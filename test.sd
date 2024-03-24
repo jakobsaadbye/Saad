@@ -1,14 +1,8 @@
 {
-    a := 5;
-    if a == 3 {
-        print("a is 3!");
-    } else if a == 2 {
-        print("a is 2!");
-    } else if a == 4 {
-        print("a is 4!");
-    } else {
-        print("a is");
-        print(a);
+    a := 2.5;
+    if a == 2.5 {
+        print("a is equal to 2.5");
+    } else if a > 2 {
+        print("a is greater than 2");
     }
-    print("We are done with the if statement!");
 }

@@ -32,6 +32,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt);
 void emit_if(CodeGenerator *cg, AstIf *ast_if);
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl);
 void emit_expression(CodeGenerator *cg, AstExpr *expr);
+void emit_integer_to_float_conversion(CodeGenerator *cg, TypeKind l_type, TypeKind r_type);
 int make_label_number(CodeGenerator *cg);
 const char *comparison_operator_to_set_instruction(TokenType op);
 const char *boolean_operator_to_instruction(TokenType op);
@@ -142,7 +143,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
     if (ast_if->has_else_block) else_label               = make_label_number(cg);
 
     sb_append(&cg->code, "   pop\t\trax\n");
-    sb_append(&cg->code, "   cmp\t\trax, 0\n");
+    sb_append(&cg->code, "   cmp\t\tal, 0\n");
     if (first_else_if_label != -1) {
         sb_append(&cg->code, "   jz\t\t\tL%d\n", first_else_if_label);
     } else if (else_label != -1) {
@@ -161,7 +162,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
         sb_append(&cg->code, "L%d:\n", next_if_else_label);
         emit_expression(cg, else_if->condition);
         sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   cmp\t\trax, 0\n");
+        sb_append(&cg->code, "   cmp\t\tal, 0\n");
         bool more_else_ifs_to_come = i + 1 < ast_if->else_ifs.count;
         bool last_else_if          = i + 1 == ast_if->else_ifs.count;
         if (more_else_ifs_to_come) {
@@ -469,16 +470,41 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
     if ((l_type == TYPE_FLOAT   && r_type == TYPE_FLOAT) ||   
         (l_type == TYPE_INTEGER && r_type == TYPE_FLOAT) ||
         (l_type == TYPE_FLOAT   && r_type == TYPE_INTEGER)) { 
-        
-        // @Incomplete
         emit_expression(cg, bin->left);
         emit_expression(cg, bin->right);
 
-        XXX;
+        emit_integer_to_float_conversion(cg, l_type, r_type);
+
+        const char *set_instruction = comparison_operator_to_set_instruction(bin->operator);
+        sb_append(&cg->code, "   comiss\t\txmm0, xmm1\n");
+        sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
+        sb_append(&cg->code, "   push\t\trax\n");
+
+        return;
     }
 
     printf("%s:%d: compiler-error: There were unhandled cases in 'emit_comparison_operator', while doing %s '%s' %s\n", __FILE__, __LINE__, type_kind_to_str(l_type), token_type_to_str(bin->operator), type_kind_to_str(r_type));
     exit(1);
+}
+
+void emit_integer_to_float_conversion(CodeGenerator *cg, TypeKind l_type, TypeKind r_type) {
+    if (l_type == TYPE_FLOAT && r_type == TYPE_INTEGER) {
+        sb_append(&cg->code, "   pop\t\trbx\n");
+        sb_append(&cg->code, "   cvtsi2ss\txmm1, rbx\n");
+        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
+    }
+    else if (l_type == TYPE_INTEGER && r_type == TYPE_FLOAT) {
+        sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   cvtsi2ss\txmm0, rax\n");
+    } else {
+        sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
+    }
 }
 
 void emit_boolean_operator(CodeGenerator *cg, AstBinary *bin) {
@@ -496,10 +522,10 @@ void emit_boolean_operator(CodeGenerator *cg, AstBinary *bin) {
 }
 
 const char *comparison_operator_to_set_instruction(TokenType op) {
-    if (op == '<')                 return "setl";
-    if (op == '>')                 return "setg";
-    if (op == TOKEN_GREATER_EQUAL) return "setge";
-    if (op == TOKEN_LESS_EQUAL)    return "setle";
+    if (op == '<')                 return "setb";
+    if (op == '>')                 return "seta";
+    if (op == TOKEN_GREATER_EQUAL) return "setae";
+    if (op == TOKEN_LESS_EQUAL)    return "setbe";
     if (op == TOKEN_DOUBLE_EQUAL)  return "sete";
     if (op == TOKEN_NOT_EQUAL)     return "setne";
 
