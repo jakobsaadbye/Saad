@@ -1,0 +1,10 @@
+{
+    a := true;
+    b := true;
+    c := 69;
+    d := true;
+    print(a);
+    print(b);
+    print(c);
+    print(d);
+}

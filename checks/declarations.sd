@@ -1,0 +1,23 @@
+{
+    int_inf   := 5 * 4 + 3 * 2 + 1;
+    int_typed : int = 5 + 4 + 3 + 2 + 1;
+
+    float_inf   := 3.14;
+    float_typed : float = 6.28;
+
+    bool_inf   := 42 > 69;
+    bool_typed : bool = 42 > 69;
+
+    string_inf   := "i am an infered string";
+    string_typed : string = "i am a typed string";
+
+
+    print(int_inf);
+    print(int_typed);
+    print(float_inf);
+    print(float_typed);
+    print(bool_inf);
+    print(bool_typed);
+    print(string_inf);
+    print(string_typed);
+}

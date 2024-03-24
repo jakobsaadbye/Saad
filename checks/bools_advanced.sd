@@ -1,0 +1,13 @@
+{
+    a := !false && true;
+    b := !(2 <= 3 && 2 >= 4 || 5 == 6 && 7 < 3 && 5 > 9);
+    c := 5 != 2;
+    d := false && true || 3 == 2;
+    e := false && true;
+
+    print(a);
+    print(b);
+    print(c);
+    print(d);
+    print(e);
+}

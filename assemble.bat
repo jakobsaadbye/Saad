@@ -1,0 +1,3 @@
+nasm -fwin64 -g ./build/out.asm -o ./build/out.obj
+
+gcc -o ./build/out.exe ./build/out.obj -lkernel32 -lmsvcrt
