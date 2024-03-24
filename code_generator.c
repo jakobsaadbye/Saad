@@ -314,13 +314,13 @@ void emit_operator_divide(CodeGenerator *cg, AstBinary *bin) {
 
         emit_expression(cg, bin->left);
         emit_expression(cg, bin->right);
-        sb_append(&cg->code, "   movq\t\txmm1, [rsp]\n");   
-        sb_append(&cg->code, "   add\t\trsp, 8\n");
-        sb_append(&cg->code, "   movq\t\txmm0, [rsp]\n");   
-        sb_append(&cg->code, "   add\t\trsp, 8\n");
-        sb_append(&cg->code, "   divsd\t\txmm0, xmm1\n");   
-        sb_append(&cg->code, "   sub\t\trsp, 8\n");         
-        sb_append(&cg->code, "   movq\t\t[rsp], xmm0\n");
+        sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "   divss\t\txmm0, xmm1\n");   
+        sb_append(&cg->code, "   sub\t\trsp, 4\n");         
+        sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
         return;
     }
 
@@ -352,13 +352,13 @@ void emit_operator_times(CodeGenerator *cg, AstBinary *bin) {
         emit_expression(cg, bin->left);
         emit_expression(cg, bin->right);
         sb_append(&cg->code, "\n");
-        sb_append(&cg->code, "   movq\t\txmm1, [rsp]\n");   
-        sb_append(&cg->code, "   add\t\trsp, 8\n");
-        sb_append(&cg->code, "   movq\t\txmm0, [rsp]\n");   
-        sb_append(&cg->code, "   add\t\trsp, 8\n");
-        sb_append(&cg->code, "   mulsd\t\txmm0, xmm1\n");   
-        sb_append(&cg->code, "   sub\t\trsp, 8\n");         
-        sb_append(&cg->code, "   movq\t\t[rsp], xmm0\n");
+        sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "   mulss\t\txmm0, xmm1\n");   
+        sb_append(&cg->code, "   sub\t\trsp, 4\n");         
+        sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
         return;
     }
 
@@ -390,13 +390,13 @@ void emit_operator_minus(CodeGenerator *cg, AstBinary *bin) {
         emit_expression(cg, bin->left);
         emit_expression(cg, bin->right);
         sb_append(&cg->code, "\n");
-        sb_append(&cg->code, "   movq\t\txmm1, [rsp]\n");   
-        sb_append(&cg->code, "   add\t\trsp, 8\n");
-        sb_append(&cg->code, "   movq\t\txmm0, [rsp]\n");   
-        sb_append(&cg->code, "   add\t\trsp, 8\n");
-        sb_append(&cg->code, "   subsd\t\txmm0, xmm1\n");   
-        sb_append(&cg->code, "   sub\t\trsp, 8\n");         
-        sb_append(&cg->code, "   movq\t\t[rsp], xmm0\n");
+        sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "   subss\t\txmm0, xmm1\n");   
+        sb_append(&cg->code, "   sub\t\trsp, 4\n");         
+        sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
         return;
     }
 
