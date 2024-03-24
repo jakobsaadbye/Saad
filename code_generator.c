@@ -18,7 +18,6 @@ typedef struct CodeGenerator {
 
     size_t constants;   // For float and string literals
     size_t labels;      // For coditional jumps
-    bool cast_integers_to_float_in_current_expression; // @Cleanup
     bool inside_print_expression;
     
 } CodeGenerator;
@@ -49,7 +48,6 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.base_ptr    = 0;
     cg.constants   = 0;
     cg.labels      = 0;
-    cg.cast_integers_to_float_in_current_expression = false;
     cg.inside_print_expression = false;
 
     return cg;
@@ -265,13 +263,7 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         sb_append(&cg->code, "   mov\t\tQWORD [rbp - %d], 0\n", cg->base_ptr);
     }
     
-
-    if (decl->evaluated_type == TYPE_FLOAT) {
-        cg->cast_integers_to_float_in_current_expression = true;
-    }
     emit_expression(cg, decl->expr);
-    cg->cast_integers_to_float_in_current_expression = false;
-
 
     sb_append(&cg->code, "\n\n");
     sb_append(&cg->code, "   ; putting result into '%s'\n", decl->identifier->name);
@@ -318,10 +310,8 @@ void emit_operator_divide(CodeGenerator *cg, AstBinary *bin) {
 
         emit_expression(cg, bin->left);
         emit_expression(cg, bin->right);
-        sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
-        sb_append(&cg->code, "   add\t\trsp, 4\n");
-        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "\n");
+        emit_integer_to_float_conversion(cg, l_type, r_type);
         sb_append(&cg->code, "   divss\t\txmm0, xmm1\n");   
         sb_append(&cg->code, "   sub\t\trsp, 4\n");         
         sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
@@ -356,10 +346,7 @@ void emit_operator_times(CodeGenerator *cg, AstBinary *bin) {
         emit_expression(cg, bin->left);
         emit_expression(cg, bin->right);
         sb_append(&cg->code, "\n");
-        sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
-        sb_append(&cg->code, "   add\t\trsp, 4\n");
-        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        emit_integer_to_float_conversion(cg, l_type, r_type);
         sb_append(&cg->code, "   mulss\t\txmm0, xmm1\n");   
         sb_append(&cg->code, "   sub\t\trsp, 4\n");         
         sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
@@ -394,10 +381,7 @@ void emit_operator_minus(CodeGenerator *cg, AstBinary *bin) {
         emit_expression(cg, bin->left);
         emit_expression(cg, bin->right);
         sb_append(&cg->code, "\n");
-        sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
-        sb_append(&cg->code, "   add\t\trsp, 4\n");
-        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        emit_integer_to_float_conversion(cg, l_type, r_type);
         sb_append(&cg->code, "   subss\t\txmm0, xmm1\n");   
         sb_append(&cg->code, "   sub\t\trsp, 4\n");         
         sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
@@ -430,11 +414,8 @@ void emit_operator_plus(CodeGenerator *cg, AstBinary *bin) {
 
         emit_expression(cg, bin->left);
         emit_expression(cg, bin->right);
-        // @Incomplete - Right now i am assuming that both the lhs and rhs are floats, but this is obviously not always the case
-        sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
-        sb_append(&cg->code, "   add\t\trsp, 4\n");
-        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "\n");
+        emit_integer_to_float_conversion(cg, l_type, r_type);
         sb_append(&cg->code, "   addss\t\txmm0, xmm1\n");   
         sb_append(&cg->code, "   sub\t\trsp, 4\n");
         sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
@@ -470,6 +451,7 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
     if ((l_type == TYPE_FLOAT   && r_type == TYPE_FLOAT) ||   
         (l_type == TYPE_INTEGER && r_type == TYPE_FLOAT) ||
         (l_type == TYPE_FLOAT   && r_type == TYPE_INTEGER)) { 
+
         emit_expression(cg, bin->left);
         emit_expression(cg, bin->right);
 
@@ -597,18 +579,8 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     if (expr->head.type == AST_LITERAL) {
         AstLiteral *lit = (AstLiteral *)(expr);
         if (lit->type == TOKEN_INTEGER) {
-            if (cg->cast_integers_to_float_in_current_expression) {
-                sb_append(&cg->code, "\n", lit->as_value.integer);
-                sb_append(&cg->code, "   ; casting value %d to a float\n", lit->as_value.integer);
-                sb_append(&cg->code, "   mov\t\trax, %d\n", lit->as_value.integer);
-                sb_append(&cg->code, "   cvtsi2ss\txmm0, rax\n");
-                sb_append(&cg->code, "   sub\t\trsp, 4\n");
-                sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
-                return;
-            } else {
-                sb_append(&cg->code, "   push\t\t%d\n", lit->as_value.integer);
-                return;
-            }
+            sb_append(&cg->code, "   push\t\t%d\n", lit->as_value.integer);
+            return;
         }
         if (lit->type == TOKEN_FLOAT) {
             sb_append(&cg->data, "   CF%d DD %lf\n", cg->constants, lit->as_value.floating);
