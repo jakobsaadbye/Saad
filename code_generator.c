@@ -23,12 +23,6 @@ typedef struct CodeGenerator {
     
 } CodeGenerator;
 
-typedef enum BranchType {
-    BRANCH_DOWN  = 0,
-    BRANCH_LEFT  = 1,
-    BRANCH_RIGHT = 2,
-} BranchType;
-
 
 void go_nuts(CodeGenerator *cg, AstNode *node);
 void emit_header(CodeGenerator *cg);
@@ -37,7 +31,7 @@ void emit_statement(CodeGenerator *cg, AstNode *node);
 void emit_print(CodeGenerator *cg, AstPrint *print_stmt);
 void emit_if(CodeGenerator *cg, AstIf *ast_if);
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl);
-void emit_expression(CodeGenerator *cg, AstExpr *expr, BranchType branch);
+void emit_expression(CodeGenerator *cg, AstExpr *expr);
 int make_label_number(CodeGenerator *cg);
 const char *comparison_operator_to_set_instruction(TokenType op);
 const char *boolean_operator_to_instruction(TokenType op);
@@ -140,7 +134,7 @@ void emit_statement(CodeGenerator *cg, AstNode *node) {
 }
 
 void emit_if(CodeGenerator *cg, AstIf *ast_if) {
-    emit_expression(cg, ast_if->condition, BRANCH_DOWN);
+    emit_expression(cg, ast_if->condition);
     int done_label = make_label_number(cg);
     int first_else_if_label = -1;
     int else_label = -1;
@@ -164,7 +158,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
         AstIf *else_if = &((AstIf *)(ast_if->else_ifs.items))[i];
         sb_append(&cg->code, ";#%zu else if\n", i + 1);
         sb_append(&cg->code, "L%d:\n", next_if_else_label);
-        emit_expression(cg, else_if->condition, BRANCH_DOWN);
+        emit_expression(cg, else_if->condition);
         sb_append(&cg->code, "   cmp\t\trax, 0\n");
         bool more_else_ifs_to_come = i + 1 < ast_if->else_ifs.count;
         bool last_else_if          = i + 1 == ast_if->else_ifs.count;
@@ -198,7 +192,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
     sb_append(&cg->code, "   ; expression of print\n");
     
     cg->inside_print_expression = true;
-    emit_expression(cg, print_stmt->expr, BRANCH_DOWN);
+    emit_expression(cg, print_stmt->expr);
     cg->inside_print_expression = false;
 
     sb_append(&cg->code, "\n");
@@ -211,7 +205,10 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
         sb_append(&cg->code, "   call\t\tprintf\n");
     }
     if (expr_type == TYPE_FLOAT) {
-        sb_append(&cg->code, "   movapd\t\txmm1, xmm0\n");
+        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
+        sb_append(&cg->code, "   movapd\txmm1, xmm0\n");
         sb_append(&cg->code, "   movq\t\trdx, xmm0\n");
         sb_append(&cg->code, "   mov\t\trcx, fmt_float\n");
         sb_append(&cg->code, "   call\t\tprintf\n");
@@ -268,7 +265,7 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     if (decl->evaluated_type == TYPE_FLOAT) {
         cg->cast_integers_to_float_in_current_expression = true;
     }
-    emit_expression(cg, decl->expr, BRANCH_DOWN);
+    emit_expression(cg, decl->expr);
     cg->cast_integers_to_float_in_current_expression = false;
 
 
@@ -279,6 +276,8 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         sb_append(&cg->code, "   mov\t\tDWORD [rbp - %d], eax\n", cg->base_ptr);
     }
     if (decl->evaluated_type == TYPE_FLOAT) {
+        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
         sb_append(&cg->code, "   movss\t\tDWORD [rbp - %d], xmm0\n", cg->base_ptr);
     }
     if (decl->evaluated_type == TYPE_BOOL) {
@@ -299,8 +298,8 @@ void emit_operator_divide(CodeGenerator *cg, AstBinary *bin) {
     TypeKind r_type = bin->right->evaluated_type;
 
     if (l_type == TYPE_INTEGER && r_type == TYPE_INTEGER) {
-        emit_expression(cg, bin->left, BRANCH_LEFT);
-        emit_expression(cg, bin->right, BRANCH_RIGHT);
+        emit_expression(cg, bin->left);
+        emit_expression(cg, bin->right);
         sb_append(&cg->code, "   pop\t\trbx\n"); // dividend
         sb_append(&cg->code, "   pop\t\trax\n"); // divisor
         sb_append(&cg->code, "   cqo\n"); // sign extend rax through rax:rdx needed for division for some reason???
@@ -313,8 +312,8 @@ void emit_operator_divide(CodeGenerator *cg, AstBinary *bin) {
         (l_type == TYPE_INTEGER && r_type == TYPE_FLOAT) ||
         (l_type == TYPE_FLOAT   && r_type == TYPE_INTEGER)) {
 
-        emit_expression(cg, bin->left, BRANCH_LEFT);
-        emit_expression(cg, bin->right, BRANCH_RIGHT);
+        emit_expression(cg, bin->left);
+        emit_expression(cg, bin->right);
         sb_append(&cg->code, "   movq\t\txmm1, [rsp]\n");   
         sb_append(&cg->code, "   add\t\trsp, 8\n");
         sb_append(&cg->code, "   movq\t\txmm0, [rsp]\n");   
@@ -336,8 +335,8 @@ void emit_operator_times(CodeGenerator *cg, AstBinary *bin) {
     TypeKind r_type = bin->right->evaluated_type;
 
     if (l_type == TYPE_INTEGER && r_type == TYPE_INTEGER) {
-        emit_expression(cg, bin->left, BRANCH_LEFT);
-        emit_expression(cg, bin->right, BRANCH_RIGHT);
+        emit_expression(cg, bin->left);
+        emit_expression(cg, bin->right);
         sb_append(&cg->code, "\n");
         sb_append(&cg->code, "   pop\t\trbx\n");
         sb_append(&cg->code, "   pop\t\trax\n");
@@ -350,8 +349,8 @@ void emit_operator_times(CodeGenerator *cg, AstBinary *bin) {
         (l_type == TYPE_INTEGER && r_type == TYPE_FLOAT) ||
         (l_type == TYPE_FLOAT   && r_type == TYPE_INTEGER)) {
 
-        emit_expression(cg, bin->left, BRANCH_LEFT);
-        emit_expression(cg, bin->right, BRANCH_RIGHT);
+        emit_expression(cg, bin->left);
+        emit_expression(cg, bin->right);
         sb_append(&cg->code, "\n");
         sb_append(&cg->code, "   movq\t\txmm1, [rsp]\n");   
         sb_append(&cg->code, "   add\t\trsp, 8\n");
@@ -374,8 +373,8 @@ void emit_operator_minus(CodeGenerator *cg, AstBinary *bin) {
     TypeKind r_type = bin->right->evaluated_type;
 
     if (l_type == TYPE_INTEGER && r_type == TYPE_INTEGER) {
-        emit_expression(cg, bin->left, BRANCH_LEFT);
-        emit_expression(cg, bin->right, BRANCH_RIGHT);
+        emit_expression(cg, bin->left);
+        emit_expression(cg, bin->right);
         sb_append(&cg->code, "\n");
         sb_append(&cg->code, "   pop\t\trbx\n");
         sb_append(&cg->code, "   pop\t\trax\n");
@@ -388,8 +387,8 @@ void emit_operator_minus(CodeGenerator *cg, AstBinary *bin) {
         (l_type == TYPE_INTEGER && r_type == TYPE_FLOAT) ||
         (l_type == TYPE_FLOAT   && r_type == TYPE_INTEGER)) {
 
-        emit_expression(cg, bin->left, BRANCH_LEFT);
-        emit_expression(cg, bin->right, BRANCH_RIGHT);
+        emit_expression(cg, bin->left);
+        emit_expression(cg, bin->right);
         sb_append(&cg->code, "\n");
         sb_append(&cg->code, "   movq\t\txmm1, [rsp]\n");   
         sb_append(&cg->code, "   add\t\trsp, 8\n");
@@ -412,8 +411,8 @@ void emit_operator_plus(CodeGenerator *cg, AstBinary *bin) {
     TypeKind r_type = bin->right->evaluated_type;
 
     if (l_type == TYPE_INTEGER && r_type == TYPE_INTEGER) {
-        emit_expression(cg, bin->left, BRANCH_LEFT);
-        emit_expression(cg, bin->right, BRANCH_RIGHT);
+        emit_expression(cg, bin->left);
+        emit_expression(cg, bin->right);
         sb_append(&cg->code, "   pop\t\trbx\n");
         sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   add\t\trax, rbx\n");
@@ -425,9 +424,17 @@ void emit_operator_plus(CodeGenerator *cg, AstBinary *bin) {
         (l_type == TYPE_INTEGER && r_type == TYPE_FLOAT) ||
         (l_type == TYPE_FLOAT   && r_type == TYPE_INTEGER)) { 
 
-        emit_expression(cg, bin->left, BRANCH_LEFT);
-        emit_expression(cg, bin->right, BRANCH_RIGHT);
+        emit_expression(cg, bin->left);
+        emit_expression(cg, bin->right);
+        // @Incomplete - Right now i am assuming that both the lhs and rhs are floats, but this is obviously not always the case
+        sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+        sb_append(&cg->code, "   add\t\trsp, 4\n");
         sb_append(&cg->code, "   addss\t\txmm0, xmm1\n");   
+        sb_append(&cg->code, "   sub\t\trsp, 4\n");
+        sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
+
         return; 
     }
 
@@ -442,8 +449,8 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
     TypeKind r_type = bin->right->evaluated_type;
 
     if (l_type == TYPE_INTEGER && r_type == TYPE_INTEGER) {
-        emit_expression(cg, bin->left, BRANCH_LEFT);
-        emit_expression(cg, bin->right, BRANCH_RIGHT);
+        emit_expression(cg, bin->left);
+        emit_expression(cg, bin->right);
 
         const char *set_instruction = comparison_operator_to_set_instruction(bin->operator);
         sb_append(&cg->code, "\n");
@@ -456,6 +463,17 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
         return;
     }
 
+    if ((l_type == TYPE_FLOAT   && r_type == TYPE_FLOAT) ||   
+        (l_type == TYPE_INTEGER && r_type == TYPE_FLOAT) ||
+        (l_type == TYPE_FLOAT   && r_type == TYPE_INTEGER)) { 
+        
+        // @Incomplete
+        emit_expression(cg, bin->left);
+        emit_expression(cg, bin->right);
+
+        XXX;
+    }
+
     printf("%s:%d: compiler-error: There were unhandled cases in 'emit_comparison_operator', while doing %s '%s' %s\n", __FILE__, __LINE__, type_kind_to_str(l_type), token_type_to_str(bin->operator), type_kind_to_str(r_type));
     exit(1);
 }
@@ -463,8 +481,8 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
 void emit_boolean_operator(CodeGenerator *cg, AstBinary *bin) {
     assert(is_boolean_operator(bin->operator));
 
-    emit_expression(cg, bin->left, BRANCH_LEFT);
-    emit_expression(cg, bin->right, BRANCH_RIGHT);
+    emit_expression(cg, bin->left);
+    emit_expression(cg, bin->right);
 
     const char *bool_instruction = boolean_operator_to_instruction(bin->operator);
     sb_append(&cg->code, "\n");
@@ -502,7 +520,7 @@ int make_label_number(CodeGenerator *cg) {
     return label_number;
 }
 
-void emit_expression(CodeGenerator *cg, AstExpr *expr, BranchType branch) {
+void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     if (expr->head.type == AST_BINARY) {
         AstBinary *bin = (AstBinary *)(expr);
         if (bin->operator == '+') {
@@ -534,7 +552,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr, BranchType branch) {
     if (expr->head.type == AST_UNARY) {
         AstUnary *unary = (AstUnary *)(expr);
         if (unary->operator == '!') {
-            emit_expression(cg, unary->expr, BRANCH_DOWN);
+            emit_expression(cg, unary->expr);
 
             sb_append(&cg->code, "\n");
             sb_append(&cg->code, "   pop\t\trax\n");
@@ -552,11 +570,11 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr, BranchType branch) {
         if (lit->type == TOKEN_INTEGER) {
             if (cg->cast_integers_to_float_in_current_expression) {
                 sb_append(&cg->code, "\n", lit->as_value.integer);
-                sb_append(&cg->code, "   ; casting value %d to a float\n", lit->as_value.integer); // @Incomplete 
+                sb_append(&cg->code, "   ; casting value %d to a float\n", lit->as_value.integer);
                 sb_append(&cg->code, "   mov\t\trax, %d\n", lit->as_value.integer);
-                sb_append(&cg->code, "   cvtsi2sd\txmm0, rax\n");
-                sb_append(&cg->code, "   sub\t\trsp, 8\n");
-                sb_append(&cg->code, "   movq\t\t[rsp], xmm0\n");
+                sb_append(&cg->code, "   cvtsi2ss\txmm0, rax\n");
+                sb_append(&cg->code, "   sub\t\trsp, 4\n");
+                sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
                 return;
             } else {
                 sb_append(&cg->code, "   push\t\t%d\n", lit->as_value.integer);
@@ -565,8 +583,9 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr, BranchType branch) {
         }
         if (lit->type == TOKEN_FLOAT) {
             sb_append(&cg->data, "   CF%d DD %lf\n", cg->constants, lit->as_value.floating);
-            const char *xmm_register = branch == BRANCH_LEFT ? "xmm0" : "xmm1";
-            sb_append(&cg->code, "   movss\t\t%s, [CF%d]\n", xmm_register, cg->constants);
+            sb_append(&cg->code, "   movss\t\txmm0, [CF%d]\n", cg->constants);
+            sb_append(&cg->code, "   sub\t\trsp, 4\n");
+            sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
             cg->constants++;
             return;
         }
@@ -592,13 +611,9 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr, BranchType branch) {
             }
 
             if (ident->type == TYPE_FLOAT) {
-                const char*                xmm_register = "xmm0";
-                if (branch == BRANCH_LEFT) xmm_register = "xmm1";
-                if (cg->inside_print_expression) {
-                    sb_append(&cg->code, "   cvtss2sd\t\t%s, [rbp - %d]\n", xmm_register, ident->stack_offset);
-                } else {
-                    sb_append(&cg->code, "   movss\t\t%s, [rbp - %d]\n", xmm_register, ident->stack_offset);
-                }
+                sb_append(&cg->code, "   movss\t\txmm0, [rbp - %d]\n", ident->stack_offset);
+                sb_append(&cg->code, "   sub\t\trsp, 4\n");
+                sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
                 return;
             }
             if (ident->type == TYPE_INTEGER) {

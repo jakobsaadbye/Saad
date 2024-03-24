@@ -1,12 +1,4 @@
 {
-    a := 5;
-    if a < 7 {
-        print("a is greater than 3, wow!");
-    } 
-    else if a < 6 {
-        print("a should be 3 to be here");
-    }
-    else {
-        print("a is something else");
-    }
+    a := 2.5 + 2;
+    print(a);
 }

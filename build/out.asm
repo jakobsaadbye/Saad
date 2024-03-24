@@ -7,6 +7,7 @@ segment .data
    fmt_string DB "%s", 10, 0
    string_false DB "false", 10, 0
    string_true  DB "true", 10, 0
+   CF0 DD 2.500000
 
 segment .text
    global main
@@ -19,228 +20,42 @@ main:
    sub		rsp, 48
 
    ; initialization of 'a'
-   mov		BYTE [rbp - 1], 0
-   push		0
+   mov		DWORD [rbp - 4], 0
+   movss		xmm0, [CF0]
+   sub		rsp, 4
+   movss		[rsp], xmm0
 
-   pop		rax
-   not		rax
-   push		rax
-   push		1
-
-   pop		rbx
-   pop		rax
-   and		al, bl
-   push		rax
+   ; casting value 2 to a float
+   mov		rax, 2
+   cvtsi2ss	xmm0, rax
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm1, [rsp]
+   add		rsp, 4
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   addss		xmm0, xmm1
+   sub		rsp, 4
+   movss		[rsp], xmm0
 
 
    ; putting result into 'a'
-   pop		rax
-   mov		BYTE [rbp - 1], al
-
-   ; initialization of 'b'
-   mov		BYTE [rbp - 2], 0
-   push		2
-   push		3
-
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   setle		al
-   push		rax
-   push		2
-   push		4
-
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   setge		al
-   push		rax
-
-   pop		rbx
-   pop		rax
-   and		al, bl
-   push		rax
-   push		5
-   push		6
-
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   push		7
-   push		3
-
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   setl		al
-   push		rax
-
-   pop		rbx
-   pop		rax
-   and		al, bl
-   push		rax
-   push		5
-   push		9
-
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   setg		al
-   push		rax
-
-   pop		rbx
-   pop		rax
-   and		al, bl
-   push		rax
-
-   pop		rbx
-   pop		rax
-   or		al, bl
-   push		rax
-
-   pop		rax
-   not		rax
-   push		rax
-
-
-   ; putting result into 'b'
-   pop		rax
-   mov		BYTE [rbp - 2], al
-
-   ; initialization of 'c'
-   mov		BYTE [rbp - 3], 0
-   push		5
-   push		2
-
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   setne		al
-   push		rax
-
-
-   ; putting result into 'c'
-   pop		rax
-   mov		BYTE [rbp - 3], al
-
-   ; initialization of 'd'
-   mov		BYTE [rbp - 4], 0
-   push		0
-   push		1
-
-   pop		rbx
-   pop		rax
-   and		al, bl
-   push		rax
-   push		3
-   push		2
-
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-
-   pop		rbx
-   pop		rax
-   or		al, bl
-   push		rax
-
-
-   ; putting result into 'd'
-   pop		rax
-   mov		BYTE [rbp - 4], al
-
-   ; initialization of 'e'
-   mov		BYTE [rbp - 5], 0
-   push		0
-   push		1
-
-   pop		rbx
-   pop		rax
-   and		al, bl
-   push		rax
-
-
-   ; putting result into 'e'
-   pop		rax
-   mov		BYTE [rbp - 5], al
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   movss		DWORD [rbp - 4], xmm0
 
    ; expression of print
-   mov		al, BYTE [rbp - 1]
-   push		rax
+   movss		xmm0, [rbp - 4]
+   sub		rsp, 4
+   movss		[rsp], xmm0
 
    ; call to print
-   pop		rax
-   cmp		al, 0
-   jnz		L0
-   mov		rcx, string_false
-   jmp		L1
-L0:
-   mov		rcx, string_true
-L1:
-   call		printf
-
-   ; expression of print
-   mov		al, BYTE [rbp - 2]
-   push		rax
-
-   ; call to print
-   pop		rax
-   cmp		al, 0
-   jnz		L2
-   mov		rcx, string_false
-   jmp		L3
-L2:
-   mov		rcx, string_true
-L3:
-   call		printf
-
-   ; expression of print
-   mov		al, BYTE [rbp - 3]
-   push		rax
-
-   ; call to print
-   pop		rax
-   cmp		al, 0
-   jnz		L4
-   mov		rcx, string_false
-   jmp		L5
-L4:
-   mov		rcx, string_true
-L5:
-   call		printf
-
-   ; expression of print
-   mov		al, BYTE [rbp - 4]
-   push		rax
-
-   ; call to print
-   pop		rax
-   cmp		al, 0
-   jnz		L6
-   mov		rcx, string_false
-   jmp		L7
-L6:
-   mov		rcx, string_true
-L7:
-   call		printf
-
-   ; expression of print
-   mov		al, BYTE [rbp - 5]
-   push		rax
-
-   ; call to print
-   pop		rax
-   cmp		al, 0
-   jnz		L8
-   mov		rcx, string_false
-   jmp		L9
-L8:
-   mov		rcx, string_true
-L9:
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   cvtss2sd	xmm0, xmm0
+   movapd	xmm1, xmm0
+   movq		rdx, xmm0
+   mov		rcx, fmt_float
    call		printf
 
    ; cleanup the stack
