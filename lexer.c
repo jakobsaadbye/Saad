@@ -204,6 +204,20 @@ bool lex(Lexer *lexer) {
             continue;
         }
 
+        if (c == '/') { // Single line comments
+            char next = peek_char(lexer, 1);
+            if (next == '/') {
+                eat_character(lexer);
+                eat_character(lexer);
+                next = peek_next_char(lexer);
+                while (next != '\n' && next != '\0') {
+                    eat_character(lexer);
+                    next = peek_next_char(lexer);
+                }
+                continue;
+            }
+        }
+
         if (is_digit(c)) {
             Pos pos_start = get_current_position(lexer);
             eat_character(lexer);

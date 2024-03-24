@@ -6,10 +6,10 @@
     e := false && true;
     f := 2.5 + 1 > 4 || 2.0 * 3 == 6.0;
 
-    print(a);
-    print(b);
-    print(c);
-    print(d);
-    print(e);
-    print(f);
+    print(a); // true
+    print(b); // true
+    print(c); // true
+    print(d); // false
+    print(e); // false
+    print(f); // true
 }
