@@ -2,13 +2,17 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "C/C++: gcc.exe build and debug active file",
+            "name": "Debug !!!",
             "type": "cppdbg",
             "request": "launch",
-            "preLaunchTask": "C/C++: gcc.exe build active file",
-            "program": "${fileDirname}/${fileBasenameNoExtension}.exe",
+            "preLaunchTask": "Debug launch",
+            "program": "C:/Saad/build/saad.exe",
+            "args": [
+                "C:/Saad/test.sd"
+            ],
             "stopAtEntry": false,
-            "cwd": "${fileDirname}",
+            "cwd": "C:/Saad",
+            "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",
             "miDebuggerPath": "C:\\mingw64\\bin\\gdb.exe",
@@ -25,19 +29,14 @@
                 }
             ]
         },
-        
         {
-            "name": "Debug !!!",
+            "name": "C/C++: gcc.exe build and debug active file",
             "type": "cppdbg",
             "request": "launch",
-            "preLaunchTask": "Debug launch",
-            "program": "C:/Saad/build/saad.exe",
-            "args": [
-                "C:/Saad/checks/bools_advanced.sd"
-            ],
+            "preLaunchTask": "C/C++: gcc.exe build active file",
+            "program": "${fileDirname}/${fileBasenameNoExtension}.exe",
             "stopAtEntry": false,
-            "cwd": "C:/Saad",
-            "environment": [],
+            "cwd": "${fileDirname}",
             "externalConsole": false,
             "MIMode": "gdb",
             "miDebuggerPath": "C:\\mingw64\\bin\\gdb.exe",

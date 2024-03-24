@@ -141,6 +141,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
     if (ast_if->else_ifs.count > 0)  first_else_if_label = make_label_number(cg);
     if (ast_if->has_else_block) else_label               = make_label_number(cg);
 
+    sb_append(&cg->code, "   pop\t\trax\n");
     sb_append(&cg->code, "   cmp\t\trax, 0\n");
     if (first_else_if_label != -1) {
         sb_append(&cg->code, "   jz\t\t\tL%d\n", first_else_if_label);
@@ -159,6 +160,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
         sb_append(&cg->code, ";#%zu else if\n", i + 1);
         sb_append(&cg->code, "L%d:\n", next_if_else_label);
         emit_expression(cg, else_if->condition);
+        sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   cmp\t\trax, 0\n");
         bool more_else_ifs_to_come = i + 1 < ast_if->else_ifs.count;
         bool last_else_if          = i + 1 == ast_if->else_ifs.count;
@@ -174,6 +176,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
         }
 
         emit_block(cg, else_if->block);
+        sb_append(&cg->code, "jmp L%d\n", done_label);
     }
 
     if (ast_if->has_else_block) {
