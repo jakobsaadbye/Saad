@@ -11,20 +11,20 @@ typedef struct StringBuilder {
 } StringBuilder;
 
 
-StringBuilder string_builder_make(size_t capicity);
+StringBuilder string_builder_init(size_t init_capicity);
 void sb_append(StringBuilder *sb, const char *string, ...);
 void sb_free(StringBuilder *sb);
 char *sb_to_string(StringBuilder *sb);
 
 
-StringBuilder string_builder_make(size_t capicity) {
-    char *buffer = (char *)(malloc(capicity));
-    memset(buffer, '\0', capicity);
+StringBuilder string_builder_init(size_t init_capicity) {
+    char *buffer = (char *)(malloc(init_capicity));
+    memset(buffer, '\0', init_capicity);
 
     return (StringBuilder) {
         .buffer  = buffer,
         .cursor   = 0,
-        .capacity = capicity
+        .capacity = init_capicity
     };
 }
 

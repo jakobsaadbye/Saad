@@ -1,7 +1,3 @@
-//
-// TODO: Use 'seta' instead of making two labels and push and pop for boolean operations
-//
-
 #include "typer.c"
 
 typedef struct CodeGenerator {
@@ -11,7 +7,7 @@ typedef struct CodeGenerator {
 
     Parser *parser;
 
-    HashTable ident_table;
+    SymbolTable ident_table;
 
     size_t base_ptr;
     int stack_space;
@@ -23,9 +19,10 @@ typedef struct CodeGenerator {
 } CodeGenerator;
 
 
-void go_nuts(CodeGenerator *cg, AstNode *node);
+void go_nuts(CodeGenerator *cg, AstCode *code);
 void emit_header(CodeGenerator *cg);
 void emit_footer(CodeGenerator *cg);
+void emit_code(CodeGenerator *cg, AstCode *code);
 void emit_statement(CodeGenerator *cg, AstNode *node);
 void emit_print(CodeGenerator *cg, AstPrint *print_stmt);
 void emit_if(CodeGenerator *cg, AstIf *ast_if);
@@ -39,9 +36,9 @@ const char *boolean_operator_to_instruction(TokenType op);
 
 CodeGenerator code_generator_init(Parser *parser) {
     CodeGenerator cg = {0};
-    cg.head        = string_builder_make(1024);
-    cg.data        = string_builder_make(1024);
-    cg.code        = string_builder_make(1024);
+    cg.head        = string_builder_init(1024);
+    cg.data        = string_builder_init(1024);
+    cg.code        = string_builder_init(1024);
 
     cg.parser      = parser;
     cg.ident_table = parser->ident_table;
@@ -53,9 +50,9 @@ CodeGenerator code_generator_init(Parser *parser) {
     return cg;
 }
 
-void go_nuts(CodeGenerator *cg, AstNode *node) {
+void go_nuts(CodeGenerator *cg, AstCode *code) {
     emit_header(cg);
-    emit_statement(cg, node);
+    emit_code(cg, code);
     emit_footer(cg);
 }
 
@@ -113,6 +110,13 @@ void emit_footer(CodeGenerator *cg) {
     sb_append(&cg->code, "   add\t\trsp, %d\n", cg->stack_space);
     sb_append(&cg->code, "   mov\t\trcx, 0\n");
     sb_append(&cg->code, "   call\t\tExitProcess\n");
+}
+
+void emit_code(CodeGenerator *cg, AstCode *code) {
+    for (unsigned int i = 0; i < code->statements.count; i++) {
+        AstNode *stmt = ((AstNode **)(code->statements.items))[i];
+        emit_statement(cg, stmt);
+    }
 }
 
 void emit_block(CodeGenerator *cg, AstBlock *block) {
@@ -605,12 +609,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         if (lit->type == TOKEN_IDENTIFIER) {
-            AstIdentifier *ident = (AstIdentifier *)(hash_table_get(&cg->ident_table, lit->as_value.identifier.name));
-            if (ident == NULL) {
+            Symbol *ident_symbol = symbol_lookup(&cg->ident_table, lit->as_value.identifier.name);
+            if (ident_symbol == NULL) {
                 report_error_ast(cg->parser, LABEL_ERROR, (AstNode *)(lit), "Undefined variable '%s'", lit->as_value.identifier.name);
                 exit(1);
             }
 
+            AstIdentifier *ident = ident_symbol->as_value.identifier;
             if (ident->type == TYPE_FLOAT) {
                 sb_append(&cg->code, "   movss\t\txmm0, [rbp - %d]\n", ident->stack_offset);
                 sb_append(&cg->code, "   sub\t\trsp, 4\n");

@@ -5,6 +5,7 @@
         "string.h": "c",
         "assert.h": "c",
         "strings.h": "c",
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "stdio.h": "c"
     }
 }

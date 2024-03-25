@@ -23,8 +23,6 @@ DynamicArray da_init(unsigned int init_cap, unsigned int item_size) {
     return da;
 }
 
-#define da_append(da, item) _da_append(da, &item);
-
 void _da_append(DynamicArray *da, void *item) {
     if (da->count + 1 > da->capacity) {
         // Reallocate memory
@@ -40,3 +38,5 @@ void _da_append(DynamicArray *da, void *item) {
     memcpy(dst, item, da->item_size);
     da->count += 1;
 }
+
+#define da_append(da, item) _da_append(da, &item);

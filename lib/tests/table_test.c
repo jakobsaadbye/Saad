@@ -1,4 +1,4 @@
-#include "typer.c"
+#include "../../ast.c"
 #include "../table.c"
 
 bool identifier_is_equal(const void *key, const void *item) {
@@ -9,7 +9,7 @@ bool identifier_is_equal(const void *key, const void *item) {
 
 int main(void)
 {
-    HashTable table = hash_table_make(128, identifier_is_equal);
+    HashTable table = hash_table_init(128, sizeof(AstIdentifier), identifier_is_equal);
 
     AstIdentifier var_a = {0};
     var_a.name = "ac";

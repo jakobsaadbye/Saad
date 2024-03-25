@@ -10,32 +10,35 @@ typedef struct Node {
 } Node;
 
 typedef struct LinkedList {
-    size_t  length;
+    size_t length;
     Node *head;
     Node *tail;
 } LinkedList;
 
 typedef struct HashTable {
     LinkedList *items;
-    size_t      table_size;
+    size_t      item_size;
+    size_t      table_length;
+    size_t      num_of_items;
 
     bool (*cmp_func)(const void* key, const void* item);
 } HashTable;
 
-HashTable  hash_table_make(size_t table_size, bool (*cmp_func)(const void* key, const void* item));
+HashTable  hash_table_init(size_t table_length, size_t item_size, bool (*cmp_func)(const void* key, const void* item));
 void       hash_table_add(HashTable *table, const char *key, void *item);
 void      *hash_table_get(HashTable *table, const char *key);
 int        hash(HashTable *table, const char *key);
 LinkedList linked_list_make();
-void       linked_list_add(LinkedList *ll, void *item);
+void       linked_list_add(LinkedList *ll, void *item, size_t item_size);
 void      *linked_list_find(LinkedList *ll, const char *key, bool (*cmp_func)(const void* key, const void* item));
 
-HashTable hash_table_make(size_t table_size, bool (*cmp_func)(const void* key, const void* item)) {
-    HashTable table  = {0};
-    table.cmp_func   = cmp_func;
-    table.table_size = table_size;
-    table.items      = (LinkedList *)(malloc(sizeof(LinkedList) * table_size));
-    for (size_t i = 0; i < table_size; i++) {
+HashTable hash_table_init(size_t table_length, size_t item_size, bool (*cmp_func)(const void* key, const void* item)) {
+    HashTable table    = {0};
+    table.cmp_func     = cmp_func;
+    table.table_length = table_length;
+    table.item_size    = item_size;
+    table.items        = (LinkedList *)(malloc(sizeof(LinkedList) * table_length));
+    for (size_t i = 0; i < table_length; i++) {
         table.items[i] = linked_list_make();
     }
     return table;
@@ -49,7 +52,8 @@ void hash_table_add(HashTable *table, const char *key, void *item) {
     int index = hash(table, key);
 
     LinkedList *ll = &table->items[index];
-    linked_list_add(ll, item);
+    linked_list_add(ll, item, table->item_size);
+    table->num_of_items += 1;
 }
 
 void *hash_table_get(HashTable *table, const char *key) {
@@ -57,7 +61,6 @@ void *hash_table_get(HashTable *table, const char *key) {
     
     LinkedList *ll = &table->items[index];
     if (ll->length == 0) return NULL;
-    if (ll->length == 1) return ll->head->data;
 
     return linked_list_find(ll, key, table->cmp_func);
 }
@@ -70,7 +73,7 @@ int hash(HashTable *table, const char *key) {
         c++;
     }
 
-    return sum % table->table_size;
+    return sum % table->table_length;
 }
 
 LinkedList linked_list_make() {
@@ -81,11 +84,12 @@ LinkedList linked_list_make() {
     return ll;
 }
 
-void linked_list_add(LinkedList *ll, void *item) {
+void linked_list_add(LinkedList *ll, void *item, size_t item_size) {
     if (ll->head == NULL) {
         Node *node =  (Node *)(malloc(sizeof(Node)));
         node->next = NULL;
-        node->data = item;
+        node->data = malloc(item_size);
+        memcpy(node->data, item, item_size);
 
         ll->head = node;
         ll->tail = node;
@@ -95,7 +99,8 @@ void linked_list_add(LinkedList *ll, void *item) {
 
     Node *node     = (Node *)(malloc(sizeof(Node)));
     node->next     = NULL;
-    node->data     = item;
+    node->data = malloc(item_size);
+    memcpy(node->data, item, item_size);
 
     ll->tail->next = node;
     ll->tail       = node;

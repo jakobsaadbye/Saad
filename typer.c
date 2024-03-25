@@ -15,6 +15,14 @@ bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
 
 
+TypeKind check_code(Typer *typer, AstCode *code) {
+    for (unsigned int i = 0; i < code->statements.count; i++) {
+        AstNode *stmt = ((AstNode **)(code->statements.items))[i];
+        check_statement(typer, stmt);
+    }
+    return TYPE_VOID;
+}
+
 TypeKind check_block(Typer *typer, AstBlock *block) {
     for (int i = 0; i < block->num_of_statements; i++) {
         check_statement(typer, block->statements[i]);
@@ -57,6 +65,13 @@ TypeKind check_statement(Typer *typer, AstNode *stmt) {
                 check_block(typer, ast_if->else_block);
             }
             
+            return TYPE_VOID;
+        }
+        case AST_BLOCK: {
+            AstBlock *block = (AstBlock *)(stmt);
+
+            check_block(typer, block);
+
             return TYPE_VOID;
         }
         default:
@@ -134,38 +149,22 @@ bool is_boolean_operator(TokenType op) {
 }
 
 TypeKind check_literal(Typer *typer, AstLiteral *literal) {
-    (void) typer; // Ignore unused ...
-
     if (literal->type == TOKEN_INTEGER) return TYPE_INTEGER;
     if (literal->type == TOKEN_FLOAT)   return TYPE_FLOAT;
     if (literal->type == TOKEN_STRING)  return TYPE_STRING;
     if (literal->type == TOKEN_BOOLEAN) return TYPE_BOOL;
     if (literal->type == TOKEN_IDENTIFIER) {
         char *ident_name     = literal->as_value.identifier.name;
-        AstIdentifier *ident = hash_table_get(&typer->parser->ident_table, ident_name);
-        if (ident == NULL) {
+        Symbol *ident_symbol = symbol_lookup(&typer->parser->ident_table, ident_name);
+        if (ident_symbol == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Undefined variable '%s'", ident_name);
             exit(1);
         }
 
         // Type must have been resolved at this point
-        return ident->type;
+        return ident_symbol->as_value.identifier->type;
     };
 
     printf("%s:%d: compiler-error: Literal '%s' could not be turned into a TypeKind.", __FILE__, __LINE__, token_type_to_str(literal->type));
-    exit(1);
-}
-
-const char *type_kind_to_str(TypeKind kind) {
-    switch (kind) {
-        case TYPE_VOID:      return "void";
-        case TYPE_BOOL:      return "bool";
-        case TYPE_INTEGER:   return "int";
-        case TYPE_FLOAT:     return "float";
-        case TYPE_STRING:    return "string";
-        case TYPE_IDENTIFER: return "type_ident";
-    }
-
-    printf("%s:%d: compiler-error: TypeKind with enum number '%d' could not be turned into a string", __FILE__, __LINE__, kind);
     exit(1);
 }

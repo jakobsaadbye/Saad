@@ -16,15 +16,15 @@ bool send_through_pipeline(char *program, const char *program_path) {
     #endif
 
     Parser parser   = parser_init(&lexer);
-    AstBlock *block = (AstBlock *) parse_block(&parser);
-    if (block == NULL) return false;
+    AstCode *code = (AstCode *) parse_top_level_code(&parser);
+    if (code == NULL) return false;
 
     Typer typer = {0};
     typer.parser = &parser;
-    check_block(&typer, block);
+    check_code(&typer, code);
 
     CodeGenerator cg = code_generator_init(&parser);
-    go_nuts(&cg, (AstNode *)(block));
+    go_nuts(&cg, code);
     code_generator_dump(&cg, "./build/out.asm");
 
     system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");

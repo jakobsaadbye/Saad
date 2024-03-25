@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "../array.c"
+#include "../dynamic_array.c"
 
 int main()
 {

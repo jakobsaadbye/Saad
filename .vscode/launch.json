@@ -8,7 +8,7 @@
             "preLaunchTask": "Debug launch",
             "program": "C:/Saad/build/saad.exe",
             "args": [
-                "C:/Saad/checks/bools_advanced.sd"
+                "C:/Saad/checks/declarations.sd"
             ],
             "stopAtEntry": false,
             "cwd": "C:/Saad",

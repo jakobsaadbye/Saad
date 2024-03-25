@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include "lib/arena.c"
-#include "lib/string.c"
+#include "lib/string_builder.c"
 
 #define MAX_TOKENS 1024
 #define MAX_DIGITS 32
@@ -44,11 +44,13 @@ typedef enum TokenType {
 
     TOKEN_DOUBLE_COLON = 150,
     TOKEN_COLON_EQUAL  = 151,
+    TOKEN_RIGHT_ARROW  = 152,
 
 
     TOKEN_PRINT        = 160,
     TOKEN_IF           = 161,
     TOKEN_ELSE         = 162,
+    TOKEN_RETURN       = 163,
 
     TOKEN_TYPE_INT     = 180,
     TOKEN_TYPE_FLOAT   = 181,
@@ -117,7 +119,7 @@ typedef struct KeywordMatch {
 Lexer lexer_init(char *input_str, const char *file_path);
 bool lex(Lexer *lexer);
 void eat_character(Lexer *lexer);
-void eat_multiple_characters(Lexer *lexer, int chars_to_eat);
+void eat_characters(Lexer *lexer, int chars_to_eat);
 char peek_char(Lexer *lexer, int lookahead);
 char peek_next_char(Lexer *lexer);
 void push_token(Lexer *lexer, Token token);
@@ -129,11 +131,11 @@ void make_identifier(Lexer *lexer, Pos start);
 void make_single_character_token(Lexer *lexer, TokenType token_type);
 void make_token(Lexer *lexer, TokenType token_type, Pos start);
 KeywordMatch matches_keyword(Lexer *lexer);
-TokenType matches_double_character_operator(char current, char next);
 bool ends_literal(char c);
 bool starts_identifier(char c);
 bool proceeds_identifier(char c);
-bool is_single_character_operator(char c);
+bool is_single_character_token(char c);
+TokenType is_double_character_token(Lexer *lexer);
 bool is_binary_operator(TokenType op);
 bool is_unary_operator(TokenType op);
 bool is_digit(char c);
@@ -168,6 +170,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_TRUE:          return "TRUE";
         case TOKEN_DOUBLE_COLON:  return "DOUBLE_COLON";
         case TOKEN_COLON_EQUAL:   return "COLON_EQUAL";
+        case TOKEN_RIGHT_ARROW:   return "RIGHT_ARROW";
         case TOKEN_LOGICAL_OR:    return "LOGICAL_OR";
         case TOKEN_LOGICAL_AND:   return "LOGICAL_AND";
         case TOKEN_LESS_EQUAL:    return "LESS_EQUAL";
@@ -175,6 +178,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_DOUBLE_EQUAL:  return "DOUBLE_EQUAL";
         case TOKEN_NOT_EQUAL:     return "NOT_EQUAL";
         case TOKEN_PRINT:         return "PRINT";
+        case TOKEN_RETURN:        return "RETURN";
         case TOKEN_IF:            return "IF";
         case TOKEN_ELSE:          return "ELSE";
         case TOKEN_TYPE_INT:      return "TYPE_INT";
@@ -269,7 +273,7 @@ bool lex(Lexer *lexer) {
             Pos pos_start = get_current_position(lexer);
             KeywordMatch keyword = matches_keyword(lexer);
             if (keyword.matched) {
-                eat_multiple_characters(lexer, keyword.length);
+                eat_characters(lexer, keyword.length);
 
                 if (keyword.token == TOKEN_TRUE || keyword.token == TOKEN_FALSE) {
                     make_literal(lexer, keyword.token, pos_start);
@@ -278,7 +282,6 @@ bool lex(Lexer *lexer) {
                 }
                 continue;
             }
-            // Fallthrough
         }
 
         if (starts_identifier(c)) {
@@ -297,73 +300,22 @@ bool lex(Lexer *lexer) {
         }
 
         {
-            Pos start = get_current_position(lexer);
-            char next = peek_char(lexer, 1);
-            TokenType op = matches_double_character_operator(c, next);
-            if (op != 0) {
+            // Double character tokens
+            TokenType token = is_double_character_token(lexer);
+            if (token) {
+                Pos start = get_current_position(lexer);
                 eat_character(lexer);
                 eat_character(lexer);
-                make_token(lexer, op, start);
-                continue;
-            } else {
-                // Fallthrough
-            }
-        }
-
-        if (is_single_character_operator(c)) {
-            eat_character(lexer);
-            make_single_character_token(lexer, (TokenType)(c));
-            continue;
-        }
-
-        if (c == '=') {
-            eat_character(lexer);
-            make_single_character_token(lexer, (TokenType)(c));
-            continue;
-        }
-
-        if (c == ';') {
-            eat_character(lexer);
-            make_single_character_token(lexer, (TokenType)(c));
-            continue;
-        }
-
-        if (c == '{') {
-            eat_character(lexer);
-            make_single_character_token(lexer, (TokenType)(c));
-            continue;
-        }
-        if (c == '}') {
-            eat_character(lexer);
-            make_single_character_token(lexer, (TokenType)(c));
-            continue;
-        }
-
-        if (c == ':') {
-            Pos pos_start = get_current_position(lexer);
-            eat_character(lexer);
-
-            char next = peek_next_char(lexer);
-            if (next == ':') {
-                eat_character(lexer);
-                make_token(lexer, TOKEN_DOUBLE_COLON, pos_start);
+                make_token(lexer, token, start);
                 continue;
             }
-            if (next == '=') {
-                eat_character(lexer);
-                make_token(lexer, TOKEN_COLON_EQUAL, pos_start);
-                continue;
-            }
-
-            make_single_character_token(lexer, (TokenType)(':'));
-            continue;
         }
 
-        if (c == '(' || c == ')') {
+        if (is_single_character_token(c)) {
             eat_character(lexer);
             make_single_character_token(lexer, (TokenType)(c));
             continue;
-        } 
+        }
 
         report_syntax_error(lexer, "Unknown character");
         return false;
@@ -399,6 +351,7 @@ KeywordMatch matches_keyword(Lexer *lexer) {
         if (c == ';')  break;
         if (c == '(')  break;
         if (c == ')')  break;
+        if (c == ',')  break;
         if (c == '\0') break;
 
         i++;
@@ -430,6 +383,7 @@ KeywordMatch matches_keyword(Lexer *lexer) {
     }
     if (keyword_len == 6) {
         if (strcmp(text, "string") == 0) return (KeywordMatch){.token = TOKEN_TYPE_STRING, .length = keyword_len, .matched = true };
+        if (strcmp(text, "return") == 0) return (KeywordMatch){.token = TOKEN_RETURN, .length = keyword_len, .matched = true };
     }
 
     return (KeywordMatch){.matched = false};
@@ -566,7 +520,7 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start) {
     push_token(lexer, result);
 }
 
-void eat_multiple_characters(Lexer *lexer, int chars_to_eat) {
+void eat_characters(Lexer *lexer, int chars_to_eat) {
     for (int i = 0; i < chars_to_eat; i++) {
         eat_character(lexer);
     }
@@ -629,28 +583,40 @@ bool is_binary_operator(TokenType op) {
     return false;
 }
 
-TokenType matches_double_character_operator(char current, char next) {
-    if (current == '&' && next == '&') return TOKEN_LOGICAL_AND;
-    if (current == '|' && next == '|') return TOKEN_LOGICAL_OR;
-    if (current == '<' && next == '=') return TOKEN_LESS_EQUAL;
-    if (current == '>' && next == '=') return TOKEN_GREATER_EQUAL;
-    if (current == '=' && next == '=') return TOKEN_DOUBLE_EQUAL;
-    if (current == '!' && next == '=') return TOKEN_NOT_EQUAL;
+TokenType is_double_character_token(Lexer *lexer) {
+    char c    = peek_next_char(lexer);
+    char next = peek_char(lexer, 1);
+    if (c == '&' && next == '&') return TOKEN_LOGICAL_AND;
+    if (c == '|' && next == '|') return TOKEN_LOGICAL_OR;
+    if (c == '<' && next == '=') return TOKEN_LESS_EQUAL;
+    if (c == '>' && next == '=') return TOKEN_GREATER_EQUAL;
+    if (c == '=' && next == '=') return TOKEN_DOUBLE_EQUAL;
+    if (c == '!' && next == '=') return TOKEN_NOT_EQUAL;
+    if (c == ':' && next == '=') return TOKEN_COLON_EQUAL;
+    if (c == ':' && next == ':') return TOKEN_DOUBLE_COLON;
+    if (c == '-' && next == '>') return TOKEN_RIGHT_ARROW;
 
     return (TokenType)(0);
 }
 
-bool is_single_character_operator(char c) {
+bool is_single_character_token(char c) {
     if (c == '+') return true;
     if (c == '-') return true;
     if (c == '*') return true;
     if (c == '/') return true;
     if (c == '%') return true;
     if (c == '^') return true;
-
     if (c == '<') return true;
     if (c == '>') return true;
     if (c == '!') return true;
+    if (c == '=') return true;
+    if (c == ';') return true;
+    if (c == '{') return true;
+    if (c == '}') return true;
+    if (c == '(') return true;
+    if (c == ')') return true;
+    if (c == ',') return true;
+    if (c == ':') return true;
     return false;
 }
 
