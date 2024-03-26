@@ -1,3 +1,9 @@
+// @ErrorImprovement:
+//     Right now i am returning a type from statement, but it is never used. I think the only
+//     time it makes sense to return the type is in check_expression. I would like to change it
+//     so that all check functions just returns a bool for success instead of the current solution
+//     of exiting!
+
 #include "parser.c"
 
 typedef struct Typer {
@@ -14,6 +20,12 @@ const char *type_kind_to_str(TypeKind kind);
 bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
 
+Typer typer_init(Parser *parser) {
+    Typer typer = {0};
+    typer.parser = parser;
+
+    return typer;
+}
 
 TypeKind check_code(Typer *typer, AstCode *code) {
     for (unsigned int i = 0; i < code->statements.count; i++) {
@@ -24,9 +36,13 @@ TypeKind check_code(Typer *typer, AstCode *code) {
 }
 
 TypeKind check_block(Typer *typer, AstBlock *block) {
+
+    enter_scope(&typer->parser->ident_table);
     for (int i = 0; i < block->num_of_statements; i++) {
         check_statement(typer, block->statements[i]);
     }
+    exit_scope(&typer->parser->ident_table);
+
     return TYPE_VOID;
 }
 
@@ -34,13 +50,28 @@ TypeKind check_statement(Typer *typer, AstNode *stmt) {
     switch (stmt->type) {
         case AST_DECLARATION: {
             AstDeclaration *decl   = (AstDeclaration *)(stmt);
-            TypeKind expr_type     = check_expression(typer, (decl->expr));
-            decl->identifier->type = expr_type;
-            decl->evaluated_type   = expr_type;
+            if (decl->declaration_type == DECLARATION_TYPED) {
+                check_expression(typer, decl->expr);
+                if (decl->expr->evaluated_type != decl->declared_type) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(decl), "Variable was said to be of type %s, but expression is of type %s", type_kind_to_str(decl->declared_type), type_kind_to_str(decl->expr->evaluated_type));
+                    exit(1);
+                }
 
-            typer->parser->block_byte_size += size_of_type(expr_type);
+                // Identifier should already be typed at the parsing stage.
+            }
+            if (decl->declaration_type == DECLARATION_INFER) {
+                check_expression(typer, decl->expr);
+                
+                decl->identifier->type = decl->expr->evaluated_type;
+            }
+            if (decl->declaration_type == DECLARATION_CONSTANT) {
+                XXX;
+            }
 
-            return expr_type;
+            // @Incomplete - Should go on each scope!
+            typer->parser->block_byte_size += size_of_type(decl->identifier->type);
+
+            return TYPE_VOID;
         }
         case AST_PRINT: {
             AstPrint *print = (AstPrint *)(stmt);
@@ -71,6 +102,50 @@ TypeKind check_statement(Typer *typer, AstNode *stmt) {
             AstBlock *block = (AstBlock *)(stmt);
 
             check_block(typer, block);
+
+            return TYPE_VOID;
+        }
+        case AST_FUNCTION_CALL: {
+            AstFunctionCall *call = (AstFunctionCall *)(stmt);
+            Symbol *func_symbol   = symbol_lookup(&typer->parser->function_table, call->identifer->name);
+            if (func_symbol == NULL) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(call), "Unknown function '%s'", call->identifer->name);
+                exit(1);
+            }
+
+            AstFunctionDefn *func_defn = func_symbol->as_value.function_defn;
+            
+            if (call->arguments.count != func_defn->parameters.count) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(call), "Mismatch in arguments to function. Function '%s' takes %d parameters, but got %d", func_defn->identifier->name, func_defn->parameters.count, call->arguments.count);
+                report_error_ast(typer->parser, LABEL_NONE, (AstNode *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
+                exit(1);
+            }
+
+            for (unsigned int i = 0; i < call->arguments.count; i++) {
+                AstExpr *arg = ((AstExpr **)(call->arguments.items))[i];
+                check_expression(typer, arg);
+                AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
+
+                if (arg->evaluated_type != param->declared_type) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(arg), "Expected argument to be of type '%s', but argument is of type '%s'", type_kind_to_str(param->declared_type), type_kind_to_str(arg->evaluated_type));
+                    report_error_ast(typer->parser, LABEL_NONE, (AstNode *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
+                    exit(1);
+                }
+            }
+
+            return TYPE_VOID;
+
+        }
+        case AST_RETURN: {
+            AstReturn *ast_return = (AstReturn *)(stmt);
+            check_expression(typer, ast_return->expr);
+
+            return TYPE_VOID;
+        }
+        case AST_FUNCTION_DEFN: {
+            AstFunctionDefn *func_defn = (AstFunctionDefn *)(stmt);
+
+            check_block(typer, func_defn->body);
 
             return TYPE_VOID;
         }

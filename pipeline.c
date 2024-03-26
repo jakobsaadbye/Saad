@@ -19,8 +19,7 @@ bool send_through_pipeline(char *program, const char *program_path) {
     AstCode *code = (AstCode *) parse_top_level_code(&parser);
     if (code == NULL) return false;
 
-    Typer typer = {0};
-    typer.parser = &parser;
+    Typer typer = typer_init(&parser);
     check_code(&typer, code);
 
     CodeGenerator cg = code_generator_init(&parser);

@@ -20,17 +20,14 @@ main:
    sub		rsp, 48
 
    ; initialization of 'a'
-   mov		QWORD [rbp - 8], 0
    mov		rax, CS0
    push		rax
 
 
    ; putting result into 'a'
-   pop		rax
-   mov		QWORD [rbp - 8], rax
 
    ; expression of print
-   mov		rax, [rbp - 8]
+   mov		rax, [rbp - 0]
    push		rax
 
    ; call to print

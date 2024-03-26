@@ -47,6 +47,9 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.labels      = 0;
     cg.inside_print_expression = false;
 
+    // Reset all the next pointers inside the scopes, used during typing.
+    symbol_table_reset(&cg.ident_table);
+
     return cg;
 }
 
@@ -120,9 +123,11 @@ void emit_code(CodeGenerator *cg, AstCode *code) {
 }
 
 void emit_block(CodeGenerator *cg, AstBlock *block) {
+    enter_scope(&cg->ident_table);
     for (int i = 0; i < block->num_of_statements; i++) {
         emit_statement(cg, block->statements[i]);
     }
+    exit_scope(&cg->ident_table);
 }
 
 void emit_statement(CodeGenerator *cg, AstNode *node) {
@@ -241,10 +246,10 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
 
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     // Increment base pointer
-    int decl_size = size_of_type(decl->evaluated_type);
+    int decl_size = size_of_type(decl->declared_type);
     cg->base_ptr += decl_size;
 
-    if (decl->evaluated_type == TYPE_INTEGER || decl->evaluated_type == TYPE_FLOAT || decl->evaluated_type == TYPE_STRING) {
+    if (decl->declared_type == TYPE_INTEGER || decl->declared_type == TYPE_FLOAT || decl->declared_type == TYPE_STRING) {
         cg->base_ptr = align_value(cg->base_ptr, decl_size);
     }
 
@@ -254,16 +259,16 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; initialization of '%s'\n", decl->identifier->name);
 
-    if (decl->evaluated_type == TYPE_INTEGER) {
+    if (decl->declared_type == TYPE_INTEGER) {
         sb_append(&cg->code, "   mov\t\tDWORD [rbp - %d], 0\n", cg->base_ptr);
     }
-    if (decl->evaluated_type == TYPE_FLOAT) {
+    if (decl->declared_type == TYPE_FLOAT) {
         sb_append(&cg->code, "   mov\t\tDWORD [rbp - %d], 0\n", cg->base_ptr);
     }
-    if (decl->evaluated_type == TYPE_BOOL) {
+    if (decl->declared_type == TYPE_BOOL) {
         sb_append(&cg->code, "   mov\t\tBYTE [rbp - %d], 0\n", cg->base_ptr);
     }
-    if (decl->evaluated_type == TYPE_STRING) {
+    if (decl->declared_type == TYPE_STRING) {
         sb_append(&cg->code, "   mov\t\tQWORD [rbp - %d], 0\n", cg->base_ptr);
     }
     
@@ -271,20 +276,20 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
 
     sb_append(&cg->code, "\n\n");
     sb_append(&cg->code, "   ; putting result into '%s'\n", decl->identifier->name);
-    if (decl->evaluated_type == TYPE_INTEGER) {
+    if (decl->declared_type == TYPE_INTEGER) {
         sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   mov\t\tDWORD [rbp - %d], eax\n", cg->base_ptr);
     }
-    if (decl->evaluated_type == TYPE_FLOAT) {
+    if (decl->declared_type == TYPE_FLOAT) {
         sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
         sb_append(&cg->code, "   add\t\trsp, 4\n");
         sb_append(&cg->code, "   movss\t\tDWORD [rbp - %d], xmm0\n", cg->base_ptr);
     }
-    if (decl->evaluated_type == TYPE_BOOL) {
+    if (decl->declared_type == TYPE_BOOL) {
         sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   mov\t\tBYTE [rbp - %d], al\n", cg->base_ptr);
     }
-    if (decl->evaluated_type == TYPE_STRING) {
+    if (decl->declared_type == TYPE_STRING) {
         sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   mov\t\tQWORD [rbp - %d], rax\n", cg->base_ptr);
     }
@@ -610,10 +615,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         }
         if (lit->type == TOKEN_IDENTIFIER) {
             Symbol *ident_symbol = symbol_lookup(&cg->ident_table, lit->as_value.identifier.name);
-            if (ident_symbol == NULL) {
-                report_error_ast(cg->parser, LABEL_ERROR, (AstNode *)(lit), "Undefined variable '%s'", lit->as_value.identifier.name);
-                exit(1);
-            }
+            assert(ident_symbol != NULL);
 
             AstIdentifier *ident = ident_symbol->as_value.identifier;
             if (ident->type == TYPE_FLOAT) {

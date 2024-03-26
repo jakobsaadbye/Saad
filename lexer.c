@@ -13,9 +13,9 @@
 
 
 #define COLOR_RESET  "\x1B[0m"
-#define COLOR_RED    "\x1B[31m"
+#define COLOR_RED    "\x1B[91m"
 #define COLOR_YELLOW "\x1B[33m"
-#define COLOR_ICE    "\x1B[36m"
+#define COLOR_ICE    "\x1B[96m"
 #define COLOR_WHITE  "\x1B[37m"
 #define COLOR_WHITE_BOLD  "\x1B[1;37m"
 
@@ -640,7 +640,7 @@ void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, co
     char message[MAX_ERROR_LEN];
     vsnprintf(message, MAX_ERROR_LEN, template, args);
 
-    Line err_line = get_input_line(lexer->input_str, start.input_idx);
+    Line highlight_line = get_input_line(lexer->input_str, start.input_idx);
 
     // Header
     if (label != LABEL_NONE) {
@@ -650,31 +650,38 @@ void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, co
     }
 
     // Code line
-    char *start_segment = malloc(start.col + 1);
-    memset(start_segment, '\0', start.col + 1);
-    memcpy(start_segment, &lexer->input_str[err_line.start], start.col);
+    if (label == LABEL_ERROR) {
+        //
+        //  Highlight the error part
+        //
+        char *start_segment = malloc(start.col + 1);
+        memset(start_segment, '\0', start.col + 1);
+        memcpy(start_segment, &lexer->input_str[highlight_line.start], start.col);
 
-    int error_len = end.col - start.col;
-    char *error_segment = malloc(error_len + 1);
-    memset(error_segment, '\0', error_len + 1);
-    memcpy(error_segment, &lexer->input_str[start.input_idx], error_len);
+        int error_len = end.col - start.col;
+        char *error_segment = malloc(error_len + 1);
+        memset(error_segment, '\0', error_len + 1);
+        memcpy(error_segment, &lexer->input_str[start.input_idx], error_len);
 
-    int end_segment_len = err_line.end - end.input_idx;
-    char *end_segment = malloc(end_segment_len + 1);
-    memset(end_segment, '\0', end_segment_len + 1);
-    memcpy(end_segment, &lexer->input_str[end.input_idx], end_segment_len);
+        int end_segment_len = highlight_line.end - end.input_idx;
+        char *end_segment = malloc(end_segment_len + 1);
+        memset(end_segment, '\0', end_segment_len + 1);
+        memcpy(end_segment, &lexer->input_str[end.input_idx], end_segment_len);
+
+        printf("   %s" "%s" "%s" COLOR_RESET "%s\n", start_segment, label_color(label), error_segment, end_segment);
+
+        // Underlining
+        for (int i = 0; i < start.col + 3; i++) printf(" ");
+        printf("%s^", label_color(label));
+        for (int i = start.col; i < end.col - 1; i++) printf("~");
+        printf(COLOR_RESET);
+        printf("\n");
+    } else {
+        printf("   %s%s" COLOR_RESET "\n", label_color(label), highlight_line.str);
+    }
 
 
-    printf("   %s" "%s" "%s" COLOR_RESET "%s\n", start_segment, label_color(label), error_segment, end_segment);
-
-    // Underline coloring
-    for (int i = 0; i < start.col + 3; i++) printf(" ");
-    printf("%s^", label_color(label));
-    for (int i = start.col; i < end.col - 1; i++) printf("~");
-    printf(COLOR_RESET);
-    printf("\n");
-
-    free_line(err_line);
+    free_line(highlight_line);
 }
 
 Line get_input_line(char *input_str, int start_pos) {

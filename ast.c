@@ -46,6 +46,7 @@ typedef enum TypeKind {
 
 typedef enum DeclarationType {
     DECLARATION_TYPED,          // ex. a : int = b
+    DECLARATION_TYPED_NO_EXPR,  // ex. a : int;
     DECLARATION_INFER,          // ex. a := b
     DECLARATION_CONSTANT        // ex. a :: 3 @ToDo - Not a thing yet
 } DeclarationType;
@@ -55,7 +56,7 @@ typedef struct AstDeclaration {
 
     DeclarationType declaration_type;
     AstIdentifier  *identifier;
-    TypeKind        evaluated_type;
+    TypeKind        declared_type;
     AstExpr        *expr;
 
 } AstDeclaration;
@@ -89,23 +90,16 @@ typedef struct AstFunctionDefn {
     AstNode head;
 
     AstIdentifier *identifier;
-    DynamicArray parameters; // of AstFunctionParameter
+    DynamicArray parameters; // of AstDeclaration
     TypeKind return_type;
-    AstBlock *block;
+    AstBlock *body;
 } AstFunctionDefn;
-
-typedef struct AstFunctionParameter {
-    AstNode head;
-
-    AstIdentifier *identifier;
-    TypeKind type;
-} AstFunctionParameter;
 
 typedef struct AstFunctionCall {
     AstNode head;
 
     AstIdentifier *identifer;
-    DynamicArray arguments;
+    DynamicArray arguments; // of AstExpr
     TypeKind evaluated_type;
 } AstFunctionCall;
 
@@ -114,8 +108,8 @@ typedef struct AstIf {
 
     AstExpr *condition;
     AstBlock *block;
-    AstBlock *else_block; // Optional
-    DynamicArray else_ifs;
+    AstBlock *else_block;
+    DynamicArray else_ifs;  // of AstIf
     bool has_else_block;
 } AstIf;
 

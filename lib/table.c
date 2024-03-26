@@ -45,10 +45,6 @@ HashTable hash_table_init(size_t table_length, size_t item_size, bool (*cmp_func
 }
 
 void hash_table_add(HashTable *table, const char *key, void *item) {
-    #ifdef DEBUG
-    printf("Added '%s' to identifier table\n", key);
-    #endif
-
     int index = hash(table, key);
 
     LinkedList *ll = &table->items[index];

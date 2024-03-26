@@ -32,7 +32,7 @@ AstFunctionCall *parse_function_call(Parser *parser);
 AstIf           *parse_if(Parser *parser);
 AstPrint        *parse_print(Parser *parser);
 AstReturn       *parse_return(Parser *parser);
-AstDeclaration  *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, TypeKind type);
+AstDeclaration  *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, Token type_token);
 AstExpr         *make_binary_node(Parser *parser, Token token, AstExpr *lhs, AstExpr *rhs);
 AstExpr         *make_unary_node(Parser *parser, Token token, AstExpr *expr);
 AstExpr         *make_literal_node(Parser *parser, Token token);
@@ -82,12 +82,14 @@ AstCode *parse_top_level_code(Parser *parser) {
     return code;
 }
 
-AstBlock *parse_block(Parser *parser) {
+AstBlock *parse_block(Parser *parser, bool open_lexical_scope) {
     AstBlock *block = (AstBlock *)(ast_allocate(parser, sizeof(AstBlock)));
 
     Token start_token = peek_next_token(parser);
     expect(parser, start_token, '{');
     eat_token(parser);
+
+    if (open_lexical_scope) open_scope(&parser->ident_table);
 
     block->statements[0]     = (AstNode *)(parse_statement(parser));
     block->num_of_statements = 1;
@@ -112,6 +114,7 @@ AstBlock *parse_block(Parser *parser) {
     expect(parser, next, '}');  // Should not be able to fail
     eat_token(parser);
 
+    if (open_lexical_scope) close_scope(&parser->ident_table);
 
     block->head.type         = AST_BLOCK;  
     block->head.start        = start_token.start;
@@ -160,7 +163,7 @@ AstNode *parse_statement(Parser *parser) {
         statement_ends_with_semicolon = false;
     }
     else if (token.type == '{') {
-        stmt = (AstNode *)(parse_block(parser));
+        stmt = (AstNode *)(parse_block(parser, true));
         statement_ends_with_semicolon = false;
     }
 
@@ -244,7 +247,7 @@ AstFunctionCall *parse_function_call(Parser *parser) {
 
 AstFunctionDefn *parse_function_defn(Parser *parser) {
     AstFunctionDefn *func_defn = (AstFunctionDefn *)(ast_allocate(parser, sizeof(AstFunctionDefn)));
-    func_defn->parameters      = da_init(2, sizeof(AstFunctionParameter *));
+    func_defn->parameters      = da_init(2, sizeof(AstDeclaration *));
     func_defn->return_type     = TYPE_VOID;
 
     Token ident_token = peek_next_token(parser);
@@ -259,6 +262,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     expect(parser, next, '('); // Should also be impossible to fail
     eat_token(parser);
 
+    open_scope(&parser->ident_table); // Open a scope, so that the parameters will be pushed down into the scope of the body
     bool first_parameter_seen = false;
     while (true) {
         //
@@ -301,15 +305,8 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         eat_token(parser);
 
         Token type_token = next;
-        TypeKind param_type = token_to_type_kind(type_token);
 
-        AstFunctionParameter *param = (AstFunctionParameter *)(ast_allocate(parser, sizeof(AstFunctionParameter)));
-        param->head.type  = AST_FUNCTION_PARAMETER;
-        param->head.start = param_ident.start;
-        param->head.end   = type_token.end;
-        param->identifier = make_identifier_node(parser, param_ident, param_type);
-        param->type       = param_type;
-
+        AstDeclaration *param = make_declaration(parser, param_ident, DECLARATION_TYPED_NO_EXPR, NULL, type_token);
         da_append(&func_defn->parameters, param);
         first_parameter_seen = true;
     }
@@ -331,13 +328,16 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         func_defn->return_type = return_type;
     }
 
-    AstBlock *block = parse_block(parser);
+    AstBlock *body = parse_block(parser, false); // Here we tell parse_block to explicitly not make a new lexical scope, as we are managing the scope manually in here
 
     func_defn->head.type  = AST_FUNCTION_DEFN;
     func_defn->head.start = ident_token.start;
-    func_defn->head.end   = block->head.end;
+    func_defn->head.end   = body->head.end;
     func_defn->identifier = make_identifier_node(parser, ident_token, func_defn->return_type);
-    func_defn->block      = block;
+    func_defn->body       = body;
+
+    close_scope(&parser->ident_table);
+    symbol_add_function_defn(&parser->function_table, func_defn);
 
     return func_defn;
 }
@@ -347,7 +347,8 @@ AstIf *parse_if(Parser *parser) {
     eat_token(parser);
 
     AstExpr *condition = parse_expression(parser, MIN_PRECEDENCE);
-    AstBlock *block    = parse_block(parser);
+
+    AstBlock *block = parse_block(parser, true);
 
     AstIf *ast_if = (AstIf *)(ast_allocate(parser, sizeof(AstIf)));
     ast_if->head.type = AST_IF;
@@ -367,7 +368,7 @@ AstIf *parse_if(Parser *parser) {
                 eat_token(parser);
                 
                 AstExpr *condition = parse_expression(parser, MIN_PRECEDENCE);
-                AstBlock *block    = parse_block(parser);
+                AstBlock *block    = parse_block(parser, true);
 
                 AstIf else_if = {0};
                 else_if.head.type = AST_IF;
@@ -381,7 +382,7 @@ AstIf *parse_if(Parser *parser) {
                 continue; // Look for more else ifs
             }
 
-            AstBlock *else_block = parse_block(parser);
+            AstBlock *else_block = parse_block(parser, true);
             ast_if->has_else_block = true;
             ast_if->else_block = else_block;
             break;
@@ -427,7 +428,7 @@ AstDeclaration *parse_declaration(Parser *parser) {
     if (next.type == TOKEN_COLON_EQUAL) {
         eat_token(parser);
         AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-        return make_declaration(parser, ident, DECLARATION_INFER, expr, TYPE_VOID); // The type of the declaration and identifier will be infered later
+        return make_declaration(parser, ident, DECLARATION_INFER, expr, (Token){0}); // The type of the declaration and identifier will be infered later
     }
 
     if (next.type == ':') {
@@ -435,7 +436,7 @@ AstDeclaration *parse_declaration(Parser *parser) {
         next = peek_next_token(parser);
 
         if (is_primitive_type(next) || next.type == TOKEN_IDENTIFIER) {
-            TypeKind type = token_to_type_kind(next);
+            Token type_token = next;
 
             eat_token(parser);
             next = peek_next_token(parser);
@@ -443,7 +444,7 @@ AstDeclaration *parse_declaration(Parser *parser) {
             eat_token(parser);
 
             AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-            return make_declaration(parser, ident, DECLARATION_TYPED, expr, type);
+            return make_declaration(parser, ident, DECLARATION_TYPED, expr, type_token);
         }
 
     }
@@ -469,23 +470,37 @@ TypeKind token_to_type_kind(Token token) {
     exit(1);
 }
 
-AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, TypeKind type) {
+AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, Token type_token) {
+    TypeKind type = TYPE_VOID;
+    if (decl_type == DECLARATION_TYPED || decl_type == DECLARATION_TYPED_NO_EXPR) {
+        type = token_to_type_kind(type_token);
+    }
     AstIdentifier *ident = make_identifier_node(parser, ident_token, type);
     Symbol *existing = symbol_add_identifier(&parser->ident_table, ident);
     if (existing != NULL) {
-        report_error_token(parser, LABEL_ERROR, ident_token, "Variable '%s' is already defined in current scope", ident_token.as_value.identifier.name);
+        report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.identifier.name);
         report_error_ast(parser, LABEL_NONE, (AstNode *)(existing), "Here is the previous declaration ...");
         exit(1);
     }
 
     AstDeclaration *decl = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
-    decl->head.type        = AST_DECLARATION;
-    decl->head.start       = ident_token.start;
-    decl->head.end         = expr->head.end;
-    decl->declaration_type = decl_type;
-    decl->identifier       = ident;
-    decl->evaluated_type   = type;
-    decl->expr             = expr;
+    if (decl_type == DECLARATION_TYPED_NO_EXPR) {
+        decl->head.type        = AST_DECLARATION;
+        decl->head.start       = ident_token.start;
+        decl->head.end         = type_token.end;
+        decl->declaration_type = decl_type;
+        decl->identifier       = ident;
+        decl->declared_type    = type;
+        decl->expr             = NULL;
+    } else {
+        decl->head.type        = AST_DECLARATION;
+        decl->head.start       = ident_token.start;
+        decl->head.end         = expr->head.end;
+        decl->declaration_type = decl_type;
+        decl->identifier       = ident;
+        decl->declared_type    = type;
+        decl->expr             = expr;
+    }
 
     return decl;
 }
