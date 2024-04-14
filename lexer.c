@@ -64,14 +64,8 @@ typedef union As_value {
     bool   boolean;
     int    integer;
     double floating;
-    struct {
-        char *data;
-        int   length;
-    } string;
-    struct {
-        char *name;
-        int   length;    
-    } identifier;
+    struct { char *data; int length; } string;
+    struct { char *name; int length; } identifier;
 } As_value;
 
 typedef struct Line {

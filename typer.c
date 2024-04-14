@@ -91,9 +91,9 @@ TypeKind check_function_call(Typer *typer, AstFunctionCall *call) {
     }
 
     for (unsigned int i = 0; i < call->arguments.count; i++) {
+        AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
         AstExpr *arg = ((AstExpr **)(call->arguments.items))[i];
         check_expression(typer, arg);
-        AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
 
         if (arg->evaluated_type != param->declared_type) {
             report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(arg), "Expected argument to be of type '%s', but argument is of type '%s'", type_kind_to_str(param->declared_type), type_kind_to_str(arg->evaluated_type));
@@ -102,7 +102,7 @@ TypeKind check_function_call(Typer *typer, AstFunctionCall *call) {
         }
     }
 
-    return TYPE_VOID;
+    return func_defn->return_type;
 }
 
 TypeKind check_statement(Typer *typer, AstNode *stmt) {
@@ -167,6 +167,7 @@ TypeKind check_statement(Typer *typer, AstNode *stmt) {
 
 TypeKind check_expression(Typer *typer, AstExpr *expr) {
     TypeKind result;
+    if (expr->head.type == AST_FUNCTION_CALL) result = check_function_call(typer,  (AstFunctionCall *)(expr));
     if (expr->head.type == AST_BINARY)  result = check_binary(typer,  (AstBinary *)(expr));
     if (expr->head.type == AST_UNARY)   result = check_unary(typer,   (AstUnary *)(expr));
     if (expr->head.type == AST_LITERAL) result = check_literal(typer, (AstLiteral *)(expr));

@@ -11,6 +11,7 @@ segment .data
 segment .text
    global main
    extern printf
+   extern ExitProcess
 
 
 main:
@@ -18,68 +19,24 @@ main:
    mov		rbp, rsp
    sub		rsp, 48
 
-   ; initialization of 'a'
+   ; initialization of 'c'
    mov		DWORD -4[rbp], 0
-   push		4
-
-
-   ; putting result into 'a'
-   pop		rax
-   mov		DWORD -4[rbp], eax
-
-   ; initialization of 'b'
-   mov		DWORD -8[rbp], 0
    push		2
-
-
-   ; putting result into 'b'
-   pop		rax
-   mov		DWORD -8[rbp], eax
-   mov		eax, DWORD -8[rbp]
-   push		rax
    pop		rax
    mov		edx, eax
-   mov		eax, DWORD -4[rbp]
-   push		rax
    push		3
-
-   pop		rbx
-   pop		rax
-   imul		rax, rbx
-   push		rax
    pop		rax
    mov		ecx, eax
    call		foo
-   add		rsp, 48
-   pop		rbp
-   ret
-
-foo:
-   push		rbp
-   mov		rbp, rsp
-   sub		rsp, 48
-   mov		DWORD 16[rbp], ecx
-   mov		DWORD 24[rbp], edx
-
-   ; initialization of 'c'
-   mov		DWORD -12[rbp], 0
-   mov		eax, DWORD 16[rbp]
-   push		rax
-   mov		eax, DWORD 24[rbp]
-   push		rax
-
-   pop		rbx
-   pop		rax
-   imul		rax, rbx
    push		rax
 
 
    ; putting result into 'c'
    pop		rax
-   mov		DWORD -12[rbp], eax
+   mov		DWORD -4[rbp], eax
 
    ; expression of print
-   mov		eax, DWORD -12[rbp]
+   mov		eax, DWORD -4[rbp]
    push		rax
 
    ; call to print
@@ -89,3 +46,23 @@ foo:
    add		rsp, 48
    pop		rbp
    ret
+
+foo:
+   push		rbp
+   mov		rbp, rsp
+   sub		rsp, 0
+   mov		DWORD 16[rbp], ecx
+   mov		DWORD 24[rbp], edx
+   mov		eax, DWORD 16[rbp]
+   push		rax
+   mov		eax, DWORD 24[rbp]
+   push		rax
+
+   pop		rbx
+   pop		rax
+   imul		rax, rbx
+   push		rax
+   pop		rax
+   pop		rbp
+   ret
+   add		rsp, 0

@@ -229,10 +229,10 @@ AstFunctionCall *parse_function_call(Parser *parser) {
         first_argument_seen = true;
     }
 
-    call->head.type  = AST_FUNCTION_CALL;
-    call->head.start = ident_token.start;
-    call->head.end   = next.end;
-    call->identifer  = make_identifier_node(parser, ident_token, TYPE_VOID); // The type of the identifier will be set later in the typer, so here i just specify void
+    call->head.head.type  = AST_FUNCTION_CALL;
+    call->head.head.start = ident_token.start;
+    call->head.head.end   = next.end;
+    call->identifer       = make_identifier_node(parser, ident_token, TYPE_VOID); // The type of the identifier will be set later in the typer, so here i just specify void
 
     return call;
 }
@@ -612,10 +612,11 @@ AstExpr *parse_leaf(Parser *parser) {
     if (t.type == TOKEN_IDENTIFIER) {
         Token next = peek_token(parser, 1);
         if (next.type == '(') {
-            // Function call
-            XXX;
+            AstFunctionCall *call = parse_function_call(parser);
+            return (AstExpr *)(call);
+        } else {
+            return make_literal_node(parser, t);
         }
-        return make_literal_node(parser, t);
     }
 
     if (t.type == '(')  {

@@ -95,12 +95,16 @@ typedef struct AstFunctionDefn {
     AstBlock *body;
 } AstFunctionDefn;
 
-typedef struct AstFunctionCall {
+typedef struct AstExpr {
     AstNode head;
+    TypeKind evaluated_type;
+} AstExpr;
+
+typedef struct AstFunctionCall {
+    AstExpr head;
 
     AstIdentifier *identifer;
     DynamicArray arguments; // of AstExpr
-    TypeKind evaluated_type;
 } AstFunctionCall;
 
 typedef struct AstIf {
@@ -113,10 +117,6 @@ typedef struct AstIf {
     bool has_else_block;
 } AstIf;
 
-typedef struct AstExpr {
-    AstNode head;
-    TypeKind evaluated_type;
-} AstExpr;
 
 typedef struct AstBinary {
     AstExpr head;

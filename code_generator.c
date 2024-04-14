@@ -117,6 +117,7 @@ void emit_header(CodeGenerator *cg) {
     sb_append(&cg->code, "segment .text\n");
     sb_append(&cg->code, "   global main\n");
     sb_append(&cg->code, "   extern printf\n");
+    sb_append(&cg->code, "   extern ExitProcess\n");
     sb_append(&cg->code, "\n");
 }
 
@@ -173,10 +174,12 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     enter_scope(&cg->ident_table);
 
     size_t bytes_allocated = cg->ident_table.current_scope->bytes_allocated;
-    size_t shadow_space = 32;
+    if (strcmp("main", func_defn->identifier->name) == 0) {
+        bytes_allocated += 32; // shadow space some reason needed for main??? @Investigate
+    }
     size_t aligned_allocated = align_value((int)(bytes_allocated), 16);
     
-    sb_append(&cg->code, "   sub\t\trsp, %d\n", aligned_allocated + shadow_space);
+    if (bytes_allocated) sb_append(&cg->code, "   sub\t\trsp, %d\n", aligned_allocated);
 
     for (unsigned int i = 0; i < func_defn->parameters.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
@@ -194,7 +197,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     emit_block(cg, func_defn->body, false);
     exit_scope(&cg->ident_table);
 
-    sb_append(&cg->code, "   add\t\trsp, %d\n", aligned_allocated + shadow_space);
+    if (bytes_allocated) sb_append(&cg->code, "   add\t\trsp, %d\n", aligned_allocated);
 
     bool returns_void = func_defn->return_type == TYPE_VOID;
     if (returns_void) {
@@ -687,6 +690,12 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
         printf("%s:%d: compiler-error: There were unhandled cases in 'emit_expression'\n", __FILE__, __LINE__);
         exit(1);
+    }
+    if (expr->head.type == AST_FUNCTION_CALL) {
+        AstFunctionCall *call = (AstFunctionCall *)(expr);
+        emit_function_call(cg, call); // Value of function call will be in rax, so simply push the value
+        sb_append(&cg->code, "   push\t\trax\n");
+        return;
     }
     if (expr->head.type == AST_LITERAL) {
         AstLiteral *lit = (AstLiteral *)(expr);
