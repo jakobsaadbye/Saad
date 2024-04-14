@@ -154,14 +154,12 @@ void emit_statement(CodeGenerator *cg, AstNode *node) {
 void emit_return(CodeGenerator *cg, AstReturn *ast_return) {
     emit_expression(cg, ast_return->expr);
 
-    if (ast_return->expr->evaluated_type == TYPE_INTEGER) {
-        sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   pop\t\trbp\n");    // @Hack - Find a way to avoid multiple returns statements!!!
-        sb_append(&cg->code, "   ret\n");
-    }
-    if (ast_return->expr->evaluated_type == TYPE_FLOAT) {
-        XXX;
-    }
+    // if (ast_return->expr->evaluated_type == TYPE_INTEGER) {
+    //     sb_append(&cg->code, "   pop\t\trax\n");
+    //     sb_append(&cg->code, "   pop\t\trbp\n");    // @Hack - Find a way to avoid multiple returns statements!!!
+    // } else {
+    //     XXX;
+    // }
 }
 
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
@@ -196,14 +194,18 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
     emit_block(cg, func_defn->body, false);
     exit_scope(&cg->ident_table);
-
-    if (bytes_allocated) sb_append(&cg->code, "   add\t\trsp, %d\n", aligned_allocated);
-
-    bool returns_void = func_defn->return_type == TYPE_VOID;
-    if (returns_void) {
-        sb_append(&cg->code, "   pop\t\trbp\n");
-        sb_append(&cg->code, "   ret\n");
+    
+    if (func_defn->return_type == TYPE_INTEGER) {
+        sb_append(&cg->code, "   pop\t\trax\n");
+    } else if (func_defn->return_type == TYPE_VOID) {
+        // Do nothing
+    } else {
+        XXX;
     }
+    if (bytes_allocated) sb_append(&cg->code, "   add\t\trsp, %d\n", aligned_allocated);
+    sb_append(&cg->code, "   pop\t\trbp\n");
+    sb_append(&cg->code, "   ret\n");
+
 }
 
 static char temp_register[6];

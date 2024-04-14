@@ -244,7 +244,7 @@ TypeKind check_literal(Typer *typer, AstLiteral *literal) {
         char *ident_name     = literal->as_value.identifier.name;
         Symbol *ident_symbol = symbol_lookup(&typer->parser->ident_table, ident_name);
         if (ident_symbol == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Undefined variable '%s'", ident_name);
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Undeclared variable '%s'", ident_name);
             exit(1);
         }
 
