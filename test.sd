@@ -1,9 +1,10 @@
 main :: () {
-    a := 2.5;
-    b := 2.5;
-    foo(a, b);
+    a := 4;
+    b := 2;
+    foo(a * 3, b);
 }
 
-foo :: (a: float, b: float) -> float {
-    return a + b;
+foo :: (a: int, b: int) {
+    c := a * b;
+    print(c);
 }

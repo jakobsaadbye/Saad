@@ -543,6 +543,7 @@ bool ends_literal(char c) {
     if (c == ' ')  return true;
     if (c == ';')  return true;
     if (c == ')')  return true;
+    if (c == ',')  return true;
     return false;
 }
 

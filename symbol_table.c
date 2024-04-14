@@ -11,6 +11,8 @@ typedef struct Scope {
     int next;       // Next child to visit on a call to dive()
     DynamicArray children;
     HashTable symbols;
+
+    size_t bytes_allocated; // Number of bytes allocated in this scope
 } Scope;
 
 typedef struct SymbolTable {
@@ -35,10 +37,11 @@ bool compare_symbol(const void *key, const void *item) {
 SymbolTable symbol_table_init() {
     SymbolTable st = {0};
     Scope *global_scope = (Scope *)(malloc(sizeof(Scope)));;
-    global_scope->parent   = NULL;
-    global_scope->children = da_init(2, sizeof(Scope));
-    global_scope->symbols  = hash_table_init(SYMBOL_HASH_TABLE_LENGTH, sizeof(Symbol), compare_symbol);
-    global_scope->next     = 0;
+    global_scope->parent    = NULL;
+    global_scope->children  = da_init(2, sizeof(Scope));
+    global_scope->symbols   = hash_table_init(SYMBOL_HASH_TABLE_LENGTH, sizeof(Symbol), compare_symbol);
+    global_scope->next      = 0;
+    global_scope->bytes_allocated = 0;
     st.current_scope = global_scope;
     st.global_scope = global_scope;
 

@@ -15,7 +15,6 @@ typedef enum AstType {
     AST_ERR,
     AST_BLOCK,
     AST_FUNCTION_DEFN,
-    AST_FUNCTION_PARAMETER,
     AST_FUNCTION_CALL,
     AST_DECLARATION,
     AST_PRINT,
@@ -59,6 +58,7 @@ typedef struct AstDeclaration {
     TypeKind        declared_type;
     AstExpr        *expr;
 
+    bool is_function_param;
 } AstDeclaration;
 
 typedef struct AstBlock {
