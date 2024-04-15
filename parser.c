@@ -187,6 +187,7 @@ AstReturn *parse_return(Parser *parser) {
     ast_return->head.start = return_token.start;
     ast_return->head.end   = expr->head.end;
     ast_return->expr       = expr;
+    ast_return->enclosing_function = NULL;
 
     return ast_return;
 }

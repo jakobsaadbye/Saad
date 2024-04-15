@@ -15,13 +15,9 @@ int main(int argc, char const *argv[]) {
     const char *input_file_path = argv[1];
     char *program = read_entire_file(input_file_path);
 
-    printf("\n\n---------- Program -------------\n");
-    printf("%s", program);
-    printf("\n----------------------------------\n\n");
-
-    bool success = send_through_pipeline(program, input_file_path);
+    bool success = send_through_pipeline(program, input_file_path, true);
     if (success) {
-        printf("Compiled successfully\n\n");
+        printf("\n\nCompiled successfully\n\n");
     } else {
         printf("There were errors during compilation\n\n");
     }

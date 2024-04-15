@@ -1,11 +1,13 @@
 main :: () {
-    a := 3;
-    b := 4;
-    c := foo(a, b);
-    print(c);
+    result := factorial(2);
+    print(result);
 }
 
-foo :: (a: int, b: int) -> int {
-    d := a * b;
-    return d;
+factorial :: (n: int) -> int {
+    print(n);
+    if (n == 0 || n == 1) {
+        return 1;
+    } else {
+        return n * factorial(n - 1);
+    }
 }

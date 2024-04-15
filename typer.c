@@ -8,6 +8,8 @@
 
 typedef struct Typer {
     Parser *parser;
+
+    AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
 } Typer;
 
 TypeKind check_block(Typer *typer, AstBlock *block, bool open_lexical_scope);
@@ -23,6 +25,7 @@ bool is_boolean_operator(TokenType op);
 Typer typer_init(Parser *parser) {
     Typer typer = {0};
     typer.parser = parser;
+    typer.enclosing_function = NULL;
 
     return typer;
 }
@@ -85,7 +88,7 @@ TypeKind check_function_call(Typer *typer, AstFunctionCall *call) {
     AstFunctionDefn *func_defn = func_symbol->as_value.function_defn;
     
     if (call->arguments.count != func_defn->parameters.count) {
-        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(call), "Mismatch in arguments to function. Function '%s' takes %d parameters, but got %d", func_defn->identifier->name, func_defn->parameters.count, call->arguments.count);
+        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(call), "Mismatch in number of arguments. Function '%s' takes %d %s, but %d were supplied", func_defn->identifier->name, func_defn->parameters.count, func_defn->parameters.count == 1 ? "parameter" : "parameters", call->arguments.count);
         report_error_ast(typer->parser, LABEL_NONE, (AstNode *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
         exit(1);
     }
@@ -152,11 +155,26 @@ TypeKind check_statement(Typer *typer, AstNode *stmt) {
         AstReturn *ast_return = (AstReturn *)(stmt);
         check_expression(typer, ast_return->expr);
 
+        AstFunctionDefn *ef = typer->enclosing_function;
+        if (ef == NULL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ast_return), "Attempting to return outside of a function");
+            exit(1);
+        }
+
+        if (ast_return->expr->evaluated_type != ef->return_type) {
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ast_return), "Type mismatch. Type of expression in return is %s, but function '%s' has return type %s", type_kind_to_str(ast_return->expr->evaluated_type), ef->identifier->name, type_kind_to_str(ef->return_type));
+            exit(1);
+        }
+
+        ast_return->enclosing_function = ef;
+
         return TYPE_VOID;
     }
     case AST_FUNCTION_DEFN: {
         AstFunctionDefn *func_defn = (AstFunctionDefn *)(stmt);
+        typer->enclosing_function = func_defn;
         check_block(typer, func_defn->body, true);
+        typer->enclosing_function = NULL;
 
         return TYPE_VOID;
     }

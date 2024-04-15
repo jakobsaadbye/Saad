@@ -153,13 +153,7 @@ void emit_statement(CodeGenerator *cg, AstNode *node) {
 
 void emit_return(CodeGenerator *cg, AstReturn *ast_return) {
     emit_expression(cg, ast_return->expr);
-
-    // if (ast_return->expr->evaluated_type == TYPE_INTEGER) {
-    //     sb_append(&cg->code, "   pop\t\trax\n");
-    //     sb_append(&cg->code, "   pop\t\trbp\n");    // @Hack - Find a way to avoid multiple returns statements!!!
-    // } else {
-    //     XXX;
-    // }
+    sb_append(&cg->code, "   jmp\t\tL%d\n", ast_return->enclosing_function->return_label);
 }
 
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
@@ -173,7 +167,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
     size_t bytes_allocated = cg->ident_table.current_scope->bytes_allocated;
     if (strcmp("main", func_defn->identifier->name) == 0) {
-        bytes_allocated += 32; // shadow space some reason needed for main??? @Investigate
+        bytes_allocated += 32; // shadow space that is for some reason needed for main??? @Investigate
     }
     size_t aligned_allocated = align_value((int)(bytes_allocated), 16);
     
@@ -192,12 +186,19 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
         }
     }
 
+    // Make a label for the return code so that any return statements within the function can jump to this. e.g for conditionals
+    int return_label = make_label_number(cg);
+    func_defn->return_label = return_label;
+
     emit_block(cg, func_defn->body, false);
     exit_scope(&cg->ident_table);
     
+
+    sb_append(&cg->code, "L%d:\n", return_label);
     if (func_defn->return_type == TYPE_INTEGER) {
         sb_append(&cg->code, "   pop\t\trax\n");
     } else if (func_defn->return_type == TYPE_VOID) {
+        sb_append(&cg->code, "   mov\t\trax, 0\n");
         // Do nothing
     } else {
         XXX;
@@ -205,7 +206,6 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     if (bytes_allocated) sb_append(&cg->code, "   add\t\trsp, %d\n", aligned_allocated);
     sb_append(&cg->code, "   pop\t\trbp\n");
     sb_append(&cg->code, "   ret\n");
-
 }
 
 static char temp_register[6];
@@ -634,7 +634,7 @@ const char *comparison_operator_to_set_instruction(TokenType op) {
 
 const char *boolean_operator_to_instruction(TokenType op) {
     if (op == TOKEN_LOGICAL_AND) return "and";
-    if (op == TOKEN_LOGICAL_OR)  return "or";
+    if (op == TOKEN_LOGICAL_OR)  return "or ";
     if (op == '!')               return "not";
 
     printf("%s:%d: compiler-error: There were unhandled cases in 'boolean_operator_to_instruction'\n", __FILE__, __LINE__);
@@ -643,9 +643,7 @@ const char *boolean_operator_to_instruction(TokenType op) {
 
 
 int make_label_number(CodeGenerator *cg) {
-    int label_number = cg->labels;
-    cg->labels++;
-    return label_number;
+    return cg->labels++;
 }
 
 void emit_expression(CodeGenerator *cg, AstExpr *expr) {

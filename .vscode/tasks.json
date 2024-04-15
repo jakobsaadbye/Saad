@@ -9,7 +9,7 @@
                 "-g",
                 "C:/Saad/main.c",
                 "-o",
-                "C:/Saad/build/saad.exe"
+                "C:/Saad/bin/saad.exe"
             ],
             "options": {
                 "cwd": "C:/mingw64/bin"

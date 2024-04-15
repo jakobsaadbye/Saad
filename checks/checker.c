@@ -26,9 +26,9 @@ void check_entire_directory(const char *dir_name) {
             sprintf(file_path, "%s/%s", dir_name, filename);
 
             printf("Compiling %s\n", file_path);
-
+            
             char *program = read_entire_file(file_path);
-            bool success  = send_through_pipeline(program, file_path);
+            bool success  = send_through_pipeline(program, file_path, false);
 
             assert(success);
 

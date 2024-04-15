@@ -80,12 +80,6 @@ typedef struct AstPrint {
     AstExpr *expr;
 } AstPrint;
 
-typedef struct AstReturn {
-    AstNode head;
-
-    AstExpr *expr;
-} AstReturn;
-
 typedef struct AstFunctionDefn {
     AstNode head;
 
@@ -93,7 +87,18 @@ typedef struct AstFunctionDefn {
     DynamicArray parameters; // of AstDeclaration
     TypeKind return_type;
     AstBlock *body;
+    
+    int return_label;
+
 } AstFunctionDefn;
+
+typedef struct AstReturn {
+    AstNode head;
+
+    AstExpr *expr;
+    AstFunctionDefn *enclosing_function;
+} AstReturn;
+
 
 typedef struct AstExpr {
     AstNode head;

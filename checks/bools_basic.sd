@@ -1,4 +1,4 @@
-{
+main :: () {
     a := true;
     b := true;
     c := 69;
