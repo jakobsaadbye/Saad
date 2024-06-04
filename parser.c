@@ -19,8 +19,6 @@ typedef struct Parser {
 } Parser;
 
 Parser           parser_init();
-AstExpr         *parse_expression(Parser *parser, int min_prec);
-AstExpr         *parse_leaf(Parser *parser);
 AstNode         *parse_statement(Parser *parser);
 AstDeclaration  *parse_declaration(Parser *parser);
 AstFunctionDefn *parse_function_defn(Parser *parser);
@@ -29,11 +27,15 @@ AstIf           *parse_if(Parser *parser);
 AstFor          *parse_for(Parser *parser);
 AstPrint        *parse_print(Parser *parser);
 AstReturn       *parse_return(Parser *parser);
+AstExpr         *parse_expression(Parser *parser, int min_prec);
+AstExpr         *parse_range_or_normal_expression(Parser *parser);
+AstExpr         *parse_leaf(Parser *parser);
 AstDeclaration  *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, Token type_token, bool is_function_parameter);
 AstExpr         *make_binary_node(Parser *parser, Token token, AstExpr *lhs, AstExpr *rhs);
 AstExpr         *make_unary_node(Parser *parser, Token token, AstExpr *expr);
 AstExpr         *make_literal_node(Parser *parser, Token token);
 AstIdentifier   *make_identifier_node(Parser *parser, Token ident_token, TypeKind type);
+AstIdentifier   *make_identifier_ephemeral(Parser *parser, const char *name, TypeKind type);
 bool identifier_is_equal(const void *key, const void *item);
 void *ast_allocate(Parser *parser, size_t size);
 void expect(Parser *parser, Token given, TokenType expected_type);
@@ -197,30 +199,19 @@ AstFor *parse_for(Parser *parser) {
         eat_token(parser);
         eat_token(parser);
 
-        AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-        next = peek_next_token(parser);
-        if (next.type == TOKEN_DOUBLE_DOT || next.type == TOKEN_TRIPLE_DOT) {
-            eat_token(parser);
-            AstExpr *end = parse_expression(parser, MIN_PRECEDENCE);
-
-            AstRangeExpr *range_expr = (AstRangeExpr *)(ast_allocate(parser, sizeof(AstRangeExpr)));            
-            range_expr->head.head.type = AST_RANGE_EXPR;
-            range_expr->head.head.start = expr->head.start;
-            range_expr->head.head.end = end->head.end;
-            range_expr->start = expr;
-            range_expr->end = end;
-            range_expr->inclusive = next.type == TOKEN_TRIPLE_DOT;
-
-            iterable = (AstExpr *)(range_expr);
-        } else {
-            iterable = expr;
-        }
+        iterable = parse_range_or_normal_expression(parser);
     } else {
-        // ToDo: Un-named for-statement. e.g for 0..10 { ... }
-        XXX;
+        iterable = parse_range_or_normal_expression(parser);
+
+        if (iterable->head.type == AST_RANGE_EXPR) {
+            iterator = make_identifier_ephemeral(parser, "it", TYPE_INTEGER);
+        } else {
+            // ToDo: Implement array type
+            XXX;
+        }
     }
 
-    // Push down the iterator into the body
+    // Push down the iterator into the body scope
     open_scope(&parser->ident_table);
     symbol_add_identifier(&parser->ident_table, iterator);
     AstBlock *body = parse_block(parser, false);
@@ -235,6 +226,28 @@ AstFor *parse_for(Parser *parser) {
     ast_for->body = body;
 
     return ast_for;
+}
+
+AstExpr *parse_range_or_normal_expression(Parser *parser) {
+    AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+
+    Token next = peek_next_token(parser);
+    if (next.type == TOKEN_DOUBLE_DOT || next.type == TOKEN_TRIPLE_DOT) {
+        eat_token(parser);
+        AstExpr *end = parse_expression(parser, MIN_PRECEDENCE);
+
+        AstRangeExpr *range_expr = (AstRangeExpr *)(ast_allocate(parser, sizeof(AstRangeExpr)));            
+        range_expr->head.head.type = AST_RANGE_EXPR;
+        range_expr->head.head.start = expr->head.start;
+        range_expr->head.head.end = end->head.end;
+        range_expr->start = expr;
+        range_expr->end = end;
+        range_expr->inclusive = next.type == TOKEN_TRIPLE_DOT;
+
+        return (AstExpr *)(range_expr);
+    } else {
+        return expr;
+    }
 }
 
 AstReturn *parse_return(Parser *parser) {
@@ -538,25 +551,14 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationT
     }
 
     AstDeclaration *decl = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
-    if (decl_type == DECLARATION_TYPED_NO_EXPR) {
-        decl->head.type         = AST_DECLARATION;
-        decl->head.start        = ident_token.start;
-        decl->head.end          = type_token.end;
-        decl->declaration_type  = decl_type;
-        decl->identifier        = ident;
-        decl->declared_type     = type;
-        decl->is_function_param = is_function_parameter;
-        decl->expr              = NULL;
-    } else {
-        decl->head.type         = AST_DECLARATION;
-        decl->head.start        = ident_token.start;
-        decl->head.end          = expr->head.end;
-        decl->declaration_type  = decl_type;
-        decl->identifier        = ident;
-        decl->declared_type     = type;
-        decl->is_function_param = is_function_parameter;
-        decl->expr              = expr;
-    }
+    decl->head.type         = AST_DECLARATION;
+    decl->head.start        = ident_token.start;
+    decl->head.end          = type_token.end;
+    decl->declaration_type  = decl_type;
+    decl->identifier        = ident;
+    decl->declared_type     = type;
+    decl->is_function_param = is_function_parameter;
+    decl->expr              = decl_type == DECLARATION_TYPED_NO_EXPR ? NULL : expr;
 
     return decl;
 }
@@ -572,6 +574,16 @@ unsigned int size_of_type(TypeKind type) {
     }
     printf("%s:%d: compiler-error: Failed to size type with enum number '%d'", __FILE__, __LINE__, type);
     exit(1);
+}
+
+AstIdentifier *make_identifier_ephemeral(Parser *parser, const char *name, TypeKind type) {
+    AstIdentifier *ident = (AstIdentifier *) ast_allocate(parser, sizeof(AstIdentifier));
+    ident->head.type = AST_IDENTIFIER;
+    ident->type      = type;
+    ident->name      = (char *)(name);
+    ident->length    = strlen(name);
+
+    return ident;
 }
 
 AstIdentifier *make_identifier_node(Parser *parser, Token ident_token, TypeKind type) {

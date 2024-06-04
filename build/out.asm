@@ -7,7 +7,6 @@ segment .data
    fmt_string DB "%s", 10, 0
    string_false DB "false", 10, 0
    string_true  DB "true", 10, 0
-   CS0 DB "Hello world!", 0 
 
 segment .text
    global main
@@ -18,28 +17,53 @@ segment .text
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 48
+   sub		rsp, 64
 
    ; initialization of 'a'
-   mov		QWORD -8[rbp], 0
-   mov		rax, CS0
-   push		rax
+   mov		DWORD -4[rbp], 0
+   push		0
 
 
    ; putting result into 'a'
    pop		rax
-   mov		QWORD -8[rbp], rax
+   mov		DWORD -4[rbp], eax
+
+   ; initialization of 'b'
+   mov		DWORD -8[rbp], 0
+   push		10
+
+
+   ; putting result into 'b'
+   pop		rax
+   mov		DWORD -8[rbp], eax
+   mov		eax, DWORD -4[rbp]
+   push		rax
+   mov		eax, DWORD -8[rbp]
+   push		rax
+   pop		rbx
+   pop		rax
+   mov		-12[rbp], eax
+   mov		-16[rbp], ebx
+   mov		eax, -12[rbp]
+   mov		-20[rbp], eax
+L1:
+   mov		eax, -16[rbp]
+   cmp		-20[rbp], eax
+   jg		L2
 
    ; expression of print
-   mov		rax, QWORD -8[rbp]
+   mov		eax, DWORD -20[rbp]
    push		rax
 
    ; call to print
    pop		rdx
-   mov		rcx, fmt_string
+   mov		rcx, fmt_int
    call		printf
+   inc		DWORD -20[rbp]
+   jmp		L1
+L2:
 L0:
    mov		rax, 0
-   add		rsp, 48
+   add		rsp, 64
    pop		rbp
    ret

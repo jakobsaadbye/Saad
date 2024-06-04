@@ -1,8 +1,8 @@
 main :: () {
-    N := 20;
+    N := 20.5;
 
-    for n in 0...N {
-        print(fib(n));
+    for 0..N {
+        print(fib(it));
     }
 }
 
