@@ -1,13 +1,11 @@
 main :: () {
-    result := factorial(2);
-    print(result);
+    print(fib(1000));
 }
 
-factorial :: (n: int) -> int {
-    print(n);
-    if (n == 0 || n == 1) {
+fib :: (n: int) -> int {
+    if n == 0 || n == 1 {
         return 1;
     } else {
-        return n * factorial(n - 1);
+        return n + fib(n - 1);
     }
 }

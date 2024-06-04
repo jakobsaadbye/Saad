@@ -99,7 +99,7 @@ TypeKind check_function_call(Typer *typer, AstFunctionCall *call) {
         check_expression(typer, arg);
 
         if (arg->evaluated_type != param->declared_type) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(arg), "Expected argument to be of type '%s', but argument is of type '%s'", type_kind_to_str(param->declared_type), type_kind_to_str(arg->evaluated_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", type_kind_to_str(param->declared_type), type_kind_to_str(arg->evaluated_type));
             report_error_ast(typer->parser, LABEL_NONE, (AstNode *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
             exit(1);
         }

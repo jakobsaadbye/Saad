@@ -175,15 +175,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
     for (unsigned int i = 0; i < func_defn->parameters.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
-        if (param->declared_type == TYPE_INTEGER) {
-            const char *reg  = func_parameter_to_register(param->declared_type, i);
-            int stack_offset = 16 + (i * 8);
-            sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], %s\n", stack_offset, reg);
-
-            param->identifier->stack_offset = stack_offset;
-        } else {
-            XXX;
-        }
+        param->identifier->stack_offset = 16 + (i * 8);
     }
 
     // Make a label for the return code so that any return statements within the function can jump to this. e.g for conditionals
@@ -208,45 +200,14 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "   ret\n");
 }
 
-static char temp_register[6];
-char *func_parameter_to_register(TypeKind param_type, int index) {
-    if (param_type == TYPE_INTEGER) {
-        if (index == 0) strcpy(temp_register, "ecx");
-        if (index == 1) strcpy(temp_register, "edx");
-        if (index >= 2 && index <= 9) sprintf(temp_register, "r%dd", index + 6);
-        if (index > 9) {
-            // @Todo: Anything above r15d should be popped off the stack
-            XXX;
-        }
-
-    }
-    if (param_type == TYPE_FLOAT) {
-        if (index <= 15) sprintf(temp_register, "xmm%d", index);
-        else {
-            // @Todo: Pop xmm registers off the stack
-            XXX;
-        }
-    }
-
-    return temp_register;
-}
-
 void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     for (int i = (int)(call->arguments.count) - 1; i >= 0; i--) {
         AstExpr *arg = ((AstExpr **)(call->arguments.items))[i];
-
         emit_expression(cg, arg);
-
-        const char *reg = func_parameter_to_register(arg->evaluated_type, i);
-        if (arg->evaluated_type == TYPE_INTEGER) {
-            sb_append(&cg->code, "   pop\t\trax\n");
-            sb_append(&cg->code, "   mov\t\t%s, eax\n", reg);
-        } else {
-            XXX;
-        }
     }
 
     sb_append(&cg->code, "   call\t\t%s\n", call->identifer->name);
+    sb_append(&cg->code, "   add\t\trsp, %d\n", call->arguments.count * 8);
 }
 
 void emit_if(CodeGenerator *cg, AstIf *ast_if) {
