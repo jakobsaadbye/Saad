@@ -1,9 +1,3 @@
-// @ErrorImprovement:
-//     Right now i am returning a type from statement, but it is never used. I think the only
-//     time it makes sense to return the type is in check_expression. I would like to change it
-//     so that all check functions just returns a bool for success instead of the current solution
-//     of exiting!
-
 #include "parser.c"
 
 typedef struct Typer {
@@ -12,8 +6,8 @@ typedef struct Typer {
     AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
 } Typer;
 
-TypeKind check_block(Typer *typer, AstBlock *block, bool open_lexical_scope);
-TypeKind check_statement(Typer *typer, AstNode *stmt);
+void check_block(Typer *typer, AstBlock *block, bool open_lexical_scope);
+void check_statement(Typer *typer, AstNode *stmt);
 TypeKind check_expression(Typer *typer, AstExpr *expr);
 TypeKind check_binary(Typer *typer, AstBinary *binary);
 TypeKind check_unary(Typer *typer, AstUnary *unary);
@@ -30,26 +24,23 @@ Typer typer_init(Parser *parser) {
     return typer;
 }
 
-TypeKind check_code(Typer *typer, AstCode *code) {
+void check_code(Typer *typer, AstCode *code) {
     for (unsigned int i = 0; i < code->statements.count; i++) {
         AstNode *stmt = ((AstNode **)(code->statements.items))[i];
         check_statement(typer, stmt);
     }
-    return TYPE_VOID;
 }
 
-TypeKind check_block(Typer *typer, AstBlock *block, bool open_lexical_scope) {
+void check_block(Typer *typer, AstBlock *block, bool open_lexical_scope) {
 
     if (open_lexical_scope) enter_scope(&typer->parser->ident_table);
     for (int i = 0; i < block->num_of_statements; i++) {
         check_statement(typer, block->statements[i]);
     }
     if (open_lexical_scope) exit_scope(&typer->parser->ident_table);
-
-    return TYPE_VOID;
 }
 
-TypeKind check_declaration(Typer *typer, AstDeclaration *decl) {
+void check_declaration(Typer *typer, AstDeclaration *decl) {
     if (decl->declaration_type == DECLARATION_TYPED) {
         check_expression(typer, decl->expr);
         if (decl->expr->evaluated_type != decl->declared_type) {
@@ -74,8 +65,6 @@ TypeKind check_declaration(Typer *typer, AstDeclaration *decl) {
     } else {
         typer->parser->ident_table.current_scope->bytes_allocated += size_of_type(decl->identifier->type);
     }
-
-    return TYPE_VOID;
 }
 
 TypeKind check_function_call(Typer *typer, AstFunctionCall *call) {
@@ -108,16 +97,17 @@ TypeKind check_function_call(Typer *typer, AstFunctionCall *call) {
     return func_defn->return_type;
 }
 
-TypeKind check_statement(Typer *typer, AstNode *stmt) {
+void check_statement(Typer *typer, AstNode *stmt) {
     switch (stmt->type) {
     case AST_DECLARATION: {
         AstDeclaration *decl = (AstDeclaration *)(stmt);
-        return check_declaration(typer, decl);
+        check_declaration(typer, decl);
+        return;
     }
     case AST_PRINT: {
         AstPrint *print = (AstPrint *)(stmt);
         check_expression(typer, print->expr);
-        return TYPE_VOID;
+        return;
     }
     case AST_IF: {
         AstIf *ast_if = (AstIf *)(stmt);
@@ -136,19 +126,17 @@ TypeKind check_statement(Typer *typer, AstNode *stmt) {
         if (ast_if->has_else_block) {
             check_block(typer, ast_if->else_block, true);
         }
-        
-        return TYPE_VOID;
+        return;
     }
     case AST_BLOCK: {
         AstBlock *block = (AstBlock *)(stmt);
-
         check_block(typer, block, true);
-
-        return TYPE_VOID;
+        return;
     }
     case AST_FUNCTION_CALL: {
         AstFunctionCall *call = (AstFunctionCall *)(stmt);
-        return check_function_call(typer, call);
+        check_function_call(typer, call);
+        return;
     }
     case AST_RETURN: {
         // @Incomplete - Should check if the type of the expression matches the function definition that the return statements resides in.
@@ -167,28 +155,59 @@ TypeKind check_statement(Typer *typer, AstNode *stmt) {
         }
 
         ast_return->enclosing_function = ef;
-
-        return TYPE_VOID;
+        return;
     }
     case AST_FUNCTION_DEFN: {
         AstFunctionDefn *func_defn = (AstFunctionDefn *)(stmt);
         typer->enclosing_function = func_defn;
         check_block(typer, func_defn->body, true);
         typer->enclosing_function = NULL;
-
-        return TYPE_VOID;
+        return;
     }
+    case AST_FOR: {
+        AstFor *ast_for = (AstFor *)(stmt);
+
+        if (ast_for->iterable->head.type == AST_RANGE_EXPR) {
+            AstRangeExpr *range = (AstRangeExpr *)(ast_for->iterable);
+            
+            TypeKind type_start = check_expression(typer, range->start);
+            TypeKind type_end = check_expression(typer, range->end);
+
+            if (type_start != TYPE_INTEGER) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(range->start), "Range expressions must have integer type as bounds. Got a %s", type_kind_to_str(type_start));
+                exit(1);
+            }
+            if (type_end != TYPE_INTEGER) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(range->end), "Range expressions must have integer type as bounds. Got a %s", type_kind_to_str(type_end));
+                exit(1);
+            }
+
+            ast_for->iterator->type = TYPE_INTEGER;
+
+            // allocate space for the iterator, start and end
+            typer->parser->ident_table.current_scope->bytes_allocated += size_of_type(TYPE_INTEGER) * 3;
+        } else {
+            // ToDo: Implement for unnamed for-statements
+            XXX;
+        }
+
+        check_block(typer, ast_for->body, true);
+
+        return;
+    }
+
     default:
         XXX;
-}
+    }
 }
 
 TypeKind check_expression(Typer *typer, AstExpr *expr) {
-    TypeKind result;
+    TypeKind result = 0;
     if (expr->head.type == AST_FUNCTION_CALL) result = check_function_call(typer,  (AstFunctionCall *)(expr));
     if (expr->head.type == AST_BINARY)  result = check_binary(typer,  (AstBinary *)(expr));
     if (expr->head.type == AST_UNARY)   result = check_unary(typer,   (AstUnary *)(expr));
     if (expr->head.type == AST_LITERAL) result = check_literal(typer, (AstLiteral *)(expr));
+    if (expr->head.type == AST_RANGE_EXPR) result = TYPE_INTEGER;
 
     if (result) {
         expr->evaluated_type = result;

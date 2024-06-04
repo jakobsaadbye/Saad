@@ -26,6 +26,7 @@ AstDeclaration  *parse_declaration(Parser *parser);
 AstFunctionDefn *parse_function_defn(Parser *parser);
 AstFunctionCall *parse_function_call(Parser *parser);
 AstIf           *parse_if(Parser *parser);
+AstFor          *parse_for(Parser *parser);
 AstPrint        *parse_print(Parser *parser);
 AstReturn       *parse_return(Parser *parser);
 AstDeclaration  *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, Token type_token, bool is_function_parameter);
@@ -154,6 +155,10 @@ AstNode *parse_statement(Parser *parser) {
         stmt = (AstNode *)(parse_if(parser));
         statement_ends_with_semicolon = false;
     }
+    else if (token.type == TOKEN_FOR) {
+        stmt = (AstNode *)(parse_for(parser));
+        statement_ends_with_semicolon = false;
+    }
     else if (token.type == '{') {
         stmt = (AstNode *)(parse_block(parser, true));
         statement_ends_with_semicolon = false;
@@ -174,6 +179,62 @@ AstNode *parse_statement(Parser *parser) {
     }
 
     return stmt;
+}
+
+AstFor *parse_for(Parser *parser) {
+    AstIdentifier *iterator = NULL;
+    AstExpr *iterable = NULL;
+
+    Token for_token = peek_next_token(parser);
+    eat_token(parser);
+
+    Token next      = peek_next_token(parser);
+    Token next_next = peek_token(parser, 1);
+
+    if (next.type == TOKEN_IDENTIFIER && next_next.type == TOKEN_IN) {
+        iterator = make_identifier_node(parser, next, 0);
+
+        eat_token(parser);
+        eat_token(parser);
+
+        AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+        next = peek_next_token(parser);
+        if (next.type == TOKEN_DOUBLE_DOT || next.type == TOKEN_TRIPLE_DOT) {
+            eat_token(parser);
+            AstExpr *end = parse_expression(parser, MIN_PRECEDENCE);
+
+            AstRangeExpr *range_expr = (AstRangeExpr *)(ast_allocate(parser, sizeof(AstRangeExpr)));            
+            range_expr->head.head.type = AST_RANGE_EXPR;
+            range_expr->head.head.start = expr->head.start;
+            range_expr->head.head.end = end->head.end;
+            range_expr->start = expr;
+            range_expr->end = end;
+            range_expr->inclusive = next.type == TOKEN_TRIPLE_DOT;
+
+            iterable = (AstExpr *)(range_expr);
+        } else {
+            iterable = expr;
+        }
+    } else {
+        // ToDo: Un-named for-statement. e.g for 0..10 { ... }
+        XXX;
+    }
+
+    // Push down the iterator into the body
+    open_scope(&parser->ident_table);
+    symbol_add_identifier(&parser->ident_table, iterator);
+    AstBlock *body = parse_block(parser, false);
+    close_scope(&parser->ident_table);
+
+    AstFor *ast_for = (AstFor *)(ast_allocate(parser, sizeof(AstFor)));
+    ast_for->head.type = AST_FOR;
+    ast_for->head.start = for_token.start;
+    ast_for->head.end = body->head.end;
+    ast_for->iterator = iterator;
+    ast_for->iterable = iterable;
+    ast_for->body = body;
+
+    return ast_for;
 }
 
 AstReturn *parse_return(Parser *parser) {
@@ -566,26 +627,30 @@ int get_precedence(TokenType op) {
     }
 }
 
+bool ends_expression(Token token) {
+    if (token.type == TOKEN_END) return true;
+    if (token.type == ')') return true;
+    if (token.type == ';') return true;
+    if (token.type == '{') return true;
+    if (token.type == ',') return true;
+    if (token.type == TOKEN_DOUBLE_DOT) return true;
+    if (token.type == TOKEN_TRIPLE_DOT) return true;
+
+    return false;
+}
+
 AstExpr *parse_expression(Parser *parser, int min_prec) {
     AstExpr *left = parse_leaf(parser);
 
     Token next = peek_next_token(parser);
-    if (next.type == TOKEN_END) return left;
-    if (next.type == ')')       return left;
-    if (next.type == ';')       return left;
-    if (next.type == '{')       return left;
-    if (next.type == ',')       return left;
+    if (ends_expression(next)) return left;
     if (is_binary_operator(next.type)) vomit_token(parser);
 
     eat_token(parser);
     while (true) {
         Token next = peek_next_token(parser);
 
-        if (next.type == TOKEN_END) break;
-        if (next.type == ')')  break;
-        if (next.type == ';')  break;
-        if (next.type == '{')  break;
-        if (next.type == ',')  break;
+        if (ends_expression(next)) break;
         if (!is_binary_operator(next.type)) {
             vomit_token(parser);
             break;
@@ -653,7 +718,9 @@ const char *ast_type_name(AstType ast_type) {
         case AST_FUNCTION_DEFN:      return "AST_FUNCTION_DEFN";
         case AST_FUNCTION_CALL:      return "AST_FUNCTION_CALL";
         case AST_IF:                 return "AST_IF";
+        case AST_FOR:                return "AST_FOR";
         case AST_EXPR:               return "AST_EXPR";
+        case AST_RANGE_EXPR:         return "AST_RANGE_EXPR";
         case AST_BINARY:             return "AST_BINARY";
         case AST_UNARY:              return "AST_UNARY";
         case AST_LITERAL:            return "AST_LITERAL";

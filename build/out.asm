@@ -7,6 +7,7 @@ segment .data
    fmt_string DB "%s", 10, 0
    string_false DB "false", 10, 0
    string_true  DB "true", 10, 0
+   CS0 DB "Hello world!", 0 
 
 segment .text
    global main
@@ -17,81 +18,28 @@ segment .text
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 32
+   sub		rsp, 48
+
+   ; initialization of 'a'
+   mov		QWORD -8[rbp], 0
+   mov		rax, CS0
+   push		rax
+
+
+   ; putting result into 'a'
+   pop		rax
+   mov		QWORD -8[rbp], rax
 
    ; expression of print
-   push		1000
-   call		fib
-   add		rsp, 8
+   mov		rax, QWORD -8[rbp]
    push		rax
 
    ; call to print
    pop		rdx
-   mov		rcx, fmt_int
+   mov		rcx, fmt_string
    call		printf
 L0:
    mov		rax, 0
-   add		rsp, 32
-   pop		rbp
-   ret
-
-fib:
-   push		rbp
-   mov		rbp, rsp
-   mov		eax, DWORD 16[rbp]
-   push		rax
-   push		0
-
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   mov		eax, DWORD 16[rbp]
-   push		rax
-   push		1
-
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-
-   pop		rbx
-   pop		rax
-   or 		al, bl
-   push		rax
-   pop		rax
-   cmp		al, 0
-   jz			L3
-   ; block of if
-   push		1
-   jmp		L1
-   jmp L2
-; else
-L3:
-   mov		eax, DWORD 16[rbp]
-   push		rax
-   mov		eax, DWORD 16[rbp]
-   push		rax
-   push		1
-
-   pop		rbx
-   pop		rax
-   sub		rax, rbx
-   push		rax
-   call		fib
-   add		rsp, 8
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   jmp		L1
-   jmp L2
-; done
-L2:
-L1:
-   pop		rax
+   add		rsp, 48
    pop		rbp
    ret

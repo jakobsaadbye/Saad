@@ -20,7 +20,9 @@ typedef enum AstType {
     AST_PRINT,
     AST_RETURN,
     AST_IF,
+    AST_FOR,
     AST_EXPR,
+    AST_RANGE_EXPR,
     AST_BINARY,
     AST_UNARY,
     AST_IDENTIFIER,
@@ -34,6 +36,7 @@ typedef struct AstNode {
     Pos end;
 } AstNode;
 
+
 typedef enum TypeKind {
     TYPE_VOID,
     TYPE_BOOL,
@@ -42,6 +45,17 @@ typedef enum TypeKind {
     TYPE_STRING,
     TYPE_IDENTIFER,
 } TypeKind;
+
+typedef struct AstExpr {
+    AstNode head;
+    TypeKind evaluated_type;
+} AstExpr;
+
+typedef struct AstCode {
+    AstNode head;
+
+    DynamicArray statements;
+} AstCode;
 
 typedef enum DeclarationType {
     DECLARATION_TYPED,          // ex. a : int = b
@@ -68,18 +82,6 @@ typedef struct AstBlock {
     int       num_of_statements;
 } AstBlock;
 
-typedef struct AstCode {
-    AstNode head;
-
-    DynamicArray statements;
-} AstCode;
-
-typedef struct AstPrint {
-    AstNode head;
-
-    AstExpr *expr;
-} AstPrint;
-
 typedef struct AstFunctionDefn {
     AstNode head;
 
@@ -92,25 +94,25 @@ typedef struct AstFunctionDefn {
 
 } AstFunctionDefn;
 
-typedef struct AstReturn {
-    AstNode head;
-
-    AstExpr *expr;
-    AstFunctionDefn *enclosing_function;
-} AstReturn;
-
-
-typedef struct AstExpr {
-    AstNode head;
-    TypeKind evaluated_type;
-} AstExpr;
-
 typedef struct AstFunctionCall {
     AstExpr head;
 
     AstIdentifier *identifer;
     DynamicArray arguments; // of AstExpr
 } AstFunctionCall;
+
+typedef struct AstPrint {
+    AstNode head;
+
+    AstExpr *expr;
+} AstPrint;
+
+typedef struct AstReturn {
+    AstNode head;
+
+    AstExpr *expr;
+    AstFunctionDefn *enclosing_function;
+} AstReturn;
 
 typedef struct AstIf {
     AstNode head;
@@ -122,6 +124,21 @@ typedef struct AstIf {
     bool has_else_block;
 } AstIf;
 
+typedef struct AstFor {
+    AstNode head;
+
+    AstIdentifier *iterator;
+    AstExpr *iterable;
+    AstBlock *body;
+} AstFor;
+
+typedef struct AstRangeExpr {
+    AstExpr head;
+
+    AstExpr* start;
+    AstExpr* end;
+    bool inclusive;
+} AstRangeExpr;
 
 typedef struct AstBinary {
     AstExpr head;

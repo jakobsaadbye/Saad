@@ -34,6 +34,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call);
 void emit_return(CodeGenerator *cg, AstReturn *ast_return);
 void emit_print(CodeGenerator *cg, AstPrint *print_stmt);
 void emit_if(CodeGenerator *cg, AstIf *ast_if);
+void emit_for(CodeGenerator *cg, AstFor *ast_for);
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl);
 void emit_expression(CodeGenerator *cg, AstExpr *expr);
 void emit_integer_to_float_conversion(CodeGenerator *cg, TypeKind l_type, TypeKind r_type);
@@ -145,9 +146,51 @@ void emit_statement(CodeGenerator *cg, AstNode *node) {
         case AST_BLOCK:         emit_block(cg, (AstBlock *)(node), true); break;
         case AST_PRINT:         emit_print(cg, (AstPrint *)(node)); break;
         case AST_IF:            emit_if(cg, (AstIf *)(node)); break;
+        case AST_FOR:           emit_for(cg, (AstFor *)(node)); break;
         default:
             printf("compiler-error: emit_statement not implemented for %s\n", ast_type_name(node->type));
             XXX;
+    }
+}
+
+void emit_for(CodeGenerator *cg, AstFor *ast_for) {
+    if (ast_for->iterable->head.type == AST_RANGE_EXPR) {
+        AstRangeExpr * range = (AstRangeExpr *)(ast_for->iterable);
+
+        // allocate space for start and end range values 
+        int offset_start = -(cg->base_ptr + size_of_type(TYPE_INTEGER));
+        int offset_end   = -(cg->base_ptr + size_of_type(TYPE_INTEGER) * 2);
+        int offset_iterator = -(cg->base_ptr + size_of_type(TYPE_INTEGER) * 3);
+        cg->base_ptr += size_of_type(TYPE_INTEGER) * 3;
+
+        emit_expression(cg, range->start);
+        emit_expression(cg, range->end);
+
+        sb_append(&cg->code, "   pop\t\trbx\n");
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   mov\t\t%d[rbp], eax\n", offset_start);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], ebx\n", offset_end);
+
+        // initialize iterator
+        ast_for->iterator->stack_offset = offset_iterator;
+        sb_append(&cg->code, "   mov\t\teax, %d[rbp]\n", offset_start);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], eax\n", offset_iterator);
+
+        int for_label = make_label_number(cg);
+        int done_label = make_label_number(cg);
+        sb_append(&cg->code, "L%d:\n", for_label);
+        sb_append(&cg->code, "   mov\t\teax, %d[rbp]\n", offset_end);
+        sb_append(&cg->code, "   cmp\t\t%d[rbp], eax\n", offset_iterator);
+        sb_append(&cg->code, "   %s\t\tL%d\n", range->inclusive ? "jg" : "jge", done_label);
+
+        emit_block(cg, ast_for->body, true);
+
+        sb_append(&cg->code, "   inc\t\tDWORD %d[rbp]\n", offset_iterator);
+        sb_append(&cg->code, "   jmp\t\tL%d\n", for_label);
+
+        sb_append(&cg->code, "L%d:\n", done_label);
+    } else {
+        XXX;
     }
 }
 
@@ -314,7 +357,6 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
 }
 
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
-    // Increment base pointer
     int type_size = size_of_type(decl->declared_type);
     cg->base_ptr += type_size;
 

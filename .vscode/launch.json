@@ -6,7 +6,7 @@
             "type": "cppdbg",
             "request": "launch",
             "preLaunchTask": "Debug launch",
-            "program": "C:/Saad/build/saad.exe",
+            "program": "C:/Saad/bin/saad.exe",
             "args": [
                 "C:/Saad/test.sd"
             ],

@@ -1,11 +1,7 @@
 main :: () {
-    print(fib(1000));
-}
-
-fib :: (n: int) -> int {
-    if n == 0 || n == 1 {
-        return 1;
-    } else {
-        return n + fib(n - 1);
+    a := 0;
+    b := 10;
+    for i in a..b  {
+        print(i);
     }
 }
