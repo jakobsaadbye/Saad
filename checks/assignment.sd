@@ -1,0 +1,21 @@
+main :: () {
+    a := 10;
+    b := 7.5;
+
+    // Assignment works for any type, while
+    // assignment + operator is limited to integer and floating types
+    a = 5;
+    b = 10.0;
+
+    a += 2;
+    b += 2.5;
+
+    a -= 2;
+    b -= 2.5;
+
+    a *= 2;
+    b *= 2.5;
+
+    a /= 2;
+    b /= 2.5;
+}

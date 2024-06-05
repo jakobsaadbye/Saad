@@ -104,6 +104,18 @@ void check_statement(Typer *typer, AstNode *stmt) {
         check_declaration(typer, decl);
         return;
     }
+    case AST_ASSIGNMENT: {
+        AstAssignment *assign = (AstAssignment *)(stmt);
+
+        TypeKind expr_type = check_expression(typer, assign->expr);
+
+        if (expr_type != assign->identifier->type) {
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assign), "Type mismatch. Trying to assign expression of type '%s' to variable of type '%s'", type_kind_to_str(expr_type), type_kind_to_str(assign->identifier->type));
+            exit(1);
+        }
+
+        return;
+    }
     case AST_PRINT: {
         AstPrint *print = (AstPrint *)(stmt);
         check_expression(typer, print->expr);

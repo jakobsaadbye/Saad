@@ -17,6 +17,7 @@ typedef enum AstType {
     AST_FUNCTION_DEFN,
     AST_FUNCTION_CALL,
     AST_DECLARATION,
+    AST_ASSIGNMENT,
     AST_PRINT,
     AST_RETURN,
     AST_IF,
@@ -74,6 +75,22 @@ typedef struct AstDeclaration {
 
     bool is_function_param;
 } AstDeclaration;
+
+typedef enum AssignOp {
+    ASSIGN_EQUAL        = '=',
+    ASSIGN_PLUS_EQUAL   = TOKEN_PLUS_EQUAL,
+    ASSIGN_MINUS_EQUAL  = TOKEN_MINUS_EQUAL,
+    ASSIGN_TIMES_EQUAL  = TOKEN_TIMES_EQUAL,
+    ASSIGN_DIVIDE_EQUAL = TOKEN_DIVIDE_EQUAL,
+} AssignOp;
+
+typedef struct AstAssignment {
+    AstNode head;
+
+    AstIdentifier *identifier;
+    AssignOp op;
+    AstExpr *expr;
+} AstAssignment;
 
 typedef struct AstBlock {
     AstNode head;

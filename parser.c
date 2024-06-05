@@ -21,6 +21,7 @@ typedef struct Parser {
 Parser           parser_init();
 AstNode         *parse_statement(Parser *parser);
 AstDeclaration  *parse_declaration(Parser *parser);
+AstAssignment   *parse_assignment(Parser *parser);
 AstFunctionDefn *parse_function_defn(Parser *parser);
 AstFunctionCall *parse_function_call(Parser *parser);
 AstIf           *parse_if(Parser *parser);
@@ -34,8 +35,8 @@ AstDeclaration  *make_declaration(Parser *parser, Token ident_token, Declaration
 AstExpr         *make_binary_node(Parser *parser, Token token, AstExpr *lhs, AstExpr *rhs);
 AstExpr         *make_unary_node(Parser *parser, Token token, AstExpr *expr);
 AstExpr         *make_literal_node(Parser *parser, Token token);
-AstIdentifier   *make_identifier_node(Parser *parser, Token ident_token, TypeKind type);
-AstIdentifier   *make_identifier_ephemeral(Parser *parser, const char *name, TypeKind type);
+AstIdentifier   *make_identifier_from_token(Parser *parser, Token ident_token, TypeKind type);
+AstIdentifier   *make_identifier_from_string(Parser *parser, const char *name, TypeKind type);
 bool identifier_is_equal(const void *key, const void *item);
 void *ast_allocate(Parser *parser, size_t size);
 void expect(Parser *parser, Token given, TokenType expected_type);
@@ -46,6 +47,7 @@ Token peek_next_token(Parser *parser);
 const char *label_color(const char *label);
 bool is_literal(Token token);
 bool is_primitive_type(Token token);
+bool is_assignment_operator(Token token);
 int get_precedence(TokenType op);
 TypeKind token_to_type_kind(Token token);
 void report_error_ast(Parser *parser, const char* label, AstNode *failing_ast, const char *message, ...);
@@ -143,7 +145,12 @@ AstNode *parse_statement(Parser *parser) {
         ) {
             stmt = (AstNode *)(parse_declaration(parser));
             statement_ends_with_semicolon = true;
-        } 
+        } else if (is_assignment_operator(next)) {
+            stmt = (AstNode *)(parse_assignment(parser));
+            statement_ends_with_semicolon = true;
+        } else {
+            // Fallthrough
+        }
     }
     else if (token.type == TOKEN_RETURN) {
         stmt = (AstNode *)(parse_return(parser));
@@ -183,6 +190,35 @@ AstNode *parse_statement(Parser *parser) {
     return stmt;
 }
 
+AstAssignment *parse_assignment(Parser *parser) {
+    Token ident_token = peek_next_token(parser);
+    assert(ident_token.type == TOKEN_IDENTIFIER);
+    eat_token(parser);
+
+    char *ident_name = ident_token.as_value.identifier.name;
+    Symbol *ident_sym = symbol_lookup(&parser->ident_table, ident_name);
+    if (ident_sym == NULL) {
+        report_error_token(parser, LABEL_ERROR, ident_token, "Undeclared variable '%s'", ident_name);
+        exit(1);
+    }
+
+    Token op_token = peek_next_token(parser);
+    assert(is_assignment_operator(op_token));
+    eat_token(parser);
+
+    AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+
+    AstAssignment *assign = (AstAssignment *)(ast_allocate(parser, sizeof(AstAssignment)));
+    assign->head.type = AST_ASSIGNMENT;
+    assign->head.start = ident_token.start;
+    assign->head.end = expr->head.end;
+    assign->identifier = ident_sym->as_value.identifier;
+    assign->op = (AssignOp)(op_token.type);
+    assign->expr = expr;
+
+    return assign;
+}
+
 AstFor *parse_for(Parser *parser) {
     AstIdentifier *iterator = NULL;
     AstExpr *iterable = NULL;
@@ -194,7 +230,7 @@ AstFor *parse_for(Parser *parser) {
     Token next_next = peek_token(parser, 1);
 
     if (next.type == TOKEN_IDENTIFIER && next_next.type == TOKEN_IN) {
-        iterator = make_identifier_node(parser, next, 0);
+        iterator = make_identifier_from_token(parser, next, 0);
 
         eat_token(parser);
         eat_token(parser);
@@ -204,7 +240,7 @@ AstFor *parse_for(Parser *parser) {
         iterable = parse_range_or_normal_expression(parser);
 
         if (iterable->head.type == AST_RANGE_EXPR) {
-            iterator = make_identifier_ephemeral(parser, "it", TYPE_INTEGER);
+            iterator = make_identifier_from_string(parser, "it", TYPE_INTEGER);
         } else {
             // ToDo: Implement array type
             XXX;
@@ -307,7 +343,7 @@ AstFunctionCall *parse_function_call(Parser *parser) {
     call->head.head.type  = AST_FUNCTION_CALL;
     call->head.head.start = ident_token.start;
     call->head.head.end   = next.end;
-    call->identifer       = make_identifier_node(parser, ident_token, TYPE_VOID); // The type of the identifier will be set later in the typer, so here i just specify void
+    call->identifer       = make_identifier_from_token(parser, ident_token, TYPE_VOID); // The type of the identifier will be set later in the typer, so here i just specify void
 
     return call;
 }
@@ -402,7 +438,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->head.type  = AST_FUNCTION_DEFN;
     func_defn->head.start = ident_token.start;
     func_defn->head.end   = body->head.end;
-    func_defn->identifier = make_identifier_node(parser, ident_token, func_defn->return_type);
+    func_defn->identifier = make_identifier_from_token(parser, ident_token, func_defn->return_type);
     func_defn->body       = body;
     symbol_add_function_defn(&parser->function_table, func_defn);
 
@@ -542,7 +578,7 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationT
     if (decl_type == DECLARATION_TYPED || decl_type == DECLARATION_TYPED_NO_EXPR) {
         type = token_to_type_kind(type_token);
     }
-    AstIdentifier *ident = make_identifier_node(parser, ident_token, type);
+    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, type);
     Symbol *existing = symbol_add_identifier(&parser->ident_table, ident);
     if (existing != NULL) {
         report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.identifier.name);
@@ -576,7 +612,7 @@ unsigned int size_of_type(TypeKind type) {
     exit(1);
 }
 
-AstIdentifier *make_identifier_ephemeral(Parser *parser, const char *name, TypeKind type) {
+AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, TypeKind type) {
     AstIdentifier *ident = (AstIdentifier *) ast_allocate(parser, sizeof(AstIdentifier));
     ident->head.type = AST_IDENTIFIER;
     ident->type      = type;
@@ -586,7 +622,7 @@ AstIdentifier *make_identifier_ephemeral(Parser *parser, const char *name, TypeK
     return ident;
 }
 
-AstIdentifier *make_identifier_node(Parser *parser, Token ident_token, TypeKind type) {
+AstIdentifier *make_identifier_from_token(Parser *parser, Token ident_token, TypeKind type) {
     assert(ident_token.type == TOKEN_IDENTIFIER);
 
     AstIdentifier *ident = (AstIdentifier *) ast_allocate(parser, sizeof(AstIdentifier));
@@ -725,6 +761,7 @@ const char *ast_type_name(AstType ast_type) {
         case AST_ERR:                break;
         case AST_BLOCK:              return "AST_BLOCK";
         case AST_DECLARATION:        return "AST_DECLARATION";
+        case AST_ASSIGNMENT:         return "AST_ASSIGNMENT";
         case AST_PRINT:              return "AST_PRINT";
         case AST_RETURN:             return "AST_RETURN";
         case AST_FUNCTION_DEFN:      return "AST_FUNCTION_DEFN";
@@ -816,6 +853,15 @@ bool is_primitive_type(Token token) {
     if (token.type == TOKEN_TYPE_INT)    return true;
     if (token.type == TOKEN_TYPE_FLOAT)  return true;
     if (token.type == TOKEN_TYPE_STRING) return true;
+    return false;
+}
+
+bool is_assignment_operator(Token token) {
+    if (token.type == '=')                return true;
+    if (token.type == TOKEN_PLUS_EQUAL)   return true;
+    if (token.type == TOKEN_MINUS_EQUAL)  return true;
+    if (token.type == TOKEN_TIMES_EQUAL)  return true;
+    if (token.type == TOKEN_DIVIDE_EQUAL) return true;
     return false;
 }
 

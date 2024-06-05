@@ -20,7 +20,7 @@
 #define COLOR_WHITE_BOLD  "\x1B[1;37m"
 
 
-static const char *LABEL_NONE    = COLOR_ICE    "none"   COLOR_RESET;
+static const char *LABEL_NONE    = COLOR_ICE    "none"    COLOR_RESET;
 static const char *LABEL_ERROR   = COLOR_RED    "error"   COLOR_RESET;
 static const char *LABEL_WARNING = COLOR_YELLOW "warning" COLOR_RESET;
 
@@ -41,6 +41,11 @@ typedef enum TokenType {
     TOKEN_GREATER_EQUAL = 143,
     TOKEN_DOUBLE_EQUAL  = 144,
     TOKEN_NOT_EQUAL     = 145,
+
+    TOKEN_PLUS_EQUAL   = 146,
+    TOKEN_MINUS_EQUAL  = 147,
+    TOKEN_TIMES_EQUAL  = 148,
+    TOKEN_DIVIDE_EQUAL = 149,
 
     TOKEN_DOUBLE_COLON = 150,
     TOKEN_COLON_EQUAL  = 151,
@@ -180,6 +185,10 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_GREATER_EQUAL: return "GREATER_EQUAL";
         case TOKEN_DOUBLE_EQUAL:  return "DOUBLE_EQUAL";
         case TOKEN_NOT_EQUAL:     return "NOT_EQUAL";
+        case TOKEN_PLUS_EQUAL:    return "PLUS_EQUAL";
+        case TOKEN_MINUS_EQUAL:   return "MINUS_EQUAL";
+        case TOKEN_TIMES_EQUAL:   return "TIMES_EQUAL";
+        case TOKEN_DIVIDE_EQUAL:  return "DIVIDE_EQUAL";
         case TOKEN_PRINT:         return "PRINT";
         case TOKEN_RETURN:        return "RETURN";
         case TOKEN_FOR:           return "FOR";
@@ -637,6 +646,10 @@ TokenType is_double_character_token(Lexer *lexer) {
     if (c == ':' && next == ':') return TOKEN_DOUBLE_COLON;
     if (c == '-' && next == '>') return TOKEN_RIGHT_ARROW;
     if (c == '.' && next == '.') return TOKEN_DOUBLE_DOT;
+    if (c == '+' && next == '=') return TOKEN_PLUS_EQUAL;
+    if (c == '-' && next == '=') return TOKEN_MINUS_EQUAL;
+    if (c == '*' && next == '=') return TOKEN_TIMES_EQUAL;
+    if (c == '/' && next == '=') return TOKEN_DIVIDE_EQUAL;
 
     return (TokenType)(0);
 }

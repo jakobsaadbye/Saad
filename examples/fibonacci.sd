@@ -1,5 +1,5 @@
 main :: () {
-    N := 20.5;
+    N := 20;
 
     for 0..N {
         print(fib(it));
