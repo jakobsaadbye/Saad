@@ -15,7 +15,7 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
     ok = lex(&lexer);
     if (!ok) return false;
 
-    dump_tokens(&lexer);
+    // dump_tokens(&lexer);
 
     Parser parser   = parser_init(&lexer);
     AstCode *code = (AstCode *) parse_top_level_code(&parser);
