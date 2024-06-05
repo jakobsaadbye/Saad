@@ -114,6 +114,13 @@ void check_statement(Typer *typer, AstNode *stmt) {
             exit(1);
         }
 
+        if (assign->op != '=') {
+            if (expr_type != TYPE_INTEGER || expr_type != TYPE_FLOAT) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assign), "Compound operators are only allowed for int and float types. Given type was '%s'\n", type_kind_to_str(expr_type));
+                exit(1);
+            }
+        }
+
         return;
     }
     case AST_PRINT: {

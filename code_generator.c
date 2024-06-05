@@ -210,11 +210,19 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
         case ASSIGN_EQUAL: {
             if (assign->expr->evaluated_type == TYPE_INTEGER) {
                 sb_append(&cg->code, "   pop\t\trax\n");
-                sb_append(&cg->code, "   mov\t\t%s %d[rbp], eax\n", size_str(TYPE_INTEGER), assign->identifier->stack_offset);
-            } else {
+                sb_append(&cg->code, "   mov\t\t%d[rbp], eax\n", assign->identifier->stack_offset);
+            } else if (assign->expr->evaluated_type == TYPE_FLOAT) {
                 sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
                 sb_append(&cg->code, "   add\t\trsp, 4\n");
                 sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", assign->identifier->stack_offset);
+            } else if (assign->expr->evaluated_type == TYPE_STRING) {
+                sb_append(&cg->code, "   pop\t\trax\n");
+                sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", assign->identifier->stack_offset);
+            } else if (assign->expr->evaluated_type == TYPE_BOOL) {
+                sb_append(&cg->code, "   pop\t\trax\n");
+                sb_append(&cg->code, "   mov\t\t%d[rbp], al\n", assign->identifier->stack_offset);
+            } else {
+                XXX;
             }
         } break;
         case ASSIGN_PLUS_EQUAL: {

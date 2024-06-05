@@ -1,10 +1,9 @@
 main :: () {
-    a := 10;
-    tau := 3.14159;
-
-    a /= 2;
-    tau *= 2.0;
-
+    a := "Your";
     print(a);
-    print(tau);
+
+    a = "Mom";
+    print(a);
+
+    a+="Is Fat";
 }
