@@ -809,14 +809,18 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     }
     if (expr->head.type == AST_UNARY) {
         AstUnary *unary = (AstUnary *)(expr);
-        if (unary->operator == '!') {
+        if (unary->operator == OP_NOT) {
             emit_expression(cg, unary->expr);
-
-            sb_append(&cg->code, "\n");
             sb_append(&cg->code, "   pop\t\trax\n");
             sb_append(&cg->code, "   not\t\trax\n");
             sb_append(&cg->code, "   push\t\trax\n");
-
+            return;
+        }
+        if (unary->operator == OP_UNARY_MINUS) {
+            emit_expression(cg, unary->expr);
+            sb_append(&cg->code, "   pop\t\trax\n");
+            sb_append(&cg->code, "   neg\t\trax\n");
+            sb_append(&cg->code, "   push\t\trax\n");
             return;
         }
 

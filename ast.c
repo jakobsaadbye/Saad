@@ -30,13 +30,31 @@ typedef enum AstType {
     AST_LITERAL,
 } AstType;
 
+typedef enum OperatorType {
+    OP_LOGICAL_OR = TOKEN_LOGICAL_OR,
+    OP_LOGICAL_AND = TOKEN_LOGICAL_AND,
+    OP_DOUBLE_EQUAL = TOKEN_DOUBLE_EQUAL,
+    OP_NOT_EQUAL = TOKEN_NOT_EQUAL,
+    OP_GREATER_THAN = '>',
+    OP_LESS_THAN = '<',
+    OP_GREATER_THAN_EQUAL = TOKEN_GREATER_EQUAL,
+    OP_LESS_THAN_EQUAL = TOKEN_LESS_EQUAL,
+    OP_MINUS = '-',
+    OP_PLUS = '+',
+    OP_TIMES = '*',
+    OP_DIVIDE = '/',
+    OP_MODULO = '%',
+    OP_POWER = '^',
+    OP_NOT = '!',
+    OP_UNARY_MINUS = 5
+} OperatorType;
+
 typedef struct AstNode {
     AstType type;
 
     Pos start;
     Pos end;
 } AstNode;
-
 
 typedef enum TypeKind {
     TYPE_VOID,
@@ -168,7 +186,7 @@ typedef struct AstBinary {
 typedef struct AstUnary {
     AstExpr head;
 
-    TokenType operator;
+    OperatorType operator;
     AstExpr  *expr;
 } AstUnary;
 

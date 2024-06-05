@@ -1,9 +1,6 @@
 main :: () {
-    a := "Your";
-    print(a);
-
-    a = "Mom";
-    print(a);
-
-    a+="Is Fat";
+    x := !(5 + 2);
+    y := 5----3;
+    print(x);
+    print(y);
 }

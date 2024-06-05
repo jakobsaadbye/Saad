@@ -33,7 +33,7 @@ AstExpr         *parse_range_or_normal_expression(Parser *parser);
 AstExpr         *parse_leaf(Parser *parser);
 AstDeclaration  *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, Token type_token, bool is_function_parameter);
 AstExpr         *make_binary_node(Parser *parser, Token token, AstExpr *lhs, AstExpr *rhs);
-AstExpr         *make_unary_node(Parser *parser, Token token, AstExpr *expr);
+AstExpr         *make_unary_node(Parser *parser, Token token, AstExpr *expr, OperatorType op_type);
 AstExpr         *make_literal_node(Parser *parser, Token token);
 AstIdentifier   *make_identifier_from_token(Parser *parser, Token ident_token, TypeKind type);
 AstIdentifier   *make_identifier_from_string(Parser *parser, const char *name, TypeKind type);
@@ -48,7 +48,7 @@ const char *label_color(const char *label);
 bool is_literal(Token token);
 bool is_primitive_type(Token token);
 bool is_assignment_operator(Token token);
-int get_precedence(TokenType op);
+int get_precedence(OperatorType op);
 TypeKind token_to_type_kind(Token token);
 void report_error_ast(Parser *parser, const char* label, AstNode *failing_ast, const char *message, ...);
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
@@ -644,33 +644,35 @@ void expect(Parser *parser, Token given, TokenType expected_type) {
     // Everything's cool dude
 }
 
-int get_precedence(TokenType op) {
-    switch ((int)(op)) {
-        case TOKEN_LOGICAL_OR: 
+int get_precedence(OperatorType op) {
+    switch (op) {
+        case OP_LOGICAL_OR: 
             return 1;
-        case TOKEN_LOGICAL_AND: 
+        case OP_LOGICAL_AND: 
             return 2;
-        case TOKEN_DOUBLE_EQUAL:
-        case TOKEN_NOT_EQUAL: 
+        case OP_DOUBLE_EQUAL:
+        case OP_NOT_EQUAL: 
             return 3;
-        case (TokenType)('>'): 
-        case (TokenType)('<'):
-        case TOKEN_GREATER_EQUAL:
-        case TOKEN_LESS_EQUAL:
+        case OP_GREATER_THAN: 
+        case OP_LESS_THAN:
+        case OP_GREATER_THAN_EQUAL:
+        case OP_LESS_THAN_EQUAL:
             return 5;
-        case (TokenType)('-'):
-        case (TokenType)('+'):
+        case OP_MINUS:
+        case OP_PLUS:
             return 6;
-        case (TokenType)('*'):
-        case (TokenType)('/'):
-        case (TokenType)('%'):
+        case OP_TIMES:
+        case OP_DIVIDE:
+        case OP_MODULO:
             return 7;
-        case (TokenType)('^'):
+        case OP_POWER:
             return 8;
-        case (TokenType)('!'):
+        case OP_NOT:
             return 9;
+        case OP_UNARY_MINUS:
+            return 10;
         default:
-            printf("%s:%d: compiler-error: Unexpected token type '%s'. Expected token to be an operator\n", __FILE__, __LINE__, token_type_to_str(op));
+            printf("%s:%d: compiler-error: Unexpected token type '%s'. Expected token to be an operator\n", __FILE__, __LINE__, token_type_to_str((TokenType)(op)));
             exit(1);
     }
 }
@@ -704,7 +706,7 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
             break;
         }
 
-        int next_prec = get_precedence(next.type);
+        int next_prec = get_precedence((OperatorType)(next.type));
         if (next_prec <= min_prec) {
             break;
         } else {
@@ -747,9 +749,16 @@ AstExpr *parse_leaf(Parser *parser) {
 
     if (t.type == '!') {
         eat_token(parser);
-        int prec          = get_precedence('!');
+        int prec = get_precedence(OP_NOT);
         AstExpr *sub_expr = parse_expression(parser, prec); 
-        return make_unary_node(parser, t, sub_expr);
+        return make_unary_node(parser, t, sub_expr, OP_NOT);
+    }
+
+    if (t.type == '-') {
+        eat_token(parser);
+        int prec = get_precedence(OP_UNARY_MINUS);
+        AstExpr *sub_expr = parse_expression(parser, prec); 
+        return make_unary_node(parser, t, sub_expr, OP_UNARY_MINUS);
     }
 
     report_error_token(parser, LABEL_ERROR, t, "Invalid expression");
@@ -783,14 +792,14 @@ void *ast_allocate(Parser *parser, size_t size) {
     return arena_allocate(&parser->ast_nodes, size);
 }
 
-AstExpr *make_unary_node(Parser *parser, Token token, AstExpr *expr) {
+AstExpr *make_unary_node(Parser *parser, Token token, AstExpr *expr, OperatorType op_type) {
     assert(is_unary_operator(token.type));
 
     AstUnary *unary_op = (AstUnary *) ast_allocate(parser, sizeof(AstUnary));
     unary_op->head.head.type  = AST_UNARY;
     unary_op->head.head.start = token.start;
     unary_op->head.head.end   = token.end;
-    unary_op->operator        = token.type;
+    unary_op->operator        = op_type;
     unary_op->expr            = expr;
 
     return (AstExpr *)(unary_op);
