@@ -14,34 +14,32 @@ segment .text
    extern printf
    extern ExitProcess
 
-assert:
-   cmp		cl, 0
-   jz 		assert_fail
-   ret
-assert_fail:
-   mov		rcx, string_assert_fail
-   call		printf
-   mov		rcx, 1
-   call		ExitProcess
 
+; assert(false);
+
+assert:
+   cmp      cl, 0
+   jz       assert_fail
+   ret
+
+assert_fail:
+   lea      rcx, [string_assert_fail] 
+   call     printf
+
+   mov      rcx, 1
+   call     ExitProcess
 
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 32
-   push		2
-   push		2
+   sub		rsp, 64
 
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   setne		al
-   push		rax
-   pop		rcx
-   mov		rdx, 2
-   call		assert
-L0:
+   mov      rcx, 0
+   mov      rdx, 7
+   call     assert
+
    mov		rax, 0
-   add		rsp, 32
+   add		rsp, 64
    pop		rbp
    ret
+   

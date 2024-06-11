@@ -1,20 +1,3 @@
-struct Vector2 {
-    x : float;
-    y : float;
-}
-
-//add_vec2 :: (a: Vector2, b: Vector2) -> Vector2 {
-//    return .Vector2{
-//        a.x + b.x,
-//        a.y + b.y
-//    };
-//}
-
 main :: () {
-    a := .Vector2{1, 3};
-    b := .Vector2{2, 4};
-
-    c := add_vec2(a, b);
-
-    print(c);
+    assert(2 != 2);
 }

@@ -27,6 +27,7 @@ AstFunctionCall *parse_function_call(Parser *parser);
 AstIf           *parse_if(Parser *parser);
 AstFor          *parse_for(Parser *parser);
 AstPrint        *parse_print(Parser *parser);
+AstAssert       *parse_assert(Parser *parser);
 AstReturn       *parse_return(Parser *parser);
 AstExpr         *parse_expression(Parser *parser, int min_prec);
 AstExpr         *parse_range_or_normal_expression(Parser *parser);
@@ -158,6 +159,10 @@ AstNode *parse_statement(Parser *parser) {
     }
     else if (token.type == TOKEN_PRINT) {
         stmt = (AstNode *)(parse_print(parser));
+        statement_ends_with_semicolon = true;
+    }
+    else if (token.type == TOKEN_ASSERT) {
+        stmt = (AstNode *)(parse_assert(parser));
         statement_ends_with_semicolon = true;
     }
     else if (token.type == TOKEN_IF) {
@@ -496,6 +501,30 @@ AstIf *parse_if(Parser *parser) {
     return ast_if;
 }
 
+AstAssert *parse_assert(Parser *parser) {
+    Token start_token = peek_next_token(parser);
+    expect(parser, start_token, TOKEN_ASSERT);
+    eat_token(parser);
+
+    Token next = peek_next_token(parser);
+    expect(parser, next, '(');
+    eat_token(parser);
+
+    AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+
+    next = peek_next_token(parser);
+    expect(parser, next, ')');
+    eat_token(parser);
+
+    AstAssert *assertion = (AstAssert *)(ast_allocate(parser, sizeof(AstAssert)));
+    assertion->head.type  = AST_ASSERT;
+    assertion->head.start = start_token.start;
+    assertion->head.end   = next.end;
+    assertion->expr       = expr;
+
+    return assertion;
+}
+
 AstPrint *parse_print(Parser *parser) {
     Token start_token = peek_next_token(parser);
     expect(parser, start_token, TOKEN_PRINT);
@@ -772,6 +801,7 @@ const char *ast_type_name(AstType ast_type) {
         case AST_DECLARATION:        return "AST_DECLARATION";
         case AST_ASSIGNMENT:         return "AST_ASSIGNMENT";
         case AST_PRINT:              return "AST_PRINT";
+        case AST_ASSERT:             return "AST_ASSERT";
         case AST_RETURN:             return "AST_RETURN";
         case AST_FUNCTION_DEFN:      return "AST_FUNCTION_DEFN";
         case AST_FUNCTION_CALL:      return "AST_FUNCTION_CALL";

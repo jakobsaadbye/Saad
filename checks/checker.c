@@ -8,7 +8,10 @@ void check_entire_directory(const char *dir_name) {
         printf("error: Failed to open directory '%s'", dir_name);
         exit(-1);
     }
-
+    
+    int succeeded = 0;
+    int failed = 0;
+    int num_tests = 0;
     struct dirent *file;
     while (true) {
         file = readdir(dir);
@@ -25,18 +28,25 @@ void check_entire_directory(const char *dir_name) {
             char file_path[256];
             sprintf(file_path, "%s/%s", dir_name, filename);
 
-            printf("Compiling %s\n", file_path);
+            printf("Compiling %s   ", file_path);
             
             char *program = read_entire_file(file_path);
             bool success  = send_through_pipeline(program, file_path, false);
-
-            assert(success);
-
-            printf("   OK\n");
+            if (success) {
+                printf("   OK\n");
+                succeeded += 1;
+            } else {
+                printf("   FAILED\n");
+                failed += 1;
+            }
 
             free(program);
+            num_tests += 1;
         }
     }
+
+    printf("\nRan %d tests, %d OK, %d FAILED\n", num_tests, succeeded, failed);
+    printf("------------------------------------\n");
 }
 
 int main() {

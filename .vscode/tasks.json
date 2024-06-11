@@ -7,7 +7,7 @@
             "args": [
                 "-fdiagnostics-color=always",
                 "-g",
-                "C:/Saad/main.c",
+                "C:/Saad/src/main.c",
                 "-o",
                 "C:/Saad/bin/saad.exe"
             ],

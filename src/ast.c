@@ -19,6 +19,7 @@ typedef enum AstType {
     AST_DECLARATION,
     AST_ASSIGNMENT,
     AST_PRINT,
+    AST_ASSERT,
     AST_RETURN,
     AST_IF,
     AST_FOR,
@@ -141,6 +142,12 @@ typedef struct AstPrint {
 
     AstExpr *expr;
 } AstPrint;
+
+typedef struct AstAssert {
+    AstNode head;
+
+    AstExpr *expr;
+} AstAssert;
 
 typedef struct AstReturn {
     AstNode head;

@@ -25,6 +25,8 @@ static const char *LABEL_ERROR   = COLOR_RED    "error"   COLOR_RESET;
 static const char *LABEL_WARNING = COLOR_YELLOW "warning" COLOR_RESET;
 
 typedef enum TokenType {
+    TOKEN_ERROR      = 0,
+
     // Mentally insert ASCII values here ...
 
     TOKEN_INTEGER    = 128,
@@ -56,10 +58,11 @@ typedef enum TokenType {
 
 
     TOKEN_PRINT        = 160,
-    TOKEN_IF           = 161,
-    TOKEN_ELSE         = 162,
-    TOKEN_RETURN       = 163,
-    TOKEN_FOR          = 164,
+    TOKEN_ASSERT       = 161,
+    TOKEN_IF           = 162,
+    TOKEN_ELSE         = 163,
+    TOKEN_RETURN       = 164,
+    TOKEN_FOR          = 165,
 
     TOKEN_TYPE_INT     = 180,
     TOKEN_TYPE_FLOAT   = 181,
@@ -166,6 +169,7 @@ char *token_type_to_str(TokenType token_type) {
         return name_str;
     }
     switch (token_type) {
+        case TOKEN_ERROR:         return "ERROR";
         case TOKEN_INTEGER:       return "INTEGER";
         case TOKEN_FLOAT:         return "FLOAT";
         case TOKEN_STRING:        return "STRING";
@@ -190,6 +194,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_TIMES_EQUAL:   return "TIMES_EQUAL";
         case TOKEN_DIVIDE_EQUAL:  return "DIVIDE_EQUAL";
         case TOKEN_PRINT:         return "PRINT";
+        case TOKEN_ASSERT:        return "ASSERT";
         case TOKEN_RETURN:        return "RETURN";
         case TOKEN_FOR:           return "FOR";
         case TOKEN_IF:            return "IF";
@@ -399,30 +404,36 @@ KeywordMatch is_keyword(Lexer *lexer) {
     memset(text, '\0', keyword_len + 1);
     memcpy(text, src, keyword_len);
 
+    TokenType token = TOKEN_ERROR;
     if (keyword_len == 2) {
-        if (strcmp(text, "if") == 0) return (KeywordMatch){.token = TOKEN_IF, .length = keyword_len, .matched = true };
-        if (strcmp(text, "in") == 0) return (KeywordMatch){.token = TOKEN_IN, .length = keyword_len, .matched = true };
+        if (strcmp(text, "if") == 0) token = TOKEN_IF;
+        if (strcmp(text, "in") == 0) token = TOKEN_IN;
     }
     if (keyword_len == 3) {
-        if (strcmp(text, "int") == 0) return (KeywordMatch){.token = TOKEN_TYPE_INT, .length = keyword_len, .matched = true };
-        if (strcmp(text, "for") == 0) return (KeywordMatch){.token = TOKEN_FOR, .length = keyword_len, .matched = true };
+        if (strcmp(text, "int") == 0) token = TOKEN_TYPE_INT;
+        if (strcmp(text, "for") == 0) token = TOKEN_FOR;
     }
     if (keyword_len == 4) {
-        if (strcmp(text, "bool") == 0) return (KeywordMatch){.token = TOKEN_TYPE_BOOL, .length = keyword_len, .matched = true };
-        if (strcmp(text, "true") == 0) return (KeywordMatch){.token = TOKEN_TRUE, .length = keyword_len, .matched = true };
-        if (strcmp(text, "else") == 0) return (KeywordMatch){.token = TOKEN_ELSE, .length = keyword_len, .matched = true };
+        if (strcmp(text, "bool") == 0) token = TOKEN_TYPE_BOOL;
+        if (strcmp(text, "true") == 0) token = TOKEN_TRUE;
+        if (strcmp(text, "else") == 0) token = TOKEN_ELSE;
     }
     if (keyword_len == 5) {
-        if (strcmp(text, "float") == 0)  return (KeywordMatch){.token = TOKEN_TYPE_FLOAT, .length = keyword_len, .matched = true };
-        if (strcmp(text, "print") == 0)  return (KeywordMatch){.token = TOKEN_PRINT, .length = keyword_len, .matched = true };
-        if (strcmp(text, "false") == 0) return (KeywordMatch){.token = TOKEN_FALSE, .length = keyword_len, .matched = true };
+        if (strcmp(text, "float") == 0)  token = TOKEN_TYPE_FLOAT;
+        if (strcmp(text, "print") == 0)  token = TOKEN_PRINT;
+        if (strcmp(text, "false") == 0) token = TOKEN_FALSE;
     }
     if (keyword_len == 6) {
-        if (strcmp(text, "string") == 0) return (KeywordMatch){.token = TOKEN_TYPE_STRING, .length = keyword_len, .matched = true };
-        if (strcmp(text, "return") == 0) return (KeywordMatch){.token = TOKEN_RETURN, .length = keyword_len, .matched = true };
+        if (strcmp(text, "string") == 0) token = TOKEN_TYPE_STRING;
+        if (strcmp(text, "return") == 0) token = TOKEN_RETURN;
+        if (strcmp(text, "assert") == 0) token = TOKEN_ASSERT;
     }
 
-    return (KeywordMatch){.matched = false};
+    if (token == TOKEN_ERROR) {
+        return (KeywordMatch){.matched = false};
+    } else {
+        return (KeywordMatch){.token = token, .length = keyword_len, .matched = true};
+    }
 }
 
 void make_identifier(Lexer *lexer, Pos pos_start) {

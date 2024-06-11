@@ -126,8 +126,18 @@ void check_statement(Typer *typer, AstNode *stmt) {
     case AST_PRINT: {
         AstPrint *print = (AstPrint *)(stmt);
         check_expression(typer, print->expr);
-    }
         return;
+    }
+    case AST_ASSERT: {
+        AstAssert *assertion = (AstAssert *)(stmt);
+        TypeKind expr_type = check_expression(typer, assertion->expr);
+        if (expr_type != TYPE_BOOL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assertion), "Type mismatch. Expected expression to be of type bool, but expression is of type '%s'", type_kind_to_str(expr_type));
+            exit(1);
+        }
+
+        return;
+    }
     case AST_IF: {
         AstIf *ast_if = (AstIf *)(stmt);
         TypeKind type_of_expr = check_expression(typer, ast_if->condition);

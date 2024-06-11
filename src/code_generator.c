@@ -19,7 +19,6 @@ typedef struct CodeGenerator {
 
     size_t constants;   // For float and string literals
     size_t labels;      // For coditional jumps
-    bool inside_print_expression;
     
 } CodeGenerator;
 
@@ -33,6 +32,7 @@ typedef enum Reg {
 
 
 void go_nuts(CodeGenerator *cg, AstCode *code);
+void emit_builtin_functions(CodeGenerator *cg);
 void emit_header(CodeGenerator *cg);
 void emit_footer(CodeGenerator *cg);
 void emit_code(CodeGenerator *cg, AstCode *code);
@@ -41,6 +41,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn);
 void emit_function_call(CodeGenerator *cg, AstFunctionCall *call);
 void emit_return(CodeGenerator *cg, AstReturn *ast_return);
 void emit_print(CodeGenerator *cg, AstPrint *print_stmt);
+void emit_assert(CodeGenerator *cg, AstAssert *assertion);
 void emit_if(CodeGenerator *cg, AstIf *ast_if);
 void emit_for(CodeGenerator *cg, AstFor *ast_for);
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl);
@@ -67,7 +68,6 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.base_ptr       = 0;
     cg.constants      = 0;
     cg.labels         = 0;
-    cg.inside_print_expression = false;
 
     // Reset all the next pointers inside the scopes, used during typing.
     symbol_table_reset(&cg.ident_table);
@@ -121,6 +121,8 @@ void emit_header(CodeGenerator *cg) {
     sb_append(&cg->data, "   fmt_string DB \"%s\", 10, 0\n", "%s");
     sb_append(&cg->data, "   string_false DB \"false\", 10, 0\n");
     sb_append(&cg->data, "   string_true  DB \"true\", 10, 0\n");
+    sb_append(&cg->data, "   string_assert_fail  DB \"Assertion failed at line %s\", 10, 0\n", "%d");
+    
     sb_append(&cg->code, "\n");
 
     // @Note - Make a check that function main exists.
@@ -130,6 +132,22 @@ void emit_header(CodeGenerator *cg) {
     sb_append(&cg->code, "   extern printf\n");
     sb_append(&cg->code, "   extern ExitProcess\n");
     sb_append(&cg->code, "\n");
+
+    emit_builtin_functions(cg);
+}
+
+void emit_builtin_functions(CodeGenerator *cg) {
+    // Assert
+    sb_append(&cg->code, "assert:\n");
+    sb_append(&cg->code, "   cmp\t\tcl, 0\n");
+    sb_append(&cg->code, "   jz \t\tassert_fail\n");
+    sb_append(&cg->code, "   ret\n");
+
+    sb_append(&cg->code, "assert_fail:\n");
+    sb_append(&cg->code, "   mov\t\trcx, string_assert_fail\n");
+    sb_append(&cg->code, "   call\t\tprintf\n");
+    sb_append(&cg->code, "   mov\t\trcx, 1\n");
+    sb_append(&cg->code, "   call\t\tExitProcess\n\n");
 }
 
 void emit_code(CodeGenerator *cg, AstCode *code) {
@@ -156,6 +174,7 @@ void emit_statement(CodeGenerator *cg, AstNode *node) {
         case AST_RETURN:        emit_return(cg, (AstReturn *)(node)); break;
         case AST_BLOCK:         emit_block(cg, (AstBlock *)(node), true); break;
         case AST_PRINT:         emit_print(cg, (AstPrint *)(node)); break;
+        case AST_ASSERT:        emit_assert(cg, (AstAssert *)(node)); break;
         case AST_IF:            emit_if(cg, (AstIf *)(node)); break;
         case AST_FOR:           emit_for(cg, (AstFor *)(node)); break;
         default:
@@ -439,13 +458,19 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
     sb_append(&cg->code, "L%d:\n", done_label);
 }
 
+void emit_assert(CodeGenerator *cg, AstAssert *assertion) {
+    emit_expression(cg, assertion->expr);
+
+    sb_append(&cg->code, "   pop\t\trcx\n");
+    sb_append(&cg->code, "   mov\t\trdx, %d\n", assertion->head.start.line + 1);
+    sb_append(&cg->code, "   call\t\tassert\n");
+}
+
 void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; expression of print\n");
     
-    cg->inside_print_expression = true;
     emit_expression(cg, print_stmt->expr);
-    cg->inside_print_expression = false;
 
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; call to print\n");
@@ -849,7 +874,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         }
         if (lit->type == TOKEN_BOOLEAN) {
             bool value = lit->as_value.boolean;
-            if (value == true) sb_append(&cg->code, "   push\t\t1\n");
+            if (value == true) sb_append(&cg->code, "   push\t\t-1\n");
             else               sb_append(&cg->code, "   push\t\t0\n"); 
             return;
         }

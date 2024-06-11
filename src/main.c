@@ -4,8 +4,7 @@
 #include "lib/file.c"
 
 int main(int argc, char const *argv[]) {
-
-    if (argc < 2) {
+    if (argc < 2) { 
         printf("\n");
         printf("Usage:\n");
         printf("   saad.exe <input_file.sd>\n");
@@ -19,7 +18,7 @@ int main(int argc, char const *argv[]) {
     if (success) {
         printf("\n\nCompiled successfully\n\n");
     } else {
-        printf("There were errors during compilation\n\n");
+        printf("There were errors\n\n");
     }
 
     free(program);

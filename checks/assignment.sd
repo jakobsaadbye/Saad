@@ -3,7 +3,7 @@ main :: () {
     b := 7.5;
 
     // Assignment works for any type, while
-    // assignment + operator is limited to integer and floating types
+    // comound assignment is limited to integer and floating types
     a = 5;
     b = 10.0;
 
