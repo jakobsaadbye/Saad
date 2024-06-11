@@ -7,7 +7,7 @@ segment .data
    fmt_string DB "%s", 10, 0
    string_false DB "false", 10, 0
    string_true  DB "true", 10, 0
-   CS0 DB "Hello world!", 0 
+   CS0 DB "Hello World!", 0 
 
 segment .text
    global main
@@ -20,13 +20,13 @@ main:
    mov		rbp, rsp
    sub		rsp, 48
 
-   ; initialization of 'a'
+   ; initialization of 'y'
    mov		QWORD -8[rbp], 0
    mov		rax, CS0
    push		rax
 
 
-   ; putting result into 'a'
+   ; putting result into 'y'
    pop		rax
    mov		QWORD -8[rbp], rax
 

@@ -1,6 +1,6 @@
 #include "dirent.h"
-#include "../lib/file.c"
-#include "../pipeline.c"
+#include "../src/lib/file.c"
+#include "../src/pipeline.c"
 
 void check_entire_directory(const char *dir_name) {
     DIR *dir = opendir(dir_name);
