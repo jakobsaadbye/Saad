@@ -1,11 +1,14 @@
 {
     "files.associations": {
+        "*.sd": "odin",
         "lexer.h": "c",
         "parser.h": "c",
         "string.h": "c",
         "assert.h": "c",
         "strings.h": "c",
         "stdlib.h": "c",
-        "stdio.h": "c"
+        "stdio.h": "c",
+        "dynamic_array.c": "cpp",
+        "symbol_table.h": "c"
     }
 }

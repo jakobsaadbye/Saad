@@ -1,24 +1,5 @@
 #include <assert.h>
 #include "ast.c"
-#include "lib/table.c"
-
-#define SYMBOL_HASH_TABLE_LENGTH 8
-
-typedef struct Scope Scope;
-
-typedef struct Scope {
-    Scope *parent;
-    int next;       // Next child to visit on a call to dive()
-    DynamicArray children;
-    HashTable symbols;
-
-    size_t bytes_allocated; // Number of bytes allocated in this scope
-} Scope;
-
-typedef struct SymbolTable {
-    Scope *global_scope;
-    Scope *current_scope;
-} SymbolTable;
 
 typedef struct Symbol {
     AstType type;
@@ -26,6 +7,8 @@ typedef struct Symbol {
     union as_value {
         AstIdentifier   *identifier;
         AstFunctionDefn *function_defn;
+        AstStruct       *struct_defn;
+        AstDeclaration  *struct_member;
     } as_value;
 } Symbol;
 
@@ -134,6 +117,24 @@ Symbol *symbol_add_function_defn(SymbolTable *st, AstFunctionDefn *func_defn) {
     symbol.type = AST_FUNCTION_DEFN;
     symbol.name = func_defn->identifier->name;
     symbol.as_value.function_defn = func_defn;
+
+    return symbol_add(st, symbol);
+}
+
+Symbol *symbol_add_struct(SymbolTable *st, AstStruct *struct_defn) {
+    Symbol symbol = {0};
+    symbol.type = AST_STRUCT;
+    symbol.name = struct_defn->identifier->name;
+    symbol.as_value.struct_defn = struct_defn;
+
+    return symbol_add(st, symbol);
+}
+
+Symbol *symbol_add_struct_member(SymbolTable *st, AstDeclaration *member) {
+    Symbol symbol = {0};
+    symbol.type = AST_STRUCT;
+    symbol.name = member->identifier->name;
+    symbol.as_value.struct_member = member;
 
     return symbol_add(st, symbol);
 }

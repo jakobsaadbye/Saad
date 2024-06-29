@@ -2,8 +2,8 @@ main :: () {
     pi := 3.141592653589793238462643383279502884197;
     tau := pi * 2;
     pi_again := tau / 2;
-    print(pi_again);
-    print(tau);
+
+    assert(pi_again == pi);
 }
 
  

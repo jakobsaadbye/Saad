@@ -28,15 +28,15 @@ void check_entire_directory(const char *dir_name) {
             char file_path[256];
             sprintf(file_path, "%s/%s", dir_name, filename);
 
-            printf("Compiling %s   ", file_path);
+            printf("Run %s\t", file_path);
             
             char *program = read_entire_file(file_path);
             bool success  = send_through_pipeline(program, file_path, false);
             if (success) {
-                printf("   OK\n");
+                printf("OK\n");
                 succeeded += 1;
             } else {
-                printf("   FAILED\n");
+                printf("FAILED\n");
                 failed += 1;
             }
 

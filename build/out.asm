@@ -8,6 +8,7 @@ segment .data
    string_false DB "false", 10, 0
    string_true  DB "true", 10, 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
+   CS0 DB "Hello world!", 0 
 
 segment .text
    global main
@@ -28,20 +29,28 @@ assert_fail:
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 32
-   push		2
-   push		2
+   sub		rsp, 48
 
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   setne		al
+   ; initialization of 'a'
+   mov		QWORD -8[rbp], 0
+   mov		rax, CS0
    push		rax
-   pop		rcx
-   mov		rdx, 2
-   call		assert
+
+
+   ; putting result into 'a'
+   pop		rax
+   mov		QWORD -8[rbp], rax
+
+   ; expression of print
+   mov		rax, QWORD -8[rbp]
+   push		rax
+
+   ; call to print
+   pop		rdx
+   mov		rcx, fmt_string
+   call		printf
 L0:
    mov		rax, 0
-   add		rsp, 32
+   add		rsp, 48
    pop		rbp
    ret

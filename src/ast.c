@@ -1,5 +1,5 @@
 #include "lexer.c"
-#include "lib/dynamic_array.c"
+#include "symbol_table.h"
 
 #define MAX_STATEMENTS_WITHIN_BLOCK 64
 
@@ -14,6 +14,9 @@ typedef struct AstIdentifier AstIdentifier;
 typedef enum AstType {
     AST_ERR,
     AST_BLOCK,
+    AST_STRUCT,
+    AST_STRUCT_LITERAL,
+    AST_STRUCT_DESIGNATOR,
     AST_FUNCTION_DEFN,
     AST_FUNCTION_CALL,
     AST_DECLARATION,
@@ -58,17 +61,26 @@ typedef struct AstNode {
 } AstNode;
 
 typedef enum TypeKind {
+    TYPE_UNTYPED,
     TYPE_VOID,
     TYPE_BOOL,
     TYPE_INTEGER,
     TYPE_FLOAT,
     TYPE_STRING,
-    TYPE_IDENTIFER,
+    TYPE_VAR,   // This type is here, when we don't know the actual type yet. F.x 'a : Car', Car might refer to a struct or an enum
+    TYPE_STRUCT,
 } TypeKind;
+
+typedef struct TypeInfo {
+    TypeKind kind;
+    union {
+        char *identifier; // A name to a struct, enum or function @ Note - enums and functions are not yet a thing
+    } as;
+} TypeInfo;
 
 typedef struct AstExpr {
     AstNode head;
-    TypeKind evaluated_type;
+    TypeInfo evaluated_type;
 } AstExpr;
 
 typedef struct AstCode {
@@ -79,20 +91,24 @@ typedef struct AstCode {
 
 typedef enum DeclarationType {
     DECLARATION_TYPED,          // ex. a : int = b
-    DECLARATION_TYPED_NO_EXPR,  // ex. a : int;
+    DECLARATION_TYPED_NO_EXPR,  // ex. a : int
     DECLARATION_INFER,          // ex. a := b
     DECLARATION_CONSTANT        // ex. a :: 3 @ToDo - Not a thing yet
 } DeclarationType;
 
+typedef enum DeclarationFlags {
+    DF_IS_STRUCT_MEMBER = 0x001,
+    DF_IS_FUNCTION_PARAMETER = 0x002,
+} DeclarationFlags;
+
 typedef struct AstDeclaration {
     AstNode head;
 
-    DeclarationType declaration_type;
-    AstIdentifier  *identifier;
-    TypeKind        declared_type;
-    AstExpr        *expr;
-
-    bool is_function_param;
+    DeclarationType  declaration_type;
+    AstIdentifier   *identifier;
+    TypeInfo         declared_type;
+    AstExpr         *expr;
+    DeclarationFlags flags;
 } AstDeclaration;
 
 typedef enum AssignOp {
@@ -118,12 +134,19 @@ typedef struct AstBlock {
     int       num_of_statements;
 } AstBlock;
 
+typedef struct AstStruct {
+    AstNode head;
+
+    AstIdentifier *identifier;
+    SymbolTable members; // of AstDeclaration
+} AstStruct;
+
 typedef struct AstFunctionDefn {
     AstNode head;
 
     AstIdentifier *identifier;
     DynamicArray parameters; // of AstDeclaration
-    TypeKind return_type;
+    TypeInfo return_type;
     AstBlock *body;
     
     int return_label;
@@ -133,7 +156,7 @@ typedef struct AstFunctionDefn {
 typedef struct AstFunctionCall {
     AstExpr head;
 
-    AstIdentifier *identifer;
+    AstIdentifier *identifer; // @Cleanup - Why doesn't this have a 'evaluated_type' field???
     DynamicArray arguments; // of AstExpr
 } AstFunctionCall;
 
@@ -197,33 +220,63 @@ typedef struct AstUnary {
     AstExpr  *expr;
 } AstUnary;
 
+typedef struct AstStructLiteral {
+    AstExpr head;
+
+    TypeInfo explicit_type;
+    DynamicArray designators; // of AstDesignator
+} AstStructLiteral;
+
+typedef struct AstStructDesignator {
+    AstNode head;
+
+    AstIdentifier *member;
+    AstExpr *value;
+} AstStructDesignator;
+
 typedef struct AstLiteral {
     AstExpr head;
 
     TokenType type;
-    As_value as_value;
+    As_value as;
 } AstLiteral;
 
 typedef struct AstIdentifier {
     AstNode head;
 
-    TypeKind type;
+    TypeInfo type;
     char *name;
     int   length;
 
     int stack_offset;
 } AstIdentifier;
 
-const char *type_kind_to_str(TypeKind kind) {
-    switch (kind) {
+char *type_to_str(TypeInfo type) {
+    switch (type.kind) {
+        case TYPE_UNTYPED:   return "untyped";
         case TYPE_VOID:      return "void";
         case TYPE_BOOL:      return "bool";
         case TYPE_INTEGER:   return "int";
         case TYPE_FLOAT:     return "float";
         case TYPE_STRING:    return "string";
-        case TYPE_IDENTIFER: return "type_ident";
+        case TYPE_VAR:       return type.as.identifier;
+        case TYPE_STRUCT:    return type.as.identifier;
     }
+    XXX;
+}
 
-    printf("%s:%d: compiler-error: TypeKind with enum number '%d' could not be turned into a string", __FILE__, __LINE__, kind);
-    exit(1);
+bool is_primitive_type(TypeKind kind) {
+    if (kind == TYPE_VOID)    return true;
+    if (kind == TYPE_BOOL)    return true;
+    if (kind == TYPE_INTEGER) return true;
+    if (kind == TYPE_FLOAT)   return true;
+    if (kind == TYPE_STRING)  return true;
+
+    return false;
+}
+
+TypeInfo type(TypeKind kind) {
+    TypeInfo result = {0};
+    result.kind = kind;
+    return result;
 }

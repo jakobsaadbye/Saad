@@ -20,12 +20,12 @@
 #define COLOR_WHITE_BOLD  "\x1B[1;37m"
 
 
-static const char *LABEL_NONE    = COLOR_ICE    "none"    COLOR_RESET;
+static const char *LABEL_NOTE    = COLOR_ICE    "note"    COLOR_RESET;
 static const char *LABEL_ERROR   = COLOR_RED    "error"   COLOR_RESET;
 static const char *LABEL_WARNING = COLOR_YELLOW "warning" COLOR_RESET;
 
 typedef enum TokenType {
-    TOKEN_ERROR      = 0,
+    TOKEN_NONE      = 0,
 
     // Mentally insert ASCII values here ...
 
@@ -56,7 +56,6 @@ typedef enum TokenType {
     TOKEN_TRIPLE_DOT   = 154,
     TOKEN_IN           = 155,
 
-
     TOKEN_PRINT        = 160,
     TOKEN_ASSERT       = 161,
     TOKEN_IF           = 162,
@@ -68,6 +67,7 @@ typedef enum TokenType {
     TOKEN_TYPE_FLOAT   = 181,
     TOKEN_TYPE_STRING  = 182,
     TOKEN_TYPE_BOOL    = 183,
+    TOKEN_TYPE_STRUCT  = 184,
     
     TOKEN_END          = 254
 } TokenType;
@@ -82,8 +82,8 @@ typedef union As_value {
 
 typedef struct Line {
     char *str;
-    int start;
-    int end;
+    int start_idx;
+    int end_idx;
 } Line;
 
 typedef struct Pos {
@@ -149,7 +149,7 @@ bool is_unary_operator(TokenType op);
 bool is_digit(char c);
 void report_syntax_error(Lexer *lexer, const char *message, ...);
 void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, const char *message, va_list args);
-Line get_input_line(char *input_str, int start_pos);
+Line get_line(char *input_str, int line_num);
 void free_line(Line line);
 const char *label_color(const char *label);
 
@@ -158,6 +158,10 @@ Lexer lexer_init(char *input_str, const char *file_path) {
     lexer.input_str = input_str;
     lexer.file_path = file_path;
     lexer.identifier_names = arena_make(1024);
+
+    lexer.char_idx = 0;
+    lexer.col = 1;
+    lexer.line_number = 1;
 
     return lexer;
 }
@@ -169,7 +173,7 @@ char *token_type_to_str(TokenType token_type) {
         return name_str;
     }
     switch (token_type) {
-        case TOKEN_ERROR:         return "ERROR";
+        case TOKEN_NONE:          return "NONE";
         case TOKEN_INTEGER:       return "INTEGER";
         case TOKEN_FLOAT:         return "FLOAT";
         case TOKEN_STRING:        return "STRING";
@@ -202,6 +206,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_TYPE_INT:      return "TYPE_INT";
         case TOKEN_TYPE_FLOAT:    return "TYPE_FLOAT";
         case TOKEN_TYPE_STRING:   return "TYPE_STRING";
+        case TOKEN_TYPE_STRUCT:   return "TYPE_STRUCT";
         case TOKEN_TYPE_BOOL:     return "TYPE_BOOL";
         case TOKEN_END:           return "END";
     }
@@ -222,7 +227,7 @@ bool lex(Lexer *lexer) {
         if (c == '\n') {
             eat_character(lexer);
             lexer->line_number += 1;
-            lexer->col          = 0;
+            lexer->col          = 1;
             continue;
         }
 
@@ -262,9 +267,6 @@ bool lex(Lexer *lexer) {
                 while (is_digit(next)) {
                     eat_character(lexer);
                     next = peek_next_char(lexer);
-                }
-
-                if (next == '.') {
                 }
 
                 if (!ends_literal(next)) {
@@ -391,6 +393,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (c == '(')  break;
         if (c == ')')  break;
         if (c == ',')  break;
+        if (c == '.')  break;
         if (c == '\0') break;
 
         i++;
@@ -404,7 +407,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
     memset(text, '\0', keyword_len + 1);
     memcpy(text, src, keyword_len);
 
-    TokenType token = TOKEN_ERROR;
+    TokenType token = TOKEN_NONE;
     if (keyword_len == 2) {
         if (strcmp(text, "if") == 0) token = TOKEN_IF;
         if (strcmp(text, "in") == 0) token = TOKEN_IN;
@@ -424,12 +427,13 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "false") == 0) token = TOKEN_FALSE;
     }
     if (keyword_len == 6) {
+        if (strcmp(text, "struct") == 0)  token = TOKEN_TYPE_STRUCT;
         if (strcmp(text, "string") == 0) token = TOKEN_TYPE_STRING;
         if (strcmp(text, "return") == 0) token = TOKEN_RETURN;
         if (strcmp(text, "assert") == 0) token = TOKEN_ASSERT;
     }
 
-    if (token == TOKEN_ERROR) {
+    if (token == TOKEN_NONE) {
         return (KeywordMatch){.matched = false};
     } else {
         return (KeywordMatch){.token = token, .length = keyword_len, .matched = true};
@@ -591,11 +595,14 @@ char peek_next_char(Lexer *lexer) {
 }
 
 bool ends_literal(char c) {
+    if (c == ',')  return true;
     if (c == ' ')  return true;
     if (c == ';')  return true;
     if (c == ')')  return true;
     if (c == ',')  return true;
     if (c == '-')  return true;
+    if (c == '}')  return true;
+    if (c == '\n')  return true;
     return false;
 }
 
@@ -685,6 +692,7 @@ bool is_single_character_token(char c) {
     if (c == ')') return true;
     if (c == ',') return true;
     if (c == ':') return true;
+    if (c == '.') return true;
     return false;
 }
 
@@ -708,88 +716,104 @@ void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, co
     char message[MAX_ERROR_LEN];
     vsnprintf(message, MAX_ERROR_LEN, template, args);
 
-    Line highlight_line = get_input_line(lexer->input_str, start.input_idx);
-
     // Header
-    if (label != LABEL_NONE) {
-        printf("\n" COLOR_WHITE_BOLD "%s:%d:%d " COLOR_RESET "%s" ": %s\n\n", lexer->file_path, start.line + 1, start.col + 1, label, message);
-    } else {
-        printf("\n" COLOR_WHITE_BOLD "%s:%d:%d " COLOR_RESET ": %s\n\n", lexer->file_path, start.line + 1, start.col + 1, message);
-    }
+    printf("\n" COLOR_WHITE_BOLD "%s:%d:%d " COLOR_RESET "%s" ": %s\n", lexer->file_path, start.line, start.col, label, message);
 
-    // Code line
-    if (label == LABEL_ERROR) {
-        //
-        //  Highlight the error part
-        //
-        char *start_segment = malloc(start.col + 1);
-        memset(start_segment, '\0', start.col + 1);
-        memcpy(start_segment, &lexer->input_str[highlight_line.start], start.col);
+    //
+    // Code lines
+    //
+    int num_lines = (end.line - start.line) + 1;
+    bool singleline = num_lines == 1;
+    if (singleline) {
+        Line line = get_line(lexer->input_str, start.line);
+        char *start_segment = malloc(start.col);
+        memset(start_segment, '\0', start.col);
+        memcpy(start_segment, line.str, start.col - 1);
 
-        int error_len = end.col - start.col;
-        char *error_segment = malloc(error_len + 1);
-        memset(error_segment, '\0', error_len + 1);
-        memcpy(error_segment, &lexer->input_str[start.input_idx], error_len);
+        //  Highlight part
+        int highlight_len = end.input_idx - start.input_idx;
+        char *highlight_segment = malloc(highlight_len + 1);
+        memset(highlight_segment, '\0', highlight_len + 1);
+        memcpy(highlight_segment, &line.str[start.col - 1], highlight_len);
 
-        int end_segment_len = highlight_line.end - end.input_idx;
+
+        int end_segment_len = line.end_idx - end.input_idx;
         char *end_segment = malloc(end_segment_len + 1);
         memset(end_segment, '\0', end_segment_len + 1);
         memcpy(end_segment, &lexer->input_str[end.input_idx], end_segment_len);
 
-        printf("   %s" "%s" "%s" COLOR_RESET "%s\n", start_segment, label_color(label), error_segment, end_segment);
+        char line_num[10];
+        sprintf(line_num, "  %d", start.line);
+        printf("%s | %s" "%s" "%s" COLOR_RESET "%s \n", line_num, start_segment, label_color(label), highlight_segment, end_segment);
 
-        // Underlining
-        for (int i = 0; i < start.col + 3; i++) printf(" ");
+        // Underline
+        for (size_t i = 0; i < strlen(line_num) + 1; i++) printf(" ");
+        printf("| ");
+        for (int i = 0; i < start.col - 1; i++) printf(" ");
         printf("%s^", label_color(label));
         for (int i = start.col; i < end.col - 1; i++) printf("~");
         printf(COLOR_RESET);
         printf("\n");
+
+        free_line(line);
     } else {
-        printf("   %s%s" COLOR_RESET "\n", label_color(label), highlight_line.str);
+        for (int i = 0; i < num_lines; i++) {
+            int line_num = start.line + i;
+            Line line = get_line(lexer->input_str, line_num);
+            if (i == 0) {
+                char *start_segment = malloc(start.col);
+                memset(start_segment, '\0', start.col);
+                memcpy(start_segment, line.str, start.col - 1);
+
+                char *rest = &line.str[start.col - 1];
+                printf("  %d | %s" "%s" "%s" COLOR_RESET "\n", line_num, start_segment, label_color(label), rest);
+                continue;
+            }
+            if (i == num_lines - 1) {
+                char *end_segment = malloc(end.col + 1);
+                memset(end_segment, '\0', end.col + 1);
+                memcpy(end_segment, line.str, end.col);
+
+                char *rest = &line.str[end.col - 1];
+                printf("  %d | " "%s" "%s" COLOR_RESET "%s" "\n", line_num, label_color(label), end_segment, rest);
+                continue;
+            }
+
+            printf("  %d | " "%s" "%s" COLOR_RESET "\n", line_num, label_color(label), line.str);
+
+            free_line(line);
+        }
     }
-
-
-    free_line(highlight_line);
 }
 
-Line get_input_line(char *input_str, int start_pos) {
-    // Seek for the next and previous line breaks to get the line where the error happened
-    int line_end_pos = start_pos;
-    char *p1 = &input_str[start_pos];
-    while ((*p1 != '\n') && (*p1 != '\0')) {
-        p1++;
-        line_end_pos++;
+Line get_line(char *input_str, int line_num) {
+    // Seek to the start of the line
+    int start_idx = 0;
+    int current_line = 1;
+    char *c = input_str;
+    while (current_line != line_num) {
+        if (*c == '\n') current_line++;
+        c++;
+        start_idx++;
     }
 
-    int line_start_pos = start_pos;
-    char *p2 = &input_str[start_pos];
-    bool found_new_line = false;
-    while (true) {
-        p2--;
-        line_start_pos--;
-        if (line_start_pos <= 0) {
-            line_start_pos = 0;
-            break;
-        }
-        if (*p2 == '\n') {
-            found_new_line = true;
-            break;
-        }
-    }
-    if (found_new_line) {
-        line_start_pos += 1;
+    // Seek for the end of the line
+    int end_idx = start_idx;
+    c = &input_str[start_idx];
+    while ((*c != '\n') && (*c != '\0')) {
+        c++;
+        end_idx++;
     }
 
-    char *start  = &input_str[line_start_pos];
-    int line_len = line_end_pos - line_start_pos;
+    int line_len = end_idx - start_idx;
     char *line   = (char *)(malloc(line_len + 1));
     memset(line, '\0', line_len + 1);
-    memcpy(line, start, line_len);
+    memcpy(line, &input_str[start_idx], line_len);
 
     return (Line) {
-        .str   = line,
-        .start = line_start_pos,
-        .end   = line_end_pos
+        .str       = line,
+        .start_idx = start_idx,
+        .end_idx   = end_idx
     };
 }
 
@@ -798,7 +822,7 @@ void free_line(Line line) {
 }
 
 const char *label_color(const char *label) {
-    if (label == LABEL_NONE)    return COLOR_ICE;
+    if (label == LABEL_NOTE)    return COLOR_ICE;
     if (label == LABEL_ERROR)   return COLOR_RED;
     if (label == LABEL_WARNING) return COLOR_YELLOW;
 
