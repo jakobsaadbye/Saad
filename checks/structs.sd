@@ -1,0 +1,22 @@
+Size :: struct {
+    big   : bool;
+    small : bool;
+}
+
+Dog :: struct {
+    legs   : int;
+    weight : float; // kg
+    height : float; // m
+    size   : Size;
+}
+
+main :: () {
+    samoid : Dog;
+    samoid.legs   = 4;
+    samoid.weight = 20.0;
+    samoid.height = 0.5;
+    samoid.size.big = true;
+
+    bmi := samoid.weight / (samoid.height * samoid.height);
+    assert(bmi == 80.0);
+}

@@ -1,6 +1,7 @@
 #include "stdbool.h"
 #include "string.h"
 #include "stdlib.h"
+#include "dynamic_array.c"
 
 typedef struct Node Node;
 
@@ -30,6 +31,7 @@ void      *hash_table_get(HashTable *table, const char *key);
 int        hash(HashTable *table, const char *key);
 LinkedList linked_list_make();
 void       linked_list_add(LinkedList *ll, void *item, size_t item_size);
+Node      *linked_list_get(LinkedList *ll, size_t index);
 void      *linked_list_find(LinkedList *ll, const char *key, bool (*cmp_func)(const void* key, const void* item));
 
 HashTable hash_table_init(size_t table_length, size_t item_size, bool (*cmp_func)(const void* key, const void* item)) {
@@ -59,6 +61,18 @@ void *hash_table_get(HashTable *table, const char *key) {
     if (ll->length == 0) return NULL;
 
     return linked_list_find(ll, key, table->cmp_func);
+}
+
+DynamicArray hash_table_get_items(HashTable *table) {
+    DynamicArray items = da_init(table->num_of_items, sizeof(void *));
+    for (size_t i = 0; i < table->table_length; i++) {
+        for (size_t j = 0; j < table->items[i].length; j++) {
+            Node *node = linked_list_get(&table->items[i], j);
+            da_append(&items, node->data);
+        }
+    }
+
+    return items;
 }
 
 int hash(HashTable *table, const char *key) {
@@ -93,14 +107,25 @@ void linked_list_add(LinkedList *ll, void *item, size_t item_size) {
         return;
     }
 
-    Node *node     = (Node *)(malloc(sizeof(Node)));
-    node->next     = NULL;
+    Node *node = (Node *)(malloc(sizeof(Node)));
+    node->next = NULL;
     node->data = malloc(item_size);
     memcpy(node->data, item, item_size);
 
     ll->tail->next = node;
     ll->tail       = node;
     ll->length++;
+}
+
+Node *linked_list_get(LinkedList *ll, size_t index) {
+    if (index >= ll->length) return NULL;
+
+    Node *node = ll->head;
+    for (size_t i = 0; i < index; i++) {
+        node = node->next;
+    }
+
+    return node;
 }
 
 void *linked_list_find(LinkedList *ll, const char *key, bool (*cmp_func)(const void* key, const void* item)) {

@@ -13,6 +13,7 @@ typedef struct CodeGenerator {
 
     SymbolTable ident_table;
     SymbolTable function_table;
+    SymbolTable type_table;
 
     size_t base_ptr;
     int stack_space;
@@ -44,8 +45,7 @@ void check_main_exists(CodeGenerator *cg);
 int make_label_number(CodeGenerator *cg);
 const char *comparison_operator_to_set_instruction(TokenType op);
 const char *boolean_operator_to_instruction(TokenType op);
-char *func_parameter_to_register(TypeKind param_type, int index);
-
+int member_access_address(CodeGenerator *cg, AstMemberAccess *ma);
 
 
 CodeGenerator code_generator_init(Parser *parser) {
@@ -57,6 +57,7 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.parser         = parser;
     cg.ident_table    = parser->ident_table;
     cg.function_table = parser->function_table;
+    cg.type_table     = parser->type_table;
     cg.base_ptr       = 0;
     cg.constants      = 0;
     cg.labels         = 0;
@@ -93,12 +94,6 @@ void code_generator_dump(CodeGenerator *cg, const char *output_path) {
     fwrite(cg->code.buffer, 1, cg->code.cursor, f);
 
     fclose(f);
-}
-
-int align_value(int value, int alignment) {
-    int rem = value % alignment;
-    if (rem == 0) return value;
-    else          return value + (alignment - rem);
 }
 
 void emit_header(CodeGenerator *cg) {
@@ -168,103 +163,110 @@ void emit_statement(CodeGenerator *cg, AstNode *node) {
         case AST_ASSERT:        emit_assert(cg, (AstAssert *)(node)); break;
         case AST_IF:            emit_if(cg, (AstIf *)(node)); break;
         case AST_FOR:           emit_for(cg, (AstFor *)(node)); break;
-        case AST_STRUCT:        emit_struct(cg, (AstStruct *)(node)); break;
+        case AST_STRUCT:        break;
         default:
             printf("compiler-error: emit_statement not implemented for %s\n", ast_type_name(node->type));
             XXX;
     }
 }
 
-void emit_struct(CodeGenerator *cg, AstStruct *ast_struct) {
-    XXX;
-}
-
 void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     emit_expression(cg, assign->expr);
 
-    switch (assign->op) {
-        case ASSIGN_EQUAL: {
-            switch (assign->expr->evaluated_type.kind) {
-                case TYPE_INTEGER: {
-                    sb_append(&cg->code, "   pop\t\trax\n");
-                    sb_append(&cg->code, "   mov\t\t%d[rbp], eax\n", assign->identifier->stack_offset);
-                    break;
-                }
-                case TYPE_FLOAT: {
-                    sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-                    sb_append(&cg->code, "   add\t\trsp, 4\n");
-                    sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", assign->identifier->stack_offset);
-                    break;
-                }
-                case TYPE_STRING: {
-                    sb_append(&cg->code, "   pop\t\trax\n");
-                    sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", assign->identifier->stack_offset);
-                    break;
-                }
-                case TYPE_BOOL: {
-                    sb_append(&cg->code, "   pop\t\trax\n");
-                    sb_append(&cg->code, "   mov\t\t%d[rbp], al\n", assign->identifier->stack_offset);
-                    break;
-                }
-                default: XXX;
-
-            }
-        } break;
-        case ASSIGN_PLUS_EQUAL: {
-            if (assign->expr->evaluated_type.kind == TYPE_INTEGER) {
-                sb_append(&cg->code, "   pop\t\trax\n");
-                sb_append(&cg->code, "   add\t\t%d[rbp], eax\n", assign->identifier->stack_offset);
-            } else {
-                sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-                sb_append(&cg->code, "   add\t\trsp, 4\n");
-                sb_append(&cg->code, "   movss\t\txmm1, DWORD %d[rbp]\n", assign->identifier->stack_offset);
-                sb_append(&cg->code, "   addss\t\txmm0, xmm1\n");
-                sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", assign->identifier->stack_offset);
-            }
-        } break;
-        case ASSIGN_MINUS_EQUAL: {
-            if (assign->expr->evaluated_type.kind == TYPE_INTEGER) {
-                sb_append(&cg->code, "   pop\t\trax\n");
-                sb_append(&cg->code, "   sub\t\t%d[rbp], eax\n", assign->identifier->stack_offset);
-            } else {
-                sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-                sb_append(&cg->code, "   add\t\trsp, 4\n");
-                sb_append(&cg->code, "   movss\t\txmm1, DWORD %d[rbp]\n", assign->identifier->stack_offset);
-                sb_append(&cg->code, "   subss\t\txmm1, xmm0\n");
-                sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", assign->identifier->stack_offset);
-            }
-        } break;
-        case ASSIGN_TIMES_EQUAL: {
-            if (assign->expr->evaluated_type.kind == TYPE_INTEGER) {
-                sb_append(&cg->code, "   pop\t\trax\n");
-                sb_append(&cg->code, "   mov\t\tebx, DWORD %d[rbp]\n", assign->identifier->stack_offset);
-                sb_append(&cg->code, "   imul\t\teax, ebx\n");
-                sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], eax\n", assign->identifier->stack_offset);
-
-            } else {
-                sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
-                sb_append(&cg->code, "   add\t\trsp, 4\n");
-                sb_append(&cg->code, "   movss\t\txmm0, DWORD %d[rbp]\n", assign->identifier->stack_offset);
-                sb_append(&cg->code, "   mulss\t\txmm0, xmm1\n");
-                sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", assign->identifier->stack_offset);
-            }
-        } break;
-        case ASSIGN_DIVIDE_EQUAL: {
-            if (assign->expr->evaluated_type.kind == TYPE_INTEGER) {
-                sb_append(&cg->code, "   pop\t\trbx\n");
-                sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", assign->identifier->stack_offset);
-                sb_append(&cg->code, "   cqo\n");
-                sb_append(&cg->code, "   idiv\t\tebx\n");
-                sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], eax\n", assign->identifier->stack_offset);
-            } else {
-                sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
-                sb_append(&cg->code, "   add\t\trsp, 4\n");
-                sb_append(&cg->code, "   movss\t\txmm0, DWORD %d[rbp]\n", assign->identifier->stack_offset);
-                sb_append(&cg->code, "   divss\t\txmm0, xmm1\n");
-                sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", assign->identifier->stack_offset);
-            }
-        } break;
+    int address = 0;
+    if (assign->lhs->head.type == AST_LITERAL) {
+        AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(assign->lhs))->as.identifier.name)->as.identifier;
+        address = ident->stack_offset;
     }
+    else if (assign->lhs->head.type == AST_MEMBER_ACCESS) {
+        AstMemberAccess *ma = (AstMemberAccess *)(assign->lhs);
+        address = member_access_address(cg, ma);
+    } else {
+        XXX;
+    }
+
+    switch (assign->op) {
+    case ASSIGN_EQUAL: {
+        switch (assign->expr->evaluated_type.kind) {
+        case TYPE_INTEGER: {
+            sb_append(&cg->code, "   pop\t\trax\n");
+            sb_append(&cg->code, "   mov\t\t%d[rbp], eax\n", address);
+            break;
+        }
+        case TYPE_FLOAT: {
+            sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+            sb_append(&cg->code, "   add\t\trsp, 4\n");
+            sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", address);
+            break;
+        }
+        case TYPE_STRING: {
+            sb_append(&cg->code, "   pop\t\trax\n");
+            sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", address);
+            break;
+        }
+        case TYPE_BOOL: {
+            sb_append(&cg->code, "   pop\t\trax\n");
+            sb_append(&cg->code, "   mov\t\t%d[rbp], al\n", address);
+            break;
+        }
+        default: XXX;
+    }
+    } break;
+    case ASSIGN_PLUS_EQUAL: {
+        if (assign->expr->evaluated_type.kind == TYPE_INTEGER) {
+            sb_append(&cg->code, "   pop\t\trax\n");
+            sb_append(&cg->code, "   add\t\t%d[rbp], eax\n", address);
+        } else {
+            sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+            sb_append(&cg->code, "   add\t\trsp, 4\n");
+            sb_append(&cg->code, "   movss\t\txmm1, DWORD %d[rbp]\n", address);
+            sb_append(&cg->code, "   addss\t\txmm0, xmm1\n");
+            sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", address);
+        }
+    } break;
+    case ASSIGN_MINUS_EQUAL: {
+        if (assign->expr->evaluated_type.kind == TYPE_INTEGER) {
+            sb_append(&cg->code, "   pop\t\trax\n");
+            sb_append(&cg->code, "   sub\t\t%d[rbp], eax\n", address);
+        } else {
+            sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+            sb_append(&cg->code, "   add\t\trsp, 4\n");
+            sb_append(&cg->code, "   movss\t\txmm1, DWORD %d[rbp]\n", address);
+            sb_append(&cg->code, "   subss\t\txmm1, xmm0\n");
+            sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", address);
+        }
+    } break;
+    case ASSIGN_TIMES_EQUAL: {
+        if (assign->expr->evaluated_type.kind == TYPE_INTEGER) {
+            sb_append(&cg->code, "   pop\t\trax\n");
+            sb_append(&cg->code, "   mov\t\tebx, DWORD %d[rbp]\n", address);
+            sb_append(&cg->code, "   imul\t\teax, ebx\n");
+            sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], eax\n", address);
+
+        } else {
+            sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
+            sb_append(&cg->code, "   add\t\trsp, 4\n");
+            sb_append(&cg->code, "   movss\t\txmm0, DWORD %d[rbp]\n", address);
+            sb_append(&cg->code, "   mulss\t\txmm0, xmm1\n");
+            sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", address);
+        }
+    } break;
+    case ASSIGN_DIVIDE_EQUAL: {
+        if (assign->expr->evaluated_type.kind == TYPE_INTEGER) {
+            sb_append(&cg->code, "   pop\t\trbx\n");
+            sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", address);
+            sb_append(&cg->code, "   cqo\n");
+            sb_append(&cg->code, "   idiv\t\tebx\n");
+            sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], eax\n", address);
+        } else {
+            sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
+            sb_append(&cg->code, "   add\t\trsp, 4\n");
+            sb_append(&cg->code, "   movss\t\txmm0, DWORD %d[rbp]\n", address);
+            sb_append(&cg->code, "   divss\t\txmm0, xmm1\n");
+            sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", address);
+        }
+    } break;
+}
 }
 
 void emit_for(CodeGenerator *cg, AstFor *ast_for) {
@@ -272,10 +274,10 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         AstRangeExpr * range = (AstRangeExpr *)(ast_for->iterable);
 
         // allocate space for start and end range values 
-        int offset_start = -(cg->base_ptr + size_of_type(type(TYPE_INTEGER)));
-        int offset_end   = -(cg->base_ptr + size_of_type(type(TYPE_INTEGER)) * 2);
-        int offset_iterator = -(cg->base_ptr + size_of_type(type(TYPE_INTEGER)) * 3);
-        cg->base_ptr += size_of_type(type(TYPE_INTEGER)) * 3;
+        int offset_start = -(cg->base_ptr + size_of_type(cg->parser, type(TYPE_INTEGER)));
+        int offset_end   = -(cg->base_ptr + size_of_type(cg->parser, type(TYPE_INTEGER)) * 2);
+        int offset_iterator = -(cg->base_ptr + size_of_type(cg->parser, type(TYPE_INTEGER)) * 3);
+        cg->base_ptr += size_of_type(cg->parser, type(TYPE_INTEGER)) * 3;
 
         emit_expression(cg, range->start);
         emit_expression(cg, range->end);
@@ -480,8 +482,31 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
     }
 }
 
+void zero_initialize(CodeGenerator *cg, AstDeclaration *decl, int stack_offset) {
+    switch (decl->declared_type.kind) {
+        case TYPE_INTEGER: sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", stack_offset); break;
+        case TYPE_FLOAT:   sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", stack_offset); break;
+        case TYPE_BOOL:    sb_append(&cg->code, "   mov\t\tBYTE %d[rbp], 0\n",  stack_offset); break;
+        case TYPE_STRING:  sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", stack_offset); break;
+        case TYPE_STRUCT: {
+            AstStruct *struct_defn = get_struct(&cg->parser->type_table, decl->declared_type.as.identifier);
+            assert(struct_defn != NULL);
+
+            DynamicArray members = get_struct_members(struct_defn);
+            for (unsigned int i = 0; i < members.count; i++) {
+                AstDeclaration *member = ((AstDeclaration **)(members.items))[i];
+                zero_initialize(cg, member, stack_offset + member->member_offset);
+            }
+            break;
+        }
+        default:
+            printf("%s:%d: compiler-error: There were unhandled cases in 'zero_initialize'\n", __FILE__, __LINE__);
+            exit(1);
+    }
+}
+
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
-    int type_size = size_of_type(decl->declared_type);
+    int type_size = size_of_type(cg->parser, decl->declared_type);
     cg->base_ptr += type_size;
 
     TypeKind declared_type = decl->declared_type.kind;
@@ -494,22 +519,7 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
 
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; initialization of '%s'\n", decl->identifier->name);
-
-    if (declared_type == TYPE_INTEGER) {
-        sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", stack_offset);
-    }
-    else if (declared_type == TYPE_FLOAT) {
-        sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", stack_offset);
-    }
-    else if (declared_type == TYPE_BOOL) {
-        sb_append(&cg->code, "   mov\t\tBYTE %d[rbp], 0\n", stack_offset);
-    }
-    else if (declared_type == TYPE_STRING) {
-        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", stack_offset);
-    }
-    else {
-        XXX;
-    }
+    zero_initialize(cg, decl, stack_offset);
     
     if (decl->declaration_type != DECLARATION_TYPED_NO_EXPR) {
         emit_expression(cg, decl->expr);
@@ -537,7 +547,6 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
             XXX;
         }
     }
-
 }
 
 void emit_operator_divide(CodeGenerator *cg, AstBinary *bin) {
@@ -782,36 +791,32 @@ int make_label_number(CodeGenerator *cg) {
     return cg->labels++;
 }
 
+int member_access_address(CodeGenerator *cg, AstMemberAccess *ma) {
+    AstIdentifier *ident = symbol_lookup(&cg->ident_table, ma->ident->name)->as.identifier;
+    int stack_offset     = ident->stack_offset;
+    for (unsigned int i = 0; i < ma->chain.count; i++) {
+        AstAccessor *ac = ((AstAccessor **)(ma->chain.items))[i];
+        stack_offset += ac->member->member_offset;
+    }
+
+    return stack_offset;
+}
+
 void emit_expression(CodeGenerator *cg, AstExpr *expr) {
-    if (expr->head.type == AST_BINARY) {
+    switch (expr->head.type) {
+    case AST_BINARY: {
         AstBinary *bin = (AstBinary *)(expr);
-        if (bin->operator == '+') {
-            emit_operator_plus(cg, bin);
-            return;
-        }
-        if (bin->operator == '-') {
-            emit_operator_minus(cg, bin);
-            return;
-        }
-        if (bin->operator == '*') {
-            emit_operator_times(cg, bin);
-            return;
-        }
-        if (bin->operator == '/') {
-            emit_operator_divide(cg, bin);
-            return;
-        }
-        if (is_comparison_operator(bin->operator)) {
-            emit_comparison_operator(cg, bin);
-            return;
-        }
-        if (is_boolean_operator(bin->operator)) {
-            emit_boolean_operator(cg, bin);
-            return;
-        }
+        TokenType op = bin->operator;
+        if (op == '+') {emit_operator_plus(cg, bin); return;}
+        if (op == '-') {emit_operator_minus(cg, bin); return;}
+        if (op == '*') {emit_operator_times(cg, bin); return;}
+        if (op == '/') {emit_operator_divide(cg, bin); return;}
+        if (is_comparison_operator(op)) {emit_comparison_operator(cg, bin); return;}
+        if (is_boolean_operator(op)) {emit_boolean_operator(cg, bin); return;}
+
         XXX;
     }
-    if (expr->head.type == AST_UNARY) {
+    case AST_UNARY: {
         AstUnary *unary = (AstUnary *)(expr);
         if (unary->operator == OP_NOT) {
             emit_expression(cg, unary->expr);
@@ -828,16 +833,46 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
 
-        printf("%s:%d: compiler-error: There were unhandled cases in 'emit_expression'\n", __FILE__, __LINE__);
-        exit(1);
+        XXX;
     }
-    if (expr->head.type == AST_FUNCTION_CALL) {
+    case AST_FUNCTION_CALL: {
         AstFunctionCall *call = (AstFunctionCall *)(expr);
-        emit_function_call(cg, call); // Value of function call will be in rax, so simply push the value
+        emit_function_call(cg, call);
         sb_append(&cg->code, "   push\t\trax\n");
         return;
     }
-    if (expr->head.type == AST_LITERAL) {
+    case AST_MEMBER_ACCESS: {
+        AstMemberAccess *ma  = (AstMemberAccess *)(expr);
+        int stack_offset = member_access_address(cg, ma);
+
+        AstDeclaration *last = ((AstAccessor **)(ma->chain.items))[ma->chain.count - 1]->member;
+        if (last->declared_type.kind == TYPE_INTEGER) {
+            sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", stack_offset);
+            sb_append(&cg->code, "   push\t\trax\n", stack_offset);
+            return;
+        }
+        if (last->declared_type.kind == TYPE_FLOAT) {
+            sb_append(&cg->code, "   movss\t\txmm0, %d[rbp]\n", stack_offset);
+            sb_append(&cg->code, "   sub\t\trsp, 4\n");
+            sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
+            return;
+        }
+        if (last->declared_type.kind == TYPE_STRING) {
+            sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", stack_offset);
+            sb_append(&cg->code, "   push\t\trax\n");
+            return;
+        }
+        if (last->declared_type.kind == TYPE_BOOL) {
+            sb_append(&cg->code, "   mov\t\tal, BYTE %d[rbp]\n", stack_offset);
+            sb_append(&cg->code, "   push\t\trax\n");
+            return;
+        }
+
+        XXX;
+
+        return;
+    }
+    case AST_LITERAL: {
         AstLiteral *lit = (AstLiteral *)(expr);
         if (lit->type == TOKEN_INTEGER) {
             sb_append(&cg->code, "   push\t\t%d\n", lit->as.integer);
@@ -869,17 +904,17 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             Symbol *ident_symbol = symbol_lookup(&cg->ident_table, lit->as.identifier.name);
             assert(ident_symbol != NULL);
 
-            AstIdentifier *ident = ident_symbol->as_value.identifier;
+            AstIdentifier *ident = ident_symbol->as.identifier;
             assert(ident != NULL);
+            if (ident->type.kind == TYPE_INTEGER) {
+                sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", ident->stack_offset);
+                sb_append(&cg->code, "   push\t\trax\n", ident->stack_offset);
+                return;
+            }
             if (ident->type.kind == TYPE_FLOAT) {
                 sb_append(&cg->code, "   movss\t\txmm0, %d[rbp]\n", ident->stack_offset);
                 sb_append(&cg->code, "   sub\t\trsp, 4\n");
                 sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
-                return;
-            }
-            if (ident->type.kind == TYPE_INTEGER) {
-                sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", ident->stack_offset);
-                sb_append(&cg->code, "   push\t\trax\n", ident->stack_offset);
                 return;
             }
             if (ident->type.kind == TYPE_STRING) {
@@ -893,13 +928,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 return;
             }
 
-            printf("%s:%d: compiler-error: There were unhandled cases in 'emit_expression'\n", __FILE__, __LINE__);
-            exit(1);
+            XXX;
         }
-        printf("%s:%d: compiler-error: There were unhandled cases in 'emit_expression'\n", __FILE__, __LINE__);
+
+        XXX;
+    }
+    default:
+        printf("%s:%d: compiler-error: There were unhandled cases in 'emit_expression' with %s\n", __FILE__, __LINE__, ast_type_name(expr->head.type));
         exit(1);
     }
-
-    printf("%s:%d: compiler-error: There were unhandled cases in 'emit_expression'\n", __FILE__, __LINE__);
-    exit(1);
 }

@@ -488,7 +488,6 @@ void push_token(Lexer *lexer, Token token) {
     lexer->token_index_cursor++;
 }
 
-
 void make_literal_here(Lexer *lexer, TokenType token_type, Pos pos_start) {
     Pos pos_end = get_current_position(lexer);
     make_literal(lexer, token_type, pos_start, pos_end);
@@ -496,80 +495,66 @@ void make_literal_here(Lexer *lexer, TokenType token_type, Pos pos_start) {
 
 void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end) {
     Token result = {0};
+    result.start = pos_start;
+    result.end   = pos_end;
+
     switch(token_type) {
-        case TOKEN_INTEGER: {
-            const char *src = &lexer->input_str[pos_start.input_idx];
-            char val_str[MAX_DIGITS];
-            memset(val_str, '\0', MAX_DIGITS);
+    case TOKEN_INTEGER: {
+        const char *src = &lexer->input_str[pos_start.input_idx];
+        char val_str[MAX_DIGITS];
+        memset(val_str, '\0', MAX_DIGITS);
 
-            strncpy(val_str, src, pos_end.input_idx - pos_start.input_idx);
-            int val = atoi(val_str);
-            
-            Token token = {0};
-            token.type  = token_type;
-            token.start = pos_start;
-            token.end   = pos_end;
-            token.as_value.integer = val;
+        strncpy(val_str, src, pos_end.input_idx - pos_start.input_idx);
+        int val = atoi(val_str);
+        
+        result.type = token_type;
+        result.as_value.integer = val;
+        break;
+    }
+    case TOKEN_FLOAT : {
+        const char *src = &lexer->input_str[pos_start.input_idx];
+        char val_str[MAX_DIGITS];
+        memset(val_str, '\0', MAX_DIGITS);
 
-            result = token;
-            break;
-        }
-        case TOKEN_FLOAT : {
-            const char *src = &lexer->input_str[pos_start.input_idx];
-            char val_str[MAX_DIGITS];
-            memset(val_str, '\0', MAX_DIGITS);
+        strncpy(val_str, src, pos_end.input_idx - pos_start.input_idx);
+        double val = atof(val_str);
+        
+        result.type = token_type;
+        result.as_value.floating = val;
 
-            strncpy(val_str, src, pos_end.input_idx - pos_start.input_idx);
-            double val = atof(val_str);
-            
-            Token token = {0};
-            token.type  = token_type;
-            token.start = pos_start;
-            token.end   = pos_end;
-            token.as_value.floating = val;
+        break;
+    }
+    case TOKEN_STRING: {
+        // For the token start and end position we save it including the quotes,
+        // but don't include them for the value of the string.
+        const char *src = &lexer->input_str[pos_start.input_idx + 1];
+        int str_len = pos_end.input_idx - pos_start.input_idx - 2;
+        char *buffer = (char *)(malloc(str_len + 1));
+        memset(buffer, '\0', str_len + 1);
+        memcpy(buffer, src, str_len);
 
-            result = token;
-            break;
-        }
-        case TOKEN_STRING: {
-            // For the token start and end position we save it including the quotes,
-            // but don't include them for the value of the string.
-            const char *src = &lexer->input_str[pos_start.input_idx + 1];
-            int str_len = pos_end.input_idx - pos_start.input_idx - 2;
-            char *buffer = (char *)(malloc(str_len + 1));
-            memset(buffer, '\0', str_len + 1);
-            memcpy(buffer, src, str_len);
- 
-            Token token = {0};
-            token.type  = token_type;
-            token.start = pos_start;
-            token.end   = pos_end;
-            token.as_value = (As_value) {
-                .string = {
-                    .data   = buffer,
-                    .length = str_len
-                }
-            };
+        result.type = token_type;
+        result.as_value = (As_value) {
+            .string = {
+                .data   = buffer,
+                .length = str_len
+            }
+        };
 
-            result = token;
-            break;
-        }
-        case TOKEN_TRUE:
-        case TOKEN_FALSE: {
-            Token token = {0};
-            token.type  = TOKEN_BOOLEAN;
-            token.start = pos_start;
-            token.end   = pos_end;
-            token.as_value = (As_value) {
-                .boolean = token_type == TOKEN_TRUE ? true : false
-            };
+        break;
+    }
+    case TOKEN_TRUE:
+    case TOKEN_FALSE: {
+        result.type = TOKEN_BOOLEAN;
+        result.as_value = (As_value) {
+            .boolean = token_type == TOKEN_TRUE ? true : false
+        };
 
-            result = token;
-            break;
-        }
-        default:
-            printf("Error: Invalid token type with id '%d' \n", token_type);
-            exit(1);
+        break;
+    }
+    default:
+        printf("Error: Invalid token type with id '%d' \n", token_type);
+        exit(1);
     }
 
     push_token(lexer, result);
@@ -767,15 +752,19 @@ void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, co
 
                 char *rest = &line.str[start.col - 1];
                 printf("  %d | %s" "%s" "%s" COLOR_RESET "\n", line_num, start_segment, label_color(label), rest);
+                
+                free_line(line);
                 continue;
             }
             if (i == num_lines - 1) {
-                char *end_segment = malloc(end.col + 1);
-                memset(end_segment, '\0', end.col + 1);
-                memcpy(end_segment, line.str, end.col);
+                char *end_segment = malloc(end.col);
+                memset(end_segment, '\0', end.col);
+                memcpy(end_segment, line.str, end.col - 1);
 
                 char *rest = &line.str[end.col - 1];
                 printf("  %d | " "%s" "%s" COLOR_RESET "%s" "\n", line_num, label_color(label), end_segment, rest);
+
+                free_line(line);
                 continue;
             }
 

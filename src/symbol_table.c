@@ -4,12 +4,12 @@
 typedef struct Symbol {
     AstType type;
     char *name;
-    union as_value {
+    union {
         AstIdentifier   *identifier;
         AstFunctionDefn *function_defn;
         AstStruct       *struct_defn;
         AstDeclaration  *struct_member;
-    } as_value;
+    } as;
 } Symbol;
 
 bool compare_symbol(const void *key, const void *item) {
@@ -19,7 +19,7 @@ bool compare_symbol(const void *key, const void *item) {
 
 SymbolTable symbol_table_init() {
     SymbolTable st = {0};
-    Scope *global_scope = (Scope *)(malloc(sizeof(Scope)));;
+    Scope *global_scope = (Scope *)(malloc(sizeof(Scope)));
     global_scope->parent    = NULL;
     global_scope->children  = da_init(2, sizeof(Scope));
     global_scope->symbols   = hash_table_init(SYMBOL_HASH_TABLE_LENGTH, sizeof(Symbol), compare_symbol);
@@ -93,6 +93,11 @@ Symbol *symbol_lookup(SymbolTable *st, char *name) {
     return symbol;
 }
 
+DynamicArray symbol_get_symbols(SymbolTable *st) {
+    DynamicArray symbols = hash_table_get_items(&st->current_scope->symbols);
+    return symbols;
+}
+
 Symbol *symbol_add(SymbolTable *st, Symbol symbol) {
     Symbol *existing = (Symbol *)(hash_table_get(&st->current_scope->symbols, symbol.name));
     if (existing) {
@@ -107,7 +112,7 @@ Symbol *symbol_add_identifier(SymbolTable *st, AstIdentifier *identifier) {
     Symbol symbol = {0};
     symbol.type = AST_IDENTIFIER;
     symbol.name = identifier->name;
-    symbol.as_value.identifier = identifier;
+    symbol.as.identifier = identifier;
 
     return symbol_add(st, symbol);
 }
@@ -116,7 +121,7 @@ Symbol *symbol_add_function_defn(SymbolTable *st, AstFunctionDefn *func_defn) {
     Symbol symbol = {0};
     symbol.type = AST_FUNCTION_DEFN;
     symbol.name = func_defn->identifier->name;
-    symbol.as_value.function_defn = func_defn;
+    symbol.as.function_defn = func_defn;
 
     return symbol_add(st, symbol);
 }
@@ -125,16 +130,16 @@ Symbol *symbol_add_struct(SymbolTable *st, AstStruct *struct_defn) {
     Symbol symbol = {0};
     symbol.type = AST_STRUCT;
     symbol.name = struct_defn->identifier->name;
-    symbol.as_value.struct_defn = struct_defn;
+    symbol.as.struct_defn = struct_defn;
 
     return symbol_add(st, symbol);
 }
 
 Symbol *symbol_add_struct_member(SymbolTable *st, AstDeclaration *member) {
     Symbol symbol = {0};
-    symbol.type = AST_STRUCT;
+    symbol.type = AST_DECLARATION;
     symbol.name = member->identifier->name;
-    symbol.as_value.struct_member = member;
+    symbol.as.struct_member = member;
 
     return symbol_add(st, symbol);
 }

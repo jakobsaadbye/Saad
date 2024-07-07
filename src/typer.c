@@ -6,17 +6,21 @@ typedef struct Typer {
     AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
 } Typer;
 
-void check_block(Typer *typer, AstBlock *block, bool open_lexical_scope);
-void check_statement(Typer *typer, AstNode *stmt);
+void     check_block(Typer *typer, AstBlock *block, bool open_lexical_scope);
+void     check_statement(Typer *typer, AstNode *stmt);
 TypeInfo check_expression(Typer *typer, AstExpr *expr, TypeInfo lhs_type);
 TypeInfo check_binary(Typer *typer, AstBinary *binary);
 TypeInfo check_unary(Typer *typer, AstUnary *unary);
 TypeInfo check_literal(Typer *typer, AstLiteral *literal);
 TypeInfo check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, TypeInfo lhs_type);
+TypeInfo check_member_access(Typer *typer, AstMemberAccess * ma);
 char *type_to_str(TypeInfo type);
 bool types_match(TypeInfo a, TypeInfo b);
 bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
+AstStruct      *get_struct(SymbolTable *type_table, char *name);
+AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name);
+DynamicArray    get_struct_members(AstStruct *struct_defn);
 
 Typer typer_init(Parser *parser) {
     Typer typer = {0};
@@ -42,49 +46,70 @@ void check_block(Typer *typer, AstBlock *block, bool open_lexical_scope) {
     if (open_lexical_scope) exit_scope(&typer->parser->ident_table);
 }
 
-void check_declaration(Typer *typer, AstDeclaration *decl) {
-    switch (decl->declaration_type) {
-        case DECLARATION_TYPED: {
-            check_expression(typer, decl->expr, decl->declared_type);
-            if (!types_match(decl->expr->evaluated_type, decl->declared_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(decl), "Variable was said to be of type %s, but expression is of type %s", type_to_str(decl->declared_type), type_to_str(decl->expr->evaluated_type));
-                exit(1);
-            }
+void resolve_enum_or_struct_type(Typer *typer, AstDeclaration *decl) {
+    if (decl->declared_type.kind == TYPE_VAR) {
+        Symbol *type_sym = symbol_lookup(&typer->parser->type_table, decl->declared_type.as.identifier);
+        if (type_sym == NULL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(&decl->declared_type), "Unknown type '%s'", type_to_str(decl->declared_type));
+            exit(1);
+        }
 
-            // Identifier should already be typed at the parsing stage.
-            break;
-        }
-        case DECLARATION_TYPED_NO_EXPR: {
-            // @Incomplete - We still gotta check that the type declared exists
-            break;
-        }
-        case DECLARATION_INFER: {
-            TypeInfo expr_type = check_expression(typer, decl->expr, type(TYPE_UNTYPED));
-            
-            decl->identifier->type = expr_type;
-            decl->declared_type    = expr_type;
-            break;
-        }
-        case DECLARATION_CONSTANT: {
+        if (type_sym->type == AST_STRUCT) {
+            decl->declared_type.kind    = TYPE_STRUCT;
+            decl->identifier->type.kind = TYPE_STRUCT;
+        } else {
+            // TODO: Handle enum type resolution
             XXX;
         }
     }
+}
+
+void check_declaration(Typer *typer, AstDeclaration *decl) {
+    switch (decl->declaration_type) {
+    case DECLARATION_TYPED: {
+        resolve_enum_or_struct_type(typer, decl);
+        
+        check_expression(typer, decl->expr, decl->declared_type);
+        if (!types_match(decl->expr->evaluated_type, decl->declared_type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(decl), "Variable was said to be of type %s, but expression is of type %s", type_to_str(decl->declared_type), type_to_str(decl->expr->evaluated_type));
+            exit(1);
+        }
+
+        break;
+    }
+    case DECLARATION_TYPED_NO_EXPR: {
+        resolve_enum_or_struct_type(typer, decl);
+        break;
+    }
+    case DECLARATION_INFER: {
+        TypeInfo expr_type = check_expression(typer, decl->expr, type(TYPE_UNTYPED));
+        
+        decl->identifier->type = expr_type;
+        decl->declared_type    = expr_type;
+        break;
+    }
+    case DECLARATION_CONSTANT: {
+        XXX;
+    }
+    }
     
-    if (decl->flags & DF_IS_FUNCTION_PARAMETER || decl->flags & DF_IS_STRUCT_MEMBER) {
-        // Omit sizing the declaration as it is already done at this point
+    if (decl->flags & (DECL_IS_FUNCTION_PARAMETER | DECL_IS_STRUCT_MEMBER)) {
+        // Omit sizing the declaration as it is done at the call site
     } else {
-        typer->parser->ident_table.current_scope->bytes_allocated += size_of_type(decl->identifier->type);
+        typer->parser->ident_table.current_scope->bytes_allocated += size_of_type(typer->parser, decl->identifier->type);
     }
 }
 
 bool types_match(TypeInfo a, TypeInfo b) {
+    assert(!(a.kind == TYPE_VAR || b.kind == TYPE_VAR) && "Matching unresolved types");
+
     if (is_primitive_type(a.kind) && is_primitive_type(b.kind)) {
         return a.kind == b.kind;
+    } else if (a.kind == TYPE_STRUCT && b.kind == TYPE_STRUCT) {
+        return strcmp(a.as.identifier, b.as.identifier) == 0;
     } else {
-        XXX;
+        return false;
     }
- 
-    return false;
 }
 
 TypeInfo check_function_call(Typer *typer, AstFunctionCall *call) {
@@ -94,7 +119,7 @@ TypeInfo check_function_call(Typer *typer, AstFunctionCall *call) {
         exit(1);
     }
 
-    AstFunctionDefn *func_defn = func_symbol->as_value.function_defn;
+    AstFunctionDefn *func_defn = func_symbol->as.function_defn;
     
     if (call->arguments.count != func_defn->parameters.count) {
         report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(call), "Mismatch in number of arguments. Function '%s' takes %d %s, but %d were supplied", func_defn->identifier->name, func_defn->parameters.count, func_defn->parameters.count == 1 ? "parameter" : "parameters", call->arguments.count);
@@ -127,10 +152,18 @@ void check_statement(Typer *typer, AstNode *stmt) {
     case AST_ASSIGNMENT: {
         AstAssignment *assign = (AstAssignment *)(stmt);
 
-        TypeInfo expr_type = check_expression(typer, assign->expr, assign->identifier->type);
+        TypeInfo lhs_type  = check_expression(typer, assign->lhs, type(TYPE_UNTYPED));
+        TypeInfo expr_type = check_expression(typer, assign->expr, lhs_type);
 
-        if (!types_match(assign->identifier->type, expr_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assign), "Type mismatch. Trying to assign expression of type '%s' to variable of type '%s'", type_to_str(expr_type), type_to_str(assign->identifier->type));
+        if (!types_match(lhs_type, expr_type)) {
+            if (assign->lhs->head.type == AST_MEMBER_ACCESS) {
+                DynamicArray accessors = ((AstMemberAccess *)(assign->lhs))->chain;
+                AstDeclaration *member = ((AstAccessor **)(accessors.items))[accessors.count - 1]->member;
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assign), "Type mismatch. Trying to assign value of type '%s' to member '%s' of type '%s'", type_to_str(expr_type), member->identifier->name, type_to_str(lhs_type));
+            } else if (assign->lhs->head.type == AST_LITERAL) {
+                char *ident_name = ((AstLiteral *)(assign->lhs))->as.identifier.name;
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assign), "Type mismatch. Trying to assign value of type '%s' to variable '%s' of type '%s'", type_to_str(expr_type), ident_name, type_to_str(lhs_type));
+            }
             exit(1);
         }
 
@@ -213,13 +246,42 @@ void check_statement(Typer *typer, AstNode *stmt) {
         return;
     }
     case AST_STRUCT: {
-        AstStruct *ast_struct = (AstStruct *)(stmt);
+        AstStruct *struct_defn = (AstStruct *)(stmt);
 
-        // @Incomplete - Check all the entries in the symbol table 
-        // for (unsigned int i = 0; i < ast_struct->members.count; i++) {
-        //     AstDeclaration *member = ((AstDeclaration **)(ast_struct->members.items))[i];
-        //     check_declaration(typer, member);
-        // }
+        DynamicArray members = get_struct_members(struct_defn);
+        for (unsigned int i = 0; i < members.count; i++) {
+            AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+            check_declaration(typer, member);
+        }
+        
+        // C-style struct alignment + padding
+        int alignment = 0;
+        int largest_alignment = 0;
+        int offset  = 0;
+        for (unsigned int i = 0; i < members.count; i++) {
+            AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+            
+            int member_size = size_of_type(typer->parser, member->declared_type);
+            if (member->declared_type.kind == TYPE_STRUCT) {
+                AstStruct *struct_defn = get_struct(&typer->parser->type_table, member->declared_type.as.identifier);
+                assert(struct_defn != NULL);
+                alignment = struct_defn->padding;
+            } else {
+                alignment = member_size;
+            }
+            offset = align_value(offset, alignment);
+
+            member->member_offset = offset;
+            offset               += member_size;
+
+            if (alignment > largest_alignment) largest_alignment = alignment;
+        }
+        struct_defn->size_bytes = align_value(offset, largest_alignment);
+        struct_defn->padding    = largest_alignment;
+
+        typer->parser->ident_table.current_scope->bytes_allocated += struct_defn->size_bytes;
+
+        free(members.items);
         return;
     }
     case AST_FOR: {
@@ -243,7 +305,7 @@ void check_statement(Typer *typer, AstNode *stmt) {
             ast_for->iterator->type = type(TYPE_INTEGER);
 
             // allocate space for the iterator, start and end
-            typer->parser->ident_table.current_scope->bytes_allocated += size_of_type(ast_for->iterator->type) * 3;
+            typer->parser->ident_table.current_scope->bytes_allocated += size_of_type(typer->parser, ast_for->iterator->type) * 3;
         } else {
             // ToDo: Implement for unnamed for-statements
             XXX;
@@ -266,6 +328,7 @@ TypeInfo check_expression(Typer *typer, AstExpr *expr, TypeInfo lhs_type) {
     else if (expr->head.type == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr));
     else if (expr->head.type == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr));
     else if (expr->head.type == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), lhs_type);
+    else if (expr->head.type == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr));
     else if (expr->head.type == AST_RANGE_EXPR)     result = type(TYPE_INTEGER);
     else {
         printf("%s:%d: compiler-error: Unhandled cases in 'type_expression'. Expression was of type %s", __FILE__, __LINE__, ast_type_name(expr->head.type));
@@ -274,6 +337,50 @@ TypeInfo check_expression(Typer *typer, AstExpr *expr, TypeInfo lhs_type) {
 
     expr->evaluated_type = result;
     return result;
+}
+
+TypeInfo check_member_access(Typer *typer, AstMemberAccess *ma) {  
+    Symbol *ident_sym = symbol_lookup(&typer->parser->ident_table, ma->ident->name);
+    if (ident_sym == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ma->ident), "Undeclared variable '%s'", ma->ident->name);
+        exit(1);
+    }
+
+    AstIdentifier *ident = ident_sym->as.identifier;
+    if (ident->type.kind != TYPE_STRUCT) {
+        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ma->ident), "Trying to access variable '%s' of type '%s'", ident->name, type_to_str(ident->type));
+        exit(1);
+    }
+
+    AstStruct *curr_struct = symbol_lookup(&typer->parser->type_table, ident->type.as.identifier)->as.struct_defn;
+    AstAccessor *ac        = NULL;
+    for (unsigned int i = 0; i < ma->chain.count; i++) {
+        ac = ((AstAccessor **)(ma->chain.items))[i];
+
+        AstDeclaration *member = get_struct_member(curr_struct, ac->name);
+        if (member == NULL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ac), "'%s' is not a member of '%s'", ac->name, curr_struct->identifier->name);
+            report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(curr_struct), "Here is the definition of '%s'", curr_struct->identifier->name);
+            exit(1);
+        }
+
+        if (member->declared_type.kind == TYPE_STRUCT) {
+            // Change the type we are looking at to that of the member in the next iteration of the loop
+            curr_struct = symbol_lookup(&typer->parser->type_table, member->declared_type.as.identifier)->as.struct_defn;
+            ac->member = member;
+            continue;
+        }
+
+        bool has_next = (i + 1) < ma->chain.count;
+        if (has_next) {
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ac), "Trying to access '%s' of type '%s'", ac->name, type_to_str(member->declared_type));
+            exit(1);
+        }
+
+        ac->member = member;
+    }
+
+    return ac->member->declared_type;
 }
 
 TypeInfo check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, TypeInfo lhs_type) {
@@ -286,11 +393,11 @@ TypeInfo check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Ty
         }
         Symbol *existing = symbol_lookup(&typer->parser->type_table, struct_literal->explicit_type.as.identifier);
         if (existing == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(struct_literal), "Unknown type '%s'", type_to_str(struct_literal->explicit_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(&struct_literal->explicit_type), "Unknown type '%s'", type_to_str(struct_literal->explicit_type));
             exit(1);
         }
 
-        struct_defn = existing->as_value.struct_defn;
+        struct_defn = existing->as.struct_defn;
     }
     else {
         // Type is inferred from the type on the declaration
@@ -305,35 +412,61 @@ TypeInfo check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Ty
 
         Symbol *existing = symbol_lookup(&typer->parser->type_table, lhs_type.as.identifier);
         if (existing == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(struct_literal), "Unknown type '%s'", type_to_str(struct_literal->explicit_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(&struct_literal->explicit_type), "Unknown type '%s'", type_to_str(struct_literal->explicit_type));
             exit(1);
         }
 
-        struct_defn = existing->as_value.struct_defn;
+        struct_defn = existing->as.struct_defn;
     }
 
-    for (unsigned int i = 0; i < struct_literal->designators.count; i++) {
-        AstStructDesignator *sd = ((AstStructDesignator **)(struct_literal->designators.items))[i];
+    DynamicArray members  = get_struct_members(struct_defn);
+    unsigned int curr_member_index = 0;
+    for (unsigned int i = 0; i < struct_literal->initializers.count; i++) {
+        AstStructInitializer *init = ((AstStructInitializer **)(struct_literal->initializers.items))[i];
 
-        Symbol *member_sym = symbol_lookup(&struct_defn->members, sd->member->name);
-        if (member_sym == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(sd->member), "'%s' is not a member of '%s'", sd->member->name, struct_defn->identifier->name);
-            report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(struct_defn), "Here is the definition of '%s'", struct_defn->identifier->name);
-            exit(1);
-        }
+        if (init->designator != NULL) {
+            AstDeclaration *member = get_struct_member(struct_defn, init->designator->name);
+            if (member == NULL) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(init->designator), "'%s' is not a member of '%s'", init->designator->name, struct_defn->identifier->name);
+                report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(struct_defn), "Here is the definition of '%s'", struct_defn->identifier->name);
+                exit(1);
+            }
 
-        AstDeclaration *struct_member = member_sym->as_value.struct_member;
-        TypeInfo member_type = struct_member->declared_type;
-        TypeInfo value_type = check_expression(typer, sd->value, member_type); // @Note - Passing down the member_type here, makes it possible for sub-struct initialization without explicitly having to type them
-        if (!types_match(member_type, value_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(sd->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", struct_member->identifier->name, type_to_str(struct_member->declared_type), type_to_str(value_type));
-            exit(1);
+            TypeInfo member_type = member->declared_type;
+            TypeInfo value_type  = check_expression(typer, init->value, member_type); // @Note - Passing down the member_type here, makes it possible for sub-struct initialization without explicitly having to type them
+            if (!types_match(member_type, value_type)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(init->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", member->identifier->name, type_to_str(member_type), type_to_str(value_type));
+                report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(struct_defn), "Here is the definition of '%s'", struct_defn->identifier->name);
+                exit(1);
+            }
+
+            curr_member_index  = member->member_index + 1;
+            init->member_index = member->member_index;
+        } else {
+            if (curr_member_index > members.count - 1) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(init), "Initializing to unknown member");
+                exit(1);
+            }
+            
+            AstDeclaration *member = ((AstDeclaration **)(members.items))[i];
+            TypeInfo member_type   = member->declared_type;
+            TypeInfo value_type    = check_expression(typer, init->value, member_type);
+            if (!types_match(member_type, value_type)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->identifier->name, type_to_str(member_type), type_to_str(value_type));
+                report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(struct_defn), "Here is the definition of '%s'", struct_defn->identifier->name);
+                exit(1);
+            }
+
+            init->member_index = curr_member_index;
+            curr_member_index += 1;
         }
     }
 
     if (struct_literal->explicit_type.kind != TYPE_UNTYPED) {
+        struct_literal->explicit_type.kind = TYPE_STRUCT;
         return struct_literal->explicit_type;
     } else {
+        lhs_type.kind = TYPE_STRUCT;
         return lhs_type;
     }
 }
@@ -422,9 +555,40 @@ TypeInfo check_literal(Typer *typer, AstLiteral *literal) {
         }
 
         // Type must have been resolved at this point
-        return ident_symbol->as_value.identifier->type;
+        return ident_symbol->as.identifier->type;
     }
     else {
         XXX;
     }
+}
+
+int cmp_members(const void *a, const void *b) {
+    return (*(AstDeclaration **)(a))->member_index - (*(AstDeclaration **)(b))->member_index;
+}
+
+DynamicArray get_struct_members(AstStruct *struct_defn) {
+    DynamicArray member_entries = symbol_get_symbols(&struct_defn->member_table);
+    DynamicArray members        = da_init(member_entries.count, sizeof(AstDeclaration *));
+    for (unsigned int i = 0; i < member_entries.count; i++) {
+        da_append(&members, ((Symbol **)(member_entries.items))[i]->as.struct_member);
+    }
+    free(member_entries.items);
+
+    qsort(members.items, members.count, members.item_size, cmp_members);
+    return members;
+}
+
+AstStruct *get_struct(SymbolTable *type_table, char *name) {
+    Symbol *struct_sym = symbol_lookup(type_table, name);
+    if (struct_sym == NULL) return NULL;
+    assert(struct_sym->type == AST_STRUCT);
+    return struct_sym->as.struct_defn;
+}
+
+AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name) {
+    Symbol *member_sym = symbol_lookup(&struct_defn->member_table, name);
+    if (member_sym == NULL) return NULL;
+
+    assert(member_sym->type == AST_DECLARATION);
+    return member_sym->as.struct_member;
 }

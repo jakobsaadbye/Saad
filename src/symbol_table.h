@@ -1,4 +1,3 @@
-#include "lib/dynamic_array.c"
 #include "lib/table.c"
 
 #define SYMBOL_HASH_TABLE_LENGTH 8

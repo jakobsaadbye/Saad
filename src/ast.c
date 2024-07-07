@@ -3,20 +3,12 @@
 
 #define MAX_STATEMENTS_WITHIN_BLOCK 64
 
-typedef struct AstNode AstNode;
-typedef struct AstExpr AstExpr;
-typedef struct AstDeclaration AstDeclaration;
-typedef struct AstBinary AstBinary;
-typedef struct AstUnary AstUnary;
-typedef struct AstLiteral AstLiteral;
-typedef struct AstIdentifier AstIdentifier;
-
 typedef enum AstType {
     AST_ERR,
     AST_BLOCK,
     AST_STRUCT,
     AST_STRUCT_LITERAL,
-    AST_STRUCT_DESIGNATOR,
+    AST_STRUCT_INITIALIZER,
     AST_FUNCTION_DEFN,
     AST_FUNCTION_CALL,
     AST_DECLARATION,
@@ -27,10 +19,13 @@ typedef enum AstType {
     AST_IF,
     AST_FOR,
     AST_EXPR,
+    AST_TYPE_INFO,
     AST_RANGE_EXPR,
     AST_BINARY,
     AST_UNARY,
     AST_IDENTIFIER,
+    AST_ACCESSOR,
+    AST_MEMBER_ACCESS,
     AST_LITERAL,
 } AstType;
 
@@ -62,19 +57,21 @@ typedef struct AstNode {
 
 typedef enum TypeKind {
     TYPE_UNTYPED,
+    TYPE_VAR,   // This type is here, when we don't know the actual type yet. F.x 'a : Car', Car might refer to a struct or an enum
     TYPE_VOID,
     TYPE_BOOL,
     TYPE_INTEGER,
     TYPE_FLOAT,
     TYPE_STRING,
-    TYPE_VAR,   // This type is here, when we don't know the actual type yet. F.x 'a : Car', Car might refer to a struct or an enum
-    TYPE_STRUCT,
+    TYPE_STRUCT, // @Cleanup - Is this needed?
 } TypeKind;
 
 typedef struct TypeInfo {
+    AstNode head;
+
     TypeKind kind;
     union {
-        char *identifier; // A name to a struct, enum or function @ Note - enums and functions are not yet a thing
+        char *identifier; // A name to a struct, enum or function @Note - enums and functions are not yet a thing
     } as;
 } TypeInfo;
 
@@ -89,6 +86,16 @@ typedef struct AstCode {
     DynamicArray statements;
 } AstCode;
 
+typedef struct AstIdentifier {
+    AstNode head;
+
+    TypeInfo type;
+    char    *name;
+    int      length;
+
+    int stack_offset;
+} AstIdentifier;
+
 typedef enum DeclarationType {
     DECLARATION_TYPED,          // ex. a : int = b
     DECLARATION_TYPED_NO_EXPR,  // ex. a : int
@@ -97,8 +104,8 @@ typedef enum DeclarationType {
 } DeclarationType;
 
 typedef enum DeclarationFlags {
-    DF_IS_STRUCT_MEMBER = 0x001,
-    DF_IS_FUNCTION_PARAMETER = 0x002,
+    DECL_IS_STRUCT_MEMBER      = 1 << 1,
+    DECL_IS_FUNCTION_PARAMETER = 1 << 2,
 } DeclarationFlags;
 
 typedef struct AstDeclaration {
@@ -109,6 +116,9 @@ typedef struct AstDeclaration {
     TypeInfo         declared_type;
     AstExpr         *expr;
     DeclarationFlags flags;
+
+    int member_index;   // Used to know the insertion order of a struct member
+    int member_offset;  // Relative offset within the struct
 } AstDeclaration;
 
 typedef enum AssignOp {
@@ -122,7 +132,7 @@ typedef enum AssignOp {
 typedef struct AstAssignment {
     AstNode head;
 
-    AstIdentifier *identifier;
+    AstExpr *lhs;
     AssignOp op;
     AstExpr *expr;
 } AstAssignment;
@@ -138,7 +148,10 @@ typedef struct AstStruct {
     AstNode head;
 
     AstIdentifier *identifier;
-    SymbolTable members; // of AstDeclaration
+    SymbolTable    member_table; // of AstDeclaration
+
+    unsigned size_bytes;
+    unsigned padding;
 } AstStruct;
 
 typedef struct AstFunctionDefn {
@@ -202,7 +215,7 @@ typedef struct AstRangeExpr {
 
     AstExpr* start;
     AstExpr* end;
-    bool inclusive;
+    bool     inclusive;
 } AstRangeExpr;
 
 typedef struct AstBinary {
@@ -213,43 +226,50 @@ typedef struct AstBinary {
     AstExpr  *right;
 } AstBinary;
 
+
+typedef struct AstAccessor {
+    AstNode head;
+
+    char *name;
+    AstDeclaration *member; // Member that is being accessed. NULL in case of the first accessor
+} AstAccessor;
+
+typedef struct AstMemberAccess {
+    AstExpr head;
+
+    AstIdentifier *ident;
+    DynamicArray chain; // Of *AstAccessor
+} AstMemberAccess;
+
 typedef struct AstUnary {
     AstExpr head;
 
     OperatorType operator;
-    AstExpr  *expr;
+    AstExpr     *expr;
 } AstUnary;
 
 typedef struct AstStructLiteral {
     AstExpr head;
 
-    TypeInfo explicit_type;
-    DynamicArray designators; // of AstDesignator
+    TypeInfo     explicit_type;
+    DynamicArray initializers; // of AstStructInitializer
 } AstStructLiteral;
 
-typedef struct AstStructDesignator {
+typedef struct AstStructInitializer {
     AstNode head;
 
-    AstIdentifier *member;
-    AstExpr *value;
-} AstStructDesignator;
+    AstIdentifier *designator; // *Optional
+    AstExpr       *value;
+
+    int member_index;
+} AstStructInitializer;
 
 typedef struct AstLiteral {
     AstExpr head;
 
     TokenType type;
-    As_value as;
+    As_value  as;
 } AstLiteral;
-
-typedef struct AstIdentifier {
-    AstNode head;
-
-    TypeInfo type;
-    char *name;
-    int   length;
-
-    int stack_offset;
-} AstIdentifier;
 
 char *type_to_str(TypeInfo type) {
     switch (type.kind) {

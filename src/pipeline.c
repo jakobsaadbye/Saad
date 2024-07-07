@@ -16,7 +16,7 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
     ok = lex(&lexer);
     if (!ok) return false;
 
-    dump_tokens(&lexer);
+    // dump_tokens(&lexer);
 
     // Parse
     Parser parser   = parser_init(&lexer);

@@ -8,7 +8,6 @@ segment .data
    string_false DB "false", 10, 0
    string_true  DB "true", 10, 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   CS0 DB "Hello world!", 0 
 
 segment .text
    global main
@@ -31,24 +30,10 @@ main:
    mov		rbp, rsp
    sub		rsp, 48
 
-   ; initialization of 'a'
-   mov		QWORD -8[rbp], 0
-   mov		rax, CS0
-   push		rax
-
-
-   ; putting result into 'a'
-   pop		rax
-   mov		QWORD -8[rbp], rax
-
-   ; expression of print
-   mov		rax, QWORD -8[rbp]
-   push		rax
-
-   ; call to print
-   pop		rdx
-   mov		rcx, fmt_string
-   call		printf
+   ; initialization of 'samoid'
+   mov		DWORD -12[rbp], 0
+   mov		DWORD -8[rbp], 0
+   mov		DWORD -4[rbp], 0
 L0:
    mov		rax, 0
    add		rsp, 48
