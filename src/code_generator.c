@@ -1,13 +1,9 @@
-// @Cleanup - When looking up identifiers, right now we do [rbp - offset] for new allocations and for lookup. This leads to wrong
-//            results when inside a function as the offset is positive. Instead we should do something like this 'offset[rbp]'. That way it
-//            it will work for both positive and negative offsets!
-
 #include "typer.c"
 
 typedef struct CodeGenerator {
-    StringBuilder head; // Declaring bit target and other misc stuff
-    StringBuilder data; // Corresponding to section .data
-    StringBuilder code; // Corresponding to section .text
+    StringBuilder head;     // Declaring bit target and other misc stuff
+    StringBuilder data;     // Corresponding to section .data
+    StringBuilder code;     // Corresponding to section .text
 
     Parser *parser;
 
@@ -16,7 +12,6 @@ typedef struct CodeGenerator {
     SymbolTable type_table;
 
     size_t base_ptr;
-    int stack_space;
 
     size_t constants;   // For float and string literals
     size_t labels;      // For coditional jumps
@@ -50,9 +45,9 @@ int member_access_address(CodeGenerator *cg, AstMemberAccess *ma);
 
 CodeGenerator code_generator_init(Parser *parser) {
     CodeGenerator cg = {0};
-    cg.head        = string_builder_init(1024);
-    cg.data        = string_builder_init(1024);
-    cg.code        = string_builder_init(1024);
+    cg.head = string_builder_init(1024);
+    cg.data = string_builder_init(1024);
+    cg.code = string_builder_init(1024);
 
     cg.parser         = parser;
     cg.ident_table    = parser->ident_table;
@@ -505,15 +500,59 @@ void zero_initialize(CodeGenerator *cg, AstDeclaration *decl, int stack_offset) 
     }
 }
 
+void assign_simple_value(CodeGenerator *cg, int address, TypeInfo lhs_type, TypeInfo value_type) {
+    if (lhs_type.kind == TYPE_INTEGER) {
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], eax\n", address);
+    }
+    else if (lhs_type.kind == TYPE_FLOAT) {
+        if (value_type.kind == TYPE_INTEGER) {
+            // Int to float conversion
+            sb_append(&cg->code, "   pop\trax\n");
+            sb_append(&cg->code, "   cvtsi2ss\txmm0, rax\n");
+            sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", address);
+        } else {
+            sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+            sb_append(&cg->code, "   add\t\trsp, 4\n");
+            sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", address);
+        }
+    }
+    else if (lhs_type.kind == TYPE_BOOL) {
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   mov\t\tBYTE %d[rbp], al\n", address);
+    }
+    else if (lhs_type.kind == TYPE_STRING) {
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", address);
+    }
+    else {
+        XXX;
+    }
+}
+
+void emit_struct_initialization(CodeGenerator *cg, AstStructLiteral *lit, int start_offset) {
+    for (unsigned int i = 0; i < lit->initializers.count; i++) {
+        AstStructInitializer *init = ((AstStructInitializer **)(lit->initializers.items))[i];
+
+        emit_expression(cg, init->value);
+
+        // Move value into respective members' address
+        int member_address  = start_offset + init->member->member_offset;
+        TypeInfo value_type = init->value->evaluated_type;
+
+        if (init->value->head.type == AST_STRUCT_LITERAL) {
+            emit_struct_initialization(cg, (AstStructLiteral *)(init->value), member_address);
+        } else {
+            assign_simple_value(cg, member_address, init->member->declared_type, value_type);
+        }
+    }
+}
+
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     int type_size = size_of_type(cg->parser, decl->declared_type);
     cg->base_ptr += type_size;
 
-    TypeKind declared_type = decl->declared_type.kind;
-    if (declared_type == TYPE_INTEGER || declared_type == TYPE_FLOAT || declared_type == TYPE_STRING) {
-        cg->base_ptr = align_value(cg->base_ptr, type_size);
-    }
-
+    cg->base_ptr = align_value(cg->base_ptr, type_size);
     decl->identifier->stack_offset = -cg->base_ptr;
     int stack_offset = decl->identifier->stack_offset;
 
@@ -522,29 +561,16 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     zero_initialize(cg, decl, stack_offset);
     
     if (decl->declaration_type != DECLARATION_TYPED_NO_EXPR) {
-        emit_expression(cg, decl->expr);
+        if (decl->expr->head.type == AST_STRUCT_LITERAL) {
+            // Struct assignment
+            emit_struct_initialization(cg, (AstStructLiteral *)(decl->expr), stack_offset);
+        } else {
+            // Simple assignment
+            emit_expression(cg, decl->expr);
 
-        sb_append(&cg->code, "\n\n");
-        sb_append(&cg->code, "   ; putting result into '%s'\n", decl->identifier->name);
-        if (declared_type == TYPE_INTEGER) {
-            sb_append(&cg->code, "   pop\t\trax\n");
-            sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], eax\n", stack_offset);
-        }
-        else if (declared_type == TYPE_FLOAT) {
-            sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-            sb_append(&cg->code, "   add\t\trsp, 4\n");
-            sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", stack_offset);
-        }
-        else if (declared_type == TYPE_BOOL) {
-            sb_append(&cg->code, "   pop\t\trax\n");
-            sb_append(&cg->code, "   mov\t\tBYTE %d[rbp], al\n", stack_offset);
-        }
-        else if (declared_type == TYPE_STRING) {
-            sb_append(&cg->code, "   pop\t\trax\n");
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", stack_offset);
-        }
-        else {
-            XXX;
+            sb_append(&cg->code, "\n\n");
+            sb_append(&cg->code, "   ; putting result into '%s'\n", decl->identifier->name);
+            assign_simple_value(cg, stack_offset, decl->declared_type, decl->expr->evaluated_type);
         }
     }
 }
@@ -558,11 +584,11 @@ void emit_operator_divide(CodeGenerator *cg, AstBinary *bin) {
     if (l_type == TYPE_INTEGER && r_type == TYPE_INTEGER) {
         emit_expression(cg, bin->left);
         emit_expression(cg, bin->right);
-        sb_append(&cg->code, "   pop\t\trbx\n"); // divisor
-        sb_append(&cg->code, "   pop\t\trax\n"); // dividend
-        sb_append(&cg->code, "   cqo\n"); // sign extend rax through rax:rdx needed for division for some reason???
+        sb_append(&cg->code, "   pop\t\trbx\n");    // divisor
+        sb_append(&cg->code, "   pop\t\trax\n");    // dividend
+        sb_append(&cg->code, "   cqo\n");           // sign extend rax through rax:rdx needed for division for some reason???
         sb_append(&cg->code, "   idiv\t\trbx\n");
-        sb_append(&cg->code, "   push\t\trax\n"); // quotient is in rax
+        sb_append(&cg->code, "   push\t\trax\n");   // quotient is in rax
         return;
     }
 
@@ -867,7 +893,6 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             sb_append(&cg->code, "   push\t\trax\n");
             return;
         }
-
         XXX;
 
         return;
@@ -933,6 +958,9 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
         XXX;
     }
+    case AST_STRUCT_LITERAL:
+        // Handled in either the assignment or declaration
+        break;
     default:
         printf("%s:%d: compiler-error: There were unhandled cases in 'emit_expression' with %s\n", __FILE__, __LINE__, ast_type_name(expr->head.type));
         exit(1);

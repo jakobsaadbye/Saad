@@ -69,9 +69,9 @@ void check_declaration(Typer *typer, AstDeclaration *decl) {
     case DECLARATION_TYPED: {
         resolve_enum_or_struct_type(typer, decl);
         
-        check_expression(typer, decl->expr, decl->declared_type);
-        if (!types_match(decl->expr->evaluated_type, decl->declared_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(decl), "Variable was said to be of type %s, but expression is of type %s", type_to_str(decl->declared_type), type_to_str(decl->expr->evaluated_type));
+        TypeInfo expr_type = check_expression(typer, decl->expr, decl->declared_type);
+        if (!types_match(expr_type, decl->declared_type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(decl), "Variable was said to be of type %s, but expression is of type %s", type_to_str(decl->declared_type), type_to_str(expr_type));
             exit(1);
         }
 
@@ -100,13 +100,15 @@ void check_declaration(Typer *typer, AstDeclaration *decl) {
     }
 }
 
-bool types_match(TypeInfo a, TypeInfo b) {
-    assert(!(a.kind == TYPE_VAR || b.kind == TYPE_VAR) && "Matching unresolved types");
+bool types_match(TypeInfo lhs, TypeInfo rhs) {
+    assert(!(lhs.kind == TYPE_VAR || rhs.kind == TYPE_VAR)); // Type slots should have been resolved at this point
 
-    if (is_primitive_type(a.kind) && is_primitive_type(b.kind)) {
-        return a.kind == b.kind;
-    } else if (a.kind == TYPE_STRUCT && b.kind == TYPE_STRUCT) {
-        return strcmp(a.as.identifier, b.as.identifier) == 0;
+    if (is_primitive_type(lhs.kind) && is_primitive_type(rhs.kind)) {
+        // Allow int to float implicit casting
+        if (lhs.kind == TYPE_FLOAT && rhs.kind == TYPE_INTEGER) return true;
+        else return lhs.kind == rhs.kind;
+    } else if (lhs.kind == TYPE_STRUCT && rhs.kind == TYPE_STRUCT) {
+        return strcmp(lhs.as.identifier, rhs.as.identifier) == 0;
     } else {
         return false;
     }
@@ -440,8 +442,8 @@ TypeInfo check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Ty
                 exit(1);
             }
 
-            curr_member_index  = member->member_index + 1;
-            init->member_index = member->member_index;
+            init->member = member;
+            curr_member_index = member->member_index + 1;
         } else {
             if (curr_member_index > members.count - 1) {
                 report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(init), "Initializing to unknown member");
@@ -457,7 +459,7 @@ TypeInfo check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Ty
                 exit(1);
             }
 
-            init->member_index = curr_member_index;
+            init->member = member;
             curr_member_index += 1;
         }
     }

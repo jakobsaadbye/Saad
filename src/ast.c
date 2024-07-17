@@ -150,8 +150,8 @@ typedef struct AstStruct {
     AstIdentifier *identifier;
     SymbolTable    member_table; // of AstDeclaration
 
-    unsigned size_bytes;
-    unsigned padding;
+    unsigned int size_bytes;
+    unsigned int padding;
 } AstStruct;
 
 typedef struct AstFunctionDefn {
@@ -258,10 +258,10 @@ typedef struct AstStructLiteral {
 typedef struct AstStructInitializer {
     AstNode head;
 
-    AstIdentifier *designator; // *Optional
+    AstIdentifier *designator;  // *Optional
     AstExpr       *value;
 
-    int member_index;
+    AstDeclaration *member;      // Member that this initializer is initializing
 } AstStructInitializer;
 
 typedef struct AstLiteral {

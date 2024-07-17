@@ -1,9 +1,12 @@
-Vector3 :: struct {
+Vector2 :: struct {
     x : float;
     y : float;
-    z : float;
 }
 
 main :: () {
-    samoid : Vector3 = .{};
+    a := Vector2.{1, 4};
+    b := Vector2.{3, 9};
+    c := Vector2.{a.x + b.x, a.y + b.y};
+    print(c.x);
+    print(c.y);
 }

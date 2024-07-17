@@ -392,6 +392,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (c == ';')  break;
         if (c == '(')  break;
         if (c == ')')  break;
+        if (c == '}')  break;
         if (c == ',')  break;
         if (c == '.')  break;
         if (c == '\0') break;
