@@ -27,6 +27,7 @@ AstAssignment   *parse_assignment(Parser *parser);
 AstFunctionDefn *parse_function_defn(Parser *parser);
 AstFunctionCall *parse_function_call(Parser *parser);
 AstStruct       *parse_struct(Parser *parser);
+AstEnum         *parse_enum(Parser *parser);
 AstIf           *parse_if(Parser *parser);
 AstFor          *parse_for(Parser *parser);
 AstPrint        *parse_print(Parser *parser);
@@ -82,7 +83,7 @@ AstCode *parse_top_level_code(Parser *parser) {
     while (true) {
         next = peek_next_token(parser);
         if (next.type == TOKEN_END) break;
-        // @Incomplete - Need to limit what statements are allowed at top level scope
+        // @Improvement - Need to limit what statements are allowed at top level scope
         AstNode *stmt = parse_statement(parser);
         da_append(&code->statements, stmt);
     }
@@ -151,6 +152,10 @@ AstNode *parse_statement(Parser *parser) {
             stmt = (AstNode *)(parse_struct(parser));
             statement_ends_with_semicolon = false;
         }
+        else if (next.type == TOKEN_DOUBLE_COLON && next_next.type == TOKEN_TYPE_ENUM) {
+            stmt = (AstNode *)(parse_enum(parser));
+            statement_ends_with_semicolon = false;
+        }
         else if (
             next.type == ':' ||
             next.type == TOKEN_COLON_EQUAL || 
@@ -211,6 +216,137 @@ AstNode *parse_statement(Parser *parser) {
     return stmt;
 }
 
+AstLiteral *int_literal_from_value(Parser *parser, int value) {
+    AstLiteral *lit     = (AstLiteral *)(ast_allocate(parser, sizeof(AstLiteral)));
+    lit->head.head.type = AST_LITERAL;
+    lit->kind           = (LiteralKind)(TOKEN_INTEGER);
+    lit->as.integer     = value;
+    return lit;
+}
+
+bool compare_enumerator(const void *key, const void *item) {
+    AstEnumerator *etor = (AstEnumerator *)(item);
+    return strcmp(key, etor->name) == 0;
+}
+
+TypeInfo token_to_type(Token token) {
+    assert(is_type_specifier(token));
+
+    TypeInfo result = {0};
+    if (is_primitive_type_token(token)) {
+        if (token.type == TOKEN_TYPE_BOOL)   result.kind = TYPE_BOOL;
+        if (token.type == TOKEN_TYPE_INT)    result.kind = TYPE_INTEGER;
+        if (token.type == TOKEN_TYPE_FLOAT)  result.kind = TYPE_FLOAT;
+        if (token.type == TOKEN_TYPE_STRING) result.kind = TYPE_STRING;
+    }
+    else if (token.type == TOKEN_IDENTIFIER) {
+        result.kind          = TYPE_VAR;
+        result.as.identifier = token.as_value.identifier.name;
+    } else {
+        printf("%s:%d: compiler-error: Token '%s' could not be turned into a TypeKind.", __FILE__, __LINE__, token_type_to_str(token.type));
+        exit(1);
+    }
+
+    result.head.type  = AST_TYPE_INFO;
+    result.head.start = token.start;
+    result.head.end   = token.end;
+
+    return result;
+}
+
+AstEnum *parse_enum(Parser *parser) {
+    Token ident_token = peek_next_token(parser);
+    expect(parser, ident_token, TOKEN_IDENTIFIER);
+    eat_token(parser);
+    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, type_var(TYPE_ENUM, ident_token.as_value.identifier.name));
+
+    // Expose the enum as identifier so enum values can be referenced explicitly using ENUM.value
+    {
+        ident->type.flags |= TypeFlag_IS_NAME_OF_ENUM;
+        Symbol *exists = symbol_add_identifier(&parser->ident_table, ident);
+        if (exists) {
+            AstIdentifier *found = exists->as.identifier;
+            report_error_ast(parser, LABEL_ERROR, (AstNode *)(ident), "Redeclaration of '%s'", found->name);
+            report_error_ast(parser, LABEL_NOTE, (AstNode *)(found), "Here is the previous declaration of '%s'", found->name);
+            exit(1);
+        }
+    }
+
+
+    Token next = peek_next_token(parser);
+    expect(parser, next, TOKEN_DOUBLE_COLON);
+    eat_token(parser);
+
+    Token enum_token = peek_next_token(parser);
+    expect(parser, enum_token, TOKEN_TYPE_ENUM);
+    eat_token(parser);
+
+    next = peek_next_token(parser);
+    expect(parser, next, '{');
+    eat_token(parser);
+
+    AstEnum *ast_enum = (AstEnum *)(ast_allocate(parser, sizeof(AstEnum)));
+    ast_enum->enumerators = hash_table_init(8, sizeof(AstEnumerator), compare_enumerator);
+
+    next = peek_next_token(parser);
+    int auto_increment_value = 0;
+    int enum_index = 0;
+    while (next.type != '}' && next.type != TOKEN_END) {
+        if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '=') {
+            // Explicit value
+            XXX;
+        } else if (next.type == TOKEN_IDENTIFIER) {
+            // Auto-increment
+            eat_token(parser);
+
+            AstEnumerator *etor = (AstEnumerator *)(ast_allocate(parser, sizeof(AstEnumerator)));
+            etor->head.type  = AST_ENUMERATOR;
+            etor->head.start = next.start;
+            etor->head.end   = next.end;
+            etor->parent     = ast_enum;
+            etor->name       = next.as_value.identifier.name; // @Robustness - Should probably do a copy here so that we are not tied to the token array
+            etor->value      = auto_increment_value;
+            etor->index      = enum_index;
+
+            hash_table_add(&ast_enum->enumerators, etor->name, etor);
+
+            auto_increment_value++;
+            enum_index++;
+        } else {
+            report_error_token(parser, LABEL_ERROR, next, "Expected name of the enumerator");
+            exit(1);
+        }
+
+        next = peek_next_token(parser);
+        if (next.type == ',' && peek_token(parser, 1).type == '}') {
+            // Allow trailing comma
+            eat_token(parser);
+            next = peek_next_token(parser);
+        } else if (next.type == '}') {
+            break; 
+        } else if (next.type == ',') {
+            // Fallthrough and parse the next
+            eat_token(parser);
+            next = peek_next_token(parser);
+        } else {
+            report_error_token(parser, LABEL_ERROR, next, "Expected a comma here");
+            exit(1);
+        }
+    }
+    expect(parser, next, '}');
+    eat_token(parser);
+
+    ast_enum->head.type  = AST_ENUM;
+    ast_enum->head.start = ident->head.start;
+    ast_enum->head.end   = peek_token(parser, -1).end;
+    ast_enum->identifier = ident;
+
+    Symbol *exists = symbol_add_enum(&parser->type_table, ast_enum);
+    assert(!exists);
+
+    return ast_enum;
+}
+
 AstStruct *parse_struct(Parser *parser) {
     Token ident_token = peek_next_token(parser);
     expect(parser, ident_token, TOKEN_IDENTIFIER);
@@ -262,9 +398,14 @@ AstStruct *parse_struct(Parser *parser) {
 
     Symbol *existing = symbol_add_struct(&parser->type_table, ast_struct);
     if (existing) {
-        report_error_ast(parser, LABEL_ERROR, (AstNode *)(ast_struct), "Struct '%s' is already defined");
-        report_error_ast(parser, LABEL_NOTE, (AstNode *)(existing->as.struct_defn), "Here is the definition of the previously defined struct");
-        exit(1);
+        if (existing->type == AST_STRUCT) {
+            report_error_ast(parser, LABEL_ERROR, (AstNode *)(ast_struct->identifier), "Struct '%s' is already defined", ast_struct->identifier->name);
+            report_error_ast(parser, LABEL_NOTE, (AstNode *)(existing->as.struct_defn), "Here is the previously defined struct");
+            exit(1);
+        } else {
+            report_error_ast(parser, LABEL_ERROR, (AstNode *)(ast_struct->identifier), "Struct '%s' is already defined as an enum", ast_struct->identifier->name);
+            report_error_ast(parser, LABEL_NOTE, (AstNode *)(existing->as.enum_defn), "Here is the previously defined enum");
+        }
     }
 
     return ast_struct;
@@ -273,7 +414,7 @@ AstStruct *parse_struct(Parser *parser) {
 AstAssignment *parse_assignment(Parser *parser) {
     AstExpr *lhs = parse_expression(parser, MIN_PRECEDENCE);
     bool valid_lhs = false;
-    if (lhs->head.type == AST_LITERAL && ((AstLiteral *)(lhs))->type == TOKEN_IDENTIFIER) 
+    if (lhs->head.type == AST_LITERAL && ((AstLiteral *)(lhs))->kind == LITERAL_IDENTIFIER) 
         valid_lhs = true;
     if (lhs->head.type == AST_MEMBER_ACCESS) 
         valid_lhs = true;
@@ -281,17 +422,6 @@ AstAssignment *parse_assignment(Parser *parser) {
         report_error_ast(parser, LABEL_ERROR, (AstNode *)(lhs), "Invalid expression as left-hand side of assignment");
         exit(1);
     }
-
-    // Token ident_token = peek_next_token(parser);
-    // expect(parser, ident_token, TOKEN_IDENTIFIER);
-    // eat_token(parser);
-
-    // char *ident_name = ident_token.as_value.identifier.name;
-    // Symbol *ident_sym = symbol_lookup(&parser->ident_table, ident_name);
-    // if (ident_sym == NULL) {
-    //     report_error_token(parser, LABEL_ERROR, ident_token, "Undeclared variable '%s'", ident_name);
-    //     exit(1);
-    // }
 
     Token op_token = peek_next_token(parser);
     if (!is_assignment_operator(op_token)) {
@@ -470,7 +600,7 @@ AstAccessor *make_accessor(Parser *parser, Token tok) {
     ac->head.start  = tok.start;
     ac->head.end    = tok.end;
     ac->name        = tok.as_value.identifier.name;
-    ac->member      = NULL;
+    ac->struct_member      = NULL;
     return ac;
 }
 
@@ -774,7 +904,7 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
         return make_declaration(parser, ident, DECLARATION_INFER, expr, (Token){0}, flags);
     }
 
-    // Typed. 'a : int = b' or 'a : int;'
+    // Typed. 'a : int = b' or 'a : int'
     if (next.type == ':') {
         eat_token(parser);
         next = peek_next_token(parser);
@@ -807,31 +937,6 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
     exit(1);
 }
 
-TypeInfo token_to_type(Token token) {
-    assert(is_type_specifier(token));
-
-    TypeInfo result = {0};
-    if (is_primitive_type_token(token)) {
-        if (token.type == TOKEN_TYPE_BOOL)   result.kind = TYPE_BOOL;
-        if (token.type == TOKEN_TYPE_INT)    result.kind = TYPE_INTEGER;
-        if (token.type == TOKEN_TYPE_FLOAT)  result.kind = TYPE_FLOAT;
-        if (token.type == TOKEN_TYPE_STRING) result.kind = TYPE_STRING;
-    }
-    else if (token.type == TOKEN_IDENTIFIER) {
-        result.kind = TYPE_VAR;
-        result.as.identifier = token.as_value.identifier.name;
-    } else {
-        printf("%s:%d: compiler-error: Token '%s' could not be turned into a TypeKind.", __FILE__, __LINE__, token_type_to_str(token.type));
-        exit(1);
-    }
-
-    result.head.type = AST_TYPE_INFO;
-    result.head.start = token.start;
-    result.head.end = token.end;
-
-    return result;
-}
-
 AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, Token type_token, DeclarationFlags flags) {
     TypeInfo ti = type(TYPE_UNTYPED);
     if (decl_type == DECLARATION_TYPED || decl_type == DECLARATION_TYPED_NO_EXPR) {
@@ -843,7 +948,7 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationT
     AstIdentifier *ident = make_identifier_from_token(parser, ident_token, ti);
 
     if (flags & DECL_IS_STRUCT_MEMBER) {
-        // Skip putting declaration into identifier table as structs keeps their own small symbol table of member managed in 'parse_struct'
+        // Skip putting identifier into identifier table as structs keeps their own small symbol table of members
     } else {
         Symbol *existing = symbol_add_identifier(&parser->ident_table, ident);
         if (existing != NULL) {
@@ -861,7 +966,7 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationT
     decl->identifier        = ident;
     decl->declared_type     = ti;
     decl->flags             = flags;
-    decl->expr              = decl_type == DECLARATION_TYPED_NO_EXPR ? NULL : expr;
+    decl->expr              = expr;
 
     return decl;
 }
@@ -880,12 +985,13 @@ unsigned int size_of_type(Parser *parser, TypeInfo type) {
         case TYPE_INTEGER:   return 4;
         case TYPE_FLOAT:     return 4;
         case TYPE_STRING:    return 8; // pointer to string
+        case TYPE_ENUM:      return 4;
         case TYPE_STRUCT: {
-            Symbol *type_sym = symbol_lookup(&parser->type_table, type.as.identifier);
-            assert(type_sym != NULL && "Trying to size unknown type");
-            assert(type_sym->type == AST_STRUCT);
+            Symbol *sym = symbol_lookup(&parser->type_table, type.as.identifier);
+            assert(sym != NULL && "Trying to size unknown type");
+            assert(sym->type == AST_STRUCT);
             
-            AstStruct *struct_defn = type_sym->as.struct_defn;
+            AstStruct *struct_defn = sym->as.struct_defn;
             if (struct_defn->size_bytes == 0) {
                 // TODO: Make sizing of structs dependent so that it doesn't matter which order structs are written in.
                 XXX;
@@ -896,9 +1002,9 @@ unsigned int size_of_type(Parser *parser, TypeInfo type) {
         case TYPE_VAR: {
             assert(false && "Sizing unresolved type");
         };
-        default:
-            XXX; // unreachable
     }
+
+    XXX;
 }
 
 AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, TypeInfo type) {
@@ -1046,6 +1152,21 @@ AstExpr *parse_leaf(Parser *parser) {
         return (AstExpr *)(struct_literal);
     }
 
+    if (t.type == '.' && peek_token(parser, 1).type == TOKEN_IDENTIFIER) {
+        Token ident = peek_token(parser, 1);
+
+        eat_token(parser);
+        eat_token(parser);
+
+        AstEnumLiteral *eval    = ast_allocate(parser, sizeof(AstEnumLiteral));
+        eval->head.head.type  = AST_ENUM_LITERAL;
+        eval->head.head.start = t.start;
+        eval->head.head.end   = ident.end;
+        eval->identifier      = make_identifier_from_token(parser, ident, type(TYPE_UNTYPED));
+
+        return (AstExpr *)(eval);
+    }
+
     if (t.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '.') {
         AstMemberAccess *ma = parse_member_access(parser);
         return (AstExpr *)(ma);
@@ -1060,7 +1181,7 @@ AstExpr *parse_leaf(Parser *parser) {
         return make_literal_node(parser, t);
     }
 
-    // @Robustness - Instead of reporting the error here, it would be better to "bubble up" the error
+    // @Improvement - Instead of reporting the error here, it would be better to "bubble up" the error
     // so that the full expression that couldn't be parsed can be shown instead of the last token that couldn't
     // be parsed.
     report_error_token(parser, LABEL_ERROR, t, "Invalid expression");
@@ -1084,6 +1205,11 @@ const char *ast_type_name(AstType ast_type) {
         case AST_ASSERT:             return "AST_ASSERT";
         case AST_RETURN:             return "AST_RETURN";
         case AST_STRUCT:             return "AST_STRUCT";
+        case AST_STRUCT_LITERAL:     return "AST_STRUCT_LITERAL";
+        case AST_STRUCT_INITIALIZER: return "AST_STRUCT_DESIGNATOR";
+        case AST_ENUM:               return "AST_ENUM";
+        case AST_ENUMERATOR:         return "AST_ENUMERATOR";
+        case AST_ENUM_LITERAL:       return "AST_ENUM_LITERAL";
         case AST_FUNCTION_DEFN:      return "AST_FUNCTION_DEFN";
         case AST_FUNCTION_CALL:      return "AST_FUNCTION_CALL";
         case AST_IF:                 return "AST_IF";
@@ -1093,8 +1219,6 @@ const char *ast_type_name(AstType ast_type) {
         case AST_BINARY:             return "AST_BINARY";
         case AST_UNARY:              return "AST_UNARY";
         case AST_LITERAL:            return "AST_LITERAL";
-        case AST_STRUCT_LITERAL:     return "AST_STRUCT_LITERAL";
-        case AST_STRUCT_INITIALIZER: return "AST_STRUCT_DESIGNATOR";
         case AST_ACCESSOR:           return "AST_ACCESSOR";
         case AST_MEMBER_ACCESS:      return "AST_MEMBER_ACCESS";
         case AST_IDENTIFIER:         return "AST_IDENTIFIER";
@@ -1142,7 +1266,7 @@ AstExpr *make_literal_node(Parser *parser, Token token) {
     literal->head.head.type  = AST_LITERAL;
     literal->head.head.start = token.start;
     literal->head.head.end   = token.end;
-    literal->type            = token.type;
+    literal->kind            = (LiteralKind)(token.type);
     literal->as              = token.as_value;
 
     return (AstExpr *)(literal);

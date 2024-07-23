@@ -16,8 +16,8 @@ float evaluate_expression(AstExpr *expr) {
     }
     else if (expr->head.type == AST_LITERAL) {
         AstLiteral *literal = (AstLiteral *)(expr);
-        if (literal->type == TOKEN_INTEGER) return (float)(literal->as_value.integer); // @Cleanup - also not perfect
-        if (literal->type == TOKEN_FLOAT)   return literal->as_value.floating;
+        if (literal->kind == TOKEN_INTEGER) return (float)(literal->as_value.integer); // @Cleanup - also not perfect
+        if (literal->kind == TOKEN_FLOAT)   return literal->as_value.floating;
     }
 
     printf("%s:%d: error: Got AST node which can not be evaluated as an expression \n", __FILE__, __LINE__); // @Cleanup - Make better error message

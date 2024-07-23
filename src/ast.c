@@ -9,6 +9,9 @@ typedef enum AstType {
     AST_STRUCT,
     AST_STRUCT_LITERAL,
     AST_STRUCT_INITIALIZER,
+    AST_ENUM,
+    AST_ENUMERATOR,
+    AST_ENUM_LITERAL,
     AST_FUNCTION_DEFN,
     AST_FUNCTION_CALL,
     AST_DECLARATION,
@@ -29,23 +32,24 @@ typedef enum AstType {
     AST_LITERAL,
 } AstType;
 
-typedef enum OperatorType {
-    OP_LOGICAL_OR = TOKEN_LOGICAL_OR,
-    OP_LOGICAL_AND = TOKEN_LOGICAL_AND,
+typedef enum OperatorType {     // Here so that operators with the same symbols still can have different enumerations f.x unary minus and simple minus
+    OP_LOGICAL_OR   = TOKEN_LOGICAL_OR,
+    OP_LOGICAL_AND  = TOKEN_LOGICAL_AND,
     OP_DOUBLE_EQUAL = TOKEN_DOUBLE_EQUAL,
-    OP_NOT_EQUAL = TOKEN_NOT_EQUAL,
+    OP_NOT_EQUAL    = TOKEN_NOT_EQUAL,
+    OP_NOT          = '!',
     OP_GREATER_THAN = '>',
-    OP_LESS_THAN = '<',
+    OP_LESS_THAN    = '<',
     OP_GREATER_THAN_EQUAL = TOKEN_GREATER_EQUAL,
-    OP_LESS_THAN_EQUAL = TOKEN_LESS_EQUAL,
-    OP_MINUS = '-',
-    OP_PLUS = '+',
-    OP_TIMES = '*',
+    OP_LESS_THAN_EQUAL    = TOKEN_LESS_EQUAL,
+
+    OP_MINUS  = '-',
+    OP_PLUS   = '+',
+    OP_TIMES  = '*',
     OP_DIVIDE = '/',
     OP_MODULO = '%',
-    OP_POWER = '^',
-    OP_NOT = '!',
-    OP_UNARY_MINUS = 5
+    OP_POWER  = '^',
+    OP_UNARY_MINUS  = 5,
 } OperatorType;
 
 typedef struct AstNode {
@@ -57,32 +61,44 @@ typedef struct AstNode {
 
 typedef enum TypeKind {
     TYPE_UNTYPED,
-    TYPE_VAR,   // This type is here, when we don't know the actual type yet. F.x 'a : Car', Car might refer to a struct or an enum
+    TYPE_VAR,   // This type is here, when we don't know the actual type yet. F.x 'a : Car', Car might refer to a struct or an enum that we only resolve in the typing phase
     TYPE_VOID,
     TYPE_BOOL,
     TYPE_INTEGER,
     TYPE_FLOAT,
     TYPE_STRING,
-    TYPE_STRUCT, // @Cleanup - Is this needed?
+    TYPE_STRUCT,
+    TYPE_ENUM,
 } TypeKind;
 
-typedef struct TypeInfo {
-    AstNode head;
+typedef enum TypeFlag {
+    TypeFlag_IS_NAME_OF_ENUM   = 1 << 0,
+    TypeFlag_IS_NAME_OF_STRUCT = 1 << 1,
+} TypeFlag;
 
+typedef struct TypeInfo {
+    AstNode  head;
     TypeKind kind;
+    TypeFlag flags;
     union {
-        char *identifier; // A name to a struct, enum or function @Note - enums and functions are not yet a thing
+        char *identifier; // A name to a struct or enum
     } as;
 } TypeInfo;
 
+typedef struct TypeEnum {
+    TypeInfo head;
+
+    // AstEnum *ast;
+    char *name;
+} TypeEnum;
+ 
 typedef struct AstExpr {
-    AstNode head;
+    AstNode  head;
     TypeInfo evaluated_type;
 } AstExpr;
 
 typedef struct AstCode {
-    AstNode head;
-
+    AstNode      head;
     DynamicArray statements;
 } AstCode;
 
@@ -132,9 +148,9 @@ typedef enum AssignOp {
 typedef struct AstAssignment {
     AstNode head;
 
-    AstExpr *lhs;
-    AssignOp op;
-    AstExpr *expr;
+    AstExpr  *lhs;
+    AssignOp  op;
+    AstExpr  *expr;
 } AstAssignment;
 
 typedef struct AstBlock {
@@ -151,8 +167,33 @@ typedef struct AstStruct {
     SymbolTable    member_table; // of AstDeclaration
 
     unsigned int size_bytes;
-    unsigned int padding;
+    unsigned int alignment;
 } AstStruct;
+
+typedef struct AstEnum {
+    AstNode head;
+
+    AstIdentifier *identifier;
+    HashTable enumerators; // of AstEnumerator
+    // TypeInfo backing_type; // has to be one of the integer types
+} AstEnum;
+
+typedef struct AstEnumerator {
+    AstNode head;
+
+    AstEnum *parent;
+
+    char    *name;
+    int      value;
+    int      index;
+} AstEnumerator;
+
+typedef struct AstEnumLiteral {
+    AstExpr head;
+
+    AstIdentifier *identifier;
+    AstEnumerator *enum_member;
+} AstEnumLiteral;
 
 typedef struct AstFunctionDefn {
     AstNode head;
@@ -163,13 +204,12 @@ typedef struct AstFunctionDefn {
     AstBlock *body;
     
     int return_label;
-
 } AstFunctionDefn;
 
 typedef struct AstFunctionCall {
     AstExpr head;
 
-    AstIdentifier *identifer; // @Cleanup - Why doesn't this have a 'evaluated_type' field???
+    AstIdentifier *identifer;
     DynamicArray arguments; // of AstExpr
 } AstFunctionCall;
 
@@ -226,12 +266,22 @@ typedef struct AstBinary {
     AstExpr  *right;
 } AstBinary;
 
+typedef enum AccessorKind {
+    Accessor_Struct,
+    Accessor_Enum,
+} AccessorKind;
 
 typedef struct AstAccessor {
     AstNode head;
 
+    AccessorKind kind;
     char *name;
-    AstDeclaration *member; // Member that is being accessed. NULL in case of the first accessor
+
+    union {
+        AstDeclaration *struct_member;
+        AstEnumerator  *enum_member;
+    };
+
 } AstAccessor;
 
 typedef struct AstMemberAccess {
@@ -261,13 +311,21 @@ typedef struct AstStructInitializer {
     AstIdentifier *designator;  // *Optional
     AstExpr       *value;
 
-    AstDeclaration *member;      // Member that this initializer is initializing
+    AstDeclaration *member;     // Member that this initializer is initializing
 } AstStructInitializer;
+
+typedef enum LiteralKind {
+    LITERAL_BOOLEAN     = TOKEN_BOOLEAN,
+    LITERAL_INTEGER     = TOKEN_INTEGER,
+    LITERAL_FLOAT       = TOKEN_FLOAT,
+    LITERAL_STRING      = TOKEN_STRING,
+    LITERAL_IDENTIFIER  = TOKEN_IDENTIFIER,
+} LiteralKind;
 
 typedef struct AstLiteral {
     AstExpr head;
 
-    TokenType type;
+    LiteralKind kind;
     As_value  as;
 } AstLiteral;
 
@@ -281,6 +339,7 @@ char *type_to_str(TypeInfo type) {
         case TYPE_STRING:    return "string";
         case TYPE_VAR:       return type.as.identifier;
         case TYPE_STRUCT:    return type.as.identifier;
+        case TYPE_ENUM:      return type.as.identifier;
     }
     XXX;
 }
@@ -293,6 +352,13 @@ bool is_primitive_type(TypeKind kind) {
     if (kind == TYPE_STRING)  return true;
 
     return false;
+}
+
+TypeInfo type_var(TypeKind kind, char *name) {
+    TypeInfo result = {0};
+    result.kind = kind;
+    result.as.identifier = name;
+    return result;
 }
 
 TypeInfo type(TypeKind kind) {

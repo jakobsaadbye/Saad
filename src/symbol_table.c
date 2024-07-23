@@ -9,6 +9,7 @@ typedef struct Symbol {
         AstFunctionDefn *function_defn;
         AstStruct       *struct_defn;
         AstDeclaration  *struct_member;
+        AstEnum         *enum_defn;
     } as;
 } Symbol;
 
@@ -26,7 +27,7 @@ SymbolTable symbol_table_init() {
     global_scope->next      = 0;
     global_scope->bytes_allocated = 0;
     st.current_scope = global_scope;
-    st.global_scope = global_scope;
+    st.global_scope  = global_scope;
 
     return st;
 }
@@ -122,6 +123,15 @@ Symbol *symbol_add_function_defn(SymbolTable *st, AstFunctionDefn *func_defn) {
     symbol.type = AST_FUNCTION_DEFN;
     symbol.name = func_defn->identifier->name;
     symbol.as.function_defn = func_defn;
+
+    return symbol_add(st, symbol);
+}
+
+Symbol *symbol_add_enum(SymbolTable *st, AstEnum *enum_defn) {
+    Symbol symbol = {0};
+    symbol.type = AST_ENUM;
+    symbol.name = enum_defn->identifier->name;
+    symbol.as.enum_defn = enum_defn;
 
     return symbol_add(st, symbol);
 }

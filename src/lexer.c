@@ -12,17 +12,17 @@
 #define XXX assert(false && "Not implemented")
 
 
-#define COLOR_RESET  "\x1B[0m"
-#define COLOR_RED    "\x1B[91m"
-#define COLOR_YELLOW "\x1B[33m"
-#define COLOR_ICE    "\x1B[96m"
-#define COLOR_WHITE  "\x1B[37m"
+#define COLOR_RESET   "\x1B[0m"
+#define COLOR_RED     "\x1B[91m"
+#define COLOR_MAGENTA "\x1B[95m"
+#define COLOR_ICE     "\x1B[96m"
+#define COLOR_WHITE   "\x1B[37m"
 #define COLOR_WHITE_BOLD  "\x1B[1;37m"
 
 
-static const char *LABEL_NOTE    = COLOR_ICE    "note"    COLOR_RESET;
-static const char *LABEL_ERROR   = COLOR_RED    "error"   COLOR_RESET;
-static const char *LABEL_WARNING = COLOR_YELLOW "warning" COLOR_RESET;
+static const char *LABEL_NOTE    = COLOR_ICE     "note"    COLOR_RESET;
+static const char *LABEL_ERROR   = COLOR_RED     "error"   COLOR_RESET;
+static const char *LABEL_WARNING = COLOR_MAGENTA "warning" COLOR_RESET;
 
 typedef enum TokenType {
     TOKEN_NONE      = 0,
@@ -68,6 +68,7 @@ typedef enum TokenType {
     TOKEN_TYPE_STRING  = 182,
     TOKEN_TYPE_BOOL    = 183,
     TOKEN_TYPE_STRUCT  = 184,
+    TOKEN_TYPE_ENUM    = 185,
     
     TOKEN_END          = 254
 } TokenType;
@@ -105,7 +106,7 @@ typedef struct Lexer {
     char *input_str;
     const char *file_path;
 
-    Token tokens[MAX_TOKENS];
+    Token tokens[MAX_TOKENS]; // @Cleanup - Turn into a dynamic array
     unsigned int token_index_cursor;
 
     Arena identifier_names;
@@ -204,10 +205,11 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_IF:            return "IF";
         case TOKEN_ELSE:          return "ELSE";
         case TOKEN_TYPE_INT:      return "TYPE_INT";
+        case TOKEN_TYPE_BOOL:     return "TYPE_BOOL";
         case TOKEN_TYPE_FLOAT:    return "TYPE_FLOAT";
         case TOKEN_TYPE_STRING:   return "TYPE_STRING";
         case TOKEN_TYPE_STRUCT:   return "TYPE_STRUCT";
-        case TOKEN_TYPE_BOOL:     return "TYPE_BOOL";
+        case TOKEN_TYPE_ENUM:     return "TYPE_ENUM";
         case TOKEN_END:           return "END";
     }
 
@@ -421,6 +423,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "bool") == 0) token = TOKEN_TYPE_BOOL;
         if (strcmp(text, "true") == 0) token = TOKEN_TRUE;
         if (strcmp(text, "else") == 0) token = TOKEN_ELSE;
+        if (strcmp(text, "enum") == 0) token = TOKEN_TYPE_ENUM;
     }
     if (keyword_len == 5) {
         if (strcmp(text, "float") == 0)  token = TOKEN_TYPE_FLOAT;
@@ -627,6 +630,8 @@ bool is_binary_operator(TokenType op) {
     if (op == TOKEN_GREATER_EQUAL) return true;
     if (op == TOKEN_DOUBLE_EQUAL)  return true;
     if (op == TOKEN_NOT_EQUAL)     return true;
+
+    if (op == '.') return true;
     return false;
 }
 
@@ -813,8 +818,8 @@ void free_line(Line line) {
 
 const char *label_color(const char *label) {
     if (label == LABEL_NOTE)    return COLOR_ICE;
+    if (label == LABEL_WARNING) return COLOR_MAGENTA;
     if (label == LABEL_ERROR)   return COLOR_RED;
-    if (label == LABEL_WARNING) return COLOR_YELLOW;
 
     return COLOR_WHITE;
 }

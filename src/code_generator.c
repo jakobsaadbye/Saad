@@ -31,6 +31,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt);
 void emit_assert(CodeGenerator *cg, AstAssert *assertion);
 void emit_if(CodeGenerator *cg, AstIf *ast_if);
 void emit_for(CodeGenerator *cg, AstFor *ast_for);
+void emit_enum(CodeGenerator *cg, AstEnum *ast_enum);
 void emit_struct(CodeGenerator *cg, AstStruct *ast_struct);
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl);
 void emit_assignment(CodeGenerator *cg, AstAssignment *assign);
@@ -158,10 +159,19 @@ void emit_statement(CodeGenerator *cg, AstNode *node) {
         case AST_ASSERT:        emit_assert(cg, (AstAssert *)(node)); break;
         case AST_IF:            emit_if(cg, (AstIf *)(node)); break;
         case AST_FOR:           emit_for(cg, (AstFor *)(node)); break;
+        case AST_ENUM:          emit_enum(cg, (AstEnum *)(node)); break;
         case AST_STRUCT:        break;
         default:
             printf("compiler-error: emit_statement not implemented for %s\n", ast_type_name(node->type));
             XXX;
+    }
+}
+
+void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
+    DynamicArray enumerators = hash_table_get_items(&ast_enum->enumerators);
+    for (unsigned int i = 0; i < enumerators.count; i++) {
+        AstEnumerator *etor = ((AstEnumerator **)(enumerators.items))[i];
+        sb_append(&cg->data, "   __%s.%s DB \"%s.%s\", 10, 0\n", ast_enum->identifier->name, etor->name, ast_enum->identifier->name, etor->name);
     }
 }
 
@@ -471,6 +481,11 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
         sb_append(&cg->code, "   mov\t\trcx, fmt_string\n");
         sb_append(&cg->code, "   call\t\tprintf\n");
     }
+    else if (expr_type.kind == TYPE_ENUM) {
+        sb_append(&cg->code, "   pop\t\trdx\n");
+        sb_append(&cg->code, "   mov\t\trcx, fmt_int\n");
+        sb_append(&cg->code, "   call\t\tprintf\n");
+    }
     else {
         // Unhandled cases
         XXX;
@@ -483,6 +498,7 @@ void zero_initialize(CodeGenerator *cg, AstDeclaration *decl, int stack_offset) 
         case TYPE_FLOAT:   sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", stack_offset); break;
         case TYPE_BOOL:    sb_append(&cg->code, "   mov\t\tBYTE %d[rbp], 0\n",  stack_offset); break;
         case TYPE_STRING:  sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", stack_offset); break;
+        case TYPE_ENUM:    sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", stack_offset); break;
         case TYPE_STRUCT: {
             AstStruct *struct_defn = get_struct(&cg->parser->type_table, decl->declared_type.as.identifier);
             assert(struct_defn != NULL);
@@ -500,13 +516,13 @@ void zero_initialize(CodeGenerator *cg, AstDeclaration *decl, int stack_offset) 
     }
 }
 
-void assign_simple_value(CodeGenerator *cg, int address, TypeInfo lhs_type, TypeInfo value_type) {
+void assign_simple_value(CodeGenerator *cg, int address, TypeInfo lhs_type, TypeInfo rhs_type) {
     if (lhs_type.kind == TYPE_INTEGER) {
         sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], eax\n", address);
     }
     else if (lhs_type.kind == TYPE_FLOAT) {
-        if (value_type.kind == TYPE_INTEGER) {
+        if (rhs_type.kind == TYPE_INTEGER) {
             // Int to float conversion
             sb_append(&cg->code, "   pop\trax\n");
             sb_append(&cg->code, "   cvtsi2ss\txmm0, rax\n");
@@ -524,6 +540,10 @@ void assign_simple_value(CodeGenerator *cg, int address, TypeInfo lhs_type, Type
     else if (lhs_type.kind == TYPE_STRING) {
         sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", address);
+    }
+    else if (lhs_type.kind == TYPE_ENUM) {
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], eax\n", address);
     }
     else {
         XXX;
@@ -822,7 +842,7 @@ int member_access_address(CodeGenerator *cg, AstMemberAccess *ma) {
     int stack_offset     = ident->stack_offset;
     for (unsigned int i = 0; i < ma->chain.count; i++) {
         AstAccessor *ac = ((AstAccessor **)(ma->chain.items))[i];
-        stack_offset += ac->member->member_offset;
+        stack_offset += ac->struct_member->member_offset;
     }
 
     return stack_offset;
@@ -871,39 +891,58 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         AstMemberAccess *ma  = (AstMemberAccess *)(expr);
         int stack_offset = member_access_address(cg, ma);
 
-        AstDeclaration *last = ((AstAccessor **)(ma->chain.items))[ma->chain.count - 1]->member;
-        if (last->declared_type.kind == TYPE_INTEGER) {
-            sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", stack_offset);
-            sb_append(&cg->code, "   push\t\trax\n", stack_offset);
+        AstAccessor *ac = ((AstAccessor **)(ma->chain.items))[ma->chain.count - 1];
+        if (ac->kind == Accessor_Struct) {
+            AstDeclaration *member = ac->struct_member;
+            if (member->declared_type.kind == TYPE_INTEGER) {
+                sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", stack_offset);
+                sb_append(&cg->code, "   push\t\trax\n");
+                return;
+            }
+            if (member->declared_type.kind == TYPE_FLOAT) {
+                sb_append(&cg->code, "   movss\t\txmm0, %d[rbp]\n", stack_offset);
+                sb_append(&cg->code, "   sub\t\trsp, 4\n");
+                sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
+                return;
+            }
+            if (member->declared_type.kind == TYPE_BOOL) {
+                sb_append(&cg->code, "   mov\t\tal, BYTE %d[rbp]\n", stack_offset);
+                sb_append(&cg->code, "   push\t\trax\n");
+                return;
+            }
+            if (member->declared_type.kind == TYPE_STRING) {
+                sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", stack_offset);
+                sb_append(&cg->code, "   push\t\trax\n");
+                return;
+            }
+            if (member->declared_type.kind == TYPE_ENUM) {
+                sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", stack_offset);
+                sb_append(&cg->code, "   push\t\trax\n");
+                return;
+            }
+            XXX;
+        } else if (ac->kind == Accessor_Enum) {
+            sb_append(&cg->code, "   push\t\t%d\n", ac->enum_member->value);
             return;
+        } else {
+            XXX; // Should not happen
         }
-        if (last->declared_type.kind == TYPE_FLOAT) {
-            sb_append(&cg->code, "   movss\t\txmm0, %d[rbp]\n", stack_offset);
-            sb_append(&cg->code, "   sub\t\trsp, 4\n");
-            sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
-            return;
-        }
-        if (last->declared_type.kind == TYPE_STRING) {
-            sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", stack_offset);
-            sb_append(&cg->code, "   push\t\trax\n");
-            return;
-        }
-        if (last->declared_type.kind == TYPE_BOOL) {
-            sb_append(&cg->code, "   mov\t\tal, BYTE %d[rbp]\n", stack_offset);
-            sb_append(&cg->code, "   push\t\trax\n");
-            return;
-        }
-        XXX;
 
+        return;
+    }
+    case AST_ENUM_LITERAL : {
+        AstEnumLiteral *elit = (AstEnumLiteral *)(expr);
+        sb_append(&cg->code, "   push\t\t%d\n", elit->enum_member->value);
         return;
     }
     case AST_LITERAL: {
         AstLiteral *lit = (AstLiteral *)(expr);
-        if (lit->type == TOKEN_INTEGER) {
+        switch (lit->kind) {
+        case LITERAL_INTEGER: {
             sb_append(&cg->code, "   push\t\t%d\n", lit->as.integer);
             return;
         }
-        if (lit->type == TOKEN_FLOAT) {
+        case LITERAL_FLOAT: {
             sb_append(&cg->data, "   CF%d DD %lf\n", cg->constants, lit->as.floating);
             sb_append(&cg->code, "   movss\t\txmm0, [CF%d]\n", cg->constants);
             sb_append(&cg->code, "   sub\t\trsp, 4\n");
@@ -911,26 +950,27 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             cg->constants++;
             return;
         }
-        if (lit->type == TOKEN_BOOLEAN) {
+        case LITERAL_STRING: {
+            sb_append(&cg->data, "   CS%d DB \"%s\", 0 \n", cg->constants, lit->as.string.data);
+            sb_append(&cg->code, "   mov\t\trax, CS%d\n", cg->constants);
+            sb_append(&cg->code, "   push\t\trax\n", cg->constants);
+            cg->constants++;
+            return;
+        }
+        case LITERAL_BOOLEAN: {
             bool value = lit->as.boolean;
             if (value == true) sb_append(&cg->code, "   push\t\t-1\n");
             else               sb_append(&cg->code, "   push\t\t0\n"); 
             return;
         }
-        if (lit->type == TOKEN_STRING) {
-            sb_append(&cg->data, "   CS%d DB \"%s\", 0 \n", cg->constants, lit->as.string.data);
-            sb_append(&cg->code, "   mov\t\trax, CS%d\n", cg->constants);
-            sb_append(&cg->code, "   push\t\trax\n", cg->constants);
-
-            cg->constants++;
-            return;
-        }
-        if (lit->type == TOKEN_IDENTIFIER) {
+        case LITERAL_IDENTIFIER: {
             Symbol *ident_symbol = symbol_lookup(&cg->ident_table, lit->as.identifier.name);
             assert(ident_symbol != NULL);
 
             AstIdentifier *ident = ident_symbol->as.identifier;
             assert(ident != NULL);
+
+            // @Improvement - Could probably be @Refactored. Looks very similar to 'assign_simple_value'
             if (ident->type.kind == TYPE_INTEGER) {
                 sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", ident->stack_offset);
                 sb_append(&cg->code, "   push\t\trax\n", ident->stack_offset);
@@ -942,19 +982,25 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
                 return;
             }
-            if (ident->type.kind == TYPE_STRING) {
-                sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", ident->stack_offset);
-                sb_append(&cg->code, "   push\t\trax\n");
-                return;
-            }
             if (ident->type.kind == TYPE_BOOL) {
                 sb_append(&cg->code, "   mov\t\tal, BYTE %d[rbp]\n", ident->stack_offset);
                 sb_append(&cg->code, "   push\t\trax\n");
                 return;
             }
+            if (ident->type.kind == TYPE_STRING) {
+                sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", ident->stack_offset);
+                sb_append(&cg->code, "   push\t\trax\n");
+                return;
+            }
+            if (ident->type.kind == TYPE_ENUM) {
+                sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", ident->stack_offset);
+                sb_append(&cg->code, "   push\t\trax\n");
+                return;
+            }
 
             XXX;
-        }
+
+        }}
 
         XXX;
     }

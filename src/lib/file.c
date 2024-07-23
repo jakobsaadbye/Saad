@@ -1,10 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define MAX_CMD_INPUT_SIZE 1024
-
-char *read_entire_file(const char *file_path);
-
 char *read_entire_file(const char *file_path) {
     FILE *f = fopen(file_path, "r");
     if (f == NULL) {

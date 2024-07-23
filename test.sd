@@ -1,12 +1,13 @@
-Vector2 :: struct {
-    x : float;
-    y : float;
+CardValue :: enum {
+    joker,
+    ace,
+    two,
+    three,
+
+    count,
 }
 
 main :: () {
-    a := Vector2.{1, 4};
-    b := Vector2.{3, 9};
-    c := Vector2.{a.x + b.x, a.y + b.y};
-    print(c.x);
-    print(c.y);
+    a := CardValue.joker;
+    print(a);
 }
