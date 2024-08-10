@@ -16,7 +16,7 @@ typedef struct Parser {
 
     SymbolTable ident_table;
     SymbolTable function_table;
-    SymbolTable type_table;
+    TypeTable   type_table;
 } Parser;
 
 Parser           parser_init();
@@ -36,12 +36,14 @@ AstReturn       *parse_return(Parser *parser);
 AstExpr         *parse_expression(Parser *parser, int min_prec);
 AstExpr         *parse_range_or_normal_expression(Parser *parser);
 AstExpr         *parse_leaf(Parser *parser);
-AstDeclaration  *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, Token type_token, DeclarationFlags flags);
-AstExpr         *make_binary_node(Parser *parser, Token token, AstExpr *lhs, AstExpr *rhs);
-AstExpr         *make_unary_node(Parser *parser, Token token, AstExpr *expr, OperatorType op_type);
-AstExpr         *make_literal_node(Parser *parser, Token token);
-AstIdentifier   *make_identifier_from_token(Parser *parser, Token ident_token, TypeInfo type);
-AstIdentifier   *make_identifier_from_string(Parser *parser, const char *name, TypeInfo type);
+
+AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, TypeInfo *type, DeclarationFlags flags);
+AstExpr        *make_binary_node(Parser *parser, Token token, AstExpr *lhs, AstExpr *rhs);
+AstExpr        *make_unary_node(Parser *parser, Token token, AstExpr *expr, OperatorType op_type);
+AstExpr        *make_literal_node(Parser *parser, Token token);
+AstIdentifier  *make_identifier_from_token(Parser *parser, Token ident_token, TypeInfo *type);
+AstIdentifier  *make_identifier_from_string(Parser *parser, const char *name, TypeInfo *type);
+
 bool identifier_is_equal(const void *key, const void *item);
 void *ast_allocate(Parser *parser, size_t size);
 void expect(Parser *parser, Token given, TokenType expected_type);
@@ -61,16 +63,16 @@ void report_error_ast(Parser *parser, const char* label, AstNode *failing_ast, c
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
 void report_error_position(Parser *parser, const char* label, Pos position, const char *message, ...);
 int align_value(int value, int alignment);
-unsigned int size_of_type(Parser *parser, TypeInfo type);
+unsigned int size_of_type(TypeInfo *type);
 
 
 Parser parser_init(Lexer *lexer) {
     Parser parser = {0};
     parser.lexer           = lexer;
-    parser.ast_nodes       = arena_make(AST_ALLOCATION_SIZE);
+    parser.ast_nodes       = arena_init(AST_ALLOCATION_SIZE);
     parser.ident_table     = symbol_table_init();
     parser.function_table  = symbol_table_init();
-    parser.type_table      = symbol_table_init();
+    parser.type_table      = type_table_init();
 
     return parser;
 }
@@ -148,11 +150,11 @@ AstNode *parse_statement(Parser *parser) {
             statement_ends_with_semicolon = true;
         }
         // @Note - Structs should probably be parsed at the top level code instead of as a statement 
-        else if (next.type == TOKEN_DOUBLE_COLON && next_next.type == TOKEN_TYPE_STRUCT) {
+        else if (next.type == TOKEN_DOUBLE_COLON && next_next.type == TOKEN_STRUCT) {
             stmt = (AstNode *)(parse_struct(parser));
             statement_ends_with_semicolon = false;
         }
-        else if (next.type == TOKEN_DOUBLE_COLON && next_next.type == TOKEN_TYPE_ENUM) {
+        else if (next.type == TOKEN_DOUBLE_COLON && next_next.type == TOKEN_ENUM) {
             stmt = (AstNode *)(parse_enum(parser));
             statement_ends_with_semicolon = false;
         }
@@ -229,40 +231,43 @@ bool compare_enumerator(const void *key, const void *item) {
     return strcmp(key, etor->name) == 0;
 }
 
-TypeInfo token_to_type(Token token) {
-    assert(is_type_specifier(token));
-
-    TypeInfo result = {0};
-    if (is_primitive_type_token(token)) {
-        if (token.type == TOKEN_TYPE_BOOL)   result.kind = TYPE_BOOL;
-        if (token.type == TOKEN_TYPE_INT)    result.kind = TYPE_INTEGER;
-        if (token.type == TOKEN_TYPE_FLOAT)  result.kind = TYPE_FLOAT;
-        if (token.type == TOKEN_TYPE_STRING) result.kind = TYPE_STRING;
+TypeInfo *parse_type(Parser *parser) {
+    Token next = peek_next_token(parser);
+    if (is_primitive_type_token(next)) {
+        eat_token(parser);
+        TypePrimitive *ti = type_alloc(&parser->type_table, sizeof(TypePrimitive));
+        TypePrimitive *primitive = &primitive_types[(next.type - TOKEN_TYPE_INT) + 1]; // +1 to skip over invalid kind
+        memcpy(ti, primitive, sizeof(TypePrimitive));
+        ti->head.head.type  = AST_TYPE_INFO;
+        ti->head.head.start = next.start;
+        ti->head.head.end   = next.end;
+        return (TypeInfo *)(ti);
     }
-    else if (token.type == TOKEN_IDENTIFIER) {
-        result.kind          = TYPE_VAR;
-        result.as.identifier = token.as_value.identifier.name;
-    } else {
-        printf("%s:%d: compiler-error: Token '%s' could not be turned into a TypeKind.", __FILE__, __LINE__, token_type_to_str(token.type));
-        exit(1);
+    if (next.type == TOKEN_IDENTIFIER) {
+        // Struct or enum
+        eat_token(parser);
+        TypeInfo *ti   = type_alloc(&parser->type_table, sizeof(TypeInfo));
+        ti->head.type  = AST_TYPE_INFO;
+        ti->head.start = next.start;
+        ti->head.end   = next.end;
+        ti->kind       = TYPE_NAME;
+        ti->as.name    = next.as_value.identifier.name;
+        return ti;
     }
 
-    result.head.type  = AST_TYPE_INFO;
-    result.head.start = token.start;
-    result.head.end   = token.end;
-
-    return result;
+    report_error_token(parser, LABEL_ERROR, next, "Expected a type");
+    exit(1);
 }
 
 AstEnum *parse_enum(Parser *parser) {
     Token ident_token = peek_next_token(parser);
     expect(parser, ident_token, TOKEN_IDENTIFIER);
     eat_token(parser);
-    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, type_var(TYPE_ENUM, ident_token.as_value.identifier.name));
+    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // Type is set later down
 
-    // Expose the enum as identifier so enum values can be referenced explicitly using ENUM.value
+    // Expose the enum as an identifier so enum values can be referenced explicitly using ENUM.value
     {
-        ident->type.flags |= TypeFlag_IS_NAME_OF_ENUM;
+        ident->flags |= IDENT_IS_NAME_OF_ENUM;
         Symbol *exists = symbol_add_identifier(&parser->ident_table, ident);
         if (exists) {
             AstIdentifier *found = exists->as.identifier;
@@ -278,7 +283,7 @@ AstEnum *parse_enum(Parser *parser) {
     eat_token(parser);
 
     Token enum_token = peek_next_token(parser);
-    expect(parser, enum_token, TOKEN_TYPE_ENUM);
+    expect(parser, enum_token, TOKEN_ENUM);
     eat_token(parser);
 
     next = peek_next_token(parser);
@@ -341,8 +346,16 @@ AstEnum *parse_enum(Parser *parser) {
     ast_enum->head.end   = peek_token(parser, -1).end;
     ast_enum->identifier = ident;
 
-    Symbol *exists = symbol_add_enum(&parser->type_table, ast_enum);
-    assert(!exists);
+    TypeEnum *type_enum       = type_alloc(&parser->type_table, sizeof(TypeEnum));
+    type_enum->head.head.type = AST_TYPE_INFO;
+    type_enum->head.kind      = TYPE_ENUM;
+    type_enum->head.as.name   = ident->name;
+    type_enum->identifier     = ast_enum->identifier;
+    type_enum->node           = ast_enum; // @Improvement - Probably also need to copy over the hashtable of enumerators
+    TypeInfo *exists          = type_add_user_defined(&parser->type_table, (TypeInfo *)(type_enum));
+    assert(!exists); // @Investigate - Is this true???
+
+    ident->type = (TypeInfo *)(type_enum);
 
     return ast_enum;
 }
@@ -351,14 +364,14 @@ AstStruct *parse_struct(Parser *parser) {
     Token ident_token = peek_next_token(parser);
     expect(parser, ident_token, TOKEN_IDENTIFIER);
     eat_token(parser);
-    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, type(TYPE_UNTYPED));
+    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL);
 
     Token next = peek_next_token(parser);
     expect(parser, next, TOKEN_DOUBLE_COLON);
     eat_token(parser);
 
     Token struct_token = peek_next_token(parser);
-    expect(parser, struct_token, TOKEN_TYPE_STRUCT);
+    expect(parser, struct_token, TOKEN_STRUCT);
     eat_token(parser);
 
     next = peek_next_token(parser);
@@ -396,15 +409,23 @@ AstStruct *parse_struct(Parser *parser) {
     ast_struct->head.end   = next.end;
     ast_struct->identifier = ident;
 
-    Symbol *existing = symbol_add_struct(&parser->type_table, ast_struct);
+    TypeStruct *type_struct     = type_alloc(&parser->type_table, sizeof(TypeStruct));
+    type_struct->head.head.type = AST_TYPE_INFO;
+    type_struct->head.kind      = TYPE_STRUCT;
+    type_struct->head.as.name   = ident->name;
+    type_struct->identifier     = ident;
+    type_struct->node           = ast_struct;
+    TypeInfo *existing          = type_add_user_defined(&parser->type_table, (TypeInfo *)(type_struct));
     if (existing) {
-        if (existing->type == AST_STRUCT) {
+        if (existing->kind == TYPE_STRUCT) {
+            TypeStruct *existing_struct = (TypeStruct *)(existing);
             report_error_ast(parser, LABEL_ERROR, (AstNode *)(ast_struct->identifier), "Struct '%s' is already defined", ast_struct->identifier->name);
-            report_error_ast(parser, LABEL_NOTE, (AstNode *)(existing->as.struct_defn), "Here is the previously defined struct");
+            report_error_ast(parser, LABEL_NOTE, (AstNode *)(existing_struct->node), "Here is the previously defined struct");
             exit(1);
         } else {
+            TypeStruct *existing_enum = (TypeStruct *)(existing);
             report_error_ast(parser, LABEL_ERROR, (AstNode *)(ast_struct->identifier), "Struct '%s' is already defined as an enum", ast_struct->identifier->name);
-            report_error_ast(parser, LABEL_NOTE, (AstNode *)(existing->as.enum_defn), "Here is the previously defined enum");
+            report_error_ast(parser, LABEL_NOTE, (AstNode *)(existing_enum->node), "Here is the previously defined enum");
         }
     }
 
@@ -454,7 +475,7 @@ AstFor *parse_for(Parser *parser) {
     Token next_next = peek_token(parser, 1);
 
     if (next.type == TOKEN_IDENTIFIER && next_next.type == TOKEN_IN) {
-        iterator = make_identifier_from_token(parser, next, type(TYPE_UNTYPED));
+        iterator = make_identifier_from_token(parser, next, NULL);
 
         eat_token(parser);
         eat_token(parser);
@@ -464,7 +485,7 @@ AstFor *parse_for(Parser *parser) {
         iterable = parse_range_or_normal_expression(parser);
 
         if (iterable->head.type == AST_RANGE_EXPR) {
-            iterator = make_identifier_from_string(parser, "it", type(TYPE_INTEGER));
+            iterator = make_identifier_from_string(parser, "it", primitive_type(PRIMITIVE_INT));
         } else {
             // ToDo: Implement array type
             XXX;
@@ -527,11 +548,10 @@ AstReturn *parse_return(Parser *parser) {
 }
 
 AstStructLiteral *parse_struct_literal(Parser *parser) {
-    TypeInfo explicit_type = type(TYPE_UNTYPED);
+    TypeInfo *explicit_type = NULL;
     Token start_token = peek_next_token(parser);
     if (start_token.type == TOKEN_IDENTIFIER) {
-        explicit_type = token_to_type(start_token);
-        eat_token(parser);
+        explicit_type = parse_type(parser);
     }
 
     Token next = peek_next_token(parser);
@@ -554,7 +574,7 @@ AstStructLiteral *parse_struct_literal(Parser *parser) {
             eat_token(parser);
             eat_token(parser);
 
-            designator = make_identifier_from_token(parser, next, type(TYPE_UNTYPED));
+            designator = make_identifier_from_token(parser, next, NULL);
             value      = parse_expression(parser, MIN_PRECEDENCE);
         } else {
             designator = NULL;
@@ -618,7 +638,7 @@ AstMemberAccess *parse_member_access(Parser *parser) {
     expect(parser, first, TOKEN_IDENTIFIER);
     eat_token(parser);
 
-    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, type(TYPE_UNTYPED));
+    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL);
     AstAccessor *ac      = make_accessor(parser, first);
     da_append(&ma->chain, ac);
 
@@ -684,7 +704,7 @@ AstFunctionCall *parse_function_call(Parser *parser) {
     call->head.head.type  = AST_FUNCTION_CALL;
     call->head.head.start = ident_token.start;
     call->head.head.end   = next.end;
-    call->identifer       = make_identifier_from_token(parser, ident_token, type(TYPE_UNTYPED)); // The type of the identifier will be set later in the typer, so here i just specify void
+    call->identifer       = make_identifier_from_token(parser, ident_token, NULL); // The type of the identifier will be set later in the typer, so here i just specify void
 
     return call;
 }
@@ -692,7 +712,6 @@ AstFunctionCall *parse_function_call(Parser *parser) {
 AstFunctionDefn *parse_function_defn(Parser *parser) {
     AstFunctionDefn *func_defn = (AstFunctionDefn *)(ast_allocate(parser, sizeof(AstFunctionDefn)));
     func_defn->parameters      = da_init(2, sizeof(AstDeclaration *));
-    func_defn->return_type     = type(TYPE_VOID);
 
     Token ident_token = peek_next_token(parser);
     expect(parser, ident_token, TOKEN_IDENTIFIER); // Should be impossible to fail
@@ -718,6 +737,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
             break;
         }
 
+        // @Cleanup - This should probably use parse_declaration with a flag telling it that its a function parameter
         if (first_parameter_seen) {
             if (next.type != ',') {
                 report_error_token(parser, LABEL_ERROR, next, "Expected a ',' between parameters");
@@ -741,46 +761,31 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         }
         eat_token(parser);
 
-        next = peek_next_token(parser);
-        if (!is_primitive_type_token(next)) {
-            report_error_token(parser, LABEL_ERROR, next, "Expected a type");
-            exit(1);
-        }
-        eat_token(parser);
-
-        Token type_token = next;
+        TypeInfo *type = parse_type(parser);
 
         // Tell 'make_declaration' that the paramters should not be sized into the scope as they live at the callee site
-        AstDeclaration *param = make_declaration(parser, param_ident, DECLARATION_TYPED_NO_EXPR, NULL, type_token, 0);
+        AstDeclaration *param = make_declaration(parser, param_ident, DECLARATION_TYPED_NO_EXPR, NULL, type, 0);
         da_append(&func_defn->parameters, param);
         first_parameter_seen = true;
     }
 
+    TypeInfo *return_type = primitive_type(PRIMITIVE_VOID);
+    
     next = peek_next_token(parser);
     if (next.type == TOKEN_RIGHT_ARROW) {
-        //
-        //  Parse return type
-        //
         eat_token(parser);
-        next = peek_next_token(parser);
-        if (!is_primitive_type_token(next)) {
-            report_error_token(parser, LABEL_ERROR, next, "Expected a return type");
-            exit(1);
-        }
-        eat_token(parser);
-
-        TypeInfo return_type = token_to_type(next);
-        func_defn->return_type = return_type;
+        return_type = parse_type(parser);;
     }
 
     AstBlock *body = parse_block(parser, false); // Here we tell parse_block to explicitly not make a new lexical scope, as we are managing the scope manually in here
     close_scope(&parser->ident_table);
 
-    func_defn->head.type  = AST_FUNCTION_DEFN;
-    func_defn->head.start = ident_token.start;
-    func_defn->head.end   = body->head.end;
-    func_defn->identifier = make_identifier_from_token(parser, ident_token, func_defn->return_type);
-    func_defn->body       = body;
+    func_defn->head.type   = AST_FUNCTION_DEFN;
+    func_defn->head.start  = ident_token.start;
+    func_defn->head.end    = body->head.end;
+    func_defn->identifier  = make_identifier_from_token(parser, ident_token, func_defn->return_type);
+    func_defn->body        = body;
+    func_defn->return_type = return_type;
     symbol_add_function_defn(&parser->function_table, func_defn);
 
     return func_defn;
@@ -901,32 +906,25 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
         }
         eat_token(parser);
         AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-        return make_declaration(parser, ident, DECLARATION_INFER, expr, (Token){0}, flags);
+        return make_declaration(parser, ident, DECLARATION_INFER, expr, NULL, flags);
     }
 
     // Typed. 'a : int = b' or 'a : int'
     if (next.type == ':') {
         eat_token(parser);
+
+        TypeInfo *type = parse_type(parser);
         next = peek_next_token(parser);
 
-        if (!is_type_specifier(next)) {
-            report_error_token(parser, LABEL_ERROR, next, "Invalid type specifier");
-            exit(1);
-        }
-
-        Token type_token = next;
-        eat_token(parser);
-
-        next = peek_next_token(parser);
         if (next.type == '=') {
             if (flags & DECL_IS_STRUCT_MEMBER)      assert(false && "Default parameters not implemented for structs yet");
             if (flags & DECL_IS_FUNCTION_PARAMETER) assert(false && "Default function parameters not implemented yet");
             
             eat_token(parser);
             AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-            return make_declaration(parser, ident, DECLARATION_TYPED, expr, type_token, flags);
+            return make_declaration(parser, ident, DECLARATION_TYPED, expr, type, flags);
         } else {
-            return make_declaration(parser, ident, DECLARATION_TYPED_NO_EXPR, NULL, type_token, flags);
+            return make_declaration(parser, ident, DECLARATION_TYPED_NO_EXPR, NULL, type, flags);
         }
     }
     if (next.type == TOKEN_DOUBLE_COLON) {
@@ -937,15 +935,8 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
     exit(1);
 }
 
-AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, Token type_token, DeclarationFlags flags) {
-    TypeInfo ti = type(TYPE_UNTYPED);
-    if (decl_type == DECLARATION_TYPED || decl_type == DECLARATION_TYPED_NO_EXPR) {
-        ti = token_to_type(type_token);
-    } else {
-        // Type will be inferred at type checking phase
-    }
-
-    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, ti);
+AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, TypeInfo *type, DeclarationFlags flags) {
+    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, type);
 
     if (flags & DECL_IS_STRUCT_MEMBER) {
         // Skip putting identifier into identifier table as structs keeps their own small symbol table of members
@@ -961,10 +952,10 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationT
     AstDeclaration *decl = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
     decl->head.type         = AST_DECLARATION;
     decl->head.start        = ident_token.start;
-    decl->head.end          = type_token.end;
+    decl->head.end          = expr != NULL ? expr->head.end : type->head.end;
     decl->declaration_type  = decl_type;
     decl->identifier        = ident;
-    decl->declared_type     = ti;
+    decl->declared_type     = type;
     decl->flags             = flags;
     decl->expr              = expr;
 
@@ -977,29 +968,19 @@ int align_value(int value, int alignment) {
     else          return value + (alignment - rem);
 }
 
-unsigned int size_of_type(Parser *parser, TypeInfo type) {
-    switch (type.kind) {
-        case TYPE_UNTYPED:   XXX;      // we are still waiting for this type to be resolved.
-        case TYPE_VOID:      return 0;
-        case TYPE_BOOL:      return 1;
-        case TYPE_INTEGER:   return 4;
-        case TYPE_FLOAT:     return 4;
-        case TYPE_STRING:    return 8; // pointer to string
-        case TYPE_ENUM:      return 4;
-        case TYPE_STRUCT: {
-            Symbol *sym = symbol_lookup(&parser->type_table, type.as.identifier);
-            assert(sym != NULL && "Trying to size unknown type");
-            assert(sym->type == AST_STRUCT);
-            
-            AstStruct *struct_defn = sym->as.struct_defn;
-            if (struct_defn->size_bytes == 0) {
-                // TODO: Make sizing of structs dependent so that it doesn't matter which order structs are written in.
-                XXX;
-            } else {
-                return struct_defn->size_bytes;
-            }
-        };
-        case TYPE_VAR: {
+unsigned int size_of_type(TypeInfo *type) {
+    switch (type->kind) {
+        case TYPE_INVALID: 
+            XXX;
+        case TYPE_VOID:    
+        case TYPE_BOOL:    
+        case TYPE_INTEGER: 
+        case TYPE_FLOAT:   
+        case TYPE_STRING:  
+            return ((TypePrimitive *)(type))->size;
+        case TYPE_ENUM:   return 4;
+        case TYPE_STRUCT: return ((TypeStruct *)(type))->size;
+        case TYPE_NAME: {
             assert(false && "Sizing unresolved type");
         };
     }
@@ -1007,7 +988,7 @@ unsigned int size_of_type(Parser *parser, TypeInfo type) {
     XXX;
 }
 
-AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, TypeInfo type) {
+AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, TypeInfo *type) {
     AstIdentifier *ident = (AstIdentifier *) ast_allocate(parser, sizeof(AstIdentifier));
     ident->head.type = AST_IDENTIFIER;
     ident->type      = type;
@@ -1017,7 +998,7 @@ AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, Typ
     return ident;
 }
 
-AstIdentifier *make_identifier_from_token(Parser *parser, Token ident_token, TypeInfo type) {
+AstIdentifier *make_identifier_from_token(Parser *parser, Token ident_token, TypeInfo *type) {
     assert(ident_token.type == TOKEN_IDENTIFIER);
 
     AstIdentifier *ident = (AstIdentifier *) ast_allocate(parser, sizeof(AstIdentifier));
@@ -1162,7 +1143,7 @@ AstExpr *parse_leaf(Parser *parser) {
         eval->head.head.type  = AST_ENUM_LITERAL;
         eval->head.head.start = t.start;
         eval->head.head.end   = ident.end;
-        eval->identifier      = make_identifier_from_token(parser, ident, type(TYPE_UNTYPED));
+        eval->identifier      = make_identifier_from_token(parser, ident, NULL);
 
         return (AstExpr *)(eval);
     }
@@ -1302,11 +1283,7 @@ bool is_type_specifier(Token token) {
 }
 
 bool is_primitive_type_token(Token token) {
-    if (token.type == TOKEN_TYPE_BOOL)   return true;
-    if (token.type == TOKEN_TYPE_INT)    return true;
-    if (token.type == TOKEN_TYPE_FLOAT)  return true;
-    if (token.type == TOKEN_TYPE_STRING) return true;
-    return false;
+    return (token.type >= TOKEN_TYPE_INT && token.type <= TOKEN_TYPE_VOID);
 }
 
 bool is_assignment_operator(Token token) {

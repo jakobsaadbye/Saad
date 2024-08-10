@@ -9,30 +9,23 @@ void dump_tokens(Lexer *lexer) {
 }
 
 bool send_through_pipeline(char *program, const char *program_path, bool output_to_console) {
-    bool ok = false;
-
-    // Lex
     Lexer lexer = lexer_init(program, program_path);
-    ok = lex(&lexer);
+    bool ok = lex(&lexer);
     if (!ok) return false;
 
     // dump_tokens(&lexer);
 
-    // Parse
-    Parser parser   = parser_init(&lexer);
+    Parser parser = parser_init(&lexer);
     AstCode *code = (AstCode *) parse_top_level_code(&parser);
     if (code == NULL) return false;
 
-    // Type + size
     Typer typer = typer_init(&parser);
     check_code(&typer, code);
 
-    // Code gen
     CodeGenerator cg = code_generator_init(&parser);
     go_nuts(&cg, code);
     code_generator_dump(&cg, "./build/out.asm");
 
-    // Assemble + linking
     system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
     int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -lkernel32 -lmsvcrt");
     if (exit_code != 0) return false;

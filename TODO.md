@@ -1,3 +1,13 @@
+Roadmap:
+    - Pointer types / Array types / Primitive type sizes
+    - Structs as function parameters
+    - Constant declarations
+
+
+TODO:
+    - Make copy from AstEnum to TypeEnum, likewise with AstStruct
+    - Resolve *TypeInfo type names in function call
+
 Fix semi-colon being off by one.
 
     main :: () {
@@ -6,3 +16,5 @@ Fix semi-colon being off by one.
     }
     .\test.sd:18:10 error: Expected a ';'
     18 |     print(x.scale + cube.xy.y);
+
+

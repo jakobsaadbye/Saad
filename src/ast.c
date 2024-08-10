@@ -60,8 +60,8 @@ typedef struct AstNode {
 } AstNode;
 
 typedef enum TypeKind {
-    TYPE_UNTYPED,
-    TYPE_VAR,   // This type is here, when we don't know the actual type yet. F.x 'a : Car', Car might refer to a struct or an enum that we only resolve in the typing phase
+    TYPE_INVALID,
+    TYPE_NAME,   // This type is here, when we don't know the actual type yet. F.x 'a : Car', Car might refer to a struct or an enum that we only resolve in the typing phase
     TYPE_VOID,
     TYPE_BOOL,
     TYPE_INTEGER,
@@ -71,30 +71,18 @@ typedef enum TypeKind {
     TYPE_ENUM,
 } TypeKind;
 
-typedef enum TypeFlag {
-    TypeFlag_IS_NAME_OF_ENUM   = 1 << 0,
-    TypeFlag_IS_NAME_OF_STRUCT = 1 << 1,
-} TypeFlag;
-
 typedef struct TypeInfo {
     AstNode  head;
     TypeKind kind;
-    TypeFlag flags;
+    // TypeFlag flags;
     union {
-        char *identifier; // A name to a struct or enum
+        char *name; // A name to a struct or enum
     } as;
 } TypeInfo;
 
-typedef struct TypeEnum {
-    TypeInfo head;
-
-    // AstEnum *ast;
-    char *name;
-} TypeEnum;
- 
 typedef struct AstExpr {
     AstNode  head;
-    TypeInfo evaluated_type;
+    TypeInfo *evaluated_type;
 } AstExpr;
 
 typedef struct AstCode {
@@ -102,12 +90,18 @@ typedef struct AstCode {
     DynamicArray statements;
 } AstCode;
 
+typedef enum IdentFlags {
+    IDENT_IS_NAME_OF_ENUM   = 1 << 0,
+    IDENT_IS_NAME_OF_STRUCT = 1 << 1,
+} IdentFlags;
+
 typedef struct AstIdentifier {
     AstNode head;
 
-    TypeInfo type;
-    char    *name;
-    int      length;
+    TypeInfo  *type;
+    IdentFlags flags;
+    char      *name;
+    int        length;
 
     int stack_offset;
 } AstIdentifier;
@@ -129,7 +123,7 @@ typedef struct AstDeclaration {
 
     DeclarationType  declaration_type;
     AstIdentifier   *identifier;
-    TypeInfo         declared_type;
+    TypeInfo        *declared_type;
     AstExpr         *expr;
     DeclarationFlags flags;
 
@@ -166,7 +160,7 @@ typedef struct AstStruct {
     AstIdentifier *identifier;
     SymbolTable    member_table; // of AstDeclaration
 
-    unsigned int size_bytes;
+    unsigned int size;
     unsigned int alignment;
 } AstStruct;
 
@@ -175,7 +169,7 @@ typedef struct AstEnum {
 
     AstIdentifier *identifier;
     HashTable enumerators; // of AstEnumerator
-    // TypeInfo backing_type; // has to be one of the integer types
+    // TypeInfo * backing_type; // has to be one of the integer types
 } AstEnum;
 
 typedef struct AstEnumerator {
@@ -200,7 +194,7 @@ typedef struct AstFunctionDefn {
 
     AstIdentifier *identifier;
     DynamicArray parameters; // of AstDeclaration
-    TypeInfo return_type;
+    TypeInfo *return_type;
     AstBlock *body;
     
     int return_label;
@@ -267,8 +261,8 @@ typedef struct AstBinary {
 } AstBinary;
 
 typedef enum AccessorKind {
-    Accessor_Struct,
-    Accessor_Enum,
+    ACCESSOR_STRUCT,
+    ACCESSOR_ENUM,
 } AccessorKind;
 
 typedef struct AstAccessor {
@@ -281,7 +275,6 @@ typedef struct AstAccessor {
         AstDeclaration *struct_member;
         AstEnumerator  *enum_member;
     };
-
 } AstAccessor;
 
 typedef struct AstMemberAccess {
@@ -301,7 +294,7 @@ typedef struct AstUnary {
 typedef struct AstStructLiteral {
     AstExpr head;
 
-    TypeInfo     explicit_type;
+    TypeInfo     *explicit_type;
     DynamicArray initializers; // of AstStructInitializer
 } AstStructLiteral;
 
@@ -329,17 +322,151 @@ typedef struct AstLiteral {
     As_value  as;
 } AstLiteral;
 
-char *type_to_str(TypeInfo type) {
-    switch (type.kind) {
-        case TYPE_UNTYPED:   return "untyped";
+
+
+typedef enum PrimitiveKind {
+    PRIMITIVE_INVALID,
+
+    PRIMITIVE_INT,
+    PRIMITIVE_U8,
+    PRIMITIVE_U16,
+    PRIMITIVE_U32,
+    PRIMITIVE_U64,
+    PRIMITIVE_S8,
+    PRIMITIVE_S16,
+    PRIMITIVE_S32,
+    PRIMITIVE_S64,
+
+    PRIMITIVE_FLOAT,
+    PRIMITIVE_F32,
+    PRIMITIVE_F64,
+
+    PRIMITIVE_STRING,
+    PRIMITIVE_BOOL,
+    PRIMITIVE_VOID,
+
+    PRIMITIVE_COUNT,
+} PrimitiveKind;
+
+char *primitive_type_names[PRIMITIVE_COUNT] = {
+    "invalid",
+    "int",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "s8",
+    "s16",
+    "s32",
+    "s64",
+    "float",
+    "f32",
+    "f64",
+    "string",
+    "bool",
+    "void",
+};
+
+typedef struct TypePrimitive {
+    TypeInfo      head;
+    PrimitiveKind kind;
+    int           size;
+} TypePrimitive;
+
+TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
+    {.head = {.kind = TYPE_INVALID}, .kind = PRIMITIVE_INVALID,.size = 0},
+    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_INT,    .size = 4},
+    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_U8,     .size = 1},
+    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_U16,    .size = 2},
+    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_U32,    .size = 4},
+    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_U64,    .size = 8},
+    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_S8,     .size = 1},
+    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_S16,    .size = 2},
+    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_S32,    .size = 4},
+    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_S64,    .size = 8},
+    {.head = {.kind = TYPE_FLOAT},   .kind = PRIMITIVE_FLOAT,  .size = 4},
+    {.head = {.kind = TYPE_FLOAT},   .kind = PRIMITIVE_F32,    .size = 4},
+    {.head = {.kind = TYPE_FLOAT},   .kind = PRIMITIVE_F64,    .size = 8},
+    {.head = {.kind = TYPE_STRING},  .kind = PRIMITIVE_STRING, .size = 8},
+    {.head = {.kind = TYPE_BOOL},    .kind = PRIMITIVE_BOOL,   .size = 1},
+    {.head = {.kind = TYPE_VOID},    .kind = PRIMITIVE_VOID,   .size = 0},
+};
+
+TypeInfo *primitive_type(PrimitiveKind kind) {
+    return (TypeInfo *)(&primitive_types[kind]);
+}
+
+typedef struct TypeEnum {
+    TypeInfo head;
+    AstEnum *node;
+    
+    AstIdentifier *identifier;
+} TypeEnum;
+
+typedef struct TypeStruct {
+    TypeInfo head;
+    AstStruct *node;
+
+    AstIdentifier *identifier;
+
+    unsigned int size;
+    unsigned int alignment;
+} TypeStruct;
+
+typedef struct TypeTable {
+    HashTable user_types;
+    Arena     types; // @Speed - Allocating types seperately from the ast nodes might be bad for cache locality as we are usually looking at the ast node and the type together. 
+                     // Maybe it would be better to just allocate the TypeInfo right next to the AstNode.
+} TypeTable;
+
+bool compare_user_types(const void *key, const void *item) {
+    TypeInfo *ti = (*(TypeInfo **)(item));
+    return strcmp((const char *)(key), ti->as.name) == 0;
+}
+
+TypeTable type_table_init() {
+    TypeTable type_table  = {0};
+    type_table.user_types = hash_table_init(32, sizeof(TypeInfo *), compare_user_types);
+    type_table.types      = arena_init(sizeof(TypeInfo) * 32);
+    return type_table;
+}
+
+TypeInfo *type_lookup(TypeTable *tt, char *name) {
+    return hash_table_get(&tt->user_types, name);
+}
+
+TypeInfo *type_add_user_defined(TypeTable *tt, TypeInfo *type) {
+    TypeInfo *existing = (TypeInfo *)(hash_table_get(&tt->user_types, type->as.name));
+    if (existing) {
+        return existing;
+    }
+
+    hash_table_add(&tt->user_types, type->as.name, &type); // @Bug - &type is not right!
+    return NULL;
+}
+
+void *type_alloc(TypeTable *tt, size_t size) {
+    return arena_allocate(&tt->types, size);
+}
+
+TypeInfo *type_var(TypeTable *tt, TypeKind kind, char *name) {
+    TypeInfo *result = type_alloc(tt, sizeof(TypeInfo));
+    result->kind = kind;
+    result->as.name = name;
+    return result;
+}
+
+char *type_to_str(TypeInfo *type) {
+    switch (type->kind) {
+        case TYPE_INVALID:   return "invalid";
         case TYPE_VOID:      return "void";
         case TYPE_BOOL:      return "bool";
         case TYPE_INTEGER:   return "int";
         case TYPE_FLOAT:     return "float";
         case TYPE_STRING:    return "string";
-        case TYPE_VAR:       return type.as.identifier;
-        case TYPE_STRUCT:    return type.as.identifier;
-        case TYPE_ENUM:      return type.as.identifier;
+        case TYPE_NAME:      return type->as.name;
+        case TYPE_STRUCT:    return type->as.name;
+        case TYPE_ENUM:      return type->as.name;
     }
     XXX;
 }
@@ -352,17 +479,4 @@ bool is_primitive_type(TypeKind kind) {
     if (kind == TYPE_STRING)  return true;
 
     return false;
-}
-
-TypeInfo type_var(TypeKind kind, char *name) {
-    TypeInfo result = {0};
-    result.kind = kind;
-    result.as.identifier = name;
-    return result;
-}
-
-TypeInfo type(TypeKind kind) {
-    TypeInfo result = {0};
-    result.kind = kind;
-    return result;
 }

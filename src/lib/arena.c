@@ -8,7 +8,7 @@ typedef struct Arena {
     size_t capacity;
 } Arena;
 
-Arena arena_make(size_t capacity) {
+Arena arena_init(size_t capacity) {
     unsigned char *data = (unsigned char*) malloc(capacity);
     
     Arena arena    = {0};

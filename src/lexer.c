@@ -63,14 +63,27 @@ typedef enum TokenType {
     TOKEN_RETURN       = 164,
     TOKEN_FOR          = 165,
 
-    TOKEN_TYPE_INT     = 180,
-    TOKEN_TYPE_FLOAT   = 181,
-    TOKEN_TYPE_STRING  = 182,
-    TOKEN_TYPE_BOOL    = 183,
-    TOKEN_TYPE_STRUCT  = 184,
-    TOKEN_TYPE_ENUM    = 185,
+    TOKEN_STRUCT  = 180,
+    TOKEN_ENUM    = 181,
+
+    // @Important!!! - Order should follow PrimitiveKind order
+    TOKEN_TYPE_INT = 185,
+    TOKEN_TYPE_U8,
+    TOKEN_TYPE_U16,
+    TOKEN_TYPE_U32,
+    TOKEN_TYPE_U64,
+    TOKEN_TYPE_S8,
+    TOKEN_TYPE_S16,
+    TOKEN_TYPE_S32,
+    TOKEN_TYPE_S64,
+    TOKEN_TYPE_FLOAT,
+    TOKEN_TYPE_F32,
+    TOKEN_TYPE_F64,
+    TOKEN_TYPE_STRING,
+    TOKEN_TYPE_BOOL, 
+    TOKEN_TYPE_VOID, // @Important!!! - void must be the final type token
     
-    TOKEN_END          = 254
+    TOKEN_END = 254
 } TokenType;
 
 typedef union As_value {
@@ -158,7 +171,7 @@ Lexer lexer_init(char *input_str, const char *file_path) {
     Lexer lexer = {0};
     lexer.input_str = input_str;
     lexer.file_path = file_path;
-    lexer.identifier_names = arena_make(1024);
+    lexer.identifier_names = arena_init(1024);
 
     lexer.char_idx = 0;
     lexer.col = 1;
@@ -205,11 +218,22 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_IF:            return "IF";
         case TOKEN_ELSE:          return "ELSE";
         case TOKEN_TYPE_INT:      return "TYPE_INT";
-        case TOKEN_TYPE_BOOL:     return "TYPE_BOOL";
+        case TOKEN_TYPE_U8:       return "TYPE_U8";
+        case TOKEN_TYPE_U16:      return "TYPE_U16";
+        case TOKEN_TYPE_U32:      return "TYPE_U32";
+        case TOKEN_TYPE_U64:      return "TYPE_U64";
+        case TOKEN_TYPE_S8:       return "TYPE_S8";
+        case TOKEN_TYPE_S16:      return "TYPE_S16";
+        case TOKEN_TYPE_S32:      return "TYPE_S32";
+        case TOKEN_TYPE_S64:      return "TYPE_S64";
         case TOKEN_TYPE_FLOAT:    return "TYPE_FLOAT";
+        case TOKEN_TYPE_F32:      return "TYPE_F32";
+        case TOKEN_TYPE_F64:      return "TYPE_F64";
         case TOKEN_TYPE_STRING:   return "TYPE_STRING";
-        case TOKEN_TYPE_STRUCT:   return "TYPE_STRUCT";
-        case TOKEN_TYPE_ENUM:     return "TYPE_ENUM";
+        case TOKEN_TYPE_BOOL:     return "TYPE_BOOL";
+        case TOKEN_TYPE_VOID:     return "TYPE_VOID";
+        case TOKEN_STRUCT:        return "TYPE_STRUCT";
+        case TOKEN_ENUM:          return "TYPE_ENUM";
         case TOKEN_END:           return "END";
     }
 
@@ -414,24 +438,35 @@ KeywordMatch is_keyword(Lexer *lexer) {
     if (keyword_len == 2) {
         if (strcmp(text, "if") == 0) token = TOKEN_IF;
         if (strcmp(text, "in") == 0) token = TOKEN_IN;
+        if (strcmp(text, "u8") == 0) token = TOKEN_TYPE_U8;
+        if (strcmp(text, "s8") == 0) token = TOKEN_TYPE_S8;
     }
     if (keyword_len == 3) {
         if (strcmp(text, "int") == 0) token = TOKEN_TYPE_INT;
         if (strcmp(text, "for") == 0) token = TOKEN_FOR;
+        if (strcmp(text, "u16") == 0) token = TOKEN_TYPE_U16;
+        if (strcmp(text, "u32") == 0) token = TOKEN_TYPE_U32;
+        if (strcmp(text, "u64") == 0) token = TOKEN_TYPE_U64;
+        if (strcmp(text, "s16") == 0) token = TOKEN_TYPE_S16;
+        if (strcmp(text, "s32") == 0) token = TOKEN_TYPE_S32;
+        if (strcmp(text, "s64") == 0) token = TOKEN_TYPE_S64;
+        if (strcmp(text, "f32") == 0) token = TOKEN_TYPE_F32;
+        if (strcmp(text, "f64") == 0) token = TOKEN_TYPE_F64;
     }
     if (keyword_len == 4) {
         if (strcmp(text, "bool") == 0) token = TOKEN_TYPE_BOOL;
+        if (strcmp(text, "void") == 0) token = TOKEN_TYPE_VOID;
         if (strcmp(text, "true") == 0) token = TOKEN_TRUE;
         if (strcmp(text, "else") == 0) token = TOKEN_ELSE;
-        if (strcmp(text, "enum") == 0) token = TOKEN_TYPE_ENUM;
+        if (strcmp(text, "enum") == 0) token = TOKEN_ENUM;
     }
     if (keyword_len == 5) {
-        if (strcmp(text, "float") == 0)  token = TOKEN_TYPE_FLOAT;
-        if (strcmp(text, "print") == 0)  token = TOKEN_PRINT;
+        if (strcmp(text, "float") == 0) token = TOKEN_TYPE_FLOAT;
+        if (strcmp(text, "print") == 0) token = TOKEN_PRINT;
         if (strcmp(text, "false") == 0) token = TOKEN_FALSE;
     }
     if (keyword_len == 6) {
-        if (strcmp(text, "struct") == 0)  token = TOKEN_TYPE_STRUCT;
+        if (strcmp(text, "struct") == 0) token = TOKEN_STRUCT;
         if (strcmp(text, "string") == 0) token = TOKEN_TYPE_STRING;
         if (strcmp(text, "return") == 0) token = TOKEN_RETURN;
         if (strcmp(text, "assert") == 0) token = TOKEN_ASSERT;
@@ -631,7 +666,6 @@ bool is_binary_operator(TokenType op) {
     if (op == TOKEN_DOUBLE_EQUAL)  return true;
     if (op == TOKEN_NOT_EQUAL)     return true;
 
-    if (op == '.') return true;
     return false;
 }
 

@@ -3,4 +3,6 @@ main :: () {
     b := 3 - 2;
     print(a);
     print(b);
+    assert(a == 13);
+    assert(b == 1);
 }

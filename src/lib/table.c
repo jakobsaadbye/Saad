@@ -128,7 +128,7 @@ Node *linked_list_get(LinkedList *ll, size_t index) {
     return node;
 }
 
-void *linked_list_find(LinkedList *ll, const char *key, bool (*cmp_func)(const void* key, const void* item)) {
+void *linked_list_find(LinkedList *ll, const char *key, bool (*cmp_func)(const void *key, const void *item)) {
     Node *node = ll->head;
     bool found = cmp_func(key, node->data);
     if (found) return node->data;
