@@ -1,25 +1,26 @@
-Size :: struct {
-    big   : bool;
-    small : bool;
+DogKind :: enum {
+    samoid,
+    chiwawa,
+    bulldog,
 }
 
 Dog :: struct {
+    kind   : DogKind;
     legs   : int;
     weight : float; // kg
     height : float; // m
-    size   : Size;
 }
 
 main :: () {
     samoid : Dog = .{
-        4,
+        kind = .samoid,
+        legs = 4,
         weight = 20.0,
-        0.5,
-        .{big = true}
+        height = 0.5
     };
 
     bmi := samoid.weight / (samoid.height * samoid.height);
     assert(bmi == 80.0);
-    assert(samoid.size.big);
-    assert(samoid.weight == 20.0);
+    assert(samoid.kind == DogKind.samoid);
+    assert(samoid.legs == 4);
 }

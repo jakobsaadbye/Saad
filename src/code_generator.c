@@ -131,6 +131,19 @@ void emit_builtin_functions(CodeGenerator *cg) {
     sb_append(&cg->code, "   call\t\tprintf\n");
     sb_append(&cg->code, "   mov\t\trcx, 1\n");
     sb_append(&cg->code, "   call\t\tExitProcess\n\n");
+
+    // Print enums
+    sb_append(&cg->code, "enum_str:\n");
+    sb_append(&cg->code, "   mov\t\trcx, fmt_string\n");
+    sb_append(&cg->code, "   jmp\t\tenum_end\n");
+    sb_append(&cg->code, "enum_int:\n");
+    sb_append(&cg->code, "   mov\t\trcx, fmt_int\n");
+    sb_append(&cg->code, "   mov\t\trdx, rax\n");
+    sb_append(&cg->code, "enum_end:\n");
+    sb_append(&cg->code, "   pop\t\trbx\n"); // @Hack @Investigate - for some reason the next printf call messes up the stack, so here we save the return address to rbx before the call to push it again after the printf call
+    sb_append(&cg->code, "   call\t\tprintf\n");
+    sb_append(&cg->code, "   push\t\trbx\n");
+    sb_append(&cg->code, "   ret\n\n");
 }
 
 void emit_code(CodeGenerator *cg, AstCode *code) {
@@ -174,7 +187,34 @@ void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
         AstEnumerator *etor = ((AstEnumerator **)(enumerators.items))[i];
         sb_append(&cg->data, "   __%s.%s DB \"%s.%s\", 10, 0\n", ast_enum->identifier->name, etor->name, ast_enum->identifier->name, etor->name);
     }
+
+    int case_label = make_label_number(cg);
+    int fallthrough_label = make_label_number(cg);
+
+    sb_append(&cg->code, "print_enum_%s:\n", ast_enum->identifier->name);
+    for (unsigned int i = 0; i < enumerators.count; i++) {
+        AstEnumerator *etor = ((AstEnumerator **)(enumerators.items))[i];
+        sb_append(&cg->code, "   mov\t\trbx, %d\n", etor->value);
+        sb_append(&cg->code, "   cmp\t\trax, rbx\n");
+        sb_append(&cg->code, "   jz\t\t\tenum_case_%d\n", case_label);
+
+        etor->label = case_label;
+        case_label  = make_label_number(cg);
+    }
+    // Fallthrough case. Use integer value
+    sb_append(&cg->code, "   jmp\t\tenum_int\n", fallthrough_label);
+
+    // Success case. Use name of enum
+    for (unsigned int i = 0; i < enumerators.count; i++) {
+        AstEnumerator *etor = ((AstEnumerator **)(enumerators.items))[i];
+        sb_append(&cg->code, "enum_case_%d:\n", etor->label);
+        sb_append(&cg->code, "   mov\t\trdx, __%s.%s\n", ast_enum->identifier->name, etor->name);
+        sb_append(&cg->code, "   jmp\t\tenum_str\n");
+    }
+
+    free(enumerators.items);
 }
+
 
 void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     emit_expression(cg, assign->expr);
@@ -285,14 +325,14 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         AstRangeExpr * range = (AstRangeExpr *)(ast_for->iterable);
         
         // allocate space for start and end range values 
-        int size_start    = ((TypePrimitive *)(range->start->evaluated_type))->size;
-        int size_end      = ((TypePrimitive *)(range->end->evaluated_type))->size;
-        int size_iterator = ((TypePrimitive *)(ast_for->iterator->type))->size;
+        int size_start    = range->start->evaluated_type->size;
+        int size_end      = range->end->evaluated_type->size;
+        int size_iterator = ast_for->iterator->type->size;
 
-        int offset_start    = -(cg->base_ptr + size_start);
-        int offset_end      = -(cg->base_ptr + offset_start + size_end);
-        int offset_iterator = -(cg->base_ptr + offset_end + size_iterator);
-        cg->base_ptr += offset_iterator;
+        int offset_start    = (cg->base_ptr - (size_start));
+        int offset_end      = (cg->base_ptr - (size_start + size_end));
+        int offset_iterator = (cg->base_ptr - (size_start + size_end + size_iterator));
+        cg->base_ptr -= (size_start + size_end + size_iterator);
 
         emit_expression(cg, range->start);
         emit_expression(cg, range->end);
@@ -339,7 +379,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     // Enter the scope of the function body to know how much stack space we should allocate for the function
     enter_scope(&cg->ident_table);
 
-    size_t bytes_allocated = cg->ident_table.current_scope->bytes_allocated;
+    size_t bytes_allocated = func_defn->bytes_allocated;;
     if (strcmp("main", func_defn->identifier->name) == 0) {
         bytes_allocated += 32; // shadow space that is for some reason needed for main??? @Investigate
     }
@@ -445,7 +485,7 @@ void emit_assert(CodeGenerator *cg, AstAssert *assertion) {
     emit_expression(cg, assertion->expr);
 
     sb_append(&cg->code, "   pop\t\trcx\n");
-    sb_append(&cg->code, "   mov\t\trdx, %d\n", assertion->head.start.line + 1);
+    sb_append(&cg->code, "   mov\t\trdx, %d\n", assertion->head.start.line);
     sb_append(&cg->code, "   call\t\tassert\n");
 }
 
@@ -492,9 +532,8 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
         sb_append(&cg->code, "   call\t\tprintf\n");
     }
     else if (expr_type->kind == TYPE_ENUM) {
-        sb_append(&cg->code, "   pop\t\trdx\n");
-        sb_append(&cg->code, "   mov\t\trcx, fmt_int\n");
-        sb_append(&cg->code, "   call\t\tprintf\n");
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   call\t\tprint_enum_%s\n", ((TypeEnum *)(expr_type))->identifier->name);
     }
     else {
         // Unhandled cases
@@ -578,11 +617,11 @@ void emit_struct_initialization(CodeGenerator *cg, AstStructLiteral *lit, int st
 }
 
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
-    int type_size = size_of_type(decl->declared_type);
-    cg->base_ptr += type_size;
+    int type_size = decl->declared_type->size;
+    cg->base_ptr -= type_size;
 
     cg->base_ptr = align_value(cg->base_ptr, type_size);
-    decl->identifier->stack_offset = -cg->base_ptr;
+    decl->identifier->stack_offset = cg->base_ptr;
     int stack_offset = decl->identifier->stack_offset;
 
     sb_append(&cg->code, "\n");
@@ -614,7 +653,7 @@ void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
     emit_expression(cg, bin->left);
     emit_expression(cg, bin->right);
 
-    // Pure integer case
+    // Integer case
     if (l_kind == TYPE_INTEGER && r_kind == TYPE_INTEGER) {
         sb_append(&cg->code, "   pop\t\trbx\n");
         sb_append(&cg->code, "   pop\t\trax\n");
@@ -638,8 +677,8 @@ void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
         emit_integer_to_float_conversion(cg, l_kind, r_kind);
         if      (bin->operator == '+') sb_append(&cg->code, "   addss\t\txmm0, xmm1\n");
         else if (bin->operator == '-') sb_append(&cg->code, "   subss\t\txmm0, xmm1\n");
-        else if (bin->operator == '*') sb_append(&cg->code, "   mulss\t\trax, rbx\n");
-        else if (bin->operator == '/') sb_append(&cg->code, "   divss\t\trax, rbx\n");
+        else if (bin->operator == '*') sb_append(&cg->code, "   mulss\t\txmm0, xmm1\n");
+        else if (bin->operator == '/') sb_append(&cg->code, "   divss\t\txmm0, xmm1\n");
         else exit(1); // Should not happen
 
         sb_append(&cg->code, "   sub\t\trsp, 4\n");
@@ -773,6 +812,8 @@ bool is_arithmetic_operator(TokenType op) {
     if (op == '-') return true;
     if (op == '*') return true;
     if (op == '/') return true;
+    if (op == '%') return true;
+    if (op == '^') return true;
     return false;
 }
 
@@ -781,11 +822,12 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     case AST_BINARY: {
         AstBinary *bin = (AstBinary *)(expr);
         TokenType op = bin->operator;
-        if (is_arithmetic_operator(op)) {emit_arithmetic_operator(cg, bin); return;}
-        if (is_comparison_operator(op)) {emit_comparison_operator(cg, bin); return;}
-        if (is_boolean_operator(op))    {emit_boolean_operator(cg, bin); return;}
+        if      (is_arithmetic_operator(op)) emit_arithmetic_operator(cg, bin);
+        else if (is_comparison_operator(op)) emit_comparison_operator(cg, bin);
+        else if (is_boolean_operator(op))    emit_boolean_operator(cg, bin); 
+        else XXX;
 
-        XXX;
+        return;
     }
     case AST_UNARY: {
         AstUnary *unary = (AstUnary *)(expr);

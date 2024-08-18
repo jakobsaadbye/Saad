@@ -9,8 +9,6 @@ typedef struct Scope {
     int next;       // Next child to visit on a call to dive()
     DynamicArray children;
     HashTable symbols;
-
-    size_t bytes_allocated; // Number of bytes allocated in this scope
 } Scope;
 
 typedef struct SymbolTable {

@@ -1,12 +1,19 @@
+TODO:
+    - Print of enum name instead of integer value
+    - Backing integer types for enums
+    - Allow enum values to be assigned to constant integer expressions
+    - Better printf support
+
+
+
+
+
 Roadmap:
     - Pointer types / Array types / Primitive type sizes
     - Structs as function parameters
     - Constant declarations
 
 
-TODO:
-    - Make copy from AstEnum to TypeEnum, likewise with AstStruct
-    - Resolve *TypeInfo type names in function call
 
 Fix semi-colon being off by one.
 

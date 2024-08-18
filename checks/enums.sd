@@ -1,0 +1,44 @@
+CardValue :: enum {
+    joker,
+    ace,
+    two,
+    three,
+    four,
+    five,
+    six,
+    seven,
+    eight,
+    nine,
+    ten,
+    jack,
+    queen,
+    king,
+
+    count
+}
+
+CardSuit :: enum {
+    joker,
+    diamonds,
+    clubs,
+    hearts,
+    spades,
+
+    count
+}
+
+Card :: struct {
+    value : CardValue;
+    suit  : CardSuit;
+}
+
+main :: () {
+    for s in 0..CardSuit.count {
+        for v in 0..CardValue.count {
+            c := Card.{ suit = s, value = v };
+
+            print(c.suit);
+            print(c.value);
+        }
+    }
+}

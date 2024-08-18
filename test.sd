@@ -1,39 +1,12 @@
-EngineType :: enum {
-    V8,
-    V6
+CardValue :: enum {
+    joker,
+    ace,
 }
 
-Fuel :: enum {
-    electric,
-    diesel,
-    gasoline,
-}
-
-Engine :: struct {
-    type : EngineType;
-    fuel : Fuel;
-    cylinders : int;
-    capacity : float;
-}
-
-Car :: struct {
-    doors : int;
-    max_speed : float;
-    engine : Engine;
+CardSuit :: enum {
+    spades,
 }
 
 main :: () {
-    bugatti := Car.{
-        doors = 4,
-        max_speed = 320,
-        engine = .{
-            type = .V6,
-            fuel = .gasoline,
-            cylinders = 8,
-            capacity = 30
-        }
-    };
-
-    print(bugatti.engine.type);
-    print(bugatti.engine.fuel);
+    print(CardSuit.spades);
 }

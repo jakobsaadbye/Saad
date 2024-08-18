@@ -59,11 +59,11 @@ bool is_assignment_operator(Token token);
 bool starts_struct_literal(Parser *parser);
 int get_precedence(OperatorType op);
 TypeInfo token_to_type(Token token);
+int align_value(int value, int alignment);
+
+void report_error(Parser *parser, Pos start, Pos end, const char *message, ...);
 void report_error_ast(Parser *parser, const char* label, AstNode *failing_ast, const char *message, ...);
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
-void report_error_position(Parser *parser, const char* label, Pos position, const char *message, ...);
-int align_value(int value, int alignment);
-unsigned int size_of_type(TypeInfo *type);
 
 
 Parser parser_init(Lexer *lexer) {
@@ -209,7 +209,7 @@ AstNode *parse_statement(Parser *parser) {
         Token next = peek_next_token(parser);
         if (next.type != ';') {
             Token prev = peek_token(parser, -1);
-            report_error_position(parser, LABEL_ERROR, prev.end, "Expected a ';'");
+            report_error(parser, prev.end, prev.end, "Syntax Error: Expected a semi-colon");
             exit(1);
         }
         eat_token(parser);
@@ -263,7 +263,7 @@ AstEnum *parse_enum(Parser *parser) {
     Token ident_token = peek_next_token(parser);
     expect(parser, ident_token, TOKEN_IDENTIFIER);
     eat_token(parser);
-    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // Type is set later down
+    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // Type of ident is set later down to refer to the enum it self
 
     // Expose the enum as an identifier so enum values can be referenced explicitly using ENUM.value
     {
@@ -271,8 +271,8 @@ AstEnum *parse_enum(Parser *parser) {
         Symbol *exists = symbol_add_identifier(&parser->ident_table, ident);
         if (exists) {
             AstIdentifier *found = exists->as.identifier;
-            report_error_ast(parser, LABEL_ERROR, (AstNode *)(ident), "Redeclaration of '%s'", found->name);
-            report_error_ast(parser, LABEL_NOTE, (AstNode *)(found), "Here is the previous declaration of '%s'", found->name);
+            report_error_ast(parser, LABEL_ERROR, (AstNode *)(ident), "Type '%s' already defined", found->name);
+            report_error_ast(parser, LABEL_NOTE, (AstNode *)(found), "Here is the previous definition of '%s'", found->name);
             exit(1);
         }
     }
@@ -348,12 +348,16 @@ AstEnum *parse_enum(Parser *parser) {
 
     TypeEnum *type_enum       = type_alloc(&parser->type_table, sizeof(TypeEnum));
     type_enum->head.head.type = AST_TYPE_INFO;
+    type_enum->head.head.start = ast_enum->head.start;
+    type_enum->head.head.end   = ast_enum->head.end;
     type_enum->head.kind      = TYPE_ENUM;
     type_enum->head.as.name   = ident->name;
-    type_enum->identifier     = ast_enum->identifier;
     type_enum->node           = ast_enum; // @Improvement - Probably also need to copy over the hashtable of enumerators
-    TypeInfo *exists          = type_add_user_defined(&parser->type_table, (TypeInfo *)(type_enum));
-    assert(!exists); // @Investigate - Is this true???
+    type_enum->identifier     = ast_enum->identifier;
+    type_enum->backing_type   = primitive_type(PRIMITIVE_INT); // @Hardcoded @Incomplete - Missing syntax for having backing types
+
+    TypeInfo *exists = type_add_user_defined(&parser->type_table, (TypeInfo *)(type_enum));
+    assert(!exists);
 
     ident->type = (TypeInfo *)(type_enum);
 
@@ -411,6 +415,8 @@ AstStruct *parse_struct(Parser *parser) {
 
     TypeStruct *type_struct     = type_alloc(&parser->type_table, sizeof(TypeStruct));
     type_struct->head.head.type = AST_TYPE_INFO;
+    type_struct->head.head.start = ast_struct->head.start;
+    type_struct->head.head.end   = ast_struct->head.end;
     type_struct->head.kind      = TYPE_STRUCT;
     type_struct->head.as.name   = ident->name;
     type_struct->identifier     = ident;
@@ -483,6 +489,12 @@ AstFor *parse_for(Parser *parser) {
         iterable = parse_range_or_normal_expression(parser);
     } else {
         iterable = parse_range_or_normal_expression(parser);
+
+        Token next = peek_next_token(parser);
+        if (next.type != '{' ) {
+            report_error(parser, iterable->head.start, next.end, "Syntax Error: Invalid for-expression");
+            exit(1);
+        }
 
         if (iterable->head.type == AST_RANGE_EXPR) {
             iterator = make_identifier_from_string(parser, "it", primitive_type(PRIMITIVE_INT));
@@ -968,26 +980,6 @@ int align_value(int value, int alignment) {
     else          return value + (alignment - rem);
 }
 
-unsigned int size_of_type(TypeInfo *type) {
-    switch (type->kind) {
-        case TYPE_INVALID: 
-            XXX;
-        case TYPE_VOID:    
-        case TYPE_BOOL:    
-        case TYPE_INTEGER: 
-        case TYPE_FLOAT:   
-        case TYPE_STRING:  
-            return ((TypePrimitive *)(type))->size;
-        case TYPE_ENUM:   return 4;
-        case TYPE_STRUCT: return ((TypeStruct *)(type))->size;
-        case TYPE_NAME: {
-            assert(false && "Sizing unresolved type");
-        };
-    }
-
-    XXX;
-}
-
 AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, TypeInfo *type) {
     AstIdentifier *ident = (AstIdentifier *) ast_allocate(parser, sizeof(AstIdentifier));
     ident->head.type = AST_IDENTIFIER;
@@ -1139,7 +1131,7 @@ AstExpr *parse_leaf(Parser *parser) {
         eat_token(parser);
         eat_token(parser);
 
-        AstEnumLiteral *eval    = ast_allocate(parser, sizeof(AstEnumLiteral));
+        AstEnumLiteral *eval  = ast_allocate(parser, sizeof(AstEnumLiteral));
         eval->head.head.type  = AST_ENUM_LITERAL;
         eval->head.head.start = t.start;
         eval->head.head.end   = ident.end;
@@ -1295,6 +1287,15 @@ bool is_assignment_operator(Token token) {
     return false;
 }
 
+void report_error(Parser *parser, Pos start, Pos end, const char *message, ...) {
+    va_list args;
+    va_start(args, message);
+
+    report_error_helper(parser->lexer, LABEL_ERROR, start, end, message, args);
+
+    va_end(args);
+}
+
 void report_error_ast(Parser *parser, const char* label, AstNode *failing_ast, const char *message, ...) {
     va_list args;
     va_start(args, message);
@@ -1309,15 +1310,6 @@ void report_error_token(Parser *parser, const char* label, Token failing_token, 
     va_start(args, message);
 
     report_error_helper(parser->lexer, label, failing_token.start, failing_token.end, message, args);
-
-    va_end(args);
-}
-
-void report_error_position(Parser *parser, const char* label, Pos position, const char *message, ...) {
-    va_list args;
-    va_start(args, message);
-
-    report_error_helper(parser->lexer, label, position, position, message, args);
 
     va_end(args);
 }

@@ -90,7 +90,12 @@ void check_declaration(Typer *typer, AstDeclaration *decl) {
     if (decl->flags & (DECL_IS_FUNCTION_PARAMETER | DECL_IS_STRUCT_MEMBER)) {
         // Omit sizing the declaration as it is done at the call site
     } else {
-        typer->parser->ident_table.current_scope->bytes_allocated += size_of_type(decl->declared_type);
+        if (typer->enclosing_function != NULL) {
+            typer->enclosing_function->bytes_allocated += decl->declared_type->size;
+        } else {
+            // @TODO: Declaring constants in global scope. Do they have to be sized though???
+            XXX;
+        }
     }
 }
 
@@ -264,7 +269,7 @@ void check_statement(Typer *typer, AstNode *stmt) {
         for (unsigned int i = 0; i < members.count; i++) {
             AstDeclaration *member = ((AstDeclaration **)members.items)[i];
             
-            int member_size = size_of_type(member->declared_type);
+            int member_size = member->declared_type->size;
             if (member->declared_type->kind == TYPE_STRUCT) {
                 alignment = ((TypeStruct *)(member->declared_type))->alignment;
             } else {
@@ -278,19 +283,19 @@ void check_statement(Typer *typer, AstNode *stmt) {
             if (alignment > largest_alignment) largest_alignment = alignment;
         }
 
-        // @Cleanup - Is it needed to also put this info on the AstStruct???
-        ast_struct->size       = align_value(offset, largest_alignment);
-        ast_struct->alignment  = largest_alignment;
-
-        // type_struct->node       = ast_struct;
-        // type_struct->identifier = ast_struct->identifier; // @Bug - This should have been done during parsing!!!
-        type_struct->size       = ast_struct->size;
-        type_struct->alignment  = ast_struct->alignment;
+        type_struct->head.size  = align_value(offset, largest_alignment);
+        type_struct->alignment  = largest_alignment;
 
         free(members.items);
         return;
     }
     case AST_ENUM: {
+        AstEnum *ast_enum = (AstEnum *)(stmt);
+
+        TypeEnum *enum_defn = (TypeEnum *)(type_lookup(&typer->parser->type_table, ast_enum->identifier->name));
+        assert(enum_defn != NULL);
+
+        enum_defn->head.size = enum_defn->backing_type->size;
         return;
     }
     case AST_FOR: {
@@ -302,19 +307,23 @@ void check_statement(Typer *typer, AstNode *stmt) {
             TypeInfo* type_start = check_expression(typer, range->start, NULL);
             TypeInfo* type_end   = check_expression(typer, range->end, NULL);
 
-            if (type_start->kind != TYPE_INTEGER) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(range->start), "Range expressions must have integer type as bounds. Got a %s", type_to_str(type_start));
+            // @Incomplete !!!
+            if (type_start->kind != TYPE_INTEGER && type_start->kind != TYPE_ENUM) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(range->start), "Range expressions must have integer type as bounds. Got type %s", type_to_str(type_start));
                 exit(1);
             }
-            if (type_end->kind != TYPE_INTEGER) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(range->end), "Range expressions must have integer type as bounds. Got a %s", type_to_str(type_end));
+            if (type_end->kind != TYPE_INTEGER && type_end->kind != TYPE_ENUM) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(range->end), "Range expressions must have integer type as bounds. Got type %s", type_to_str(type_end));
                 exit(1);
             }
 
             ast_for->iterator->type = primitive_type(PRIMITIVE_INT);
 
             // allocate space for the iterator, start and end
-            typer->parser->ident_table.current_scope->bytes_allocated += size_of_type(ast_for->iterator->type) * 3;
+            assert(typer->enclosing_function != NULL);
+            typer->enclosing_function->bytes_allocated += ast_for->iterator->type->size;
+            typer->enclosing_function->bytes_allocated += type_start->size;
+            typer->enclosing_function->bytes_allocated += type_end->size;
         } else {
             // ToDo: Implement for unnamed for-statements
             XXX;
@@ -537,13 +546,6 @@ TypeInfo *check_struct_literal(Typer *typer, AstStructLiteral *literal, TypeInfo
     }
 }
 
-TypeInfo *biggest(TypeInfo *lhs, TypeInfo *rhs) {
-    // @Incomplete - Should promote integer expression instead of just taking the biggest.
-    int size_lhs = ((TypePrimitive *)(lhs))->size;
-    int size_rhs = ((TypePrimitive *)(rhs))->size;
-    return size_lhs > size_rhs ? lhs : rhs;
-}
-
 TypeInfo *check_binary(Typer *typer, AstBinary *binary) {
     TypeInfo *ti_lhs = check_expression(typer, binary->left, NULL);
     TypeInfo *ti_rhs = check_expression(typer, binary->right, NULL);
@@ -555,16 +557,16 @@ TypeInfo *check_binary(Typer *typer, AstBinary *binary) {
         exit(1);
     }
     if (strchr("+-/*^", binary->operator)) {
-        if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest(ti_lhs, ti_rhs);
-        if (lhs == TYPE_FLOAT   && rhs == TYPE_FLOAT)   return biggest(ti_lhs, ti_rhs);
-        if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return biggest(ti_lhs, ti_rhs);
-        if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return biggest(ti_lhs, ti_rhs);
+        if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_INT);
+        if (lhs == TYPE_FLOAT   && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_FLOAT);
+        if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_FLOAT);
+        if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_FLOAT);
     }
     if (binary->operator == '%') {
-        if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest(ti_lhs, ti_rhs);
+        if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_INT);
     }
     if (is_boolean_operator(binary->operator)) {
-        if (lhs == TYPE_BOOL && rhs == TYPE_BOOL)       return ti_lhs;
+        if (lhs == TYPE_BOOL && rhs == TYPE_BOOL)       return primitive_type(PRIMITIVE_BOOL);
     }
     if (is_comparison_operator(binary->operator)) {
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_BOOL);

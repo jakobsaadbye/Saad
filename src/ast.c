@@ -74,6 +74,7 @@ typedef enum TypeKind {
 typedef struct TypeInfo {
     AstNode  head;
     TypeKind kind;
+    int size;
     // TypeFlag flags;
     union {
         char *name; // A name to a struct or enum
@@ -159,9 +160,6 @@ typedef struct AstStruct {
 
     AstIdentifier *identifier;
     SymbolTable    member_table; // of AstDeclaration
-
-    unsigned int size;
-    unsigned int alignment;
 } AstStruct;
 
 typedef struct AstEnum {
@@ -180,6 +178,8 @@ typedef struct AstEnumerator {
     char    *name;
     int      value;
     int      index;
+
+    int label; // Used by print to determine how to branch to this enum value
 } AstEnumerator;
 
 typedef struct AstEnumLiteral {
@@ -196,6 +196,8 @@ typedef struct AstFunctionDefn {
     DynamicArray parameters; // of AstDeclaration
     TypeInfo *return_type;
     AstBlock *body;
+
+    int bytes_allocated; // Number of bytes allocated in the function
     
     int return_label;
 } AstFunctionDefn;
@@ -370,26 +372,25 @@ char *primitive_type_names[PRIMITIVE_COUNT] = {
 typedef struct TypePrimitive {
     TypeInfo      head;
     PrimitiveKind kind;
-    int           size;
 } TypePrimitive;
 
 TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
-    {.head = {.kind = TYPE_INVALID}, .kind = PRIMITIVE_INVALID,.size = 0},
-    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_INT,    .size = 4},
-    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_U8,     .size = 1},
-    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_U16,    .size = 2},
-    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_U32,    .size = 4},
-    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_U64,    .size = 8},
-    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_S8,     .size = 1},
-    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_S16,    .size = 2},
-    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_S32,    .size = 4},
-    {.head = {.kind = TYPE_INTEGER}, .kind = PRIMITIVE_S64,    .size = 8},
-    {.head = {.kind = TYPE_FLOAT},   .kind = PRIMITIVE_FLOAT,  .size = 4},
-    {.head = {.kind = TYPE_FLOAT},   .kind = PRIMITIVE_F32,    .size = 4},
-    {.head = {.kind = TYPE_FLOAT},   .kind = PRIMITIVE_F64,    .size = 8},
-    {.head = {.kind = TYPE_STRING},  .kind = PRIMITIVE_STRING, .size = 8},
-    {.head = {.kind = TYPE_BOOL},    .kind = PRIMITIVE_BOOL,   .size = 1},
-    {.head = {.kind = TYPE_VOID},    .kind = PRIMITIVE_VOID,   .size = 0},
+    {.kind = PRIMITIVE_INVALID, .head = {.kind = TYPE_INVALID, .size = 0}},
+    {.kind = PRIMITIVE_INT,     .head = {.kind = TYPE_INTEGER, .size = 4}},
+    {.kind = PRIMITIVE_U8,      .head = {.kind = TYPE_INTEGER, .size = 1}},
+    {.kind = PRIMITIVE_U16,     .head = {.kind = TYPE_INTEGER, .size = 2}},
+    {.kind = PRIMITIVE_U32,     .head = {.kind = TYPE_INTEGER, .size = 4}},
+    {.kind = PRIMITIVE_U64,     .head = {.kind = TYPE_INTEGER, .size = 8}},
+    {.kind = PRIMITIVE_S8,      .head = {.kind = TYPE_INTEGER, .size = 1}},
+    {.kind = PRIMITIVE_S16,     .head = {.kind = TYPE_INTEGER, .size = 2}},
+    {.kind = PRIMITIVE_S32,     .head = {.kind = TYPE_INTEGER, .size = 4}},
+    {.kind = PRIMITIVE_S64,     .head = {.kind = TYPE_INTEGER, .size = 8}},
+    {.kind = PRIMITIVE_FLOAT,   .head = {.kind = TYPE_FLOAT,   .size = 4}},
+    {.kind = PRIMITIVE_F32,     .head = {.kind = TYPE_FLOAT,   .size = 4}},
+    {.kind = PRIMITIVE_F64,     .head = {.kind = TYPE_FLOAT,   .size = 8}},
+    {.kind = PRIMITIVE_STRING,  .head = {.kind = TYPE_STRING,  .size = 8}},
+    {.kind = PRIMITIVE_BOOL,    .head = {.kind = TYPE_BOOL,    .size = 1}},
+    {.kind = PRIMITIVE_VOID,    .head = {.kind = TYPE_VOID,    .size = 0}},
 };
 
 TypeInfo *primitive_type(PrimitiveKind kind) {
@@ -401,7 +402,16 @@ typedef struct TypeEnum {
     AstEnum *node;
     
     AstIdentifier *identifier;
+    TypeInfo *backing_type;
 } TypeEnum;
+
+typedef struct TypeEnumValue {
+    TypeInfo head;
+    AstEnum *node;
+    
+    char    *name;
+    As_value value;
+} TypeEnumValue;
 
 typedef struct TypeStruct {
     TypeInfo head;
@@ -409,7 +419,6 @@ typedef struct TypeStruct {
 
     AstIdentifier *identifier;
 
-    unsigned int size;
     unsigned int alignment;
 } TypeStruct;
 
@@ -432,7 +441,11 @@ TypeTable type_table_init() {
 }
 
 TypeInfo *type_lookup(TypeTable *tt, char *name) {
-    return hash_table_get(&tt->user_types, name);
+    TypeInfo **found = hash_table_get(&tt->user_types, name);
+    if (found != NULL) {
+        return *found;
+    }
+    return NULL;
 }
 
 TypeInfo *type_add_user_defined(TypeTable *tt, TypeInfo *type) {

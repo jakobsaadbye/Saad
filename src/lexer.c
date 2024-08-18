@@ -161,7 +161,7 @@ TokenType is_triple_character_token(Lexer *lexer);
 bool is_binary_operator(TokenType op);
 bool is_unary_operator(TokenType op);
 bool is_digit(char c);
-void report_syntax_error(Lexer *lexer, const char *message, ...);
+void report_syntax_error_here(Lexer *lexer, const char *message, ...);
 void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, const char *message, va_list args);
 Line get_line(char *input_str, int line_num);
 void free_line(Line line);
@@ -296,13 +296,13 @@ bool lex(Lexer *lexer) {
                 }
 
                 if (!ends_literal(next)) {
-                    report_syntax_error(lexer, "Invalid float literal. Probably a missing ;");
+                    report_syntax_error_here(lexer, "Invalid float literal. Probably a missing ;");
                     return false;
                 }
                 make_literal_here(lexer, TOKEN_FLOAT, pos_start);
             } else {
                 if (!ends_literal(next)) {
-                    report_syntax_error(lexer, "Invalid integer literal. Probably a missing ;");
+                    report_syntax_error_here(lexer, "Invalid integer literal. Probably a missing ;");
                     return false;
                 }
                 make_literal_here(lexer, TOKEN_INTEGER, pos_start);
@@ -384,7 +384,7 @@ bool lex(Lexer *lexer) {
             continue;
         }
 
-        report_syntax_error(lexer, "Unknown character '%c'", c);
+        report_syntax_error_here(lexer, "Unknown character '%c'", c);
         return false;
     }
 
@@ -725,7 +725,7 @@ bool is_digit(char c) {
     return c >= '0' && c <= '9';
 }
 
-void report_syntax_error(Lexer *lexer, const char *message, ...) {
+void report_syntax_error_here(Lexer *lexer, const char *message, ...) {
     va_list args;
     va_start(args, message);
 
