@@ -1,44 +1,18 @@
-CardValue :: enum {
-    joker,
-    ace,
-    two,
-    three,
-    four,
-    five,
-    six,
-    seven,
-    eight,
-    nine,
-    ten,
-    jack,
-    queen,
-    king,
-
-    count
+DogKind :: enum {
+    samoid,
+    chiwawa,
+    bulldog,
 }
 
-CardSuit :: enum {
-    joker,
-    diamonds,
-    clubs,
-    hearts,
-    spades,
-
-    count
-}
-
-Card :: struct {
-    value : CardValue;
-    suit  : CardSuit;
+Dog :: struct {
+    kind   : DogKind;
 }
 
 main :: () {
-    for s in 0..CardSuit.count {
-        for v in 0..CardValue.count {
-            c := Card.{ suit = s, value = v };
+    dog1 := Dog.{ .samoid };
+    dog2 := Dog.{ .bulldog };
+    dog2.kind = -.chiwawa + .bulldog;
 
-            print(c.suit);
-            print(c.value);
-        }
-    }
+    assert(dog2.kind == DogKind.chiwawa);
+    assert(dog1.kind == 0);
 }

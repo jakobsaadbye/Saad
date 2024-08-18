@@ -653,6 +653,9 @@ void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
     emit_expression(cg, bin->left);
     emit_expression(cg, bin->right);
 
+    if (l_kind == TYPE_ENUM) l_kind = TYPE_INTEGER;
+    if (r_kind == TYPE_ENUM) r_kind = TYPE_INTEGER;
+
     // Integer case
     if (l_kind == TYPE_INTEGER && r_kind == TYPE_INTEGER) {
         sb_append(&cg->code, "   pop\t\trbx\n");
@@ -699,6 +702,11 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
 
     TypeKind l_kind = l_type->kind;
     TypeKind r_kind = r_type->kind;
+
+
+    if (l_kind == TYPE_ENUM) l_kind = TYPE_INTEGER;
+    if (r_kind == TYPE_ENUM) r_kind = TYPE_INTEGER;
+
 
     if (l_kind == TYPE_INTEGER && r_kind == TYPE_INTEGER) {
         emit_expression(cg, bin->left);

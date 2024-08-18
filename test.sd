@@ -1,12 +1,18 @@
-CardValue :: enum {
-    joker,
-    ace,
+DogKind :: enum {
+    samoid,
+    chiwawa,
+    bulldog,
 }
 
-CardSuit :: enum {
-    spades,
+Dog :: struct {
+    kind   : DogKind;
 }
 
 main :: () {
-    print(CardSuit.spades);
+    dog1 := Dog.{ .samoid };
+    dog2 := Dog.{ .bulldog };
+    dog2.kind = -.chiwawa + .bulldog;
+
+    assert(dog2.kind == DogKind.chiwawa);
+    assert(dog1.kind == 0);
 }

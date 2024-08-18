@@ -8,11 +8,12 @@ typedef struct Typer {
 
 void     check_block(Typer *typer, AstBlock *block, bool open_lexical_scope);
 void     check_statement(Typer *typer, AstNode *stmt);
-TypeInfo *check_expression(Typer *typer, AstExpr *expr, TypeInfo *lhs_type);
-TypeInfo *check_binary(Typer *typer, AstBinary *binary);
-TypeInfo *check_unary(Typer *typer, AstUnary *unary);
+TypeInfo *check_expression(Typer *typer, AstExpr *expr, TypeInfo *ctx_type);
+TypeInfo *check_binary(Typer *typer, AstBinary *binary, TypeInfo *ctx_type);
+TypeInfo *check_unary(Typer *typer, AstUnary *unary, TypeInfo *ctx_type);
 TypeInfo *check_literal(Typer *typer, AstLiteral *literal);
-TypeInfo *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, TypeInfo *lhs_type);
+TypeInfo *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, TypeInfo *ctx_type);
+TypeInfo *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, TypeInfo *ctx_type);
 TypeInfo *check_member_access(Typer *typer, AstMemberAccess * ma);
 char *type_to_str(TypeInfo *type);
 bool types_are_equal(TypeInfo *lhs, TypeInfo *rhs);
@@ -340,7 +341,7 @@ void check_statement(Typer *typer, AstNode *stmt) {
 }
 
 TypeInfo *check_enum_literal(Typer *typer, AstEnumLiteral *literal, TypeInfo *lhs_type) {
-    if (lhs_type->kind != TYPE_ENUM) {
+    if (lhs_type == NULL || lhs_type->kind != TYPE_ENUM) {
         report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Couldn't infer type of enum value from the context");
         exit(1);
     }
@@ -359,14 +360,14 @@ TypeInfo *check_enum_literal(Typer *typer, AstEnumLiteral *literal, TypeInfo *lh
     return lhs_type;
 }
 
-TypeInfo *check_expression(Typer *typer, AstExpr *expr, TypeInfo *lhs_type) {
+TypeInfo *check_expression(Typer *typer, AstExpr *expr, TypeInfo *ctx_type) {
     TypeInfo *result = NULL;
     if      (expr->head.type == AST_FUNCTION_CALL)  result = check_function_call(typer,  (AstFunctionCall *)(expr));
-    else if (expr->head.type == AST_BINARY)         result = check_binary(typer, (AstBinary *)(expr));
-    else if (expr->head.type == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr));
+    else if (expr->head.type == AST_BINARY)         result = check_binary(typer, (AstBinary *)(expr), ctx_type);
+    else if (expr->head.type == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
     else if (expr->head.type == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr));
-    else if (expr->head.type == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), lhs_type);
-    else if (expr->head.type == AST_ENUM_LITERAL)   result = check_enum_literal(typer, (AstEnumLiteral *)(expr), lhs_type);
+    else if (expr->head.type == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), ctx_type);
+    else if (expr->head.type == AST_ENUM_LITERAL)   result = check_enum_literal(typer, (AstEnumLiteral *)(expr), ctx_type);
     else if (expr->head.type == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr));
     else if (expr->head.type == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_INT);
     else {
@@ -546,16 +547,21 @@ TypeInfo *check_struct_literal(Typer *typer, AstStructLiteral *literal, TypeInfo
     }
 }
 
-TypeInfo *check_binary(Typer *typer, AstBinary *binary) {
-    TypeInfo *ti_lhs = check_expression(typer, binary->left, NULL);
-    TypeInfo *ti_rhs = check_expression(typer, binary->right, NULL);
+TypeInfo *check_binary(Typer *typer, AstBinary *binary, TypeInfo *ctx_type) {
+    TypeInfo *ti_lhs = check_expression(typer, binary->left, ctx_type);
+    TypeInfo *ti_rhs = check_expression(typer, binary->right, ctx_type);
 
     TypeKind lhs = ti_lhs->kind;
     TypeKind rhs = ti_rhs->kind;
-    if (!is_primitive_type(lhs) && !is_primitive_type(rhs)) {
-        assert(false && "Binary operation between two user-defined types (structs and enums) is not yet supported!");
+
+    if (lhs == TYPE_STRUCT && rhs == TYPE_STRUCT) {
+        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(binary), "Binary operation between two structs is not yet supported!");
         exit(1);
     }
+
+    if (lhs == TYPE_ENUM) lhs = TYPE_INTEGER;
+    if (rhs == TYPE_ENUM) rhs = TYPE_INTEGER;
+
     if (strchr("+-/*^", binary->operator)) {
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_INT);
         if (lhs == TYPE_FLOAT   && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_FLOAT);
@@ -579,17 +585,20 @@ TypeInfo *check_binary(Typer *typer, AstBinary *binary) {
     exit(1);
 }
 
-TypeInfo *check_unary(Typer *typer, AstUnary *unary) {
-    TypeInfo *expr_type = check_expression(typer, unary->expr, NULL);
+TypeInfo *check_unary(Typer *typer, AstUnary *unary, TypeInfo *ctx_type) {
+    TypeInfo *expr_type = check_expression(typer, unary->expr, ctx_type);
+    TypeKind type_kind  = expr_type->kind;
+
+    if (type_kind == TYPE_ENUM) type_kind = TYPE_INTEGER;
 
     if (unary->operator == OP_NOT) {
-        if (expr_type->kind != TYPE_BOOL) {
+        if (type_kind != TYPE_BOOL) {
             report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(unary->expr), "Type mismatch. Operator '!' is not applicative on expression of type '%s'\n", type_to_str(expr_type));
             exit(1);
         }
     }
     else if (unary->operator == OP_UNARY_MINUS) {
-        if (expr_type->kind != TYPE_INTEGER && expr_type->kind != TYPE_FLOAT) {
+        if (type_kind != TYPE_INTEGER && type_kind != TYPE_FLOAT) {
             report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(unary->expr), "Type mismatch. Operator '-' is not applicative on expression of type '%s'\n", type_to_str(expr_type));
             exit(1);
         };

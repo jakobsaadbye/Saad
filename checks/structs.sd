@@ -21,6 +21,5 @@ main :: () {
 
     bmi := samoid.weight / (samoid.height * samoid.height);
     assert(bmi == 80.0);
-    assert(samoid.kind == DogKind.samoid);
     assert(samoid.legs == 4);
 }
