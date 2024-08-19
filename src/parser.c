@@ -32,6 +32,7 @@ AstIf           *parse_if(Parser *parser);
 AstFor          *parse_for(Parser *parser);
 AstPrint        *parse_print(Parser *parser);
 AstAssert       *parse_assert(Parser *parser);
+AstTypeof       *parse_typeof(Parser *parser);
 AstReturn       *parse_return(Parser *parser);
 AstExpr         *parse_expression(Parser *parser, int min_prec);
 AstExpr         *parse_range_or_normal_expression(Parser *parser);
@@ -185,6 +186,10 @@ AstNode *parse_statement(Parser *parser) {
     }
     else if (token.type == TOKEN_ASSERT) {
         stmt = (AstNode *)(parse_assert(parser));
+        statement_ends_with_semicolon = true;
+    }
+    else if (token.type == TOKEN_TYPEOF) {
+        stmt = (AstNode *)(parse_typeof(parser));
         statement_ends_with_semicolon = true;
     }
     else if (token.type == TOKEN_IF) {
@@ -354,7 +359,7 @@ AstEnum *parse_enum(Parser *parser) {
     type_enum->head.as.name   = ident->name;
     type_enum->node           = ast_enum; // @Improvement - Probably also need to copy over the hashtable of enumerators
     type_enum->identifier     = ast_enum->identifier;
-    type_enum->backing_type   = primitive_type(PRIMITIVE_INT); // @Hardcoded @Incomplete - Missing syntax for having backing types
+    type_enum->backing_type   = primitive_type(PRIMITIVE_INT); // @Improvement - Support for having a backing integer type
 
     TypeInfo *exists = type_add_user_defined(&parser->type_table, (TypeInfo *)(type_enum));
     assert(!exists);
@@ -854,6 +859,30 @@ AstIf *parse_if(Parser *parser) {
     return ast_if;
 }
 
+AstTypeof *parse_typeof(Parser *parser) {
+    Token start_token = peek_next_token(parser);
+    expect(parser, start_token, TOKEN_TYPEOF);
+    eat_token(parser);
+
+    Token next = peek_next_token(parser);
+    expect(parser, next, '(');
+    eat_token(parser);
+
+    AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+
+    next = peek_next_token(parser);
+    expect(parser, next, ')');
+    eat_token(parser);
+
+    AstTypeof *ast_typeof  = (AstTypeof *)(ast_allocate(parser, sizeof(AstTypeof)));
+    ast_typeof->head.type  = AST_TYPEOF;
+    ast_typeof->head.start = start_token.start;
+    ast_typeof->head.end   = next.end;
+    ast_typeof->expr       = expr;
+
+    return ast_typeof;
+}
+
 AstAssert *parse_assert(Parser *parser) {
     Token start_token = peek_next_token(parser);
     expect(parser, start_token, TOKEN_ASSERT);
@@ -977,7 +1006,10 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationT
 int align_value(int value, int alignment) {
     int rem = value % alignment;
     if (rem == 0) return value;
-    else          return value + (alignment - rem);
+    else {
+        if (value < 0) return value - (alignment + rem);
+        else           return value + (alignment - rem);
+    }
 }
 
 AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, TypeInfo *type) {
@@ -1176,6 +1208,7 @@ const char *ast_type_name(AstType ast_type) {
         case AST_ASSIGNMENT:         return "AST_ASSIGNMENT";
         case AST_PRINT:              return "AST_PRINT";
         case AST_ASSERT:             return "AST_ASSERT";
+        case AST_TYPEOF:             return "AST_TYPEOF";
         case AST_RETURN:             return "AST_RETURN";
         case AST_STRUCT:             return "AST_STRUCT";
         case AST_STRUCT_LITERAL:     return "AST_STRUCT_LITERAL";

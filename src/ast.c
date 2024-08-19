@@ -18,6 +18,7 @@ typedef enum AstType {
     AST_ASSIGNMENT,
     AST_PRINT,
     AST_ASSERT,
+    AST_TYPEOF,
     AST_RETURN,
     AST_IF,
     AST_FOR,
@@ -221,6 +222,12 @@ typedef struct AstAssert {
     AstExpr *expr;
 } AstAssert;
 
+typedef struct AstTypeof {
+    AstNode head;
+
+    AstExpr *expr;
+} AstTypeof;
+
 typedef struct AstReturn {
     AstNode head;
 
@@ -352,7 +359,7 @@ typedef enum PrimitiveKind {
 
 char *primitive_type_names[PRIMITIVE_COUNT] = {
     "invalid",
-    "int",
+    "int",  // alias for s32
     "u8",
     "u16",
     "u32",
@@ -361,7 +368,7 @@ char *primitive_type_names[PRIMITIVE_COUNT] = {
     "s16",
     "s32",
     "s64",
-    "float",
+    "float",  // alias for f32
     "f32",
     "f64",
     "string",
@@ -471,17 +478,22 @@ TypeInfo *type_var(TypeTable *tt, TypeKind kind, char *name) {
 
 char *type_to_str(TypeInfo *type) {
     switch (type->kind) {
-        case TYPE_INVALID:   return "invalid";
-        case TYPE_VOID:      return "void";
-        case TYPE_BOOL:      return "bool";
-        case TYPE_INTEGER:   return "int";
-        case TYPE_FLOAT:     return "float";
-        case TYPE_STRING:    return "string";
+        case TYPE_INVALID:
+        case TYPE_VOID:
+        case TYPE_BOOL:
+        case TYPE_INTEGER:
+        case TYPE_FLOAT:
+        case TYPE_STRING: {
+            TypePrimitive *prim = (TypePrimitive *)(type);
+            return primitive_type_names[prim->kind];
+        }
         case TYPE_NAME:      return type->as.name;
         case TYPE_STRUCT:    return type->as.name;
         case TYPE_ENUM:      return type->as.name;
     }
-    XXX;
+
+    printf("internal compiler error: Unknown type kind: %d in type_to_str()", type->kind);
+    exit(1);
 }
 
 bool is_primitive_type(TypeKind kind) {
@@ -492,4 +504,20 @@ bool is_primitive_type(TypeKind kind) {
     if (kind == TYPE_STRING)  return true;
 
     return false;
+}
+
+bool is_signed_integer(TypeInfo *type) {
+    assert(type->kind == TYPE_INTEGER);
+
+    TypePrimitive *prim = (TypePrimitive *)(type);
+    switch (prim->kind) {
+    case PRIMITIVE_INT:
+    case PRIMITIVE_S8:
+    case PRIMITIVE_S16:
+    case PRIMITIVE_S32:
+    case PRIMITIVE_S64:
+        return true;
+    default:
+        return false;
+    }
 }

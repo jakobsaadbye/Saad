@@ -50,13 +50,74 @@ void resolve_enum_or_struct_type(Typer *typer, AstDeclaration *decl) {
     if (decl->declared_type->kind == TYPE_NAME) {
         TypeInfo *found = type_lookup(&typer->parser->type_table, decl->declared_type->as.name);
         if (found == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(&decl->declared_type), "Unknown type '%s'", type_to_str(decl->declared_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(decl->declared_type), "Unknown type '%s'", type_to_str(decl->declared_type));
             exit(1);
         }
 
         decl->declared_type    = found;
         decl->identifier->type = found;
     }
+}
+
+#define U8_MAX  255U
+#define U16_MAX 65535U
+#define U32_MAX 4294967295UL
+#define U64_MAX 18446744073709551615ULL
+#define S8_MAX  127
+#define S16_MAX 32767
+#define S32_MAX 2147483647
+#define S64_MAX 9223372036854775807
+
+unsigned long long max_value_of_type(TypePrimitive *type) {
+    switch (type->kind) {
+        case PRIMITIVE_INVALID: XXX;
+        case PRIMITIVE_INT:     return S32_MAX;
+        case PRIMITIVE_U8:      return U8_MAX;
+        case PRIMITIVE_U16:     return U16_MAX;
+        case PRIMITIVE_U32:     return U32_MAX;
+        case PRIMITIVE_U64:     return U64_MAX;
+        case PRIMITIVE_S8:      return S8_MAX;
+        case PRIMITIVE_S16:     return S16_MAX;
+        case PRIMITIVE_S32:     return S32_MAX;
+        case PRIMITIVE_S64:     return S64_MAX;
+        case PRIMITIVE_FLOAT:   XXX;
+        case PRIMITIVE_F32:     XXX;
+        case PRIMITIVE_F64:     XXX;
+        case PRIMITIVE_STRING:  XXX;
+        case PRIMITIVE_BOOL:    XXX;
+        case PRIMITIVE_VOID:    XXX;
+        case PRIMITIVE_COUNT:   XXX;
+    }
+
+    printf("internal compiler error: Unknown type kind %d in max_value_of_type()", type->kind);
+    exit(1);
+}
+
+void check_for_overflow(Typer *typer, AstDeclaration *decl) {
+    if (decl->expr == NULL) return;
+
+    AstExpr *expr = decl->expr;
+    if (expr->head.type == AST_LITERAL) {
+        AstLiteral *lit = (AstLiteral *)(expr);
+
+        if (lit->kind == LITERAL_INTEGER) {
+            assert(is_primitive_type(decl->declared_type->kind));
+
+            TypePrimitive *prim_type = (TypePrimitive *)(decl->declared_type);
+            unsigned long long int lit_value = lit->as.integer;
+            unsigned long long int max_value = max_value_of_type(prim_type);
+
+            if (lit_value > max_value) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(lit), "Assignment produces an integer overflow. Max value of type '%s' is '%llu'", type_to_str(decl->declared_type), max_value);
+                exit(1);
+            }
+        } else {
+            return;
+        }
+    }
+    // Expr is complex so we just let it slide. 
+    // @Note - When we can evaluate expressions, we should
+    // be able to handle checking overflow situations.
 }
 
 void check_declaration(Typer *typer, AstDeclaration *decl) {
@@ -87,6 +148,8 @@ void check_declaration(Typer *typer, AstDeclaration *decl) {
         XXX;
     }
     }
+
+    check_for_overflow(typer, decl);
     
     if (decl->flags & (DECL_IS_FUNCTION_PARAMETER | DECL_IS_STRUCT_MEMBER)) {
         // Omit sizing the declaration as it is done at the call site
@@ -196,6 +259,11 @@ void check_statement(Typer *typer, AstNode *stmt) {
             exit(1);
         }
 
+        return;
+    }
+    case AST_TYPEOF: {
+        AstTypeof *ast_typeof = (AstTypeof *)(stmt);
+        check_expression(typer, ast_typeof->expr, NULL);
         return;
     }
     case AST_IF: {
@@ -308,7 +376,6 @@ void check_statement(Typer *typer, AstNode *stmt) {
             TypeInfo* type_start = check_expression(typer, range->start, NULL);
             TypeInfo* type_end   = check_expression(typer, range->end, NULL);
 
-            // @Incomplete !!!
             if (type_start->kind != TYPE_INTEGER && type_start->kind != TYPE_ENUM) {
                 report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(range->start), "Range expressions must have integer type as bounds. Got type %s", type_to_str(type_start));
                 exit(1);
@@ -547,6 +614,11 @@ TypeInfo *check_struct_literal(Typer *typer, AstStructLiteral *literal, TypeInfo
     }
 }
 
+TypeInfo *biggest_type(TypeInfo *lhs, TypeInfo *rhs) {
+    if (lhs->size >= rhs->size) return lhs;
+    else                        return rhs;
+}
+
 TypeInfo *check_binary(Typer *typer, AstBinary *binary, TypeInfo *ctx_type) {
     TypeInfo *ti_lhs = check_expression(typer, binary->left, ctx_type);
     TypeInfo *ti_rhs = check_expression(typer, binary->right, ctx_type);
@@ -563,13 +635,13 @@ TypeInfo *check_binary(Typer *typer, AstBinary *binary, TypeInfo *ctx_type) {
     if (rhs == TYPE_ENUM) rhs = TYPE_INTEGER;
 
     if (strchr("+-/*^", binary->operator)) {
-        if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_INT);
-        if (lhs == TYPE_FLOAT   && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_FLOAT);
-        if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_FLOAT);
-        if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_FLOAT);
+        if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
+        if (lhs == TYPE_FLOAT   && rhs == TYPE_FLOAT)   return biggest_type(ti_lhs, ti_rhs);
+        if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
+        if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return biggest_type(ti_lhs, ti_rhs);
     }
     if (binary->operator == '%') {
-        if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_INT);
+        if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
     }
     if (is_boolean_operator(binary->operator)) {
         if (lhs == TYPE_BOOL && rhs == TYPE_BOOL)       return primitive_type(PRIMITIVE_BOOL);

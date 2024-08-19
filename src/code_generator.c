@@ -11,7 +11,7 @@ typedef struct CodeGenerator {
     SymbolTable function_table;
     TypeTable   type_table;
 
-    size_t base_ptr;
+    int base_ptr;
 
     size_t constants;   // For float and string literals
     size_t labels;      // For coditional jumps
@@ -29,6 +29,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call);
 void emit_return(CodeGenerator *cg, AstReturn *ast_return);
 void emit_print(CodeGenerator *cg, AstPrint *print_stmt);
 void emit_assert(CodeGenerator *cg, AstAssert *assertion);
+void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof);
 void emit_if(CodeGenerator *cg, AstIf *ast_if);
 void emit_for(CodeGenerator *cg, AstFor *ast_for);
 void emit_enum(CodeGenerator *cg, AstEnum *ast_enum);
@@ -43,6 +44,7 @@ int make_label_number(CodeGenerator *cg);
 const char *comparison_operator_to_set_instruction(TokenType op);
 const char *boolean_operator_to_instruction(TokenType op);
 int member_access_address(CodeGenerator *cg, AstMemberAccess *ma);
+char *DT(TypeInfo *type);
 
 
 CodeGenerator code_generator_init(Parser *parser) {
@@ -99,8 +101,8 @@ void emit_header(CodeGenerator *cg) {
     sb_append(&cg->head, "\n");
 
     sb_append(&cg->data, "segment .data\n");
-    sb_append(&cg->data, "   fmt_int   DB \"%s\", 10, 0\n", "%d");
-    sb_append(&cg->data, "   fmt_float DB \"%s\", 10, 0\n", "%f");
+    sb_append(&cg->data, "   fmt_int   DB \"%s\", 10, 0\n", "%lld");
+    sb_append(&cg->data, "   fmt_float DB \"%s\", 10, 0\n", "%lf");
     sb_append(&cg->data, "   fmt_string DB \"%s\", 10, 0\n", "%s");
     sb_append(&cg->data, "   string_false DB \"false\", 10, 0\n");
     sb_append(&cg->data, "   string_true  DB \"true\", 10, 0\n");
@@ -171,6 +173,7 @@ void emit_statement(CodeGenerator *cg, AstNode *node) {
         case AST_BLOCK:         emit_block(cg, (AstBlock *)(node), true); break;
         case AST_PRINT:         emit_print(cg, (AstPrint *)(node)); break;
         case AST_ASSERT:        emit_assert(cg, (AstAssert *)(node)); break;
+        case AST_TYPEOF:        emit_typeof(cg, (AstTypeof *)(node)); break;
         case AST_IF:            emit_if(cg, (AstIf *)(node)); break;
         case AST_FOR:           emit_for(cg, (AstFor *)(node)); break;
         case AST_ENUM:          emit_enum(cg, (AstEnum *)(node)); break;
@@ -489,6 +492,55 @@ void emit_assert(CodeGenerator *cg, AstAssert *assertion) {
     sb_append(&cg->code, "   call\t\tassert\n");
 }
 
+void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof) {
+    TypeInfo *expr_type = ast_typeof->expr->evaluated_type;
+
+    if (!is_primitive_type(expr_type->kind)) {
+        report_error_ast(cg->parser, LABEL_ERROR, (AstNode *)(ast_typeof), "typeof() of type other than primitive types is not yet implemented");
+        exit(1);
+    }
+
+    PrimitiveKind type_kind  = ((TypePrimitive *)(expr_type))->kind;
+    char         *type_name  = primitive_type_names[type_kind];
+    int           type_label = make_label_number(cg);
+
+    sb_append(&cg->data, "   T%d\tDB \"%s\", 10, 0", type_label, type_name);
+    sb_append(&cg->code, "   mov\t\trcx, T%d\n", type_label);
+    sb_append(&cg->code, "   call\t\tprintf\n");
+}
+
+const char *REG_A(TypeInfo *type) {
+    if (type->size == 1) return "al";
+    if (type->size == 2) return "ax";
+    if (type->size == 4) return "eax";
+    if (type->size == 8) return "rax";
+    XXX;
+}
+
+const char *REG_B(TypeInfo *type) {
+    if (type->size == 1) return "bl";
+    if (type->size == 2) return "bx";
+    if (type->size == 4) return "ebx";
+    if (type->size == 8) return "rbx";
+    XXX;
+}
+
+const char *REG_C(TypeInfo *type) {
+    if (type->size == 1) return "cl";
+    if (type->size == 2) return "cx";
+    if (type->size == 4) return "ecx";
+    if (type->size == 8) return "rcx";
+    XXX;
+}
+
+const char *REG_D(TypeInfo *type) {
+    if (type->size == 1) return "dl";
+    if (type->size == 2) return "dx";
+    if (type->size == 4) return "edx";
+    if (type->size == 8) return "rdx";
+    XXX;
+}
+
 void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; expression of print\n");
@@ -543,7 +595,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
 
 void zero_initialize(CodeGenerator *cg, AstDeclaration *decl, int stack_offset) {
     switch (decl->declared_type->kind) {
-        case TYPE_INTEGER: sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", stack_offset); break;
+        case TYPE_INTEGER: sb_append(&cg->code, "   mov\t\t%s %d[rbp], 0\n", DT(decl->declared_type), stack_offset); break;
         case TYPE_FLOAT:   sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", stack_offset); break;
         case TYPE_BOOL:    sb_append(&cg->code, "   mov\t\tBYTE %d[rbp], 0\n",  stack_offset); break;
         case TYPE_STRING:  sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", stack_offset); break;
@@ -569,7 +621,7 @@ void zero_initialize(CodeGenerator *cg, AstDeclaration *decl, int stack_offset) 
 void assign_simple_value(CodeGenerator *cg, int address, TypeInfo *lhs_type, TypeInfo *rhs_type) {
     if (lhs_type->kind == TYPE_INTEGER) {
         sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], eax\n", address);
+        sb_append(&cg->code, "   mov\t\t%s %d[rbp], %s\n", DT(lhs_type), address, REG_A(lhs_type)); // nocheckin
     }
     else if (lhs_type->kind == TYPE_FLOAT) {
         if (rhs_type->kind == TYPE_INTEGER) {
@@ -619,10 +671,10 @@ void emit_struct_initialization(CodeGenerator *cg, AstStructLiteral *lit, int st
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     int type_size = decl->declared_type->size;
     cg->base_ptr -= type_size;
+    cg->base_ptr  = align_value(cg->base_ptr, type_size);
 
-    cg->base_ptr = align_value(cg->base_ptr, type_size);
     decl->identifier->stack_offset = cg->base_ptr;
-    int stack_offset = decl->identifier->stack_offset;
+    int stack_offset               = cg->base_ptr;
 
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; initialization of '%s'\n", decl->identifier->name);
@@ -914,7 +966,8 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         AstLiteral *lit = (AstLiteral *)(expr);
         switch (lit->kind) {
         case LITERAL_INTEGER: {
-            sb_append(&cg->code, "   push\t\t%d\n", lit->as.integer);
+            sb_append(&cg->code, "   mov\t\trax, %llu\n", lit->as.integer);
+            sb_append(&cg->code, "   push\t\trax\n");
             return;
         }
         case LITERAL_FLOAT: {
@@ -947,7 +1000,11 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
             // @Improvement - Could probably be @Refactored. Looks very similar to 'assign_simple_value'
             if (ident->type->kind == TYPE_INTEGER) {
-                sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", ident->stack_offset);
+                sb_append(&cg->code, "   mov\t\trax, 0\n");
+                sb_append(&cg->code, "   mov\t\t%s, %s %d[rbp]\n", REG_A(ident->type), DT(ident->type), ident->stack_offset);
+                if (is_signed_integer(ident->type) && ident->type->size != 8) {
+                    sb_append(&cg->code, "   movsx\t\trax, %s\n", REG_A(ident->type));
+                }
                 sb_append(&cg->code, "   push\t\trax\n", ident->stack_offset);
                 return;
             }
@@ -986,4 +1043,45 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         printf("%s:%d: compiler-error: There were unhandled cases in 'emit_expression' with %s\n", __FILE__, __LINE__, ast_type_name(expr->head.type));
         exit(1);
     }
+}
+
+// Convert type to one of the four intel data types
+char *DT(TypeInfo *type) {
+    switch (type->kind) {
+    case TYPE_INVALID: XXX;
+    case TYPE_NAME: XXX;
+    case TYPE_VOID: XXX;
+    case TYPE_BOOL: 
+    case TYPE_INTEGER:
+    case TYPE_FLOAT:
+    case TYPE_STRING: {
+        TypePrimitive *prim_type = (TypePrimitive *)(type);
+        switch (prim_type->kind) {
+            case PRIMITIVE_INVALID: XXX;
+            case PRIMITIVE_INT:     return "DWORD";
+            case PRIMITIVE_U8:      return "BYTE";
+            case PRIMITIVE_U16:     return "WORD";
+            case PRIMITIVE_U32:     return "DWORD";
+            case PRIMITIVE_U64:     return "QWORD";
+            case PRIMITIVE_S8:      return "BYTE";
+            case PRIMITIVE_S16:     return "WORD";
+            case PRIMITIVE_S32:     return "DWORD";
+            case PRIMITIVE_S64:     return "QWORD";
+            case PRIMITIVE_FLOAT:   XXX;
+            case PRIMITIVE_F32:     XXX;
+            case PRIMITIVE_F64:     XXX;
+            case PRIMITIVE_STRING:  return "QWORD";
+            case PRIMITIVE_BOOL:    return "BYTE";
+            case PRIMITIVE_VOID:    XXX;
+            case PRIMITIVE_COUNT:   XXX;      
+        }
+        XXX; // unreachable
+    }
+    case TYPE_STRUCT: XXX;
+    case TYPE_ENUM: {
+        TypeEnum *enum_type = (TypeEnum *)(type);
+        return DT(enum_type->backing_type);
+    };
+    }
+    XXX; // unreachable
 }

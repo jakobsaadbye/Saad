@@ -2,8 +2,8 @@ bits 64
 default rel
 
 segment .data
-   fmt_int   DB "%d", 10, 0
-   fmt_float DB "%f", 10, 0
+   fmt_int   DB "%lld", 10, 0
+   fmt_float DB "%lf", 10, 0
    fmt_string DB "%s", 10, 0
    string_false DB "false", 10, 0
    string_true  DB "true", 10, 0
@@ -11,6 +11,9 @@ segment .data
    __DogKind.bulldog DB "DogKind.bulldog", 10, 0
    __DogKind.chiwawa DB "DogKind.chiwawa", 10, 0
    __DogKind.samoid DB "DogKind.samoid", 10, 0
+   CF0 DD 20.000000
+   CF1 DD 0.500000
+   CF2 DD 80.000000
 
 segment .text
    global main
@@ -63,45 +66,84 @@ enum_case_3:
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 48
+   sub		rsp, 64
 
-   ; initialization of 'dog1'
+   ; initialization of 'samoid'
+   mov		DWORD -16[rbp], 0
+   mov		DWORD -12[rbp], 0
+   mov		DWORD -8[rbp], 0
    mov		DWORD -4[rbp], 0
    push		0
    pop		rax
-   mov		DWORD -4[rbp], eax
+   mov		DWORD -16[rbp], eax
+   mov		rax, 4
+   push		rax
+   pop		rax
+   mov		DWORD -12[rbp], eax
+   movss		xmm0, [CF0]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   movss		DWORD -8[rbp], xmm0
+   movss		xmm0, [CF1]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   movss		DWORD -4[rbp], xmm0
 
-   ; initialization of 'dog2'
-   mov		DWORD -8[rbp], 0
-   push		2
-   pop		rax
-   mov		DWORD -8[rbp], eax
-   push		1
-   pop		rax
-   neg		rax
-   push		rax
-   push		2
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		-8[rbp], eax
-   mov		eax, DWORD -8[rbp]
-   push		rax
-   push		1
+   ; initialization of 'bmi'
+   mov		DWORD -20[rbp], 0
+   movss		xmm0, -8[rbp]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm0, -4[rbp]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm0, -4[rbp]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm1, [rsp]
+   add		rsp, 4
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   mulss		xmm0, xmm1
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm1, [rsp]
+   add		rsp, 4
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   divss		xmm0, xmm1
+   sub		rsp, 4
+   movss		[rsp], xmm0
 
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
+
+   ; putting result into 'bmi'
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   movss		DWORD -20[rbp], xmm0
+   movss		xmm0, -20[rbp]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm0, [CF2]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm1, [rsp]
+   add		rsp, 4
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   comiss		xmm0, xmm1
    sete		al
    push		rax
    pop		rcx
-   mov		rdx, 16
+   mov		rdx, 23
    call		assert
-   mov		eax, DWORD -4[rbp]
+   mov		eax, DWORD -12[rbp]
    push		rax
-   push		0
+   mov		rax, 4
+   push		rax
 
    pop		rbx
    pop		rax
@@ -109,10 +151,10 @@ main:
    sete		al
    push		rax
    pop		rcx
-   mov		rdx, 17
+   mov		rdx, 24
    call		assert
 L5:
    mov		rax, 0
-   add		rsp, 48
+   add		rsp, 64
    pop		rbp
    ret

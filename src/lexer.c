@@ -62,6 +62,7 @@ typedef enum TokenType {
     TOKEN_ELSE         = 163,
     TOKEN_RETURN       = 164,
     TOKEN_FOR          = 165,
+    TOKEN_TYPEOF       = 166,
 
     TOKEN_STRUCT  = 180,
     TOKEN_ENUM    = 181,
@@ -87,9 +88,9 @@ typedef enum TokenType {
 } TokenType;
 
 typedef union As_value {
-    bool   boolean;
-    int    integer;
-    double floating;
+    bool               boolean;
+    unsigned long long integer;
+    double             floating;
     struct { char *data; int length; } string;
     struct { char *name; int length; } identifier;
 } As_value;
@@ -213,6 +214,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_DIVIDE_EQUAL:  return "DIVIDE_EQUAL";
         case TOKEN_PRINT:         return "PRINT";
         case TOKEN_ASSERT:        return "ASSERT";
+        case TOKEN_TYPEOF:        return "TYPEOF";
         case TOKEN_RETURN:        return "RETURN";
         case TOKEN_FOR:           return "FOR";
         case TOKEN_IF:            return "IF";
@@ -470,6 +472,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "string") == 0) token = TOKEN_TYPE_STRING;
         if (strcmp(text, "return") == 0) token = TOKEN_RETURN;
         if (strcmp(text, "assert") == 0) token = TOKEN_ASSERT;
+        if (strcmp(text, "typeof") == 0) token = TOKEN_TYPEOF;
     }
 
     if (token == TOKEN_NONE) {
@@ -544,7 +547,7 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
         memset(val_str, '\0', MAX_DIGITS);
 
         strncpy(val_str, src, pos_end.input_idx - pos_start.input_idx);
-        int val = atoi(val_str);
+        unsigned long long val = strtoull(val_str, NULL, 0);
         
         result.type = token_type;
         result.as_value.integer = val;
