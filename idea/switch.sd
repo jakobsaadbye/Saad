@@ -1,0 +1,23 @@
+//
+// This is just hypothetical syntax for doing switch statements so is not really implemented!!!
+//
+
+Status :: enum {
+    open,
+    closed,
+}
+
+main :: () {
+    status := Status.closed;
+
+    status = 3;
+    
+    str : string;
+    switch status {
+        case .open:   str = "open";
+        case .closed: str = "closed";
+        otherwise:    str = "invalid";
+    } 
+
+    print(str);
+}

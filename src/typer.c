@@ -93,27 +93,29 @@ unsigned long long max_value_of_type(TypePrimitive *type) {
     exit(1);
 }
 
-void check_for_overflow(Typer *typer, AstDeclaration *decl) {
-    if (decl->expr == NULL) return;
+void check_for_integer_overflow(Typer *typer, TypeInfo *lhs_type, AstExpr *expr) {
+    if (expr == NULL) return;
 
-    AstExpr *expr = decl->expr;
+    if (lhs_type->kind == TYPE_ENUM) {
+        // @Todo - Handle assignment to enum with integer that might be too large
+        return;
+    }
+
     if (expr->head.type == AST_LITERAL) {
         AstLiteral *lit = (AstLiteral *)(expr);
 
         if (lit->kind == LITERAL_INTEGER) {
-            assert(is_primitive_type(decl->declared_type->kind));
+            assert(is_primitive_type(lhs_type->kind));
 
-            TypePrimitive *prim_type = (TypePrimitive *)(decl->declared_type);
+            TypePrimitive *prim_type = (TypePrimitive *)(lhs_type);
             unsigned long long int lit_value = lit->as.integer;
             unsigned long long int max_value = max_value_of_type(prim_type);
 
             if (lit_value > max_value) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(lit), "Assignment produces an integer overflow. Max value of type '%s' is '%llu'", type_to_str(decl->declared_type), max_value);
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(lit), "Assignment produces an integer overflow. Max value of type '%s' is '%llu'", type_to_str(lhs_type), max_value);
                 exit(1);
             }
-        } else {
-            return;
-        }
+        } 
     }
     // Expr is complex so we just let it slide. 
     // @Note - When we can evaluate expressions, we should
@@ -149,7 +151,7 @@ void check_declaration(Typer *typer, AstDeclaration *decl) {
     }
     }
 
-    check_for_overflow(typer, decl);
+    check_for_integer_overflow(typer, decl->declared_type, decl->expr);
     
     if (decl->flags & (DECL_IS_FUNCTION_PARAMETER | DECL_IS_STRUCT_MEMBER)) {
         // Omit sizing the declaration as it is done at the call site
@@ -243,6 +245,8 @@ void check_statement(Typer *typer, AstNode *stmt) {
                 exit(1);
             }
         }
+
+        check_for_integer_overflow(typer, lhs_type, assign->expr);
 
         return;
     }

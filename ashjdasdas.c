@@ -1,11 +1,7 @@
 #include <stdio.h>
 
-int main(int argc, char const *argv[])
+int main()
 {
-    unsigned char x = 255;
-    x += 2;
-
-    printf("x=%llu", x);
-    
+    int x = 2147483648;
     return 0;
 }
