@@ -1,30 +1,8 @@
-main :: () {
-    a : u8  = 255 + 1;
-    b : u16 = 65535 + 1;
-    c : u32 = 4294967295 + 1;
-    d : u64 = 18446744073709551615 + 1;
-    
-    assert(a == 0);
-    assert(b == 0);
-    assert(c == 0);
-    assert(d == 0);
-    
-    
-    e : s8  = 127 + 1;
-    f : s16 = 32767 + 1;
-    g : s32 = 2147483647 + 1;
-    h : s64 = 9223372036854775807 + 1;
-    i : s8  = -129;
-    j : s16 = -32769;
-    k : s32 = -2147483649;
-    l : s64 = -9223372036854775809;
+ASPECT_RATIO  :: 16.0 / 9.0;
+WINDOW_WIDTH  :: 860 * ASPECT_RATIO;
+WINDOW_HEIGHT :: 640 * ASPECT_RATIO;
 
-    assert(e == -128);
-    assert(f == -32768);
-    assert(g == -2147483648);
-    assert(h == -9223372036854775808);
-    assert(i == 127);
-    assert(j == 32767);
-    assert(k == 2147483647);
-    assert(l == 9223372036854775807);
+main :: () {
+
+    print(WINDOW_WIDTH);
 }

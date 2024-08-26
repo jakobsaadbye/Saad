@@ -224,7 +224,7 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
 
     int address = 0;
     if (assign->lhs->head.type == AST_LITERAL) {
-        AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(assign->lhs))->as.identifier.name)->as.identifier;
+        AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(assign->lhs))->as.value.identifier.name)->as.identifier;
         address = ident->stack_offset;
     }
     else if (assign->lhs->head.type == AST_MEMBER_ACCESS) {
@@ -669,6 +669,21 @@ void emit_struct_initialization(CodeGenerator *cg, AstStructLiteral *lit, int st
 }
 
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
+    if (decl->flags & DECLARATION_CONSTANT) {
+        assert(decl->expr->head.type == AST_LITERAL);
+        AstLiteral *lit = (AstLiteral *)(decl->expr);
+
+        switch (lit->kind) {
+            case LITERAL_BOOLEAN: break; // Immediate value is used
+            case LITERAL_INTEGER: break; // Immediate value is used
+            case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", decl->identifier->name, lit->as.value.floating); break;
+            case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", decl->identifier->name, lit->as.value.string.data); break;
+            case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
+        }
+
+        return;
+    }
+
     int type_size = decl->declared_type->size;
     cg->base_ptr -= type_size;
     cg->base_ptr  = align_value(cg->base_ptr, type_size);
@@ -680,7 +695,7 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     sb_append(&cg->code, "   ; initialization of '%s'\n", decl->identifier->name);
     zero_initialize(cg, decl, stack_offset);
     
-    if (decl->declaration_type != DECLARATION_TYPED_NO_EXPR) {
+    if (!(decl->flags & DECLARATION_TYPED_NO_EXPR)) {
         if (decl->expr->head.type == AST_STRUCT_LITERAL) {
             // Struct assignment
             emit_struct_initialization(cg, (AstStructLiteral *)(decl->expr), stack_offset);
@@ -692,7 +707,7 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
             sb_append(&cg->code, "   ; putting result into '%s'\n", decl->identifier->name);
             assign_simple_value(cg, stack_offset, decl->declared_type, decl->expr->evaluated_type);
         }
-    }
+    } 
 }
 
 void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
@@ -966,12 +981,12 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         AstLiteral *lit = (AstLiteral *)(expr);
         switch (lit->kind) {
         case LITERAL_INTEGER: {
-            sb_append(&cg->code, "   mov\t\trax, %llu\n", lit->as.integer);
+            sb_append(&cg->code, "   mov\t\trax, %llu\n", lit->as.value.integer); // @Incomplete - Need to check if signed or unsigned!!!
             sb_append(&cg->code, "   push\t\trax\n");
             return;
         }
         case LITERAL_FLOAT: {
-            sb_append(&cg->data, "   CF%d DD %lf\n", cg->constants, lit->as.floating);
+            sb_append(&cg->data, "   CF%d DD %lf\n", cg->constants, lit->as.value.floating);
             sb_append(&cg->code, "   movss\t\txmm0, [CF%d]\n", cg->constants);
             sb_append(&cg->code, "   sub\t\trsp, 4\n");
             sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
@@ -979,24 +994,49 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_STRING: {
-            sb_append(&cg->data, "   CS%d DB \"%s\", 0 \n", cg->constants, lit->as.string.data);
+            sb_append(&cg->data, "   CS%d DB \"%s\", 0 \n", cg->constants, lit->as.value.string.data);
             sb_append(&cg->code, "   mov\t\trax, CS%d\n", cg->constants);
             sb_append(&cg->code, "   push\t\trax\n", cg->constants);
             cg->constants++;
             return;
         }
         case LITERAL_BOOLEAN: {
-            bool value = lit->as.boolean;
-            if (value == true) sb_append(&cg->code, "   push\t\t-1\n");
-            else               sb_append(&cg->code, "   push\t\t0\n"); 
+            sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);
             return;
         }
         case LITERAL_IDENTIFIER: {
-            Symbol *ident_symbol = symbol_lookup(&cg->ident_table, lit->as.identifier.name);
+            Symbol *ident_symbol = symbol_lookup(&cg->ident_table, lit->as.value.identifier.name);
             assert(ident_symbol != NULL);
 
             AstIdentifier *ident = ident_symbol->as.identifier;
-            assert(ident != NULL);
+
+            if (ident->belongs_to_decl && ident->belongs_to_decl->flags & DECLARATION_CONSTANT) {
+                assert(ident->belongs_to_decl->expr->head.type == AST_LITERAL);
+                AstLiteral *lit = (AstLiteral *)(ident->belongs_to_decl->expr);
+                switch (lit->kind) {
+                    case LITERAL_BOOLEAN: {
+                        sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);
+                        return;
+                    }
+                    case LITERAL_INTEGER: {
+                        sb_append(&cg->code, "   push\t\t%lld\n", lit->as.value.integer);
+                        return;
+                    }
+                    case LITERAL_FLOAT: {
+                        // @Incomplete - We need to check if float is 32 or 64 bit constant. Right now we just assume 32 bit
+                        sb_append(&cg->code, "   movss\t\txmm0, [C_%s]\n", ident->name);
+                        sb_append(&cg->code, "   sub\t\trsp, 4\n"); 
+                        sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
+                        return;
+                    }
+                    case LITERAL_STRING: {
+                        sb_append(&cg->code, "   mov\t\trax, C_%s\n", ident->name);
+                        sb_append(&cg->code, "   push\t\trax");
+                        return;
+                    }
+                    case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
+                }
+            }
 
             // @Improvement - Could probably be @Refactored. Looks very similar to 'assign_simple_value'
             if (ident->type->kind == TYPE_INTEGER) {

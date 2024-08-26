@@ -38,7 +38,7 @@ AstExpr         *parse_expression(Parser *parser, int min_prec);
 AstExpr         *parse_range_or_normal_expression(Parser *parser);
 AstExpr         *parse_leaf(Parser *parser);
 
-AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, TypeInfo *type, DeclarationFlags flags);
+AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *expr, TypeInfo *type, DeclarationFlags flags);
 AstExpr        *make_binary_node(Parser *parser, Token token, AstExpr *lhs, AstExpr *rhs);
 AstExpr        *make_unary_node(Parser *parser, Token token, AstExpr *expr, OperatorType op_type);
 AstExpr        *make_literal_node(Parser *parser, Token token);
@@ -227,7 +227,8 @@ AstLiteral *int_literal_from_value(Parser *parser, int value) {
     AstLiteral *lit     = (AstLiteral *)(ast_allocate(parser, sizeof(AstLiteral)));
     lit->head.head.type = AST_LITERAL;
     lit->kind           = (LiteralKind)(TOKEN_INTEGER);
-    lit->as.integer     = value;
+    lit->as.value.integer = value;
+    lit->as.flags         = 0;
     return lit;
 }
 
@@ -256,7 +257,7 @@ TypeInfo *parse_type(Parser *parser) {
         ti->head.start = next.start;
         ti->head.end   = next.end;
         ti->kind       = TYPE_NAME;
-        ti->as.name    = next.as_value.identifier.name;
+        ti->as.name    = next.as_value.value.identifier.name;
         return ti;
     }
 
@@ -272,7 +273,7 @@ AstEnum *parse_enum(Parser *parser) {
 
     // Expose the enum as an identifier so enum values can be referenced explicitly using ENUM.value
     {
-        ident->flags |= IDENT_IS_NAME_OF_ENUM;
+        ident->flags |= IDENTIFIER_IS_NAME_OF_ENUM;
         Symbol *exists = symbol_add_identifier(&parser->ident_table, ident);
         if (exists) {
             AstIdentifier *found = exists->as.identifier;
@@ -314,7 +315,7 @@ AstEnum *parse_enum(Parser *parser) {
             etor->head.start = next.start;
             etor->head.end   = next.end;
             etor->parent     = ast_enum;
-            etor->name       = next.as_value.identifier.name; // @Robustness - Should probably do a copy here so that we are not tied to the token array
+            etor->name       = next.as_value.value.identifier.name; // @Robustness - Should probably do a copy here so that we are not tied to the token array
             etor->value      = auto_increment_value;
             etor->index      = enum_index;
 
@@ -393,7 +394,7 @@ AstStruct *parse_struct(Parser *parser) {
     // Parse members
     int member_index = 0;
     while (next.type != '}' && next.type != TOKEN_END) {
-        AstDeclaration *member = parse_declaration(parser, DECL_IS_STRUCT_MEMBER);
+        AstDeclaration *member = parse_declaration(parser, DECLARATION_IS_STRUCT_MEMBER);
         member->member_index = member_index;
 
         next = peek_next_token(parser);
@@ -636,7 +637,7 @@ AstAccessor *make_accessor(Parser *parser, Token tok) {
     ac->head.type   = AST_ACCESSOR;
     ac->head.start  = tok.start;
     ac->head.end    = tok.end;
-    ac->name        = tok.as_value.identifier.name;
+    ac->name        = tok.as_value.value.identifier.name;
     ac->struct_member      = NULL;
     return ac;
 }
@@ -781,7 +782,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         TypeInfo *type = parse_type(parser);
 
         // Tell 'make_declaration' that the paramters should not be sized into the scope as they live at the callee site
-        AstDeclaration *param = make_declaration(parser, param_ident, DECLARATION_TYPED_NO_EXPR, NULL, type, 0);
+        AstDeclaration *param = make_declaration(parser, param_ident, NULL, type, DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_FUNCTION_PARAMETER);
         da_append(&func_defn->parameters, param);
         first_parameter_seen = true;
     }
@@ -942,12 +943,12 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
 
     // Infer. e.g. a := b
     if (next.type == TOKEN_COLON_EQUAL) {
-        if (flags & DECL_IS_STRUCT_MEMBER) {
+        if (flags & DECLARATION_IS_STRUCT_MEMBER) {
             assert(false && "Default parameters not implemented for structs yet");
         }
         eat_token(parser);
         AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-        return make_declaration(parser, ident, DECLARATION_INFER, expr, NULL, flags);
+        return make_declaration(parser, ident, expr, NULL, flags | DECLARATION_INFER);
     }
 
     // Typed. 'a : int = b' or 'a : int'
@@ -958,47 +959,57 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
         next = peek_next_token(parser);
 
         if (next.type == '=') {
-            if (flags & DECL_IS_STRUCT_MEMBER)      assert(false && "Default parameters not implemented for structs yet");
-            if (flags & DECL_IS_FUNCTION_PARAMETER) assert(false && "Default function parameters not implemented yet");
+            if (flags & DECLARATION_IS_STRUCT_MEMBER)      assert(false && "Default struct member values not implemented yet");
+            if (flags & DECLARATION_IS_FUNCTION_PARAMETER) assert(false && "Default function arguments not implemented yet");
             
             eat_token(parser);
             AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-            return make_declaration(parser, ident, DECLARATION_TYPED, expr, type, flags);
+            return make_declaration(parser, ident, expr, type, flags | DECLARATION_TYPED);
         } else {
-            return make_declaration(parser, ident, DECLARATION_TYPED_NO_EXPR, NULL, type, flags);
+            return make_declaration(parser, ident, NULL, type, flags | DECLARATION_TYPED_NO_EXPR);
         }
     }
+
+    // Constant. e.g. A :: 5;
     if (next.type == TOKEN_DOUBLE_COLON) {
-        XXX;
-    }
+        eat_token(parser);
+
+        AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+
+        return make_declaration(parser, ident, expr, NULL, flags | DECLARATION_CONSTANT);
+    }   
 
     report_error_token(parser, LABEL_ERROR, next, "Invalid declaration");
     exit(1);
 }
 
-AstDeclaration *make_declaration(Parser *parser, Token ident_token, DeclarationType decl_type, AstExpr *expr, TypeInfo *type, DeclarationFlags flags) {
+AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *expr, TypeInfo *type, DeclarationFlags flags) {
     AstIdentifier *ident = make_identifier_from_token(parser, ident_token, type);
 
-    if (flags & DECL_IS_STRUCT_MEMBER) {
+    if (flags & DECLARATION_CONSTANT) {
+        ident->flags |= IDENTIFIER_IS_CONSTANT;
+    }
+    if (flags & DECLARATION_IS_STRUCT_MEMBER) {
         // Skip putting identifier into identifier table as structs keeps their own small symbol table of members
     } else {
         Symbol *existing = symbol_add_identifier(&parser->ident_table, ident);
         if (existing != NULL) {
-            report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.identifier.name);
+            report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.value.identifier.name);
             report_error_ast(parser, LABEL_NOTE, (AstNode *)(existing->as.identifier), "Here is the previous declaration ...");
             exit(1);
         }
     }
 
-    AstDeclaration *decl = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
+    AstDeclaration *decl    = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
     decl->head.type         = AST_DECLARATION;
     decl->head.start        = ident_token.start;
     decl->head.end          = expr != NULL ? expr->head.end : type->head.end;
-    decl->declaration_type  = decl_type;
     decl->identifier        = ident;
     decl->declared_type     = type;
     decl->flags             = flags;
     decl->expr              = expr;
+
+    ident->belongs_to_decl = decl;
 
     return decl;
 }
@@ -1030,8 +1041,8 @@ AstIdentifier *make_identifier_from_token(Parser *parser, Token ident_token, Typ
     ident->head.start = ident_token.start;
     ident->head.end   = ident_token.end;
     ident->type       = type;
-    ident->name       = ident_token.as_value.identifier.name;
-    ident->length     = ident_token.as_value.identifier.length;
+    ident->name       = ident_token.as_value.value.identifier.name;
+    ident->length     = ident_token.as_value.value.identifier.length;
     ident->stack_offset = 0;
 
     return ident;

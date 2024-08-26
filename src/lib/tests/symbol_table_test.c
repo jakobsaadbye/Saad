@@ -44,7 +44,7 @@ int main()
 
                 Symbol *b = symbol_lookup(&st, "b");
                 assert(b != NULL);
-                assert(b->as_value.identifier->type == TYPE_FLOAT);
+                assert(b->as_value.value.identifier->type == TYPE_FLOAT);
             close_scope(&st);
 
             open_scope(&st);

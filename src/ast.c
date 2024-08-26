@@ -82,6 +82,10 @@ typedef struct TypeInfo {
     } as;
 } TypeInfo;
 
+
+typedef struct AstDeclaration AstDeclaration;
+
+
 typedef struct AstExpr {
     AstNode  head;
     TypeInfo *evaluated_type;
@@ -92,42 +96,41 @@ typedef struct AstCode {
     DynamicArray statements;
 } AstCode;
 
-typedef enum IdentFlags {
-    IDENT_IS_NAME_OF_ENUM   = 1 << 0,
-    IDENT_IS_NAME_OF_STRUCT = 1 << 1,
-} IdentFlags;
+typedef enum IdentifierFlags {
+    IDENTIFIER_IS_NAME_OF_ENUM   = 1 << 0,
+    IDENTIFIER_IS_NAME_OF_STRUCT = 1 << 1,
+    IDENTIFIER_IS_CONSTANT       = 1 << 2,
+} IdentifierFlags;
 
 typedef struct AstIdentifier {
     AstNode head;
 
     TypeInfo  *type;
-    IdentFlags flags;
+    IdentifierFlags flags;
     char      *name;
     int        length;
+
+    AstDeclaration *belongs_to_decl;
 
     int stack_offset;
 } AstIdentifier;
 
-typedef enum DeclarationType {
-    DECLARATION_TYPED,          // ex. a : int = b
-    DECLARATION_TYPED_NO_EXPR,  // ex. a : int
-    DECLARATION_INFER,          // ex. a := b
-    DECLARATION_CONSTANT        // ex. a :: 3 @ToDo - Not a thing yet
-} DeclarationType;
-
 typedef enum DeclarationFlags {
-    DECL_IS_STRUCT_MEMBER      = 1 << 1,
-    DECL_IS_FUNCTION_PARAMETER = 1 << 2,
+    DECLARATION_TYPED                 = 1 << 0,
+    DECLARATION_TYPED_NO_EXPR         = 1 << 1,
+    DECLARATION_INFER                 = 1 << 2,
+    DECLARATION_CONSTANT              = 1 << 3,
+    DECLARATION_IS_STRUCT_MEMBER      = 1 << 4,
+    DECLARATION_IS_FUNCTION_PARAMETER = 1 << 5,
 } DeclarationFlags;
 
 typedef struct AstDeclaration {
     AstNode head;
 
-    DeclarationType  declaration_type;
+    DeclarationFlags flags;
     AstIdentifier   *identifier;
     TypeInfo        *declared_type;
     AstExpr         *expr;
-    DeclarationFlags flags;
 
     int member_index;   // Used to know the insertion order of a struct member
     int member_offset;  // Relative offset within the struct
@@ -328,7 +331,7 @@ typedef struct AstLiteral {
     AstExpr head;
 
     LiteralKind kind;
-    As_value  as;
+    As_value    as;
 } AstLiteral;
 
 
@@ -461,7 +464,7 @@ TypeInfo *type_add_user_defined(TypeTable *tt, TypeInfo *type) {
         return existing;
     }
 
-    hash_table_add(&tt->user_types, type->as.name, &type); // @Bug - &type is not right!
+    hash_table_add(&tt->user_types, type->as.name, &type);
     return NULL;
 }
 

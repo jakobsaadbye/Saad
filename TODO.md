@@ -1,17 +1,18 @@
 TODO:
-    - Print of enum name instead of integer value
     - Backing integer types for enums
     - Allow enum values to be assigned to constant integer expressions
-    - Better printf support
-
-
-
-
+    - Better printf
 
 Roadmap:
-    - Pointer types / Array types / Primitive type sizes
+    - Constants
+    - Pointer types
+    - Array types
+    - Heap allocation + Allocators
     - Structs as function parameters
-    - Constant declarations
+    - Switch statement
+    - Bit operations
+    - Foreign functions + C bindings
+    - Modules / Packages
 
 
 

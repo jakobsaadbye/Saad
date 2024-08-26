@@ -11,6 +11,14 @@
 
 #define XXX assert(false && "Not implemented")
 
+#define U8_MAX  255U
+#define U16_MAX 65535U
+#define U32_MAX 4294967295UL
+#define U64_MAX 18446744073709551615ULL
+#define S8_MAX  127
+#define S16_MAX 32767
+#define S32_MAX 2147483647
+#define S64_MAX 9223372036854775807
 
 #define COLOR_RESET   "\x1B[0m"
 #define COLOR_RED     "\x1B[91m"
@@ -87,12 +95,19 @@ typedef enum TokenType {
     TOKEN_END = 254
 } TokenType;
 
-typedef union As_value {
-    bool               boolean;
-    unsigned long long integer;
-    double             floating;
-    struct { char *data; int length; } string;
-    struct { char *name; int length; } identifier;
+typedef enum ValueFlags {
+    VALUE_IS_BIGGER_THAN_SIGNED_64_BIT_INTEGER = 1 << 0
+} ValueFlags;
+
+typedef struct As_value {
+    ValueFlags flags;
+    union {
+        bool               boolean;
+        long long          integer;
+        double             floating;
+        struct { char *data; int length; } string;
+        struct { char *name; int length; } identifier;
+    } value;
 } As_value;
 
 typedef struct Line {
@@ -297,16 +312,16 @@ bool lex(Lexer *lexer) {
                     next = peek_next_char(lexer);
                 }
 
-                if (!ends_literal(next)) {
-                    report_syntax_error_here(lexer, "Invalid float literal. Probably a missing ;");
-                    return false;
-                }
+                // if (!ends_literal(next)) {
+                //     report_syntax_error_here(lexer, "Invalid float literal. Probably a missing ;");
+                //     return false;
+                // }
                 make_literal_here(lexer, TOKEN_FLOAT, pos_start);
             } else {
-                if (!ends_literal(next)) {
-                    report_syntax_error_here(lexer, "Invalid integer literal. Probably a missing ;");
-                    return false;
-                }
+                // if (!ends_literal(next)) {
+                //     report_syntax_error_here(lexer, "Invalid integer literal. Probably a missing ;");
+                //     return false;
+                // }
                 make_literal_here(lexer, TOKEN_INTEGER, pos_start);
             }
 
@@ -498,9 +513,9 @@ void make_identifier(Lexer *lexer, Pos pos_start) {
     Token token = {0};
     token.type  = TOKEN_IDENTIFIER;
     token.as_value = (As_value) {
-        .identifier = {
-            .name   = ident_name,
-            .length = ident_length
+        .flags = 0,
+        .value = {
+            .identifier = { .name = ident_name, .length = ident_length }
         }
     };
     token.start = pos_start;
@@ -548,9 +563,14 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
 
         strncpy(val_str, src, pos_end.input_idx - pos_start.input_idx);
         unsigned long long val = strtoull(val_str, NULL, 0);
-        
+
         result.type = token_type;
-        result.as_value.integer = val;
+        if (val > S64_MAX) {
+            result.as_value.flags |= VALUE_IS_BIGGER_THAN_SIGNED_64_BIT_INTEGER;
+        }
+
+        result.as_value.value.integer = (long long)(val);
+        
         break;
     }
     case TOKEN_FLOAT : {
@@ -562,7 +582,7 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
         double val = atof(val_str);
         
         result.type = token_type;
-        result.as_value.floating = val;
+        result.as_value.value.floating = val;
 
         break;
     }
@@ -577,9 +597,9 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
 
         result.type = token_type;
         result.as_value = (As_value) {
-            .string = {
-                .data   = buffer,
-                .length = str_len
+            .flags = 0,
+            .value = {
+                .string = {.data = buffer, .length = str_len}  
             }
         };
 
@@ -588,9 +608,7 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
     case TOKEN_TRUE:
     case TOKEN_FALSE: {
         result.type = TOKEN_BOOLEAN;
-        result.as_value = (As_value) {
-            .boolean = token_type == TOKEN_TRUE ? true : false
-        };
+        result.as_value.value.boolean = token_type == TOKEN_TRUE ? true : false;
 
         break;
     }

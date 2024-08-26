@@ -46,47 +46,48 @@ void print_compiler_report(CompilerReport cr) {
 }
 
 bool send_through_pipeline(char *program, const char *program_path, bool output_to_console) {
-    CompilerReport cr = {0};
+    CompilerReport report = {0};
 
 
-    cr.lex_time_start = clock();
+    report.lex_time_start = clock();
     Lexer lexer = lexer_init(program, program_path);
     bool ok = lex(&lexer);
     if (!ok) return false;
-    cr.lex_time_end = clock();
+    report.lex_time_end = clock();
 
     // dump_tokens(&lexer);
 
 
-    cr.parse_time_start = clock();
+    report.parse_time_start = clock();
     Parser parser = parser_init(&lexer);
     AstCode *code = (AstCode *) parse_top_level_code(&parser);
     if (code == NULL) return false;
-    cr.parse_time_end = clock();
+    report.parse_time_end = clock();
 
 
-    cr.typer_time_start = clock();
-    Typer typer = typer_init(&parser);
+    report.typer_time_start = clock();
+    ConstEvaluater ce = const_evaluator_init(&parser);
+    Typer typer = typer_init(&parser, &ce);
     check_code(&typer, code);
-    cr.typer_time_end = clock();
+    report.typer_time_end = clock();
 
 
-    cr.codegen_time_start = clock();
+    report.codegen_time_start = clock();
     CodeGenerator cg = code_generator_init(&parser);
     go_nuts(&cg, code);
     code_generator_dump(&cg, "./build/out.asm");
-    cr.codegen_time_end = clock();
+    report.codegen_time_end = clock();
 
-    cr.asm_and_link_time_start = clock();
+    report.asm_and_link_time_start = clock();
     system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
     int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -lkernel32 -lmsvcrt");
     if (exit_code != 0) return false;
-    cr.asm_and_link_time_end = clock();
+    report.asm_and_link_time_end = clock();
 
 
     if (output_to_console) {
         exit_code = system(".\\build\\out.exe");
-        print_compiler_report(cr);
+        print_compiler_report(report);
     } else {
         exit_code = system(".\\build\\out.exe >nul");
     }

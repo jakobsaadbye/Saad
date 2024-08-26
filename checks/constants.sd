@@ -1,0 +1,10 @@
+PI  :: 3.14159;
+TAU :: PI * 2;
+
+TRUE  :: true;
+FALSE :: false;
+
+main :: () {
+    assert(TAU / 2 == PI);
+    assert(TRUE);
+}

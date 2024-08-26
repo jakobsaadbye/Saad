@@ -1,7 +1,8 @@
-#include "parser.c"
+#include "const_expr.c"
 
 typedef struct Typer {
     Parser *parser;
+    ConstEvaluater *ce;
 
     AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
 } Typer;
@@ -23,9 +24,10 @@ AstStruct      *get_struct(SymbolTable *type_table, char *name);
 AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name);
 DynamicArray    get_struct_members(AstStruct *struct_defn);
 
-Typer typer_init(Parser *parser) {
+Typer typer_init(Parser *parser, ConstEvaluater *ce) {
     Typer typer = {0};
     typer.parser = parser;
+    typer.ce = ce;
     typer.enclosing_function = NULL;
 
     return typer;
@@ -59,15 +61,6 @@ void resolve_enum_or_struct_type(Typer *typer, AstDeclaration *decl) {
     }
 }
 
-#define U8_MAX  255U
-#define U16_MAX 65535U
-#define U32_MAX 4294967295UL
-#define U64_MAX 18446744073709551615ULL
-#define S8_MAX  127
-#define S16_MAX 32767
-#define S32_MAX 2147483647
-#define S64_MAX 9223372036854775807
-
 unsigned long long max_value_of_type(TypePrimitive *type) {
     switch (type->kind) {
         case PRIMITIVE_INVALID: XXX;
@@ -94,6 +87,7 @@ unsigned long long max_value_of_type(TypePrimitive *type) {
 }
 
 void check_for_integer_overflow(Typer *typer, TypeInfo *lhs_type, AstExpr *expr) {
+    assert(lhs_type);
     if (expr == NULL) return;
 
     if (lhs_type->kind == TYPE_ENUM) {
@@ -106,10 +100,11 @@ void check_for_integer_overflow(Typer *typer, TypeInfo *lhs_type, AstExpr *expr)
 
         if (lit->kind == LITERAL_INTEGER) {
             assert(is_primitive_type(lhs_type->kind));
+            assert(lit->as.value.integer >= 0);
 
             TypePrimitive *prim_type = (TypePrimitive *)(lhs_type);
-            unsigned long long int lit_value = lit->as.integer;
-            unsigned long long int max_value = max_value_of_type(prim_type);
+            unsigned long long lit_value = (unsigned long long) lit->as.value.integer;
+            unsigned long long max_value = max_value_of_type(prim_type);
 
             if (lit_value > max_value) {
                 report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(lit), "Assignment produces an integer overflow. Max value of type '%s' is '%llu'", type_to_str(lhs_type), max_value);
@@ -123,8 +118,7 @@ void check_for_integer_overflow(Typer *typer, TypeInfo *lhs_type, AstExpr *expr)
 }
 
 void check_declaration(Typer *typer, AstDeclaration *decl) {
-    switch (decl->declaration_type) {
-    case DECLARATION_TYPED: {
+    if (decl->flags & DECLARATION_TYPED) {
         resolve_enum_or_struct_type(typer, decl);
         
         TypeInfo *expr_type = check_expression(typer, decl->expr, decl->declared_type);
@@ -132,35 +126,45 @@ void check_declaration(Typer *typer, AstDeclaration *decl) {
             report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(decl), "Variable was said to be of type %s, but expression is of type %s", type_to_str(decl->declared_type), type_to_str(expr_type));
             exit(1);
         }
-
-        break;
     }
-    case DECLARATION_TYPED_NO_EXPR: {
+    else if (decl->flags & DECLARATION_TYPED_NO_EXPR) {
         resolve_enum_or_struct_type(typer, decl);
-        break;
     }
-    case DECLARATION_INFER: {
+    else if (decl->flags & DECLARATION_INFER) {
         TypeInfo *expr_type = check_expression(typer, decl->expr, NULL);
         
         decl->identifier->type = expr_type;
         decl->declared_type    = expr_type;
-        break;
     }
-    case DECLARATION_CONSTANT: {
-        XXX;
-    }
+    else if (decl->flags & DECLARATION_CONSTANT) {
+        TypeInfo *expr_type  = check_expression(typer, decl->expr, NULL);
+        AstExpr  *const_expr = simplify_expression(typer->ce, decl->expr);
+        if (const_expr->head.type == AST_LITERAL) {
+            // Swap out the current expression for the simplified expression
+            decl->expr = const_expr;
+        } else {
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(decl->expr), "Constant declaration with a non-constant expression");
+            exit(1);
+        }
+
+        decl->identifier->type = expr_type;
+        decl->declared_type    = expr_type;
     }
 
     check_for_integer_overflow(typer, decl->declared_type, decl->expr);
     
-    if (decl->flags & (DECL_IS_FUNCTION_PARAMETER | DECL_IS_STRUCT_MEMBER)) {
+    if (decl->flags & (DECLARATION_IS_FUNCTION_PARAMETER | DECLARATION_IS_STRUCT_MEMBER)) {
         // Omit sizing the declaration as it is done at the call site
     } else {
         if (typer->enclosing_function != NULL) {
             typer->enclosing_function->bytes_allocated += decl->declared_type->size;
         } else {
-            // @TODO: Declaring constants in global scope. Do they have to be sized though???
-            XXX;
+            if (decl->flags & DECLARATION_CONSTANT) {
+                // Constants don't need to be sized
+            } else {
+                // @TODO: Non-constant declarations in global scope should also be sized. Variables that live in global scope, should probably have some defined stack address of where they live, so they can be referenced locally. Still an open question on how i would do this.
+                XXX;
+            }
         }
     }
 }
@@ -233,7 +237,7 @@ void check_statement(Typer *typer, AstNode *stmt) {
                 AstDeclaration *member = ((AstAccessor **)(accessors.items))[accessors.count - 1]->struct_member;
                 report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assign), "Type mismatch. Trying to assign value of type '%s' to member '%s' of type '%s'", type_to_str(expr_type), member->identifier->name, type_to_str(lhs_type));
             } else if (assign->lhs->head.type == AST_LITERAL) {
-                char *ident_name = ((AstLiteral *)(assign->lhs))->as.identifier.name;
+                char *ident_name = ((AstLiteral *)(assign->lhs))->as.value.identifier.name;
                 report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assign), "Type mismatch. Trying to assign value of type '%s' to variable '%s' of type '%s'", type_to_str(expr_type), ident_name, type_to_str(lhs_type));
             }
             exit(1);
@@ -433,14 +437,14 @@ TypeInfo *check_enum_literal(Typer *typer, AstEnumLiteral *literal, TypeInfo *lh
 
 TypeInfo *check_expression(Typer *typer, AstExpr *expr, TypeInfo *ctx_type) {
     TypeInfo *result = NULL;
-    if      (expr->head.type == AST_FUNCTION_CALL)  result = check_function_call(typer,  (AstFunctionCall *)(expr));
+    if      (expr->head.type == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
     else if (expr->head.type == AST_BINARY)         result = check_binary(typer, (AstBinary *)(expr), ctx_type);
     else if (expr->head.type == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
     else if (expr->head.type == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr));
     else if (expr->head.type == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), ctx_type);
     else if (expr->head.type == AST_ENUM_LITERAL)   result = check_enum_literal(typer, (AstEnumLiteral *)(expr), ctx_type);
     else if (expr->head.type == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr));
-    else if (expr->head.type == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_INT);
+    else if (expr->head.type == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_INT); // @Investigate - Shouldn't this be checked for both sides being integers???
     else {
         printf("%s:%d: compiler-error: Unhandled cases in 'type_expression'. Expression was of type %s", __FILE__, __LINE__, ast_type_name(expr->head.type));
         exit(1);
@@ -464,7 +468,7 @@ TypeInfo *check_member_access(Typer *typer, AstMemberAccess *ma) {
     }
 
     if (ident->type->kind == TYPE_ENUM) {
-        if (ident->flags & IDENT_IS_NAME_OF_ENUM) {
+        if (ident->flags & IDENTIFIER_IS_NAME_OF_ENUM) {
             assert(ma->chain.count > 0);
             AstAccessor *ac = ((AstAccessor **)(ma->chain.items))[0];
             if (ma->chain.count > 1) {
@@ -638,11 +642,11 @@ TypeInfo *check_binary(Typer *typer, AstBinary *binary, TypeInfo *ctx_type) {
     if (lhs == TYPE_ENUM) lhs = TYPE_INTEGER;
     if (rhs == TYPE_ENUM) rhs = TYPE_INTEGER;
 
-    if (strchr("+-/*^", binary->operator)) {
+    if (strchr("+-*/^", binary->operator)) {
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
         if (lhs == TYPE_FLOAT   && rhs == TYPE_FLOAT)   return biggest_type(ti_lhs, ti_rhs);
-        if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
-        if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return biggest_type(ti_lhs, ti_rhs);
+        if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return ti_lhs;
+        if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return ti_rhs;
     }
     if (binary->operator == '%') {
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
@@ -701,6 +705,14 @@ bool is_boolean_operator(TokenType op) {
     return false;
 }
 
+bool is_a_before_b (AstNode *a, AstNode *b) {
+    if ((b->start.line - a->start.line) > 0) return true;
+    if ((b->start.line - a->start.line) < 0) return false;
+    else {
+        return (b->start.col - a->start.col) < 0;
+    }
+}
+
 TypeInfo *check_literal(Typer *typer, AstLiteral *literal) {
     switch (literal->kind) {
     case LITERAL_INTEGER:   return primitive_type(PRIMITIVE_INT);
@@ -708,15 +720,22 @@ TypeInfo *check_literal(Typer *typer, AstLiteral *literal) {
     case LITERAL_STRING:    return primitive_type(PRIMITIVE_STRING);
     case LITERAL_BOOLEAN:   return primitive_type(PRIMITIVE_BOOL);
     case LITERAL_IDENTIFIER: {
-        char   *ident_name   = literal->as.identifier.name;
+        char   *ident_name   = literal->as.value.identifier.name;
         Symbol *ident_symbol = symbol_lookup(&typer->parser->ident_table, ident_name);
         if (ident_symbol == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Undeclared variable '%s'", ident_name);
             exit(1);
         }
 
+        AstIdentifier *ident = ident_symbol->as.identifier;
+
+        if (is_a_before_b((AstNode *)(literal), (AstNode *)(ident))) {
+            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Undeclared variable '%s'", ident->name);
+            exit(1);
+        }
+
         // Type must have been resolved at this point
-        return ident_symbol->as.identifier->type;
+        return ident->type;
     }}
 
     XXX;
