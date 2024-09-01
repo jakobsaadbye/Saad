@@ -800,7 +800,7 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
         emit_integer_to_float_conversion(cg, l_kind, r_kind);
 
         const char *set_instruction = comparison_operator_to_set_instruction(bin->operator);
-        sb_append(&cg->code, "   comiss\t\txmm0, xmm1\n");
+        sb_append(&cg->code, "   comiss\txmm0, xmm1\n");
         sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
         sb_append(&cg->code, "   push\t\trax\n");
 

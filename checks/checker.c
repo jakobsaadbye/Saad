@@ -2,7 +2,7 @@
 #include "../src/lib/file.c"
 #include "../src/pipeline.c"
 
-void check_entire_directory(const char *dir_name) {
+void check_entire_directory(const char *dir_name, bool failing_is_success) {
     DIR *dir = opendir(dir_name);
     if (dir == NULL) {
         printf("error: Failed to open directory '%s'", dir_name);
@@ -30,9 +30,16 @@ void check_entire_directory(const char *dir_name) {
 
             printf("Run %s\t", file_path);
             
+            bool ok = false;
             char *program = read_entire_file(file_path);
-            bool success  = send_through_pipeline(program, file_path, false);
-            if (success) {
+            bool compiled = send_through_pipeline(program, file_path, false);
+
+            if (failing_is_success)
+                ok = !compiled;
+            else
+                ok = compiled;
+
+            if (ok) {
                 printf("OK\n");
                 succeeded += 1;
             } else {
@@ -50,8 +57,9 @@ void check_entire_directory(const char *dir_name) {
 }
 
 int main() {
-    check_entire_directory("examples");
-    check_entire_directory("checks");
+    check_entire_directory("examples", false);
+    check_entire_directory("checks", false);
+    check_entire_directory("checks/fails", true);
 
     return 0;
 }

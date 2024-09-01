@@ -1,5 +1,7 @@
-#include "code_generator.c"
 #include <time.h>
+#include <stdio.h>
+#include <io.h>
+#include "code_generator.c"
 
 
 void dump_tokens(Lexer *lexer) {
@@ -32,8 +34,7 @@ void print_compiler_report(CompilerReport cr) {
 
     double dt_total = dt_lex + dt_parse + dt_typer + dt_codegen + dt_asm_link;
 
-    printf("\n-----------------------------\n");
-    printf("Front-end time:\n");
+    printf("\nFront-end time:\n");
     printf("   Lexer:\t %.3lf s.\n", dt_lex);
     printf("   Parser:\t %.3lf s.\n", dt_parse);
     printf("   Total:\t %.3lf s.\n", dt_lex + dt_parse);
@@ -45,30 +46,41 @@ void print_compiler_report(CompilerReport cr) {
     printf("\nTotal time: %.3lf s.\n", dt_total);
 }
 
+int old_stdout = -1;
+void reset_stdout() {
+    dup2(old_stdout, 1);
+} 
+
+#define return_and_cleanup { reset_stdout(); return false; }
+
 bool send_through_pipeline(char *program, const char *program_path, bool output_to_console) {
     CompilerReport report = {0};
 
+    old_stdout = dup(1);
+    if (!output_to_console) {
+        freopen("nul", "w", stdout);
+    }
 
     report.lex_time_start = clock();
     Lexer lexer = lexer_init(program, program_path);
     bool ok = lex(&lexer);
-    if (!ok) return false;
+    if (!ok) return_and_cleanup;
     report.lex_time_end = clock();
 
     // dump_tokens(&lexer);
 
-
     report.parse_time_start = clock();
     Parser parser = parser_init(&lexer);
     AstCode *code = (AstCode *) parse_top_level_code(&parser);
-    if (code == NULL) return false;
+    if (code == NULL) return_and_cleanup;
     report.parse_time_end = clock();
 
 
     report.typer_time_start = clock();
     ConstEvaluater ce = const_evaluator_init(&parser);
     Typer typer = typer_init(&parser, &ce);
-    check_code(&typer, code);
+    ok = check_code(&typer, code);
+    if (!ok) return_and_cleanup;
     report.typer_time_end = clock();
 
 
@@ -81,7 +93,7 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
     report.asm_and_link_time_start = clock();
     system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
     int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -lkernel32 -lmsvcrt");
-    if (exit_code != 0) return false;
+    if (exit_code != 0) return_and_cleanup;
     report.asm_and_link_time_end = clock();
 
 
@@ -92,7 +104,8 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
         exit_code = system(".\\build\\out.exe >nul");
     }
     
-    if (exit_code != 0) return false;
+    if (exit_code != 0) return_and_cleanup;
 
+    reset_stdout();
     return true;
 }

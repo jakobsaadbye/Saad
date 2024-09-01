@@ -1,7 +1,5 @@
 MY_STRING :: "Hello Sad Buyers!";
 
 main :: () {
-    MY_STRING = "123";
-
-    print(MY_STRING);
+    MY_STRING = "123"; // not allowed
 }

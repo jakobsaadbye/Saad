@@ -9,6 +9,7 @@
         "stdlib.h": "c",
         "stdio.h": "c",
         "dynamic_array.c": "cpp",
-        "symbol_table.h": "c"
+        "symbol_table.h": "c",
+        "io.h": "c"
     }
 }
