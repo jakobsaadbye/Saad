@@ -545,6 +545,11 @@ TypeInfo *check_enum_literal(Typer *typer, AstEnumLiteral *literal, TypeInfo *lh
         return NULL;
     }
 
+    if (!found->is_typechecked) {
+        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Enum member used before being declared", enum_name, enum_defn->identifier->name);
+        return NULL;
+    }
+
     literal->enum_member = found;
 
     return lhs_type;

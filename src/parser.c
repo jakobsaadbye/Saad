@@ -62,7 +62,7 @@ int get_precedence(OperatorType op);
 TypeInfo token_to_type(Token token);
 int align_value(int value, int alignment);
 
-void report_error(Parser *parser, Pos start, Pos end, const char *message, ...);
+void report_error_range(Parser *parser, Pos start, Pos end, const char *message, ...);
 void report_error_ast(Parser *parser, const char* label, AstNode *failing_ast, const char *message, ...);
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
 
@@ -214,7 +214,7 @@ AstNode *parse_statement(Parser *parser) {
         Token next = peek_next_token(parser);
         if (next.type != ';') {
             Token prev = peek_token(parser, -1);
-            report_error(parser, prev.end, prev.end, "Syntax Error: Expected a semi-colon");
+            report_error_range(parser, prev.end, prev.end, "Syntax Error: Expected a semi-colon");
             exit(1);
         }
         eat_token(parser);
@@ -355,7 +355,8 @@ AstEnum *parse_enum(Parser *parser) {
             eat_token(parser);
             next = peek_next_token(parser);
         } else {
-            report_error_token(parser, LABEL_ERROR, next, "Expected a comma here");
+            Token token_missing_comma = peek_token(parser, -1);
+            report_error_range(parser, token_missing_comma.end, token_missing_comma.end, "Expected a comma");
             exit(1);
         }
     }
@@ -513,7 +514,7 @@ AstFor *parse_for(Parser *parser) {
 
         Token next = peek_next_token(parser);
         if (next.type != '{' ) {
-            report_error(parser, iterable->head.start, next.end, "Syntax Error: Invalid for-expression");
+            report_error_range(parser, iterable->head.start, next.end, "Syntax Error: Invalid for-expression");
             exit(1);
         }
 
@@ -1346,7 +1347,7 @@ bool is_assignment_operator(Token token) {
     return false;
 }
 
-void report_error(Parser *parser, Pos start, Pos end, const char *message, ...) {
+void report_error_range(Parser *parser, Pos start, Pos end, const char *message, ...) {
     va_list args;
     va_start(args, message);
 
