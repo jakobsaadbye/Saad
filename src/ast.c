@@ -3,6 +3,8 @@
 
 #define MAX_STATEMENTS_WITHIN_BLOCK 64
 
+typedef struct AstDeclaration AstDeclaration;
+
 typedef enum AstType {
     AST_ERR,
     AST_BLOCK,
@@ -53,12 +55,12 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
     OP_UNARY_MINUS  = 5,
 } OperatorType;
 
-typedef struct AstNode {
+typedef struct Ast {
     AstType type;
 
     Pos start;
     Pos end;
-} AstNode;
+} Ast;
 
 typedef enum TypeKind {
     TYPE_INVALID,
@@ -72,27 +74,23 @@ typedef enum TypeKind {
     TYPE_ENUM,
 } TypeKind;
 
-typedef struct TypeInfo {
-    AstNode  head;
+typedef struct Type {
+    Ast  head;
     TypeKind kind;
     int size;
     // TypeFlag flags;
     union {
         char *name; // A name to a struct or enum
     } as;
-} TypeInfo;
-
-
-typedef struct AstDeclaration AstDeclaration;
-
+} Type;
 
 typedef struct AstExpr {
-    AstNode  head;
-    TypeInfo *evaluated_type;
+    Ast  head;
+    Type *evaluated_type;
 } AstExpr;
 
 typedef struct AstCode {
-    AstNode      head;
+    Ast      head;
     DynamicArray statements;
 } AstCode;
 
@@ -103,9 +101,9 @@ typedef enum IdentifierFlags {
 } IdentifierFlags;
 
 typedef struct AstIdentifier {
-    AstNode head;
+    Ast head;
 
-    TypeInfo  *type;
+    Type  *type;
     IdentifierFlags flags;
     char      *name;
     int        length;
@@ -125,11 +123,11 @@ typedef enum DeclarationFlags {
 } DeclarationFlags;
 
 typedef struct AstDeclaration {
-    AstNode head;
+    Ast head;
 
     DeclarationFlags flags;
     AstIdentifier   *identifier;
-    TypeInfo        *declared_type;
+    Type        *declared_type;
     AstExpr         *expr;
 
     int member_index;   // Used to know the insertion order of a struct member
@@ -145,7 +143,7 @@ typedef enum AssignOp {
 } AssignOp;
 
 typedef struct AstAssignment {
-    AstNode head;
+    Ast head;
 
     AstExpr  *lhs;
     AssignOp  op;
@@ -153,28 +151,28 @@ typedef struct AstAssignment {
 } AstAssignment;
 
 typedef struct AstBlock {
-    AstNode head;
+    Ast head;
 
-    AstNode  *statements[MAX_STATEMENTS_WITHIN_BLOCK]; // @Cleanup - Make into a DynamicArray!
-    int       num_of_statements;
+    Ast  *statements[MAX_STATEMENTS_WITHIN_BLOCK]; // @Cleanup - Make into a DynamicArray!
+    int   num_of_statements;
 } AstBlock;
 
 typedef struct AstStruct {
-    AstNode head;
+    Ast head;
 
     AstIdentifier *identifier;
     SymbolTable    member_table; // of AstDeclaration
 } AstStruct;
 
 typedef struct AstEnum {
-    AstNode head;
+    Ast head;
 
     AstIdentifier *identifier;
     DynamicArray   enumerators; // of *AstEnumerator
 } AstEnum;
 
 typedef struct AstEnumerator {
-    AstNode head;
+    Ast head;
 
     AstEnum *parent;
 
@@ -197,11 +195,11 @@ typedef struct AstEnumLiteral {
 } AstEnumLiteral;
 
 typedef struct AstFunctionDefn {
-    AstNode head;
+    Ast head;
 
     AstIdentifier *identifier;
     DynamicArray parameters; // of AstDeclaration
-    TypeInfo *return_type;
+    Type *return_type;
     AstBlock *body;
 
     int bytes_allocated; // Number of bytes allocated in the function
@@ -217,42 +215,41 @@ typedef struct AstFunctionCall {
 } AstFunctionCall;
 
 typedef struct AstPrint {
-    AstNode head;
+    Ast head;
 
     AstExpr *expr;
 } AstPrint;
 
 typedef struct AstAssert {
-    AstNode head;
+    Ast head;
 
     AstExpr *expr;
 } AstAssert;
 
 typedef struct AstTypeof {
-    AstNode head;
+    Ast head;
 
     AstExpr *expr;
 } AstTypeof;
 
 typedef struct AstReturn {
-    AstNode head;
+    Ast head;
 
     AstExpr *expr;
     AstFunctionDefn *enclosing_function;
 } AstReturn;
 
 typedef struct AstIf {
-    AstNode head;
+    Ast head;
 
     AstExpr *condition;
     AstBlock *block;
     AstBlock *else_block;
-    DynamicArray else_ifs;  // of AstIf
-    bool has_else_block;
+    DynamicArray else_ifs;  // of *AstIf
 } AstIf;
 
 typedef struct AstFor {
-    AstNode head;
+    Ast head;
 
     AstIdentifier *iterator;
     AstExpr *iterable;
@@ -281,7 +278,7 @@ typedef enum AccessorKind {
 } AccessorKind;
 
 typedef struct AstAccessor {
-    AstNode head;
+    Ast head;
 
     AccessorKind kind;
     char *name;
@@ -309,12 +306,12 @@ typedef struct AstUnary {
 typedef struct AstStructLiteral {
     AstExpr head;
 
-    TypeInfo     *explicit_type;
+    Type     *explicit_type;
     DynamicArray initializers; // of AstStructInitializer
 } AstStructLiteral;
 
 typedef struct AstStructInitializer {
-    AstNode head;
+    Ast head;
 
     AstIdentifier *designator;  // *Optional
     AstExpr       *value;
@@ -383,7 +380,7 @@ char *primitive_type_names[PRIMITIVE_COUNT] = {
 };
 
 typedef struct TypePrimitive {
-    TypeInfo      head;
+    Type      head;
     PrimitiveKind kind;
 } TypePrimitive;
 
@@ -406,20 +403,20 @@ TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.kind = PRIMITIVE_VOID,    .head = {.kind = TYPE_VOID,    .size = 0}},
 };
 
-TypeInfo *primitive_type(PrimitiveKind kind) {
-    return (TypeInfo *)(&primitive_types[kind]);
+Type *primitive_type(PrimitiveKind kind) {
+    return (Type *)(&primitive_types[kind]);
 }
 
 typedef struct TypeEnum {
-    TypeInfo head;
+    Type head;
     AstEnum *node;
     
     AstIdentifier *identifier;
-    TypeInfo *backing_type;
+    Type *backing_type;
 } TypeEnum;
 
 typedef struct TypeEnumValue {
-    TypeInfo head;
+    Type head;
     AstEnum *node;
     
     char    *name;
@@ -427,7 +424,7 @@ typedef struct TypeEnumValue {
 } TypeEnumValue;
 
 typedef struct TypeStruct {
-    TypeInfo head;
+    Type head;
     AstStruct *node;
 
     AstIdentifier *identifier;
@@ -438,31 +435,31 @@ typedef struct TypeStruct {
 typedef struct TypeTable {
     HashTable user_types;
     Arena     types; // @Speed - Allocating types seperately from the ast nodes might be bad for cache locality as we are usually looking at the ast node and the type together. 
-                     // Maybe it would be better to just allocate the TypeInfo right next to the AstNode.
+                     // Maybe it would be better to just allocate the Type right next to the Ast.
 } TypeTable;
 
 bool compare_user_types(const void *key, const void *item) {
-    TypeInfo *ti = (*(TypeInfo **)(item));
+    Type *ti = (*(Type **)(item));
     return strcmp((const char *)(key), ti->as.name) == 0;
 }
 
 TypeTable type_table_init() {
     TypeTable type_table  = {0};
-    type_table.user_types = hash_table_init(32, sizeof(TypeInfo *), compare_user_types);
-    type_table.types      = arena_init(sizeof(TypeInfo) * 32);
+    type_table.user_types = hash_table_init(32, sizeof(Type *), compare_user_types);
+    type_table.types      = arena_init(sizeof(Type) * 32);
     return type_table;
 }
 
-TypeInfo *type_lookup(TypeTable *tt, char *name) {
-    TypeInfo **found = hash_table_get(&tt->user_types, name);
+Type *type_lookup(TypeTable *tt, char *name) {
+    Type **found = hash_table_get(&tt->user_types, name);
     if (found != NULL) {
         return *found;
     }
     return NULL;
 }
 
-TypeInfo *type_add_user_defined(TypeTable *tt, TypeInfo *type) {
-    TypeInfo *existing = (TypeInfo *)(hash_table_get(&tt->user_types, type->as.name));
+Type *type_add_user_defined(TypeTable *tt, Type *type) {
+    Type *existing = (Type *)(hash_table_get(&tt->user_types, type->as.name));
     if (existing) {
         return existing;
     }
@@ -475,14 +472,14 @@ void *type_alloc(TypeTable *tt, size_t size) {
     return arena_allocate(&tt->types, size);
 }
 
-TypeInfo *type_var(TypeTable *tt, TypeKind kind, char *name) {
-    TypeInfo *result = type_alloc(tt, sizeof(TypeInfo));
+Type *type_var(TypeTable *tt, TypeKind kind, char *name) {
+    Type *result = type_alloc(tt, sizeof(Type));
     result->kind = kind;
     result->as.name = name;
     return result;
 }
 
-char *type_to_str(TypeInfo *type) {
+char *type_to_str(Type *type) {
     switch (type->kind) {
         case TYPE_INVALID:
         case TYPE_VOID:
@@ -512,7 +509,7 @@ bool is_primitive_type(TypeKind kind) {
     return false;
 }
 
-bool is_signed_integer(TypeInfo *type) {
+bool is_signed_integer(Type *type) {
     assert(type->kind == TYPE_INTEGER);
 
     TypePrimitive *prim = (TypePrimitive *)(type);

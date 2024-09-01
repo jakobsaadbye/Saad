@@ -21,7 +21,7 @@ typedef struct Parser {
 
 Parser           parser_init();
 AstCode         *parse_top_level_code(Parser *parser);
-AstNode         *parse_statement(Parser *parser);
+Ast         *parse_statement(Parser *parser);
 AstDeclaration  *parse_declaration(Parser *parser, DeclarationFlags flags);
 AstAssignment   *parse_assignment(Parser *parser);
 AstFunctionDefn *parse_function_defn(Parser *parser);
@@ -38,12 +38,12 @@ AstExpr         *parse_expression(Parser *parser, int min_prec);
 AstExpr         *parse_range_or_normal_expression(Parser *parser);
 AstExpr         *parse_leaf(Parser *parser);
 
-AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *expr, TypeInfo *type, DeclarationFlags flags);
+AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *expr, Type *type, DeclarationFlags flags);
 AstExpr        *make_binary_node(Parser *parser, Token token, AstExpr *lhs, AstExpr *rhs);
 AstExpr        *make_unary_node(Parser *parser, Token token, AstExpr *expr, OperatorType op_type);
 AstExpr        *make_literal_node(Parser *parser, Token token);
-AstIdentifier  *make_identifier_from_token(Parser *parser, Token ident_token, TypeInfo *type);
-AstIdentifier  *make_identifier_from_string(Parser *parser, const char *name, TypeInfo *type);
+AstIdentifier  *make_identifier_from_token(Parser *parser, Token ident_token, Type *type);
+AstIdentifier  *make_identifier_from_string(Parser *parser, const char *name, Type *type);
 
 bool identifier_is_equal(const void *key, const void *item);
 void *ast_allocate(Parser *parser, size_t size);
@@ -59,11 +59,11 @@ bool is_primitive_type_token(Token token);
 bool is_assignment_operator(Token token);
 bool starts_struct_literal(Parser *parser);
 int get_precedence(OperatorType op);
-TypeInfo token_to_type(Token token);
+Type token_to_type(Token token);
 int align_value(int value, int alignment);
 
 void report_error_range(Parser *parser, Pos start, Pos end, const char *message, ...);
-void report_error_ast(Parser *parser, const char* label, AstNode *failing_ast, const char *message, ...);
+void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const char *message, ...);
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
 
 
@@ -80,14 +80,14 @@ Parser parser_init(Lexer *lexer) {
 
 AstCode *parse_top_level_code(Parser *parser) {
     AstCode *code = (AstCode *)(ast_allocate(parser, sizeof(AstCode)));
-    code->statements = da_init(8, sizeof(AstNode *));
+    code->statements = da_init(8, sizeof(Ast *));
 
     Token next = peek_next_token(parser);
     while (true) {
         next = peek_next_token(parser);
         if (next.type == TOKEN_END) break;
         // @Improvement - Need to limit what statements are allowed at top level scope
-        AstNode *stmt = parse_statement(parser);
+        Ast *stmt = parse_statement(parser);
         da_append(&code->statements, stmt);
     }
 
@@ -115,7 +115,7 @@ AstBlock *parse_block(Parser *parser, bool open_lexical_scope) {
                 exit(1);
             }
 
-            block->statements[i] = (AstNode *)(parse_statement(parser));
+            block->statements[i] = (Ast *)(parse_statement(parser));
             block->num_of_statements += 1;
             i++;
         }
@@ -133,9 +133,9 @@ AstBlock *parse_block(Parser *parser, bool open_lexical_scope) {
     return block;
 }
 
-AstNode *parse_statement(Parser *parser) {
+Ast *parse_statement(Parser *parser) {
     bool statement_ends_with_semicolon = false;
-    AstNode *stmt = NULL;
+    Ast *stmt = NULL;
     
     Token token = peek_next_token(parser);
 
@@ -143,20 +143,20 @@ AstNode *parse_statement(Parser *parser) {
         Token next      = peek_token(parser, 1);
         Token next_next = peek_token(parser, 2);
         if (next.type == TOKEN_DOUBLE_COLON && next_next.type == '(') {
-            stmt = (AstNode *)(parse_function_defn(parser));
+            stmt = (Ast *)(parse_function_defn(parser));
             statement_ends_with_semicolon = false;
         }
         else if (next.type == '(') {
-            stmt = (AstNode *)(parse_function_call(parser));
+            stmt = (Ast *)(parse_function_call(parser));
             statement_ends_with_semicolon = true;
         }
         // @Note - Structs should probably be parsed at the top level code instead of as a statement 
         else if (next.type == TOKEN_DOUBLE_COLON && next_next.type == TOKEN_STRUCT) {
-            stmt = (AstNode *)(parse_struct(parser));
+            stmt = (Ast *)(parse_struct(parser));
             statement_ends_with_semicolon = false;
         }
         else if (next.type == TOKEN_DOUBLE_COLON && next_next.type == TOKEN_ENUM) {
-            stmt = (AstNode *)(parse_enum(parser));
+            stmt = (Ast *)(parse_enum(parser));
             statement_ends_with_semicolon = false;
         }
         else if (
@@ -164,44 +164,44 @@ AstNode *parse_statement(Parser *parser) {
             next.type == TOKEN_COLON_EQUAL || 
             next.type == TOKEN_DOUBLE_COLON
         ) {
-            stmt = (AstNode *)(parse_declaration(parser, 0));
+            stmt = (Ast *)(parse_declaration(parser, 0));
             statement_ends_with_semicolon = true;
         } else if (
             next.type == '.' ||
             is_assignment_operator(next)
         ) {
-            stmt = (AstNode *)(parse_assignment(parser));
+            stmt = (Ast *)(parse_assignment(parser));
             statement_ends_with_semicolon = true;
         } else {
             // Fallthrough
         }
     }
     else if (token.type == TOKEN_RETURN) {
-        stmt = (AstNode *)(parse_return(parser));
+        stmt = (Ast *)(parse_return(parser));
         statement_ends_with_semicolon = true;
     }
     else if (token.type == TOKEN_PRINT) {
-        stmt = (AstNode *)(parse_print(parser));
+        stmt = (Ast *)(parse_print(parser));
         statement_ends_with_semicolon = true;
     }
     else if (token.type == TOKEN_ASSERT) {
-        stmt = (AstNode *)(parse_assert(parser));
+        stmt = (Ast *)(parse_assert(parser));
         statement_ends_with_semicolon = true;
     }
     else if (token.type == TOKEN_TYPEOF) {
-        stmt = (AstNode *)(parse_typeof(parser));
+        stmt = (Ast *)(parse_typeof(parser));
         statement_ends_with_semicolon = true;
     }
     else if (token.type == TOKEN_IF) {
-        stmt = (AstNode *)(parse_if(parser));
+        stmt = (Ast *)(parse_if(parser));
         statement_ends_with_semicolon = false;
     }
     else if (token.type == TOKEN_FOR) {
-        stmt = (AstNode *)(parse_for(parser));
+        stmt = (Ast *)(parse_for(parser));
         statement_ends_with_semicolon = false;
     }
     else if (token.type == '{') {
-        stmt = (AstNode *)(parse_block(parser, true));
+        stmt = (Ast *)(parse_block(parser, true));
         statement_ends_with_semicolon = false;
     }
 
@@ -237,7 +237,7 @@ bool compare_enumerator(const void *key, const void *item) {
     return strcmp(key, etor->name) == 0;
 }
 
-TypeInfo *parse_type(Parser *parser) {
+Type *parse_type(Parser *parser) {
     Token next = peek_next_token(parser);
     if (is_primitive_type_token(next)) {
         eat_token(parser);
@@ -247,12 +247,12 @@ TypeInfo *parse_type(Parser *parser) {
         ti->head.head.type  = AST_TYPE_INFO;
         ti->head.head.start = next.start;
         ti->head.head.end   = next.end;
-        return (TypeInfo *)(ti);
+        return (Type *)(ti);
     }
     if (next.type == TOKEN_IDENTIFIER) {
         // Struct or enum
         eat_token(parser);
-        TypeInfo *ti   = type_alloc(&parser->type_table, sizeof(TypeInfo));
+        Type *ti   = type_alloc(&parser->type_table, sizeof(Type));
         ti->head.type  = AST_TYPE_INFO;
         ti->head.start = next.start;
         ti->head.end   = next.end;
@@ -277,8 +277,8 @@ AstEnum *parse_enum(Parser *parser) {
         Symbol *exists = symbol_add_identifier(&parser->ident_table, ident);
         if (exists) {
             AstIdentifier *found = exists->as.identifier;
-            report_error_ast(parser, LABEL_ERROR, (AstNode *)(ident), "Type '%s' already defined", found->name);
-            report_error_ast(parser, LABEL_NOTE, (AstNode *)(found), "Here is the previous definition of '%s'", found->name);
+            report_error_ast(parser, LABEL_ERROR, (Ast *)(ident), "Type '%s' already defined", found->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)(found), "Here is the previous definition of '%s'", found->name);
             exit(1);
         }
     }
@@ -378,10 +378,10 @@ AstEnum *parse_enum(Parser *parser) {
     type_enum->identifier     = ast_enum->identifier;
     type_enum->backing_type   = primitive_type(PRIMITIVE_INT); // @Improvement - Support for having a backing integer type
 
-    TypeInfo *exists = type_add_user_defined(&parser->type_table, (TypeInfo *)(type_enum));
+    Type *exists = type_add_user_defined(&parser->type_table, (Type *)(type_enum));
     assert(!exists);
 
-    ident->type = (TypeInfo *)(type_enum);
+    ident->type = (Type *)(type_enum);
 
     return ast_enum;
 }
@@ -420,8 +420,8 @@ AstStruct *parse_struct(Parser *parser) {
 
         Symbol *existing = symbol_add_struct_member(&ast_struct->member_table, member);
         if (existing != NULL) {
-            report_error_ast(parser, LABEL_ERROR, (AstNode *)(member->identifier), "Redeclaration of member variable '%s'", member->identifier->name);
-            report_error_ast(parser, LABEL_NOTE, (AstNode *)(existing->as.identifier), "Here is the previous declaration ...");
+            report_error_ast(parser, LABEL_ERROR, (Ast *)(member->identifier), "Redeclaration of member variable '%s'", member->identifier->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing->as.identifier), "Here is the previous declaration ...");
             exit(1);
         }
 
@@ -437,7 +437,7 @@ AstStruct *parse_struct(Parser *parser) {
     ast_struct->identifier = ident;
 
     if (!(member_index > 0)) {
-        report_error_ast(parser, LABEL_ERROR, (AstNode *)(ast_struct), "Structs must have atleast one member");
+        report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct), "Structs must have atleast one member");
         exit(1);
     }
 
@@ -449,17 +449,17 @@ AstStruct *parse_struct(Parser *parser) {
     type_struct->head.as.name   = ident->name;
     type_struct->identifier     = ident;
     type_struct->node           = ast_struct;
-    TypeInfo *existing          = type_add_user_defined(&parser->type_table, (TypeInfo *)(type_struct));
+    Type *existing          = type_add_user_defined(&parser->type_table, (Type *)(type_struct));
     if (existing) {
         if (existing->kind == TYPE_STRUCT) {
             TypeStruct *existing_struct = (TypeStruct *)(existing);
-            report_error_ast(parser, LABEL_ERROR, (AstNode *)(ast_struct->identifier), "Struct '%s' is already defined", ast_struct->identifier->name);
-            report_error_ast(parser, LABEL_NOTE, (AstNode *)(existing_struct->node), "Here is the previously defined struct");
+            report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct->identifier), "Struct '%s' is already defined", ast_struct->identifier->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing_struct->node), "Here is the previously defined struct");
             exit(1);
         } else {
             TypeStruct *existing_enum = (TypeStruct *)(existing);
-            report_error_ast(parser, LABEL_ERROR, (AstNode *)(ast_struct->identifier), "Struct '%s' is already defined as an enum", ast_struct->identifier->name);
-            report_error_ast(parser, LABEL_NOTE, (AstNode *)(existing_enum->node), "Here is the previously defined enum");
+            report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct->identifier), "Struct '%s' is already defined as an enum", ast_struct->identifier->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing_enum->node), "Here is the previously defined enum");
         }
     }
 
@@ -474,7 +474,7 @@ AstAssignment *parse_assignment(Parser *parser) {
     if (lhs->head.type == AST_MEMBER_ACCESS) 
         valid_lhs = true;
     if (!valid_lhs) {
-        report_error_ast(parser, LABEL_ERROR, (AstNode *)(lhs), "Invalid expression as left-hand side of assignment");
+        report_error_ast(parser, LABEL_ERROR, (Ast *)(lhs), "Invalid expression as left-hand side of assignment");
         exit(1);
     }
 
@@ -588,7 +588,7 @@ AstReturn *parse_return(Parser *parser) {
 }
 
 AstStructLiteral *parse_struct_literal(Parser *parser) {
-    TypeInfo *explicit_type = NULL;
+    Type *explicit_type = NULL;
     Token start_token = peek_next_token(parser);
     if (start_token.type == TOKEN_IDENTIFIER) {
         explicit_type = parse_type(parser);
@@ -801,7 +801,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         }
         eat_token(parser);
 
-        TypeInfo *type = parse_type(parser);
+        Type *type = parse_type(parser);
 
         // Tell 'make_declaration' that the paramters should not be sized into the scope as they live at the callee site
         AstDeclaration *param = make_declaration(parser, param_ident, NULL, type, DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_FUNCTION_PARAMETER);
@@ -809,7 +809,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         first_parameter_seen = true;
     }
 
-    TypeInfo *return_type = primitive_type(PRIMITIVE_VOID);
+    Type *return_type = primitive_type(PRIMITIVE_VOID);
     
     next = peek_next_token(parser);
     if (next.type == TOKEN_RIGHT_ARROW) {
@@ -872,7 +872,6 @@ AstIf *parse_if(Parser *parser) {
             }
 
             AstBlock *else_block = parse_block(parser, true);
-            ast_if->has_else_block = true;
             ast_if->else_block = else_block;
             break;
         }
@@ -977,7 +976,7 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
     if (next.type == ':') {
         eat_token(parser);
 
-        TypeInfo *type = parse_type(parser);
+        Type *type = parse_type(parser);
         next = peek_next_token(parser);
 
         if (next.type == '=') {
@@ -1005,7 +1004,7 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
     exit(1);
 }
 
-AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *expr, TypeInfo *type, DeclarationFlags flags) {
+AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *expr, Type *type, DeclarationFlags flags) {
     AstIdentifier *ident = make_identifier_from_token(parser, ident_token, type);
 
     if (flags & DECLARATION_CONSTANT) {
@@ -1017,7 +1016,7 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *exp
         Symbol *existing = symbol_add_identifier(&parser->ident_table, ident);
         if (existing != NULL) {
             report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.value.identifier.name);
-            report_error_ast(parser, LABEL_NOTE, (AstNode *)(existing->as.identifier), "Here is the previous declaration ...");
+            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing->as.identifier), "Here is the previous declaration ...");
             exit(1);
         }
     }
@@ -1045,7 +1044,7 @@ int align_value(int value, int alignment) {
     }
 }
 
-AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, TypeInfo *type) {
+AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, Type *type) {
     AstIdentifier *ident = (AstIdentifier *) ast_allocate(parser, sizeof(AstIdentifier));
     ident->head.type = AST_IDENTIFIER;
     ident->type      = type;
@@ -1055,7 +1054,7 @@ AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, Typ
     return ident;
 }
 
-AstIdentifier *make_identifier_from_token(Parser *parser, Token ident_token, TypeInfo *type) {
+AstIdentifier *make_identifier_from_token(Parser *parser, Token ident_token, Type *type) {
     assert(ident_token.type == TOKEN_IDENTIFIER);
 
     AstIdentifier *ident = (AstIdentifier *) ast_allocate(parser, sizeof(AstIdentifier));
@@ -1362,7 +1361,7 @@ void report_error_range(Parser *parser, Pos start, Pos end, const char *message,
     va_end(args);
 }
 
-void report_error_ast(Parser *parser, const char* label, AstNode *failing_ast, const char *message, ...) {
+void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const char *message, ...) {
     va_list args;
     va_start(args, message);
 

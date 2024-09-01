@@ -7,17 +7,17 @@ typedef struct Typer {
     AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
 } Typer;
 
-bool     check_block(Typer *typer, AstBlock *block, bool open_lexical_scope);
-bool     check_statement(Typer *typer, AstNode *stmt);
-TypeInfo *check_expression(Typer *typer, AstExpr *expr, TypeInfo *ctx_type);
-TypeInfo *check_binary(Typer *typer, AstBinary *binary, TypeInfo *ctx_type);
-TypeInfo *check_unary(Typer *typer, AstUnary *unary, TypeInfo *ctx_type);
-TypeInfo *check_literal(Typer *typer, AstLiteral *literal);
-TypeInfo *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, TypeInfo *ctx_type);
-TypeInfo *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, TypeInfo *ctx_type);
-TypeInfo *check_member_access(Typer *typer, AstMemberAccess * ma);
-char *type_to_str(TypeInfo *type);
-bool types_are_equal(TypeInfo *lhs, TypeInfo *rhs);
+bool      check_block(Typer *typer, AstBlock *block, bool open_lexical_scope);
+bool      check_statement(Typer *typer, Ast *stmt);
+Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type);
+Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type);
+Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type);
+Type *check_literal(Typer *typer, AstLiteral *literal);
+Type *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Type *ctx_type);
+Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_type);
+Type *check_member_access(Typer *typer, AstMemberAccess * ma);
+char *type_to_str(Type *type);
+bool types_are_equal(Type *lhs, Type *rhs);
 bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
 AstStruct      *get_struct(SymbolTable *type_table, char *name);
@@ -37,7 +37,7 @@ bool check_code(Typer *typer, AstCode *code) {
     bool ok;
 
     for (unsigned int i = 0; i < code->statements.count; i++) {
-        AstNode *stmt = ((AstNode **)(code->statements.items))[i];
+        Ast *stmt = ((Ast **)(code->statements.items))[i];
         ok = check_statement(typer, stmt);
         if (!ok) return false; // @Improvement - Maybe proceed with typechecking if we can still continue after seing the error
     }
@@ -60,9 +60,9 @@ bool check_block(Typer *typer, AstBlock *block, bool open_lexical_scope) {
 
 bool resolve_enum_or_struct_type(Typer *typer, AstDeclaration *decl) {
     if (decl->declared_type->kind == TYPE_NAME) {
-        TypeInfo *found = type_lookup(&typer->parser->type_table, decl->declared_type->as.name);
+        Type *found = type_lookup(&typer->parser->type_table, decl->declared_type->as.name);
         if (found == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(decl->declared_type), "Unknown type '%s'", type_to_str(decl->declared_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->declared_type), "Unknown type '%s'", type_to_str(decl->declared_type));
             return false;
         }
 
@@ -75,35 +75,27 @@ bool resolve_enum_or_struct_type(Typer *typer, AstDeclaration *decl) {
 
 unsigned long long max_value_of_type(TypePrimitive *type) {
     switch (type->kind) {
-        case PRIMITIVE_INVALID: XXX;
-        case PRIMITIVE_INT:     return S32_MAX;
-        case PRIMITIVE_U8:      return U8_MAX;
-        case PRIMITIVE_U16:     return U16_MAX;
-        case PRIMITIVE_U32:     return U32_MAX;
-        case PRIMITIVE_U64:     return U64_MAX;
-        case PRIMITIVE_S8:      return S8_MAX;
-        case PRIMITIVE_S16:     return S16_MAX;
-        case PRIMITIVE_S32:     return S32_MAX;
-        case PRIMITIVE_S64:     return S64_MAX;
-        case PRIMITIVE_FLOAT:   XXX;
-        case PRIMITIVE_F32:     XXX;
-        case PRIMITIVE_F64:     XXX;
-        case PRIMITIVE_STRING:  XXX;
-        case PRIMITIVE_BOOL:    XXX;
-        case PRIMITIVE_VOID:    XXX;
-        case PRIMITIVE_COUNT:   XXX;
+    case PRIMITIVE_INT: return S32_MAX;
+    case PRIMITIVE_U8:  return U8_MAX;
+    case PRIMITIVE_U16: return U16_MAX;
+    case PRIMITIVE_U32: return U32_MAX;
+    case PRIMITIVE_U64: return U64_MAX;
+    case PRIMITIVE_S8:  return S8_MAX;
+    case PRIMITIVE_S16: return S16_MAX;
+    case PRIMITIVE_S32: return S32_MAX;
+    case PRIMITIVE_S64: return S64_MAX;
+    default:
+        printf("Internal compiler error: Unknown type kind %d in max_value_of_type()", type->kind);
+        exit(1);
     }
-
-    printf("internal compiler error: Unknown type kind %d in max_value_of_type()", type->kind);
-    exit(1);
 }
 
-bool check_for_integer_overflow(Typer *typer, TypeInfo *lhs_type, AstExpr *expr) {
+bool check_for_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
     assert(lhs_type);
     if (expr == NULL) return true;
 
     if (lhs_type->kind == TYPE_ENUM) {
-        // @Todo - Handle assignment to enum with integer that might be too large
+        // @TODO - Handle assignment to enum with integer that might be too large
         return true;
     }
 
@@ -119,7 +111,7 @@ bool check_for_integer_overflow(Typer *typer, TypeInfo *lhs_type, AstExpr *expr)
             unsigned long long max_value = max_value_of_type(prim_type);
 
             if (lit_value > max_value) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(lit), "Assignment produces an integer overflow. Max value of type '%s' is '%llu'", type_to_str(lhs_type), max_value);
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(lit), "Assignment produces an integer overflow. Max value of type '%s' is '%llu'", type_to_str(lhs_type), max_value);
                 return false;
             }
         } 
@@ -137,10 +129,10 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         ok = resolve_enum_or_struct_type(typer, decl);
         if (!ok) return false;
         
-        TypeInfo *expr_type = check_expression(typer, decl->expr, decl->declared_type);
+        Type *expr_type = check_expression(typer, decl->expr, decl->declared_type);
         if (!expr_type) return false;
         if (!types_are_equal(decl->declared_type, expr_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(decl), "Variable was said to be of type %s, but expression is of type %s", type_to_str(decl->declared_type), type_to_str(expr_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl), "Variable was said to be of type %s, but expression is of type %s", type_to_str(decl->declared_type), type_to_str(expr_type));
             return false;
         }
     }
@@ -149,14 +141,14 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         if (!ok) return false;
     }
     else if (decl->flags & DECLARATION_INFER) {
-        TypeInfo *expr_type = check_expression(typer, decl->expr, NULL);
+        Type *expr_type = check_expression(typer, decl->expr, NULL);
         if (!expr_type) return false;
         
         decl->identifier->type = expr_type;
         decl->declared_type    = expr_type;
     }
     else if (decl->flags & DECLARATION_CONSTANT) {
-        TypeInfo *expr_type  = check_expression(typer, decl->expr, NULL);
+        Type *expr_type  = check_expression(typer, decl->expr, NULL);
         if (!expr_type) return false;
 
         AstExpr *const_expr = simplify_expression(typer->ce, decl->expr);
@@ -167,7 +159,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
             //                 a thing?
             decl->expr = const_expr;
         } else {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(decl->expr), "Constant declaration with a non-constant expression");
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "Constant declaration with a non-constant expression");
             return false;
         }
 
@@ -196,7 +188,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
     return true;
 }
 
-bool types_are_equal(TypeInfo *lhs, TypeInfo *rhs) {
+bool types_are_equal(Type *lhs, Type *rhs) {
     assert(!(lhs->kind == TYPE_NAME || rhs->kind == TYPE_NAME)); // Type slots should have been resolved at this point
 
     if (is_primitive_type(lhs->kind) && is_primitive_type(rhs->kind)) {
@@ -215,30 +207,30 @@ bool types_are_equal(TypeInfo *lhs, TypeInfo *rhs) {
     }
 }
 
-TypeInfo *check_function_call(Typer *typer, AstFunctionCall *call) {
+Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     Symbol *func_symbol = symbol_lookup(&typer->parser->function_table, call->identifer->name);
     if (func_symbol == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(call), "Unknown function '%s'", call->identifer->name);
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Unknown function '%s'", call->identifer->name);
         return NULL;
     }
 
     AstFunctionDefn *func_defn = func_symbol->as.function_defn;
     
     if (call->arguments.count != func_defn->parameters.count) {
-        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(call), "Mismatch in number of arguments. Function '%s' takes %d %s, but %d were supplied", func_defn->identifier->name, func_defn->parameters.count, func_defn->parameters.count == 1 ? "parameter" : "parameters", call->arguments.count);
-        report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Mismatch in number of arguments. Function '%s' takes %d %s, but %d were supplied", func_defn->identifier->name, func_defn->parameters.count, func_defn->parameters.count == 1 ? "parameter" : "parameters", call->arguments.count);
+        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
         return NULL;
     }
 
     for (unsigned int i = 0; i < call->arguments.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
         AstExpr *arg       = ((AstExpr **)(call->arguments.items))[i];
-        TypeInfo *arg_type = check_expression(typer, arg, NULL);
+        Type *arg_type = check_expression(typer, arg, NULL);
         if (!arg_type) return NULL;
 
         if (!types_are_equal(arg->evaluated_type, param->declared_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", type_to_str(param->declared_type), type_to_str(arg_type));
-            report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", type_to_str(param->declared_type), type_to_str(arg_type));
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
             return NULL;
         }
     }
@@ -247,9 +239,9 @@ TypeInfo *check_function_call(Typer *typer, AstFunctionCall *call) {
 }
 
 bool check_assignment(Typer *typer, AstAssignment *assign) {
-    TypeInfo *lhs_type  = check_expression(typer, assign->lhs, NULL);
+    Type *lhs_type  = check_expression(typer, assign->lhs, NULL);
     if (!lhs_type) return false;
-    TypeInfo *expr_type = check_expression(typer, assign->expr, lhs_type);
+    Type *expr_type = check_expression(typer, assign->expr, lhs_type);
     if (!expr_type) return false;
 
     bool is_member     = assign->lhs->head.type == AST_MEMBER_ACCESS;
@@ -272,15 +264,15 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     }
 
     if (lhs_is_constant) {
-        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assign), "Cannot assign new value to constant '%s'", is_member ? member->identifier->name : ident->name);
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign new value to constant '%s'", is_member ? member->identifier->name : ident->name);
         return false;
     }
 
     if (!types_are_equal(lhs_type, expr_type)) {
         if (is_member) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assign), "Cannot assign value of '%s' to member '%s' of type '%s'", type_to_str(expr_type), member->identifier->name, type_to_str(lhs_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of '%s' to member '%s' of type '%s'", type_to_str(expr_type), member->identifier->name, type_to_str(lhs_type));
         } else if (is_identifier) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assign), "Cannot assign value of '%s' to variable '%s' of type '%s'", type_to_str(expr_type), ident->name, type_to_str(lhs_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of '%s' to variable '%s' of type '%s'", type_to_str(expr_type), ident->name, type_to_str(lhs_type));
         } else {
             XXX;
         }
@@ -290,7 +282,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
 
     if (assign->op != '=') {
         if (expr_type->kind != TYPE_INTEGER && expr_type->kind != TYPE_FLOAT) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assign), "Compound operators are only allowed for int and float types. Given type was '%s'\n", type_to_str(expr_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Compound operators are only allowed for int and float types. Given type was '%s'\n", type_to_str(expr_type));
             return false;
         }
     }
@@ -345,16 +337,16 @@ bool check_for(Typer *typer, AstFor *ast_for) {
     if (ast_for->iterable->head.type == AST_RANGE_EXPR) {
         AstRangeExpr *range = (AstRangeExpr *)(ast_for->iterable);
         
-        TypeInfo* type_start = check_expression(typer, range->start, NULL);
-        TypeInfo* type_end   = check_expression(typer, range->end, NULL);
+        Type* type_start = check_expression(typer, range->start, NULL);
+        Type* type_end   = check_expression(typer, range->end, NULL);
         if (!type_start || !type_end) return NULL;
 
         if (type_start->kind != TYPE_INTEGER && type_start->kind != TYPE_ENUM) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(range->start), "Range expressions must have integer type as bounds. Got type %s", type_to_str(type_start));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(range->start), "Range expressions must have integer type as bounds. Got type %s", type_to_str(type_start));
             return NULL;
         }
         if (type_end->kind != TYPE_INTEGER && type_end->kind != TYPE_ENUM) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(range->end), "Range expressions must have integer type as bounds. Got type %s", type_to_str(type_end));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(range->end), "Range expressions must have integer type as bounds. Got type %s", type_to_str(type_end));
             return NULL;
         }
 
@@ -387,7 +379,7 @@ AstEnumerator *enum_value_is_unique(AstEnum *ast_enum, int value) {
     return NULL;
 }
 
-bool check_statement(Typer *typer, AstNode *stmt) {
+bool check_statement(Typer *typer, Ast *stmt) {
     switch (stmt->type) {
     case AST_DECLARATION: return check_declaration(typer, (AstDeclaration *)(stmt));
     case AST_ASSIGNMENT:  return check_assignment(typer, (AstAssignment *)(stmt));
@@ -397,9 +389,9 @@ bool check_statement(Typer *typer, AstNode *stmt) {
     }
     case AST_ASSERT: {
         AstAssert *assertion = (AstAssert *)(stmt);
-        TypeInfo *expr_type = check_expression(typer, assertion->expr, NULL);
+        Type *expr_type = check_expression(typer, assertion->expr, NULL);
         if (expr_type->kind != TYPE_BOOL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(assertion), "Type mismatch. Expected expression to be of type bool, but expression is of type '%s'", type_to_str(expr_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assertion), "Type mismatch. Expected expression to be of type bool, but expression is of type '%s'", type_to_str(expr_type));
             return false;
         }
 
@@ -411,9 +403,9 @@ bool check_statement(Typer *typer, AstNode *stmt) {
     }
     case AST_IF: {
         AstIf *ast_if = (AstIf *)(stmt);
-        TypeInfo *condition_type = check_expression(typer, ast_if->condition, NULL);
+        Type *condition_type = check_expression(typer, ast_if->condition, NULL);
         if (condition_type->kind != TYPE_BOOL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ast_if->condition), "Expression needs to be of type 'bool', but expression evaluated to type '%s'", type_to_str(condition_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_if->condition), "Expression needs to be of type 'bool', but expression evaluated to type '%s'", type_to_str(condition_type));
             return false;
         }
 
@@ -422,10 +414,10 @@ bool check_statement(Typer *typer, AstNode *stmt) {
 
         for (unsigned int i = 0; i < ast_if->else_ifs.count; i++) {
             AstIf *else_if = &(((AstIf *)(ast_if->else_ifs.items))[i]);
-            ok = check_statement(typer, (AstNode *)(else_if));
+            ok = check_statement(typer, (Ast *)(else_if));
             if (!ok) return false;
         }
-        if (ast_if->has_else_block) {
+        if (ast_if->else_block) {
             ok = check_block(typer, ast_if->else_block, true);
             if (!ok) return false;
         }
@@ -444,15 +436,15 @@ bool check_statement(Typer *typer, AstNode *stmt) {
         AstReturn *ast_return = (AstReturn *)(stmt);
         AstFunctionDefn *ef = typer->enclosing_function;
         if (ef == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ast_return), "Attempting to return outside of a function");
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_return), "Attempting to return outside of a function");
             return false;
         }
 
-        TypeInfo *ok = check_expression(typer, ast_return->expr, ef->return_type);
+        Type *ok = check_expression(typer, ast_return->expr, ef->return_type);
         if (!ok) return false;
 
         if (!types_are_equal(ast_return->expr->evaluated_type, ef->return_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ast_return), "Type mismatch. Type of expression in return is %s, but function '%s' has return type %s", type_to_str(ast_return->expr->evaluated_type), ef->identifier->name, type_to_str(ef->return_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_return), "Type mismatch. Type of expression in return is %s, but function '%s' has return type %s", type_to_str(ast_return->expr->evaluated_type), ef->identifier->name, type_to_str(ef->return_type));
             return false;
         }
 
@@ -479,16 +471,16 @@ bool check_statement(Typer *typer, AstNode *stmt) {
         for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
             AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
             if (etor->expr) {
-                TypeInfo *ok = check_expression(typer, etor->expr, (TypeInfo *)(enum_defn)); // Type definition of the enum gets to be the ctx type so we can refer to enum members inside the enum with the shorthand syntax .ENUM_MEMBER
+                Type *ok = check_expression(typer, etor->expr, (Type *)(enum_defn)); // Type definition of the enum gets to be the ctx type so we can refer to enum members inside the enum with the shorthand syntax .ENUM_MEMBER
                 if (!ok) return NULL;
 
                 AstExpr *constexpr = simplify_expression(typer->ce, etor->expr);
                 if (constexpr->head.type != AST_LITERAL) {
-                    report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(etor->expr), "Value must be a constant expression");
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Value must be a constant expression");
                     return false;
                 }
                 if (constexpr->evaluated_type->kind != TYPE_INTEGER) { // @Robustness - Check that the value of the integer does not overflow the backing type if made explicit. Maybe if the value goes beyond the default int we promote the integer type to fit the largest value???
-                    report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(etor->expr), "Enum value must have type int, but value is of type %s", type_to_str(etor->expr->evaluated_type));
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Enum value must have type int, but value is of type %s", type_to_str(etor->expr->evaluated_type));
                     return false;
                 }
 
@@ -501,8 +493,8 @@ bool check_statement(Typer *typer, AstNode *stmt) {
             
             AstEnumerator *enumerator_with_same_value = enum_value_is_unique(ast_enum, etor->value);
             if (enumerator_with_same_value) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(etor->expr), "Enum values must be unique. Both '%s' and '%s' have value %d", etor->name, enumerator_with_same_value->name, etor->value);
-                report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(enumerator_with_same_value), "Here is the enum member with the same value ...");
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Enum values must be unique. Both '%s' and '%s' have value %d", etor->name, enumerator_with_same_value->name, etor->value);
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(enumerator_with_same_value), "Here is the enum member with the same value ...");
                 return false;
             }
 
@@ -530,9 +522,9 @@ AstEnumerator *find_enum_member(AstEnum *enum_defn, char *name) {
     return NULL;
 }
 
-TypeInfo *check_enum_literal(Typer *typer, AstEnumLiteral *literal, TypeInfo *lhs_type) {
+Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) {
     if (lhs_type == NULL || lhs_type->kind != TYPE_ENUM) {
-        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Couldn't infer type of enum value from the context");
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Couldn't infer type of enum value from the context");
         return NULL;
     }
 
@@ -540,13 +532,13 @@ TypeInfo *check_enum_literal(Typer *typer, AstEnumLiteral *literal, TypeInfo *lh
     char     *enum_name = literal->identifier->name;
     AstEnumerator *found = find_enum_member(enum_defn->node, enum_name);
     if (!found) {
-        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "'%s' is not a member of enum '%s'", enum_name, enum_defn->identifier->name);
-        report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(enum_defn), "Here is the definition of '%s'", enum_defn->identifier->name);
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "'%s' is not a member of enum '%s'", enum_name, enum_defn->identifier->name);
+        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(enum_defn), "Here is the definition of '%s'", enum_defn->identifier->name);
         return NULL;
     }
 
     if (!found->is_typechecked) {
-        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Enum member used before being declared", enum_name, enum_defn->identifier->name);
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Enum member used before being declared", enum_name, enum_defn->identifier->name);
         return NULL;
     }
 
@@ -555,8 +547,8 @@ TypeInfo *check_enum_literal(Typer *typer, AstEnumLiteral *literal, TypeInfo *lh
     return lhs_type;
 }
 
-TypeInfo *check_expression(Typer *typer, AstExpr *expr, TypeInfo *ctx_type) {
-    TypeInfo *result = NULL;
+Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
+    Type *result = NULL;
     if      (expr->head.type == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
     else if (expr->head.type == AST_BINARY)         result = check_binary(typer, (AstBinary *)(expr), ctx_type);
     else if (expr->head.type == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
@@ -574,16 +566,16 @@ TypeInfo *check_expression(Typer *typer, AstExpr *expr, TypeInfo *ctx_type) {
     return result;
 }
 
-TypeInfo *check_member_access(Typer *typer, AstMemberAccess *ma) {  
+Type *check_member_access(Typer *typer, AstMemberAccess *ma) {  
     Symbol *ident_sym = symbol_lookup(&typer->parser->ident_table, ma->ident->name);
     if (ident_sym == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ma->ident), "Undeclared variable '%s'", ma->ident->name);
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->ident), "Undeclared variable '%s'", ma->ident->name);
         return NULL;
     }
 
     AstIdentifier *ident = ident_sym->as.identifier;
     if (ident->type->kind != TYPE_STRUCT && ident->type->kind != TYPE_ENUM) {
-        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ma->ident), "Trying to access variable '%s' of type '%s'", ident->name, type_to_str(ident->type));
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->ident), "Trying to access variable '%s' of type '%s'", ident->name, type_to_str(ident->type));
         return NULL;
     }
 
@@ -592,7 +584,7 @@ TypeInfo *check_member_access(Typer *typer, AstMemberAccess *ma) {
             assert(ma->chain.count > 0);
             AstAccessor *ac = ((AstAccessor **)(ma->chain.items))[0];
             if (ma->chain.count > 1) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ac), "'%s' is not accessable", ac->name);
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ac), "'%s' is not accessable", ac->name);
                 return NULL;
             }
 
@@ -601,22 +593,22 @@ TypeInfo *check_member_access(Typer *typer, AstMemberAccess *ma) {
             char     *enum_name = ac->name;
             AstEnumerator *found = find_enum_member(enum_defn->node, enum_name);
             if (!found) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ac), "'%s' is not a member of enum '%s'", enum_name, enum_defn->identifier->name);
-                report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(enum_defn), "Here is the definition of '%s'", enum_defn->identifier->name);
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ac), "'%s' is not a member of enum '%s'", enum_name, enum_defn->identifier->name);
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(enum_defn), "Here is the definition of '%s'", enum_defn->identifier->name);
                 return NULL;
             }
 
             if (!found->is_typechecked) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ac), "Enum member used before being declared", enum_name, enum_defn->identifier->name);
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ac), "Enum member used before being declared", enum_name, enum_defn->identifier->name);
                 return NULL;
             }
 
             ac->kind        = ACCESSOR_ENUM;
             ac->enum_member = found;
 
-            return (TypeInfo *)(enum_defn);
+            return (Type *)(enum_defn);
         } else {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ma->ident), "Enum values are not accessable", ident->name, type_to_str(ident->type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->ident), "Enum values are not accessable", ident->name, type_to_str(ident->type));
             return NULL;
         }
     }
@@ -630,8 +622,8 @@ TypeInfo *check_member_access(Typer *typer, AstMemberAccess *ma) {
 
             AstDeclaration *member = get_struct_member(curr_struct->node, ac->name);
             if (member == NULL) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ac), "'%s' is not a member of '%s'", ac->name, curr_struct->identifier->name);
-                report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(curr_struct), "Here is the definition of '%s'", curr_struct->identifier->name);
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ac), "'%s' is not a member of '%s'", ac->name, curr_struct->identifier->name);
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(curr_struct), "Here is the definition of '%s'", curr_struct->identifier->name);
                 return NULL;
             }
 
@@ -644,7 +636,7 @@ TypeInfo *check_member_access(Typer *typer, AstMemberAccess *ma) {
             } else {
                 bool has_next = (i + 1) < ma->chain.count;
                 if (has_next) {
-                    report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ac), "Trying to access '%s' of type '%s'", ac->name, type_to_str(member->declared_type));
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ac), "Trying to access '%s' of type '%s'", ac->name, type_to_str(member->declared_type));
                     return NULL;
                 } else {
                     // Everything is fine, we end on a member not a struct
@@ -658,24 +650,24 @@ TypeInfo *check_member_access(Typer *typer, AstMemberAccess *ma) {
     XXX;
 }
 
-TypeInfo *check_struct_literal(Typer *typer, AstStructLiteral *literal, TypeInfo *lhs_type) {
+Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_type) {
     TypeStruct *struct_defn = NULL;
     if (literal->explicit_type != NULL) {
         // Explicit type is used
-        TypeInfo *type = literal->explicit_type;
+        Type *type = literal->explicit_type;
         if (type->kind != TYPE_NAME) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Type mistmatch. Struct literal cannot conform to type '%s'", type_to_str(type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Type mistmatch. Struct literal cannot conform to type '%s'", type_to_str(type));
             return NULL;
         }
 
-        TypeInfo *found = type_lookup(&typer->parser->type_table, type->as.name);
+        Type *found = type_lookup(&typer->parser->type_table, type->as.name);
         if (!found) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(&type), "Unknown type '%s'", type_to_str(type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(&type), "Unknown type '%s'", type_to_str(type));
             return NULL;
         }
 
         if (found->kind != TYPE_STRUCT) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(&type), "'%s' is not the name of a struct. Type of '%s' is '%s'", found->as.name, found->as.name, type_to_str(type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(&type), "'%s' is not the name of a struct. Type of '%s' is '%s'", found->as.name, found->as.name, type_to_str(type));
             return NULL;
         }
         
@@ -685,12 +677,12 @@ TypeInfo *check_struct_literal(Typer *typer, AstStructLiteral *literal, TypeInfo
     else {
         // Type is inferred from the type on the declaration
         if (lhs_type == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Type of struct literal could not be infered. Put atleast a type on the declaration or make an explict type on the struct literal");
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Type of struct literal could not be infered. Put atleast a type on the declaration or make an explict type on the struct literal");
             return NULL;
         }
 
         if (lhs_type->kind != TYPE_STRUCT) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Type mistmatch. Struct literal cannot conform to type '%s'", type_to_str(lhs_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Type mistmatch. Struct literal cannot conform to type '%s'", type_to_str(lhs_type));
             return NULL;
         }
 
@@ -705,18 +697,18 @@ TypeInfo *check_struct_literal(Typer *typer, AstStructLiteral *literal, TypeInfo
         if (init->designator != NULL) {
             AstDeclaration *member = get_struct_member(struct_defn->node, init->designator->name);
             if (member == NULL) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(init->designator), "'%s' is not a member of '%s'", init->designator->name, struct_defn->identifier->name);
-                report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->designator), "'%s' is not a member of '%s'", init->designator->name, struct_defn->identifier->name);
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
                 return NULL;
             }
 
-            TypeInfo *member_type = member->declared_type;
-            TypeInfo *value_type  = check_expression(typer, init->value, member_type); // @Note - Passing down the member_type here, makes it possible for sub-struct initialization without explicitly having to type them
+            Type *member_type = member->declared_type;
+            Type *value_type  = check_expression(typer, init->value, member_type); // @Note - Passing down the member_type here, makes it possible for sub-struct initialization without explicitly having to type them
             if (!value_type) return NULL;
 
             if (!types_are_equal(member_type, value_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(init->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", member->identifier->name, type_to_str(member_type), type_to_str(value_type));
-                report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", member->identifier->name, type_to_str(member_type), type_to_str(value_type));
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
                 return NULL;
             }
 
@@ -724,18 +716,18 @@ TypeInfo *check_struct_literal(Typer *typer, AstStructLiteral *literal, TypeInfo
             curr_member_index = member->member_index + 1;
         } else {
             if (curr_member_index > members.count - 1) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(init), "Initializing to unknown member");
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init), "Initializing to unknown member");
                 return NULL;
             }
             
             AstDeclaration *member  = ((AstDeclaration **)(members.items))[i];
-            TypeInfo *member_type   = member->declared_type;
-            TypeInfo *value_type    = check_expression(typer, init->value, member_type);
+            Type *member_type   = member->declared_type;
+            Type *value_type    = check_expression(typer, init->value, member_type);
             if (!value_type) return NULL;
 
             if (!types_are_equal(member_type, value_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->identifier->name, type_to_str(member_type), type_to_str(value_type));
-                report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->identifier->name, type_to_str(member_type), type_to_str(value_type));
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
                 return NULL;
             }
 
@@ -751,21 +743,21 @@ TypeInfo *check_struct_literal(Typer *typer, AstStructLiteral *literal, TypeInfo
     }
 }
 
-TypeInfo *biggest_type(TypeInfo *lhs, TypeInfo *rhs) {
+Type *biggest_type(Type *lhs, Type *rhs) {
     if (lhs->size >= rhs->size) return lhs;
     else                        return rhs;
 }
 
-TypeInfo *check_binary(Typer *typer, AstBinary *binary, TypeInfo *ctx_type) {
-    TypeInfo *ti_lhs = check_expression(typer, binary->left, ctx_type);
-    TypeInfo *ti_rhs = check_expression(typer, binary->right, ctx_type);
+Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
+    Type *ti_lhs = check_expression(typer, binary->left, ctx_type);
+    Type *ti_rhs = check_expression(typer, binary->right, ctx_type);
     if (!ti_lhs || !ti_rhs) return NULL;
 
     TypeKind lhs = ti_lhs->kind;
     TypeKind rhs = ti_rhs->kind;
 
     if (lhs == TYPE_STRUCT && rhs == TYPE_STRUCT) {
-        report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(binary), "Binary operation between two structs is not yet supported!");
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Binary operation between two structs is not yet supported!");
         return NULL;
     }
 
@@ -791,25 +783,25 @@ TypeInfo *check_binary(Typer *typer, AstBinary *binary, TypeInfo *ctx_type) {
         if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_BOOL);
     }
 
-    report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(binary), "Type '%s' and '%s' is not compatible with operator %s\n", type_to_str(ti_lhs), type_to_str(ti_rhs), token_type_to_str(binary->operator));
+    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Type '%s' and '%s' is not compatible with operator %s\n", type_to_str(ti_lhs), type_to_str(ti_rhs), token_type_to_str(binary->operator));
     return NULL;
 }
 
-TypeInfo *check_unary(Typer *typer, AstUnary *unary, TypeInfo *ctx_type) {
-    TypeInfo *expr_type = check_expression(typer, unary->expr, ctx_type);
+Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
+    Type *expr_type = check_expression(typer, unary->expr, ctx_type);
     if (!expr_type) return NULL;
 
     TypeKind type_kind = expr_type->kind;
 
     if (unary->operator == OP_NOT) {
         if (type_kind != TYPE_BOOL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(unary->expr), "Type mismatch. Operator '!' is not applicative on expression of type '%s'\n", type_to_str(expr_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Type mismatch. Operator '!' is not applicative on expression of type '%s'\n", type_to_str(expr_type));
             exit(1);
         }
     }
     else if (unary->operator == OP_UNARY_MINUS) {
         if (type_kind != TYPE_INTEGER && type_kind != TYPE_FLOAT && type_kind != TYPE_ENUM) { // Maybe give a warning when applying unary minus to an enum??? Seems kinda strange
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(unary->expr), "Type mismatch. Operator '-' is not applicative on expression of type '%s'\n", type_to_str(expr_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Type mismatch. Operator '-' is not applicative on expression of type '%s'\n", type_to_str(expr_type));
             return NULL;
         };
     } else {
@@ -835,7 +827,7 @@ bool is_boolean_operator(TokenType op) {
     return false;
 }
 
-bool is_a_before_b (AstNode *a, AstNode *b) {
+bool is_a_before_b (Ast *a, Ast *b) {
     if ((b->start.line - a->start.line) > 0) return true;
     if ((b->start.line - a->start.line) < 0) return false;
     else {
@@ -843,7 +835,7 @@ bool is_a_before_b (AstNode *a, AstNode *b) {
     }
 }
 
-TypeInfo *check_literal(Typer *typer, AstLiteral *literal) {
+Type *check_literal(Typer *typer, AstLiteral *literal) {
     switch (literal->kind) {
     case LITERAL_INTEGER:   return primitive_type(PRIMITIVE_INT);
     case LITERAL_FLOAT:     return primitive_type(PRIMITIVE_FLOAT);
@@ -853,14 +845,14 @@ TypeInfo *check_literal(Typer *typer, AstLiteral *literal) {
         char   *ident_name   = literal->as.value.identifier.name;
         Symbol *ident_symbol = symbol_lookup(&typer->parser->ident_table, ident_name);
         if (ident_symbol == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Undeclared variable '%s'", ident_name);
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared variable '%s'", ident_name);
             return NULL;
         }
 
         AstIdentifier *ident = ident_symbol->as.identifier;
 
-        if (is_a_before_b((AstNode *)(literal), (AstNode *)(ident))) {
-            report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "Undeclared variable '%s'", ident->name);
+        if (is_a_before_b((Ast *)(literal), (Ast *)(ident))) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared variable '%s'", ident->name);
             return NULL;
         }
 

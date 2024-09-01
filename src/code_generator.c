@@ -23,7 +23,7 @@ void emit_builtin_functions(CodeGenerator *cg);
 void emit_header(CodeGenerator *cg);
 void emit_footer(CodeGenerator *cg);
 void emit_code(CodeGenerator *cg, AstCode *code);
-void emit_statement(CodeGenerator *cg, AstNode *node);
+void emit_statement(CodeGenerator *cg, Ast *node);
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn);
 void emit_function_call(CodeGenerator *cg, AstFunctionCall *call);
 void emit_return(CodeGenerator *cg, AstReturn *ast_return);
@@ -44,7 +44,7 @@ int make_label_number(CodeGenerator *cg);
 const char *comparison_operator_to_set_instruction(TokenType op);
 const char *boolean_operator_to_instruction(TokenType op);
 int member_access_address(CodeGenerator *cg, AstMemberAccess *ma);
-char *DT(TypeInfo *type);
+char *DT(Type *type);
 
 
 CodeGenerator code_generator_init(Parser *parser) {
@@ -150,7 +150,7 @@ void emit_builtin_functions(CodeGenerator *cg) {
 
 void emit_code(CodeGenerator *cg, AstCode *code) {
     for (unsigned int i = 0; i < code->statements.count; i++) {
-        AstNode *stmt = ((AstNode **)(code->statements.items))[i];
+        Ast *stmt = ((Ast **)(code->statements.items))[i];
         emit_statement(cg, stmt);
     }
 }
@@ -163,7 +163,7 @@ void emit_block(CodeGenerator *cg, AstBlock *block, bool open_lexical_scope) {
     if (open_lexical_scope) exit_scope(&cg->ident_table);
 }
 
-void emit_statement(CodeGenerator *cg, AstNode *node) {
+void emit_statement(CodeGenerator *cg, Ast *node) {
     switch (node->type) {
         case AST_DECLARATION:   emit_declaration(cg, (AstDeclaration *)(node)); break;
         case AST_ASSIGNMENT:    emit_assignment(cg, (AstAssignment *)(node)); break;
@@ -426,11 +426,12 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
 
 void emit_if(CodeGenerator *cg, AstIf *ast_if) {
     emit_expression(cg, ast_if->condition);
+
     int done_label = make_label_number(cg);
     int first_else_if_label = -1;
     int else_label = -1;
     if (ast_if->else_ifs.count > 0)  first_else_if_label = make_label_number(cg);
-    if (ast_if->has_else_block) else_label               = make_label_number(cg);
+    if (ast_if->else_block)          else_label          = make_label_number(cg);
 
     sb_append(&cg->code, "   pop\t\trax\n");
     sb_append(&cg->code, "   cmp\t\tal, 0\n");
@@ -459,7 +460,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
             next_if_else_label = make_label_number(cg);
             sb_append(&cg->code, "   jz\t\t\tL%d\n", next_if_else_label);
         } else if (last_else_if) {
-            if (ast_if->has_else_block) {
+            if (ast_if->else_block) {
                 sb_append(&cg->code, "   jz\t\t\tL%d\n", else_label);
             } else {
                 sb_append(&cg->code, "   jz\t\t\tL%d\n", done_label);
@@ -470,7 +471,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
         sb_append(&cg->code, "   jmp L%d\n", done_label);
     }
 
-    if (ast_if->has_else_block) {
+    if (ast_if->else_block) {
         sb_append(&cg->code, "; else\n");
         sb_append(&cg->code, "L%d:\n", else_label);
         emit_block(cg, ast_if->else_block, true);
@@ -490,10 +491,10 @@ void emit_assert(CodeGenerator *cg, AstAssert *assertion) {
 }
 
 void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof) {
-    TypeInfo *expr_type = ast_typeof->expr->evaluated_type;
+    Type *expr_type = ast_typeof->expr->evaluated_type;
 
     if (!is_primitive_type(expr_type->kind)) {
-        report_error_ast(cg->parser, LABEL_ERROR, (AstNode *)(ast_typeof), "typeof() of type other than primitive types is not yet implemented");
+        report_error_ast(cg->parser, LABEL_ERROR, (Ast *)(ast_typeof), "typeof() of type other than primitive types is not yet implemented");
         exit(1);
     }
 
@@ -506,7 +507,7 @@ void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof) {
     sb_append(&cg->code, "   call\t\tprintf\n");
 }
 
-const char *REG_A(TypeInfo *type) {
+const char *REG_A(Type *type) {
     if (type->size == 1) return "al";
     if (type->size == 2) return "ax";
     if (type->size == 4) return "eax";
@@ -514,7 +515,7 @@ const char *REG_A(TypeInfo *type) {
     XXX;
 }
 
-const char *REG_B(TypeInfo *type) {
+const char *REG_B(Type *type) {
     if (type->size == 1) return "bl";
     if (type->size == 2) return "bx";
     if (type->size == 4) return "ebx";
@@ -522,7 +523,7 @@ const char *REG_B(TypeInfo *type) {
     XXX;
 }
 
-const char *REG_C(TypeInfo *type) {
+const char *REG_C(Type *type) {
     if (type->size == 1) return "cl";
     if (type->size == 2) return "cx";
     if (type->size == 4) return "ecx";
@@ -530,7 +531,7 @@ const char *REG_C(TypeInfo *type) {
     XXX;
 }
 
-const char *REG_D(TypeInfo *type) {
+const char *REG_D(Type *type) {
     if (type->size == 1) return "dl";
     if (type->size == 2) return "dx";
     if (type->size == 4) return "edx";
@@ -547,7 +548,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; call to print\n");
 
-    TypeInfo *expr_type = print_stmt->expr->evaluated_type;
+    Type *expr_type = print_stmt->expr->evaluated_type;
     if (expr_type->kind == TYPE_INTEGER) {
         sb_append(&cg->code, "   pop\t\trdx\n");
         sb_append(&cg->code, "   mov\t\trcx, fmt_int\n");
@@ -615,7 +616,7 @@ void zero_initialize(CodeGenerator *cg, AstDeclaration *decl, int stack_offset) 
     }
 }
 
-void assign_simple_value(CodeGenerator *cg, int address, TypeInfo *lhs_type, TypeInfo *rhs_type) {
+void assign_simple_value(CodeGenerator *cg, int address, Type *lhs_type, Type *rhs_type) {
     if (lhs_type->kind == TYPE_INTEGER) {
         sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   mov\t\t%s %d[rbp], %s\n", DT(lhs_type), address, REG_A(lhs_type)); // nocheckin
@@ -708,8 +709,8 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
 }
 
 void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
-    TypeInfo *l_type = bin->left->evaluated_type;
-    TypeInfo *r_type = bin->right->evaluated_type;
+    Type *l_type = bin->left->evaluated_type;
+    Type *r_type = bin->right->evaluated_type;
 
     TypeKind l_kind = l_type->kind;
     TypeKind r_kind = r_type->kind;
@@ -761,8 +762,8 @@ void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
 void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
     assert(is_comparison_operator(bin->operator));
 
-    TypeInfo *l_type = bin->left->evaluated_type;
-    TypeInfo *r_type = bin->right->evaluated_type;
+    Type *l_type = bin->left->evaluated_type;
+    Type *r_type = bin->right->evaluated_type;
 
     TypeKind l_kind = l_type->kind;
     TypeKind r_kind = r_type->kind;
@@ -1083,7 +1084,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 }
 
 // Convert type to one of the four intel data types
-char *DT(TypeInfo *type) {
+char *DT(Type *type) {
     switch (type->kind) {
     case TYPE_INVALID: XXX;
     case TYPE_NAME: XXX;
