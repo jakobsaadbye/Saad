@@ -185,18 +185,17 @@ void emit_statement(CodeGenerator *cg, AstNode *node) {
 }
 
 void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
-    DynamicArray enumerators = hash_table_get_items(&ast_enum->enumerators);
-    for (unsigned int i = 0; i < enumerators.count; i++) {
-        AstEnumerator *etor = ((AstEnumerator **)(enumerators.items))[i];
-        sb_append(&cg->data, "   __%s.%s DB \"%s.%s\", 10, 0\n", ast_enum->identifier->name, etor->name, ast_enum->identifier->name, etor->name);
+    for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
+        AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
+        sb_append(&cg->data, "   __%s.%s DB \"%s.%s\", 0\n", ast_enum->identifier->name, etor->name, ast_enum->identifier->name, etor->name);
     }
 
     int case_label = make_label_number(cg);
     int fallthrough_label = make_label_number(cg);
 
     sb_append(&cg->code, "print_enum_%s:\n", ast_enum->identifier->name);
-    for (unsigned int i = 0; i < enumerators.count; i++) {
-        AstEnumerator *etor = ((AstEnumerator **)(enumerators.items))[i];
+    for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
+        AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
         sb_append(&cg->code, "   mov\t\trbx, %d\n", etor->value);
         sb_append(&cg->code, "   cmp\t\trax, rbx\n");
         sb_append(&cg->code, "   jz\t\t\tenum_case_%d\n", case_label);
@@ -208,14 +207,12 @@ void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
     sb_append(&cg->code, "   jmp\t\tenum_int\n", fallthrough_label);
 
     // Success case. Use name of enum
-    for (unsigned int i = 0; i < enumerators.count; i++) {
-        AstEnumerator *etor = ((AstEnumerator **)(enumerators.items))[i];
+    for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
+        AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
         sb_append(&cg->code, "enum_case_%d:\n", etor->label);
         sb_append(&cg->code, "   mov\t\trdx, __%s.%s\n", ast_enum->identifier->name, etor->name);
         sb_append(&cg->code, "   jmp\t\tenum_str\n");
     }
-
-    free(enumerators.items);
 }
 
 

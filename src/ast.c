@@ -170,8 +170,7 @@ typedef struct AstEnum {
     AstNode head;
 
     AstIdentifier *identifier;
-    HashTable enumerators; // of AstEnumerator
-    // TypeInfo * backing_type; // has to be one of the integer types
+    DynamicArray   enumerators; // of *AstEnumerator
 } AstEnum;
 
 typedef struct AstEnumerator {
@@ -180,10 +179,14 @@ typedef struct AstEnumerator {
     AstEnum *parent;
 
     char    *name;
-    int      value;
-    int      index;
+    AstExpr *expr;  // null if auto-incremented enum
 
+    int      value; // Evaluated value set by the typer
+    int      index;
+    
     int label; // Used by print to determine how to branch to this enum value
+
+    bool     is_typechecked;
 } AstEnumerator;
 
 typedef struct AstEnumLiteral {

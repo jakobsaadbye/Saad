@@ -1,7 +1,7 @@
 TODO:
     - Backing integer types for enums
-    - Allow enum values to be assigned to constant integer expressions
     - Better printf
+    - Better scoping
 
 Roadmap:
     - Constants

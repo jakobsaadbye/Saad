@@ -1,7 +1,20 @@
-MY_STRING :: "Hello Sad Buyers!";
+Status :: enum {
+    ok = 1,
+    created,
+
+    bad_request = 400,
+    permission_denied,
+    payment_required,
+    forbidden,
+    not_found,
+    method_not_allowed = Status.bad_request + 5,
+}
 
 main :: () {
-    MY_STRING = "123";
-
-    print(MY_STRING);
+    assert(Status.ok == 1);
+    assert(Status.created == 2);
+    assert(Status.bad_request == 400);
+    assert(Status.permission_denied == 401);
+    assert(Status.permission_denied == 401);
+    assert(Status.method_not_allowed == 405);
 }

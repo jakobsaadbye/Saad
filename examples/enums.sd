@@ -1,5 +1,5 @@
 CardValue :: enum {
-    joker,
+    joker = 0,
     ace,
     two,
     three,
@@ -18,7 +18,7 @@ CardValue :: enum {
 }
 
 CardSuit :: enum {
-    joker,
+    joker = 0,
     diamonds,
     clubs,
     hearts,

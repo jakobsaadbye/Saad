@@ -376,6 +376,17 @@ bool check_for(Typer *typer, AstFor *ast_for) {
     return true;
 }
 
+AstEnumerator *enum_value_is_unique(AstEnum *ast_enum, int value) {
+    for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
+        AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
+        if (!etor->is_typechecked) continue;
+
+        if (etor->value == value) return etor;
+    }
+    
+    return NULL;
+}
+
 bool check_statement(Typer *typer, AstNode *stmt) {
     switch (stmt->type) {
     case AST_DECLARATION: return check_declaration(typer, (AstDeclaration *)(stmt));
@@ -464,6 +475,41 @@ bool check_statement(Typer *typer, AstNode *stmt) {
         TypeEnum *enum_defn = (TypeEnum *)(type_lookup(&typer->parser->type_table, ast_enum->identifier->name));
         assert(enum_defn != NULL); // Was put in during parsing
 
+        int auto_increment_value = 0;
+        for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
+            AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
+            if (etor->expr) {
+                TypeInfo *ok = check_expression(typer, etor->expr, (TypeInfo *)(enum_defn)); // Type definition of the enum gets to be the ctx type so we can refer to enum members inside the enum with the shorthand syntax .ENUM_MEMBER
+                if (!ok) return NULL;
+
+                AstExpr *constexpr = simplify_expression(typer->ce, etor->expr);
+                if (constexpr->head.type != AST_LITERAL) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(etor->expr), "Value must be a constant expression");
+                    return false;
+                }
+                if (constexpr->evaluated_type->kind != TYPE_INTEGER) { // @Robustness - Check that the value of the integer does not overflow the backing type if made explicit. Maybe if the value goes beyond the default int we promote the integer type to fit the largest value???
+                    report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(etor->expr), "Enum value must have type int, but value is of type %s", type_to_str(etor->expr->evaluated_type));
+                    return false;
+                }
+
+                etor->value = ((AstLiteral *)(constexpr))->as.value.integer;
+                auto_increment_value = etor->value + 1;
+            } else {
+                etor->value = auto_increment_value;
+                auto_increment_value++;
+            }
+            
+            AstEnumerator *enumerator_with_same_value = enum_value_is_unique(ast_enum, etor->value);
+            if (enumerator_with_same_value) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(etor->expr), "Enum values must be unique. Both '%s' and '%s' have value %d", etor->name, enumerator_with_same_value->name, etor->value);
+                report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(enumerator_with_same_value), "Here is the enum member with the same value ...");
+                return false;
+            }
+
+            etor->is_typechecked = true;
+        }
+
+
         enum_defn->head.size = enum_defn->backing_type->size;
         return true;
     }
@@ -471,6 +517,17 @@ bool check_statement(Typer *typer, AstNode *stmt) {
     default:
         XXX;
     }
+}
+
+AstEnumerator *find_enum_member(AstEnum *enum_defn, char *name) {
+    for (unsigned int i = 0; i < enum_defn->enumerators.count; i++) {
+        AstEnumerator *etor = ((AstEnumerator **)(enum_defn->enumerators.items))[i];
+        if (strcmp(etor->name, name) == 0) {
+            return etor;
+        }
+    }
+
+    return NULL;
 }
 
 TypeInfo *check_enum_literal(Typer *typer, AstEnumLiteral *literal, TypeInfo *lhs_type) {
@@ -481,7 +538,7 @@ TypeInfo *check_enum_literal(Typer *typer, AstEnumLiteral *literal, TypeInfo *lh
 
     TypeEnum *enum_defn = (TypeEnum *)(lhs_type);
     char     *enum_name = literal->identifier->name;
-    AstEnumerator *found = hash_table_get(&enum_defn->node->enumerators, enum_name);
+    AstEnumerator *found = find_enum_member(enum_defn->node, enum_name);
     if (!found) {
         report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(literal), "'%s' is not a member of enum '%s'", enum_name, enum_defn->identifier->name);
         report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(enum_defn), "Here is the definition of '%s'", enum_defn->identifier->name);
@@ -537,7 +594,7 @@ TypeInfo *check_member_access(Typer *typer, AstMemberAccess *ma) {
             // @Refactor - Find a way to refactor this. Looks similar to the way enum literals are type checked !
             TypeEnum *enum_defn = (TypeEnum *)(ident->type);
             char     *enum_name = ac->name;
-            AstEnumerator *found = hash_table_get(&enum_defn->node->enumerators, enum_name);
+            AstEnumerator *found = find_enum_member(enum_defn->node, enum_name);
             if (!found) {
                 report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ac), "'%s' is not a member of enum '%s'", enum_name, enum_defn->identifier->name);
                 report_error_ast(typer->parser, LABEL_NOTE, (AstNode *)(enum_defn), "Here is the definition of '%s'", enum_defn->identifier->name);

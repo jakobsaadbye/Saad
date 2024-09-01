@@ -297,15 +297,31 @@ AstEnum *parse_enum(Parser *parser) {
     eat_token(parser);
 
     AstEnum *ast_enum = (AstEnum *)(ast_allocate(parser, sizeof(AstEnum)));
-    ast_enum->enumerators = hash_table_init(8, sizeof(AstEnumerator), compare_enumerator);
+    ast_enum->enumerators = da_init(2, sizeof(AstEnumerator *));
 
     next = peek_next_token(parser);
-    int auto_increment_value = 0;
     int enum_index = 0;
     while (next.type != '}' && next.type != TOKEN_END) {
         if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '=') {
             // Explicit value
-            XXX;
+            eat_token(parser);
+            eat_token(parser);
+
+            AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+            if (!expr) return NULL;
+
+            AstEnumerator *etor = (AstEnumerator *)(ast_allocate(parser, sizeof(AstEnumerator)));
+            etor->head.type  = AST_ENUMERATOR;
+            etor->head.start = next.start;
+            etor->head.end   = next.end;
+            etor->parent     = ast_enum;
+            etor->name       = next.as_value.value.identifier.name; // @Robustness - Should probably do a copy here so that we are not tied to the token array
+            etor->expr       = expr;
+            etor->index      = enum_index;
+
+            da_append(&ast_enum->enumerators, etor);
+
+            enum_index++;
         } else if (next.type == TOKEN_IDENTIFIER) {
             // Auto-increment
             eat_token(parser);
@@ -316,12 +332,11 @@ AstEnum *parse_enum(Parser *parser) {
             etor->head.end   = next.end;
             etor->parent     = ast_enum;
             etor->name       = next.as_value.value.identifier.name; // @Robustness - Should probably do a copy here so that we are not tied to the token array
-            etor->value      = auto_increment_value;
+            etor->expr       = NULL;
             etor->index      = enum_index;
 
-            hash_table_add(&ast_enum->enumerators, etor->name, etor);
+            da_append(&ast_enum->enumerators, etor);
 
-            auto_increment_value++;
             enum_index++;
         } else {
             report_error_token(parser, LABEL_ERROR, next, "Expected name of the enumerator");

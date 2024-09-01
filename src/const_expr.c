@@ -16,30 +16,31 @@ AstExpr *simplify_expression(ConstEvaluater *ce, AstExpr *expr);
 
 
 AstExpr *make_literal_integer(ConstEvaluater *ce, long long value) {
-    AstLiteral *lit = ast_allocate(ce->parser, sizeof(AstLiteral));
-    lit->head.head.type   = AST_LITERAL;
-    lit->kind             = LITERAL_INTEGER;
-    lit->as.value.integer = value;
+    AstLiteral *lit          = ast_allocate(ce->parser, sizeof(AstLiteral));
+    lit->head.head.type      = AST_LITERAL;
+    lit->head.evaluated_type = primitive_type(PRIMITIVE_INT);
+    lit->kind                = LITERAL_INTEGER;
+    lit->as.value.integer    = value;
     return (AstExpr *)(lit);
 }
 
 AstExpr *make_literal_float(ConstEvaluater *ce, double value) {
-    AstLiteral *lit = ast_allocate(ce->parser, sizeof(AstLiteral));
-    lit->head.head.type    = AST_LITERAL;
-    lit->kind              = LITERAL_FLOAT;
-    lit->as.value.floating = value;
+    AstLiteral *lit          = ast_allocate(ce->parser, sizeof(AstLiteral));
+    lit->head.head.type      = AST_LITERAL;
+    lit->head.evaluated_type = primitive_type(PRIMITIVE_FLOAT);
+    lit->kind                = LITERAL_FLOAT;
+    lit->as.value.floating   = value;
     return (AstExpr *)(lit);
 }
 
 AstExpr *make_literal_boolean(ConstEvaluater *ce, bool value) {
-    AstLiteral *lit = ast_allocate(ce->parser, sizeof(AstLiteral));
-    lit->head.head.type    = AST_LITERAL;
-    lit->kind              = LITERAL_BOOLEAN;
-    lit->as.value.boolean = value;
+    AstLiteral *lit          = ast_allocate(ce->parser, sizeof(AstLiteral));
+    lit->head.head.type      = AST_LITERAL;
+    lit->head.evaluated_type = primitive_type(PRIMITIVE_BOOL);
+    lit->kind                = LITERAL_BOOLEAN;
+    lit->as.value.boolean    = value;
     return (AstExpr *)(lit);
 }
-
-
 
 AstExpr *simplify_binary(ConstEvaluater *ce, AstBinary *bin) {
     AstExpr *left_expr  = simplify_expression(ce, bin->left);
@@ -136,8 +137,19 @@ AstExpr *simplify_expression(ConstEvaluater *ce, AstExpr *expr) {
             return expr;
         }
         case AST_STRUCT_LITERAL:
-        case AST_ENUM_LITERAL:
-        case AST_MEMBER_ACCESS:
+        case AST_ENUM_LITERAL: {
+            AstEnumLiteral *lit = (AstEnumLiteral *)(expr);
+            return make_literal_integer(ce, lit->enum_member->value); // @Note - Potential loss of enum information
+        }
+        case AST_MEMBER_ACCESS: {
+            AstMemberAccess *ma = (AstMemberAccess *)(expr);
+            AstAccessor *member = ((AstAccessor **)(ma->chain.items))[ma->chain.count - 1];
+            if (member->kind == ACCESSOR_ENUM) {
+                return make_literal_integer(ce, member->enum_member->value); // @Note - Potential loss of enum information
+            }
+
+            return expr;
+        }
         case AST_RANGE_EXPR:
         default:
             printf("%s:%d: compiler-error: Unhandled cases in 'simplify_expression'. Expression was of type %s", __FILE__, __LINE__, ast_type_name(expr->head.type));
