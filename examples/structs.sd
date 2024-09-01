@@ -1,7 +1,10 @@
+DEFAULT_ENGINE_TYPE :: EngineType.V6;
+
 EngineType :: enum {
     V8,
     V6
 }
+
 
 Fuel :: enum {
     electric,
@@ -27,7 +30,7 @@ main :: () {
         doors = 4,
         max_speed = 320,
         engine = .{
-            type = .V6,
+            type = DEFAULT_ENGINE_TYPE,
             fuel = .gasoline,
             cylinders = 8,
             capacity = 30

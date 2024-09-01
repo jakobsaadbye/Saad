@@ -606,6 +606,11 @@ TypeInfo *check_member_access(Typer *typer, AstMemberAccess *ma) {
                 return NULL;
             }
 
+            if (!found->is_typechecked) {
+                report_error_ast(typer->parser, LABEL_ERROR, (AstNode *)(ac), "Enum member used before being declared", enum_name, enum_defn->identifier->name);
+                return NULL;
+            }
+
             ac->kind        = ACCESSOR_ENUM;
             ac->enum_member = found;
 

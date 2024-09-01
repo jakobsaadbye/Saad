@@ -1,7 +1,7 @@
 Status :: enum {
     ok = 1,
     created,
-
+    
     bad_request = 400,
     permission_denied,
     payment_required,
@@ -10,11 +10,8 @@ Status :: enum {
     method_not_allowed = Status.bad_request + 5,
 }
 
+DEFAULT_STATUS :: Status.created;
+
 main :: () {
-    assert(Status.ok == 1);
-    assert(Status.created == 2);
-    assert(Status.bad_request == 400);
-    assert(Status.permission_denied == 401);
-    assert(Status.permission_denied == 401);
-    assert(Status.method_not_allowed == 405);
+    print(DEFAULT_STATUS);
 }
