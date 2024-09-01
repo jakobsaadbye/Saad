@@ -213,8 +213,8 @@ AstNode *parse_statement(Parser *parser) {
     if (statement_ends_with_semicolon) {
         Token next = peek_next_token(parser);
         if (next.type != ';') {
-            Token prev = peek_token(parser, -1);
-            report_error_range(parser, prev.end, prev.end, "Syntax Error: Expected a semi-colon");
+            Token token_missing_semicolon = peek_token(parser, -2);
+            report_error_range(parser, token_missing_semicolon.end, token_missing_semicolon.end, "Syntax Error: Expected a semi-colon");
             exit(1);
         }
         eat_token(parser);
@@ -408,6 +408,7 @@ AstStruct *parse_struct(Parser *parser) {
     ast_struct->member_table = symbol_table_init();
 
     // Parse members
+    next = peek_next_token(parser);
     int member_index = 0;
     while (next.type != '}' && next.type != TOKEN_END) {
         AstDeclaration *member = parse_declaration(parser, DECLARATION_IS_STRUCT_MEMBER);
@@ -434,6 +435,11 @@ AstStruct *parse_struct(Parser *parser) {
     ast_struct->head.start = ident_token.start;
     ast_struct->head.end   = next.end;
     ast_struct->identifier = ident;
+
+    if (!(member_index > 0)) {
+        report_error_ast(parser, LABEL_ERROR, (AstNode *)(ast_struct), "Structs must have atleast one member");
+        exit(1);
+    }
 
     TypeStruct *type_struct     = type_alloc(&parser->type_table, sizeof(TypeStruct));
     type_struct->head.head.type = AST_TYPE_INFO;

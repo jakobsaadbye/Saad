@@ -1,10 +1,9 @@
-DEFAULT_ENGINE_TYPE :: EngineType.V6;
-
 EngineType :: enum {
     V8,
-    V6
+    V6,
 }
 
+DEFAULT_ENGINE_TYPE :: EngineType.V6;
 
 Fuel :: enum {
     electric,

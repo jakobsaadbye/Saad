@@ -1,17 +1,11 @@
-Status :: enum {
-    ok = 1,
-    created,
-    
-    bad_request = 400,
-    permission_denied,
-    payment_required,
-    forbidden,
-    not_found,
-    method_not_allowed = Status.bad_request + 5,
-}
-
-DEFAULT_STATUS :: Status.created;
+Vector3 :: struct {}
 
 main :: () {
-    print(DEFAULT_STATUS);
+    y : Vector3 = .{
+        x = 1.0, 
+        y = 2.0, 
+        z = 3.0
+    };
+
+    print(x.scale + cube.xy.y);
 }
