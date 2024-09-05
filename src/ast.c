@@ -11,6 +11,7 @@ typedef enum AstType {
     AST_STRUCT,
     AST_STRUCT_LITERAL,
     AST_STRUCT_INITIALIZER,
+    AST_ARRAY_LITERAL,
     AST_ENUM,
     AST_ENUMERATOR,
     AST_ENUM_LITERAL,
@@ -25,34 +26,39 @@ typedef enum AstType {
     AST_IF,
     AST_FOR,
     AST_EXPR,
-    AST_TYPE_INFO,
+    AST_TYPE,
     AST_RANGE_EXPR,
     AST_BINARY,
     AST_UNARY,
     AST_IDENTIFIER,
+    AST_SUBSCRIPT,
     AST_ACCESSOR,
     AST_MEMBER_ACCESS,
+    AST_ARRAY_ACCESS,
     AST_LITERAL,
 } AstType;
 
 typedef enum OperatorType {     // Here so that operators with the same symbols still can have different enumerations f.x unary minus and simple minus
-    OP_LOGICAL_OR   = TOKEN_LOGICAL_OR,
-    OP_LOGICAL_AND  = TOKEN_LOGICAL_AND,
-    OP_DOUBLE_EQUAL = TOKEN_DOUBLE_EQUAL,
-    OP_NOT_EQUAL    = TOKEN_NOT_EQUAL,
-    OP_NOT          = '!',
-    OP_GREATER_THAN = '>',
-    OP_LESS_THAN    = '<',
+    OP_LOGICAL_OR         = TOKEN_LOGICAL_OR,
+    OP_LOGICAL_AND        = TOKEN_LOGICAL_AND,
+    OP_DOUBLE_EQUAL       = TOKEN_DOUBLE_EQUAL,
+    OP_NOT_EQUAL          = TOKEN_NOT_EQUAL,
+    OP_NOT                = '!',
+    OP_GREATER_THAN       = '>',
+    OP_LESS_THAN          = '<',
     OP_GREATER_THAN_EQUAL = TOKEN_GREATER_EQUAL,
     OP_LESS_THAN_EQUAL    = TOKEN_LESS_EQUAL,
 
-    OP_MINUS  = '-',
-    OP_PLUS   = '+',
-    OP_TIMES  = '*',
-    OP_DIVIDE = '/',
-    OP_MODULO = '%',
-    OP_POWER  = '^',
-    OP_UNARY_MINUS  = 5,
+    OP_MINUS        = '-',
+    OP_PLUS         = '+',
+    OP_TIMES        = '*',
+    OP_DIVIDE       = '/',
+    OP_MODULO       = '%',
+    OP_POWER        = '^',
+    OP_UNARY_MINUS  = 5, // Picked arbitrarily. Should just not conflict with the others
+    
+    OP_DOT          = '.',
+    OP_SUBSCRIPT    = '[',
 } OperatorType;
 
 typedef struct Ast {
@@ -66,21 +72,27 @@ typedef enum TypeKind {
     TYPE_INVALID,
     TYPE_NAME,   // This type is here, when we don't know the actual type yet. F.x 'a : Car', Car might refer to a struct or an enum that we only resolve in the typing phase
     TYPE_VOID,
-    TYPE_BOOL,
+    TYPE_BOOL, 
     TYPE_INTEGER,
     TYPE_FLOAT,
     TYPE_STRING,
+    TYPE_ARRAY,
     TYPE_STRUCT,
     TYPE_ENUM,
 } TypeKind;
 
+typedef enum TypeFlags {
+    TYPE_IS_DEFINITION = 1 << 0,
+} TypeFlags;
+
 typedef struct Type {
     Ast  head;
-    TypeKind kind;
+    TypeKind  kind;
+    TypeFlags flags;
+
     int size;
-    // TypeFlag flags;
     union {
-        char *name; // A name to a struct or enum
+        char *name; // A name to a struct or enum // @Cleanup - No need to be a union
     } as;
 } Type;
 
@@ -272,28 +284,41 @@ typedef struct AstBinary {
     AstExpr  *right;
 } AstBinary;
 
-typedef enum AccessorKind {
-    ACCESSOR_STRUCT,
-    ACCESSOR_ENUM,
-} AccessorKind;
 
-typedef struct AstAccessor {
+typedef struct AstSubscript {
     Ast head;
 
-    AccessorKind kind;
-    char *name;
+    AstExpr *expr;
+} AstSubscript;
 
-    union {
-        AstDeclaration *struct_member;
-        AstEnumerator  *enum_member;
-    };
-} AstAccessor;
+typedef struct AstArrayAccess {
+    Ast head;
+
+    AstExpr *accessing;
+    AstExpr *subscript;
+    
+    Token open_bracket;
+    Token close_bracket;
+
+    DynamicArray subscripts; // Of *AstSubscript @Remove
+} AstArrayAccess;
+
+typedef enum MemberAccessKind {
+    MEMBER_ACCESS_STRUCT,
+    MEMBER_ACCESS_ENUM,
+} AccessorKind;
 
 typedef struct AstMemberAccess {
     AstExpr head;
 
-    AstIdentifier *ident;
-    DynamicArray chain; // Of *AstAccessor
+    AstExpr *left;
+    AstExpr *right;
+    
+    AccessorKind access_kind;
+    union {
+        AstDeclaration *struct_member;
+        AstEnumerator  *enum_member;
+    };
 } AstMemberAccess;
 
 typedef struct AstUnary {
@@ -313,11 +338,17 @@ typedef struct AstStructLiteral {
 typedef struct AstStructInitializer {
     Ast head;
 
-    AstIdentifier *designator;  // *Optional
+    AstIdentifier *designator;  // null if no explicit member name is used
     AstExpr       *value;
 
-    AstDeclaration *member;     // Member that this initializer is initializing
+    AstDeclaration *member;     // member that this initializer is initializing
 } AstStructInitializer;
+
+typedef struct AstArrayLiteral {
+    Ast head;
+
+    DynamicArray expressions; // of *AstExpression
+} AstArrayLiteral;
 
 typedef enum LiteralKind {
     LITERAL_BOOLEAN     = TOKEN_BOOLEAN,
@@ -333,7 +364,6 @@ typedef struct AstLiteral {
     LiteralKind kind;
     As_value    as;
 } AstLiteral;
-
 
 
 typedef enum PrimitiveKind {
@@ -407,6 +437,23 @@ Type *primitive_type(PrimitiveKind kind) {
     return (Type *)(&primitive_types[kind]);
 }
 
+typedef enum ArrayFlags {
+    ARRAY_IS_STATIC                         = 1 << 0,
+    ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY  = 1 << 1,
+    ARRAY_IS_DYNAMIC                        = 1 << 2,
+} ArrayFlags;
+
+typedef struct TypeArray {
+    Type head;
+    AstArrayLiteral *node;
+    
+    ArrayFlags flags;
+    Type *elem_type;
+
+    AstExpr  *capacity_expr;
+    long long capicity; // Will be set in in typer
+} TypeArray;
+
 typedef struct TypeEnum {
     Type head;
     AstEnum *node;
@@ -446,7 +493,7 @@ bool compare_user_types(const void *key, const void *item) {
 TypeTable type_table_init() {
     TypeTable type_table  = {0};
     type_table.user_types = hash_table_init(32, sizeof(Type *), compare_user_types);
-    type_table.types      = arena_init(sizeof(Type) * 32);
+    type_table.types      = arena_init(sizeof(Type) * 128);
     return type_table;
 }
 
@@ -481,18 +528,25 @@ Type *type_var(TypeTable *tt, TypeKind kind, char *name) {
 
 char *type_to_str(Type *type) {
     switch (type->kind) {
-        case TYPE_INVALID:
-        case TYPE_VOID:
-        case TYPE_BOOL:
-        case TYPE_INTEGER:
-        case TYPE_FLOAT:
-        case TYPE_STRING: {
-            TypePrimitive *prim = (TypePrimitive *)(type);
-            return primitive_type_names[prim->kind];
-        }
-        case TYPE_NAME:      return type->as.name;
-        case TYPE_STRUCT:    return type->as.name;
-        case TYPE_ENUM:      return type->as.name;
+    case TYPE_INVALID:
+    case TYPE_VOID:
+    case TYPE_BOOL:
+    case TYPE_INTEGER:
+    case TYPE_FLOAT:
+    case TYPE_STRING: {
+        TypePrimitive *prim = (TypePrimitive *)(type);
+        return primitive_type_names[prim->kind];
+    }
+    case TYPE_ARRAY: {
+        TypeArray *array = (TypeArray *)(type);
+        StringBuilder builder = string_builder_init(32);
+        sb_append(&builder, "[]%s", type_to_str(array->elem_type));
+
+        return sb_to_string(&builder); // @Leak
+    }
+    case TYPE_NAME:      return type->as.name;
+    case TYPE_STRUCT:    return type->as.name;
+    case TYPE_ENUM:      return type->as.name;
     }
 
     printf("internal compiler error: Unknown type kind: %d in type_to_str()", type->kind);

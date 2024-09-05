@@ -1,28 +1,21 @@
+TODO Arrays:
+    - parse array access on member access
+    - parse lhs of assignment being a member access
+
 TODO:
     - Backing integer types for enums
     - Better printf
     - Better scoping
 
 Roadmap:
-    - Constants
     - Pointer types
     - Array types
+    - Constants (Mostly done. Missing as struct member)
+    - Revisit of for-loops
+    - Switch statement
     - Heap allocation + Allocators
     - Structs as function parameters
-    - Switch statement
+    - Struct default values
     - Bit operations
     - Foreign functions + C bindings
     - Modules / Packages
-
-
-
-Fix semi-colon being off by one.
-
-    main :: () {
-        y : Vector3 = .{x = 1.0, y = 2.0, z = 3.0}
-        printXXX(x.scale + cube.xy.y);
-    }
-    .\test.sd:18:10 error: Expected a ';'
-    18 |     print(x.scale + cube.xy.y);
-
-

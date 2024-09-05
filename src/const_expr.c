@@ -143,9 +143,9 @@ AstExpr *simplify_expression(ConstEvaluater *ce, AstExpr *expr) {
         }
         case AST_MEMBER_ACCESS: {
             AstMemberAccess *ma = (AstMemberAccess *)(expr);
-            AstAccessor *member = ((AstAccessor **)(ma->chain.items))[ma->chain.count - 1];
-            if (member->kind == ACCESSOR_ENUM) {
-                return make_literal_integer(ce, member->enum_member->value); // @Note - Potential loss of enum information
+
+            if (ma->access_kind == MEMBER_ACCESS_ENUM) {
+                return make_literal_integer(ce, ma->enum_member->value); // @Note - Potential loss of enum information
             }
 
             return expr;

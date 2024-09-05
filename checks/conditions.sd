@@ -1,14 +1,12 @@
 main :: () {
     a := 5;
     if a == 3 {
-        print("a is 3!");
+        assert(false);
     } else if a == 2 {
-        print("a is 2!");
+        assert(false);
     } else if a == 4 {
-        print("a is 4!");
+        assert(false);
     } else {
-        print("a is");
-        print(a);
+        assert(true);
     }
-    print("We are done with the if statement!");
 }

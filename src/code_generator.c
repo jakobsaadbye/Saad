@@ -43,7 +43,7 @@ void check_main_exists(CodeGenerator *cg);
 int make_label_number(CodeGenerator *cg);
 const char *comparison_operator_to_set_instruction(TokenType op);
 const char *boolean_operator_to_instruction(TokenType op);
-int member_access_address(CodeGenerator *cg, AstMemberAccess *ma);
+int get_member_access_address(CodeGenerator *cg, AstMemberAccess *ma);
 char *DT(Type *type);
 
 
@@ -226,7 +226,7 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     }
     else if (assign->lhs->head.type == AST_MEMBER_ACCESS) {
         AstMemberAccess *ma = (AstMemberAccess *)(assign->lhs);
-        address = member_access_address(cg, ma);
+        address = get_member_access_address(cg, ma);
     } else {
         XXX;
     }
@@ -624,7 +624,7 @@ void assign_simple_value(CodeGenerator *cg, int address, Type *lhs_type, Type *r
     else if (lhs_type->kind == TYPE_FLOAT) {
         if (rhs_type->kind == TYPE_INTEGER) {
             // Int to float conversion
-            sb_append(&cg->code, "   pop\trax\n");
+            sb_append(&cg->code, "   pop\t\trax\n");
             sb_append(&cg->code, "   cvtsi2ss\txmm0, rax\n");
             sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", address);
         } else {
@@ -869,15 +869,19 @@ int make_label_number(CodeGenerator *cg) {
     return cg->labels++;
 }
 
-int member_access_address(CodeGenerator *cg, AstMemberAccess *ma) {
-    AstIdentifier *ident = symbol_lookup(&cg->ident_table, ma->ident->name)->as.identifier;
-    int stack_offset     = ident->stack_offset;
-    for (unsigned int i = 0; i < ma->chain.count; i++) {
-        AstAccessor *ac = ((AstAccessor **)(ma->chain.items))[i];
-        stack_offset += ac->struct_member->member_offset;
+int get_member_access_address(CodeGenerator *cg, AstMemberAccess *ma) {
+    if (ma->left->head.type == AST_MEMBER_ACCESS) {
+        AstMemberAccess *left = (AstMemberAccess *)(ma->left);
+
+        int current_offset = get_member_access_address(cg, left);
+        return current_offset + ma->struct_member->member_offset;
+    }
+    if (ma->left->head.type == AST_LITERAL && ((AstLiteral *)(ma->left))->kind == LITERAL_IDENTIFIER) {
+        AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(ma->left))->as.value.identifier.name)->as.identifier;
+        return ident->stack_offset + ma->struct_member->member_offset;
     }
 
-    return stack_offset;
+    XXX; // should be unreachable
 }
 
 bool is_arithmetic_operator(TokenType op) {
@@ -929,11 +933,10 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     }
     case AST_MEMBER_ACCESS: {
         AstMemberAccess *ma  = (AstMemberAccess *)(expr);
-        int stack_offset = member_access_address(cg, ma);
+        int stack_offset = get_member_access_address(cg, ma);
 
-        AstAccessor *ac = ((AstAccessor **)(ma->chain.items))[ma->chain.count - 1];
-        if (ac->kind == ACCESSOR_STRUCT) {
-            AstDeclaration *member = ac->struct_member;
+        if (ma->access_kind == MEMBER_ACCESS_STRUCT) {
+            AstDeclaration *member = ma->struct_member;
             if (member->declared_type->kind == TYPE_INTEGER) {
                 sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", stack_offset);
                 sb_append(&cg->code, "   push\t\trax\n");
@@ -961,8 +964,8 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 return;
             }
             XXX;
-        } else if (ac->kind == ACCESSOR_ENUM) {
-            sb_append(&cg->code, "   push\t\t%d\n", ac->enum_member->value);
+        } else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
+            sb_append(&cg->code, "   push\t\t%d\n", ma->enum_member->value);
             return;
         } else {
             XXX; // Should not happen
@@ -1086,40 +1089,35 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 // Convert type to one of the four intel data types
 char *DT(Type *type) {
     switch (type->kind) {
-    case TYPE_INVALID: XXX;
-    case TYPE_NAME: XXX;
-    case TYPE_VOID: XXX;
     case TYPE_BOOL: 
     case TYPE_INTEGER:
     case TYPE_FLOAT:
     case TYPE_STRING: {
         TypePrimitive *prim_type = (TypePrimitive *)(type);
         switch (prim_type->kind) {
-            case PRIMITIVE_INVALID: XXX;
-            case PRIMITIVE_INT:     return "DWORD";
-            case PRIMITIVE_U8:      return "BYTE";
-            case PRIMITIVE_U16:     return "WORD";
-            case PRIMITIVE_U32:     return "DWORD";
-            case PRIMITIVE_U64:     return "QWORD";
-            case PRIMITIVE_S8:      return "BYTE";
-            case PRIMITIVE_S16:     return "WORD";
-            case PRIMITIVE_S32:     return "DWORD";
-            case PRIMITIVE_S64:     return "QWORD";
-            case PRIMITIVE_FLOAT:   XXX;
-            case PRIMITIVE_F32:     XXX;
-            case PRIMITIVE_F64:     XXX;
-            case PRIMITIVE_STRING:  return "QWORD";
-            case PRIMITIVE_BOOL:    return "BYTE";
-            case PRIMITIVE_VOID:    XXX;
-            case PRIMITIVE_COUNT:   XXX;      
+        case PRIMITIVE_INVALID: XXX;
+        case PRIMITIVE_INT:     return "DWORD";
+        case PRIMITIVE_U8:      return "BYTE";
+        case PRIMITIVE_U16:     return "WORD";
+        case PRIMITIVE_U32:     return "DWORD";
+        case PRIMITIVE_U64:     return "QWORD";
+        case PRIMITIVE_S8:      return "BYTE";
+        case PRIMITIVE_S16:     return "WORD";
+        case PRIMITIVE_S32:     return "DWORD";
+        case PRIMITIVE_S64:     return "QWORD";
+        case PRIMITIVE_STRING:  return "QWORD";
+        case PRIMITIVE_BOOL:    return "BYTE";
+        default:
+            printf("Internal compiler error: Unhandled cases in *DT()\n");
+            exit(1);
         }
-        XXX; // unreachable
     }
-    case TYPE_STRUCT: XXX;
     case TYPE_ENUM: {
         TypeEnum *enum_type = (TypeEnum *)(type);
         return DT(enum_type->backing_type);
     };
+    default:
+        printf("Internal compiler error: Unhandled cases in *DT()\n");
+        exit(1);
     }
-    XXX; // unreachable
 }

@@ -679,6 +679,9 @@ bool is_binary_operator(TokenType op) {
     if (op == TOKEN_DOUBLE_EQUAL)  return true;
     if (op == TOKEN_NOT_EQUAL)     return true;
 
+    if (op == '.') return true;
+    if (op == '[') return true;
+
     return false;
 }
 
@@ -726,6 +729,8 @@ bool is_single_character_token(char c) {
     if (c == ';') return true;
     if (c == '{') return true;
     if (c == '}') return true;
+    if (c == '[') return true;
+    if (c == ']') return true;
     if (c == '(') return true;
     if (c == ')') return true;
     if (c == ',') return true;

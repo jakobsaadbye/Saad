@@ -1,11 +1,10 @@
-Vector3 :: struct {}
+Vector2 :: struct {
+    x : float;
+    y : float;
+}
 
 main :: () {
-    y : Vector3 = .{
-        x = 1.0, 
-        y = 2.0, 
-        z = 3.0
-    };
+    a := Vector2.{3, 4};
 
-    print(x.scale + cube.xy.y);
+    print(a.y);
 }

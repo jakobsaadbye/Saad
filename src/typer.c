@@ -7,15 +7,16 @@ typedef struct Typer {
     AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
 } Typer;
 
-bool      check_block(Typer *typer, AstBlock *block, bool open_lexical_scope);
-bool      check_statement(Typer *typer, Ast *stmt);
+bool  check_block(Typer *typer, AstBlock *block, bool open_lexical_scope);
+bool  check_statement(Typer *typer, Ast *stmt);
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type);
 Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type);
 Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type);
 Type *check_literal(Typer *typer, AstLiteral *literal);
 Type *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Type *ctx_type);
 Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_type);
-Type *check_member_access(Typer *typer, AstMemberAccess * ma);
+Type *check_member_access(Typer *typer, AstMemberAccess * ma); // @Incomplete
+
 char *type_to_str(Type *type);
 bool types_are_equal(Type *lhs, Type *rhs);
 bool is_comparison_operator(TokenType op);
@@ -58,22 +59,53 @@ bool check_block(Typer *typer, AstBlock *block, bool open_lexical_scope) {
     return true;
 }
 
-bool resolve_enum_or_struct_type(Typer *typer, AstDeclaration *decl) {
-    if (decl->declared_type->kind == TYPE_NAME) {
-        Type *found = type_lookup(&typer->parser->type_table, decl->declared_type->as.name);
+Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
+    if (is_primitive_type(type->kind)) {
+        return type;
+    } 
+
+    if (type->kind == TYPE_NAME) {
+        Type *found = type_lookup(&typer->parser->type_table, type->as.name);
         if (found == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->declared_type), "Unknown type '%s'", type_to_str(decl->declared_type));
-            return false;
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Unknown type '%s'", type_to_str(type));
+            return NULL;
         }
 
-        decl->declared_type    = found;
-        decl->identifier->type = found;
+        return found;
     }
 
-    return true;
+    if (type->kind == TYPE_ARRAY) {
+        TypeArray *array = (TypeArray *)(type);
+
+        if (decl) {
+            if (array->capacity_expr) {
+                AstExpr *constexpr = simplify_expression(typer->ce, array->capacity_expr);
+                if (constexpr->head.type != AST_LITERAL && ((AstLiteral *)(constexpr))->kind != LITERAL_INTEGER) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be an integer constant");
+                    return NULL;
+                }
+
+                array->capicity = ((AstLiteral *)(constexpr))->as.value.integer;
+            }
+            if (array->flags & ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY && decl->expr == NULL) { // @Note - This might also be the case for function parameters that also don't allow an expression to be present
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array), "Missing array initializer to determine size of array");
+                return NULL;
+            }
+        }
+
+        Type *elem_type = resolve_type(typer, array->elem_type, decl);
+        if (!elem_type) return NULL;
+
+        array->elem_type  = elem_type;
+        array->head.size  = array->capicity * elem_type->size; 
+
+        return (Type *)(array);
+    }
+
+    return NULL;
 }
 
-unsigned long long max_value_of_type(TypePrimitive *type) {
+unsigned long long max_integer_value(TypePrimitive *type) {
     switch (type->kind) {
     case PRIMITIVE_INT: return S32_MAX;
     case PRIMITIVE_U8:  return U8_MAX;
@@ -85,7 +117,7 @@ unsigned long long max_value_of_type(TypePrimitive *type) {
     case PRIMITIVE_S32: return S32_MAX;
     case PRIMITIVE_S64: return S64_MAX;
     default:
-        printf("Internal compiler error: Unknown type kind %d in max_value_of_type()", type->kind);
+        printf("Internal compiler error: Unknown type kind %d in max_integer_value()", type->kind);
         exit(1);
     }
 }
@@ -108,7 +140,7 @@ bool check_for_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
 
             TypePrimitive *prim_type = (TypePrimitive *)(lhs_type);
             unsigned long long lit_value = (unsigned long long) lit->as.value.integer;
-            unsigned long long max_value = max_value_of_type(prim_type);
+            unsigned long long max_value = max_integer_value(prim_type);
 
             if (lit_value > max_value) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(lit), "Assignment produces an integer overflow. Max value of type '%s' is '%llu'", type_to_str(lhs_type), max_value);
@@ -123,27 +155,31 @@ bool check_for_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
 }
 
 bool check_declaration(Typer *typer, AstDeclaration *decl) {
-    bool ok;
-
     if (decl->flags & DECLARATION_TYPED) {
-        ok = resolve_enum_or_struct_type(typer, decl);
-        if (!ok) return false;
+        Type *resolved_type = resolve_type(typer, decl->declared_type, decl);
+        if (!resolved_type) return false;
+
+        decl->identifier->type = resolved_type;
+        decl->declared_type    = resolved_type;
         
         Type *expr_type = check_expression(typer, decl->expr, decl->declared_type);
         if (!expr_type) return false;
         if (!types_are_equal(decl->declared_type, expr_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl), "Variable was said to be of type %s, but expression is of type %s", type_to_str(decl->declared_type), type_to_str(expr_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "'%s' is said to be of type %s, but expression is of type %s", decl->identifier->name, type_to_str(decl->declared_type), type_to_str(expr_type));
             return false;
         }
     }
     else if (decl->flags & DECLARATION_TYPED_NO_EXPR) {
-        ok = resolve_enum_or_struct_type(typer, decl);
-        if (!ok) return false;
+        Type *resolved_type = resolve_type(typer, decl->declared_type, decl);
+        if (!resolved_type) return false;
+
+        decl->identifier->type = resolved_type;
+        decl->declared_type    = resolved_type;
     }
     else if (decl->flags & DECLARATION_INFER) {
         Type *expr_type = check_expression(typer, decl->expr, NULL);
         if (!expr_type) return false;
-        
+
         decl->identifier->type = expr_type;
         decl->declared_type    = expr_type;
     }
@@ -167,7 +203,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         decl->declared_type    = expr_type;
     }
 
-    ok = check_for_integer_overflow(typer, decl->declared_type, decl->expr);
+    bool ok = check_for_integer_overflow(typer, decl->declared_type, decl->expr);
     if (!ok) return false;
     
     if (decl->flags & (DECLARATION_IS_FUNCTION_PARAMETER | DECLARATION_IS_STRUCT_MEMBER)) {
@@ -202,7 +238,12 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         (lhs->kind == TYPE_ENUM   && rhs->kind == TYPE_ENUM)
     ) {
         return strcmp(lhs->as.name, rhs->as.name) == 0;
-    } else {
+    } else if (lhs->kind == TYPE_ARRAY && rhs->kind == TYPE_ARRAY) {
+        Type *left_elem_type  = ((TypeArray *)(lhs))->elem_type;
+        Type *right_elem_type = ((TypeArray *)(rhs))->elem_type;
+        return types_are_equal(left_elem_type, right_elem_type);
+    }
+    else {
         return false;
     }
 }
@@ -252,8 +293,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
 
     bool lhs_is_constant = false;
     if (is_member) {
-        DynamicArray accessors = ((AstMemberAccess *)(assign->lhs))->chain;
-        member = ((AstAccessor **)(accessors.items))[accessors.count - 1]->struct_member;
+        member = ((AstMemberAccess *)(assign->lhs))->struct_member;
         lhs_is_constant = member->flags & DECLARATION_CONSTANT;
     } else if (is_identifier) {
         ident = symbol_lookup(&typer->parser->ident_table, ((AstLiteral *)(assign->lhs))->as.value.identifier.name)->as.identifier;
@@ -457,6 +497,8 @@ bool check_statement(Typer *typer, Ast *stmt) {
         bool ok = check_block(typer, func_defn->body, true);
         if (!ok) return false;
 
+        func_defn->return_type = resolve_type(typer, func_defn->return_type, NULL);
+
         typer->enclosing_function = NULL;
         return true;
     }
@@ -547,6 +589,108 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) 
     return lhs_type;
 }
 
+Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_type) {
+    bool infer_type_from_first_element = ctx_type == NULL;
+    if (infer_type_from_first_element) {
+        if (array_lit->expressions.count == 0) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Couldn't infer type of array literal from the context as it didn't contain any elements");
+            return NULL;
+        }
+
+        Type *first_element_type = check_expression(typer, ((AstExpr **)(array_lit->expressions.items))[0], NULL);
+        if (!first_element_type) return NULL;
+
+        TypeArray *array       = type_alloc(&typer->parser->type_table, sizeof(TypeArray));
+        array->head.head.type  = AST_TYPE;
+        array->head.head.start = array_lit->head.start;
+        array->head.head.end   = array_lit->head.end;
+        array->head.kind       = TYPE_ARRAY;
+        array->flags           = ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY;
+        array->elem_type       = first_element_type;
+
+        ctx_type = (Type *)(array);
+    }
+
+    if(ctx_type->kind != TYPE_ARRAY) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Expected element to have type %s, but element is of type []%s", type_to_str(ctx_type), type_to_str(ctx_type));
+        return NULL;
+    }
+
+    // Copying ctx_type to not alter its size and capacity
+    TypeArray *array = type_alloc(&typer->parser->type_table, sizeof(TypeArray));
+    memcpy(array, ctx_type, sizeof(TypeArray));
+    array->node = array_lit;
+
+    for (unsigned int i = 0; i < array_lit->expressions.count; i++) {
+        AstExpr *expr = ((AstExpr **)(array_lit->expressions.items))[i];
+        if (infer_type_from_first_element && i == 0) continue;
+
+        Type *expr_type = check_expression(typer, expr, array->elem_type);
+        if (!expr_type) return NULL;
+
+        if (!types_are_equal(array->elem_type, expr_type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(expr), "Expected element to have type %s, but element is of type %s", type_to_str(array->elem_type), type_to_str(expr_type));
+            return NULL;
+        }
+    }
+
+
+    //
+    //  Sizing of the array
+    //
+    if (array->flags & ARRAY_IS_STATIC) {
+        if (array_lit->expressions.count > array->capicity) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Trying to assign %d elements to array with size %d", array_lit->expressions.count, array->capicity);
+            return NULL;
+        }
+        array->head.size = array->elem_type->size * array->capicity;
+        // array capacity is set in check_declaration()
+    }
+    else if (array->flags & (ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY | ARRAY_IS_DYNAMIC)) {
+        // Ensure that the size of the outer array gets to be the size of the biggest inner array type
+        int capacity  = array_lit->expressions.count;
+        int elem_size = array->elem_type->size;
+
+        if (array->elem_type->kind == TYPE_ARRAY && ((TypeArray *)(array->elem_type))->flags & ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY) {
+            int size_of_biggest_inner_array = 0;
+            for (unsigned int i = 0; i < array_lit->expressions.count; i++) {
+                AstExpr *expr = ((AstExpr **)(array_lit->expressions.items))[i];
+                assert(expr->evaluated_type != NULL && expr->evaluated_type->kind == TYPE_ARRAY);
+
+                TypeArray *inner_array = (TypeArray *)(expr->evaluated_type);
+                size_of_biggest_inner_array = inner_array->head.size > size_of_biggest_inner_array ? inner_array->head.size : size_of_biggest_inner_array;
+            }
+
+            elem_size = size_of_biggest_inner_array;
+        }
+
+        array->capicity  = capacity;
+        array->head.size = elem_size * capacity;
+    }
+
+
+    return (Type *)(array);
+}
+
+Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
+    Type *type_being_accessed = check_expression(typer, array_ac->accessing, NULL);
+    if (!type_being_accessed) return NULL;
+
+    if (type_being_accessed->kind != TYPE_ARRAY) {
+        report_error_range(typer->parser, array_ac->accessing->head.start, array_ac->open_bracket.start, "Cannot access expression of type %s", type_to_str(type_being_accessed));
+        return NULL;
+    }
+
+    AstExpr *subscript = array_ac->subscript;
+    Type    *subscript_type = check_expression(typer, subscript, type_being_accessed); // @Note - passing down type_being_accessed to allow enum literals to be used
+    if (subscript_type->kind != TYPE_INTEGER && subscript_type->kind != TYPE_ENUM) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(subscript), "Array subscript must be an integer or enum type, but got type %s", type_to_str(subscript_type));
+        return NULL;
+    }
+
+    return ((TypeArray *)(type_being_accessed))->elem_type;
+}
+
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     Type *result = NULL;
     if      (expr->head.type == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
@@ -554,8 +698,10 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.type == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
     else if (expr->head.type == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr));
     else if (expr->head.type == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), ctx_type);
+    else if (expr->head.type == AST_ARRAY_LITERAL)  result = check_array_literal(typer, (AstArrayLiteral *)(expr), ctx_type);
     else if (expr->head.type == AST_ENUM_LITERAL)   result = check_enum_literal(typer, (AstEnumLiteral *)(expr), ctx_type);
-    else if (expr->head.type == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr));
+    else if (expr->head.type == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr)); // @ Incomplete
+    else if (expr->head.type == AST_ARRAY_ACCESS)   result = check_array_access(typer, (AstArrayAccess *)(expr));
     else if (expr->head.type == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_INT); // @Investigate - Shouldn't this be checked for both sides being integers???
     else {
         printf("%s:%d: compiler-error: Unhandled cases in 'type_expression'. Expression was of type %s", __FILE__, __LINE__, ast_type_name(expr->head.type));
@@ -566,88 +712,62 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     return result;
 }
 
-Type *check_member_access(Typer *typer, AstMemberAccess *ma) {  
-    Symbol *ident_sym = symbol_lookup(&typer->parser->ident_table, ma->ident->name);
-    if (ident_sym == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->ident), "Undeclared variable '%s'", ma->ident->name);
+Type *check_member_access(Typer *typer, AstMemberAccess *ma) { // @Incomplete - Change type
+    Type *type_lhs = check_expression(typer, ma->left, NULL);
+    if (!type_lhs) return NULL;
+
+    //
+    // Explicit enum value
+    //
+    AstExpr *lhs = ma->left;
+    if (type_lhs->kind == TYPE_ENUM && lhs->head.type == AST_LITERAL && ((AstLiteral *)(lhs))->kind == LITERAL_IDENTIFIER) {
+        char *ident_name    = ((AstLiteral *)(lhs))->as.value.identifier.name;
+        TypeEnum *enum_defn = ((TypeEnum *)(type_lhs));
+        if (strcmp(ident_name, enum_defn->identifier->name) == 0) {
+
+            AstExpr *rhs = ma->right;
+            if (rhs->head.type == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
+                char *name = ((AstLiteral *)(rhs))->as.value.identifier.name;
+                AstEnumerator *enum_member = find_enum_member(enum_defn->node, name);
+                if (!enum_member) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "%s is not a member of enum %s", name, enum_defn->identifier->name);
+                    report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(enum_defn), "Here is the definition of %s", enum_defn->identifier->name);
+                    return NULL;
+                }
+
+                ma->access_kind = MEMBER_ACCESS_ENUM;
+                ma->enum_member = enum_member;
+                return (Type *)(enum_defn);
+            }
+        }
+    }
+
+    if (type_lhs->kind != TYPE_STRUCT) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->left), "Cannot access expression of type %s", type_to_str(type_lhs));
         return NULL;
     }
 
-    AstIdentifier *ident = ident_sym->as.identifier;
-    if (ident->type->kind != TYPE_STRUCT && ident->type->kind != TYPE_ENUM) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->ident), "Trying to access variable '%s' of type '%s'", ident->name, type_to_str(ident->type));
-        return NULL;
-    }
+    TypeStruct *struct_defn = (TypeStruct *)(type_lhs);
 
-    if (ident->type->kind == TYPE_ENUM) {
-        if (ident->flags & IDENTIFIER_IS_NAME_OF_ENUM) {
-            assert(ma->chain.count > 0);
-            AstAccessor *ac = ((AstAccessor **)(ma->chain.items))[0];
-            if (ma->chain.count > 1) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ac), "'%s' is not accessable", ac->name);
-                return NULL;
-            }
-
-            // @Refactor - Find a way to refactor this. Looks similar to the way enum literals are type checked !
-            TypeEnum *enum_defn = (TypeEnum *)(ident->type);
-            char     *enum_name = ac->name;
-            AstEnumerator *found = find_enum_member(enum_defn->node, enum_name);
-            if (!found) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ac), "'%s' is not a member of enum '%s'", enum_name, enum_defn->identifier->name);
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(enum_defn), "Here is the definition of '%s'", enum_defn->identifier->name);
-                return NULL;
-            }
-
-            if (!found->is_typechecked) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ac), "Enum member used before being declared", enum_name, enum_defn->identifier->name);
-                return NULL;
-            }
-
-            ac->kind        = ACCESSOR_ENUM;
-            ac->enum_member = found;
-
-            return (Type *)(enum_defn);
-        } else {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->ident), "Enum values are not accessable", ident->name, type_to_str(ident->type));
+    AstExpr *rhs = ma->right;
+    if (rhs->head.type == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
+        char *member_name = ((AstLiteral *)(rhs))->as.value.identifier.name;
+        
+        AstDeclaration *member = get_struct_member(struct_defn->node, member_name); // @Cleanup - get_struct_member should probably take TypeStruct instead of AstStruct
+        if (!member) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a member of '%s'", member_name, type_to_str((Type *)struct_defn));
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn), "Here is the definition of %s", type_to_str((Type *)struct_defn));
             return NULL;
         }
+
+        ma->access_kind   = MEMBER_ACCESS_STRUCT;
+        ma->struct_member = member;
+        return member->declared_type;
+    } else {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "Invalid member expression");
+        return NULL;
     }
 
-
-    if (ident->type->kind == TYPE_STRUCT) {
-        TypeStruct  *curr_struct = (TypeStruct *)(ident->type);
-        AstAccessor *ac          = NULL;
-        for (unsigned int i = 0; i < ma->chain.count; i++) {
-            ac = ((AstAccessor **)(ma->chain.items))[i];
-
-            AstDeclaration *member = get_struct_member(curr_struct->node, ac->name);
-            if (member == NULL) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ac), "'%s' is not a member of '%s'", ac->name, curr_struct->identifier->name);
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(curr_struct), "Here is the definition of '%s'", curr_struct->identifier->name);
-                return NULL;
-            }
-
-            ac->kind          = ACCESSOR_STRUCT;
-            ac->struct_member = member;
-
-            if (member->declared_type->kind == TYPE_STRUCT) {
-                curr_struct = (TypeStruct *)(member->declared_type);
-                continue;
-            } else {
-                bool has_next = (i + 1) < ma->chain.count;
-                if (has_next) {
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ac), "Trying to access '%s' of type '%s'", ac->name, type_to_str(member->declared_type));
-                    return NULL;
-                } else {
-                    // Everything is fine, we end on a member not a struct
-                }
-            }
-        }
-
-        return ac->struct_member->declared_type;
-    }
-
-    XXX;
 }
 
 Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_type) {
@@ -655,34 +775,39 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_ty
     if (literal->explicit_type != NULL) {
         // Explicit type is used
         Type *type = literal->explicit_type;
-        if (type->kind != TYPE_NAME) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Type mistmatch. Struct literal cannot conform to type '%s'", type_to_str(type));
-            return NULL;
+        if (type->kind == TYPE_STRUCT) {
+            // Explicit type have already been resolved @Note - Currently this only happens in check_array_literal where the first expression is typechecked, and then all the expressions are again typechecked against that first expression, so we might end here.
+            return literal->explicit_type;
         }
 
-        Type *found = type_lookup(&typer->parser->type_table, type->as.name);
-        if (!found) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(&type), "Unknown type '%s'", type_to_str(type));
-            return NULL;
-        }
+        if (type->kind == TYPE_NAME) {
+            Type *found = type_lookup(&typer->parser->type_table, type->as.name);
+            if (!found) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Unknown type '%s'", type_to_str(type));
+                return NULL;
+            }
 
-        if (found->kind != TYPE_STRUCT) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(&type), "'%s' is not the name of a struct. Type of '%s' is '%s'", found->as.name, found->as.name, type_to_str(type));
+            if (found->kind != TYPE_STRUCT) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "'%s' is not the name of a struct. Type of '%s' is '%s'", found->as.name, found->as.name, type_to_str(type));
+                return NULL;
+            }
+            
+            literal->explicit_type = found;
+            struct_defn = (TypeStruct *)(found);
+        } else {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Struct literal cannot conform to type '%s'", type_to_str(lhs_type));
             return NULL;
         }
-        
-        literal->explicit_type = found;
-        struct_defn = (TypeStruct *)(found);
     }
     else {
         // Type is inferred from the type on the declaration
         if (lhs_type == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Type of struct literal could not be infered. Put atleast a type on the declaration or make an explict type on the struct literal");
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Type of struct literal could not be infered from the context");
             return NULL;
         }
 
         if (lhs_type->kind != TYPE_STRUCT) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Type mistmatch. Struct literal cannot conform to type '%s'", type_to_str(lhs_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Struct literal cannot conform to type '%s'", type_to_str(lhs_type));
             return NULL;
         }
 
@@ -716,13 +841,13 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_ty
             curr_member_index = member->member_index + 1;
         } else {
             if (curr_member_index > members.count - 1) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init), "Initializing to unknown member");
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init), "Initializing to unknown member of '%s'", type_to_str((Type *)(struct_defn)));
                 return NULL;
             }
             
-            AstDeclaration *member  = ((AstDeclaration **)(members.items))[i];
-            Type *member_type   = member->declared_type;
-            Type *value_type    = check_expression(typer, init->value, member_type);
+            AstDeclaration *member = ((AstDeclaration **)(members.items))[i];
+            Type *member_type = member->declared_type;
+            Type *value_type  = check_expression(typer, init->value, member_type);
             if (!value_type) return NULL;
 
             if (!types_are_equal(member_type, value_type)) {

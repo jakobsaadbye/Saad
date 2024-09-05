@@ -25,7 +25,7 @@ void check_entire_directory(const char *dir_name, bool failing_is_success) {
         char *extension = c + 1;
 
         if (strcmp(extension, "sd") == 0) {
-            char file_path[256];
+            char file_path[512];
             sprintf(file_path, "%s/%s", dir_name, filename);
 
             printf("Run %s\t", file_path);
