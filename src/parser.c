@@ -1,6 +1,5 @@
 #include "symbol_table.c"
 
-#define AST_ALLOCATION_SIZE 16384
 #define IDENT_TABLE_SIZE    128
 
 #define MAX_PRECEDENCE 99
@@ -23,7 +22,7 @@ Parser           parser_init();
 AstCode         *parse_top_level_code(Parser *parser);
 Ast             *parse_statement(Parser *parser);
 AstDeclaration  *parse_declaration(Parser *parser, DeclarationFlags flags);
-AstAssignment   *parse_assignment(Parser *parser);
+AstAssignment   *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token);
 AstFunctionDefn *parse_function_defn(Parser *parser);
 AstFunctionCall *parse_function_call(Parser *parser);
 AstStruct       *parse_struct(Parser *parser);
@@ -72,7 +71,7 @@ void report_error_token(Parser *parser, const char* label, Token failing_token, 
 Parser parser_init(Lexer *lexer) {
     Parser parser = {0};
     parser.lexer           = lexer;
-    parser.ast_nodes       = arena_init(AST_ALLOCATION_SIZE);
+    parser.ast_nodes       = arena_init(4096);
     parser.ident_table     = symbol_table_init();
     parser.function_table  = symbol_table_init();
     parser.type_table      = type_table_init();
@@ -90,6 +89,7 @@ AstCode *parse_top_level_code(Parser *parser) {
         if (next.type == TOKEN_END) break;
         // @Improvement - Need to limit what statements are allowed at top level scope
         Ast *stmt = parse_statement(parser);
+        if (!stmt) return NULL;
         da_append(&code->statements, stmt);
     }
 
@@ -117,7 +117,9 @@ AstBlock *parse_block(Parser *parser, bool open_lexical_scope) {
                 exit(1);
             }
 
-            block->statements[i] = (Ast *)(parse_statement(parser));
+            Ast *stmt = parse_statement(parser);
+            if (!stmt) return NULL;
+            block->statements[i] = stmt;
             block->num_of_statements += 1;
             i++;
         }
@@ -142,8 +144,8 @@ Ast *parse_statement(Parser *parser) {
     Token token = peek_next_token(parser);
 
     if (token.type == TOKEN_IDENTIFIER) {
-        Token next      = peek_token(parser, 1);
-        Token next_next = peek_token(parser, 2);
+        Token next      = peek_token(parser, 1); // @Cleanup - This is dangerous!!!
+        Token next_next = peek_token(parser, 2); // @Cleanup - This is dangerous!!!
         if (next.type == TOKEN_DOUBLE_COLON && next_next.type == '(') {
             stmt = (Ast *)(parse_function_defn(parser));
             statement_ends_with_semicolon = false;
@@ -168,13 +170,8 @@ Ast *parse_statement(Parser *parser) {
         ) {
             stmt = (Ast *)(parse_declaration(parser, 0));
             statement_ends_with_semicolon = true;
-        } else if (
-            next.type == '.' ||
-            is_assignment_operator(next)
-        ) {
-            stmt = (Ast *)(parse_assignment(parser));
-            statement_ends_with_semicolon = true;
-        } else {
+        } 
+        else {
             // Fallthrough
         }
     }
@@ -208,8 +205,23 @@ Ast *parse_statement(Parser *parser) {
     }
 
     if (stmt == NULL) {
-        report_error_token(parser, LABEL_ERROR, token, "Invalid statement");
-        exit(1);
+        AstExpr *lhs = parse_expression(parser, MIN_PRECEDENCE);
+        if (!lhs) {
+            report_error_token(parser, LABEL_ERROR, peek_next_token(parser), "Invalid expression");
+            exit(1);
+        }
+
+        Token next = peek_next_token(parser);
+        if (is_assignment_operator(next)) {
+            eat_token(parser);
+            stmt = (Ast *)(parse_assignment(parser, lhs, next));
+            if (!stmt) {
+                return NULL;
+            }
+            statement_ends_with_semicolon = true;
+        } else {
+            return NULL;
+        }
     }
 
     if (statement_ends_with_semicolon) {
@@ -514,26 +526,24 @@ AstStruct *parse_struct(Parser *parser) {
     return ast_struct;
 }
 
-AstAssignment *parse_assignment(Parser *parser) {
-    AstExpr *lhs = parse_expression(parser, MIN_PRECEDENCE);
+AstAssignment *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token) {
+    assert(is_assignment_operator(op_token));
+
     bool valid_lhs = false;
     if (lhs->head.type == AST_LITERAL && ((AstLiteral *)(lhs))->kind == LITERAL_IDENTIFIER) 
         valid_lhs = true;
     if (lhs->head.type == AST_MEMBER_ACCESS) 
         valid_lhs = true;
+    if (lhs->head.type == AST_ARRAY_ACCESS) 
+        valid_lhs = true;
+
     if (!valid_lhs) {
         report_error_ast(parser, LABEL_ERROR, (Ast *)(lhs), "Invalid expression as left-hand side of assignment");
-        exit(1);
+        return NULL;
     }
-
-    Token op_token = peek_next_token(parser);
-    if (!is_assignment_operator(op_token)) {
-        report_error_token(parser, LABEL_ERROR, op_token, "Expected an assignment operator");
-        exit(1);
-    }
-    eat_token(parser);
 
     AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+    if (!expr) return NULL;
 
     AstAssignment *assign = (AstAssignment *)(ast_allocate(parser, sizeof(AstAssignment)));
     assign->head.type     = AST_ASSIGNMENT;
@@ -584,6 +594,7 @@ AstFor *parse_for(Parser *parser) {
     open_scope(&parser->ident_table);
     symbol_add_identifier(&parser->ident_table, iterator);
     AstBlock *body = parse_block(parser, false);
+    if (!body) return NULL;
     close_scope(&parser->ident_table);
 
     AstFor *ast_for = (AstFor *)(ast_allocate(parser, sizeof(AstFor)));
@@ -599,11 +610,13 @@ AstFor *parse_for(Parser *parser) {
 
 AstExpr *parse_range_or_normal_expression(Parser *parser) {
     AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+    if (!expr) return NULL;
 
     Token next = peek_next_token(parser);
     if (next.type == TOKEN_DOUBLE_DOT || next.type == TOKEN_TRIPLE_DOT) {
         eat_token(parser);
         AstExpr *end = parse_expression(parser, MIN_PRECEDENCE);
+        if (!end) return NULL;
 
         AstRangeExpr *range_expr = (AstRangeExpr *)(ast_allocate(parser, sizeof(AstRangeExpr)));            
         range_expr->head.head.type = AST_RANGE_EXPR;
@@ -624,6 +637,7 @@ AstReturn *parse_return(Parser *parser) {
     eat_token(parser);
 
     AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+    if (!expr) return NULL;
 
     AstReturn *ast_return = (AstReturn *)(ast_allocate(parser, sizeof(AstReturn)));
     ast_return->head.type  = AST_RETURN;
@@ -664,9 +678,11 @@ AstStructLiteral *parse_struct_literal(Parser *parser) {
 
             designator = make_identifier_from_token(parser, next, NULL);
             value      = parse_expression(parser, MIN_PRECEDENCE);
+            if (!value) return NULL;
         } else {
             designator = NULL;
             value      = parse_expression(parser, MIN_PRECEDENCE);
+            if (!value) return NULL;
         }
 
         AstStructInitializer *init = ast_allocate(parser, sizeof(AstStructInitializer));
@@ -745,12 +761,13 @@ AstExpr *parse_array_access(Parser *parser, Token open_bracket, AstExpr *left) {
     assert(open_bracket.type == '[');
 
     AstExpr *subscript = parse_expression(parser, MIN_PRECEDENCE);
+    if (!subscript) return NULL;
 
     Token next = peek_next_token(parser);
     if (next.type != ']') {
         report_error_token(parser, LABEL_ERROR, next, "Expected a closing bracket here");
         report_error_token(parser, LABEL_NOTE, open_bracket, "For this open bracket ...");
-        exit(1);
+        return NULL;
     }
     eat_token(parser);
 
@@ -799,6 +816,7 @@ AstFunctionCall *parse_function_call(Parser *parser) {
         }
 
         AstExpr *arg = parse_expression(parser, MIN_PRECEDENCE);
+        if (!arg) return NULL;
 
         da_append(&call->arguments, arg);
         first_argument_seen = true;
@@ -881,6 +899,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     }
 
     AstBlock *body = parse_block(parser, false); // Here we tell parse_block to explicitly not make a new lexical scope, as we are managing the scope manually in here
+    if (!body) return NULL;
     close_scope(&parser->ident_table);
 
     func_defn->head.type   = AST_FUNCTION_DEFN;
@@ -899,8 +918,10 @@ AstIf *parse_if(Parser *parser) {
     eat_token(parser);
 
     AstExpr *condition = parse_expression(parser, MIN_PRECEDENCE);
+    if (!condition) return NULL;
 
     AstBlock *block = parse_block(parser, true);
+    if (!block) return NULL;
 
     AstIf *ast_if = (AstIf *)(ast_allocate(parser, sizeof(AstIf)));
     ast_if->head.type = AST_IF;
@@ -920,7 +941,9 @@ AstIf *parse_if(Parser *parser) {
                 eat_token(parser);
                 
                 AstExpr *condition = parse_expression(parser, MIN_PRECEDENCE);
-                AstBlock *block    = parse_block(parser, true);
+                if (!condition) return NULL;
+                AstBlock *block = parse_block(parser, true);
+                if (!block) return NULL;
 
                 AstIf else_if = {0};
                 else_if.head.type = AST_IF;
@@ -935,6 +958,8 @@ AstIf *parse_if(Parser *parser) {
             }
 
             AstBlock *else_block = parse_block(parser, true);
+            if (!else_block) return NULL;
+
             ast_if->else_block = else_block;
             break;
         }
@@ -954,6 +979,7 @@ AstTypeof *parse_typeof(Parser *parser) {
     eat_token(parser);
 
     AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+    if (!expr) return NULL;
 
     next = peek_next_token(parser);
     expect(parser, next, ')');
@@ -978,6 +1004,7 @@ AstAssert *parse_assert(Parser *parser) {
     eat_token(parser);
 
     AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+    if (!expr) return NULL;
 
     next = peek_next_token(parser);
     expect(parser, next, ')');
@@ -1002,6 +1029,7 @@ AstPrint *parse_print(Parser *parser) {
     eat_token(parser);
 
     AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+    if (!expr) return NULL;
 
     next = peek_next_token(parser);
     expect(parser, next, ')');
@@ -1030,6 +1058,7 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
         }
         eat_token(parser);
         AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+        if (!expr) return NULL;
         return make_declaration(parser, ident, expr, NULL, flags | DECLARATION_INFER);
     }
 
@@ -1046,6 +1075,7 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
             
             eat_token(parser);
             AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+            if (!expr) return NULL;
             return make_declaration(parser, ident, expr, type, flags | DECLARATION_TYPED);
         } else {
             return make_declaration(parser, ident, NULL, type, flags | DECLARATION_TYPED_NO_EXPR);
@@ -1057,6 +1087,7 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
         eat_token(parser);
 
         AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+        if (!expr) return NULL;
 
         return make_declaration(parser, ident, expr, NULL, flags | DECLARATION_CONSTANT);
     }   
@@ -1193,6 +1224,7 @@ bool ends_expression(Token token) {
 
 AstExpr *parse_expression(Parser *parser, int min_prec) {
     AstExpr *left = parse_leaf(parser);
+    if (!left) return NULL;
 
     Token next = peek_next_token(parser);
     if (ends_expression(next)) return left;
@@ -1211,11 +1243,14 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
 
             if (next.type == '.') {
                 AstExpr *right = parse_leaf(parser);
+                if (!right) return NULL;
                 left = make_member_access(parser, next, left, right);
             } else if (next.type == '[') {
                 left = parse_array_access(parser, next, left);
+                if (!left) return NULL;
             } else {
                 AstExpr *right = parse_expression(parser, next_prec);
+                if (!right) return NULL;
                 left = make_binary_node(parser, next, left, right);
             }
         }
@@ -1237,7 +1272,9 @@ AstExpr *parse_leaf(Parser *parser) {
 
     if (t.type == '(')  {
         eat_token(parser);
-        AstExpr *sub_expr = parse_expression(parser, MIN_PRECEDENCE); 
+        AstExpr *sub_expr = parse_expression(parser, MIN_PRECEDENCE);
+        if (!sub_expr) return NULL;
+
         Token next = peek_next_token(parser);
         if (next.type != ')') {
             report_error_token(parser, LABEL_ERROR, t, "Expected a closing paranthesis for this parenthesis");
@@ -1251,6 +1288,7 @@ AstExpr *parse_leaf(Parser *parser) {
         eat_token(parser);
         int prec = get_precedence(OP_NOT);
         AstExpr *sub_expr = parse_expression(parser, prec); 
+        if (!sub_expr) return NULL;
         return make_unary_node(parser, t, sub_expr, OP_NOT);
     }
 
@@ -1258,6 +1296,7 @@ AstExpr *parse_leaf(Parser *parser) {
         eat_token(parser);
         int prec = get_precedence(OP_UNARY_MINUS);
         AstExpr *sub_expr = parse_expression(parser, prec); 
+        if (!sub_expr) return NULL;
         return make_unary_node(parser, t, sub_expr, OP_UNARY_MINUS);
     }
 
@@ -1296,11 +1335,7 @@ AstExpr *parse_leaf(Parser *parser) {
         return make_literal_node(parser, t);
     }
 
-    // @Improvement - Instead of reporting the error here, it would be better to "bubble up" the error
-    // so that the full expression that couldn't be parsed can be shown instead of the last token that couldn't
-    // be parsed.
-    report_error_token(parser, LABEL_ERROR, t, "Invalid expression");
-    exit(1);
+    return NULL;
 }
 
 bool starts_struct_literal(Parser *parser) {

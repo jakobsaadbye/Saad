@@ -75,24 +75,28 @@ main:
    mov		DWORD -8[rbp], 0
    mov		DWORD -4[rbp], 0
    push		0
-   pop		rax
-   mov		DWORD -16[rbp], eax
+   mov		rax, 0
+   pop		rbx
+   mov		DWORD -16[rbp + rax], ebx
    mov		rax, 4
    push		rax
-   pop		rax
-   mov		DWORD -12[rbp], eax
+   mov		rax, 0
+   pop		rbx
+   mov		DWORD -12[rbp + rax], ebx
    movss		xmm0, [CF0]
    sub		rsp, 4
    movss		[rsp], xmm0
+   mov		rax, 0
    movss		xmm0, [rsp]
    add		rsp, 4
-   movss		DWORD -8[rbp], xmm0
+   movss		DWORD -8[rbp + rax], xmm0
    movss		xmm0, [CF1]
    sub		rsp, 4
    movss		[rsp], xmm0
+   mov		rax, 0
    movss		xmm0, [rsp]
    add		rsp, 4
-   movss		DWORD -4[rbp], xmm0
+   movss		DWORD -4[rbp + rax], xmm0
 
    ; initialization of 'bmi'
    mov		DWORD -20[rbp], 0
@@ -122,9 +126,10 @@ main:
    divss		xmm0, xmm1
    sub		rsp, 4
    movss		[rsp], xmm0
+   mov		rax, 0
    movss		xmm0, [rsp]
    add		rsp, 4
-   movss		DWORD -20[rbp], xmm0
+   movss		DWORD -20[rbp + rax], xmm0
    movss		xmm0, -20[rbp]
    sub		rsp, 4
    movss		[rsp], xmm0

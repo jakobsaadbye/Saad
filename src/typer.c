@@ -303,6 +303,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     if (!expr_type) return false;
 
     bool is_member     = assign->lhs->head.type == AST_MEMBER_ACCESS;
+    bool is_array_ac   = assign->lhs->head.type == AST_ARRAY_ACCESS;
     bool is_identifier = assign->lhs->head.type == AST_LITERAL && ((AstLiteral *)(assign->lhs))->kind == LITERAL_IDENTIFIER;
 
     AstDeclaration *member = NULL;
@@ -312,7 +313,11 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     if (is_member) {
         member = ((AstMemberAccess *)(assign->lhs))->struct_member;
         lhs_is_constant = member->flags & DECLARATION_CONSTANT;
-    } else if (is_identifier) {
+    } 
+    else if (is_array_ac) {
+        lhs_is_constant = false;
+    }
+    else if (is_identifier) {
         ident = symbol_lookup(&typer->parser->ident_table, ((AstLiteral *)(assign->lhs))->as.value.identifier.name)->as.identifier;
         assert(ident); // Is checked in check_expression so no need to check it here also
         lhs_is_constant = ident->flags & IDENTIFIER_IS_CONSTANT;
@@ -327,9 +332,11 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
 
     if (!types_are_equal(lhs_type, expr_type)) {
         if (is_member) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of '%s' to member '%s' of type '%s'", type_to_str(expr_type), member->identifier->name, type_to_str(lhs_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to member '%s' of type '%s'", type_to_str(expr_type), member->identifier->name, type_to_str(lhs_type));
         } else if (is_identifier) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of '%s' to variable '%s' of type '%s'", type_to_str(expr_type), ident->name, type_to_str(lhs_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to variable '%s' of type '%s'", type_to_str(expr_type), ident->name, type_to_str(lhs_type));
+        } else if (is_array_ac) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to array index '%s' of type '%s'", type_to_str(expr_type), ident->name, type_to_str(lhs_type));
         } else {
             XXX;
         }

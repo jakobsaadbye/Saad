@@ -46,7 +46,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr);
 
 void emit_integer_to_float_conversion(CodeGenerator *cg, TypeKind l_kind, TypeKind r_kind);
 void emit_initialization(CodeGenerator *cg, int dest_offset, AstExpr *expr, Type *lhs_type, Type *rhs_type);
-void emit_simple_initialization(CodeGenerator *cg, int dest_offset, Type *lhs_type, Type *rhs_type);
+void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, Type *lhs_type, Type *rhs_type);
 
 void check_main_exists(CodeGenerator *cg);
 int make_label_number(CodeGenerator *cg);
@@ -228,31 +228,29 @@ void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
 void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     emit_expression(cg, assign->expr);
 
-
-    bool clear_rax = true;
+    bool offset_is_runtime_computed = false;
     int base_offset = 0;
     if (assign->lhs->head.type == AST_LITERAL) {
         AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(assign->lhs))->as.value.identifier.name)->as.identifier;
         base_offset = ident->stack_offset;
+        offset_is_runtime_computed = false;
     }
     else if (assign->lhs->head.type == AST_MEMBER_ACCESS) {
         AstMemberAccess *ma = (AstMemberAccess *)(assign->lhs);
         MemberAccessResult result = emit_member_access_offset(cg, ma);
-        if (result.is_runtime_computed) {
-            clear_rax = false;
-        }
         base_offset = result.base_offset;
+        offset_is_runtime_computed = result.is_runtime_computed;
     } else {
         XXX;
     }
 
-    if (clear_rax) {
+    if (!offset_is_runtime_computed) {
         sb_append(&cg->code, "   mov\t\trax, 0\n");
     }
 
 
     if (assign->op == ASSIGN_EQUAL) {
-        emit_simple_initialization(cg, base_offset, assign->lhs->evaluated_type, assign->expr->evaluated_type);
+        emit_simple_initialization(cg, base_offset, offset_is_runtime_computed, assign->lhs->evaluated_type, assign->expr->evaluated_type);
         return;
     }
 
@@ -614,16 +612,20 @@ void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type) {
     }
 }
 
-void emit_simple_initialization(CodeGenerator *cg, int dest_offset, Type *lhs_type, Type *rhs_type) {
+void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, Type *lhs_type, Type *rhs_type) {
+    if (!dest_is_runtime_computed) {
+        sb_append(&cg->code, "   mov\t\trax, 0\n");
+    }
+
     switch (lhs_type->kind) {
     case TYPE_BOOL: {
-        sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   mov\t\tBYTE %d[rbp], al\n", dest_offset);
+        sb_append(&cg->code, "   pop\t\trbx\n");
+        sb_append(&cg->code, "   mov\t\tBYTE %d[rbp + rax], bl\n", dest_offset);
         break;
     }
     case TYPE_INTEGER: {
-        sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   mov\t\t%s %d[rbp], %s\n", DT(lhs_type), dest_offset, REG_A(lhs_type)); // nocheckin
+        sb_append(&cg->code, "   pop\t\trbx\n");
+        sb_append(&cg->code, "   mov\t\t%s %d[rbp + rax], %s\n", DT(lhs_type), dest_offset, REG_B(lhs_type));
         break;
     }
     case TYPE_FLOAT: {
@@ -631,24 +633,24 @@ void emit_simple_initialization(CodeGenerator *cg, int dest_offset, Type *lhs_ty
             // Int to float conversion 
             // @Note - I feel like this conversion from int to float should be dealt with at the typing level instead of here. 
             // One idea is to just change it at the check_delcarartion level. If we have a float on the left and an integer on the right, just change the right hand side type to be integer
-            sb_append(&cg->code, "   pop\t\trax\n");
-            sb_append(&cg->code, "   cvtsi2ss\txmm0, rax\n");
-            sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", dest_offset);
+            sb_append(&cg->code, "   pop\t\trbx\n");
+            sb_append(&cg->code, "   cvtsi2ss\txmm0, rbx\n");
+            sb_append(&cg->code, "   movss\t\tDWORD %d[rbp + rax], xmm0\n", dest_offset);
         } else {
             sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
             sb_append(&cg->code, "   add\t\trsp, 4\n");
-            sb_append(&cg->code, "   movss\t\tDWORD %d[rbp], xmm0\n", dest_offset);
+            sb_append(&cg->code, "   movss\t\tDWORD %d[rbp + rax], xmm0\n", dest_offset);
         }
         break;
     }
     case TYPE_STRING: {
-        sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", dest_offset);
+        sb_append(&cg->code, "   pop\t\trbx\n");
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp + rax], rbx\n", dest_offset);
         break;
     }
     case TYPE_ENUM: {
-        sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], eax\n", dest_offset);
+        sb_append(&cg->code, "   pop\t\trbx\n");
+        sb_append(&cg->code, "   mov\t\tDWORD %d[rbp + rax], ebx\n", dest_offset);
         break;
     }
     default:
@@ -689,7 +691,7 @@ void emit_initialization(CodeGenerator *cg, int dest_offset, AstExpr *expr, Type
     }
     else {
         emit_expression(cg, expr);
-        emit_simple_initialization(cg, dest_offset, lhs_type, rhs_type);
+        emit_simple_initialization(cg, dest_offset, false, lhs_type, rhs_type);
     }
 }
 
@@ -924,16 +926,12 @@ MemberAccessResult emit_member_access_offset(CodeGenerator *cg, AstMemberAccess 
 
         MemberAccessResult result = emit_member_access_offset(cg, left);
         if (result.is_runtime_computed) {
-            // We are offsetting into a runtime address,
-
             sb_append(&cg->code, "   add\t\trax, %d\n", ma->struct_member->member_offset);
             return (MemberAccessResult){
                 .base_offset = result.base_offset,
                 .is_runtime_computed = true
             };
         } else {
-
-            // @Incomplete - Probably have to check the rhs as it could be a new array access
             return (MemberAccessResult){
                 .base_offset = result.base_offset + ma->struct_member->member_offset,
                 .is_runtime_computed = false
@@ -950,21 +948,38 @@ MemberAccessResult emit_member_access_offset(CodeGenerator *cg, AstMemberAccess 
     }
     if (ma->left->head.type == AST_ARRAY_ACCESS) {
         AstArrayAccess *array_ac = (AstArrayAccess *)(ma->left);
-        emit_array_access_offset(cg, array_ac);
 
         AstExpr *cursor = array_ac->accessing;
         while(cursor->head.type == AST_ARRAY_ACCESS) {
             cursor = ((AstArrayAccess *)(cursor))->accessing;
         }
 
-        assert(cursor->head.type == AST_LITERAL && ((AstLiteral *)(cursor))->kind == LITERAL_IDENTIFIER);
-        AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(cursor))->as.value.identifier.name)->as.identifier;
-        assert(ident);
+        if (cursor->head.type == AST_LITERAL) {
+            assert(((AstLiteral *)(cursor))->kind == LITERAL_IDENTIFIER);
+            AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(cursor))->as.value.identifier.name)->as.identifier;
+            assert(ident);
 
-        return (MemberAccessResult){
-            .base_offset = ident->stack_offset,
-            .is_runtime_computed = true
-        }; 
+            emit_array_access_offset(cg, array_ac);
+            sb_append(&cg->code, "   add\t\trax, %d\n", ma->struct_member->member_offset);
+            return (MemberAccessResult){
+                .base_offset = ident->stack_offset,
+                .is_runtime_computed = true
+            };
+        }
+        else if (cursor->head.type == AST_MEMBER_ACCESS) {
+            AstMemberAccess *left = (AstMemberAccess *)(cursor);
+            MemberAccessResult result = emit_member_access_offset(cg, left);
+            
+            emit_array_access_offset(cg, array_ac);
+            sb_append(&cg->code, "   add\t\trax, %d\n", ma->struct_member->member_offset);
+            return (MemberAccessResult){
+                .base_offset = result.base_offset,
+                .is_runtime_computed = true
+            };
+        }
+        else {
+            XXX;
+        }
     }
     else {
         XXX;
