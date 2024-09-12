@@ -2,6 +2,9 @@
 
 int main()
 {
-    int x = 2147483648;
+    int a [] = {};
+
+    printf("sizeof(a) = %zu\n", sizeof(a));
+
     return 0;
 }

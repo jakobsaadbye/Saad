@@ -292,15 +292,13 @@ typedef struct AstSubscript {
 } AstSubscript;
 
 typedef struct AstArrayAccess {
-    Ast head;
+    AstExpr head;
 
     AstExpr *accessing;
     AstExpr *subscript;
     
     Token open_bracket;
     Token close_bracket;
-
-    DynamicArray subscripts; // Of *AstSubscript @Remove
 } AstArrayAccess;
 
 typedef enum MemberAccessKind {
@@ -345,7 +343,7 @@ typedef struct AstStructInitializer {
 } AstStructInitializer;
 
 typedef struct AstArrayLiteral {
-    Ast head;
+    AstExpr head;
 
     DynamicArray expressions; // of *AstExpression
 } AstArrayLiteral;

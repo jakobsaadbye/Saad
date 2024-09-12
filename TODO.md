@@ -1,6 +1,7 @@
 TODO Arrays:
-    - parse array access on member access
-    - parse lhs of assignment being a member access
+    - Codegen for assignment to array access
+    - Codegen for array access in expressions
+    - Codegen for declaring arrays
 
 TODO:
     - Backing integer types for enums

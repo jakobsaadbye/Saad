@@ -5,6 +5,9 @@ typedef struct Typer {
     ConstEvaluater *ce;
 
     AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
+
+    DynamicArray flattened_array; // of *DynamicArray of *TypeArray. Used to infer size of array literals
+    int array_literal_depth;
 } Typer;
 
 bool  check_block(Typer *typer, AstBlock *block, bool open_lexical_scope);
@@ -30,6 +33,8 @@ Typer typer_init(Parser *parser, ConstEvaluater *ce) {
     typer.parser = parser;
     typer.ce = ce;
     typer.enclosing_function = NULL;
+
+    typer.array_literal_depth = 0;
 
     return typer;
 }
@@ -85,7 +90,13 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
                     return NULL;
                 }
 
-                array->capicity = ((AstLiteral *)(constexpr))->as.value.integer;
+                long long capacity = ((AstLiteral *)(constexpr))->as.value.integer;
+                if (capacity < 0) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be non-negative. Value is %lld", capacity);
+                    return NULL;
+                }
+
+                array->capicity = capacity;
             }
             if (array->flags & ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY && decl->expr == NULL) { // @Note - This might also be the case for function parameters that also don't allow an expression to be present
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array), "Missing array initializer to determine size of array");
@@ -125,6 +136,7 @@ unsigned long long max_integer_value(TypePrimitive *type) {
 bool check_for_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
     assert(lhs_type);
     if (expr == NULL) return true;
+    if (lhs_type->kind != TYPE_INTEGER && lhs_type->kind != TYPE_ENUM) return true;
 
     if (lhs_type->kind == TYPE_ENUM) {
         // @TODO - Handle assignment to enum with integer that might be too large
@@ -167,6 +179,11 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         if (!types_are_equal(decl->declared_type, expr_type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "'%s' is said to be of type %s, but expression is of type %s", decl->identifier->name, type_to_str(decl->declared_type), type_to_str(expr_type));
             return false;
+        }
+
+        if (expr_type->kind == TYPE_ARRAY) {
+            decl->identifier->type = expr_type;
+            decl->declared_type    = expr_type;
         }
     }
     else if (decl->flags & DECLARATION_TYPED_NO_EXPR) {
@@ -589,7 +606,80 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) 
     return lhs_type;
 }
 
+void queue_array_to_be_sized(DynamicArray *flattened_array, TypeArray *array, int depth) {
+    if (depth >= (int)flattened_array->count) {
+        for (int i = 0; i < depth + 1; i++) {
+            DynamicArray elements = da_init(2, sizeof(TypeArray *));
+            da_append(flattened_array, elements);
+        }
+    }
+
+    DynamicArray *elements = &((DynamicArray *)(flattened_array->items))[depth];
+    da_append(elements, array);
+}
+
+void free_flattened_array(DynamicArray *flattened_array) {
+    for (unsigned int i = 0; i < flattened_array->count; i++) {
+        DynamicArray *elements = &((DynamicArray *)(flattened_array->items))[i];
+        free(elements->items);
+    }
+}
+
+void do_sizing_of_entire_array(DynamicArray *flattened_array) {
+    for (int d = (int)flattened_array->count - 1; d >= 0; d--) {
+        DynamicArray elements = ((DynamicArray *)(flattened_array->items))[d];
+
+        if (d == 0) assert(elements.count == 1); // Only one root array
+
+        //
+        // Static specified size
+        //
+        TypeArray *array = ((TypeArray **)(elements.items))[0];
+        if (array->flags & ARRAY_IS_STATIC) {
+            assert(array->capicity != 0 && array->capacity_expr != NULL);
+
+            array->head.size = array->capicity * array->elem_type->size;
+            continue;
+        }
+
+        //
+        // Dynamic + inferred array size
+        //
+        int size_of_biggest_array     = 0;
+        int capacity_of_biggest_array = 0;
+
+        // First pass to find the biggest size of array
+        for (unsigned j = 0; j < elements.count; j++) {
+            
+            TypeArray *array = ((TypeArray **)(elements.items))[j];
+            AstArrayLiteral *array_lit = array->node;
+
+            if (d == (int)(flattened_array->count - 1)) assert(array->elem_type->kind != TYPE_ARRAY);
+
+            int capacity   = array_lit->expressions.count;
+            int array_size = capacity * array->elem_type->size; 
+
+            if (capacity   > capacity_of_biggest_array) capacity_of_biggest_array = capacity;
+            if (array_size > size_of_biggest_array)     size_of_biggest_array = array_size;
+        }
+
+        // Second pass to set all the inner arrays size and capacity to be the biggest
+        for (unsigned j = 0; j < elements.count; j++) {
+            TypeArray *array = ((TypeArray **)(elements.items))[j];
+
+            array->capicity  = capacity_of_biggest_array;
+            array->head.size = size_of_biggest_array;
+        }
+    }
+}
+
 Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_type) {
+
+    if (typer->array_literal_depth == 0) {
+        typer->flattened_array = da_init(4, sizeof(DynamicArray));
+    }
+    typer->array_literal_depth += 1;
+
     bool infer_type_from_first_element = ctx_type == NULL;
     if (infer_type_from_first_element) {
         if (array_lit->expressions.count == 0) {
@@ -597,13 +687,14 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
             return NULL;
         }
 
+        
         Type *first_element_type = check_expression(typer, ((AstExpr **)(array_lit->expressions.items))[0], NULL);
         if (!first_element_type) return NULL;
 
         TypeArray *array       = type_alloc(&typer->parser->type_table, sizeof(TypeArray));
         array->head.head.type  = AST_TYPE;
-        array->head.head.start = array_lit->head.start;
-        array->head.head.end   = array_lit->head.end;
+        array->head.head.start = array_lit->head.head.start;
+        array->head.head.end   = array_lit->head.head.end;
         array->head.kind       = TYPE_ARRAY;
         array->flags           = ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY;
         array->elem_type       = first_element_type;
@@ -634,40 +725,30 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
         }
     }
 
+    // @Hack - Reassigning the element type, as the pointer gets outdated when doing copies of the array type
+    Type *first_element_type = ((AstExpr **)(array_lit->expressions.items))[0]->evaluated_type;
+    array->elem_type = first_element_type;
 
     //
     //  Sizing of the array
     //
-    if (array->flags & ARRAY_IS_STATIC) {
+    if (array->capacity_expr) {
         if (array_lit->expressions.count > array->capicity) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Trying to assign %d elements to array with size %d", array_lit->expressions.count, array->capicity);
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(array->capacity_expr), "Here is the specified size of that array");
             return NULL;
         }
-        array->head.size = array->elem_type->size * array->capicity;
-        // array capacity is set in check_declaration()
-    }
-    else if (array->flags & (ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY | ARRAY_IS_DYNAMIC)) {
-        // Ensure that the size of the outer array gets to be the size of the biggest inner array type
-        int capacity  = array_lit->expressions.count;
-        int elem_size = array->elem_type->size;
-
-        if (array->elem_type->kind == TYPE_ARRAY && ((TypeArray *)(array->elem_type))->flags & ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY) {
-            int size_of_biggest_inner_array = 0;
-            for (unsigned int i = 0; i < array_lit->expressions.count; i++) {
-                AstExpr *expr = ((AstExpr **)(array_lit->expressions.items))[i];
-                assert(expr->evaluated_type != NULL && expr->evaluated_type->kind == TYPE_ARRAY);
-
-                TypeArray *inner_array = (TypeArray *)(expr->evaluated_type);
-                size_of_biggest_inner_array = inner_array->head.size > size_of_biggest_inner_array ? inner_array->head.size : size_of_biggest_inner_array;
-            }
-
-            elem_size = size_of_biggest_inner_array;
-        }
-
-        array->capicity  = capacity;
-        array->head.size = elem_size * capacity;
     }
 
+    // @Note - We have to size the array no matter what, as we allow inferred array sizes in sized arrays. F.x we could have
+    // 'a : [][10][] int' where the size of the second dimension with the specified capacity is still unknown due to the last dimension being unknown
+    queue_array_to_be_sized(&typer->flattened_array, array, typer->array_literal_depth - 1);
+
+    typer->array_literal_depth -= 1;
+    if (typer->array_literal_depth == 0) {
+        do_sizing_of_entire_array(&typer->flattened_array);
+        free_flattened_array(&typer->flattened_array);
+    }
 
     return (Type *)(array);
 }
@@ -677,14 +758,14 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
     if (!type_being_accessed) return NULL;
 
     if (type_being_accessed->kind != TYPE_ARRAY) {
-        report_error_range(typer->parser, array_ac->accessing->head.start, array_ac->open_bracket.start, "Cannot access expression of type %s", type_to_str(type_being_accessed));
+        report_error_range(typer->parser, array_ac->accessing->head.start, array_ac->open_bracket.start, "Cannot subscript into expression of type %s", type_to_str(type_being_accessed));
         return NULL;
     }
 
     AstExpr *subscript = array_ac->subscript;
     Type    *subscript_type = check_expression(typer, subscript, type_being_accessed); // @Note - passing down type_being_accessed to allow enum literals to be used
     if (subscript_type->kind != TYPE_INTEGER && subscript_type->kind != TYPE_ENUM) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(subscript), "Array subscript must be an integer or enum type, but got type %s", type_to_str(subscript_type));
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(subscript), "Array subscript must be an integer or enum type, got type %s", type_to_str(subscript_type));
         return NULL;
     }
 

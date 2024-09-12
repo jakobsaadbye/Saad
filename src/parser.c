@@ -734,20 +734,11 @@ AstArrayLiteral *parse_array_literal(Parser *parser) {
 
     Token close_bracket = next;
 
-    array_lit->head.type  = AST_ARRAY_LITERAL;
-    array_lit->head.start = open_bracket.start;
-    array_lit->head.end   = close_bracket.end;
+    array_lit->head.head.type  = AST_ARRAY_LITERAL;
+    array_lit->head.head.start = open_bracket.start;
+    array_lit->head.head.end   = close_bracket.end;
 
     return array_lit;
-}
-
-bool starts_array_access(Parser *parser) {
-    Token t = peek_next_token(parser);
-    if (t.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '[') {
-        return true;
-    }
-
-    return false;
 }
 
 AstExpr *parse_array_access(Parser *parser, Token open_bracket, AstExpr *left) {
@@ -763,14 +754,14 @@ AstExpr *parse_array_access(Parser *parser, Token open_bracket, AstExpr *left) {
     }
     eat_token(parser);
 
-    AstArrayAccess *array_ac = ast_allocate(parser, sizeof(AstArrayAccess));
-    array_ac->head.type      = AST_ARRAY_ACCESS;
-    array_ac->head.start     = left->head.start;
-    array_ac->head.end       = next.end;
-    array_ac->accessing      = left;
-    array_ac->subscript      = subscript;
-    array_ac->open_bracket   = open_bracket;
-    array_ac->close_bracket  = next;
+    AstArrayAccess *array_ac      = ast_allocate(parser, sizeof(AstArrayAccess));
+    array_ac->head.head.type      = AST_ARRAY_ACCESS;
+    array_ac->head.head.start     = left->head.start;
+    array_ac->head.head.end       = next.end;
+    array_ac->accessing           = left;
+    array_ac->subscript           = subscript;
+    array_ac->open_bracket        = open_bracket;
+    array_ac->close_bracket       = next;
 
     return (AstExpr *)(array_ac);
 }
@@ -1106,6 +1097,8 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *exp
 }
 
 int align_value(int value, int alignment) {
+    if (alignment == 0) return value;
+
     int rem = value % alignment;
     if (rem == 0) return value;
     else {

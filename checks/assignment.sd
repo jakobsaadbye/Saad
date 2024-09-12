@@ -2,20 +2,33 @@ main :: () {
     a := 10;
     b := 7.5;
 
-    // Assignment works for any type, while
-    // comound assignment is limited to integer and floating types
     a = 5;
     b = 10.0;
+
+    assert(a == 5);
+    assert(b == 10.0);
 
     a += 2;
     b += 2.5;
 
+    assert(a == 7);
+    assert(b == 12.5);
+
     a -= 2;
     b -= 2.5;
 
+    assert(a == 5);
+    assert(b == 10.0);
+
     a *= 2;
-    b *= 2.5;
+    b *= 2;
+
+    assert(a == 10);
+    assert(b == 20.0);
 
     a /= 2;
-    b /= 2.5;
+    b /= 2.0;
+
+    assert(a == 5);
+    assert(b == 10.0);
 }

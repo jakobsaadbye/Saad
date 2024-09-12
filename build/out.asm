@@ -19,6 +19,7 @@ segment .text
    global main
    extern printf
    extern ExitProcess
+   extern malloc
 
 assert:
    cmp		cl, 0
@@ -95,13 +96,16 @@ main:
 
    ; initialization of 'bmi'
    mov		DWORD -20[rbp], 0
-   movss		xmm0, -8[rbp]
+   mov		rax, 0
+   movss		xmm0, -8[rbp + rax]
    sub		rsp, 4
    movss		[rsp], xmm0
-   movss		xmm0, -4[rbp]
+   mov		rax, 0
+   movss		xmm0, -4[rbp + rax]
    sub		rsp, 4
    movss		[rsp], xmm0
-   movss		xmm0, -4[rbp]
+   mov		rax, 0
+   movss		xmm0, -4[rbp + rax]
    sub		rsp, 4
    movss		[rsp], xmm0
    movss		xmm1, [rsp]
@@ -118,9 +122,6 @@ main:
    divss		xmm0, xmm1
    sub		rsp, 4
    movss		[rsp], xmm0
-
-
-   ; putting result into 'bmi'
    movss		xmm0, [rsp]
    add		rsp, 4
    movss		DWORD -20[rbp], xmm0
@@ -140,7 +141,8 @@ main:
    pop		rcx
    mov		rdx, 23
    call		assert
-   mov		eax, DWORD -12[rbp]
+   mov		rax, 0
+   mov		eax, DWORD -12[rbp + rax]
    push		rax
    mov		rax, 4
    push		rax
