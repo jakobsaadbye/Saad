@@ -46,15 +46,13 @@ void *arena_allocate(Arena *arena, size_t size) {
         new_capacity *= 2;
     }
 
-    printf("Resizing arena. Old capacity = %.2f kb, New capacity = %.2f kb\n", ((double)current_chunk->capacity) / 1000.0, ((double)new_capacity) / 1000.0);
-
     Chunk *new_chunk = make_new_chunk(current_chunk, new_capacity);
     arena->current_chunk = new_chunk;
 
     return arena_allocate(arena, size);
 }
 
-void arena_free(Arena *arena) {
+void arena_free_all(Arena *arena) {
     Chunk *chunk = arena->current_chunk;
     while(chunk) {
         free(chunk->data);

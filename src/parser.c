@@ -582,12 +582,7 @@ AstFor *parse_for(Parser *parser) {
             exit(1);
         }
 
-        if (iterable->head.type == AST_RANGE_EXPR) {
-            iterator = make_identifier_from_string(parser, "it", primitive_type(PRIMITIVE_INT));
-        } else {
-            // ToDo: Implement array type
-            XXX;
-        }
+        iterator = make_identifier_from_string(parser, "it", NULL); // type is set later
     }
 
     // Push down the iterator into the body scope

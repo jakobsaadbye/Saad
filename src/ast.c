@@ -346,6 +346,8 @@ typedef struct AstArrayLiteral {
     AstExpr head;
 
     DynamicArray expressions; // of *AstExpression
+
+    int base_offset; // used in CodeGenerator
 } AstArrayLiteral;
 
 typedef enum LiteralKind {

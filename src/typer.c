@@ -228,6 +228,11 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
     } else {
         if (typer->enclosing_function != NULL) {
             typer->enclosing_function->bytes_allocated += decl->declared_type->size;
+
+            if (decl->expr && decl->expr->head.type == AST_ARRAY_LITERAL) {
+                // A little iffy, if we wanna keep it this way
+                typer->enclosing_function->bytes_allocated += 16; // data + count
+            }
         } else {
             if (decl->flags & DECLARATION_CONSTANT) {
                 // Constants don't need to be sized
@@ -421,9 +426,15 @@ bool check_for(Typer *typer, AstFor *ast_for) {
         typer->enclosing_function->bytes_allocated += ast_for->iterator->type->size;
         typer->enclosing_function->bytes_allocated += type_start->size;
         typer->enclosing_function->bytes_allocated += type_end->size;
-    } else {
-        // ToDo: Implement for unnamed for-statements
-        XXX;
+    } 
+    else {
+        Type *iterable_type = check_expression(typer, (AstExpr *)ast_for->iterable, NULL);
+        if (iterable_type->kind != TYPE_ARRAY) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_for->iterable), "Cannot iterate through expression of type %s", type_to_str(iterable_type));
+            return NULL;
+        }
+
+        ast_for->iterator->type = ((TypeArray *)(iterable_type))->elem_type;
     }
 
     bool ok = check_block(typer, ast_for->body, true);
