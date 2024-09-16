@@ -316,7 +316,7 @@ Type *parse_type(Parser *parser) {
         array->head.kind       = TYPE_ARRAY;
         array->flags           = array_flags;
         array->elem_type       = elem_type;
-        array->capacity_expr       = size_expr;
+        array->capacity_expr   = size_expr;
 
         return (Type *)(array);
     }   

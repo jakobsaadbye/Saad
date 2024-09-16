@@ -15,10 +15,10 @@ bool  check_statement(Typer *typer, Ast *stmt);
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type);
 Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type);
 Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type);
-Type *check_literal(Typer *typer, AstLiteral *literal);
+Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type);
 Type *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Type *ctx_type);
 Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_type);
-Type *check_member_access(Typer *typer, AstMemberAccess * ma); // @Incomplete
+Type *check_member_access(Typer *typer, AstMemberAccess * ma);
 
 char *type_to_str(Type *type);
 bool types_are_equal(Type *lhs, Type *rhs);
@@ -429,12 +429,17 @@ bool check_for(Typer *typer, AstFor *ast_for) {
     } 
     else {
         Type *iterable_type = check_expression(typer, (AstExpr *)ast_for->iterable, NULL);
+        if (!iterable_type) return NULL;
         if (iterable_type->kind != TYPE_ARRAY) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_for->iterable), "Cannot iterate through expression of type %s", type_to_str(iterable_type));
             return NULL;
         }
 
         ast_for->iterator->type = ((TypeArray *)(iterable_type))->elem_type;
+
+        // Allocate space for iterator, pointer to head of array, stop condition (count) and index
+        assert(typer->enclosing_function != NULL);
+        typer->enclosing_function->bytes_allocated += align_value(ast_for->iterator->type->size, 8) + 24;
     }
 
     bool ok = check_block(typer, ast_for->body, true);
@@ -693,6 +698,16 @@ void do_sizing_of_entire_array(DynamicArray *flattened_array) {
 
 Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_type) {
 
+    if(ctx_type && ctx_type->kind != TYPE_ARRAY) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Expected expression to have type %s", type_to_str(ctx_type));
+        return NULL;
+    }
+
+    if (ctx_type && array_lit->expressions.count == 0) {
+        // Don't bother type the empty array
+        return ctx_type;
+    }
+
     if (typer->array_literal_depth == 0) {
         typer->flattened_array = da_init(4, sizeof(DynamicArray));
     }
@@ -732,11 +747,14 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
 
     for (unsigned int i = 0; i < array_lit->expressions.count; i++) {
         AstExpr *expr = ((AstExpr **)(array_lit->expressions.items))[i];
+
+        bool ok = check_for_integer_overflow(typer, array->elem_type, expr);
+        if (!ok) return NULL;
+
         if (infer_type_from_first_element && i == 0) continue;
 
         Type *expr_type = check_expression(typer, expr, array->elem_type);
         if (!expr_type) return NULL;
-
         if (!types_are_equal(array->elem_type, expr_type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(expr), "Expected element to have type %s, but element is of type %s", type_to_str(array->elem_type), type_to_str(expr_type));
             return NULL;
@@ -795,11 +813,11 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     if      (expr->head.type == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
     else if (expr->head.type == AST_BINARY)         result = check_binary(typer, (AstBinary *)(expr), ctx_type);
     else if (expr->head.type == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
-    else if (expr->head.type == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr));
+    else if (expr->head.type == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr), ctx_type);
     else if (expr->head.type == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), ctx_type);
     else if (expr->head.type == AST_ARRAY_LITERAL)  result = check_array_literal(typer, (AstArrayLiteral *)(expr), ctx_type);
     else if (expr->head.type == AST_ENUM_LITERAL)   result = check_enum_literal(typer, (AstEnumLiteral *)(expr), ctx_type);
-    else if (expr->head.type == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr)); // @ Incomplete
+    else if (expr->head.type == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr));
     else if (expr->head.type == AST_ARRAY_ACCESS)   result = check_array_access(typer, (AstArrayAccess *)(expr));
     else if (expr->head.type == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_INT); // @Investigate - Shouldn't this be checked for both sides being integers???
     else {
@@ -811,7 +829,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     return result;
 }
 
-Type *check_member_access(Typer *typer, AstMemberAccess *ma) { // @Incomplete - Change type
+Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     Type *type_lhs = check_expression(typer, ma->left, NULL);
     if (!type_lhs) return NULL;
 
@@ -1059,12 +1077,12 @@ bool is_a_before_b (Ast *a, Ast *b) {
     }
 }
 
-Type *check_literal(Typer *typer, AstLiteral *literal) {
+Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     switch (literal->kind) {
-    case LITERAL_INTEGER:   return primitive_type(PRIMITIVE_INT);
-    case LITERAL_FLOAT:     return primitive_type(PRIMITIVE_FLOAT);
-    case LITERAL_STRING:    return primitive_type(PRIMITIVE_STRING);
-    case LITERAL_BOOLEAN:   return primitive_type(PRIMITIVE_BOOL);
+    case LITERAL_INTEGER:   return (ctx_type && ctx_type->kind == TYPE_INTEGER) ? ctx_type : primitive_type(PRIMITIVE_INT);
+    case LITERAL_FLOAT:     return (ctx_type && ctx_type->kind == TYPE_FLOAT)   ? ctx_type : primitive_type(PRIMITIVE_FLOAT);
+    case LITERAL_STRING:    return (ctx_type && ctx_type->kind == TYPE_STRING)  ? ctx_type : primitive_type(PRIMITIVE_STRING);
+    case LITERAL_BOOLEAN:   return (ctx_type && ctx_type->kind == TYPE_BOOL)    ? ctx_type : primitive_type(PRIMITIVE_BOOL);
     case LITERAL_IDENTIFIER: {
         char   *ident_name   = literal->as.value.identifier.name;
         Symbol *ident_symbol = symbol_lookup(&typer->parser->ident_table, ident_name);

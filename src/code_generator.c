@@ -54,7 +54,12 @@ int make_label_number(CodeGenerator *cg);
 const char *comparison_operator_to_set_instruction(TokenType op);
 const char *boolean_operator_to_instruction(TokenType op);
 MemberAccessResult emit_member_access_offset(CodeGenerator *cg, AstMemberAccess *ma);
-char *DT(Type *type);
+char *WIDTH(Type *type);
+
+const char *REG_A(Type *type);
+const char *REG_B(Type *type);
+const char *REG_C(Type *type);
+const char *REG_D(Type *type);
 
 
 CodeGenerator code_generator_init(Parser *parser) {
@@ -353,11 +358,64 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
 
         sb_append(&cg->code, "L%d:\n", done_label);
     } else {
-        // AstIdentifier *iterator = ast_for->iterator;
-        // AstExpr *iterable       = ast_for->iterable;
+        AstIdentifier *iterator = ast_for->iterator;
+        AstExpr *iterable       = ast_for->iterable;
 
-        // @Incomplete !
-        XXX;
+        // Allocate space for iterator, pointer to head of array, stop condition (count) and index
+
+        int aligned_iterator_size   = align_value(iterator->type->size, 8);
+        int offset_iterator         = cg->base_ptr - aligned_iterator_size;
+        int offset_data             = offset_iterator - 8;
+        int offset_count            = offset_iterator - 16;
+        int offset_index            = offset_iterator - 24;
+        cg->base_ptr               -= 24 + aligned_iterator_size;
+
+        iterator->stack_offset = offset_iterator;
+
+        emit_expression(cg, iterable);
+
+        sb_append(&cg->code, "   ; For-loop\n");
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   pop\t\trbx\n");
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rax     ; data\n", offset_data);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rbx     ; count\n", offset_count);
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0 ; index\n", offset_index);
+        
+        int for_label = make_label_number(cg);
+        int done_label = make_label_number(cg);
+        sb_append(&cg->code, "L%d:\n", for_label);
+        sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", offset_count);
+        sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", offset_index); // nocheckin
+        sb_append(&cg->code, "   cmp\t\trax, rbx\n");
+        sb_append(&cg->code, "   jge\t\tL%d\n", done_label);
+
+
+        sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", offset_index);
+        if (iterator->type->size <= 8) {
+            // Copy the value into register
+            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", offset_data);
+            sb_append(&cg->code, "   imul\t\trax, %d\n", iterator->type->size);
+            sb_append(&cg->code, "   add\t\trbx, rax\n");
+            sb_append(&cg->code, "   mov\t\t%s, %s [rbx]\n", REG_A(iterator->type), WIDTH(iterator->type));
+            sb_append(&cg->code, "   mov\t\t%d[rbp], %s \n", offset_iterator, REG_A(iterator->type));
+        } else {
+            // Copy the value in chunks of 8 bytes
+            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", offset_data);
+            sb_append(&cg->code, "   imul\t\trax, %d\n", iterator->type->size);
+            sb_append(&cg->code, "   add\t\trbx, rax\n"); // rbx holds offset into beginning of struct
+            int num_copies = aligned_iterator_size / 8;
+            for (int i = 0; i < num_copies; i++) {
+                sb_append(&cg->code, "   mov\t\trax, [rbx + %d]\n", i * 8);
+                sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", offset_iterator + (i * 8));
+            }
+        }
+
+        emit_block(cg, ast_for->body, true);
+
+        sb_append(&cg->code, "   inc\t\tQWORD %d[rbp]\n", offset_index);
+        sb_append(&cg->code, "   jmp\t\tL%d\n", for_label);
+
+        sb_append(&cg->code, "L%d:\n", done_label);
     }
 }
 
@@ -506,32 +564,32 @@ void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof) {
 const char *REG_A(Type *type) {
     if (type->size == 1) return "al";
     if (type->size == 2) return "ax";
-    if (type->size == 4) return "eax";
-    if (type->size == 8) return "rax";
+    if (type->size <= 4) return "eax";
+    if (type->size <= 8) return "rax";
     XXX;
 }
 
 const char *REG_B(Type *type) {
     if (type->size == 1) return "bl";
     if (type->size == 2) return "bx";
-    if (type->size == 4) return "ebx";
-    if (type->size == 8) return "rbx";
+    if (type->size <= 4) return "ebx";
+    if (type->size <= 8) return "rbx";
     XXX;
 }
 
 const char *REG_C(Type *type) {
     if (type->size == 1) return "cl";
     if (type->size == 2) return "cx";
-    if (type->size == 4) return "ecx";
-    if (type->size == 8) return "rcx";
+    if (type->size <= 4) return "ecx";
+    if (type->size <= 8) return "rcx";
     XXX;
 }
 
 const char *REG_D(Type *type) {
     if (type->size == 1) return "dl";
     if (type->size == 2) return "dx";
-    if (type->size == 4) return "edx";
-    if (type->size == 8) return "rdx";
+    if (type->size <= 4) return "edx";
+    if (type->size <= 8) return "rdx";
     XXX;
 }
 
@@ -581,6 +639,9 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
         sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   call\t\tprint_enum_%s\n", ((TypeEnum *)(expr_type))->identifier->name);
     }
+    else if (expr_type->kind == TYPE_ARRAY) {
+        XXX;
+    }
     else {
         // Unhandled cases
         XXX;
@@ -589,7 +650,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
 
 void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type, bool is_array_initialization) {
     switch (type->kind) {
-    case TYPE_INTEGER: sb_append(&cg->code, "   mov\t\t%s %d[rbp], 0\n", DT(type), dest_offset); break;
+    case TYPE_INTEGER: sb_append(&cg->code, "   mov\t\t%s %d[rbp], 0\n", WIDTH(type), dest_offset); break;
     case TYPE_FLOAT:   sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", dest_offset); break;
     case TYPE_BOOL:    sb_append(&cg->code, "   mov\t\tBYTE %d[rbp], 0\n",  dest_offset); break;
     case TYPE_STRING:  sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dest_offset); break;
@@ -646,7 +707,7 @@ void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is
     }
     case TYPE_INTEGER: {
         sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   mov\t\t%s %s, %s\n", DT(lhs_type), address_str, REG_A(lhs_type));
+        sb_append(&cg->code, "   mov\t\t%s %s, %s\n", WIDTH(lhs_type), address_str, REG_A(lhs_type));
         break;
     }
     case TYPE_FLOAT: {
@@ -770,7 +831,7 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         cg->base_ptr  = align_value(cg->base_ptr, 8);
 
         base_array_offset = cg->base_ptr;
-        ((AstArrayLiteral *)decl->expr)->base_offset = base_array_offset; // @Incomplete - Need a function to set the base array offset on all child arrays of the array literal!
+        ((AstArrayLiteral *)decl->expr)->base_offset = base_array_offset; // @Investigate - Is this really incomplete? @Incomplete - Need a function to set the base array offset on all child arrays of the array literal!
     }
 
     sb_append(&cg->code, "\n");
@@ -1111,7 +1172,7 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool used_as
     switch (innermost_type->kind) {
     case TYPE_BOOL: XXX;
     case TYPE_INTEGER: {
-        sb_append(&cg->code, "   mov\t\teax, %s [rbx]\n", DT(innermost_type));
+        sb_append(&cg->code, "   mov\t\teax, %s [rbx]\n", WIDTH(innermost_type));
         sb_append(&cg->code, "   push\t\trax\n");
         return;
     }
@@ -1309,7 +1370,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             // @Improvement - Could probably be @Refactored. Looks very similar to 'assign_simple_value'
             if (ident->type->kind == TYPE_INTEGER) {
                 sb_append(&cg->code, "   mov\t\trax, 0\n");
-                sb_append(&cg->code, "   mov\t\t%s, %s %d[rbp]\n", REG_A(ident->type), DT(ident->type), ident->stack_offset);
+                sb_append(&cg->code, "   mov\t\t%s, %s %d[rbp]\n", REG_A(ident->type), WIDTH(ident->type), ident->stack_offset);
                 if (is_signed_integer(ident->type) && ident->type->size != 8) {
                     sb_append(&cg->code, "   movsx\t\trax, %s\n", REG_A(ident->type));
                 }
@@ -1337,6 +1398,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 sb_append(&cg->code, "   push\t\trax\n");
                 return;
             }
+            if (ident->type->kind == TYPE_ARRAY) {
+                sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", ident->stack_offset);
+                sb_append(&cg->code, "   mov\t\trbx, QWORD %d[rbp]\n", ident->stack_offset + 8);
+                sb_append(&cg->code, "   push\t\trbx\n");
+                sb_append(&cg->code, "   push\t\trax\n");
+                return;
+            }
 
             XXX;
 
@@ -1353,38 +1421,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     }
 }
 
-// Convert type to one of the four intel data types
-char *DT(Type *type) {
-    switch (type->kind) {
-    case TYPE_BOOL: 
-    case TYPE_INTEGER:
-    case TYPE_FLOAT:
-    case TYPE_STRING: {
-        TypePrimitive *prim_type = (TypePrimitive *)(type);
-        switch (prim_type->kind) {
-        case PRIMITIVE_INVALID: XXX;
-        case PRIMITIVE_INT:     return "DWORD";
-        case PRIMITIVE_U8:      return "BYTE";
-        case PRIMITIVE_U16:     return "WORD";
-        case PRIMITIVE_U32:     return "DWORD";
-        case PRIMITIVE_U64:     return "QWORD";
-        case PRIMITIVE_S8:      return "BYTE";
-        case PRIMITIVE_S16:     return "WORD";
-        case PRIMITIVE_S32:     return "DWORD";
-        case PRIMITIVE_S64:     return "QWORD";
-        case PRIMITIVE_STRING:  return "QWORD";
-        case PRIMITIVE_BOOL:    return "BYTE";
-        default:
-            printf("Internal compiler error: Unhandled cases in *DT()\n");
-            exit(1);
-        }
-    }
-    case TYPE_ENUM: {
-        TypeEnum *enum_type = (TypeEnum *)(type);
-        return DT(enum_type->backing_type);
-    };
-    default:
-        printf("Internal compiler error: Unhandled cases in *DT()\n");
-        exit(1);
-    }
+// Convert type to one of the four intel data types / width's (BYTE, WORD, DWORD, QWORD)
+char *WIDTH(Type *type) {
+    if (type->size == 1) return "BYTE";
+    if (type->size == 2) return "WORD";
+    if (type->size <= 4) return "DWORD";
+    if (type->size <= 8) return "QWORD";
+
+    printf("Internal Compiler Error: Taking WIDTH() of type %s with size %d\n", type_to_str(type), type->size);
+    XXX;
 }
