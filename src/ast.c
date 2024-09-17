@@ -38,7 +38,7 @@ typedef enum AstType {
     AST_LITERAL,
 } AstType;
 
-typedef enum OperatorType {     // Here so that operators with the same symbols still can have different enumerations f.x unary minus and simple minus
+typedef enum OperatorType {     // Here so that operators with the same symbols still can have different enumerations f.x unary minus and binary minus
     OP_LOGICAL_OR         = TOKEN_LOGICAL_OR,
     OP_LOGICAL_AND        = TOKEN_LOGICAL_AND,
     OP_DOUBLE_EQUAL       = TOKEN_DOUBLE_EQUAL,
@@ -55,11 +55,12 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
     OP_DIVIDE       = '/',
     OP_MODULO       = '%',
     OP_POWER        = '^',
-    OP_UNARY_MINUS  = 5, // Picked arbitrarily. Should just not conflict with the others
+    OP_UNARY_MINUS  = 1, // Picked arbitrarily. Should just not conflict with the others
     
     OP_DOT          = '.',
     OP_SUBSCRIPT    = '[',
     OP_ADDRESS_OF   = '&',
+    OP_POINTER_DEREFERENCE = 2, // Picked arbitrarily. Should just not conflict with the others
 } OperatorType;
 
 typedef struct Ast {

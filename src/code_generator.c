@@ -42,12 +42,13 @@ void emit_enum(CodeGenerator *cg, AstEnum *ast_enum);
 void emit_struct(CodeGenerator *cg, AstStruct *ast_struct);
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl);
 void emit_assignment(CodeGenerator *cg, AstAssignment *assign);
-void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool used_as_lvalue);
+void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue);
 void emit_expression(CodeGenerator *cg, AstExpr *expr);
 
 void emit_integer_to_float_conversion(CodeGenerator *cg, TypeKind l_kind, TypeKind r_kind);
 void emit_initialization(CodeGenerator *cg, int dest_offset, AstExpr *expr, Type *lhs_type, Type *rhs_type);
 void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, Type *lhs_type, Type *rhs_type);
+void emit_move_and_push(CodeGenerator *cg, Type *type, bool lvalue);
 
 void check_main_exists(CodeGenerator *cg);
 int make_label_number(CodeGenerator *cg);
@@ -119,6 +120,7 @@ void emit_header(CodeGenerator *cg) {
     sb_append(&cg->data, "   fmt_int   DB \"%s\", 10, 0\n", "%lld");
     sb_append(&cg->data, "   fmt_float DB \"%s\", 10, 0\n", "%lf");
     sb_append(&cg->data, "   fmt_string DB \"%s\", 10, 0\n", "%s");
+    sb_append(&cg->data, "   fmt_address DB \"0x%s\", 10, 0\n", "%p");
     sb_append(&cg->data, "   string_false DB \"false\", 10, 0\n");
     sb_append(&cg->data, "   string_true  DB \"true\", 10, 0\n");
     sb_append(&cg->data, "   string_assert_fail  DB \"Assertion failed at line %s\", 10, 0\n", "%d");
@@ -559,14 +561,8 @@ void emit_assert(CodeGenerator *cg, AstAssert *assertion) {
 void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof) {
     Type *expr_type = ast_typeof->expr->evaluated_type;
 
-    if (!is_primitive_type(expr_type->kind)) {
-        report_error_ast(cg->parser, LABEL_ERROR, (Ast *)(ast_typeof), "typeof() of type other than primitive types is not yet implemented");
-        exit(1);
-    }
-
-    PrimitiveKind type_kind  = ((TypePrimitive *)(expr_type))->kind;
-    char         *type_name  = primitive_type_names[type_kind];
-    int           type_label = make_label_number(cg);
+    char *type_name  = type_to_str(expr_type);
+    int   type_label = make_label_number(cg);
 
     sb_append(&cg->data, "   T%d\tDB \"%s\", 10, 0", type_label, type_name);
     sb_append(&cg->code, "   mov\t\trcx, T%d\n", type_label);
@@ -650,6 +646,12 @@ void emit_print(CodeGenerator *cg, AstPrint *print_stmt) {
     else if (expr_type->kind == TYPE_ENUM) {
         sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   call\t\tprint_enum_%s\n", ((TypeEnum *)(expr_type))->identifier->name);
+    }
+    else if (expr_type->kind == TYPE_POINTER) {
+        sb_append(&cg->code, "   pop\t\trdx\n");
+        // sb_append(&cg->code, "   mov\t\trdx, [rdx]\n");
+        sb_append(&cg->code, "   mov\t\trcx, fmt_address\n");
+        sb_append(&cg->code, "   call\t\tprintf\n");
     }
     else if (expr_type->kind == TYPE_ARRAY) {
         XXX;
@@ -942,17 +944,14 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
     TypeKind l_kind = l_type->kind;
     TypeKind r_kind = r_type->kind;
 
-
     if (l_kind == TYPE_ENUM) l_kind = TYPE_INTEGER;
     if (r_kind == TYPE_ENUM) r_kind = TYPE_INTEGER;
 
+    const char *set_instruction = comparison_operator_to_set_instruction(bin->operator);
+    emit_expression(cg, bin->left);
+    emit_expression(cg, bin->right);
 
     if (l_kind == TYPE_INTEGER && r_kind == TYPE_INTEGER) {
-        emit_expression(cg, bin->left);
-        emit_expression(cg, bin->right);
-
-        const char *set_instruction = comparison_operator_to_set_instruction(bin->operator);
-        sb_append(&cg->code, "\n");
         sb_append(&cg->code, "   pop\t\trbx\n");
         sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   cmp\t\trax, rbx\n");
@@ -961,21 +960,24 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
 
         return;
     }
-
     if ((l_kind == TYPE_FLOAT   && r_kind == TYPE_FLOAT) ||   
         (l_kind == TYPE_INTEGER && r_kind == TYPE_FLOAT) ||
-        (l_kind == TYPE_FLOAT   && r_kind == TYPE_INTEGER)) { 
-
-        emit_expression(cg, bin->left);
-        emit_expression(cg, bin->right);
-
+        (l_kind == TYPE_FLOAT   && r_kind == TYPE_INTEGER)) 
+    { 
         emit_integer_to_float_conversion(cg, l_kind, r_kind);
 
-        const char *set_instruction = comparison_operator_to_set_instruction(bin->operator);
         sb_append(&cg->code, "   comiss\txmm0, xmm1\n");
         sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
         sb_append(&cg->code, "   push\t\trax\n");
 
+        return;
+    }
+    if (l_kind == TYPE_POINTER && r_kind == TYPE_POINTER) {
+        sb_append(&cg->code, "   pop\t\trbx\n");
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   cmp\t\trax, rbx\n");
+        sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
+        sb_append(&cg->code, "   push\t\trax\n");
         return;
     }
 
@@ -1157,12 +1159,7 @@ MemberAccessResult emit_member_access_offset(CodeGenerator *cg, AstMemberAccess 
 
 }
 
-// a[10].b
-// ^    ^- Member access should be a relative offset from some address 
-// |---- Should produce an absolute address 
-
-
-void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool used_as_lvalue) {
+void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue) {
     emit_array_access_offset(cg, array_ac);
 
     Type *type = NULL;
@@ -1192,28 +1189,50 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool used_as
     sb_append(&cg->code, "   mov\t\trbx, QWORD %d[rbp]\n", base_offset); // load pointer to data
     sb_append(&cg->code, "   add\t\trbx, rax\n"); // add offset
 
-    if (used_as_lvalue) return; // Offset is in rbx
+    if (lvalue) return; // Offset is in rbx
+    
+    emit_move_and_push(cg, innermost_type, lvalue);
+}
 
-    // rax -> computed offset of array
-    // rbx -> pointer to data
-    // @Incomplete !!!
-    switch (innermost_type->kind) {
-    case TYPE_BOOL: XXX;
-    case TYPE_INTEGER: {
-        sb_append(&cg->code, "   mov\t\teax, %s [rbx]\n", WIDTH(innermost_type));
+// Src is [rbx], Dest is size of type
+void emit_move_and_push(CodeGenerator *cg, Type *type, bool lvalue) {
+    switch (type->kind) {
+    case TYPE_BOOL:
+    case TYPE_STRING:
+    case TYPE_ENUM: {
+        sb_append(&cg->code, "   mov\t\t%s, %s [rbx]\n", REG_A(type), WIDTH(type));
         sb_append(&cg->code, "   push\t\trax\n");
         return;
     }
-    case TYPE_FLOAT:
-    case TYPE_STRING:
+    case TYPE_INTEGER: {
+        sb_append(&cg->code, "   mov\t\t%s, %s [rbx]\n", REG_A(type), WIDTH(type));
+        if (is_signed_integer(type) && type->size != 8) {
+            sb_append(&cg->code, "   movsx\t\trax, %s\n", REG_A(type));
+        }
+        sb_append(&cg->code, "   push\t\trax\n");
+        return;
+    }
+    case TYPE_FLOAT: {
+        sb_append(&cg->code, "   %s\t\txmm0, [rbx]\n", type->size == 4 ? "movss" : "movsd");
+        sb_append(&cg->code, "   sub\t\trsp, %d\n", type->size);
+        sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
+        return;
+    }
+    case TYPE_POINTER: {
+        if (lvalue) {
+            sb_append(&cg->code, "   push\t\trbx\n");
+        } else {
+            sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
+            sb_append(&cg->code, "   push\t\trbx\n");
+        }
+        return;
+    }
+    case TYPE_ARRAY:
     case TYPE_STRUCT:
-    case TYPE_ENUM:
     default:
-        printf("internal-compiler-error: Unhandled case %s in emit_array_access()", type_to_str(innermost_type));
+        printf("internal-compiler-error: Unhandled case %s in emit_move_and_push()", type_to_str(type));
         exit(1);
     }
-
-
 }
 
 bool is_arithmetic_operator(TokenType op) {
@@ -1271,6 +1290,17 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             } else {
                 XXX;
             }
+        }
+        if (unary->operator == OP_POINTER_DEREFERENCE) {
+            printf("Typeof expr is %s\n", type_to_str(unary->expr->evaluated_type));
+            emit_expression(cg, unary->expr);
+
+            Type *dereferenced_type = unary->head.evaluated_type;
+            sb_append(&cg->code, "   pop\t\trbx\n");
+
+            emit_move_and_push(cg, dereferenced_type, false);
+
+            return;
         }
 
         XXX;
@@ -1445,8 +1475,9 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 return;
             }
             if (ident->type->kind == TYPE_POINTER) {
-                sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", ident->stack_offset);
+                sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", ident->stack_offset);
                 sb_append(&cg->code, "   push\t\trax\n");
+                return;
             }
             if (ident->type->kind == TYPE_ARRAY) {
                 sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", ident->stack_offset);
@@ -1456,6 +1487,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 return;
             }
 
+            printf("Internal Compiler Error: Unexpected identifier type %s in emit_expression()\n", type_to_str(ident->type));
             XXX;
 
         }}

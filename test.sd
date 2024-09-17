@@ -4,7 +4,27 @@ Vector2 :: struct {
 }
 
 main:: () {
-    ptr : *void;
+    c0 := 1;
+    c1 := 2;
+    c2 := 3;
+    a : []*int = [&c0,&c1,&c2];
+
+    assert(a[0] == &c0);
+    assert(a[1] == &c1);
+    assert(a[2] == &c2);
+    
+
+    p0 := a[0];
+    p1 := a[1];
+    p2 := a[2];
+
+    assert(p0 == &c0);
+    assert(p1 == &c1);
+    assert(p2 == &c2);
+
+    for p in a {
+        print(&p);
+    }
 }
 
 

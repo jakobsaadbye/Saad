@@ -917,7 +917,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
 
     func_defn->head.type   = AST_FUNCTION_DEFN;
     func_defn->head.start  = ident_token.start;
-    func_defn->head.end    = body->head.end;
+    func_defn->head.end    = body->head.start;
     func_defn->identifier  = make_identifier_from_token(parser, ident_token, func_defn->return_type);
     func_defn->body        = body;
     func_defn->return_type = return_type;
@@ -1211,6 +1211,7 @@ int get_precedence(OperatorType op) {
             return 9;
         case OP_UNARY_MINUS:
         case OP_ADDRESS_OF:
+        case OP_POINTER_DEREFERENCE:
             return 10;
         case OP_DOT:
         case OP_SUBSCRIPT:
@@ -1322,6 +1323,14 @@ AstExpr *parse_leaf(Parser *parser) {
         return make_unary_node(parser, t, sub_expr, OP_ADDRESS_OF);
     }
 
+    if (t.type == '*') {
+        eat_token(parser);
+        int prec = get_precedence(OP_POINTER_DEREFERENCE);
+        AstExpr *sub_expr = parse_expression(parser, prec); 
+        if (!sub_expr) return NULL;
+        return make_unary_node(parser, t, sub_expr, OP_POINTER_DEREFERENCE);
+    }
+
     if (starts_struct_literal(parser)) {
         AstStructLiteral *struct_literal = parse_struct_literal(parser);
         return (AstExpr *)(struct_literal);
@@ -1427,7 +1436,7 @@ AstExpr *make_unary_node(Parser *parser, Token token, AstExpr *expr, OperatorTyp
     AstUnary *unary_op = (AstUnary *) ast_allocate(parser, sizeof(AstUnary));
     unary_op->head.head.type  = AST_UNARY;
     unary_op->head.head.start = token.start;
-    unary_op->head.head.end   = token.end;
+    unary_op->head.head.end   = expr->head.end;
     unary_op->operator        = op_type;
     unary_op->expr            = expr;
 

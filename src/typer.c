@@ -517,6 +517,8 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_IF: {
         AstIf *ast_if = (AstIf *)(stmt);
         Type *condition_type = check_expression(typer, ast_if->condition, NULL);
+        if (!condition_type) return NULL;
+
         if (condition_type->kind != TYPE_BOOL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_if->condition), "Expression needs to be of type 'bool', but expression evaluated to type '%s'", type_to_str(condition_type));
             return false;
@@ -557,7 +559,8 @@ bool check_statement(Typer *typer, Ast *stmt) {
         if (!ok) return false;
 
         if (!types_are_equal(ast_return->expr->evaluated_type, ef->return_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_return), "Type mismatch. Type of expression in return is %s, but function '%s' has return type %s", type_to_str(ast_return->expr->evaluated_type), ef->identifier->name, type_to_str(ef->return_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_return), "Type mismatch. Returning type %s from function '%s' with return type %s", type_to_str(ast_return->expr->evaluated_type), ef->identifier->name, type_to_str(ef->return_type));
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(ef), "... Here is the function signature for '%s'", ef->identifier->name);
             return false;
         }
 
@@ -1056,6 +1059,7 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         if (lhs == TYPE_FLOAT   && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_BOOL);
+        if (lhs == TYPE_POINTER && rhs == TYPE_POINTER) return primitive_type(PRIMITIVE_BOOL);
     }
 
     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Type '%s' and '%s' is not compatible with operator %s\n", type_to_str(ti_lhs), type_to_str(ti_rhs), token_type_to_str(binary->operator));
@@ -1109,6 +1113,15 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
         ptr->head.size       = 8;
         ptr->pointer_to      = expr_type;
         return (Type *)(ptr);
+    }
+    else if (unary->operator == OP_POINTER_DEREFERENCE) {
+        if (expr_type->kind != TYPE_POINTER) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Trying to dereference something not a pointer is invalid. Expression has type %s", type_to_str(expr_type));
+            return NULL;
+        }
+
+        Type *pointed_to = ((TypePointer *)(expr_type))->pointer_to;
+        return pointed_to;
     }
     else {
         XXX;

@@ -1,27 +1,54 @@
 main:: () {
-    a : int = 3;
-    b : int = 5;
+    {
+        a : int = 3;
+        b : int = 5;
 
-    // Update of value at address pointed to
-    ptr := &a;
-    ptr = 5;
-    assert(a == 5);
+        // Update of value at address pointed to
+        ptr := &a;
+        ptr = 5;
+        assert(a == 5);
 
-    // Changing address of pointer
-    ptr = &b;
-    ptr = 20;
-    assert(b == 20);
-    assert(a == 5);
+        // Changing address of pointer
+        ptr = &b;
+        ptr = 20;
+        assert(b == 20);
+        assert(a == 5);
 
-    // Pointer mania
-    x := 5;
-    ptr1 := &x;
-    ptr2 := &ptr1;
-    ptr3 := &ptr2;
+        // Pointer mania
+        x := 5;
+        ptr1 := &x;
+        ptr2 := &ptr1;
+        ptr3 := &ptr2;
 
-    ptr3 = 10;
+        ptr3 = 10;
 
-    assert(x == 10);
+        assert(x == 10);
+    }
+
+    // Pointers inside arrays
+    {
+        c0 := 1;
+        c1 := 2;
+        c2 := 3;
+        a : []*int = [&c0,&c1,&c2];
+
+        assert(a[0] == &c0);
+        assert(a[1] == &c1);
+        assert(a[2] == &c2);
+        
+
+        p0 := a[0];
+        p1 := a[1];
+        p2 := a[2];
+
+        assert(p0 == &c0);
+        assert(p1 == &c1);
+        assert(p2 == &c2);
+
+        for p in a {
+            print(&p);
+        }
+    }
 }
 
 
