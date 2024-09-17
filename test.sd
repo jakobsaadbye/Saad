@@ -1,32 +1,10 @@
-// 12-byte struct
-Vector3 :: struct {
-    x : int;
-    y : int;
-    z : int;
-}
-
-// 7-byte struct
-WeirdStruct :: struct {
-    a : bool;
-    b : bool;
-    c : bool;
-    d : bool;
-    e : bool;
-    f : bool;
-    g : bool;
+Vector2 :: struct {
+    x : float;
+    y : float;
 }
 
 main:: () {
-    a : []Vector3 = [.{1, 3, 5}, .{4, 9, 11}];
-
-    for a {
-        print(it.z);
-    }
-
-    b : []WeirdStruct = [.{}, .{}];
-    for b {
-        print(it.c);
-    }
+    ptr : *void;
 }
 
 

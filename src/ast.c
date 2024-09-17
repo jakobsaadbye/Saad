@@ -59,6 +59,7 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
     
     OP_DOT          = '.',
     OP_SUBSCRIPT    = '[',
+    OP_ADDRESS_OF   = '&',
 } OperatorType;
 
 typedef struct Ast {
@@ -77,6 +78,7 @@ typedef enum TypeKind {
     TYPE_FLOAT,
     TYPE_STRING,
     TYPE_ARRAY,
+    TYPE_POINTER,
     TYPE_STRUCT,
     TYPE_ENUM,
 } TypeKind;
@@ -437,6 +439,11 @@ Type *primitive_type(PrimitiveKind kind) {
     return (Type *)(&primitive_types[kind]);
 }
 
+typedef struct TypePointer {
+    Type head;
+    Type *pointer_to;
+} TypePointer;
+
 typedef enum ArrayFlags {
     ARRAY_IS_STATIC                         = 1 << 0,
     ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY  = 1 << 1,
@@ -536,6 +543,13 @@ char *type_to_str(Type *type) {
     case TYPE_STRING: {
         TypePrimitive *prim = (TypePrimitive *)(type);
         return primitive_type_names[prim->kind];
+    }
+    case TYPE_POINTER: {
+        TypePointer *ptr = (TypePointer *)(type);
+        StringBuilder builder = string_builder_init(32);
+        sb_append(&builder, "*%s", type_to_str(ptr->pointer_to));
+
+        return sb_to_string(&builder); // @Leak
     }
     case TYPE_ARRAY: {
         TypeArray *array = (TypeArray *)(type);

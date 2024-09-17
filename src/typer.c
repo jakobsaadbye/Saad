@@ -79,6 +79,17 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
         return found;
     }
 
+    if (type->kind == TYPE_POINTER) {
+        TypePointer *ptr = (TypePointer *)(type);
+
+        Type *pointed_to = resolve_type(typer, ptr->pointer_to, decl);
+        if (!pointed_to) return NULL;
+
+        ptr->head.size = 8;
+        ptr->pointer_to = pointed_to;
+        return (Type *)(ptr);
+    }
+
     if (type->kind == TYPE_ARRAY) {
         TypeArray *array = (TypeArray *)(type);
 
@@ -255,15 +266,16 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         else return lhs->kind == rhs->kind;
     } else if (lhs->kind == TYPE_ENUM && rhs->kind == TYPE_INTEGER) {
         return true;
-    } else if (
-        (lhs->kind == TYPE_STRUCT && rhs->kind == TYPE_STRUCT) || 
-        (lhs->kind == TYPE_ENUM   && rhs->kind == TYPE_ENUM)
-    ) {
+    } else if ((lhs->kind == TYPE_STRUCT && rhs->kind == TYPE_STRUCT) || (lhs->kind == TYPE_ENUM   && rhs->kind == TYPE_ENUM)) {
         return strcmp(lhs->as.name, rhs->as.name) == 0;
     } else if (lhs->kind == TYPE_ARRAY && rhs->kind == TYPE_ARRAY) {
         Type *left_elem_type  = ((TypeArray *)(lhs))->elem_type;
         Type *right_elem_type = ((TypeArray *)(rhs))->elem_type;
         return types_are_equal(left_elem_type, right_elem_type);
+    } else if (lhs->kind == TYPE_POINTER && rhs->kind == TYPE_POINTER) {
+        Type *left_pointed_to  = ((TypePointer *)(lhs))->pointer_to;
+        Type *right_pointed_to = ((TypePointer *)(rhs))->pointer_to;
+        return types_are_equal(left_pointed_to, right_pointed_to);
     }
     else {
         return false;
@@ -335,6 +347,33 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         return false;
     }
 
+    if (assign->op != '=') {
+        if (expr_type->kind != TYPE_INTEGER && expr_type->kind != TYPE_FLOAT) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Compound operators are only allowed for int and float types. Given type was '%s'\n", type_to_str(expr_type));
+            return false;
+        }
+    }
+
+    if (lhs_type->kind == TYPE_POINTER) {
+        if (expr_type->kind != TYPE_POINTER) {
+            Type *pointed_to = ((TypePointer *)(lhs_type))->pointer_to;
+            while (pointed_to->kind == TYPE_POINTER) {
+                pointed_to = ((TypePointer *)(pointed_to))->pointer_to;
+            }
+
+            if (!types_are_equal(pointed_to, expr_type)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Expression of type %s cannot be assigned to pointer with innermost type %s", type_to_str(expr_type), type_to_str(pointed_to));
+                return false;
+            }
+
+            bool ok = check_for_integer_overflow(typer, pointed_to, assign->expr);
+            if (!ok) return false;
+
+            return true;
+        }
+        /* Fallthrough */
+    } 
+
     if (!types_are_equal(lhs_type, expr_type)) {
         if (is_member) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to member '%s' of type '%s'", type_to_str(expr_type), member->identifier->name, type_to_str(lhs_type));
@@ -349,12 +388,6 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         return false;
     }
 
-    if (assign->op != '=') {
-        if (expr_type->kind != TYPE_INTEGER && expr_type->kind != TYPE_FLOAT) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Compound operators are only allowed for int and float types. Given type was '%s'\n", type_to_str(expr_type));
-            return false;
-        }
-    }
 
     bool ok = check_for_integer_overflow(typer, lhs_type, assign->expr);
     if (!ok) return false;
@@ -1040,17 +1073,46 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Type mismatch. Operator '!' is not applicative on expression of type '%s'\n", type_to_str(expr_type));
             exit(1);
         }
+
+        return expr_type;
     }
     else if (unary->operator == OP_UNARY_MINUS) {
         if (type_kind != TYPE_INTEGER && type_kind != TYPE_FLOAT && type_kind != TYPE_ENUM) { // Maybe give a warning when applying unary minus to an enum??? Seems kinda strange
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Type mismatch. Operator '-' is not applicative on expression of type '%s'\n", type_to_str(expr_type));
             return NULL;
         };
-    } else {
+
+        return expr_type;
+    } 
+    else if (unary->operator == OP_ADDRESS_OF) {
+        bool lvalue = false;
+        if (unary->expr->head.type == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
+            lvalue = true;
+        }
+        else if (unary->expr->head.type == AST_ARRAY_ACCESS) {
+            lvalue = true;
+        }
+        else if (unary->expr->head.type == AST_MEMBER_ACCESS) {
+            lvalue = true;
+        }
+
+        if (!lvalue) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Invalid lvalue");
+            return NULL;
+        }
+
+        TypePointer *ptr     = type_alloc(&typer->parser->type_table, sizeof(TypePointer));
+        ptr->head.head.type  = AST_TYPE;
+        ptr->head.head.start = expr_type->head.start;
+        ptr->head.head.end   = expr_type->head.end;
+        ptr->head.kind       = TYPE_POINTER;
+        ptr->head.size       = 8;
+        ptr->pointer_to      = expr_type;
+        return (Type *)(ptr);
+    }
+    else {
         XXX;
     }
-
-    return expr_type;
 }
 
 bool is_comparison_operator(TokenType op) {

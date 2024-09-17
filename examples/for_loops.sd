@@ -1,37 +1,43 @@
 main :: () {
 
+    
     // Exclusive range
-    for 0..10 {
-        print(it);
-    }
-
-    print(""); print("");
-
-    // Inclusive range
-    for 0...10 {
-        print(it);
-    }
-
-    print(""); print("");
-
-    // Ranges can be arbitrary expressions
-    a := 0;
-    b := 10;
-    for a...b+10 {
-        print(it);
-    }
-
-    print(""); print("");
-
-    // Named for-loops
     for i in 0..10 {
         print(i);
     }
-
-    print(""); print("");
-
-    // Named inclusive for-loops with range expressions
-    for i in a...b-5 {
+    
+    print("");
+    
+    // Inclusive range
+    for i in 0...10 {
         print(i);
     }
+    
+    print("");
+    
+    // Ranges can be arbitrary expressions
+    a := 0;
+    b := 10;
+    for i in a...b+10 {
+        print(i);
+    }
+    
+    print("");
+
+    // If no name for an iterator is given then the iterator will be named 'it'
+    for 0..10 {
+        print(it);
+    }
+    
+    print("");
+
+    
+    // Looping over arrays has the same syntax
+    x := [1, 1, 2, 3, 5, 8, 11, 19];
+    for x {
+        print(it);
+    }
+    
+    print("");
+
 }

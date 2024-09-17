@@ -28,7 +28,7 @@ void check_entire_directory(const char *dir_name, bool failing_is_success) {
             char file_path[512];
             sprintf(file_path, "%s/%s", dir_name, filename);
 
-            printf("Run %s\t", file_path);
+            printf("Run %s\t\t", file_path);
             
             bool ok = false;
             char *program = read_entire_file(file_path);
@@ -59,7 +59,7 @@ void check_entire_directory(const char *dir_name, bool failing_is_success) {
 int main() {
     check_entire_directory("examples", false);
     check_entire_directory("checks", false);
-    check_entire_directory("checks/fails", true);
+    check_entire_directory("checks/should_fail", true);
 
     return 0;
 }

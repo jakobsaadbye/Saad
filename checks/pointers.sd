@@ -1,0 +1,27 @@
+main:: () {
+    a : int = 3;
+    b : int = 5;
+
+    // Update of value at address pointed to
+    ptr := &a;
+    ptr = 5;
+    assert(a == 5);
+
+    // Changing address of pointer
+    ptr = &b;
+    ptr = 20;
+    assert(b == 20);
+    assert(a == 5);
+
+    // Pointer mania
+    x := 5;
+    ptr1 := &x;
+    ptr2 := &ptr1;
+    ptr3 := &ptr2;
+
+    ptr3 = 10;
+
+    assert(x == 10);
+}
+
+

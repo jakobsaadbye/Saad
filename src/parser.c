@@ -278,6 +278,24 @@ Type *parse_type(Parser *parser) {
         return ti;
     }
 
+    if (next.type == '*') {
+        Token asterix = next;
+        eat_token(parser);
+
+        TypePointer *ptr = type_alloc(&parser->type_table, sizeof(TypePointer));
+        
+        Type *pointed_to = parse_type(parser);
+        if (!pointed_to) return NULL;
+
+        ptr->head.head.type  = AST_TYPE;
+        ptr->head.head.start = asterix.start;
+        ptr->head.head.end   = pointed_to->head.end;
+        ptr->head.kind       = TYPE_POINTER;
+        ptr->pointer_to      = pointed_to;
+
+        return (Type *)(ptr);
+    }
+
     if (next.type == '[') {
         eat_token(parser);
 
@@ -1192,6 +1210,7 @@ int get_precedence(OperatorType op) {
         case OP_NOT:
             return 9;
         case OP_UNARY_MINUS:
+        case OP_ADDRESS_OF:
             return 10;
         case OP_DOT:
         case OP_SUBSCRIPT:
@@ -1293,6 +1312,14 @@ AstExpr *parse_leaf(Parser *parser) {
         AstExpr *sub_expr = parse_expression(parser, prec); 
         if (!sub_expr) return NULL;
         return make_unary_node(parser, t, sub_expr, OP_UNARY_MINUS);
+    }
+
+    if (t.type == '&') {
+        eat_token(parser);
+        int prec = get_precedence(OP_ADDRESS_OF);
+        AstExpr *sub_expr = parse_expression(parser, prec); 
+        if (!sub_expr) return NULL;
+        return make_unary_node(parser, t, sub_expr, OP_ADDRESS_OF);
     }
 
     if (starts_struct_literal(parser)) {

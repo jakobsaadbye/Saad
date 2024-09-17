@@ -662,6 +662,7 @@ bool proceeds_identifier(char c) {
 bool is_unary_operator(TokenType op) {
     if (op == '!') return true;
     if (op == '-') return true;
+    if (op == '&') return true;
     return false;
 }
 
@@ -736,6 +737,7 @@ bool is_single_character_token(char c) {
     if (c == ']') return true;
     if (c == '(') return true;
     if (c == ')') return true;
+    if (c == '&') return true;
     if (c == ',') return true;
     if (c == ':') return true;
     if (c == '.') return true;
