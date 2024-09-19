@@ -54,7 +54,7 @@ void check_main_exists(CodeGenerator *cg);
 int make_label_number(CodeGenerator *cg);
 const char *comparison_operator_to_set_instruction(TokenType op);
 const char *boolean_operator_to_instruction(TokenType op);
-MemberAccessResult emit_member_access_offset(CodeGenerator *cg, AstMemberAccess *ma);
+MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma);
 char *WIDTH(Type *type);
 
 const char *REG_A(Type *type);
@@ -259,7 +259,7 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     }
     else if (assign->lhs->head.type == AST_MEMBER_ACCESS) {
         AstMemberAccess *ma = (AstMemberAccess *)(assign->lhs);
-        MemberAccessResult result = emit_member_access_offset(cg, ma);
+        MemberAccessResult result = emit_member_access(cg, ma);
         base_offset = result.base_offset;
         offset_is_runtime_computed = result.is_runtime_computed;
     }
@@ -1078,18 +1078,27 @@ void emit_array_access_offset(CodeGenerator *cg, AstArrayAccess *array_ac) {
     }
 }
 
-MemberAccessResult emit_member_access_offset(CodeGenerator *cg, AstMemberAccess *ma) {
+MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
     if (ma->left->head.type == AST_MEMBER_ACCESS) {
         AstMemberAccess *left = (AstMemberAccess *)(ma->left);
 
-        MemberAccessResult result = emit_member_access_offset(cg, left);
+        MemberAccessResult result = emit_member_access(cg, left);
+
+        Type *left_type = left->head.evaluated_type;
+
         if (result.is_runtime_computed) {
+            if (left_type->kind == TYPE_POINTER) {
+                sb_append(&cg->code, "   mov\t\trbx, [rbx]   ; Pointer dereference 1\n");
+            }
             sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
-            return (MemberAccessResult){
-                .base_offset = result.base_offset,
-                .is_runtime_computed = true
-            };
+            return (MemberAccessResult){0, true};
         } else {
+            if (left_type->kind == TYPE_POINTER) {
+                sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", result.base_offset);
+                sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
+                return (MemberAccessResult){0, true};
+            }
+
             return (MemberAccessResult){
                 .base_offset = result.base_offset + ma->struct_member->member_offset,
                 .is_runtime_computed = false
@@ -1099,10 +1108,18 @@ MemberAccessResult emit_member_access_offset(CodeGenerator *cg, AstMemberAccess 
     if (ma->left->head.type == AST_LITERAL && ((AstLiteral *)(ma->left))->kind == LITERAL_IDENTIFIER) {
         AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(ma->left))->as.value.identifier.name)->as.identifier;
 
-        return (MemberAccessResult){
-            .base_offset = ident->stack_offset + ma->struct_member->member_offset,
-            .is_runtime_computed = false
-        };
+        if (ident->type->kind == TYPE_POINTER) {
+            // Field access through pointer
+            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", ident->stack_offset);
+            sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
+
+            return (MemberAccessResult){0, true};
+        } else {
+            return (MemberAccessResult){
+                .base_offset = ident->stack_offset + ma->struct_member->member_offset,
+                .is_runtime_computed = false
+            };
+        }
     }
     if (ma->left->head.type == AST_ARRAY_ACCESS) {
         AstArrayAccess *array_ac = (AstArrayAccess *)(ma->left);
@@ -1126,30 +1143,47 @@ MemberAccessResult emit_member_access_offset(CodeGenerator *cg, AstMemberAccess 
             sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset); // offset into member
             sb_append(&cg->code, "\n");
 
-            return (MemberAccessResult){
-                .base_offset = 0,
-                .is_runtime_computed = true
-            };
+            return (MemberAccessResult){0, true};
         }
         else if (cursor->head.type == AST_MEMBER_ACCESS) {
             AstMemberAccess *left = (AstMemberAccess *)(cursor);
-            MemberAccessResult result = emit_member_access_offset(cg, left);
+            MemberAccessResult result = emit_member_access(cg, left);
             assert(result.is_runtime_computed);
 
             emit_array_access_offset(cg, array_ac);
 
             sb_append(&cg->code, "\n   ; Left is member access\n");
-            // sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");                               // load address to beginning of array
             sb_append(&cg->code, "   add\t\trbx, rax\n");                                    // offset into array
             sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);   // offset into member
             sb_append(&cg->code, "\n");
 
-            return (MemberAccessResult){
-                .base_offset = 0,
-                .is_runtime_computed = true
-            };
+            return (MemberAccessResult){0, true};
         }
         else {
+            XXX;
+        }
+    }
+    else if (ma->left->head.type == AST_UNARY) {
+        AstUnary *unary = (AstUnary *)(ma->left);
+        assert(unary->expr->evaluated_type->kind == TYPE_POINTER);
+
+        if (unary->operator == OP_POINTER_DEREFERENCE) {
+            if (unary->expr->head.type == AST_MEMBER_ACCESS) {
+                MemberAccessResult result = emit_member_access(cg, (AstMemberAccess *)(unary->expr));
+                if (result.is_runtime_computed) {
+                    sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
+                } else {
+                    sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", result.base_offset);
+                }
+
+                sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
+                return (MemberAccessResult){0, true};
+            } else {
+                XXX;
+            }
+        } else if (unary->operator == OP_ADDRESS_OF) {
+            XXX;
+        } else {
             XXX;
         }
     }
@@ -1289,7 +1323,14 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 return;
             }
             else if (unary->expr->head.type == AST_MEMBER_ACCESS) {
-                XXX;
+                MemberAccessResult result = emit_member_access(cg, (AstMemberAccess *)unary->expr);
+                if (result.is_runtime_computed) {
+                    sb_append(&cg->code, "   push\t\trbx\n");
+                } else {
+                    sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", result.base_offset);
+                    sb_append(&cg->code, "   push\t\trbx\n");
+                }
+                return;
             } else {
                 XXX;
             }
@@ -1321,7 +1362,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     }
     case AST_MEMBER_ACCESS: {
         AstMemberAccess *ma  = (AstMemberAccess *)(expr);
-        MemberAccessResult result = emit_member_access_offset(cg, ma); // offset is put in rax
+        MemberAccessResult result = emit_member_access(cg, ma); // offset is put in rax
         if (!result.is_runtime_computed) {
             sb_append(&cg->code, "   mov\t\trax, 0\n");
         }
@@ -1331,40 +1372,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         if (ma->access_kind == MEMBER_ACCESS_STRUCT) {
             AstDeclaration *member = ma->struct_member;
 
-            char address_str[16];
             if (result.is_runtime_computed) {
-                sprintf(address_str, "[rbx]");
+                // Result is already in rbx
             } else {
-                sprintf(address_str, "%d[rbp]", base_offset);
+                sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", base_offset);
             }
 
-            if (member->declared_type->kind == TYPE_INTEGER) {
-                sb_append(&cg->code, "   mov\t\teax, DWORD %s\n", address_str);
-                sb_append(&cg->code, "   push\t\trax\n");
-                return;
-            }
-            if (member->declared_type->kind == TYPE_FLOAT) {
-                sb_append(&cg->code, "   movss\t\txmm0, %s\n", address_str);
-                sb_append(&cg->code, "   sub\t\trsp, 4\n");
-                sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
-                return;
-            }
-            if (member->declared_type->kind == TYPE_BOOL) {
-                sb_append(&cg->code, "   mov\t\tal, BYTE %s\n", address_str);
-                sb_append(&cg->code, "   push\t\trax\n");
-                return;
-            }
-            if (member->declared_type->kind == TYPE_STRING) {
-                sb_append(&cg->code, "   mov\t\trax, QWORD %s\n", address_str);
-                sb_append(&cg->code, "   push\t\trax\n");
-                return;
-            }
-            if (member->declared_type->kind == TYPE_ENUM) {
-                sb_append(&cg->code, "   mov\t\teax, DWORD %s\n", address_str);
-                sb_append(&cg->code, "   push\t\trax\n");
-                return;
-            }
-            XXX;
+            emit_move_and_push(cg, member->declared_type, false);
         } else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
             sb_append(&cg->code, "   push\t\t%d\n", ma->enum_member->value);
             return;

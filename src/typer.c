@@ -895,12 +895,24 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         }
     }
 
-    if (type_lhs->kind != TYPE_STRUCT) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->left), "Cannot access expression of type %s", type_to_str(type_lhs));
+    TypeStruct *struct_defn;
+    bool valid_lhs = false;
+    if (type_lhs->kind == TYPE_POINTER) {
+        Type *pointed_to = ((TypePointer *)(type_lhs))->pointer_to;
+
+        if (pointed_to->kind == TYPE_STRUCT) {
+            struct_defn = (TypeStruct *)(pointed_to);
+            valid_lhs = true;
+        }
+    }
+    else if (type_lhs->kind == TYPE_STRUCT) {
+        struct_defn = (TypeStruct *)(type_lhs);
+        valid_lhs = true;
+    }
+    if (!valid_lhs) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->left), "Cannot field access into expression of type %s", type_to_str(type_lhs));
         return NULL;
     }
-
-    TypeStruct *struct_defn = (TypeStruct *)(type_lhs);
 
     AstExpr *rhs = ma->right;
     if (rhs->head.type == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
@@ -1116,7 +1128,7 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     }
     else if (unary->operator == OP_POINTER_DEREFERENCE) {
         if (expr_type->kind != TYPE_POINTER) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Trying to dereference something not a pointer. Expression has type %s", type_to_str(expr_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Invalid pointer dereference. Expression has type %s", type_to_str(expr_type));
             return NULL;
         }
 

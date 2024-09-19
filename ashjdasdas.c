@@ -1,19 +1,18 @@
 #include <stdio.h>
 #include <stdbool.h>
 
-typedef struct WeirdlySizedStruct {
-    bool a;
-    bool b;
-    bool c;
-    bool d;
-    bool e;
-} WeirdlySizedStruct;
+typedef struct Node {
+    Node *next;
+    int data;
+} Node;
 
-int main()
-{
-    WeirdlySizedStruct w = {0};
+int main() {
+    Node n1 = {0};
+    n1.data = 69;
 
-    printf("sizeof(WeirdlySizedStruct) = %zu\n", sizeof(WeirdlySizedStruct));
+    Node *ptr0 = &n1;
+    Node **ptr1 = &ptr0;
 
+    printf("%d", ptr1->data);
     return 0;
 }

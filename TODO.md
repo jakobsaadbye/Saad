@@ -7,6 +7,7 @@ TODO:
     - Backing integer types for enums
     - Better printf
     - Better scoping
+    - Error messages with multiple color highlighting.
 
 Roadmap:
     - Pointer types
