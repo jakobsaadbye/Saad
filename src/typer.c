@@ -1116,7 +1116,7 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     }
     else if (unary->operator == OP_POINTER_DEREFERENCE) {
         if (expr_type->kind != TYPE_POINTER) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Trying to dereference something not a pointer is invalid. Expression has type %s", type_to_str(expr_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Trying to dereference something not a pointer. Expression has type %s", type_to_str(expr_type));
             return NULL;
         }
 

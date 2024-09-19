@@ -1159,6 +1159,7 @@ MemberAccessResult emit_member_access_offset(CodeGenerator *cg, AstMemberAccess 
 
 }
 
+// If lvalue is set, the final offset will be in rbx, otherwise the rvalue needs to be popped/moved from stack
 void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue) {
     emit_array_access_offset(cg, array_ac);
 
@@ -1189,7 +1190,7 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue)
     sb_append(&cg->code, "   mov\t\trbx, QWORD %d[rbp]\n", base_offset); // load pointer to data
     sb_append(&cg->code, "   add\t\trbx, rax\n"); // add offset
 
-    if (lvalue) return; // Offset is in rbx
+    if (lvalue) return;
     
     emit_move_and_push(cg, innermost_type, lvalue);
 }
@@ -1283,7 +1284,9 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 return;
             }
             else if (unary->expr->head.type == AST_ARRAY_ACCESS) {
-                XXX;
+                emit_array_access(cg, (AstArrayAccess *)(unary->expr), true);
+                sb_append(&cg->code, "   push\t\trbx\n");
+                return;
             }
             else if (unary->expr->head.type == AST_MEMBER_ACCESS) {
                 XXX;
@@ -1292,7 +1295,6 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             }
         }
         if (unary->operator == OP_POINTER_DEREFERENCE) {
-            printf("Typeof expr is %s\n", type_to_str(unary->expr->evaluated_type));
             emit_expression(cg, unary->expr);
 
             Type *dereferenced_type = unary->head.evaluated_type;

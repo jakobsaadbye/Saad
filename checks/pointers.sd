@@ -45,6 +45,11 @@ main:: () {
         assert(p1 == &c1);
         assert(p2 == &c2);
 
+        // Real crasy stuff
+        assert(**(&a[0]) == 1);
+        assert(**(&a[1]) == 2);
+        assert(**(&a[2]) == 3);
+
         for p in a {
             print(&p);
         }
