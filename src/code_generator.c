@@ -1078,6 +1078,41 @@ void emit_array_access_offset(CodeGenerator *cg, AstArrayAccess *array_ac) {
     }
 }
 
+void emit_unary_inside_member_access(CodeGenerator *cg, AstUnary *unary, AstMemberAccess *ma) {
+    if (unary->operator == OP_POINTER_DEREFERENCE) {
+        assert(unary->expr->evaluated_type->kind == TYPE_POINTER);
+
+        if (unary->expr->head.type == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
+            AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(unary->expr))->as.value.identifier.name)->as.identifier;
+            assert(ident->type->kind == TYPE_POINTER);
+
+            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", ident->stack_offset);
+            sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
+        }
+        else if (unary->expr->head.type == AST_MEMBER_ACCESS) {
+            MemberAccessResult result = emit_member_access(cg, (AstMemberAccess *)(unary->expr));
+            if (result.is_runtime_computed) {
+                sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
+            } else {
+                sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", result.base_offset);
+            }
+
+            sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
+        } 
+        else if (unary->expr->head.type == AST_UNARY) {
+            emit_unary_inside_member_access(cg, (AstUnary *)(unary->expr), ma);
+            sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
+        }
+        else {
+            XXX;
+        }
+    } else if (unary->operator == OP_ADDRESS_OF) {
+        XXX;
+    } else {
+        XXX;
+    }
+}
+
 MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
     if (ma->left->head.type == AST_MEMBER_ACCESS) {
         AstMemberAccess *left = (AstMemberAccess *)(ma->left);
@@ -1164,28 +1199,8 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
         }
     }
     else if (ma->left->head.type == AST_UNARY) {
-        AstUnary *unary = (AstUnary *)(ma->left);
-        assert(unary->expr->evaluated_type->kind == TYPE_POINTER);
-
-        if (unary->operator == OP_POINTER_DEREFERENCE) {
-            if (unary->expr->head.type == AST_MEMBER_ACCESS) {
-                MemberAccessResult result = emit_member_access(cg, (AstMemberAccess *)(unary->expr));
-                if (result.is_runtime_computed) {
-                    sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
-                } else {
-                    sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", result.base_offset);
-                }
-
-                sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
-                return (MemberAccessResult){0, true};
-            } else {
-                XXX;
-            }
-        } else if (unary->operator == OP_ADDRESS_OF) {
-            XXX;
-        } else {
-            XXX;
-        }
+        emit_unary_inside_member_access(cg, (AstUnary *)(ma->left), ma);
+        return (MemberAccessResult){0, true};
     }
     else {
         XXX;

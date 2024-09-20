@@ -32,17 +32,25 @@ main:: () {
         n1.data = 1;
         n2.data = 2;
         n3.data = 37;
+
         n1.next = &n2;
         n2.next = &n3;
         n3.next = &n1;
         
-        assert(n1.next.next == &n3);
+        assert(n1.next.next      == &n3);
+        assert(n1.next.next.next == &n1);
     }
     
-    // ptr0 := &n1;
-    // ptr1 := &ptr0;
-    // ptr2 := &ptr1;
-    // print(ptr2.data); // Should be 69
+    // Multiple pointer dereference to get to inner struct
+    {
+        n1 : Node;
+        n1.data = 69;
+    
+        ptr0 := &n1;
+        ptr1 := &ptr0;
+        ptr2 := &ptr1;
+        assert((*(*ptr2)).data == 69);
+    }
 
     // cursor := &n1;
     // for 0..10 {

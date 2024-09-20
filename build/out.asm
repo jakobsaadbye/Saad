@@ -46,7 +46,7 @@ enum_end:
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 96
+   sub		rsp, 144
 
    ; initialization of 'v'
    mov		DWORD -8[rbp], 0
@@ -160,10 +160,71 @@ main:
    sete		al
    push		rax
    pop		rcx
-   mov		rdx, 39
+   mov		rdx, 40
+   call		assert
+   mov		rbx, -24[rbp]
+   add		rbx, 8
+   mov		rbx, [rbx]   ; Pointer dereference 1
+   add		rbx, 8
+   mov		rbx, [rbx]
+   push		rbx
+   lea		rax, -32[rbp]
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 41
+   call		assert
+
+   ; initialization of 'n1'
+   mov		DWORD -80[rbp], 0
+   mov		QWORD -72[rbp], 0
+   mov		rax, 69
+   push		rax
+   pop		rax
+   mov		DWORD -80[rbp], eax
+
+   ; initialization of 'ptr0'
+   mov		QWORD -88[rbp], 0
+   lea		rax, -80[rbp]
+   push		rax
+   pop		rax
+   mov		QWORD -88[rbp], rax
+
+   ; initialization of 'ptr1'
+   mov		QWORD -96[rbp], 0
+   lea		rax, -88[rbp]
+   push		rax
+   pop		rax
+   mov		QWORD -96[rbp], rax
+
+   ; initialization of 'ptr2'
+   mov		QWORD -104[rbp], 0
+   lea		rax, -96[rbp]
+   push		rax
+   pop		rax
+   mov		QWORD -104[rbp], rax
+   mov		rbx, -104[rbp]
+   mov		rbx, [rbx]
+   mov		rbx, [rbx]
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 69
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 52
    call		assert
 L0:
    mov		rax, 0
-   add		rsp, 96
+   add		rsp, 144
    pop		rbp
    ret
