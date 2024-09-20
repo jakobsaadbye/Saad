@@ -8,6 +8,7 @@ TODO:
     - Better printf
     - Better scoping
     - Error messages with multiple color highlighting.
+    - :WrongForLoopSizing
 
 Roadmap:
     - Pointer types

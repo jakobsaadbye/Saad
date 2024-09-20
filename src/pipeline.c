@@ -104,7 +104,9 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
         exit_code = system(".\\build\\out.exe >nul");
     }
     
-    if (exit_code != 0) return_and_cleanup;
+    if (exit_code != 0) {
+        return_and_cleanup;
+    } 
 
     reset_stdout();
     return true;

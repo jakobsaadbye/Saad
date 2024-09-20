@@ -1,3 +1,13 @@
+Vector2 :: struct {
+    x : float;
+    y : float;
+}
+
+Node :: struct {
+    data : int;
+    next : *Node;
+}
+
 main:: () {
     {
         a : int = 3;
@@ -53,6 +63,69 @@ main:: () {
         for p in a {
             print(&p);
         }
+    }
+
+    // Changing value of struct field through pointer
+    {
+        v : Vector2;
+    
+        ptr := &v.x;
+        ptr = 1.0;
+        ptr = &v.y;
+        ptr = 3.0;
+    
+        assert(v.x == 1.0);
+        assert(v.y == 3.0);
+    }
+
+    // Dereference and change of value through pointer on a struct field
+    {
+        n1 : Node;
+        n2 : Node;
+        n3 : Node;
+
+        n1.next = &n2;
+        n2.next = &n3;
+        n3.next = &n1;
+        
+        assert(n1.next.next      == &n3);
+        assert(n1.next.next.next == &n1);
+    }
+    
+    // Multiple pointer dereference to get to inner struct
+    {
+        n1 : Node;
+        n1.data = 69;
+    
+        ptr0 := &n1;
+        ptr1 := &ptr0;
+        ptr2 := &ptr1;
+        assert((*(*ptr2)).data == 69);
+    }
+
+    // Checking that is also works inside for-loops
+    {
+        n1 : Node;
+        n2 : Node;
+        n3 : Node;
+
+        n1.next = &n2;
+        n2.next = &n3;
+        n3.next = &n1;
+
+        n1.data = 1;
+        n2.data = 2;
+        n3.data = 37;
+
+        cursor := &n1;
+
+        assert(cursor.data == 1);
+        cursor = cursor.next;
+        assert(cursor.data == 2);
+        cursor = cursor.next;
+        assert(cursor.data == 37);
+        cursor = cursor.next;
+        assert(cursor.data == 1);
     }
 }
 

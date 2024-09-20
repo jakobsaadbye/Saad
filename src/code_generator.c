@@ -451,7 +451,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     if (strcmp("main", func_defn->identifier->name) == 0) {
         bytes_allocated += 32; // shadow space that is for some reason needed for main??? @Investigate
     }
-    size_t aligned_allocated = align_value((int)(bytes_allocated), 16);
+    size_t aligned_allocated = align_value((int)(bytes_allocated), 32); // :WrongForLoopSizing @Temporary @Hack Would like it if this was only 16 byte aligned instead of 32, but it seems like there is some problem with sizing for-loops correctly that causes not enough space to be allocated
     
     if (bytes_allocated) sb_append(&cg->code, "   sub\t\trsp, %d\n", aligned_allocated);
 

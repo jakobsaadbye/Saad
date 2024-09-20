@@ -28,10 +28,6 @@ main:: () {
         n1 : Node;
         n2 : Node;
         n3 : Node;
-    
-        n1.data = 1;
-        n2.data = 2;
-        n3.data = 37;
 
         n1.next = &n2;
         n2.next = &n3;
@@ -52,12 +48,31 @@ main:: () {
         assert((*(*ptr2)).data == 69);
     }
 
-    // cursor := &n1;
-    // for 0..10 {
-    //     print(cursor.data);
-    //     cursor = cursor.next;
+    // Checking that is also works inside for-loops
+    {
+        n1 : Node;
+        n2 : Node;
+        n3 : Node;
 
-    // }
+        n1.next = &n2;
+        n2.next = &n3;
+        n3.next = &n1;
+
+        n1.data = 1;
+        n2.data = 2;
+        n3.data = 37;
+
+        cursor := &n1;
+
+        assert(cursor.data == 1);
+        cursor = cursor.next;
+        assert(cursor.data == 2);
+        cursor = cursor.next;
+        assert(cursor.data == 37);
+        cursor = cursor.next;
+        assert(cursor.data == 1);
+    }
+
 }
 
 
