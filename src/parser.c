@@ -581,18 +581,24 @@ AstFor *parse_for(Parser *parser) {
     Token for_token = peek_next_token(parser);
     eat_token(parser);
 
-    Token next      = peek_next_token(parser);
-    Token next_next = peek_token(parser, 1);
+    Token next = peek_next_token(parser);
 
-    if (next.type == TOKEN_IDENTIFIER && next_next.type == TOKEN_IN) {
+    if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_IN) {
         iterator = make_identifier_from_token(parser, next, NULL);
 
         eat_token(parser);
         eat_token(parser);
 
         iterable = parse_range_or_normal_expression(parser);
-    } else {
+        if (!iterable) return NULL;
+    } 
+    else if (next.type == '{') {
+        iterator = NULL;
+        iterable = NULL;
+    }
+    else {
         iterable = parse_range_or_normal_expression(parser);
+        if (!iterable) return NULL;
 
         Token next = peek_next_token(parser);
         if (next.type != '{' ) {
@@ -602,13 +608,20 @@ AstFor *parse_for(Parser *parser) {
 
         iterator = make_identifier_from_string(parser, "it", NULL); // type is set later
     }
+    
 
-    // Push down the iterator into the body scope
-    open_scope(&parser->ident_table);
-    symbol_add_identifier(&parser->ident_table, iterator);
-    AstBlock *body = parse_block(parser, false);
-    if (!body) return NULL;
-    close_scope(&parser->ident_table);
+    AstBlock *body;
+    if (iterator) {
+        // Push down the iterator into the scope of the body
+        open_scope(&parser->ident_table);
+        symbol_add_identifier(&parser->ident_table, iterator);
+        body = parse_block(parser, false);
+        if (!body) return NULL;
+        close_scope(&parser->ident_table);
+    } else {
+        body = parse_block(parser, true);
+        if (!body) return NULL;
+    }
 
     AstFor *ast_for = (AstFor *)(ast_allocate(parser, sizeof(AstFor)));
     ast_for->head.type = AST_FOR;

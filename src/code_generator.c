@@ -48,7 +48,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr);
 void emit_integer_to_float_conversion(CodeGenerator *cg, TypeKind l_kind, TypeKind r_kind);
 void emit_initialization(CodeGenerator *cg, int dest_offset, AstExpr *expr, Type *lhs_type, Type *rhs_type);
 void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, Type *lhs_type, Type *rhs_type);
-void emit_move_and_push(CodeGenerator *cg, Type *type, bool lvalue);
+void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_computed, Type *src_type, bool lvalue);
 
 void check_main_exists(CodeGenerator *cg);
 int make_label_number(CodeGenerator *cg);
@@ -334,7 +334,18 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
 }
 
 void emit_for(CodeGenerator *cg, AstFor *ast_for) {
-    if (ast_for->iterable->head.type == AST_RANGE_EXPR) {
+    if (!ast_for->iterable) {
+        int for_label = make_label_number(cg);
+        int done_label = make_label_number(cg);
+        sb_append(&cg->code, "L%d:\n", for_label);
+
+        emit_block(cg, ast_for->body, true);
+
+        sb_append(&cg->code, "   jmp\t\tL%d\n", for_label);
+
+        sb_append(&cg->code, "L%d:\n", done_label);
+    }
+    else if (ast_for->iterable->head.type == AST_RANGE_EXPR) {
         AstRangeExpr * range = (AstRangeExpr *)(ast_for->iterable);
         
         // allocate space for start and end range values 
@@ -373,7 +384,8 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         sb_append(&cg->code, "   jmp\t\tL%d\n", for_label);
 
         sb_append(&cg->code, "L%d:\n", done_label);
-    } else {
+    } 
+    else {
         AstIdentifier *iterator = ast_for->iterator;
         AstExpr *iterable       = ast_for->iterable;
 
@@ -401,7 +413,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         int done_label = make_label_number(cg);
         sb_append(&cg->code, "L%d:\n", for_label);
         sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", offset_count);
-        sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", offset_index); // nocheckin
+        sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", offset_index);
         sb_append(&cg->code, "   cmp\t\trax, rbx\n");
         sb_append(&cg->code, "   jge\t\tL%d\n", done_label);
 
@@ -570,7 +582,7 @@ void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof) {
     char *type_name  = type_to_str(expr_type);
     int   type_label = make_label_number(cg);
 
-    sb_append(&cg->data, "   T%d\tDB \"%s\", 10, 0", type_label, type_name);
+    sb_append(&cg->data, "   T%d\tDB \"%s\", 10, 0\n", type_label, type_name);
     sb_append(&cg->code, "   mov\t\trcx, T%d\n", type_label);
     sb_append(&cg->code, "   call\t\tprintf\n");
 }
@@ -831,9 +843,9 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
 
         switch (lit->kind) {
         case LITERAL_BOOLEAN: break; // Immediate value is used
-        case LITERAL_INTEGER: break; // Immediate value is used
-        case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", decl->identifier->name, lit->as.value.floating); break;
-        case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", decl->identifier->name, lit->as.value.string.data); break;
+        case LITERAL_INTEGER: break; // Immediate value is used 
+        case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", decl->identifier->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup
+        case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", decl->identifier->name, lit->as.value.string.data); break; // :IdentifierNameAsConstant @Cleanup
         case LITERAL_NIL:     XXX;
         case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
         }
@@ -1248,30 +1260,37 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue)
 
     if (lvalue) return;
     
-    emit_move_and_push(cg, innermost_type, lvalue);
+    emit_move_and_push(cg, 0, true, innermost_type, lvalue);
 }
 
 // Src is [rbx], Dest is size of type
-void emit_move_and_push(CodeGenerator *cg, Type *type, bool lvalue) {
-    switch (type->kind) {
+void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_computed, Type *src_type, bool lvalue) {
+    char src[16];
+    if (src_is_runtime_computed) {
+        sprintf(src, "[rbx]");
+    } else {
+        sprintf(src, "%d[rbp]", src_offset);
+    }
+
+    switch (src_type->kind) {
     case TYPE_BOOL:
     case TYPE_STRING:
     case TYPE_ENUM: {
-        sb_append(&cg->code, "   mov\t\t%s, %s [rbx]\n", REG_A(type), WIDTH(type));
+        sb_append(&cg->code, "   mov\t\t%s, %s %s\n", REG_A(src_type), WIDTH(src_type), src);
         sb_append(&cg->code, "   push\t\trax\n");
         return;
     }
     case TYPE_INTEGER: {
-        sb_append(&cg->code, "   mov\t\t%s, %s [rbx]\n", REG_A(type), WIDTH(type));
-        if (is_signed_integer(type) && type->size != 8) {
-            sb_append(&cg->code, "   movsx\t\trax, %s\n", REG_A(type));
+        sb_append(&cg->code, "   mov\t\t%s, %s %s\n", REG_A(src_type), WIDTH(src_type), src);
+        if (is_signed_integer(src_type) && src_type->size != 8) {
+            sb_append(&cg->code, "   movsx\t\trax, %s\n", REG_A(src_type));
         }
         sb_append(&cg->code, "   push\t\trax\n");
         return;
     }
     case TYPE_FLOAT: {
-        sb_append(&cg->code, "   %s\t\txmm0, [rbx]\n", type->size == 4 ? "movss" : "movsd");
-        sb_append(&cg->code, "   sub\t\trsp, %d\n", type->size);
+        sb_append(&cg->code, "   %s\t\txmm0, %s\n", src_type->size == 4 ? "movss" : "movsd", src);
+        sb_append(&cg->code, "   sub\t\trsp, %d\n", src_type->size);
         sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
         return;
     }
@@ -1279,15 +1298,21 @@ void emit_move_and_push(CodeGenerator *cg, Type *type, bool lvalue) {
         if (lvalue) {
             sb_append(&cg->code, "   push\t\trbx\n");
         } else {
-            sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
+            sb_append(&cg->code, "   mov\t\trbx, %s\n", src);
             sb_append(&cg->code, "   push\t\trbx\n");
         }
         return;
     }
-    case TYPE_ARRAY:
+    case TYPE_ARRAY: {
+        sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", src_offset);
+        sb_append(&cg->code, "   mov\t\trbx, QWORD %d[rbp]\n", src_offset + 8);
+        sb_append(&cg->code, "   push\t\trbx\n");
+        sb_append(&cg->code, "   push\t\trax\n");
+        return;
+    }
     case TYPE_STRUCT:
     default:
-        printf("internal-compiler-error: Unhandled case %s in emit_move_and_push()", type_to_str(type));
+        printf("internal-compiler-error: Unhandled case %s in emit_move_and_push()", type_to_str(src_type));
         exit(1);
     }
 }
@@ -1375,7 +1400,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             Type *dereferenced_type = unary->head.evaluated_type;
             sb_append(&cg->code, "   pop\t\trbx\n");
 
-            emit_move_and_push(cg, dereferenced_type, false);
+            emit_move_and_push(cg, 0, true, dereferenced_type, false);
 
             return;
         }
@@ -1396,15 +1421,11 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     }
     case AST_MEMBER_ACCESS: {
         AstMemberAccess *ma  = (AstMemberAccess *)(expr);
-        MemberAccessResult result = emit_member_access(cg, ma); // offset is put in rax
-
-        if (!result.is_runtime_computed) {
-            sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", result.base_offset);
-        }
+        MemberAccessResult result = emit_member_access(cg, ma);
 
         if (ma->access_kind == MEMBER_ACCESS_STRUCT) {
             AstDeclaration *member = ma->struct_member;
-            emit_move_and_push(cg, member->declared_type, false);
+            emit_move_and_push(cg, result.base_offset, result.is_runtime_computed, member->declared_type, false);
         } else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
             sb_append(&cg->code, "   push\t\t%d\n", ma->enum_member->value);
             return;
@@ -1475,13 +1496,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                     }
                     case LITERAL_FLOAT: {
                         // @Incomplete - We need to check if float is 32 or 64 bit constant. Right now we just assume 32 bit
-                        sb_append(&cg->code, "   movss\t\txmm0, [C_%s]\n", ident->name);
+                        sb_append(&cg->code, "   movss\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant @Cleanup - Should the identifier name really be used as the constant name??? Not good if we have the same identifier name in two seperate blocks inside same function!
                         sb_append(&cg->code, "   sub\t\trsp, 4\n"); 
                         sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
                         return;
                     }
                     case LITERAL_STRING: {
-                        sb_append(&cg->code, "   mov\t\trax, C_%s\n", ident->name);
+                        sb_append(&cg->code, "   mov\t\trax, C_%s\n", ident->name); // :IdentifierNameAsConstant @Cleanup
                         sb_append(&cg->code, "   push\t\trax");
                         return;
                     }
@@ -1490,55 +1511,10 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 }
             }
 
-            // @Cleanup - Simplify and use emit_move_and_push!
-            if (ident->type->kind == TYPE_INTEGER) {
-                sb_append(&cg->code, "   mov\t\trax, 0\n");
-                sb_append(&cg->code, "   mov\t\t%s, %s %d[rbp]\n", REG_A(ident->type), WIDTH(ident->type), ident->stack_offset);
-                if (is_signed_integer(ident->type) && ident->type->size != 8) {
-                    sb_append(&cg->code, "   movsx\t\trax, %s\n", REG_A(ident->type));
-                }
-                sb_append(&cg->code, "   push\t\trax\n", ident->stack_offset);
-                return;
-            }
-            if (ident->type->kind == TYPE_FLOAT) {
-                sb_append(&cg->code, "   movss\t\txmm0, %d[rbp]\n", ident->stack_offset);
-                sb_append(&cg->code, "   sub\t\trsp, 4\n");
-                sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
-                return;
-            }
-            if (ident->type->kind == TYPE_BOOL) {
-                sb_append(&cg->code, "   mov\t\tal, BYTE %d[rbp]\n", ident->stack_offset);
-                sb_append(&cg->code, "   push\t\trax\n");
-                return;
-            }
-            if (ident->type->kind == TYPE_STRING) {
-                sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", ident->stack_offset);
-                sb_append(&cg->code, "   push\t\trax\n");
-                return;
-            }
-            if (ident->type->kind == TYPE_ENUM) {
-                sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", ident->stack_offset);
-                sb_append(&cg->code, "   push\t\trax\n");
-                return;
-            }
-            if (ident->type->kind == TYPE_POINTER) {
-                sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", ident->stack_offset);
-                sb_append(&cg->code, "   push\t\trax\n");
-                return;
-            }
-            if (ident->type->kind == TYPE_ARRAY) {
-                sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", ident->stack_offset);
-                sb_append(&cg->code, "   mov\t\trbx, QWORD %d[rbp]\n", ident->stack_offset + 8);
-                sb_append(&cg->code, "   push\t\trbx\n");
-                sb_append(&cg->code, "   push\t\trax\n");
-                return;
-            }
-
-            printf("Internal Compiler Error: Unexpected identifier type %s in emit_expression()\n", type_to_str(ident->type));
-            XXX;
-
+            emit_move_and_push(cg, ident->stack_offset, false, ident->type, false);
+            return;
         }}
-
+        
         XXX;
     }
     case AST_STRUCT_LITERAL:

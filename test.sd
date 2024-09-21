@@ -1,48 +1,31 @@
-Vector2 :: struct {
-    x : float;
-    y : float;
-}
-
 Node :: struct {
-    data : int;
     next : *Node;
+    data : int;
 }
 
-main :: () {
-    // n0 : Node;
-    // n1 : Node;
-    // n2 : Node;
-    // n3 : Node;
+main :: () -> int {
 
-    // n0.data = 1;
-    // n1.data = 2;
-    // n2.data = 3;
-    // n3.data = 4;
-
-    // n0.next = &n1;
-    // n1.next = &n2;
-    // n2.next = &n3;
-    // n3.next = nil;
-
-    // cursor := &n0;
-    // for 0...100 {
-    //     print(cursor.data);
-    //     cursor = cursor.next;
-    //     if (!cursor) {
-    //         return 0;
-    //     }
-    // }
-
-    n : Node;
+    n0 : Node;
     n1 : Node;
+    n2 : Node;
 
-    n.next = &n1;
+    n0.next = &n1;
+    n1.next = &n2;
+    n2.next = nil;
 
-    if (n.next) {
-        print("n does not have next!");
-    } else {
-        print("n has next!");
-    } 
+    n0.data = 69;
+    n1.data = 420;
+    n2.data = 1337;
+
+    cursor := &n0;
+    for {
+        print("INFINITY!!!");
+        // print(cursor.data);
+        // cursor = cursor.next;
+        // if cursor == nil {
+        //     return 1;
+        // }
+    }
 }
 
 

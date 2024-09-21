@@ -287,13 +287,6 @@ typedef struct AstBinary {
     AstExpr  *right;
 } AstBinary;
 
-
-typedef struct AstSubscript {
-    Ast head;
-
-    AstExpr *expr;
-} AstSubscript;
-
 typedef struct AstArrayAccess {
     AstExpr head;
 

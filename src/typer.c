@@ -439,7 +439,10 @@ bool check_struct(Typer *typer, AstStruct *ast_struct) {
 }
 
 bool check_for(Typer *typer, AstFor *ast_for) {
-    if (ast_for->iterable->head.type == AST_RANGE_EXPR) {
+    if (!ast_for->iterable) {
+        // Nothing to check!
+    }
+    else if (ast_for->iterable->head.type == AST_RANGE_EXPR) {
         AstRangeExpr *range = (AstRangeExpr *)(ast_for->iterable);
         
         Type* type_start = check_expression(typer, range->start, NULL);
@@ -506,8 +509,8 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_ASSERT: {
         AstAssert *assertion = (AstAssert *)(stmt);
         Type *expr_type = check_expression(typer, assertion->expr, NULL);
-        if (expr_type->kind != TYPE_BOOL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assertion), "Type mismatch. Expected expression to be of type bool, but expression is of type '%s'", type_to_str(expr_type));
+        if (expr_type->kind != TYPE_BOOL && expr_type->kind != TYPE_POINTER) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assertion), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(expr_type));
             return false;
         }
 
