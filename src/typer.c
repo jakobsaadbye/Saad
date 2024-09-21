@@ -275,6 +275,9 @@ bool types_are_equal(Type *lhs, Type *rhs) {
     } else if (lhs->kind == TYPE_POINTER && rhs->kind == TYPE_POINTER) {
         Type *left_pointed_to  = ((TypePointer *)(lhs))->pointer_to;
         Type *right_pointed_to = ((TypePointer *)(rhs))->pointer_to;
+        if (right_pointed_to->kind == TYPE_VOID) {
+            return true;
+        }
         return types_are_equal(left_pointed_to, right_pointed_to);
     }
     else {
@@ -519,8 +522,8 @@ bool check_statement(Typer *typer, Ast *stmt) {
         Type *condition_type = check_expression(typer, ast_if->condition, NULL);
         if (!condition_type) return NULL;
 
-        if (condition_type->kind != TYPE_BOOL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_if->condition), "Expression needs to be of type 'bool', but expression evaluated to type '%s'", type_to_str(condition_type));
+        if (condition_type->kind != TYPE_BOOL && condition_type->kind != TYPE_POINTER) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_if->condition), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(condition_type));
             return false;
         }
 
@@ -1085,12 +1088,14 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     TypeKind type_kind = expr_type->kind;
 
     if (unary->operator == OP_NOT) {
-        if (type_kind != TYPE_BOOL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Type mismatch. Operator '!' is not applicative on expression of type '%s'\n", type_to_str(expr_type));
+        if (type_kind != TYPE_BOOL && type_kind != TYPE_POINTER) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Expression needs to be of type 'bool' or pointer. Got type %s\n", type_to_str(expr_type));
             exit(1);
         }
 
-        return expr_type;
+        // @Note - If applied to a pointer, we will do a pointer to bool conversion
+
+        return primitive_type(PRIMITIVE_BOOL);
     }
     else if (unary->operator == OP_UNARY_MINUS) {
         if (type_kind != TYPE_INTEGER && type_kind != TYPE_FLOAT && type_kind != TYPE_ENUM) { // Maybe give a warning when applying unary minus to an enum??? Seems kinda strange
@@ -1170,6 +1175,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     case LITERAL_FLOAT:     return (ctx_type && ctx_type->kind == TYPE_FLOAT)   ? ctx_type : primitive_type(PRIMITIVE_FLOAT);
     case LITERAL_STRING:    return (ctx_type && ctx_type->kind == TYPE_STRING)  ? ctx_type : primitive_type(PRIMITIVE_STRING);
     case LITERAL_BOOLEAN:   return (ctx_type && ctx_type->kind == TYPE_BOOL)    ? ctx_type : primitive_type(PRIMITIVE_BOOL);
+    case LITERAL_NIL:       return (Type *)t_nil_ptr;
     case LITERAL_IDENTIFIER: {
         char   *ident_name   = literal->as.value.identifier.name;
         Symbol *ident_symbol = symbol_lookup(&typer->parser->ident_table, ident_name);

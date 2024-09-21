@@ -1279,6 +1279,7 @@ AstExpr *parse_leaf(Parser *parser) {
     if (t.type == TOKEN_BOOLEAN ||
         t.type == TOKEN_INTEGER ||
         t.type == TOKEN_FLOAT   ||
+        t.type == TOKEN_NIL     ||
         t.type == TOKEN_STRING
     ) {
         eat_token(parser);
@@ -1491,6 +1492,7 @@ bool is_literal(Token token) {
     if (token.type == TOKEN_INTEGER)    return true;
     if (token.type == TOKEN_FLOAT)      return true;
     if (token.type == TOKEN_STRING)     return true;
+    if (token.type == TOKEN_NIL)        return true;
     if (token.type == TOKEN_IDENTIFIER) return true;
     return false;
 }

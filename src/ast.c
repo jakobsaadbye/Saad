@@ -358,6 +358,7 @@ typedef enum LiteralKind {
     LITERAL_INTEGER     = TOKEN_INTEGER,
     LITERAL_FLOAT       = TOKEN_FLOAT,
     LITERAL_STRING      = TOKEN_STRING,
+    LITERAL_NIL         = TOKEN_NIL,
     LITERAL_IDENTIFIER  = TOKEN_IDENTIFIER,
 } LiteralKind;
 
@@ -417,6 +418,7 @@ typedef struct TypePrimitive {
     PrimitiveKind kind;
 } TypePrimitive;
 
+// @Note - maybe make each of these into a global variable instead with prefix t_<TYPE>
 TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.kind = PRIMITIVE_INVALID, .head = {.kind = TYPE_INVALID, .size = 0}},
     {.kind = PRIMITIVE_INT,     .head = {.kind = TYPE_INTEGER, .size = 4}},
@@ -436,6 +438,7 @@ TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.kind = PRIMITIVE_VOID,    .head = {.kind = TYPE_VOID,    .size = 0}},
 };
 
+
 Type *primitive_type(PrimitiveKind kind) {
     return (Type *)(&primitive_types[kind]);
 }
@@ -444,6 +447,11 @@ typedef struct TypePointer {
     Type head;
     Type *pointer_to;
 } TypePointer;
+
+TypePointer *t_nil_ptr = &(TypePointer){
+    .head = {.kind = TYPE_POINTER, .size = 8},
+    .pointer_to = (Type *)&(TypePrimitive){.kind = PRIMITIVE_VOID, .head = {.kind = TYPE_VOID, .size = 0}}
+};
 
 typedef enum ArrayFlags {
     ARRAY_IS_STATIC                         = 1 << 0,

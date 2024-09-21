@@ -44,6 +44,7 @@ typedef enum TokenType {
     TOKEN_BOOLEAN    = 132,
     TOKEN_FALSE      = 133,
     TOKEN_TRUE       = 134,
+    TOKEN_NIL        = 135,
 
     TOKEN_LOGICAL_OR    = 140,
     TOKEN_LOGICAL_AND   = 141,
@@ -211,6 +212,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_BOOLEAN:       return "BOOLEAN";
         case TOKEN_FALSE:         return "FALSE";
         case TOKEN_TRUE:          return "TRUE";
+        case TOKEN_NIL:           return "NIL";
         case TOKEN_DOUBLE_COLON:  return "DOUBLE_COLON";
         case TOKEN_COLON_EQUAL:   return "COLON_EQUAL";
         case TOKEN_RIGHT_ARROW:   return "RIGHT_ARROW";
@@ -454,6 +456,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "s8") == 0) token = TOKEN_TYPE_S8;
     }
     if (keyword_len == 3) {
+        if (strcmp(text, "nil") == 0) token = TOKEN_NIL;
         if (strcmp(text, "int") == 0) token = TOKEN_TYPE_INT;
         if (strcmp(text, "for") == 0) token = TOKEN_FOR;
         if (strcmp(text, "u16") == 0) token = TOKEN_TYPE_U16;

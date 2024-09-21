@@ -97,17 +97,14 @@ main:
 
    ; initialization of 'bmi'
    mov		DWORD -20[rbp], 0
-   mov		rax, 0
    lea		rbx, -8[rbp]
    movss		xmm0, [rbx]
    sub		rsp, 4
    movss		[rsp], xmm0
-   mov		rax, 0
    lea		rbx, -4[rbp]
    movss		xmm0, [rbx]
    sub		rsp, 4
    movss		[rsp], xmm0
-   mov		rax, 0
    lea		rbx, -4[rbp]
    movss		xmm0, [rbx]
    sub		rsp, 4
@@ -145,7 +142,6 @@ main:
    pop		rcx
    mov		rdx, 23
    call		assert
-   mov		rax, 0
    lea		rbx, -12[rbp]
    mov		eax, DWORD [rbx]
    movsx		rax, eax

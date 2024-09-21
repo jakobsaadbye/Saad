@@ -503,6 +503,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
 
     sb_append(&cg->code, "   pop\t\trax\n");
     sb_append(&cg->code, "   cmp\t\tal, 0\n");
+
     if (first_else_if_label != -1) {
         sb_append(&cg->code, "   jz\t\t\tL%d\n", first_else_if_label);
     } else if (else_label != -1) {
@@ -510,6 +511,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
     } else {
         sb_append(&cg->code, "   jz\t\t\tL%d\n", done_label);
     }
+
     sb_append(&cg->code, "   ; block of if\n");
     emit_block(cg, ast_if->block, true);
     sb_append(&cg->code, "   jmp L%d\n", done_label);
@@ -517,11 +519,15 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
     int next_if_else_label = first_else_if_label;
     for (unsigned int i = 0; i < ast_if->else_ifs.count; i++) {
         AstIf *else_if = &((AstIf *)(ast_if->else_ifs.items))[i];
+
         sb_append(&cg->code, ";#%zu else if\n", i + 1);
         sb_append(&cg->code, "L%d:\n", next_if_else_label);
+
         emit_expression(cg, else_if->condition);
+
         sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   cmp\t\tal, 0\n");
+
         bool more_else_ifs_to_come = i + 1 < ast_if->else_ifs.count;
         bool last_else_if          = i + 1 == ast_if->else_ifs.count;
         if (more_else_ifs_to_come) {
@@ -828,6 +834,7 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         case LITERAL_INTEGER: break; // Immediate value is used
         case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", decl->identifier->name, lit->as.value.floating); break;
         case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", decl->identifier->name, lit->as.value.string.data); break;
+        case LITERAL_NIL:     XXX;
         case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
         }
 
@@ -1312,7 +1319,19 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         if (unary->operator == OP_NOT) {
             emit_expression(cg, unary->expr);
             sb_append(&cg->code, "   pop\t\trax\n");
-            sb_append(&cg->code, "   not\t\trax\n");
+
+            if (unary->expr->evaluated_type->kind == TYPE_BOOL) {
+                sb_append(&cg->code, "   not\t\trax\n");
+            }
+            else if (unary->expr->evaluated_type->kind == TYPE_POINTER) {
+                sb_append(&cg->code, "   test\t\trax, rax\n");
+                sb_append(&cg->code, "   sete\t\tal\n");
+                sb_append(&cg->code, "   movzx\t\trax, al\n");
+            } else {
+                printf("Internal Compiler Error: Unexpected unary expression type '%s' in emit_expression<AST_UNARY>", type_to_str(unary->expr->evaluated_type));
+                exit(1);
+            }
+
             sb_append(&cg->code, "   push\t\trax\n");
             return;
         }
@@ -1378,21 +1397,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     case AST_MEMBER_ACCESS: {
         AstMemberAccess *ma  = (AstMemberAccess *)(expr);
         MemberAccessResult result = emit_member_access(cg, ma); // offset is put in rax
-        if (!result.is_runtime_computed) {
-            sb_append(&cg->code, "   mov\t\trax, 0\n");
-        }
 
-        int base_offset = result.base_offset;
+        if (!result.is_runtime_computed) {
+            sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", result.base_offset);
+        }
 
         if (ma->access_kind == MEMBER_ACCESS_STRUCT) {
             AstDeclaration *member = ma->struct_member;
-
-            if (result.is_runtime_computed) {
-                // Result is already in rbx
-            } else {
-                sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", base_offset);
-            }
-
             emit_move_and_push(cg, member->declared_type, false);
         } else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
             sb_append(&cg->code, "   push\t\t%d\n", ma->enum_member->value);
@@ -1440,6 +1451,10 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);
             return;
         }
+        case LITERAL_NIL: {
+            sb_append(&cg->code, "   push\t\t0\n");
+            return;
+        }
         case LITERAL_IDENTIFIER: {
             Symbol *ident_symbol = symbol_lookup(&cg->ident_table, lit->as.value.identifier.name);
             assert(ident_symbol != NULL);
@@ -1470,11 +1485,12 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                         sb_append(&cg->code, "   push\t\trax");
                         return;
                     }
+                    case LITERAL_NIL: XXX;
                     case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
                 }
             }
 
-            // @Improvement - Could probably be @Refactored. Looks very similar to 'assign_simple_value'
+            // @Cleanup - Simplify and use emit_move_and_push!
             if (ident->type->kind == TYPE_INTEGER) {
                 sb_append(&cg->code, "   mov\t\trax, 0\n");
                 sb_append(&cg->code, "   mov\t\t%s, %s %d[rbp]\n", REG_A(ident->type), WIDTH(ident->type), ident->stack_offset);
