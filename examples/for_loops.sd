@@ -37,6 +37,14 @@ main :: () {
     for x {
         print(it);
     }
+
+    print("");
+    
+    // If no expression is given, its an infinite loop like in Go
+    for {
+        print("To infinity and beyond!");
+        break;
+    }
     
     print("");
 

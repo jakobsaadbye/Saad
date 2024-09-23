@@ -128,7 +128,7 @@ AstExpr *simplify_expression(ConstEvaluater *ce, AstExpr *expr) {
             AstLiteral *lit = (AstLiteral *)(expr);
 
             if (lit->kind == LITERAL_IDENTIFIER) {
-                AstIdentifier *ident = symbol_lookup(&ce->parser->ident_table, lit->as.value.identifier.name)->as.identifier;
+                AstIdentifier *ident = symbol_lookup(&ce->parser->ident_table, lit->as.value.identifier.name, (Ast *)lit)->as.identifier;
                 if (ident->flags & IDENTIFIER_IS_CONSTANT) {
                     return simplify_expression(ce, ident->belongs_to_decl->expr);
                 }

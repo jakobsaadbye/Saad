@@ -3,7 +3,7 @@ Node :: struct {
     data : int;
 }
 
-main :: () -> int {
+main :: () {
 
     n0 : Node;
     n1 : Node;
@@ -19,13 +19,12 @@ main :: () -> int {
 
     cursor := &n0;
     for {
-        print("INFINITY!!!");
-        // print(cursor.data);
-        // cursor = cursor.next;
-        // if cursor == nil {
-        //     return 1;
-        // }
+        if cursor == nil {
+            break;
+        }
+        cursor = cursor.next;
     }
-}
 
+
+}
 

@@ -70,8 +70,10 @@ typedef enum TokenType {
     TOKEN_IF           = 162,
     TOKEN_ELSE         = 163,
     TOKEN_RETURN       = 164,
-    TOKEN_FOR          = 165,
-    TOKEN_TYPEOF       = 166,
+    TOKEN_BREAK        = 165,
+    TOKEN_CONTINUE     = 166,
+    TOKEN_FOR          = 167,
+    TOKEN_TYPEOF       = 168,
 
     TOKEN_STRUCT  = 180,
     TOKEN_ENUM    = 181,
@@ -233,6 +235,8 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_ASSERT:        return "ASSERT";
         case TOKEN_TYPEOF:        return "TYPEOF";
         case TOKEN_RETURN:        return "RETURN";
+        case TOKEN_BREAK:         return "BREAK";
+        case TOKEN_CONTINUE:      return "CONTINUE";
         case TOKEN_FOR:           return "FOR";
         case TOKEN_IF:            return "IF";
         case TOKEN_ELSE:          return "ELSE";
@@ -479,6 +483,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "float") == 0) token = TOKEN_TYPE_FLOAT;
         if (strcmp(text, "print") == 0) token = TOKEN_PRINT;
         if (strcmp(text, "false") == 0) token = TOKEN_FALSE;
+        if (strcmp(text, "break") == 0) token = TOKEN_BREAK;
     }
     if (keyword_len == 6) {
         if (strcmp(text, "struct") == 0) token = TOKEN_STRUCT;
@@ -486,6 +491,9 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "return") == 0) token = TOKEN_RETURN;
         if (strcmp(text, "assert") == 0) token = TOKEN_ASSERT;
         if (strcmp(text, "typeof") == 0) token = TOKEN_TYPEOF;
+    }
+    if (keyword_len == 8) {
+        if (strcmp(text, "continue") == 0) token = TOKEN_CONTINUE;
     }
 
     if (token == TOKEN_NONE) {

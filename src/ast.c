@@ -23,6 +23,7 @@ typedef enum AstType {
     AST_ASSERT,
     AST_TYPEOF,
     AST_RETURN,
+    AST_BREAK_OR_CONTINUE,
     AST_IF,
     AST_FOR,
     AST_EXPR,
@@ -269,7 +270,17 @@ typedef struct AstFor {
     AstIdentifier *iterator;
     AstExpr *iterable;
     AstBlock *body;
+
+    int condition_label; // Set in CodeGenerator so break and continue know where to branch to
+    int done_label;
 } AstFor;
+
+typedef struct AstBreakOrContinue {
+    Ast head;
+    
+    Token token; // Either has type TOKEN_BREAK or TOKEN_CONTINUE
+    AstFor *enclosing_for;
+} AstBreakOrContinue;
 
 typedef struct AstRangeExpr {
     AstExpr head;
@@ -592,5 +603,13 @@ bool is_signed_integer(Type *type) {
         return true;
     default:
         return false;
+    }
+}
+
+bool is_a_before_b (Ast *a, Ast *b) {
+    if ((b->start.line - a->start.line) > 0) return true;
+    if ((b->start.line - a->start.line) < 0) return false;
+    else {
+        return (b->start.col - a->start.col) < 0;
     }
 }

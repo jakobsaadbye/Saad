@@ -5,6 +5,7 @@ typedef struct Typer {
     ConstEvaluater *ce;
 
     AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
+    AstFor          *enclosing_for; // Used by break or continue statements to know where to branch to
 
     DynamicArray flattened_array; // of *DynamicArray of *TypeArray. Used to infer size of array literals
     int array_literal_depth;
@@ -82,11 +83,11 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
     if (type->kind == TYPE_POINTER) {
         TypePointer *ptr = (TypePointer *)(type);
 
-        Type *pointed_to = resolve_type(typer, ptr->pointer_to, decl);
-        if (!pointed_to) return NULL;
+        Type *points_to = resolve_type(typer, ptr->pointer_to, decl);
+        if (!points_to) return NULL;
 
         ptr->head.size = 8;
-        ptr->pointer_to = pointed_to;
+        ptr->pointer_to = points_to;
         return (Type *)(ptr);
     }
 
@@ -273,12 +274,12 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         Type *right_elem_type = ((TypeArray *)(rhs))->elem_type;
         return types_are_equal(left_elem_type, right_elem_type);
     } else if (lhs->kind == TYPE_POINTER && rhs->kind == TYPE_POINTER) {
-        Type *left_pointed_to  = ((TypePointer *)(lhs))->pointer_to;
-        Type *right_pointed_to = ((TypePointer *)(rhs))->pointer_to;
-        if (right_pointed_to->kind == TYPE_VOID) {
+        Type *left_points_to  = ((TypePointer *)(lhs))->pointer_to;
+        Type *right_points_to = ((TypePointer *)(rhs))->pointer_to;
+        if (right_points_to->kind == TYPE_VOID) {
             return true;
         }
-        return types_are_equal(left_pointed_to, right_pointed_to);
+        return types_are_equal(left_points_to, right_points_to);
     }
     else {
         return false;
@@ -286,7 +287,7 @@ bool types_are_equal(Type *lhs, Type *rhs) {
 }
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
-    Symbol *func_symbol = symbol_lookup(&typer->parser->function_table, call->identifer->name);
+    Symbol *func_symbol = symbol_lookup(&typer->parser->function_table, call->identifer->name, (Ast *)call);
     if (func_symbol == NULL) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Unknown function '%s'", call->identifer->name);
         return NULL;
@@ -338,7 +339,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         lhs_is_constant = false;
     }
     else if (is_identifier) {
-        ident = symbol_lookup(&typer->parser->ident_table, ((AstLiteral *)(assign->lhs))->as.value.identifier.name)->as.identifier;
+        ident = symbol_lookup(&typer->parser->ident_table, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs)->as.identifier;
         assert(ident); // Is checked in check_expression so no need to check it here also
         lhs_is_constant = ident->flags & IDENTIFIER_IS_CONSTANT;
     } else {
@@ -359,17 +360,17 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
 
     if (lhs_type->kind == TYPE_POINTER) {
         if (expr_type->kind != TYPE_POINTER) {
-            Type *pointed_to = ((TypePointer *)(lhs_type))->pointer_to;
-            while (pointed_to->kind == TYPE_POINTER) {
-                pointed_to = ((TypePointer *)(pointed_to))->pointer_to;
+            Type *points_to = ((TypePointer *)(lhs_type))->pointer_to;
+            while (points_to->kind == TYPE_POINTER) {
+                points_to = ((TypePointer *)(points_to))->pointer_to;
             }
 
-            if (!types_are_equal(pointed_to, expr_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Expression of type %s cannot be assigned to pointer with innermost type %s", type_to_str(expr_type), type_to_str(pointed_to));
+            if (!types_are_equal(points_to, expr_type)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Expression of type %s cannot be assigned to pointer with innermost type %s", type_to_str(expr_type), type_to_str(points_to));
                 return false;
             }
 
-            bool ok = check_for_integer_overflow(typer, pointed_to, assign->expr);
+            bool ok = check_for_integer_overflow(typer, points_to, assign->expr);
             if (!ok) return false;
 
             return true;
@@ -439,6 +440,8 @@ bool check_struct(Typer *typer, AstStruct *ast_struct) {
 }
 
 bool check_for(Typer *typer, AstFor *ast_for) {
+    typer->enclosing_for = ast_for;
+
     if (!ast_for->iterable) {
         // Nothing to check!
     }
@@ -484,6 +487,7 @@ bool check_for(Typer *typer, AstFor *ast_for) {
     bool ok = check_block(typer, ast_for->body, true);
     if (!ok) return false;
 
+    typer->enclosing_for = NULL;
     return true;
 }
 
@@ -571,6 +575,18 @@ bool check_statement(Typer *typer, Ast *stmt) {
         }
 
         ast_return->enclosing_function = ef;
+        return true;
+    }
+    case AST_BREAK_OR_CONTINUE: {
+        AstBreakOrContinue *boc = (AstBreakOrContinue *)(stmt);
+        AstFor *enclosing_for = typer->enclosing_for;
+        if (!enclosing_for) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(boc), "%s is only allowed inside for-loop's", boc->token.type ==TOKEN_BREAK ? "break" : "continue");
+            return false;
+        }
+
+        boc->enclosing_for = enclosing_for;
+
         return true;
     }
     case AST_FUNCTION_DEFN: {
@@ -877,6 +893,8 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
 
     //
     // Explicit enum value
+    // @Cleanup - I think this bit of code can be better put elsewhere in a unary dot as that is what we are checking for here. e.g .ENUM
+    //            That way, i wouldn't need to have an access kind for the member
     //
     AstExpr *lhs = ma->left;
     if (type_lhs->kind == TYPE_ENUM && lhs->head.type == AST_LITERAL && ((AstLiteral *)(lhs))->kind == LITERAL_IDENTIFIER) {
@@ -904,10 +922,10 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     TypeStruct *struct_defn;
     bool valid_lhs = false;
     if (type_lhs->kind == TYPE_POINTER) {
-        Type *pointed_to = ((TypePointer *)(type_lhs))->pointer_to;
+        Type *points_to = ((TypePointer *)(type_lhs))->pointer_to;
 
-        if (pointed_to->kind == TYPE_STRUCT) {
-            struct_defn = (TypeStruct *)(pointed_to);
+        if (points_to->kind == TYPE_STRUCT) {
+            struct_defn = (TypeStruct *)(points_to);
             valid_lhs = true;
         }
     }
@@ -943,7 +961,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
 
 Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_type) {
     TypeStruct *struct_defn = NULL;
-    if (literal->explicit_type != NULL) {
+    if (literal->explicit_type) {
         // Explicit type is used
         Type *type = literal->explicit_type;
         if (type->kind == TYPE_STRUCT) {
@@ -1140,8 +1158,8 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
             return NULL;
         }
 
-        Type *pointed_to = ((TypePointer *)(expr_type))->pointer_to;
-        return pointed_to;
+        Type *points_to = ((TypePointer *)(expr_type))->pointer_to;
+        return points_to;
     }
     else {
         XXX;
@@ -1164,14 +1182,6 @@ bool is_boolean_operator(TokenType op) {
     return false;
 }
 
-bool is_a_before_b (Ast *a, Ast *b) {
-    if ((b->start.line - a->start.line) > 0) return true;
-    if ((b->start.line - a->start.line) < 0) return false;
-    else {
-        return (b->start.col - a->start.col) < 0;
-    }
-}
-
 Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     switch (literal->kind) {
     case LITERAL_INTEGER:   return (ctx_type && ctx_type->kind == TYPE_INTEGER) ? ctx_type : primitive_type(PRIMITIVE_INT);
@@ -1181,18 +1191,13 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     case LITERAL_NIL:       return (Type *)t_nil_ptr;
     case LITERAL_IDENTIFIER: {
         char   *ident_name   = literal->as.value.identifier.name;
-        Symbol *ident_symbol = symbol_lookup(&typer->parser->ident_table, ident_name);
+        Symbol *ident_symbol = symbol_lookup(&typer->parser->ident_table, ident_name, (Ast *)literal);
         if (ident_symbol == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared variable '%s'", ident_name);
             return NULL;
         }
 
         AstIdentifier *ident = ident_symbol->as.identifier;
-
-        if (is_a_before_b((Ast *)(literal), (Ast *)(ident))) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared variable '%s'", ident->name);
-            return NULL;
-        }
 
         // Type must have been resolved at this point
         return ident->type;
@@ -1218,14 +1223,14 @@ DynamicArray get_struct_members(AstStruct *struct_defn) {
 }
 
 AstStruct *get_struct(SymbolTable *type_table, char *name) {
-    Symbol *struct_sym = symbol_lookup(type_table, name);
+    Symbol *struct_sym = symbol_lookup(type_table, name, NULL);
     if (struct_sym == NULL) return NULL;
     assert(struct_sym->type == AST_STRUCT);
     return struct_sym->as.struct_defn;
 }
 
 AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name) {
-    Symbol *member_sym = symbol_lookup(&struct_defn->member_table, name);
+    Symbol *member_sym = symbol_lookup(&struct_defn->member_table, name, NULL);
     if (member_sym == NULL) return NULL;
 
     assert(member_sym->type == AST_DECLARATION);

@@ -1,24 +1,24 @@
 TODO Arrays:
-    - Codegen for assignment to array access
-    - Codegen for array access in expressions
     - Codegen for declaring arrays
 
 TODO:
     - Backing integer types for enums
     - Better printf
-    - Better scoping
-    - Error messages with multiple color highlighting.
-    - :WrongForLoopSizing
+    - Better scoping (structs should have their own scope, same with enums)
+    - Error messages with multiple color highlighting. (For cases where the red underline can be confusing. E.g when doing pointer dereference)
+    - :WrongForLoopSizing (remove temporary hack of aligning functions to 32 bytes just to fix for-loops wrong size!)
+    - Unary dot for enum access
 
 Roadmap:
-    - Pointer types
+    - Revisit of for-loops
+    - Pointer types (Mostly done)
     - Array types
     - Constants (Mostly done. Missing as struct member)
-    - Revisit of for-loops
     - Switch statement
+    - Type casts
     - Heap allocation + Allocators
     - Structs as function parameters
     - Struct default values
     - Bit operations
-    - Foreign functions + C bindings
+    - Foreign functions / C bindings
     - Modules / Packages

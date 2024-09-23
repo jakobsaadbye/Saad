@@ -179,6 +179,18 @@ Ast *parse_statement(Parser *parser) {
         stmt = (Ast *)(parse_return(parser));
         statement_ends_with_semicolon = true;
     }
+    else if (token.type == TOKEN_BREAK || token.type == TOKEN_CONTINUE) {
+        eat_token(parser);
+
+        AstBreakOrContinue *boc = ast_allocate(parser, sizeof(AstBreakOrContinue));
+        boc->head.type          = AST_BREAK_OR_CONTINUE;
+        boc->head.start         = token.start;
+        boc->head.end           = token.end;
+        boc->token              = token;
+
+        stmt = (Ast *)boc;
+        statement_ends_with_semicolon = true;
+    }
     else if (token.type == TOKEN_PRINT) {
         stmt = (Ast *)(parse_print(parser));
         statement_ends_with_semicolon = true;
@@ -284,14 +296,14 @@ Type *parse_type(Parser *parser) {
 
         TypePointer *ptr = type_alloc(&parser->type_table, sizeof(TypePointer));
         
-        Type *pointed_to = parse_type(parser);
-        if (!pointed_to) return NULL;
+        Type *points_to = parse_type(parser);
+        if (!points_to) return NULL;
 
         ptr->head.head.type  = AST_TYPE;
         ptr->head.head.start = asterix.start;
-        ptr->head.head.end   = pointed_to->head.end;
+        ptr->head.head.end   = points_to->head.end;
         ptr->head.kind       = TYPE_POINTER;
-        ptr->pointer_to      = pointed_to;
+        ptr->pointer_to      = points_to;
 
         return (Type *)(ptr);
     }
@@ -1399,7 +1411,6 @@ const char *ast_type_name(AstType ast_type) {
         case AST_PRINT:              return "AST_PRINT";
         case AST_ASSERT:             return "AST_ASSERT";
         case AST_TYPEOF:             return "AST_TYPEOF";
-        case AST_RETURN:             return "AST_RETURN";
         case AST_STRUCT:             return "AST_STRUCT";
         case AST_STRUCT_LITERAL:     return "AST_STRUCT_LITERAL";
         case AST_STRUCT_INITIALIZER: return "AST_STRUCT_INITIALIZER";
@@ -1410,7 +1421,9 @@ const char *ast_type_name(AstType ast_type) {
         case AST_FUNCTION_DEFN:      return "AST_FUNCTION_DEFN";
         case AST_FUNCTION_CALL:      return "AST_FUNCTION_CALL";
         case AST_IF:                 return "AST_IF";
+        case AST_RETURN:             return "AST_RETURN";
         case AST_FOR:                return "AST_FOR";
+        case AST_BREAK_OR_CONTINUE:  return "AST_BREAK_OR_CONTINUE";
         case AST_EXPR:               return "AST_EXPR";
         case AST_RANGE_EXPR:         return "AST_RANGE_EXPR";
         case AST_BINARY:             return "AST_BINARY";

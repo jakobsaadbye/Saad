@@ -76,12 +76,30 @@ void close_scope(SymbolTable *st) {
     st->current_scope = st->current_scope->parent;
 }
 
-Symbol *symbol_lookup(SymbolTable *st, char *name) {
+Symbol *symbol_lookup(SymbolTable *st, char *name, Ast *used_at) {
     Scope *searching_scope = st->current_scope;
     Symbol *symbol = NULL;
     while (true) {
         symbol = (Symbol *) hash_table_get(&searching_scope->symbols, name);
-        if (symbol) break;
+        if (symbol) {
+            if (symbol->type == AST_IDENTIFIER) {
+                Ast *declared_at = &symbol->as.identifier->head;
+                if (is_a_before_b(used_at, declared_at)) {
+                    // Keep looking for the identifier in parent scopes, as we can't have identifiers be used
+                    // before they are initialized.
+                    // @Note - This check should only be done in 'imperative' scopes. In struct or enum scopes, it should be fine to refer to other things in the same scope
+                    //         since its all constant anyways
+                    searching_scope = searching_scope->parent;
+                    if (searching_scope == NULL) {
+                        return NULL;
+                    }
+
+                    continue;
+                }
+            }
+
+            return symbol;
+        }
         
         searching_scope = searching_scope->parent;
         if (searching_scope == NULL) {
@@ -89,8 +107,6 @@ Symbol *symbol_lookup(SymbolTable *st, char *name) {
             return NULL;
         }
     }
-
-    return symbol;
 }
 
 DynamicArray symbol_get_symbols(SymbolTable *st) {
