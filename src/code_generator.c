@@ -210,7 +210,7 @@ void emit_break_or_continue(CodeGenerator *cg, AstBreakOrContinue *boc) {
     if (boc->token.type == TOKEN_BREAK) {
         sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing_for->done_label);
     } else if (boc->token.type == TOKEN_CONTINUE) {
-        sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing_for->condition_label);
+        sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing_for->post_expression_label);
     } else {
         XXX; // Shouldn't happen
     }
@@ -348,16 +348,17 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
 }
 
 void emit_for(CodeGenerator *cg, AstFor *ast_for) {
-    int for_label = make_label_number(cg);
-    int done_label = make_label_number(cg);
+    int cond_label            = make_label_number(cg);
+    int post_expression_label = make_label_number(cg);
+    int done_label            = make_label_number(cg);
 
-    ast_for->condition_label = for_label;
+    ast_for->post_expression_label = post_expression_label;
     ast_for->done_label = done_label;
     
     if (!ast_for->iterable) {
-        sb_append(&cg->code, "L%d:\n", for_label);
+        sb_append(&cg->code, "L%d:\n", cond_label);
         emit_block(cg, ast_for->body, true);
-        sb_append(&cg->code, "   jmp\t\tL%d\n", for_label);
+        sb_append(&cg->code, "   jmp\t\tL%d\n", cond_label);
         sb_append(&cg->code, "L%d:\n", done_label);
     }
     else if (ast_for->iterable->head.type == AST_RANGE_EXPR) {
@@ -386,15 +387,17 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         sb_append(&cg->code, "   mov\t\teax, %d[rbp]\n", offset_start);
         sb_append(&cg->code, "   mov\t\t%d[rbp], eax\n", offset_iterator);
 
-        sb_append(&cg->code, "L%d:\n", for_label);
+        sb_append(&cg->code, "L%d:\n", cond_label);
         sb_append(&cg->code, "   mov\t\teax, %d[rbp]\n", offset_end);
         sb_append(&cg->code, "   cmp\t\t%d[rbp], eax\n", offset_iterator);
         sb_append(&cg->code, "   %s\t\tL%d\n", range->inclusive ? "jg" : "jge", done_label);
 
         emit_block(cg, ast_for->body, true);
-
+        
+        
+        sb_append(&cg->code, "L%d:\n", post_expression_label);
         sb_append(&cg->code, "   inc\t\tDWORD %d[rbp]\n", offset_iterator);
-        sb_append(&cg->code, "   jmp\t\tL%d\n", for_label);
+        sb_append(&cg->code, "   jmp\t\tL%d\n", cond_label);
 
         sb_append(&cg->code, "L%d:\n", done_label);
     } 
@@ -422,7 +425,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         sb_append(&cg->code, "   mov\t\t%d[rbp], rbx     ; count\n", offset_count);
         sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0 ; index\n", offset_index);
         
-        sb_append(&cg->code, "L%d:\n", for_label);
+        sb_append(&cg->code, "L%d:\n", cond_label);
         sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", offset_count);
         sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", offset_index);
         sb_append(&cg->code, "   cmp\t\trax, rbx\n");
@@ -448,9 +451,10 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         }
 
         emit_block(cg, ast_for->body, true);
-
+        
+        sb_append(&cg->code, "L%d:\n", post_expression_label);
         sb_append(&cg->code, "   inc\t\tQWORD %d[rbp]\n", offset_index);
-        sb_append(&cg->code, "   jmp\t\tL%d\n", for_label);
+        sb_append(&cg->code, "   jmp\t\tL%d\n", cond_label);
 
         sb_append(&cg->code, "L%d:\n", done_label);
     }

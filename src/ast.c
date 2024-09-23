@@ -271,7 +271,7 @@ typedef struct AstFor {
     AstExpr *iterable;
     AstBlock *body;
 
-    int condition_label; // Set in CodeGenerator so break and continue know where to branch to
+    int post_expression_label; // Set in CodeGenerator so break and continue know where to branch to
     int done_label;
 } AstFor;
 
