@@ -887,7 +887,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.type == AST_ENUM_LITERAL)   result = check_enum_literal(typer, (AstEnumLiteral *)(expr), ctx_type);
     else if (expr->head.type == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr));
     else if (expr->head.type == AST_ARRAY_ACCESS)   result = check_array_access(typer, (AstArrayAccess *)(expr));
-    else if (expr->head.type == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_INT); // @Investigate - Shouldn't this be checked for both sides being integers???
+    else if (expr->head.type == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_S64); // @Investigate - Shouldn't this be checked for both sides being integers???
     else {
         printf("%s:%d: compiler-error: Unhandled cases in 'type_expression'. Expression was of type %s", __FILE__, __LINE__, ast_type_name(expr->head.type));
         exit(1);

@@ -1,15 +1,29 @@
+Monstor :: struct {
+    name  : string;
+    ugly  : bool;
+    scary : bool;
+}
+
 main :: () {
 
-    numbers := [1,1,2,3,5,8,11,19,30];
+    monstors : []Monstor = [
+        .{"Mike", true, false},
+        .{"Solomon", false, true},
+        .{"Ralph", true, true},
+    ];
     
-    for n, i in numbers {
-        print(i);
-        print(n);
+    for m, i in monstors {
+        print(m.name);
     }
 
     print("");
 
     for n, i in 10...20 {
+        if i == 0 {
+            typeof(i);
+            typeof(n);
+        }
+
         print(i);
         print(n);
     }
