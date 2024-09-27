@@ -640,7 +640,7 @@ AstFor *parse_for(Parser *parser) {
         Token next = peek_next_token(parser);
         if (next.type != '{' ) {
             report_error_range(parser, iterable->head.start, next.end, "Syntax Error: Invalid for-expression");
-            exit(1);
+            return NULL;
         }
 
         iterator = make_identifier_from_string(parser, "it", NULL); // type is set later

@@ -462,13 +462,17 @@ bool check_for(Typer *typer, AstFor *ast_for) {
             return NULL;
         }
 
-        ast_for->iterator->type = primitive_type(PRIMITIVE_INT);
+        ast_for->iterator->type = primitive_type(PRIMITIVE_S64);
+        if (ast_for->index) {
+            ast_for->index->type = primitive_type(PRIMITIVE_S64);
+        }
 
-        // allocate space for the iterator, start and end
+        // allocate space for the iterator, start, end and optionally for the index
         assert(typer->enclosing_function != NULL);
-        typer->enclosing_function->bytes_allocated += ast_for->iterator->type->size;
-        typer->enclosing_function->bytes_allocated += type_start->size;
-        typer->enclosing_function->bytes_allocated += type_end->size;
+        typer->enclosing_function->bytes_allocated += 24;
+        if (ast_for->index) {
+            typer->enclosing_function->bytes_allocated += 8;
+        }
     } 
     else {
         Type *iterable_type = check_expression(typer, (AstExpr *)ast_for->iterable, NULL);
@@ -480,7 +484,7 @@ bool check_for(Typer *typer, AstFor *ast_for) {
 
         ast_for->iterator->type = ((TypeArray *)(iterable_type))->elem_type;
         if (ast_for->index) {
-            ast_for->index->type = primitive_type(PRIMITIVE_INT);
+            ast_for->index->type = primitive_type(PRIMITIVE_S64);
         }
 
         // Allocate space for iterator, pointer to head of array, stop condition (count) and index
@@ -512,7 +516,8 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_ASSIGNMENT:  return check_assignment(typer, (AstAssignment *)(stmt));
     case AST_PRINT: {
         AstPrint *print = (AstPrint *)(stmt);
-        return check_expression(typer, print->expr, NULL);
+        Type *ok = check_expression(typer, print->expr, NULL);
+        return ok;
     }
     case AST_ASSERT: {
         AstAssert *assertion = (AstAssert *)(stmt);
@@ -1204,7 +1209,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 
         AstIdentifier *ident = ident_symbol->as.identifier;
 
-        // Type must have been resolved at this point
+        assert(ident->type);
         return ident->type;
     }}
 

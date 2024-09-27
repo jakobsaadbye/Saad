@@ -365,38 +365,46 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         AstRangeExpr * range = (AstRangeExpr *)(ast_for->iterable);
         
         // allocate space for start and end range values 
-        int size_start    = range->start->evaluated_type->size;
-        int size_end      = range->end->evaluated_type->size;
         int size_iterator = ast_for->iterator->type->size;
 
-        int offset_start    = (cg->base_ptr - (size_start));
-        int offset_end      = (cg->base_ptr - (size_start + size_end));
-        int offset_iterator = (cg->base_ptr - (size_start + size_end + size_iterator));
-        cg->base_ptr -= (size_start + size_end + size_iterator);
+        cg->base_ptr = align_value(cg->base_ptr, size_iterator);
+
+        int offset_iterator = cg->base_ptr - size_iterator;
+        int offset_start    = offset_iterator - 8;
+        int offset_end      = offset_iterator - 16;
+        int offset_index    = offset_iterator - 24; // Only used if an index is also specified
+
+        cg->base_ptr -= size_iterator + 16;
+        if (ast_for->index) {
+            cg->base_ptr -= 8;
+            ast_for->index->stack_offset = offset_index;
+        }
+        ast_for->iterator->stack_offset = offset_iterator;
+
 
         emit_expression(cg, range->start);
         emit_expression(cg, range->end);
 
         sb_append(&cg->code, "   pop\t\trbx\n");
         sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   mov\t\t%d[rbp], eax\n", offset_start);
-        sb_append(&cg->code, "   mov\t\t%d[rbp], ebx\n", offset_end);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", offset_start);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", offset_end);
 
-        // initialize iterator
-        ast_for->iterator->stack_offset = offset_iterator;
-        sb_append(&cg->code, "   mov\t\teax, %d[rbp]\n", offset_start);
-        sb_append(&cg->code, "   mov\t\t%d[rbp], eax\n", offset_iterator);
+        // initialize iterator and optionally the index
+        sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", offset_start);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", offset_iterator);
+        if (ast_for->index)  sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", offset_index);
 
         sb_append(&cg->code, "L%d:\n", cond_label);
-        sb_append(&cg->code, "   mov\t\teax, %d[rbp]\n", offset_end);
-        sb_append(&cg->code, "   cmp\t\t%d[rbp], eax\n", offset_iterator);
+        sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", offset_end);
+        sb_append(&cg->code, "   cmp\t\t%d[rbp], rax\n", offset_iterator);
         sb_append(&cg->code, "   %s\t\tL%d\n", range->inclusive ? "jg" : "jge", done_label);
 
         emit_block(cg, ast_for->body, true);
         
-        
         sb_append(&cg->code, "L%d:\n", post_expression_label);
-        sb_append(&cg->code, "   inc\t\tDWORD %d[rbp]\n", offset_iterator);
+        sb_append(&cg->code, "   inc\t\tQWORD %d[rbp]\n", offset_iterator);
+        if (ast_for->index)  sb_append(&cg->code, "   inc\t\tQWORD %d[rbp]\n", offset_index);
         sb_append(&cg->code, "   jmp\t\tL%d\n", cond_label);
 
         sb_append(&cg->code, "L%d:\n", done_label);
