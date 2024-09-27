@@ -442,10 +442,11 @@ bool check_struct(Typer *typer, AstStruct *ast_struct) {
 bool check_for(Typer *typer, AstFor *ast_for) {
     typer->enclosing_for = ast_for;
 
-    if (!ast_for->iterable) {
+    if (ast_for->kind == FOR_INFINITY_AND_BEYOND) {
         // Nothing to check!
     }
     else if (ast_for->iterable->head.type == AST_RANGE_EXPR) {
+        // @Incomplete - Need to set type of index if being used!
         AstRangeExpr *range = (AstRangeExpr *)(ast_for->iterable);
         
         Type* type_start = check_expression(typer, range->start, NULL);
@@ -478,6 +479,9 @@ bool check_for(Typer *typer, AstFor *ast_for) {
         }
 
         ast_for->iterator->type = ((TypeArray *)(iterable_type))->elem_type;
+        if (ast_for->index) {
+            ast_for->index->type = primitive_type(PRIMITIVE_INT);
+        }
 
         // Allocate space for iterator, pointer to head of array, stop condition (count) and index
         assert(typer->enclosing_function != NULL);
@@ -858,6 +862,7 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
 
     AstExpr *subscript = array_ac->subscript;
     Type    *subscript_type = check_expression(typer, subscript, type_being_accessed); // @Note - passing down type_being_accessed to allow enum literals to be used
+    if (!subscript_type) return NULL;
     if (subscript_type->kind != TYPE_INTEGER && subscript_type->kind != TYPE_ENUM) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(subscript), "Array subscript must be an integer or enum type, got type %s", type_to_str(subscript_type));
         return NULL;

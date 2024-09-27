@@ -47,7 +47,7 @@ main :: () {
     v = v + 1;
     print(v); // CardValue.jack
     
-    // Also means we can assign unknown values
+    // Also means we can assign values not in range of the enum
     v = 99;
     print(v); // Will just print '99'
 }

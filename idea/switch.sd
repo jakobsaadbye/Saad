@@ -16,7 +16,7 @@ main :: () {
     switch status {
         case .open:   str = "open";
         case .closed: str = "closed";
-        otherwise:    str = "invalid";
+        case:         str = "invalid";
     } 
 
     print(str);

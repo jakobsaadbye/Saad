@@ -403,18 +403,24 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
     } 
     else {
         AstIdentifier *iterator = ast_for->iterator;
+        AstIdentifier *index    = ast_for->index;
         AstExpr *iterable       = ast_for->iterable;
 
         // Allocate space for iterator, pointer to head of array, stop condition (count) and index
-
+        //
+        // :WrongForLoopSizing @Investigate - Might have to do with the fact that we are not aligning the stack before allocating space for the iterator!
         int aligned_iterator_size = align_value(iterator->type->size, 8);
         int offset_iterator       = cg->base_ptr - aligned_iterator_size;
         int offset_data           = offset_iterator - 8;
         int offset_count          = offset_iterator - 16;
         int offset_index          = offset_iterator - 24;
         cg->base_ptr             -= 24 + aligned_iterator_size;
-
+        
+        assert(iterator);
         iterator->stack_offset = offset_iterator;
+        if (index) {
+            index->stack_offset = offset_index;
+        }
 
         emit_expression(cg, iterable);
 

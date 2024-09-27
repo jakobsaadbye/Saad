@@ -143,37 +143,30 @@ Ast *parse_statement(Parser *parser) {
     
     Token token = peek_next_token(parser);
 
-    if (token.type == TOKEN_IDENTIFIER) {
-        Token next      = peek_token(parser, 1); // @Cleanup - This is dangerous!!!
-        Token next_next = peek_token(parser, 2); // @Cleanup - This is dangerous!!!
-        if (next.type == TOKEN_DOUBLE_COLON && next_next.type == '(') {
-            stmt = (Ast *)(parse_function_defn(parser));
-            statement_ends_with_semicolon = false;
-        }
-        else if (next.type == '(') {
-            stmt = (Ast *)(parse_function_call(parser));
-            statement_ends_with_semicolon = true;
-        }
+    if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '(') {
+        stmt = (Ast *)(parse_function_call(parser));
+        statement_ends_with_semicolon = true;
+    }
+    else if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == '(') {
+        stmt = (Ast *)(parse_function_defn(parser));
+        statement_ends_with_semicolon = false;
+    }
+    else if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_STRUCT) {
         // @Note - Structs should probably be parsed at the top level code instead of as a statement 
-        else if (next.type == TOKEN_DOUBLE_COLON && next_next.type == TOKEN_STRUCT) {
-            stmt = (Ast *)(parse_struct(parser));
-            statement_ends_with_semicolon = false;
-        }
-        else if (next.type == TOKEN_DOUBLE_COLON && next_next.type == TOKEN_ENUM) {
-            stmt = (Ast *)(parse_enum(parser));
-            statement_ends_with_semicolon = false;
-        }
-        else if (
-            next.type == ':' ||
-            next.type == TOKEN_COLON_EQUAL || 
-            next.type == TOKEN_DOUBLE_COLON
-        ) {
-            stmt = (Ast *)(parse_declaration(parser, 0));
-            statement_ends_with_semicolon = true;
-        } 
-        else {
-            // Fallthrough
-        }
+        stmt = (Ast *)(parse_struct(parser));
+        statement_ends_with_semicolon = false;
+    }
+    else if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_ENUM) {
+        stmt = (Ast *)(parse_enum(parser));
+        statement_ends_with_semicolon = false;
+    }
+    else if (token.type == TOKEN_IDENTIFIER && 
+            (peek_token(parser, 1).type == ':' ||
+            peek_token(parser, 1).type == TOKEN_COLON_EQUAL ||
+            peek_token(parser, 1).type == TOKEN_DOUBLE_COLON))
+    {
+        stmt = (Ast *)(parse_declaration(parser, 0));
+        statement_ends_with_semicolon = true;
     }
     else if (token.type == TOKEN_RETURN) {
         stmt = (Ast *)(parse_return(parser));
@@ -214,13 +207,12 @@ Ast *parse_statement(Parser *parser) {
     else if (token.type == '{') {
         stmt = (Ast *)(parse_block(parser, true));
         statement_ends_with_semicolon = false;
-    }
-
-    if (stmt == NULL) {
+    } 
+    else {
         AstExpr *lhs = parse_expression(parser, MIN_PRECEDENCE);
         if (!lhs) {
             report_error_token(parser, LABEL_ERROR, peek_next_token(parser), "Invalid expression");
-            exit(1);
+            return NULL;
         }
 
         Token next = peek_next_token(parser);
@@ -234,6 +226,10 @@ Ast *parse_statement(Parser *parser) {
         } else {
             return NULL;
         }
+    }
+
+    if (stmt == NULL) {
+        return NULL;
     }
 
     if (statement_ends_with_semicolon) {
@@ -587,6 +583,8 @@ AstAssignment *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token) {
 }
 
 AstFor *parse_for(Parser *parser) {
+    ForKind kind = 0;
+    AstIdentifier *index = NULL;
     AstIdentifier *iterator = NULL;
     AstExpr *iterable = NULL;
 
@@ -594,7 +592,6 @@ AstFor *parse_for(Parser *parser) {
     eat_token(parser);
 
     Token next = peek_next_token(parser);
-
     if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_IN) {
         iterator = make_identifier_from_token(parser, next, NULL);
 
@@ -603,10 +600,38 @@ AstFor *parse_for(Parser *parser) {
 
         iterable = parse_range_or_normal_expression(parser);
         if (!iterable) return NULL;
-    } 
+
+        kind = FOR_WITH_NAMED_ITERATOR;
+    }
+    else if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == ',') {
+        iterator = make_identifier_from_token(parser, next, NULL);
+        eat_token(parser);
+        eat_token(parser);
+        
+        next = peek_next_token(parser);
+        if (next.type != TOKEN_IDENTIFIER) {
+            report_error_token(parser, LABEL_ERROR, next, "Expected an identifier for the index");
+            return NULL;
+        }
+        eat_token(parser);
+        index = make_identifier_from_token(parser, next, NULL);
+
+        next = peek_next_token(parser);
+        if (next.type != TOKEN_IN) {
+            report_error_token(parser, LABEL_ERROR, next, "Expected the 'in' keyword here");
+            return NULL;
+        }
+        eat_token(parser);
+
+        iterable = parse_range_or_normal_expression(parser);
+        if (!iterable) return NULL;
+        
+        kind = FOR_WITH_NAMED_ITERATOR_AND_INDEX;
+    }
     else if (next.type == '{') {
         iterator = NULL;
         iterable = NULL;
+        kind = FOR_INFINITY_AND_BEYOND;
     }
     else {
         iterable = parse_range_or_normal_expression(parser);
@@ -619,14 +644,17 @@ AstFor *parse_for(Parser *parser) {
         }
 
         iterator = make_identifier_from_string(parser, "it", NULL); // type is set later
+        kind = FOR_WITH_EXPR;
     }
     
 
     AstBlock *body;
-    if (iterator) {
+    if (iterator || index) {
         // Push down the iterator into the scope of the body
         open_scope(&parser->ident_table);
-        symbol_add_identifier(&parser->ident_table, iterator);
+        if (iterator) symbol_add_identifier(&parser->ident_table, iterator);
+        if (index)    symbol_add_identifier(&parser->ident_table, index);
+        
         body = parse_block(parser, false);
         if (!body) return NULL;
         close_scope(&parser->ident_table);
@@ -639,7 +667,9 @@ AstFor *parse_for(Parser *parser) {
     ast_for->head.type = AST_FOR;
     ast_for->head.start = for_token.start;
     ast_for->head.end = body->head.end;
+    ast_for->kind = kind;
     ast_for->iterator = iterator;
+    ast_for->index = index;
     ast_for->iterable = iterable;
     ast_for->body = body;
 

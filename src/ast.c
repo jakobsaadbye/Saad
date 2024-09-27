@@ -264,10 +264,19 @@ typedef struct AstIf {
     DynamicArray else_ifs;  // of *AstIf
 } AstIf;
 
+typedef enum ForKind {
+    FOR_WITH_NAMED_ITERATOR = 1,
+    FOR_WITH_NAMED_ITERATOR_AND_INDEX = 2,
+    FOR_WITH_EXPR = 3,
+    FOR_INFINITY_AND_BEYOND = 4,
+} ForKind;
+
 typedef struct AstFor {
     Ast head;
 
+    ForKind kind;
     AstIdentifier *iterator;
+    AstIdentifier *index;
     AstExpr *iterable;
     AstBlock *body;
 

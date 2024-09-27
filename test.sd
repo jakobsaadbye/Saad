@@ -1,22 +1,66 @@
-Node :: struct {
-    next : *Node;
-    data : int;
+// main :: () {
+
+//     numbers := [1,1,2,3,5,8,11,19,30];
+    
+//     for n, in numbers {
+//         print(i);
+//         print(n);
+//         print("");
+//     }
+
+
+// }
+
+// Enums work mostly as they do in C.
+// They are mostly treated as integers and we don't go out of our way to check
+// that values assigned to enums are one of its options
+
+CardValue :: enum {
+    joker = 0,
+    ace,        // 'ace' will have value 1
+    two,
+    three,
+    four,
+    five,
+    six,
+    seven,
+    eight,
+    nine,
+    ten,
+    jack,
+    queen,
+    king,
+
+    count
+}
+
+CardSuit :: enum {
+    joker = 0,
+    diamonds,
+    clubs,
+    hearts = .joker + 3, // Enum members can reference other enum members for their value
+    spades = 4,
+
+    // also_joker = .joker, // All enum members must have unique values, so this will fail if you uncomment it
+
+    count
 }
 
 main :: () {
-    for i in -1...1 {
-        for j in -1...1 {
-            if i == 0 && j == 0 {
-                continue;
-            }
-            print(i);
-            print(j);
-            print("");
-        }
+    // Enums default initialzes to 0 regardless of what the first member is
+    v : CardValue;
+    print(v); // Will print 'CardValue.joker'
 
-        print("");
-    }
+    // Enum members can be referenced using .<enum_name> if the enum can be inferred from the context. In this case from the left-hand-side of the assignment
+    v = .ten;
+    // The above is the same as saying
+    v = CardValue.ten;
 
-
+    // Because enum members are just treated as integers, we can do the following
+    v = v + 1;
+    print(v); // CardValue.jack
+    
+    // Also means we can assign values not in range of the enum
+    v = 99;
+    print(v); // Will just print '99'
 }
-
