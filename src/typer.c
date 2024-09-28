@@ -608,7 +608,6 @@ bool check_statement(Typer *typer, Ast *stmt) {
 
         print->c_string = c_string;
 
-        printf("Generated c string = %s\n", c_string);
         return true;
     }
     case AST_ASSERT: {

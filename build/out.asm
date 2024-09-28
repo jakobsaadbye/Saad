@@ -9,6 +9,8 @@ segment .data
    string_false DB "false", 10, 0
    string_true  DB "true", 10, 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
+   CS0 DB "Jakob", 0 
+   CS1 DB "Congratulations %s on your %s birthday!", 0 
 
 segment .text
    global main
@@ -42,315 +44,25 @@ enum_end:
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 96
+   sub		rsp, 32
 
-   ; initialization of 'a'
-   mov		BYTE -1[rbp], 0
-   mov		rax, 255
+   ; expression of print
+   mov		rax, CS0
    push		rax
-   mov		rax, 1
-   push		rax
-   pop		rbx
+   push		-1
    pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		BYTE -1[rbp], al
-
-   ; initialization of 'b'
-   mov		WORD -4[rbp], 0
-   mov		rax, 65535
-   push		rax
-   mov		rax, 1
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		WORD -4[rbp], ax
-
-   ; initialization of 'c'
-   mov		DWORD -8[rbp], 0
-   mov		rax, 4294967295
-   push		rax
-   mov		rax, 1
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		DWORD -8[rbp], eax
-
-   ; initialization of 'd'
-   mov		QWORD -16[rbp], 0
-   mov		rax, 18446744073709551615
-   push		rax
-   mov		rax, 1
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		QWORD -16[rbp], rax
-   mov		al, BYTE -1[rbp]
-   push		rax
-   mov		rax, 0
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 7
-   call		assert
-   mov		ax, WORD -4[rbp]
-   push		rax
-   mov		rax, 0
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 8
-   call		assert
-   mov		eax, DWORD -8[rbp]
-   push		rax
-   mov		rax, 0
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 9
-   call		assert
-   mov		rax, QWORD -16[rbp]
-   push		rax
-   mov		rax, 0
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 10
-   call		assert
-
-   ; initialization of 'e'
-   mov		BYTE -17[rbp], 0
-   mov		rax, 127
-   push		rax
-   mov		rax, 1
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		BYTE -17[rbp], al
-
-   ; initialization of 'f'
-   mov		WORD -20[rbp], 0
-   mov		rax, 32767
-   push		rax
-   mov		rax, 1
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		WORD -20[rbp], ax
-
-   ; initialization of 'g'
-   mov		DWORD -24[rbp], 0
-   mov		rax, 2147483647
-   push		rax
-   mov		rax, 1
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		DWORD -24[rbp], eax
-
-   ; initialization of 'h'
-   mov		QWORD -32[rbp], 0
-   mov		rax, 9223372036854775807
-   push		rax
-   mov		rax, 1
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		QWORD -32[rbp], rax
-
-   ; initialization of 'i'
-   mov		BYTE -33[rbp], 0
-   mov		rax, 129
-   push		rax
-   pop		rax
-   neg		rax
-   push		rax
-   pop		rax
-   mov		BYTE -33[rbp], al
-
-   ; initialization of 'j'
-   mov		WORD -36[rbp], 0
-   mov		rax, 32769
-   push		rax
-   pop		rax
-   neg		rax
-   push		rax
-   pop		rax
-   mov		WORD -36[rbp], ax
-
-   ; initialization of 'k'
-   mov		DWORD -40[rbp], 0
-   mov		rax, 2147483649
-   push		rax
-   pop		rax
-   neg		rax
-   push		rax
-   pop		rax
-   mov		DWORD -40[rbp], eax
-
-   ; initialization of 'l'
-   mov		QWORD -48[rbp], 0
-   mov		rax, 9223372036854775809
-   push		rax
-   pop		rax
-   neg		rax
-   push		rax
-   pop		rax
-   mov		QWORD -48[rbp], rax
-   mov		al, BYTE -17[rbp]
-   movsx		rax, al
-   push		rax
-   mov		rax, 128
-   push		rax
-   pop		rax
-   neg		rax
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 22
-   call		assert
-   mov		ax, WORD -20[rbp]
-   movsx		rax, ax
-   push		rax
-   mov		rax, 32768
-   push		rax
-   pop		rax
-   neg		rax
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 23
-   call		assert
-   mov		eax, DWORD -24[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 2147483648
-   push		rax
-   pop		rax
-   neg		rax
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 24
-   call		assert
-   mov		rax, QWORD -32[rbp]
-   push		rax
-   mov		rax, 9223372036854775808
-   push		rax
-   pop		rax
-   neg		rax
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 25
-   call		assert
-   mov		al, BYTE -33[rbp]
-   movsx		rax, al
-   push		rax
-   mov		rax, 127
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 26
-   call		assert
-   mov		ax, WORD -36[rbp]
-   movsx		rax, ax
-   push		rax
-   mov		rax, 32767
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 27
-   call		assert
-   mov		eax, DWORD -40[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 2147483647
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 28
-   call		assert
-   mov		rax, QWORD -48[rbp]
-   push		rax
-   mov		rax, 9223372036854775807
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 29
-   call		assert
+   cmp		al, 0
+   jnz		L1
+   mov		r8, string_false
+   jmp		L2
+L1:
+   mov		r8, string_true
+L2:
+   pop		rdx
+   mov		rcx, CS1
+   call		printf
 L0:
    mov		rax, 0
-   add		rsp, 96
+   add		rsp, 32
    pop		rbp
    ret

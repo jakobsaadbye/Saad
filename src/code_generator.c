@@ -648,69 +648,84 @@ const char *REG_D(Type *type) {
     XXX;
 }
 
+char *get_function_argument_register(int arg_index) {
+    if (arg_index == 0) return "rcx";
+    if (arg_index == 1) return "rdx";
+    if (arg_index == 2) return "r8";
+    if (arg_index == 3) return "r9";
+    if (arg_index == 4) return "r10";
+    if (arg_index == 5) return "r11";
+    if (arg_index == 6) return "r12";
+    if (arg_index == 7) return "r13";
+    if (arg_index == 8) return "r14";
+    if (arg_index == 9) return "r15";
+    XXX;
+}
+
 void emit_print(CodeGenerator *cg, AstPrint *print) {
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; expression of print\n");
-    
-    for (unsigned int i = 0; i < print->arguments.count; i++) {
+
+
+    // Push all the arguments on the stack
+    for (unsigned int i = 1; i < print->arguments.count; i++) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
         emit_expression(cg, arg);
-
     }
 
-    sb_append(&cg->code, "\n");
-    sb_append(&cg->code, "   ; call to print\n");
+    // Pop and assign registers
+    for (int i = print->arguments.count - 1; i >= 1; i--) {
+        AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
 
-    XXX;
-    // Type *expr_type = print->expr->evaluated_type;
-    // if (expr_type->kind == TYPE_INTEGER) {
-    //     sb_append(&cg->code, "   pop\t\trdx\n");
-    //     sb_append(&cg->code, "   mov\t\trcx, fmt_int\n");
-    //     sb_append(&cg->code, "   call\t\tprintf\n");
-    // }
-    // else if (expr_type->kind == TYPE_FLOAT) {
-    //     sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-    //     sb_append(&cg->code, "   add\t\trsp, 4\n");
-    //     sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
-    //     sb_append(&cg->code, "   movapd\txmm1, xmm0\n");
-    //     sb_append(&cg->code, "   movq\t\trdx, xmm0\n");
-    //     sb_append(&cg->code, "   mov\t\trcx, fmt_float\n");
-    //     sb_append(&cg->code, "   call\t\tprintf\n");
-    // }
-    // else if (expr_type->kind == TYPE_BOOL) {
-    //     int true_label        = make_label_number(cg);
-    //     int fallthrough_label = make_label_number(cg);
-    //     sb_append(&cg->code, "   pop\t\trax\n");
-    //     sb_append(&cg->code, "   cmp\t\tal, 0\n");
-    //     sb_append(&cg->code, "   jnz\t\tL%d\n", true_label);
-    //     sb_append(&cg->code, "   mov\t\trcx, string_false\n");
-    //     sb_append(&cg->code, "   jmp\t\tL%d\n", fallthrough_label);
-    //     sb_append(&cg->code, "L%d:\n", true_label);
-    //     sb_append(&cg->code, "   mov\t\trcx, string_true\n");
-    //     sb_append(&cg->code, "L%d:\n", fallthrough_label);
-    //     sb_append(&cg->code, "   call\t\tprintf\n");
-    // }
-    // else if (expr_type->kind == TYPE_STRING) {
-    //     sb_append(&cg->code, "   pop\t\trdx\n");
-    //     sb_append(&cg->code, "   mov\t\trcx, fmt_string\n");
-    //     sb_append(&cg->code, "   call\t\tprintf\n");
-    // }
-    // else if (expr_type->kind == TYPE_ENUM) {
-    //     sb_append(&cg->code, "   pop\t\trax\n");
-    //     sb_append(&cg->code, "   call\t\tprint_enum_%s\n", ((TypeEnum *)(expr_type))->identifier->name);
-    // }
-    // else if (expr_type->kind == TYPE_POINTER) {
-    //     sb_append(&cg->code, "   pop\t\trdx\n");
-    //     sb_append(&cg->code, "   mov\t\trcx, fmt_address\n");
-    //     sb_append(&cg->code, "   call\t\tprintf\n");
-    // }
-    // else if (expr_type->kind == TYPE_ARRAY) {
-    //     XXX;
-    // }
-    // else {
-    //     // Unhandled cases
-    //     XXX;
-    // }
+        Type *arg_type = arg->evaluated_type;
+        char *reg = get_function_argument_register(i);
+
+        if (arg_type->kind == TYPE_INTEGER) {
+            sb_append(&cg->code, "   pop\t\t%s\n", reg);
+        }
+        else if (arg_type->kind == TYPE_FLOAT) {
+            sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
+            sb_append(&cg->code, "   add\t\trsp, 4\n");
+            sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
+            sb_append(&cg->code, "   movapd\txmm1, xmm0\n");
+            sb_append(&cg->code, "   movq\t\t%s, xmm0\n", reg);
+        }
+        else if (arg_type->kind == TYPE_BOOL) {
+            int true_label        = make_label_number(cg);
+            int fallthrough_label = make_label_number(cg);
+            sb_append(&cg->code, "   pop\t\trax\n");
+            sb_append(&cg->code, "   cmp\t\tal, 0\n");
+            sb_append(&cg->code, "   jnz\t\tL%d\n", true_label);
+            sb_append(&cg->code, "   mov\t\t%s, string_false\n", reg);
+            sb_append(&cg->code, "   jmp\t\tL%d\n", fallthrough_label);
+            sb_append(&cg->code, "L%d:\n", true_label);
+            sb_append(&cg->code, "   mov\t\t%s, string_true\n", reg);
+            sb_append(&cg->code, "L%d:\n", fallthrough_label);
+        }
+        else if (arg_type->kind == TYPE_STRING) {
+            sb_append(&cg->code, "   pop\t\t%s\n", reg);
+        }
+        else if (arg_type->kind == TYPE_ENUM) {
+            sb_append(&cg->code, "   pop\t\trax\n");
+            sb_append(&cg->code, "   call\t\tprint_enum_%s\n", ((TypeEnum *)(arg_type))->identifier->name);
+        }
+        else if (arg_type->kind == TYPE_POINTER) {
+            sb_append(&cg->code, "   pop\t\trdx\n");
+            sb_append(&cg->code, "   mov\t\trcx, fmt_address\n");
+            sb_append(&cg->code, "   call\t\tprintf\n");
+        }
+        else if (arg_type->kind == TYPE_ARRAY) {
+            XXX;
+        }
+        else {
+            // Unhandled cases
+            XXX;
+        }
+    }
+
+    sb_append(&cg->data, "   CS%d DB \"%s\", 0 \n", cg->constants, print->c_string);
+    sb_append(&cg->code, "   mov\t\trcx, CS%d\n", cg->constants);
+    sb_append(&cg->code, "   call\t\tprintf\n");
 }
 
 void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type, bool is_array_initialization) {

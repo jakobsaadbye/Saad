@@ -16,5 +16,5 @@ main :: () {
     //     print(monstors[i].name);
     // }
 
-    print("Congratulations % on your % birthday!", "Jakob", 24);
+    print("Congratulations % on your % birthday!", "Jakob", true);
 }
