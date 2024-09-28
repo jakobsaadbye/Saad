@@ -11,13 +11,13 @@ typedef struct StringBuilder {
 } StringBuilder;
 
 
-StringBuilder string_builder_init(size_t init_capicity);
+StringBuilder sb_init(size_t init_capicity);
 void sb_append(StringBuilder *sb, const char *string, ...);
 void sb_free(StringBuilder *sb);
 char *sb_to_string(StringBuilder *sb);
 
 
-StringBuilder string_builder_init(size_t init_capicity) {
+StringBuilder sb_init(size_t init_capicity) {
     char *buffer = (char *)(malloc(init_capicity));
     memset(buffer, '\0', init_capicity);
 
@@ -67,6 +67,43 @@ void sb_append(StringBuilder *sb, const char *template, ...) {
 
         free(string);
     }
+}
+
+// Copies length amount of characters from src to the builder
+void sb_copy(StringBuilder *sb, char *src, int length) {
+    if ((sb->cursor + length) < sb->capacity) {
+        char *dst = &sb->buffer[sb->cursor];
+        memcpy(dst, src, length);
+        sb->cursor += length;
+
+        return;
+    } else {
+        size_t new_capacity = sb->capacity;
+        while (new_capacity <= sb->cursor + length) {
+            new_capacity = new_capacity * 2;
+        }
+
+        char *new_buffer = (char *)(realloc(sb->buffer, new_capacity));
+        if (new_buffer == NULL) {
+            printf("%s:%d: error: Buy more ram!", __FILE__, __LINE__);
+            exit(1);
+        }
+
+        sb->buffer   = new_buffer;
+        sb->capacity = new_capacity;
+
+        memset(&sb->buffer[sb->cursor], '\0', new_capacity - sb->cursor);
+
+        char *dst = &sb->buffer[sb->cursor];
+        memcpy(dst, src, length);
+        sb->cursor += length;
+    }
+}
+
+// Copies the null-terminated src string to the builder
+void sb_copy_string(StringBuilder *sb, char *src) {
+    int length = strlen(src);
+    sb_copy(sb, src, length);
 }
 
 void sb_free(StringBuilder *sb) {

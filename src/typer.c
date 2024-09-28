@@ -510,14 +510,106 @@ AstEnumerator *enum_value_is_unique(AstEnum *ast_enum, int value) {
     return NULL;
 }
 
+char *generate_c_printf_string(Typer *typer, AstPrint *print) {
+    assert(print->arguments.count >= 1);
+
+    AstExpr *arg0 = ((AstExpr **)print->arguments.items)[0];
+    assert(arg0->head.type == AST_LITERAL && ((AstLiteral *)arg0)->kind == LITERAL_STRING);
+
+    StringBuilder sb = sb_init(((AstLiteral *)arg0)->as.value.string.length);
+    char *head = ((AstLiteral *)arg0)->as.value.string.data;
+    char *c = head;
+    int num_specifiers = 0;
+
+    // First scan to get the number of specifiers
+    while (*c != '\0') {
+        if (*c == '%') {
+            num_specifiers += 1;
+        }
+        c += 1;
+    }
+
+    if ((unsigned int )num_specifiers != print->arguments.count - 1) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg0, "Mismatch in the number of specifiers and arguments. Got %d specifiers and %d arguments", num_specifiers, print->arguments.count - 1);
+        return NULL;
+    }
+
+    // Second scan to generate the string
+    c = head;
+    char *copied = c;
+    int chars_to_copy = 0;
+    int arg_index = 1; // Starts at 1 to skip the constant string
+    while (*c != '\0') {
+        if (*c == '%') {
+            Type *arg_type = ((AstExpr **)print->arguments.items)[arg_index]->evaluated_type;
+            char *format_specifier = "";
+            switch (arg_type->kind) {
+                case TYPE_BOOL:    format_specifier = "%s"; break;
+                case TYPE_INTEGER: format_specifier = "%lld"; break;
+                case TYPE_FLOAT:   format_specifier = "%lf"; break;
+                case TYPE_STRING:  format_specifier = "%s"; break;
+                default:
+                    printf("Internal Compiler Error: Got unknown argument type %s in generate_c_printf_string()", type_to_str(arg_type));
+                    return NULL;
+            }
+
+            // Copy everything upto this point in the src string
+            sb_copy(&sb, copied, chars_to_copy);
+            copied = c + 1;
+
+            // Copy the format specifier
+            sb_copy_string(&sb, format_specifier);
+
+            arg_index += 1;
+            chars_to_copy = 0;
+            c += 1;
+        }
+
+        chars_to_copy += 1;
+        c += 1;
+    }
+
+    // Copy the tail
+    sb_copy(&sb, copied, chars_to_copy);
+
+    return sb_to_string(&sb);
+}
+
 bool check_statement(Typer *typer, Ast *stmt) {
     switch (stmt->type) {
     case AST_DECLARATION: return check_declaration(typer, (AstDeclaration *)(stmt));
     case AST_ASSIGNMENT:  return check_assignment(typer, (AstAssignment *)(stmt));
     case AST_PRINT: {
         AstPrint *print = (AstPrint *)(stmt);
-        Type *ok = check_expression(typer, print->expr, NULL);
-        return ok;
+        if (print->arguments.count < 1) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)print, "Missing first argument to print");
+            return NULL;
+        }
+
+        for (unsigned int i = 0; i < print->arguments.count; i++) {
+            AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
+            Type *arg_type = check_expression(typer, arg, NULL);
+            if (!arg_type) return NULL;
+            if (i == 0) {
+                if (arg_type->kind != TYPE_STRING) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Expected argument to have type string");
+                    return NULL;
+                }
+                if (arg->head.type != AST_LITERAL && ((AstLiteral *)arg)->kind != LITERAL_STRING) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "First argument to printf must be a constant string");
+                    return NULL;
+                }
+
+            }
+        }
+
+        char *c_string = generate_c_printf_string(typer, print);
+        if (!c_string) return NULL;
+
+        print->c_string = c_string;
+
+        printf("Generated c string = %s\n", c_string);
+        return true;
     }
     case AST_ASSERT: {
         AstAssert *assertion = (AstAssert *)(stmt);

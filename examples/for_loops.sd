@@ -45,6 +45,23 @@ main :: () {
         print("To infinity and beyond!");
         break;
     }
+
+    print("");
+
+    // Its also possible to include the index
+    fibonacci_numbers := [1, 1, 2, 3, 5, 8, 11, 19];
+    for n, i in fibonacci_numbers {
+        print(i);
+        print(n);
+        print("");
+    }
+
+    // And it also works with ranges ()
+    for n, i in 10...20 {
+        print(i);
+        print(n);
+        print("");
+    }
     
     print("");
 

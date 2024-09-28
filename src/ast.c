@@ -233,7 +233,8 @@ typedef struct AstFunctionCall {
 typedef struct AstPrint {
     Ast head;
 
-    AstExpr *expr;
+    DynamicArray arguments; // of *AstExpr
+    char *c_string; // Generated c string
 } AstPrint;
 
 typedef struct AstAssert {
@@ -568,14 +569,14 @@ char *type_to_str(Type *type) {
     }
     case TYPE_POINTER: {
         TypePointer *ptr = (TypePointer *)(type);
-        StringBuilder builder = string_builder_init(32);
+        StringBuilder builder = sb_init(32);
         sb_append(&builder, "*%s", type_to_str(ptr->pointer_to));
 
         return sb_to_string(&builder); // @Leak
     }
     case TYPE_ARRAY: {
         TypeArray *array = (TypeArray *)(type);
-        StringBuilder builder = string_builder_init(32);
+        StringBuilder builder = sb_init(32);
         sb_append(&builder, "[]%s", type_to_str(array->elem_type));
 
         return sb_to_string(&builder); // @Leak

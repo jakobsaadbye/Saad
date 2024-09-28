@@ -138,6 +138,7 @@ AstBlock *parse_block(Parser *parser, bool open_lexical_scope) {
 }
 
 Ast *parse_statement(Parser *parser) {
+    bool matched_a_statement = false;
     bool statement_ends_with_semicolon = false;
     Ast *stmt = NULL;
     
@@ -146,19 +147,23 @@ Ast *parse_statement(Parser *parser) {
     if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '(') {
         stmt = (Ast *)(parse_function_call(parser));
         statement_ends_with_semicolon = true;
+        matched_a_statement = true;
     }
     else if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == '(') {
         stmt = (Ast *)(parse_function_defn(parser));
         statement_ends_with_semicolon = false;
+        matched_a_statement = true;
     }
     else if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_STRUCT) {
         // @Note - Structs should probably be parsed at the top level code instead of as a statement 
         stmt = (Ast *)(parse_struct(parser));
         statement_ends_with_semicolon = false;
+        matched_a_statement = true;
     }
     else if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_ENUM) {
         stmt = (Ast *)(parse_enum(parser));
         statement_ends_with_semicolon = false;
+        matched_a_statement = true;
     }
     else if (token.type == TOKEN_IDENTIFIER && 
             (peek_token(parser, 1).type == ':' ||
@@ -167,10 +172,12 @@ Ast *parse_statement(Parser *parser) {
     {
         stmt = (Ast *)(parse_declaration(parser, 0));
         statement_ends_with_semicolon = true;
+        matched_a_statement = true;
     }
     else if (token.type == TOKEN_RETURN) {
         stmt = (Ast *)(parse_return(parser));
         statement_ends_with_semicolon = true;
+        matched_a_statement = true;
     }
     else if (token.type == TOKEN_BREAK || token.type == TOKEN_CONTINUE) {
         eat_token(parser);
@@ -183,30 +190,37 @@ Ast *parse_statement(Parser *parser) {
 
         stmt = (Ast *)boc;
         statement_ends_with_semicolon = true;
+        matched_a_statement = true;
     }
     else if (token.type == TOKEN_PRINT) {
         stmt = (Ast *)(parse_print(parser));
         statement_ends_with_semicolon = true;
+        matched_a_statement = true;
     }
     else if (token.type == TOKEN_ASSERT) {
         stmt = (Ast *)(parse_assert(parser));
         statement_ends_with_semicolon = true;
+        matched_a_statement = true;
     }
     else if (token.type == TOKEN_TYPEOF) {
         stmt = (Ast *)(parse_typeof(parser));
         statement_ends_with_semicolon = true;
+        matched_a_statement = true;
     }
     else if (token.type == TOKEN_IF) {
         stmt = (Ast *)(parse_if(parser));
         statement_ends_with_semicolon = false;
+        matched_a_statement = true;
     }
     else if (token.type == TOKEN_FOR) {
         stmt = (Ast *)(parse_for(parser));
         statement_ends_with_semicolon = false;
+        matched_a_statement = true;
     }
     else if (token.type == '{') {
         stmt = (Ast *)(parse_block(parser, true));
         statement_ends_with_semicolon = false;
+        matched_a_statement = true;
     } 
     else {
         AstExpr *lhs = parse_expression(parser, MIN_PRECEDENCE);
@@ -219,16 +233,19 @@ Ast *parse_statement(Parser *parser) {
         if (is_assignment_operator(next)) {
             eat_token(parser);
             stmt = (Ast *)(parse_assignment(parser, lhs, next));
-            if (!stmt) {
-                return NULL;
+            if (stmt) {
+                statement_ends_with_semicolon = true;
+                matched_a_statement = true;
             }
-            statement_ends_with_semicolon = true;
-        } else {
-            return NULL;
         }
     }
 
-    if (stmt == NULL) {
+    if (!matched_a_statement) {
+        report_error_token(parser, LABEL_ERROR, token, "Invalid statement");
+        return NULL;
+    }
+    if (!stmt && matched_a_statement) {
+        // Error is already reported in the matched statement
         return NULL;
     }
 
@@ -1096,20 +1113,45 @@ AstPrint *parse_print(Parser *parser) {
     expect(parser, next, '(');
     eat_token(parser);
 
-    AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-    if (!expr) return NULL;
+    AstPrint *print = (AstPrint *)(ast_allocate(parser, sizeof(AstPrint)));
+    print->arguments = da_init(4, sizeof(AstExpr *));
+
+    // @Copy-n-Paste from parse_function_call
+    bool first_argument_seen = false;
+    while (true) {
+        //
+        // Parse argument list
+        //
+        next = peek_next_token(parser);
+        if (next.type == ')' || next.type == TOKEN_END) {
+            break;
+        }
+
+        if (first_argument_seen) {
+            if (next.type != ',') {
+                report_error_token(parser, LABEL_ERROR, next, "Expected a ',' between arguments");
+                exit(1);    
+            }
+            eat_token(parser);
+            next = peek_next_token(parser);
+        }
+
+        AstExpr *arg = parse_expression(parser, MIN_PRECEDENCE);
+        if (!arg) return NULL;
+
+        da_append(&print->arguments, arg);
+        first_argument_seen = true;
+    }
 
     next = peek_next_token(parser);
     expect(parser, next, ')');
     eat_token(parser);
+    
+    print->head.type  = AST_PRINT;
+    print->head.start = start_token.start;
+    print->head.end   = next.end;
 
-    AstPrint *print_stmt = (AstPrint *)(ast_allocate(parser, sizeof(AstPrint)));
-    print_stmt->head.type  = AST_PRINT;
-    print_stmt->head.start = start_token.start;
-    print_stmt->head.end   = next.end;
-    print_stmt->expr       = expr;
-
-    return print_stmt;
+    return print;
 }
 
 AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {

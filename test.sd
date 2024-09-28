@@ -6,25 +6,15 @@ Monstor :: struct {
 
 main :: () {
 
-    monstors : []Monstor = [
-        .{"Mike", true, false},
-        .{"Solomon", false, true},
-        .{"Ralph", true, true},
-    ];
-    
-    for m, i in monstors {
-        print(m.name);
-    }
+    // monstors : []Monstor = [
+    //     .{"Mike", true, false},
+    //     .{"Solomon", false, true},
+    //     .{"Ralph", true, true},
+    // ];
+    // for m in monstors {
+    //     print("%, ugly = %, scary = %", m.name, m.ugly, m.scary);
+    //     print(monstors[i].name);
+    // }
 
-    print("");
-
-    for n, i in 10...20 {
-        if i == 0 {
-            typeof(i);
-            typeof(n);
-        }
-
-        print(i);
-        print(n);
-    }
+    print("Congratulations % on your % birthday!", "Jakob", 24);
 }
