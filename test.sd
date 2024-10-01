@@ -1,20 +1,28 @@
-Monstor :: struct {
+Monster :: struct {
     name  : string;
     ugly  : bool;
     scary : bool;
 }
 
-main :: () {
+HTTPStatus :: enum {
+    ok = 200,
+    bad_request = 400,
+    unauthorized = 401,
+}
 
-    // monstors : []Monstor = [
+main :: () {
+    // monsters : []Monster = [
     //     .{"Mike", true, false},
     //     .{"Solomon", false, true},
     //     .{"Ralph", true, true},
     // ];
-    // for m in monstors {
+    // for m in monsters {
     //     print("%, ugly = %, scary = %", m.name, m.ugly, m.scary);
-    //     print(monstors[i].name);
     // }
 
-    print("Congratulations % on your % birthday!", "Jakob", true);
+    error1 := HTTPStatus.ok;
+    error2 := HTTPStatus.bad_request;
+    error3 := HTTPStatus.unauthorized;
+    print("Received http status: % and % and %", error1, error2, error3);
+
 }

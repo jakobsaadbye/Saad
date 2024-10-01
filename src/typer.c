@@ -548,8 +548,9 @@ char *generate_c_printf_string(Typer *typer, AstPrint *print) {
                 case TYPE_INTEGER: format_specifier = "%lld"; break;
                 case TYPE_FLOAT:   format_specifier = "%lf"; break;
                 case TYPE_STRING:  format_specifier = "%s"; break;
+                case TYPE_ENUM:    format_specifier = "%s"; break;
                 default:
-                    printf("Internal Compiler Error: Got unknown argument type %s in generate_c_printf_string()", type_to_str(arg_type));
+                    printf("Internal Compiler Error: Got unknown argument type %s in generate_c_printf_string()\n", type_to_str(arg_type));
                     return NULL;
             }
 

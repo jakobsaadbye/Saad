@@ -15,6 +15,8 @@ typedef struct CodeGenerator {
 
     size_t constants;   // For float and string literals
     size_t labels;      // For coditional jumps
+
+    int enum_scratch_buffers; // Used for printing enum values where an int to string conversion needs to take place
     
 } CodeGenerator;
 
@@ -77,6 +79,7 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.base_ptr       = 0;
     cg.constants      = 0;
     cg.labels         = 0;
+    cg.enum_scratch_buffers = 0;
 
     // Reset all the next pointers inside the scopes, used during typing.
     symbol_table_reset(&cg.ident_table);
@@ -118,21 +121,19 @@ void emit_header(CodeGenerator *cg) {
     sb_append(&cg->head, "\n");
 
     sb_append(&cg->data, "segment .data\n");
-    sb_append(&cg->data, "   fmt_int   DB \"%s\", 10, 0\n", "%lld");
-    sb_append(&cg->data, "   fmt_float DB \"%s\", 10, 0\n", "%lf");
-    sb_append(&cg->data, "   fmt_string DB \"%s\", 10, 0\n", "%s");
-    sb_append(&cg->data, "   fmt_address DB \"0x%s\", 10, 0\n", "%p");
-    sb_append(&cg->data, "   string_false DB \"false\", 10, 0\n");
-    sb_append(&cg->data, "   string_true  DB \"true\", 10, 0\n");
+    sb_append(&cg->data, "   fmt_int   DB \"%s\", 0\n", "%lld");
+    sb_append(&cg->data, "   fmt_float DB \"%s\", 0\n", "%lf");
+    sb_append(&cg->data, "   fmt_string DB \"%s\", 0\n", "%s");
+    sb_append(&cg->data, "   fmt_address DB \"0x%s\", 0\n", "%p");
+    sb_append(&cg->data, "   string_false DB \"false\", 0\n");
+    sb_append(&cg->data, "   string_true  DB \"true\", 0\n");
     sb_append(&cg->data, "   string_assert_fail  DB \"Assertion failed at line %s\", 10, 0\n", "%d");
-    
     sb_append(&cg->code, "\n");
-
-    // @Note - Make a check that function main exists.
 
     sb_append(&cg->code, "segment .text\n");
     sb_append(&cg->code, "   global main\n");
     sb_append(&cg->code, "   extern printf\n");
+    sb_append(&cg->code, "   extern sprintf\n");
     sb_append(&cg->code, "   extern ExitProcess\n");
     sb_append(&cg->code, "   extern malloc\n");
     sb_append(&cg->code, "\n");
@@ -152,19 +153,6 @@ void emit_builtin_functions(CodeGenerator *cg) {
     sb_append(&cg->code, "   call\t\tprintf\n");
     sb_append(&cg->code, "   mov\t\trcx, 1\n");
     sb_append(&cg->code, "   call\t\tExitProcess\n\n");
-
-    // Print enums
-    sb_append(&cg->code, "enum_str:\n");
-    sb_append(&cg->code, "   mov\t\trcx, fmt_string\n");
-    sb_append(&cg->code, "   jmp\t\tenum_end\n");
-    sb_append(&cg->code, "enum_int:\n");
-    sb_append(&cg->code, "   mov\t\trcx, fmt_int\n");
-    sb_append(&cg->code, "   mov\t\trdx, rax\n");
-    sb_append(&cg->code, "enum_end:\n");
-    sb_append(&cg->code, "   pop\t\trbx\n"); // @Hack @Investigate - for some reason the next printf call messes up the stack, so here we save the return address to rbx before the call to push it again after the printf call
-    sb_append(&cg->code, "   call\t\tprintf\n");
-    sb_append(&cg->code, "   push\t\trbx\n");
-    sb_append(&cg->code, "   ret\n\n");
 }
 
 void emit_code(CodeGenerator *cg, AstCode *code) {
@@ -222,28 +210,48 @@ void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
         sb_append(&cg->data, "   __%s.%s DB \"%s.%s\", 0\n", ast_enum->identifier->name, etor->name, ast_enum->identifier->name, etor->name);
     }
 
-    int case_label = make_label_number(cg);
-    int fallthrough_label = make_label_number(cg);
 
+    // char *print_enum(char *buf, int value)
+    // - buf is in rcx
+    // - value is in rdx
+    // - returned string is in rax
+    int case_label = make_label_number(cg);
     sb_append(&cg->code, "print_enum_%s:\n", ast_enum->identifier->name);
     for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
-        sb_append(&cg->code, "   mov\t\trbx, %d\n", etor->value);
-        sb_append(&cg->code, "   cmp\t\trax, rbx\n");
+        sb_append(&cg->code, "   mov\t\tr8, %d\n", etor->value);
+        sb_append(&cg->code, "   cmp\t\trdx, r8\n");
         sb_append(&cg->code, "   jz\t\t\tenum_case_%d\n", case_label);
 
         etor->label = case_label;
         case_label  = make_label_number(cg);
     }
-    // Fallthrough case. Use integer value
-    sb_append(&cg->code, "   jmp\t\tenum_int\n", fallthrough_label);
 
-    // Success case. Use name of enum
+    // Case integer value
+    sb_append(&cg->code, "   push\t\trcx\n");
+    sb_append(&cg->code, "   mov\t\tr8, rdx\n");
+    sb_append(&cg->code, "   mov\t\trdx, fmt_int\n");
+
+    sb_append(&cg->code, "   push\t\tr8\n");
+    sb_append(&cg->code, "   push\t\trdx\n");
+    sb_append(&cg->code, "   push\t\trcx\n");
+
+    sb_append(&cg->code, "   call\t\tsprintf\n"); // @Note - For some reason sprintf reads its arguments from the stack instead of in rcx, rdx ... ??? Say what
+
+    sb_append(&cg->code, "   pop\t\trax\n");
+
+    sb_append(&cg->code, "   pop\t\trbx\n");
+    sb_append(&cg->code, "   pop\t\trbx\n");
+    sb_append(&cg->code, "   pop\t\trbx\n");
+
+    sb_append(&cg->code, "   ret\n");
+
+    // Case name of enum member
     for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
         sb_append(&cg->code, "enum_case_%d:\n", etor->label);
-        sb_append(&cg->code, "   mov\t\trdx, __%s.%s\n", ast_enum->identifier->name, etor->name);
-        sb_append(&cg->code, "   jmp\t\tenum_str\n");
+        sb_append(&cg->code, "   mov\t\trax, __%s.%s\n", ast_enum->identifier->name, etor->name);
+        sb_append(&cg->code, "   ret\n");
     }
 }
 
@@ -666,14 +674,25 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; expression of print\n");
 
-
     // Push all the arguments on the stack
+    int num_enum_arguments = 0;
     for (unsigned int i = 1; i < print->arguments.count; i++) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
         emit_expression(cg, arg);
+        if (arg->evaluated_type->kind == TYPE_ENUM) {
+            num_enum_arguments += 1;
+        }
+    }
+
+    // Potentially allocate space for enum integer to string conversion
+    if (num_enum_arguments > cg->enum_scratch_buffers) {
+        for (int i = cg->enum_scratch_buffers; i < num_enum_arguments; i++) {
+            sb_append(&cg->data, "   enum_buffer_%d times 20 DB 0\n", i); // 20 is the length of the largest integer number 2^64sb_append(&cg->data, "")
+        }
     }
 
     // Pop and assign registers
+    int enum_buffer_index = 0;
     for (int i = print->arguments.count - 1; i >= 1; i--) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
 
@@ -706,10 +725,27 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
             sb_append(&cg->code, "   pop\t\t%s\n", reg);
         }
         else if (arg_type->kind == TYPE_ENUM) {
-            sb_append(&cg->code, "   pop\t\trax\n");
+            sb_append(&cg->code, "   mov\t\trax, enum_buffer_%d\n", enum_buffer_index);
+            sb_append(&cg->code, "   pop\t\trbx\n");
+
+            // Save current registers
+            for (int j = print->arguments.count - 1; j > i; j--)
+                sb_append(&cg->code, "   push\t\t%s   ; storing\n", get_function_argument_register(j));
+
+            sb_append(&cg->code, "   mov\t\trcx, rax\n");
+            sb_append(&cg->code, "   mov\t\trdx, rbx\n");
+
             sb_append(&cg->code, "   call\t\tprint_enum_%s\n", ((TypeEnum *)(arg_type))->identifier->name);
+            sb_append(&cg->code, "   mov\t\t%s, rax\n", reg);
+
+            // Restore registers
+            for (int j = i + 1; (unsigned int) j < print->arguments.count; j++) 
+                sb_append(&cg->code, "   pop\t\t%s   ; restore\n", get_function_argument_register(j));
+
+            enum_buffer_index += 1;
         }
         else if (arg_type->kind == TYPE_POINTER) {
+            // @Incomplete
             sb_append(&cg->code, "   pop\t\trdx\n");
             sb_append(&cg->code, "   mov\t\trcx, fmt_address\n");
             sb_append(&cg->code, "   call\t\tprintf\n");
@@ -723,8 +759,9 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
         }
     }
 
-    sb_append(&cg->data, "   CS%d DB \"%s\", 0 \n", cg->constants, print->c_string);
-    sb_append(&cg->code, "   mov\t\trcx, CS%d\n", cg->constants);
+    int const_number = cg->constants++;
+    sb_append(&cg->data, "   CS%d DB `%s`, 10, 0 \n", const_number, print->c_string);
+    sb_append(&cg->code, "   mov\t\trcx, CS%d\n", const_number);
     sb_append(&cg->code, "   call\t\tprintf\n");
 }
 
