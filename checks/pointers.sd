@@ -61,7 +61,7 @@ main:: () {
         assert(**(&a[2]) == 3);
 
         for p in a {
-            print(&p);
+            print("%", &p);
         }
     }
 

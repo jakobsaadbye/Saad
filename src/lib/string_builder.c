@@ -71,6 +71,8 @@ void sb_append(StringBuilder *sb, const char *template, ...) {
 
 // Copies length amount of characters from src to the builder
 void sb_copy(StringBuilder *sb, char *src, int length) {
+    if (length == 0) return;
+    
     if ((sb->cursor + length) < sb->capacity) {
         char *dst = &sb->buffer[sb->cursor];
         memcpy(dst, src, length);

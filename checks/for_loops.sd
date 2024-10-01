@@ -12,9 +12,7 @@ main :: () {
                 if i == 0 && j == 0 {
                     continue;
                 }
-                print(i);
-                print(j);
-                print("");
+                print("(%, %)", i, j);
             }
     
             print("");

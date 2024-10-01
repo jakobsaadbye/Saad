@@ -689,6 +689,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
         for (int i = cg->enum_scratch_buffers; i < num_enum_arguments; i++) {
             sb_append(&cg->data, "   enum_buffer_%d times 20 DB 0\n", i); // 20 is the length of the largest integer number 2^64sb_append(&cg->data, "")
         }
+        cg->enum_scratch_buffers = num_enum_arguments;
     }
 
     // Pop and assign registers
@@ -745,13 +746,11 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
             enum_buffer_index += 1;
         }
         else if (arg_type->kind == TYPE_POINTER) {
-            // @Incomplete
-            sb_append(&cg->code, "   pop\t\trdx\n");
-            sb_append(&cg->code, "   mov\t\trcx, fmt_address\n");
-            sb_append(&cg->code, "   call\t\tprintf\n");
+            sb_append(&cg->code, "   pop\t\t%s\n", reg);
         }
         else if (arg_type->kind == TYPE_ARRAY) {
-            XXX;
+            sb_append(&cg->code, "   pop\t\t%s\n", reg);
+            sb_append(&cg->code, "   pop\t\trbx\n"); // Don't use the length for anything
         }
         else {
             // Unhandled cases
@@ -1594,10 +1593,10 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                     case LITERAL_NIL: XXX;
                     case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
                 }
+            } else {
+                emit_move_and_push(cg, ident->stack_offset, false, ident->type, false);
+                return;
             }
-
-            emit_move_and_push(cg, ident->stack_offset, false, ident->type, false);
-            return;
         }}
         
         XXX;

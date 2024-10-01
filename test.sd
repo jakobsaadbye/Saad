@@ -20,9 +20,8 @@ main :: () {
     //     print("%, ugly = %, scary = %", m.name, m.ugly, m.scary);
     // }
 
-    error1 := HTTPStatus.ok;
-    error2 := HTTPStatus.bad_request;
-    error3 := HTTPStatus.unauthorized;
-    print("Received http status: % and % and %", error1, error2, error3);
-
+    // error1 := HTTPStatus.ok;
+    // error2 := HTTPStatus.bad_request;
+    // error3 := HTTPStatus.unauthorized;
+    // print("Received http status: % and % and %", error1, error2, error3);
 }

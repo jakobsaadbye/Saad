@@ -1,8 +1,8 @@
 main :: () {
     a : int = (5 * 4 + 3 * 2) / 2;
     b := 3 - 2;
-    print(a);
-    print(b);
+    print("%", a);
+    print("%", b);
     assert(a == 13);
     assert(b == 1);
 }

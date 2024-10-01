@@ -36,7 +36,7 @@ CardSuit :: enum {
 main :: () {
     // Enums default initialzes to 0 regardless of what the first member is
     v : CardValue;
-    print(v); // Will print 'CardValue.joker'
+    print("%", v); // Will print 'CardValue.joker'
 
     // Enum members can be referenced using .<enum_name> if the enum can be inferred from the context. In this case from the left-hand-side of the assignment
     v = .ten;
@@ -45,9 +45,9 @@ main :: () {
 
     // Because enum members are just treated as integers, we can do the following
     v = v + 1;
-    print(v); // CardValue.jack
+    print("%", v); // CardValue.jack
     
     // Also means we can assign values not in range of the enum
     v = 99;
-    print(v); // Will just print '99'
+    print("%", v); // Will just print '99'
 }

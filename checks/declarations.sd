@@ -12,12 +12,12 @@ main :: () {
     string_typed : string = "i am a typed string";
 
 
-    print(int_inf);
-    print(int_typed);
-    print(float_inf);
-    print(float_typed);
-    print(bool_inf);
-    print(bool_typed);
-    print(string_inf);
-    print(string_typed);
+    print("%", int_inf);
+    print("%", int_typed);
+    print("%", float_inf);
+    print("%", float_typed);
+    print("%", bool_inf);
+    print("%", bool_typed);
+    print("%", string_inf);
+    print("%", string_typed);
 }

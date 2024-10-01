@@ -12,10 +12,8 @@ segment .data
    __HTTPStatus.ok DB "HTTPStatus.ok", 0
    __HTTPStatus.bad_request DB "HTTPStatus.bad_request", 0
    __HTTPStatus.unauthorized DB "HTTPStatus.unauthorized", 0
-   enum_buffer_0 times 20 DB 0
-   enum_buffer_1 times 20 DB 0
-   enum_buffer_2 times 20 DB 0
-   CS0 DB `Received http status: %s and %s and %s`, 10, 0 
+   CS0 DB `0x%p`, 10, 0 
+   CS1 DB `0x%p`, 10, 0 
 
 segment .text
    global main
@@ -69,61 +67,69 @@ enum_case_2:
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 64
+   sub		rsp, 96
 
-   ; initialization of 'error1'
-   mov		DWORD -4[rbp], 0
-   push		200
+   ; initialization of 'a'
+   mov		QWORD -16[rbp], 0
+   mov		QWORD -8[rbp], 0
+   mov		DWORD -40[rbp], 0
+   mov		DWORD -36[rbp], 0
+   mov		DWORD -32[rbp], 0
+   mov		DWORD -28[rbp], 0
+   mov		DWORD -24[rbp], 0
+   mov		rax, 1
+   push		rax
    pop		rax
-   mov		DWORD -4[rbp], eax
-
-   ; initialization of 'error2'
-   mov		DWORD -8[rbp], 0
-   push		400
+   mov		DWORD -40[rbp], eax
+   mov		rax, 2
+   push		rax
    pop		rax
-   mov		DWORD -8[rbp], eax
-
-   ; initialization of 'error3'
-   mov		DWORD -12[rbp], 0
-   push		401
+   mov		DWORD -36[rbp], eax
+   mov		rax, 3
+   push		rax
    pop		rax
-   mov		DWORD -12[rbp], eax
+   mov		DWORD -32[rbp], eax
+   mov		rax, 4
+   push		rax
+   pop		rax
+   mov		DWORD -28[rbp], eax
+   mov		rax, 5
+   push		rax
+   pop		rax
+   mov		DWORD -24[rbp], eax
+   push		5
+   lea		rax, -40[rbp]
+   push		rax
+   pop		rax
+   pop		rcx
+   mov		QWORD -16[rbp], rax
+   mov		QWORD -8[rbp], rcx
 
    ; expression of print
-   mov		eax, DWORD -4[rbp]
+   mov		rax, QWORD -16[rbp]
+   mov		rbx, QWORD -8[rbp]
+   push		rbx
    push		rax
-   mov		eax, DWORD -8[rbp]
-   push		rax
-   mov		eax, DWORD -12[rbp]
-   push		rax
-   mov		rax, enum_buffer_0
+   pop		rdx
    pop		rbx
-   mov		rcx, rax
-   mov		rdx, rbx
-   call		print_enum_HTTPStatus
-   mov		r9, rax
-   mov		rax, enum_buffer_1
-   pop		rbx
-   push		r9   ; storing
-   mov		rcx, rax
-   mov		rdx, rbx
-   call		print_enum_HTTPStatus
-   mov		r8, rax
-   pop		r9   ; restore
-   mov		rax, enum_buffer_2
-   pop		rbx
-   push		r9   ; storing
-   push		r8   ; storing
-   mov		rcx, rax
-   mov		rdx, rbx
-   call		print_enum_HTTPStatus
-   mov		rdx, rax
-   pop		r8   ; restore
-   pop		r9   ; restore
    mov		rcx, CS0
+   call		printf
+
+   ; expression of print
+   mov		rax, 0
+   push		rax
+   pop		rax
+   imul		rax, 4
+   push		rax
+   pop		rax
+   mov		rbx, QWORD -16[rbp]
+   add		rbx, rax
+   push		rbx
+   pop		rdx
+   mov		rcx, CS1
    call		printf
 L4:
    mov		rax, 0
-   add		rsp, 64
+   add		rsp, 96
    pop		rbp
    ret

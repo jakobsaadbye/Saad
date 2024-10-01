@@ -2,7 +2,7 @@ main :: () {
     N := 20;
 
     for 0..N {
-        print(fib(it));
+        print("%", fib(it));
     }
 }
 

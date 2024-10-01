@@ -516,7 +516,7 @@ char *generate_c_printf_string(Typer *typer, AstPrint *print) {
     AstExpr *arg0 = ((AstExpr **)print->arguments.items)[0];
     assert(arg0->head.type == AST_LITERAL && ((AstLiteral *)arg0)->kind == LITERAL_STRING);
 
-    StringBuilder sb = sb_init(((AstLiteral *)arg0)->as.value.string.length);
+    StringBuilder sb = sb_init(((AstLiteral *)arg0)->as.value.string.length + 1);
     char *head = ((AstLiteral *)arg0)->as.value.string.data;
     char *c = head;
     int num_specifiers = 0;
@@ -549,6 +549,8 @@ char *generate_c_printf_string(Typer *typer, AstPrint *print) {
                 case TYPE_FLOAT:   format_specifier = "%lf"; break;
                 case TYPE_STRING:  format_specifier = "%s"; break;
                 case TYPE_ENUM:    format_specifier = "%s"; break;
+                case TYPE_POINTER: format_specifier = "0x%p"; break;
+                case TYPE_ARRAY:   format_specifier = "0x%p"; break;
                 default:
                     printf("Internal Compiler Error: Got unknown argument type %s in generate_c_printf_string()\n", type_to_str(arg_type));
                     return NULL;
@@ -593,7 +595,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
             if (!arg_type) return NULL;
             if (i == 0) {
                 if (arg_type->kind != TYPE_STRING) {
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Expected argument to have type string");
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Print expects the first argument to have type string, but argument is of type %s", type_to_str(arg_type));
                     return NULL;
                 }
                 if (arg->head.type != AST_LITERAL && ((AstLiteral *)arg)->kind != LITERAL_STRING) {
