@@ -520,7 +520,7 @@ bool compare_user_types(const void *key, const void *item) {
     return strcmp((const char *)(key), ti->as.name) == 0;
 }
 
-TypeTable type_table_init() {
+TypeTable type_table_init(void) {
     TypeTable type_table  = {0};
     type_table.user_types = hash_table_init(32, sizeof(Type *), compare_user_types);
     type_table.types      = arena_init(sizeof(Type) * 128);

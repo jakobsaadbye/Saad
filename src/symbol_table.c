@@ -18,7 +18,7 @@ bool compare_symbol(const void *key, const void *item) {
     return strcmp((const char *)(key), symbol->name) == 0;
 }
 
-SymbolTable symbol_table_init() {
+SymbolTable symbol_table_init(void) {
     SymbolTable st = {0};
     Scope *global_scope = (Scope *)(malloc(sizeof(Scope)));
     global_scope->parent    = NULL;

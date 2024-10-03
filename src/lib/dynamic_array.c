@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define da_append(da, item) _da_append(da, &item);
+
 typedef struct DynamicArray {
     unsigned int item_size;
     unsigned char *items;
@@ -38,5 +40,3 @@ void _da_append(DynamicArray *da, void *item) {
     memcpy(dst, item, da->item_size);
     da->count += 1;
 }
-
-#define da_append(da, item) _da_append(da, &item);

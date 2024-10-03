@@ -12,8 +12,6 @@ segment .data
    __HTTPStatus.ok DB "HTTPStatus.ok", 0
    __HTTPStatus.bad_request DB "HTTPStatus.bad_request", 0
    __HTTPStatus.unauthorized DB "HTTPStatus.unauthorized", 0
-   CS0 DB `0x%p`, 10, 0 
-   CS1 DB `0x%p`, 10, 0 
 
 segment .text
    global main
@@ -67,69 +65,9 @@ enum_case_2:
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 96
-
-   ; initialization of 'a'
-   mov		QWORD -16[rbp], 0
-   mov		QWORD -8[rbp], 0
-   mov		DWORD -40[rbp], 0
-   mov		DWORD -36[rbp], 0
-   mov		DWORD -32[rbp], 0
-   mov		DWORD -28[rbp], 0
-   mov		DWORD -24[rbp], 0
-   mov		rax, 1
-   push		rax
-   pop		rax
-   mov		DWORD -40[rbp], eax
-   mov		rax, 2
-   push		rax
-   pop		rax
-   mov		DWORD -36[rbp], eax
-   mov		rax, 3
-   push		rax
-   pop		rax
-   mov		DWORD -32[rbp], eax
-   mov		rax, 4
-   push		rax
-   pop		rax
-   mov		DWORD -28[rbp], eax
-   mov		rax, 5
-   push		rax
-   pop		rax
-   mov		DWORD -24[rbp], eax
-   push		5
-   lea		rax, -40[rbp]
-   push		rax
-   pop		rax
-   pop		rcx
-   mov		QWORD -16[rbp], rax
-   mov		QWORD -8[rbp], rcx
-
-   ; expression of print
-   mov		rax, QWORD -16[rbp]
-   mov		rbx, QWORD -8[rbp]
-   push		rbx
-   push		rax
-   pop		rdx
-   pop		rbx
-   mov		rcx, CS0
-   call		printf
-
-   ; expression of print
-   mov		rax, 0
-   push		rax
-   pop		rax
-   imul		rax, 4
-   push		rax
-   pop		rax
-   mov		rbx, QWORD -16[rbp]
-   add		rbx, rax
-   push		rbx
-   pop		rdx
-   mov		rcx, CS1
-   call		printf
+   sub		rsp, 32
 L4:
    mov		rax, 0
-   add		rsp, 96
+   add		rsp, 32
    pop		rbp
    ret

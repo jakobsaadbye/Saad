@@ -96,7 +96,7 @@ void go_nuts(CodeGenerator *cg, AstCode *code) {
 void check_main_exists(CodeGenerator *cg) {
     Symbol *main_symbol = symbol_lookup(&cg->function_table, "main", NULL);
     if (main_symbol == NULL) {
-        printf("Missing function 'main' as entry-point to the program\n");
+        printf("Error: Missing function 'main' as entry-point to the program\n");
         exit(1);
     }
 }

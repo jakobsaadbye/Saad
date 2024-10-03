@@ -1,8 +1,14 @@
 #include <time.h>
 #include <stdio.h>
-#include <io.h>
 #include "code_generator.c"
 
+#ifdef __APPLE__
+    #include <sys/uio.h>
+    #include <fcntl.h> 
+    #include <unistd.h>
+#else
+    #include <io.h>
+#endif
 
 void dump_tokens(Lexer *lexer) {
     printf("\nTokens: \n");
@@ -47,7 +53,7 @@ void print_compiler_report(CompilerReport cr) {
 }
 
 int old_stdout = -1;
-void reset_stdout() {
+void reset_stdout(void) {
     dup2(old_stdout, 1);
 } 
 

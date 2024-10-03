@@ -18,7 +18,7 @@ typedef struct Parser {
     TypeTable   type_table;
 } Parser;
 
-Parser           parser_init();
+Parser           parser_init(Lexer *lexer);
 AstCode         *parse_top_level_code(Parser *parser);
 Ast             *parse_statement(Parser *parser);
 AstDeclaration  *parse_declaration(Parser *parser, DeclarationFlags flags);
