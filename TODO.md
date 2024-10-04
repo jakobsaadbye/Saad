@@ -1,6 +1,6 @@
 Current TODO:
-    - :WrongForLoopSizing (remove temporary hack of aligning functions to 32 bytes just to fix for-loops wrong size!)
     - Support index with for loops
+    - :WrongForLoopSizing (remove temporary hack of aligning functions to 32 bytes just to fix for-loops wrong size!)
     - Make Array be a struct where you can do array.count or array.data
 
     - Backing integer types for enums
@@ -11,7 +11,7 @@ Current TODO:
 
 Roadmap:
     - Revisit of for-loops
-    - Pointer types (Mostly done)
+    - Pointer types (Mostly done, void pointer autocast is missing)
     - Array types (Mostly done, multidimensional arrays + heap allocated is still missing)
     - Constants (Mostly done. Missing as struct member)
     - Switch statement
