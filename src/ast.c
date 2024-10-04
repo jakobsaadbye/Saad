@@ -383,6 +383,43 @@ typedef struct AstLiteral {
     As_value    as;
 } AstLiteral;
 
+const char *ast_to_str(Ast *ast) {
+    switch (ast->type) {
+    case AST_ERR:                return "AST_ERR";
+    case AST_BLOCK:              return "AST_BLOCK";
+    case AST_DECLARATION:        return "AST_DECLARATION";
+    case AST_ASSIGNMENT:         return "AST_ASSIGNMENT";
+    case AST_PRINT:              return "AST_PRINT";
+    case AST_ASSERT:             return "AST_ASSERT";
+    case AST_TYPEOF:             return "AST_TYPEOF";
+    case AST_STRUCT:             return "AST_STRUCT";
+    case AST_STRUCT_LITERAL:     return "AST_STRUCT_LITERAL";
+    case AST_STRUCT_INITIALIZER: return "AST_STRUCT_INITIALIZER";
+    case AST_ARRAY_LITERAL:      return "AST_ARRAY_LITERAL";
+    case AST_ENUM:               return "AST_ENUM";
+    case AST_ENUMERATOR:         return "AST_ENUMERATOR";
+    case AST_ENUM_LITERAL:       return "AST_ENUM_LITERAL";
+    case AST_FUNCTION_DEFN:      return "AST_FUNCTION_DEFN";
+    case AST_FUNCTION_CALL:      return "AST_FUNCTION_CALL";
+    case AST_IF:                 return "AST_IF";
+    case AST_RETURN:             return "AST_RETURN";
+    case AST_FOR:                return "AST_FOR";
+    case AST_BREAK_OR_CONTINUE:  return "AST_BREAK_OR_CONTINUE";
+    case AST_EXPR:               return "AST_EXPR";
+    case AST_RANGE_EXPR:         return "AST_RANGE_EXPR";
+    case AST_BINARY:             return "AST_BINARY";
+    case AST_UNARY:              return "AST_UNARY";
+    case AST_LITERAL:            return "AST_LITERAL";
+    case AST_SUBSCRIPT:          return "AST_SUBSCRIPT";
+    case AST_ACCESSOR:           return "AST_ACCESSOR";
+    case AST_MEMBER_ACCESS:      return "AST_MEMBER_ACCESS";
+    case AST_ARRAY_ACCESS:       return "AST_ARRAY_ACCESS";
+    case AST_IDENTIFIER:         return "AST_IDENTIFIER";
+    case AST_TYPE:               return "AST_TYPE";
+    }
+    printf("%s:%d: compiler-error: Could not give the name of AST node with type id %d\n", __FILE__, __LINE__, ast->type);
+    exit(1);
+}
 
 typedef enum PrimitiveKind {
     PRIMITIVE_INVALID,
@@ -520,7 +557,7 @@ bool compare_user_types(const void *key, const void *item) {
     return strcmp((const char *)(key), ti->as.name) == 0;
 }
 
-TypeTable type_table_init() {
+TypeTable type_table_init(void) {
     TypeTable type_table  = {0};
     type_table.user_types = hash_table_init(32, sizeof(Type *), compare_user_types);
     type_table.types      = arena_init(sizeof(Type) * 128);

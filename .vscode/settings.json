@@ -10,6 +10,10 @@
         "stdio.h": "c",
         "dynamic_array.c": "cpp",
         "symbol_table.h": "c",
-        "io.h": "c"
+        "io.h": "c",
+        "time.h": "c",
+        "uio.h": "c",
+        "fcntl.h": "c",
+        "unistd.h": "c"
     }
 }

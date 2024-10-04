@@ -152,7 +152,7 @@ AstExpr *simplify_expression(ConstEvaluater *ce, AstExpr *expr) {
         }
         case AST_RANGE_EXPR:
         default:
-            printf("%s:%d: compiler-error: Unhandled cases in 'simplify_expression'. Expression was of type %s", __FILE__, __LINE__, ast_type_name(expr->head.type));
+            printf("%s:%d: compiler-error: Unhandled cases in 'simplify_expression'. Expression was of type %s", __FILE__, __LINE__, ast_to_str((Ast *)expr));
             return expr;
     }
 }

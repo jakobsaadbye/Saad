@@ -19,6 +19,9 @@ segment .data
    CS7 DB "scary", 0 
    CS8 DB "not scary", 0 
    CS9 DB `My name is %s, i am %s and %s`, 10, 0 
+   __HTTPStatus.ok DB "HTTPStatus.ok", 0
+   __HTTPStatus.bad_request DB "HTTPStatus.bad_request", 0
+   __HTTPStatus.unauthorized DB "HTTPStatus.unauthorized", 0
 
 segment .text
    global main
@@ -188,5 +191,9 @@ L3:
 L0:
    mov		rax, 0
    add		rsp, 160
+   sub		rsp, 32
+L4:
+   mov		rax, 0
+   add		rsp, 32
    pop		rbp
    ret

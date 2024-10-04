@@ -96,7 +96,7 @@ void go_nuts(CodeGenerator *cg, AstCode *code) {
 void check_main_exists(CodeGenerator *cg) {
     Symbol *main_symbol = symbol_lookup(&cg->function_table, "main", NULL);
     if (main_symbol == NULL) {
-        printf("Missing function 'main' as entry-point to the program\n");
+        printf("Error: Missing function 'main' as entry-point to the program\n");
         exit(1);
     }
 }
@@ -172,23 +172,23 @@ void emit_block(CodeGenerator *cg, AstBlock *block, bool open_lexical_scope) {
 
 void emit_statement(CodeGenerator *cg, Ast *node) {
     switch (node->type) {
-        case AST_DECLARATION:       emit_declaration(cg, (AstDeclaration *)(node)); break;
-        case AST_ASSIGNMENT:        emit_assignment(cg, (AstAssignment *)(node)); break;
-        case AST_FUNCTION_DEFN:     emit_function_defn(cg, (AstFunctionDefn *)(node)); break;
-        case AST_FUNCTION_CALL:     emit_function_call(cg, (AstFunctionCall *)(node)); break;
-        case AST_RETURN:            emit_return(cg, (AstReturn *)(node)); break;
-        case AST_BREAK_OR_CONTINUE: emit_break_or_continue(cg, (AstBreakOrContinue *)(node)); break;
-        case AST_BLOCK:             emit_block(cg, (AstBlock *)(node), true); break;
-        case AST_PRINT:             emit_print(cg, (AstPrint *)(node)); break;
-        case AST_ASSERT:            emit_assert(cg, (AstAssert *)(node)); break;
-        case AST_TYPEOF:            emit_typeof(cg, (AstTypeof *)(node)); break;
-        case AST_IF:                emit_if(cg, (AstIf *)(node)); break;
-        case AST_FOR:               emit_for(cg, (AstFor *)(node)); break;
-        case AST_ENUM:              emit_enum(cg, (AstEnum *)(node)); break;
-        case AST_STRUCT:        break;
-        default:
-            printf("compiler-error: emit_statement not implemented for %s\n", ast_type_name(node->type));
-            XXX;
+    case AST_DECLARATION:       emit_declaration(cg, (AstDeclaration *)(node)); break;
+    case AST_ASSIGNMENT:        emit_assignment(cg, (AstAssignment *)(node)); break;
+    case AST_FUNCTION_DEFN:     emit_function_defn(cg, (AstFunctionDefn *)(node)); break;
+    case AST_FUNCTION_CALL:     emit_function_call(cg, (AstFunctionCall *)(node)); break;
+    case AST_RETURN:            emit_return(cg, (AstReturn *)(node)); break;
+    case AST_BREAK_OR_CONTINUE: emit_break_or_continue(cg, (AstBreakOrContinue *)(node)); break;
+    case AST_BLOCK:             emit_block(cg, (AstBlock *)(node), true); break;
+    case AST_PRINT:             emit_print(cg, (AstPrint *)(node)); break;
+    case AST_ASSERT:            emit_assert(cg, (AstAssert *)(node)); break;
+    case AST_TYPEOF:            emit_typeof(cg, (AstTypeof *)(node)); break;
+    case AST_IF:                emit_if(cg, (AstIf *)(node)); break;
+    case AST_FOR:               emit_for(cg, (AstFor *)(node)); break;
+    case AST_ENUM:              emit_enum(cg, (AstEnum *)(node)); break;
+    case AST_STRUCT:        break;
+    default:
+        printf("compiler-error: emit_statement not implemented for %s\n", ast_to_str(node));
+        XXX;
     }
 }
 
@@ -1605,7 +1605,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         // Handled in either the assignment or declaration
         break;
     default:
-        printf("%s:%d: compiler-error: There were unhandled cases in 'emit_expression' with %s\n", __FILE__, __LINE__, ast_type_name(expr->head.type));
+        printf("%s:%d: compiler-error: There were unhandled cases in 'emit_expression' with %s\n", __FILE__, __LINE__, ast_to_str((Ast *)expr));
         exit(1);
     }
 }

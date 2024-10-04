@@ -29,7 +29,7 @@ HashTable  hash_table_init(size_t table_length, size_t item_size, bool (*cmp_fun
 void       hash_table_add(HashTable *table, const char *key, void *item);
 void      *hash_table_get(HashTable *table, const char *key);
 int        hash(HashTable *table, const char *key);
-LinkedList linked_list_make();
+LinkedList linked_list_make(void);
 void       linked_list_add(LinkedList *ll, void *item, size_t item_size);
 Node      *linked_list_get(LinkedList *ll, size_t index);
 void      *linked_list_find(LinkedList *ll, const char *key, bool (*cmp_func)(const void* key, const void* item));
@@ -86,7 +86,7 @@ int hash(HashTable *table, const char *key) {
     return sum % table->table_length;
 }
 
-LinkedList linked_list_make() {
+LinkedList linked_list_make(void) {
     LinkedList ll = {0};
     ll.head = NULL;
     ll.tail = NULL;
@@ -143,10 +143,3 @@ void *linked_list_find(LinkedList *ll, const char *key, bool (*cmp_func)(const v
         return node->data;
     }
 }
-
-
-
-
-
-
-

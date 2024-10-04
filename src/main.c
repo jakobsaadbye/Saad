@@ -5,7 +5,7 @@
 
 int main(int argc, char const *argv[]) {
     if (argc < 2) { 
-        printf("\n");
+        printf("Error: Missing input file\n\n");
         printf("Usage:\n");
         printf("   saad.exe <input_file.sd>\n");
         return 1;
