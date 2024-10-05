@@ -11,6 +11,8 @@ typedef struct CodeGenerator {
     SymbolTable function_table;
     TypeTable   type_table;
 
+    AstBlock *current_scope;
+
     int base_ptr;
 
     size_t constants;   // For float and string literals
@@ -76,13 +78,11 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.ident_table    = parser->ident_table;
     cg.function_table = parser->function_table;
     cg.type_table     = parser->type_table;
+    cg.current_scope  = parser->current_scope;
     cg.base_ptr       = 0;
     cg.constants      = 0;
     cg.labels         = 0;
     cg.enum_scratch_buffers = 0;
-
-    // Reset all the next pointers inside the scopes, used during typing.
-    symbol_table_reset(&cg.ident_table);
 
     return cg;
 }
@@ -94,8 +94,8 @@ void go_nuts(CodeGenerator *cg, AstCode *code) {
 }
 
 void check_main_exists(CodeGenerator *cg) {
-    Symbol *main_symbol = symbol_lookup(&cg->function_table, "main", NULL);
-    if (main_symbol == NULL) {
+    AstIdentifier *main = lookup_from_scope(cg->current_scope, "main", NULL);
+    if (main == NULL) {
         printf("Error: Missing function 'main' as entry-point to the program\n");
         exit(1);
     }
@@ -156,18 +156,19 @@ void emit_builtin_functions(CodeGenerator *cg) {
 }
 
 void emit_code(CodeGenerator *cg, AstCode *code) {
-    for (unsigned int i = 0; i < code->statements.count; i++) {
+    for (int i = 0; i < code->statements.count; i++) {
         Ast *stmt = ((Ast **)(code->statements.items))[i];
         emit_statement(cg, stmt);
     }
 }
 
-void emit_block(CodeGenerator *cg, AstBlock *block, bool open_lexical_scope) {
-    if (open_lexical_scope) enter_scope(&cg->ident_table);
-    for (int i = 0; i < block->num_of_statements; i++) {
-        emit_statement(cg, block->statements[i]);
+void emit_block(CodeGenerator *cg, AstBlock *block) {
+    cg->current_scope = block;
+    for (int i = 0; i < block->statements.count; i++) {
+        Ast *stmt = ((Ast **)block->statements.items)[i];
+        emit_statement(cg, stmt);
     }
-    if (open_lexical_scope) exit_scope(&cg->ident_table);
+    cg->current_scope = block->parent;
 }
 
 void emit_statement(CodeGenerator *cg, Ast *node) {
@@ -178,7 +179,7 @@ void emit_statement(CodeGenerator *cg, Ast *node) {
     case AST_FUNCTION_CALL:     emit_function_call(cg, (AstFunctionCall *)(node)); break;
     case AST_RETURN:            emit_return(cg, (AstReturn *)(node)); break;
     case AST_BREAK_OR_CONTINUE: emit_break_or_continue(cg, (AstBreakOrContinue *)(node)); break;
-    case AST_BLOCK:             emit_block(cg, (AstBlock *)(node), true); break;
+    case AST_BLOCK:             emit_block(cg, (AstBlock *)(node)); break;
     case AST_PRINT:             emit_print(cg, (AstPrint *)(node)); break;
     case AST_ASSERT:            emit_assert(cg, (AstAssert *)(node)); break;
     case AST_TYPEOF:            emit_typeof(cg, (AstTypeof *)(node)); break;
@@ -205,7 +206,7 @@ void emit_break_or_continue(CodeGenerator *cg, AstBreakOrContinue *boc) {
 }
 
 void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
-    for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
+    for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
         sb_append(&cg->data, "   __%s.%s DB \"%s.%s\", 0\n", ast_enum->identifier->name, etor->name, ast_enum->identifier->name, etor->name);
     }
@@ -217,7 +218,7 @@ void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
     // - returned string is in rax
     int case_label = make_label_number(cg);
     sb_append(&cg->code, "print_enum_%s:\n", ast_enum->identifier->name);
-    for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
+    for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
         sb_append(&cg->code, "   mov\t\tr8, %d\n", etor->value);
         sb_append(&cg->code, "   cmp\t\trdx, r8\n");
@@ -247,7 +248,7 @@ void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
     sb_append(&cg->code, "   ret\n");
 
     // Case name of enum member
-    for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
+    for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
         sb_append(&cg->code, "enum_case_%d:\n", etor->label);
         sb_append(&cg->code, "   mov\t\trax, __%s.%s\n", ast_enum->identifier->name, etor->name);
@@ -261,7 +262,8 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     bool offset_is_runtime_computed = false;
     int base_offset = 0;
     if (assign->lhs->head.type == AST_LITERAL) {
-        AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs)->as.identifier;
+        AstIdentifier *ident = lookup_from_scope(cg->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs);
+        assert(ident);
 
         if (ident->type->kind == TYPE_POINTER) {
             if (assign->expr->evaluated_type->kind != TYPE_POINTER) {
@@ -365,7 +367,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
     
     if (!ast_for->iterable) {
         sb_append(&cg->code, "L%d:\n", cond_label);
-        emit_block(cg, ast_for->body, true);
+        emit_block(cg, ast_for->body);
         sb_append(&cg->code, "   jmp\t\tL%d\n", cond_label);
         sb_append(&cg->code, "L%d:\n", done_label);
     }
@@ -408,7 +410,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         sb_append(&cg->code, "   cmp\t\t%d[rbp], rax\n", offset_iterator);
         sb_append(&cg->code, "   %s\t\tL%d\n", range->inclusive ? "jg" : "jge", done_label);
 
-        emit_block(cg, ast_for->body, true);
+        emit_block(cg, ast_for->body);
         
         sb_append(&cg->code, "L%d:\n", post_expression_label);
         sb_append(&cg->code, "   inc\t\tQWORD %d[rbp]\n", offset_iterator);
@@ -472,7 +474,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
             }
         }
 
-        emit_block(cg, ast_for->body, true);
+        emit_block(cg, ast_for->body);
         
         sb_append(&cg->code, "L%d:\n", post_expression_label);
         sb_append(&cg->code, "   inc\t\tQWORD %d[rbp]\n", offset_index);
@@ -493,8 +495,9 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "   push\t\trbp\n");
     sb_append(&cg->code, "   mov\t\trbp, rsp\n");
 
+    // @Remove???
     // Enter the scope of the function body to know how much stack space we should allocate for the function
-    enter_scope(&cg->ident_table);
+    // enter_scope(&cg->ident_table);
 
     size_t bytes_allocated = func_defn->bytes_allocated;;
     if (strcmp("main", func_defn->identifier->name) == 0) {
@@ -504,7 +507,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     
     if (bytes_allocated) sb_append(&cg->code, "   sub\t\trsp, %d\n", aligned_allocated);
 
-    for (unsigned int i = 0; i < func_defn->parameters.count; i++) {
+    for (int i = 0; i < func_defn->parameters.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
         param->identifier->stack_offset = 16 + (i * 8);
     }
@@ -513,9 +516,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     int return_label = make_label_number(cg);
     func_defn->return_label = return_label;
 
-    emit_block(cg, func_defn->body, false);
-    exit_scope(&cg->ident_table);
-    
+    emit_block(cg, func_defn->body);
 
     sb_append(&cg->code, "L%d:\n", return_label);
     if (func_defn->return_type->kind == TYPE_INTEGER) {
@@ -562,11 +563,11 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
     }
 
     sb_append(&cg->code, "   ; block of if\n");
-    emit_block(cg, ast_if->block, true);
+    emit_block(cg, ast_if->block);
     sb_append(&cg->code, "   jmp L%d\n", done_label);
 
     int next_if_else_label = first_else_if_label;
-    for (unsigned int i = 0; i < ast_if->else_ifs.count; i++) {
+    for (int i = 0; i < ast_if->else_ifs.count; i++) {
         AstIf *else_if = &((AstIf *)(ast_if->else_ifs.items))[i];
 
         sb_append(&cg->code, ";#%zu else if\n", i + 1);
@@ -590,14 +591,14 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
             }
         }
 
-        emit_block(cg, else_if->block, true);
+        emit_block(cg, else_if->block);
         sb_append(&cg->code, "   jmp L%d\n", done_label);
     }
 
     if (ast_if->else_block) {
         sb_append(&cg->code, "; else\n");
         sb_append(&cg->code, "L%d:\n", else_label);
-        emit_block(cg, ast_if->else_block, true);
+        emit_block(cg, ast_if->else_block);
         sb_append(&cg->code, "   jmp L%d\n", done_label);
     }
 
@@ -676,7 +677,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
 
     // Push all the arguments on the stack
     int num_enum_arguments = 0;
-    for (unsigned int i = 1; i < print->arguments.count; i++) {
+    for (int i = 1; i < print->arguments.count; i++) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
         emit_expression(cg, arg);
         if (arg->evaluated_type->kind == TYPE_ENUM) {
@@ -740,7 +741,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
             sb_append(&cg->code, "   mov\t\t%s, rax\n", reg);
 
             // Restore registers
-            for (int j = i + 1; (unsigned int) j < print->arguments.count; j++) 
+            for (int j = i + 1; (int) j < print->arguments.count; j++) 
                 sb_append(&cg->code, "   pop\t\t%s   ; restore\n", get_function_argument_register(j));
 
             enum_buffer_index += 1;
@@ -777,7 +778,7 @@ void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type, bool is_arr
         assert(struct_defn != NULL);
 
         DynamicArray members = get_struct_members(struct_defn);
-        for (unsigned int i = 0; i < members.count; i++) {
+        for (int i = 0; i < members.count; i++) {
             AstDeclaration *member = ((AstDeclaration **)(members.items))[i];
             zero_initialize(cg, dest_offset + member->member_offset, member->declared_type, member->declared_type->kind == TYPE_ARRAY);
         }
@@ -791,7 +792,7 @@ void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type, bool is_arr
 
         TypeArray *array = (TypeArray *)(type);
         if (is_array_initialization) {
-            for (unsigned int i = 0; i < array->capicity; i++) {
+            for (int i = 0; i < array->capicity; i++) {
                 zero_initialize(cg, dest_offset + (i * array->elem_type->size), array->elem_type, true);
             }
         } else {
@@ -885,7 +886,7 @@ void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is
 }
 
 void emit_struct_initialization(CodeGenerator *cg, int dest_offset, AstStructLiteral *lit) {
-    for (unsigned int i = 0; i < lit->initializers.count; i++) {
+    for (int i = 0; i < lit->initializers.count; i++) {
         AstStructInitializer *init = ((AstStructInitializer **)(lit->initializers.items))[i];
 
         int member_offset = dest_offset + init->member->member_offset;
@@ -898,7 +899,7 @@ void emit_array_initialization(CodeGenerator *cg, int dest_offset, AstArrayLiter
     assert(lhs_type->kind == TYPE_ARRAY);
     
     int elem_size   = ((TypeArray *)(array_lit->head.evaluated_type))->elem_type->size;
-    for (unsigned int i = 0; i < array_lit->expressions.count; i++) {
+    for (int i = 0; i < array_lit->expressions.count; i++) {
         AstExpr *expr = ((AstExpr **)(array_lit->expressions.items))[i];
 
         int elem_offset = dest_offset + (i * elem_size);
@@ -1186,7 +1187,7 @@ void emit_unary_inside_member_access(CodeGenerator *cg, AstUnary *unary, AstMemb
         assert(unary->expr->evaluated_type->kind == TYPE_POINTER);
 
         if (unary->expr->head.type == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
-            AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(unary->expr))->as.value.identifier.name, (Ast *)unary->expr)->as.identifier;
+            AstIdentifier *ident = lookup_from_scope(cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name, (Ast *)unary->expr);
             assert(ident->type->kind == TYPE_POINTER);
 
             sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", ident->stack_offset);
@@ -1244,7 +1245,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
         }
     }
     if (ma->left->head.type == AST_LITERAL && ((AstLiteral *)(ma->left))->kind == LITERAL_IDENTIFIER) {
-        AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(ma->left))->as.value.identifier.name, (Ast *)(ma->left))->as.identifier;
+        AstIdentifier *ident = lookup_from_scope(cg->current_scope, ((AstLiteral *)(ma->left))->as.value.identifier.name, (Ast *)(ma->left));
 
         if (ident->type->kind == TYPE_POINTER) {
             // Field access through pointer
@@ -1269,7 +1270,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
 
         if (cursor->head.type == AST_LITERAL) {
             assert(((AstLiteral *)(cursor))->kind == LITERAL_IDENTIFIER);
-            AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(cursor))->as.value.identifier.name, (Ast *)cursor)->as.identifier;
+            AstIdentifier *ident = lookup_from_scope(cg->current_scope, ((AstLiteral *)(cursor))->as.value.identifier.name, (Ast *)cursor);
             assert(ident && ident->type->kind == TYPE_ARRAY);
 
             emit_array_access_offset(cg, array_ac);
@@ -1323,7 +1324,7 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue)
         expr = ((AstArrayAccess *)(expr))->accessing;
     }
     if (expr->head.type == AST_LITERAL && ((AstLiteral *)(expr))->kind == LITERAL_IDENTIFIER) {
-        AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(expr))->as.value.identifier.name, (Ast *)expr)->as.identifier;
+        AstIdentifier *ident = lookup_from_scope(cg->current_scope, ((AstLiteral *)(expr))->as.value.identifier.name, (Ast *)expr);
 
         type        = ident->type;
         base_offset = ident->stack_offset;
@@ -1453,7 +1454,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         }
         if (unary->operator == OP_ADDRESS_OF) {
             if (unary->expr->head.type == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
-                AstIdentifier *ident = symbol_lookup(&cg->ident_table, ((AstLiteral *)(unary->expr))->as.value.identifier.name, (Ast *)unary->expr)->as.identifier;
+                AstIdentifier *ident = lookup_from_scope(cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name, (Ast *)unary->expr);
                 assert(ident);
 
                 sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", ident->stack_offset);
@@ -1561,10 +1562,8 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_IDENTIFIER: {
-            Symbol *ident_symbol = symbol_lookup(&cg->ident_table, lit->as.value.identifier.name, (Ast *)lit);
-            assert(ident_symbol != NULL);
-
-            AstIdentifier *ident = ident_symbol->as.identifier;
+            AstIdentifier *ident = lookup_from_scope(cg->current_scope, lit->as.value.identifier.name, (Ast *)lit);
+            assert(ident);
 
             if (ident->belongs_to_decl && ident->belongs_to_decl->flags & DECLARATION_CONSTANT) {
                 assert(ident->belongs_to_decl->expr->head.type == AST_LITERAL);

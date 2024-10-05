@@ -9,19 +9,12 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   CS0 DB "Mike", 0 
-   CS1 DB "Solomon", 0 
-   CS2 DB "Ralph", 0 
-   CS3 DB "", 0 
-   CS4 DB "ugly", 0 
-   CS5 DB "not ugly", 0 
-   CS6 DB "", 0 
-   CS7 DB "scary", 0 
-   CS8 DB "not scary", 0 
-   CS9 DB `My name is %s, i am %s and %s`, 10, 0 
-   __HTTPStatus.ok DB "HTTPStatus.ok", 0
-   __HTTPStatus.bad_request DB "HTTPStatus.bad_request", 0
-   __HTTPStatus.unauthorized DB "HTTPStatus.unauthorized", 0
+   __DogKind.samoid DB "DogKind.samoid", 0
+   __DogKind.chiwawa DB "DogKind.chiwawa", 0
+   __DogKind.bulldog DB "DogKind.bulldog", 0
+   CF0 DD 20.000000
+   CF1 DD 0.500000
+   CF2 DD 80.000000
 
 segment .text
    global main
@@ -40,160 +33,127 @@ assert_fail:
    mov		rcx, 1
    call		ExitProcess
 
+print_enum_DogKind:
+   mov		r8, 0
+   cmp		rdx, r8
+   jz			enum_case_0
+   mov		r8, 1
+   cmp		rdx, r8
+   jz			enum_case_1
+   mov		r8, 2
+   cmp		rdx, r8
+   jz			enum_case_2
+   push		rcx
+   mov		r8, rdx
+   mov		rdx, fmt_int
+   push		r8
+   push		rdx
+   push		rcx
+   call		sprintf
+   pop		rax
+   pop		rbx
+   pop		rbx
+   pop		rbx
+   ret
+enum_case_0:
+   mov		rax, __DogKind.samoid
+   ret
+enum_case_1:
+   mov		rax, __DogKind.chiwawa
+   ret
+enum_case_2:
+   mov		rax, __DogKind.bulldog
+   ret
 
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 160
+   sub		rsp, 64
 
-   ; initialization of 'monsters'
-   mov		QWORD -16[rbp], 0
-   mov		QWORD -8[rbp], 0
-   mov		QWORD -64[rbp], 0
-   mov		BYTE -56[rbp], 0
-   mov		BYTE -55[rbp], 0
-   mov		QWORD -48[rbp], 0
-   mov		BYTE -40[rbp], 0
-   mov		BYTE -39[rbp], 0
-   mov		QWORD -32[rbp], 0
-   mov		BYTE -24[rbp], 0
-   mov		BYTE -23[rbp], 0
-   mov		rax, CS0
-   push		rax
-   pop		rax
-   mov		QWORD -64[rbp], rax
-   push		-1
-   pop		rax
-   mov		BYTE -56[rbp], al
+   ; initialization of 'samoid'
+   mov		DWORD -16[rbp], 0
+   mov		DWORD -12[rbp], 0
+   mov		DWORD -8[rbp], 0
+   mov		DWORD -4[rbp], 0
    push		0
    pop		rax
-   mov		BYTE -55[rbp], al
-   mov		rax, CS1
+   mov		DWORD -16[rbp], eax
+   mov		rax, 4
    push		rax
    pop		rax
-   mov		QWORD -48[rbp], rax
-   push		0
-   pop		rax
-   mov		BYTE -40[rbp], al
-   push		-1
-   pop		rax
-   mov		BYTE -39[rbp], al
-   mov		rax, CS2
+   mov		DWORD -12[rbp], eax
+   movss		xmm0, [CF0]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   movss		DWORD -8[rbp], xmm0
+   movss		xmm0, [CF1]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   movss		DWORD -4[rbp], xmm0
+
+   ; initialization of 'bmi'
+   mov		DWORD -20[rbp], 0
+   movss		xmm0, -8[rbp]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm0, -4[rbp]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm0, -4[rbp]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm1, [rsp]
+   add		rsp, 4
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   mulss		xmm0, xmm1
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm1, [rsp]
+   add		rsp, 4
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   divss		xmm0, xmm1
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   movss		DWORD -20[rbp], xmm0
+   movss		xmm0, -20[rbp]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm0, [CF2]
+   sub		rsp, 4
+   movss		[rsp], xmm0
+   movss		xmm1, [rsp]
+   add		rsp, 4
+   movss		xmm0, [rsp]
+   add		rsp, 4
+   comiss	xmm0, xmm1
+   sete		al
    push		rax
-   pop		rax
-   mov		QWORD -32[rbp], rax
-   push		-1
-   pop		rax
-   mov		BYTE -24[rbp], al
-   push		-1
-   pop		rax
-   mov		BYTE -23[rbp], al
-   push		3
-   lea		rax, -64[rbp]
-   push		rax
-   pop		rax
    pop		rcx
-   mov		QWORD -16[rbp], rax
-   mov		QWORD -8[rbp], rcx
-   mov		rax, QWORD -16[rbp]
-   mov		rbx, QWORD -8[rbp]
-   push		rbx
+   mov		rdx, 23
+   call		assert
+   mov		eax, DWORD -12[rbp]
+   movsx		rax, eax
    push		rax
-   ; For-loop
-   pop		rax
+   mov		rax, 4
+   push		rax
    pop		rbx
-   mov		-88[rbp], rax     ; data
-   mov		-96[rbp], rbx     ; count
-   mov		QWORD -104[rbp], 0 ; index
-L1:
-   mov		rbx, -96[rbp]
-   mov		rax, -104[rbp]
+   pop		rax
    cmp		rax, rbx
-   jge		L3
-   mov		rbx, -88[rbp]
-   imul		rax, 16
-   add		rbx, rax
-   mov		rax, [rbx + 0]
-   mov		-80[rbp], rax
-   mov		rax, [rbx + 8]
-   mov		-72[rbp], rax
-
-   ; initialization of 'is_or_is_not_ugly'
-   mov		QWORD -112[rbp], 0
-   mov		rax, CS3
+   sete		al
    push		rax
-   pop		rax
-   mov		QWORD -112[rbp], rax
-   mov		al, BYTE -72[rbp]
-   push		rax
-   pop		rax
-   cmp		al, 0
-   jz			L5
-   ; block of if
-   mov		rax, CS4
-   push		rax
-   pop		rax
-   mov		QWORD -112[rbp], rax
-   jmp L4
-; else
-L5:
-   mov		rax, CS5
-   push		rax
-   pop		rax
-   mov		QWORD -112[rbp], rax
-   jmp L4
-; done
-L4:
-
-   ; initialization of 'is_or_is_not_scary'
-   mov		QWORD -120[rbp], 0
-   mov		rax, CS6
-   push		rax
-   pop		rax
-   mov		QWORD -120[rbp], rax
-   mov		al, BYTE -71[rbp]
-   push		rax
-   pop		rax
-   cmp		al, 0
-   jz			L7
-   ; block of if
-   mov		rax, CS7
-   push		rax
-   pop		rax
-   mov		QWORD -120[rbp], rax
-   jmp L6
-; else
-L7:
-   mov		rax, CS8
-   push		rax
-   pop		rax
-   mov		QWORD -120[rbp], rax
-   jmp L6
-; done
-L6:
-
-   ; expression of print
-   mov		rax, QWORD -80[rbp]
-   push		rax
-   mov		rax, QWORD -112[rbp]
-   push		rax
-   mov		rax, QWORD -120[rbp]
-   push		rax
-   pop		r9
-   pop		r8
-   pop		rdx
-   mov		rcx, CS9
-   call		printf
-L2:
-   inc		QWORD -104[rbp]
-   jmp		L1
-L3:
-L0:
-   mov		rax, 0
-   add		rsp, 160
-   sub		rsp, 32
+   pop		rcx
+   mov		rdx, 24
+   call		assert
 L4:
    mov		rax, 0
-   add		rsp, 32
+   add		rsp, 64
    pop		rbp
    ret

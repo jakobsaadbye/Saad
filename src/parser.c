@@ -16,6 +16,8 @@ typedef struct Parser {
     SymbolTable ident_table;
     SymbolTable function_table;
     TypeTable   type_table;
+
+    AstBlock *current_scope;
 } Parser;
 
 Parser           parser_init(Lexer *lexer);
@@ -68,6 +70,68 @@ void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
 
 
+AstBlock *new_block(Parser *parser) {
+    AstBlock *scope = ast_allocate(parser, sizeof(AstBlock));
+    scope->statements = da_init(4, sizeof(Ast *));
+    scope->identifiers = da_init(4, sizeof(AstIdentifier *));
+    scope->parent = parser->current_scope;
+    parser->current_scope = scope;
+    return scope;
+}
+
+void close_block(Parser *parser) {
+    parser->current_scope = parser->current_scope->parent;
+}
+
+AstIdentifier *find_in_scope(AstBlock *scope, char *ident_name, Ast *used_at) {
+    AstIdentifier *found = NULL;
+    for (int i = 0; i < scope->identifiers.count; i++) {
+        AstIdentifier *ident = ((AstIdentifier **)scope->identifiers.items)[i];
+
+        if (used_at && used_at->type != AST_ERR) {
+            // This if-condition is abit of a @Hack to get around looking up ephemeral identifiers such as it 
+            // and checking that main exists, without making variations of this function. 
+            Ast *declared_at = &ident->head;
+            if (is_a_before_b(used_at, declared_at)) {
+                // Case where identifier is used before being declared
+                break;
+            }
+        }
+
+        if (strcmp(ident->name, ident_name) == 0) {
+            found = ident;
+            break;
+        }
+    }
+    return found;
+}
+
+AstIdentifier *lookup_from_scope(AstBlock *scope, char *ident_name, Ast *used_at) {
+    AstBlock *searching_scope = scope;
+    while (true) {
+        if (searching_scope == NULL) return NULL;
+
+        AstIdentifier *found = find_in_scope(searching_scope, ident_name, used_at);
+        if (found) return found;
+
+        searching_scope = searching_scope->parent;
+    }
+}
+
+AstIdentifier *lookup_scope(Parser *parser, char *ident_name, Ast *site) {
+    return lookup_from_scope(parser->current_scope, ident_name, site);
+}
+
+AstIdentifier *add_identifier_to_scope(AstBlock *scope, AstIdentifier *ident) {
+    AstIdentifier *existing = find_in_scope(scope, ident->name, (Ast *)ident);
+    if (existing) return existing;
+
+    da_append(&scope->identifiers, ident);
+
+    printf("Added %s to scope\n", ident->name);
+    return NULL;
+}
+
 Parser parser_init(Lexer *lexer) {
     Parser parser = {0};
     parser.lexer           = lexer;
@@ -75,6 +139,7 @@ Parser parser_init(Lexer *lexer) {
     parser.ident_table     = symbol_table_init();
     parser.function_table  = symbol_table_init();
     parser.type_table      = type_table_init();
+    parser.current_scope   = NULL;
 
     return parser;
 }
@@ -82,6 +147,9 @@ Parser parser_init(Lexer *lexer) {
 AstCode *parse_top_level_code(Parser *parser) {
     AstCode *code = (AstCode *)(ast_allocate(parser, sizeof(AstCode)));
     code->statements = da_init(8, sizeof(Ast *));
+
+    // Create global scope
+    new_block(parser);
 
     Token next = peek_next_token(parser);
     while (true) {
@@ -96,43 +164,40 @@ AstCode *parse_top_level_code(Parser *parser) {
     return code;
 }
 
-AstBlock *parse_block(Parser *parser, bool open_lexical_scope) {
-    AstBlock *block = (AstBlock *)(ast_allocate(parser, sizeof(AstBlock)));
+AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
+    AstBlock *block;
+    if (inject_into_scope) {
+        block = inject_into_scope;
+    } else {
+        block = new_block(parser);
+    }
 
     Token start_token = peek_next_token(parser);
     expect(parser, start_token, '{');
     eat_token(parser);
 
-    if (open_lexical_scope) open_scope(&parser->ident_table);
-
-    int i = 0;
     Token next;
     while (true) {
         next = peek_next_token(parser);
-        if (next.type == '}') break;
-        else {
-            if (i >= MAX_STATEMENTS_WITHIN_BLOCK) {
-                printf("%s:%d: compiler-error: Reached maximum number of statements allowed within a single block which is %d", __FILE__, __LINE__, MAX_STATEMENTS_WITHIN_BLOCK);
-                report_error_token(parser, LABEL_ERROR, start_token, "Here is the block with too many statements");
-                exit(1);
-            }
+        if (next.type == '}' || next.type == TOKEN_END) break;
 
-            Ast *stmt = parse_statement(parser);
-            if (!stmt) return NULL;
-            block->statements[i] = stmt;
-            block->num_of_statements += 1;
-            i++;
-        }
+        Ast *stmt = parse_statement(parser);
+        if (!stmt) return NULL;
+        da_append(&block->statements, stmt);
     }
 
-    expect(parser, next, '}');  // Should not be able to fail
+    expect(parser, next, '}');
     eat_token(parser);
 
-    if (open_lexical_scope) close_scope(&parser->ident_table);
+    block->head.type  = AST_BLOCK;  
+    block->head.start = start_token.start;
+    block->head.end   = next.end;
 
-    block->head.type         = AST_BLOCK;  
-    block->head.start        = start_token.start;
-    block->head.end          = next.end;
+    if (inject_into_scope) {
+        // Closing the scope is done by the caller of parse_block
+    } else {
+        close_block(parser);
+    }
 
     return block;
 }
@@ -218,7 +283,7 @@ Ast *parse_statement(Parser *parser) {
         matched_a_statement = true;
     }
     else if (token.type == '{') {
-        stmt = (Ast *)(parse_block(parser, true));
+        stmt = (Ast *)(parse_block(parser, NULL));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     } 
@@ -375,13 +440,13 @@ AstEnum *parse_enum(Parser *parser) {
     AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // Type of ident is set later down to refer to the enum it self
 
     // Expose the enum as an identifier so enum values can be referenced explicitly using ENUM.value
+    // @ScopeRefactoring
     {
         ident->flags |= IDENTIFIER_IS_NAME_OF_ENUM;
-        Symbol *exists = symbol_add_identifier(&parser->ident_table, ident);
-        if (exists) {
-            AstIdentifier *found = exists->as.identifier;
-            report_error_ast(parser, LABEL_ERROR, (Ast *)(ident), "Type '%s' already defined", found->name);
-            report_error_ast(parser, LABEL_NOTE, (Ast *)(found), "Here is the previous definition of '%s'", found->name);
+        AstIdentifier *existing = add_identifier_to_scope(parser->current_scope, ident);
+        if (existing) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)(ident), "Type '%s' already defined", existing->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous definition of '%s'", existing->name);
             exit(1);
         }
     }
@@ -668,15 +733,15 @@ AstFor *parse_for(Parser *parser) {
     AstBlock *body;
     if (iterator || index) {
         // Push down the iterator into the scope of the body
-        open_scope(&parser->ident_table);
-        if (iterator) symbol_add_identifier(&parser->ident_table, iterator);
-        if (index)    symbol_add_identifier(&parser->ident_table, index);
+        body = new_block(parser);
+        if (iterator) add_identifier_to_scope(body, iterator);
+        if (index)    add_identifier_to_scope(body, index);
         
-        body = parse_block(parser, false);
+        body = parse_block(parser, body);
         if (!body) return NULL;
-        close_scope(&parser->ident_table);
+        close_block(parser);
     } else {
-        body = parse_block(parser, true);
+        body = parse_block(parser, NULL);
         if (!body) return NULL;
     }
 
@@ -931,7 +996,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     expect(parser, next, '('); // Should also be impossible to fail
     eat_token(parser);
 
-    open_scope(&parser->ident_table); // Open a scope, so that the parameters will be pushed down into the scope of the body
+    AstBlock *body = new_block(parser); // Open a scope, so that the parameters will be pushed down into the scope of the body
     bool first_parameter_seen = false;
     while (true) {
         //
@@ -983,17 +1048,26 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         return_type = parse_type(parser);;
     }
 
-    AstBlock *body = parse_block(parser, false); // Here we tell parse_block to explicitly not make a new lexical scope, as we are managing the scope manually in here
+    body = parse_block(parser, body); // Here we tell parse_block to explicitly not make a new lexical scope, but instead use our existing function body
     if (!body) return NULL;
-    close_scope(&parser->ident_table);
+    close_block(parser);
+
+    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, return_type); // @Incomplete - The return type here is not correct. It should be set in the typer to be of function type, which we currently do not have
+    AstIdentifier *existing = add_identifier_to_scope(parser->current_scope, ident);
+    if (existing) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of function %s", ident->name);
+        report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "   ... Here is the previously defined function");
+        return NULL;
+    }
 
     func_defn->head.type   = AST_FUNCTION_DEFN;
     func_defn->head.start  = ident_token.start;
     func_defn->head.end    = body->head.start;
-    func_defn->identifier  = make_identifier_from_token(parser, ident_token, func_defn->return_type);
+    func_defn->identifier  = ident;
     func_defn->body        = body;
     func_defn->return_type = return_type;
-    symbol_add_function_defn(&parser->function_table, func_defn);
+
+    symbol_add_function_defn(&parser->function_table, func_defn); // @Remove
 
     return func_defn;
 }
@@ -1005,7 +1079,7 @@ AstIf *parse_if(Parser *parser) {
     AstExpr *condition = parse_expression(parser, MIN_PRECEDENCE);
     if (!condition) return NULL;
 
-    AstBlock *block = parse_block(parser, true);
+    AstBlock *block = parse_block(parser, NULL);
     if (!block) return NULL;
 
     AstIf *ast_if = (AstIf *)(ast_allocate(parser, sizeof(AstIf)));
@@ -1027,7 +1101,7 @@ AstIf *parse_if(Parser *parser) {
                 
                 AstExpr *condition = parse_expression(parser, MIN_PRECEDENCE);
                 if (!condition) return NULL;
-                AstBlock *block = parse_block(parser, true);
+                AstBlock *block = parse_block(parser, NULL);
                 if (!block) return NULL;
 
                 AstIf else_if = {0};
@@ -1042,7 +1116,7 @@ AstIf *parse_if(Parser *parser) {
                 continue; // Look for more else ifs
             }
 
-            AstBlock *else_block = parse_block(parser, true);
+            AstBlock *else_block = parse_block(parser, NULL);
             if (!else_block) return NULL;
 
             ast_if->else_block = else_block;
@@ -1212,13 +1286,14 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *exp
     if (flags & DECLARATION_CONSTANT) {
         ident->flags |= IDENTIFIER_IS_CONSTANT;
     }
+
     if (flags & DECLARATION_IS_STRUCT_MEMBER) {
         // Skip putting identifier into identifier table as structs keeps their own small symbol table of members
     } else {
-        Symbol *existing = symbol_add_identifier(&parser->ident_table, ident);
+        AstIdentifier *existing = add_identifier_to_scope(parser->current_scope, ident);
         if (existing != NULL) {
             report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.value.identifier.name);
-            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing->as.identifier), "Here is the previous declaration ...");
+            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous declaration ...");
             exit(1);
         }
     }

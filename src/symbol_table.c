@@ -50,7 +50,7 @@ void exit_scope(SymbolTable *st) {
 void symbol_table_reset_helper(SymbolTable *st, Scope *current) {
     current->next = 0;
 
-    for (unsigned int i = 0; i < current->children.count; i++) {
+    for (int i = 0; i < current->children.count; i++) {
         Scope *next = &((Scope *)(current->children.items))[i];
         assert(next != NULL);
         symbol_table_reset_helper(st, next);

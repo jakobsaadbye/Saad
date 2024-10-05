@@ -4,6 +4,8 @@ typedef struct Typer {
     Parser *parser;
     ConstEvaluater *ce;
 
+    AstBlock *current_scope;
+
     AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
     AstFor          *enclosing_for; // Used by break or continue statements to know where to branch to
 
@@ -11,7 +13,7 @@ typedef struct Typer {
     int array_literal_depth;
 } Typer;
 
-bool  check_block(Typer *typer, AstBlock *block, bool open_lexical_scope);
+bool  check_block(Typer *typer, AstBlock *block);
 bool  check_statement(Typer *typer, Ast *stmt);
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type);
 Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type);
@@ -33,7 +35,9 @@ Typer typer_init(Parser *parser, ConstEvaluater *ce) {
     Typer typer = {0};
     typer.parser = parser;
     typer.ce = ce;
+    typer.current_scope = parser->current_scope;
     typer.enclosing_function = NULL;
+    typer.enclosing_for = NULL;
 
     typer.array_literal_depth = 0;
 
@@ -43,7 +47,7 @@ Typer typer_init(Parser *parser, ConstEvaluater *ce) {
 bool check_code(Typer *typer, AstCode *code) {
     bool ok;
 
-    for (unsigned int i = 0; i < code->statements.count; i++) {
+    for (int i = 0; i < code->statements.count; i++) {
         Ast *stmt = ((Ast **)(code->statements.items))[i];
         ok = check_statement(typer, stmt);
         if (!ok) return false; // @Improvement - Maybe proceed with typechecking if we can still continue after seing the error
@@ -52,15 +56,16 @@ bool check_code(Typer *typer, AstCode *code) {
     return true;
 }
 
-bool check_block(Typer *typer, AstBlock *block, bool open_lexical_scope) {
+bool check_block(Typer *typer, AstBlock *block) {
     bool ok;
 
-    if (open_lexical_scope) enter_scope(&typer->parser->ident_table);
-    for (int i = 0; i < block->num_of_statements; i++) {
-        ok = check_statement(typer, block->statements[i]);
+    typer->current_scope = block;
+    for (int i = 0; i < block->statements.count; i++) {
+        Ast *stmt = ((Ast **)block->statements.items)[i];
+        ok = check_statement(typer, stmt);
         if (!ok) return false;
     }
-    if (open_lexical_scope) exit_scope(&typer->parser->ident_table);
+    typer->current_scope = block->parent;
 
     return true;
 }
@@ -96,7 +101,7 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
 
         if (decl) {
             if (array->capacity_expr) {
-                AstExpr *constexpr = simplify_expression(typer->ce, array->capacity_expr);
+                AstExpr *constexpr = simplify_expression(typer->ce, typer->current_scope, array->capacity_expr);
                 if (constexpr->head.type != AST_LITERAL && ((AstLiteral *)(constexpr))->kind != LITERAL_INTEGER) {
                     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be an integer constant");
                     return NULL;
@@ -216,7 +221,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         Type *expr_type  = check_expression(typer, decl->expr, NULL);
         if (!expr_type) return false;
 
-        AstExpr *const_expr = simplify_expression(typer->ce, decl->expr);
+        AstExpr *const_expr = simplify_expression(typer->ce, typer->current_scope, decl->expr);
         if (const_expr->head.type == AST_LITERAL) {
             // Swap out the current expression for the simplified expression
             // @Speed? @Note - We might in the future cleanup the already allocated expression tree as its no longer needed after this swap.
@@ -287,6 +292,7 @@ bool types_are_equal(Type *lhs, Type *rhs) {
 }
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
+    // @ScopeRefactoring - We need a function type in order to handle this
     Symbol *func_symbol = symbol_lookup(&typer->parser->function_table, call->identifer->name, (Ast *)call);
     if (func_symbol == NULL) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Unknown function '%s'", call->identifer->name);
@@ -301,7 +307,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         return NULL;
     }
 
-    for (unsigned int i = 0; i < call->arguments.count; i++) {
+    for (int i = 0; i < call->arguments.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
         AstExpr *arg       = ((AstExpr **)(call->arguments.items))[i];
         Type *arg_type = check_expression(typer, arg, NULL);
@@ -339,7 +345,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         lhs_is_constant = false;
     }
     else if (is_identifier) {
-        ident = symbol_lookup(&typer->parser->ident_table, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs)->as.identifier;
+        ident = lookup_from_scope(typer->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs);
         assert(ident); // Is checked in check_expression so no need to check it here also
         lhs_is_constant = ident->flags & IDENTIFIER_IS_CONSTANT;
     } else {
@@ -405,7 +411,7 @@ bool check_struct(Typer *typer, AstStruct *ast_struct) {
 
     DynamicArray members = get_struct_members(ast_struct);
     bool ok;
-    for (unsigned int i = 0; i < members.count; i++) {
+    for (int i = 0; i < members.count; i++) {
         AstDeclaration *member = ((AstDeclaration **)members.items)[i];
         ok = check_declaration(typer, member);
         if (!ok) return false;
@@ -415,7 +421,7 @@ bool check_struct(Typer *typer, AstStruct *ast_struct) {
     int alignment = 0;
     int largest_alignment = 0;
     int offset  = 0;
-    for (unsigned int i = 0; i < members.count; i++) {
+    for (int i = 0; i < members.count; i++) {
         AstDeclaration *member = ((AstDeclaration **)members.items)[i];
         
         int member_size = member->declared_type->size;
@@ -492,7 +498,7 @@ bool check_for(Typer *typer, AstFor *ast_for) {
         typer->enclosing_function->bytes_allocated += align_value(ast_for->iterator->type->size, 8) + 24;
     }
 
-    bool ok = check_block(typer, ast_for->body, true);
+    bool ok = check_block(typer, ast_for->body);
     if (!ok) return false;
 
     typer->enclosing_for = NULL;
@@ -500,7 +506,7 @@ bool check_for(Typer *typer, AstFor *ast_for) {
 }
 
 AstEnumerator *enum_value_is_unique(AstEnum *ast_enum, int value) {
-    for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
+    for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
         if (!etor->is_typechecked) continue;
 
@@ -529,7 +535,7 @@ char *generate_c_printf_string(Typer *typer, AstPrint *print) {
         c += 1;
     }
 
-    if ((unsigned int )num_specifiers != print->arguments.count - 1) {
+    if (num_specifiers != print->arguments.count - 1) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg0, "Mismatch in the number of specifiers and arguments. Got %d specifiers and %d arguments", num_specifiers, print->arguments.count - 1);
         return NULL;
     }
@@ -589,7 +595,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
             return NULL;
         }
 
-        for (unsigned int i = 0; i < print->arguments.count; i++) {
+        for (int i = 0; i < print->arguments.count; i++) {
             AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
             Type *arg_type = check_expression(typer, arg, NULL);
             if (!arg_type) return NULL;
@@ -637,16 +643,16 @@ bool check_statement(Typer *typer, Ast *stmt) {
             return false;
         }
 
-        bool ok = check_block(typer, ast_if->block, true);
+        bool ok = check_block(typer, ast_if->block);
         if (!ok) return false;
 
-        for (unsigned int i = 0; i < ast_if->else_ifs.count; i++) {
+        for (int i = 0; i < ast_if->else_ifs.count; i++) {
             AstIf *else_if = &(((AstIf *)(ast_if->else_ifs.items))[i]);
             ok = check_statement(typer, (Ast *)(else_if));
             if (!ok) return false;
         }
         if (ast_if->else_block) {
-            ok = check_block(typer, ast_if->else_block, true);
+            ok = check_block(typer, ast_if->else_block);
             if (!ok) return false;
         }
 
@@ -654,7 +660,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
     }
     case AST_BLOCK: {
         AstBlock *block = (AstBlock *)(stmt);
-        return check_block(typer, block, true);
+        return check_block(typer, block);
     }
     case AST_FUNCTION_CALL: {
         AstFunctionCall *call = (AstFunctionCall *)(stmt);
@@ -695,7 +701,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_FUNCTION_DEFN: {
         AstFunctionDefn *func_defn = (AstFunctionDefn *)(stmt);
         typer->enclosing_function = func_defn;
-        bool ok = check_block(typer, func_defn->body, true);
+        bool ok = check_block(typer, func_defn->body);
         if (!ok) return false;
 
         func_defn->return_type = resolve_type(typer, func_defn->return_type, NULL);
@@ -711,13 +717,13 @@ bool check_statement(Typer *typer, Ast *stmt) {
         assert(enum_defn != NULL); // Was put in during parsing
 
         int auto_increment_value = 0;
-        for (unsigned int i = 0; i < ast_enum->enumerators.count; i++) {
+        for (int i = 0; i < ast_enum->enumerators.count; i++) {
             AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
             if (etor->expr) {
                 Type *ok = check_expression(typer, etor->expr, (Type *)(enum_defn)); // Type definition of the enum gets to be the ctx type so we can refer to enum members inside the enum with the shorthand syntax .ENUM_MEMBER
                 if (!ok) return NULL;
 
-                AstExpr *constexpr = simplify_expression(typer->ce, etor->expr);
+                AstExpr *constexpr = simplify_expression(typer->ce, typer->current_scope, etor->expr); // @ScopeRefactoring - We still need to give enums their own scope. This probably doesn't work!!!
                 if (constexpr->head.type != AST_LITERAL) {
                     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Value must be a constant expression");
                     return false;
@@ -755,7 +761,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
 }
 
 AstEnumerator *find_enum_member(AstEnum *enum_defn, char *name) {
-    for (unsigned int i = 0; i < enum_defn->enumerators.count; i++) {
+    for (int i = 0; i < enum_defn->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(enum_defn->enumerators.items))[i];
         if (strcmp(etor->name, name) == 0) {
             return etor;
@@ -803,7 +809,7 @@ void queue_array_to_be_sized(DynamicArray *flattened_array, TypeArray *array, in
 }
 
 void free_flattened_array(DynamicArray *flattened_array) {
-    for (unsigned int i = 0; i < flattened_array->count; i++) {
+    for (int i = 0; i < flattened_array->count; i++) {
         DynamicArray *elements = &((DynamicArray *)(flattened_array->items))[i];
         free(elements->items);
     }
@@ -833,7 +839,7 @@ void do_sizing_of_entire_array(DynamicArray *flattened_array) {
         int capacity_of_biggest_array = 0;
 
         // First pass to find the biggest size of array
-        for (unsigned j = 0; j < elements.count; j++) {
+        for (int j = 0; j < elements.count; j++) {
             
             TypeArray *array = ((TypeArray **)(elements.items))[j];
             AstArrayLiteral *array_lit = array->node;
@@ -848,7 +854,7 @@ void do_sizing_of_entire_array(DynamicArray *flattened_array) {
         }
 
         // Second pass to set all the inner arrays size and capacity to be the biggest
-        for (unsigned j = 0; j < elements.count; j++) {
+        for (int j = 0; j < elements.count; j++) {
             TypeArray *array = ((TypeArray **)(elements.items))[j];
 
             array->capicity  = capacity_of_biggest_array;
@@ -906,7 +912,7 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
     memcpy(array, ctx_type, sizeof(TypeArray));
     array->node = array_lit;
 
-    for (unsigned int i = 0; i < array_lit->expressions.count; i++) {
+    for (int i = 0; i < array_lit->expressions.count; i++) {
         AstExpr *expr = ((AstExpr **)(array_lit->expressions.items))[i];
 
         bool ok = check_for_integer_overflow(typer, array->elem_type, expr);
@@ -1108,8 +1114,8 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_ty
     }
 
     DynamicArray members = get_struct_members(struct_defn->node);
-    unsigned int curr_member_index = 0;
-    for (unsigned int i = 0; i < literal->initializers.count; i++) {
+    int curr_member_index = 0;
+    for (int i = 0; i < literal->initializers.count; i++) {
         AstStructInitializer *init = ((AstStructInitializer **)(literal->initializers.items))[i];
 
         if (init->designator != NULL) {
@@ -1295,13 +1301,11 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     case LITERAL_NIL:       return (Type *)t_nil_ptr;
     case LITERAL_IDENTIFIER: {
         char   *ident_name   = literal->as.value.identifier.name;
-        Symbol *ident_symbol = symbol_lookup(&typer->parser->ident_table, ident_name, (Ast *)literal);
-        if (ident_symbol == NULL) {
+        AstIdentifier *ident = lookup_from_scope(typer->current_scope, ident_name, (Ast *)literal);
+        if (ident == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared variable '%s'", ident_name);
             return NULL;
         }
-
-        AstIdentifier *ident = ident_symbol->as.identifier;
 
         assert(ident->type);
         return ident->type;
@@ -1317,7 +1321,7 @@ int cmp_members(const void *a, const void *b) {
 DynamicArray get_struct_members(AstStruct *struct_defn) {
     DynamicArray member_entries = symbol_get_symbols(&struct_defn->member_table);
     DynamicArray members        = da_init(member_entries.count, sizeof(AstDeclaration *));
-    for (unsigned int i = 0; i < member_entries.count; i++) {
+    for (int i = 0; i < member_entries.count; i++) {
         da_append(&members, ((Symbol **)(member_entries.items))[i]->as.struct_member);
     }
     free(member_entries.items);

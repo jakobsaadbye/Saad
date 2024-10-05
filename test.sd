@@ -1,32 +1,15 @@
-Monster :: struct {
-    name  : string;
-    ugly  : bool;
-    scary : bool;
+main :: () {
+    N := 20;
+
+    for 0..N {
+        print("%", fib(it));
+    }
 }
 
-
-main :: () {
-    monsters : []Monster = [
-        .{"Mike", true, false},
-        .{"Solomon", false, true},
-        .{"Ralph", true, true},
-    ];
-
-    for m in monsters {
-        is_or_is_not_ugly := "";
-        if m.ugly {
-            is_or_is_not_ugly = "ugly";
-        } else {
-            is_or_is_not_ugly = "not ugly";
-        }
-        
-        is_or_is_not_scary := "";
-        if m.scary {
-            is_or_is_not_scary = "scary";
-        } else {
-            is_or_is_not_scary = "not scary";
-        }
-        
-        print("My name is %, i am % and %", m.name, is_or_is_not_ugly, is_or_is_not_scary);
+fib :: (n: int) -> int {
+    if n == 0 || n == 1 {
+        return 1;
+    } else {
+        return fib(n - 1) + fib(n - 2);
     }
 }

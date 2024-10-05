@@ -4,6 +4,7 @@
 #define MAX_STATEMENTS_WITHIN_BLOCK 64
 
 typedef struct AstDeclaration AstDeclaration;
+typedef struct AstBlock AstBlock;
 
 typedef enum AstType {
     AST_ERR,
@@ -166,11 +167,14 @@ typedef struct AstAssignment {
     AstExpr  *expr;
 } AstAssignment;
 
+// 2. Structures and enums gets an AstBlock to hold their members
+
 typedef struct AstBlock {
     Ast head;
 
-    Ast  *statements[MAX_STATEMENTS_WITHIN_BLOCK]; // @Cleanup - Make into a DynamicArray!
-    int   num_of_statements;
+    AstBlock *parent;
+    DynamicArray statements;
+    DynamicArray identifiers;
 } AstBlock;
 
 typedef struct AstStruct {

@@ -4,10 +4,10 @@
 #define da_append(da, item) _da_append(da, &item);
 
 typedef struct DynamicArray {
-    unsigned int item_size;
+    int item_size;
     unsigned char *items;
-    unsigned int count;
-    unsigned int capacity;
+    int count;
+    int capacity;
 } DynamicArray;
 
 DynamicArray da_init(unsigned int init_cap, unsigned int item_size) {
