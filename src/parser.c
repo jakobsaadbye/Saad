@@ -70,11 +70,16 @@ void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
 
 
-AstBlock *new_block(Parser *parser) {
+AstBlock *new_block(Parser *parser, BlockKind kind) {
     AstBlock *scope = ast_allocate(parser, sizeof(AstBlock));
+    scope->parent = parser->current_scope;
+    scope->kind = kind;
     scope->statements = da_init(4, sizeof(Ast *));
     scope->identifiers = da_init(4, sizeof(AstIdentifier *));
-    scope->parent = parser->current_scope;
+    scope->members = da_init(4, sizeof(AstDeclaration *));
+    scope->belongs_to_struct = NULL;
+    scope->belongs_to_enum = NULL;
+
     parser->current_scope = scope;
     return scope;
 }
@@ -106,6 +111,19 @@ AstIdentifier *find_in_scope(AstBlock *scope, char *ident_name, Ast *used_at) {
     return found;
 }
 
+AstDeclaration *find_member_in_scope(AstBlock *scope, char *name) {
+    AstDeclaration *found = NULL;
+    for (int i = 0; i < scope->members.count; i++) {
+        AstDeclaration *member = ((AstDeclaration **)scope->members.items)[i];
+        if (strcmp(name, member->identifier->name) == 0) {
+            found = member;
+            break;
+        }
+    }
+
+    return found;
+}
+
 AstIdentifier *lookup_from_scope(AstBlock *scope, char *ident_name, Ast *used_at) {
     AstBlock *searching_scope = scope;
     while (true) {
@@ -128,7 +146,18 @@ AstIdentifier *add_identifier_to_scope(AstBlock *scope, AstIdentifier *ident) {
 
     da_append(&scope->identifiers, ident);
 
-    printf("Added %s to scope\n", ident->name);
+    return NULL;
+}
+
+AstDeclaration *add_declaration_to_scope(AstBlock *scope, AstDeclaration *decl) {
+    AstIdentifier *existing = find_in_scope(scope, decl->identifier->name, NULL); // Passing NULL here as the used_at site so that we don't care about the ordering of declarations and they can refer to each other
+    if (existing) {
+        assert(existing->belongs_to_decl);
+        return existing->belongs_to_decl;
+    };
+
+    da_append(&scope->members, decl);
+
     return NULL;
 }
 
@@ -149,7 +178,7 @@ AstCode *parse_top_level_code(Parser *parser) {
     code->statements = da_init(8, sizeof(Ast *));
 
     // Create global scope
-    new_block(parser);
+    new_block(parser, BLOCK_IMPERATIVE);
 
     Token next = peek_next_token(parser);
     while (true) {
@@ -169,7 +198,7 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
     if (inject_into_scope) {
         block = inject_into_scope;
     } else {
-        block = new_block(parser);
+        block = new_block(parser, BLOCK_IMPERATIVE);
     }
 
     Token start_token = peek_next_token(parser);
@@ -183,9 +212,19 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
 
         Ast *stmt = parse_statement(parser);
         if (!stmt) return NULL;
+
+        if (block->kind == BLOCK_DECLARATIVE) {
+            bool valid = false;
+            if (stmt->type == AST_DECLARATION) valid = true;
+
+            if (!valid) {
+                report_error_ast(parser, LABEL_ERROR, (Ast *)stmt, "Invalid statement inside of a struct or enum. Only declarations are allowed");
+                return NULL;
+            }
+        }
+
         da_append(&block->statements, stmt);
     }
-
     expect(parser, next, '}');
     eat_token(parser);
 
@@ -568,43 +607,53 @@ AstStruct *parse_struct(Parser *parser) {
     expect(parser, struct_token, TOKEN_STRUCT);
     eat_token(parser);
 
-    next = peek_next_token(parser);
-    expect(parser, next, '{');
-    eat_token(parser);
+    AstStruct *ast_struct = (AstStruct *)(ast_allocate(parser, sizeof(AstStruct)));
+    AstBlock *scope = new_block(parser, BLOCK_DECLARATIVE);
+    scope->belongs_to_struct = ast_struct;
 
-    AstStruct *ast_struct    = (AstStruct *)(ast_allocate(parser, sizeof(AstStruct)));
-    ast_struct->member_table = symbol_table_init();
+    scope = parse_block(parser, scope);
+    if (!scope) return NULL;
 
-    // Parse members
-    next = peek_next_token(parser);
-    int member_index = 0;
-    while (next.type != '}' && next.type != TOKEN_END) {
-        AstDeclaration *member = parse_declaration(parser, DECLARATION_IS_STRUCT_MEMBER);
-        member->member_index = member_index;
+    close_block(parser);
 
-        next = peek_next_token(parser);
-        expect(parser, next, ';');
-        eat_token(parser);
+    // next = peek_next_token(parser);
+    // expect(parser, next, '{');
+    // eat_token(parser);
 
-        Symbol *existing = symbol_add_struct_member(&ast_struct->member_table, member);
-        if (existing != NULL) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *)(member->identifier), "Redeclaration of member variable '%s'", member->identifier->name);
-            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing->as.identifier), "Here is the previous declaration ...");
-            exit(1);
-        }
+    // AstStruct *ast_struct    = (AstStruct *)(ast_allocate(parser, sizeof(AstStruct)));
+    // ast_struct->member_table = symbol_table_init();
 
-        next = peek_next_token(parser);
-        member_index++;
-    }
-    expect(parser, next, '}');
-    eat_token(parser);
+    // // Parse members
+    // next = peek_next_token(parser);
+    // int member_index = 0;
+    // while (next.type != '}' && next.type != TOKEN_END) {
+    //     AstDeclaration *member = parse_declaration(parser, DECLARATION_IS_STRUCT_MEMBER);
+    //     member->member_index = member_index;
+
+    //     next = peek_next_token(parser);
+    //     expect(parser, next, ';');
+    //     eat_token(parser);
+
+    //     Symbol *existing = symbol_add_struct_member(&ast_struct->member_table, member);
+    //     if (existing != NULL) {
+    //         report_error_ast(parser, LABEL_ERROR, (Ast *)(member->identifier), "Redeclaration of member variable '%s'", member->identifier->name);
+    //         report_error_ast(parser, LABEL_NOTE, (Ast *)(existing->as.identifier), "Here is the previous declaration ...");
+    //         exit(1);
+    //     }
+
+    //     next = peek_next_token(parser);
+    //     member_index++;
+    // }
+    // expect(parser, next, '}');
+    // eat_token(parser);
 
     ast_struct->head.type  = AST_STRUCT;
     ast_struct->head.start = ident_token.start;
-    ast_struct->head.end   = next.end;
+    ast_struct->head.end   = scope->head.end;
     ast_struct->identifier = ident;
+    ast_struct->scope      = scope;
 
-    if (!(member_index > 0)) {
+    if (scope->members.count == 0) {
         report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct), "Structs must have atleast one member");
         exit(1);
     }
@@ -733,7 +782,7 @@ AstFor *parse_for(Parser *parser) {
     AstBlock *body;
     if (iterator || index) {
         // Push down the iterator into the scope of the body
-        body = new_block(parser);
+        body = new_block(parser, BLOCK_IMPERATIVE);
         if (iterator) add_identifier_to_scope(body, iterator);
         if (index)    add_identifier_to_scope(body, index);
         
@@ -996,7 +1045,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     expect(parser, next, '('); // Should also be impossible to fail
     eat_token(parser);
 
-    AstBlock *body = new_block(parser); // Open a scope, so that the parameters will be pushed down into the scope of the body
+    AstBlock *body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters will be pushed down into the scope of the body
     bool first_parameter_seen = false;
     while (true) {
         //
@@ -1237,8 +1286,9 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
 
     // Infer. e.g. a := b
     if (next.type == TOKEN_COLON_EQUAL) {
-        if (flags & DECLARATION_IS_STRUCT_MEMBER) {
-            assert(false && "Default parameters not implemented for structs yet");
+        if (parser->current_scope->belongs_to_struct) {
+            report_error_token(parser, LABEL_ERROR, ident, "Default struct values are not yet implemented!");
+            return NULL;
         }
         eat_token(parser);
         AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
@@ -1254,8 +1304,14 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
         next = peek_next_token(parser);
 
         if (next.type == '=') {
-            if (flags & DECLARATION_IS_STRUCT_MEMBER)      assert(false && "Default struct member values not implemented yet");
-            if (flags & DECLARATION_IS_FUNCTION_PARAMETER) assert(false && "Default function arguments not implemented yet");
+            if (parser->current_scope->belongs_to_struct) {
+                report_error_token(parser, LABEL_ERROR, ident, "Default struct values are not yet implemented!");
+                return NULL;
+            }
+            if (flags & DECLARATION_IS_FUNCTION_PARAMETER) {
+                report_error_token(parser, LABEL_ERROR, ident,"Default function arguments not implemented yet");
+                return NULL;
+            };
             
             eat_token(parser);
             AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
@@ -1287,17 +1343,6 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *exp
         ident->flags |= IDENTIFIER_IS_CONSTANT;
     }
 
-    if (flags & DECLARATION_IS_STRUCT_MEMBER) {
-        // Skip putting identifier into identifier table as structs keeps their own small symbol table of members
-    } else {
-        AstIdentifier *existing = add_identifier_to_scope(parser->current_scope, ident);
-        if (existing != NULL) {
-            report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.value.identifier.name);
-            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous declaration ...");
-            exit(1);
-        }
-    }
-
     AstDeclaration *decl    = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
     decl->head.type         = AST_DECLARATION;
     decl->head.start        = ident_token.start;
@@ -1308,6 +1353,29 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *exp
     decl->expr              = expr;
 
     ident->belongs_to_decl = decl;
+
+    if (parser->current_scope->belongs_to_struct) {
+        decl->flags |= DECLARATION_IS_STRUCT_MEMBER;
+    }
+
+    // @ScopeRefactoring - We want to get rid of the use of identifiers and just have them as declarations at some point
+    if (parser->current_scope->kind == BLOCK_IMPERATIVE) {
+        AstIdentifier *existing = add_identifier_to_scope(parser->current_scope, ident);
+        if (existing != NULL) {
+            report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.value.identifier.name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous declaration ...");
+            exit(1);
+        }
+    } else if (parser->current_scope->kind == BLOCK_DECLARATIVE) {
+        AstDeclaration *existing = add_declaration_to_scope(parser->current_scope, decl);
+        if (existing != NULL) {
+            report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.value.identifier.name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous declaration ...");
+            exit(1);
+        }
+    } else {
+        XXX;
+    }
 
     return decl;
 }

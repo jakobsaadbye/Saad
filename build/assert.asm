@@ -19,7 +19,7 @@ segment .text
 
 assert:
    cmp      cl, 0
-   jz       assert_fail
+   jz       assert_failasdsd
    ret
 
 assert_fail:

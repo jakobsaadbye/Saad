@@ -777,12 +777,10 @@ void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type, bool is_arr
         AstStruct *struct_defn = ((TypeStruct *)(type))->node;
         assert(struct_defn != NULL);
 
-        DynamicArray members = get_struct_members(struct_defn);
-        for (int i = 0; i < members.count; i++) {
-            AstDeclaration *member = ((AstDeclaration **)(members.items))[i];
+        for (int i = 0; i < struct_defn->scope->members.count; i++) {
+            AstDeclaration *member = ((AstDeclaration **)(struct_defn->scope->members.items))[i];
             zero_initialize(cg, dest_offset + member->member_offset, member->declared_type, member->declared_type->kind == TYPE_ARRAY);
         }
-        free(members.items);
         break;
     }
     case TYPE_ARRAY : {

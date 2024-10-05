@@ -5,6 +5,8 @@
 
 typedef struct AstDeclaration AstDeclaration;
 typedef struct AstBlock AstBlock;
+typedef struct AstStruct AstStruct;
+typedef struct AstEnum AstEnum;
 
 typedef enum AstType {
     AST_ERR,
@@ -144,11 +146,11 @@ typedef struct AstDeclaration {
 
     DeclarationFlags flags;
     AstIdentifier   *identifier;
-    Type        *declared_type;
+    Type            *declared_type;
     AstExpr         *expr;
 
     int member_index;   // Used to know the insertion order of a struct member
-    int member_offset;  // Relative offset within the struct
+    int member_offset;  // Relative offset of the member within the struct
 } AstDeclaration;
 
 typedef enum AssignOp {
@@ -169,19 +171,34 @@ typedef struct AstAssignment {
 
 // 2. Structures and enums gets an AstBlock to hold their members
 
+typedef enum BlockKind {
+    BLOCK_INVALID,
+    BLOCK_IMPERATIVE,
+    BLOCK_DECLARATIVE, // a struct or enum
+} BlockKind;
+
 typedef struct AstBlock {
     Ast head;
 
+    BlockKind kind;
     AstBlock *parent;
+
     DynamicArray statements;
+
     DynamicArray identifiers;
+    DynamicArray members; // of *AstDeclaration. Used in enums or structs
+
+    AstStruct *belongs_to_struct;
+    AstEnum   *belongs_to_enum;
 } AstBlock;
 
 typedef struct AstStruct {
     Ast head;
 
     AstIdentifier *identifier;
-    SymbolTable    member_table; // of AstDeclaration
+    SymbolTable    member_table; // of AstDeclaration // @Remove
+
+    AstBlock *scope;
 } AstStruct;
 
 typedef struct AstEnum {

@@ -27,9 +27,7 @@ char *type_to_str(Type *type);
 bool types_are_equal(Type *lhs, Type *rhs);
 bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
-AstStruct      *get_struct(SymbolTable *type_table, char *name);
 AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name);
-DynamicArray    get_struct_members(AstStruct *struct_defn);
 
 Typer typer_init(Parser *parser, ConstEvaluater *ce) {
     Typer typer = {0};
@@ -409,13 +407,16 @@ bool check_struct(Typer *typer, AstStruct *ast_struct) {
     TypeStruct *type_struct = (TypeStruct *)(type_lookup(&typer->parser->type_table, ast_struct->identifier->name));
     assert(type_struct != NULL && type_struct->head.kind == TYPE_STRUCT);
 
-    DynamicArray members = get_struct_members(ast_struct);
+
+    typer->current_scope = ast_struct->scope;
+    DynamicArray members = ast_struct->scope->members;
     bool ok;
     for (int i = 0; i < members.count; i++) {
         AstDeclaration *member = ((AstDeclaration **)members.items)[i];
         ok = check_declaration(typer, member);
         if (!ok) return false;
     }
+    typer->current_scope = ast_struct->scope->parent;
     
     // C-style struct alignment + padding
     int alignment = 0;
@@ -441,7 +442,6 @@ bool check_struct(Typer *typer, AstStruct *ast_struct) {
     type_struct->head.size  = align_value(offset, largest_alignment);
     type_struct->alignment  = largest_alignment;
 
-    free(members.items);
     return true;
 }
 
@@ -1002,7 +1002,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     if (!type_lhs) return NULL;
 
     //
-    // Explicit enum value
+    // 1'st case : Explicit enum value
     // @Cleanup - I think this bit of code can be better put elsewhere in a unary dot as that is what we are checking for here. e.g .ENUM
     //            That way, i wouldn't need to have an access kind for the member
     //
@@ -1029,6 +1029,9 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         }
     }
 
+    //
+    // 2'nd case : Member access on struct
+    //
     TypeStruct *struct_defn;
     bool valid_lhs = false;
     if (type_lhs->kind == TYPE_POINTER) {
@@ -1048,11 +1051,12 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         return NULL;
     }
 
+
     AstExpr *rhs = ma->right;
     if (rhs->head.type == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
         char *member_name = ((AstLiteral *)(rhs))->as.value.identifier.name;
         
-        AstDeclaration *member = get_struct_member(struct_defn->node, member_name); // @Cleanup - get_struct_member should probably take TypeStruct instead of AstStruct
+        AstDeclaration *member = get_struct_member(struct_defn->node, member_name);
         if (!member) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a member of '%s'", member_name, type_to_str((Type *)struct_defn));
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn), "Here is the definition of %s", type_to_str((Type *)struct_defn));
@@ -1113,7 +1117,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_ty
         struct_defn = (TypeStruct *)(lhs_type);
     }
 
-    DynamicArray members = get_struct_members(struct_defn->node);
+    DynamicArray members = struct_defn->node->scope->members;
     int curr_member_index = 0;
     for (int i = 0; i < literal->initializers.count; i++) {
         AstStructInitializer *init = ((AstStructInitializer **)(literal->initializers.items))[i];
@@ -1314,33 +1318,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     XXX;
 }
 
-int cmp_members(const void *a, const void *b) {
-    return (*(AstDeclaration **)(a))->member_index - (*(AstDeclaration **)(b))->member_index;
-}
-
-DynamicArray get_struct_members(AstStruct *struct_defn) {
-    DynamicArray member_entries = symbol_get_symbols(&struct_defn->member_table);
-    DynamicArray members        = da_init(member_entries.count, sizeof(AstDeclaration *));
-    for (int i = 0; i < member_entries.count; i++) {
-        da_append(&members, ((Symbol **)(member_entries.items))[i]->as.struct_member);
-    }
-    free(member_entries.items);
-
-    qsort(members.items, members.count, members.item_size, cmp_members);
-    return members;
-}
-
-AstStruct *get_struct(SymbolTable *type_table, char *name) {
-    Symbol *struct_sym = symbol_lookup(type_table, name, NULL);
-    if (struct_sym == NULL) return NULL;
-    assert(struct_sym->type == AST_STRUCT);
-    return struct_sym->as.struct_defn;
-}
-
+// @Remove - Still kinda handy until we don't use AstIdentifier as the primary lookup in scopes
 AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name) {
-    Symbol *member_sym = symbol_lookup(&struct_defn->member_table, name, NULL);
-    if (member_sym == NULL) return NULL;
-
-    assert(member_sym->type == AST_DECLARATION);
-    return member_sym->as.struct_member;
+    return find_member_in_scope(struct_defn->scope, name);
 }
