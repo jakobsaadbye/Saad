@@ -1,5 +1,4 @@
 main :: () {
-
     
     // Exclusive range
     for i in 0..10 {

@@ -9,12 +9,7 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   __DogKind.samoid DB "DogKind.samoid", 0
-   __DogKind.chiwawa DB "DogKind.chiwawa", 0
-   __DogKind.bulldog DB "DogKind.bulldog", 0
-   CF0 DD 20.000000
-   CF1 DD 0.500000
-   CF2 DD 80.000000
+   CS0 DB `%lld`, 10, 0 
 
 segment .text
    global main
@@ -33,127 +28,124 @@ assert_fail:
    mov		rcx, 1
    call		ExitProcess
 
-print_enum_DogKind:
-   mov		r8, 0
-   cmp		rdx, r8
-   jz			enum_case_0
-   mov		r8, 1
-   cmp		rdx, r8
-   jz			enum_case_1
-   mov		r8, 2
-   cmp		rdx, r8
-   jz			enum_case_2
-   push		rcx
-   mov		r8, rdx
-   mov		rdx, fmt_int
-   push		r8
-   push		rdx
-   push		rcx
-   call		sprintf
-   pop		rax
-   pop		rbx
-   pop		rbx
-   pop		rbx
-   ret
-enum_case_0:
-   mov		rax, __DogKind.samoid
-   ret
-enum_case_1:
-   mov		rax, __DogKind.chiwawa
-   ret
-enum_case_2:
-   mov		rax, __DogKind.bulldog
-   ret
 
 main:
    push		rbp
    mov		rbp, rsp
    sub		rsp, 64
 
-   ; initialization of 'samoid'
-   mov		DWORD -16[rbp], 0
-   mov		DWORD -12[rbp], 0
-   mov		DWORD -8[rbp], 0
+   ; initialization of 'N'
    mov		DWORD -4[rbp], 0
-   push		0
-   pop		rax
-   mov		DWORD -16[rbp], eax
-   mov		rax, 4
+   mov		rax, 20
    push		rax
    pop		rax
-   mov		DWORD -12[rbp], eax
-   movss		xmm0, [CF0]
-   sub		rsp, 4
-   movss		[rsp], xmm0
-   movss		xmm0, [rsp]
-   add		rsp, 4
-   movss		DWORD -8[rbp], xmm0
-   movss		xmm0, [CF1]
-   sub		rsp, 4
-   movss		[rsp], xmm0
-   movss		xmm0, [rsp]
-   add		rsp, 4
-   movss		DWORD -4[rbp], xmm0
-
-   ; initialization of 'bmi'
-   mov		DWORD -20[rbp], 0
-   movss		xmm0, -8[rbp]
-   sub		rsp, 4
-   movss		[rsp], xmm0
-   movss		xmm0, -4[rbp]
-   sub		rsp, 4
-   movss		[rsp], xmm0
-   movss		xmm0, -4[rbp]
-   sub		rsp, 4
-   movss		[rsp], xmm0
-   movss		xmm1, [rsp]
-   add		rsp, 4
-   movss		xmm0, [rsp]
-   add		rsp, 4
-   mulss		xmm0, xmm1
-   sub		rsp, 4
-   movss		[rsp], xmm0
-   movss		xmm1, [rsp]
-   add		rsp, 4
-   movss		xmm0, [rsp]
-   add		rsp, 4
-   divss		xmm0, xmm1
-   sub		rsp, 4
-   movss		[rsp], xmm0
-   movss		xmm0, [rsp]
-   add		rsp, 4
-   movss		DWORD -20[rbp], xmm0
-   movss		xmm0, -20[rbp]
-   sub		rsp, 4
-   movss		[rsp], xmm0
-   movss		xmm0, [CF2]
-   sub		rsp, 4
-   movss		[rsp], xmm0
-   movss		xmm1, [rsp]
-   add		rsp, 4
-   movss		xmm0, [rsp]
-   add		rsp, 4
-   comiss	xmm0, xmm1
-   sete		al
+   mov		DWORD -4[rbp], eax
+   mov		rax, 0
    push		rax
-   pop		rcx
-   mov		rdx, 23
-   call		assert
-   mov		eax, DWORD -12[rbp]
+   mov		eax, DWORD -4[rbp]
    movsx		rax, eax
    push		rax
-   mov		rax, 4
+   pop		rbx
+   pop		rax
+   mov		-24[rbp], rax
+   mov		-32[rbp], rbx
+   mov		rax, -24[rbp]
+   mov		-16[rbp], rax
+L1:
+   mov		rax, -32[rbp]
+   cmp		-16[rbp], rax
+   jge		L3
+
+   ; expression of print
+   mov		rax, QWORD -16[rbp]
+   push		rax
+   call		fib
+   add		rsp, 8
+   push		rax
+   pop		rdx
+   mov		rcx, CS0
+   call		printf
+L2:
+   inc		QWORD -16[rbp]
+   jmp		L1
+L3:
+L0:
+   mov		rax, 0
+   add		rsp, 64
+   pop		rbp
+   ret
+
+fib:
+   push		rbp
+   mov		rbp, rsp
+   mov		eax, DWORD 16[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 0
    push		rax
    pop		rbx
    pop		rax
    cmp		rax, rbx
    sete		al
    push		rax
-   pop		rcx
-   mov		rdx, 24
-   call		assert
+   mov		eax, DWORD 16[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 1
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+
+   pop		rbx
+   pop		rax
+   or 		al, bl
+   push		rax
+   pop		rax
+   cmp		al, 0
+   jz			L6
+   ; block of if
+   mov		rax, 1
+   push		rax
+   jmp		L4
+   jmp L5
+; else
+L6:
+   mov		eax, DWORD 16[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 1
+   push		rax
+   pop		rbx
+   pop		rax
+   sub		rax, rbx
+   push		rax
+   call		fib
+   add		rsp, 8
+   push		rax
+   mov		eax, DWORD 16[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 2
+   push		rax
+   pop		rbx
+   pop		rax
+   sub		rax, rbx
+   push		rax
+   call		fib
+   add		rsp, 8
+   push		rax
+   pop		rbx
+   pop		rax
+   add		rax, rbx
+   push		rax
+   jmp		L4
+   jmp L5
+; done
+L5:
 L4:
-   mov		rax, 0
-   add		rsp, 64
+   pop		rax
    pop		rbp
    ret

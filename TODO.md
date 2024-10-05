@@ -1,5 +1,6 @@
 Current TODO:
     - :WrongForLoopSizing (remove temporary hack of aligning functions to 32 bytes just to fix for-loops wrong size!)
+    - @Investigate - examples/for_loops crashes once in a while. Is it a hisenbug?
     - Make Array be a struct where you can do array.count or array.data
 
     - Backing integer types for enums

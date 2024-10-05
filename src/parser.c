@@ -1,6 +1,4 @@
-#include "symbol_table.c"
-
-#define IDENT_TABLE_SIZE    128
+#include "ast.c"
 
 #define MAX_PRECEDENCE 99
 #define MIN_PRECEDENCE -99
@@ -13,11 +11,9 @@ typedef struct Parser {
     int current_token_index;
     int current_ast_node_index;
 
-    SymbolTable ident_table;
-    SymbolTable function_table;
-    TypeTable   type_table;
-
     AstBlock *current_scope;
+    TypeTable type_table;
+
 } Parser;
 
 Parser           parser_init(Lexer *lexer);
@@ -48,7 +44,6 @@ AstExpr        *make_literal_node(Parser *parser, Token token);
 AstIdentifier  *make_identifier_from_token(Parser *parser, Token ident_token, Type *type);
 AstIdentifier  *make_identifier_from_string(Parser *parser, const char *name, Type *type);
 
-bool identifier_is_equal(const void *key, const void *item);
 void *ast_allocate(Parser *parser, size_t size);
 void expect(Parser *parser, Token given, TokenType expected_type);
 void eat_token(Parser *parser);
@@ -62,13 +57,14 @@ bool is_primitive_type_token(Token token);
 bool is_assignment_operator(Token token);
 bool starts_struct_literal(Parser *parser);
 int get_precedence(OperatorType op);
-Type token_to_type(Token token);
 int align_value(int value, int alignment);
 
 void report_error_range(Parser *parser, Pos start, Pos end, const char *message, ...);
 void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const char *message, ...);
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
 
+
+int global_scope_counter = 0;
 
 AstBlock *new_block(Parser *parser, BlockKind kind) {
     AstBlock *scope = ast_allocate(parser, sizeof(AstBlock));
@@ -78,7 +74,7 @@ AstBlock *new_block(Parser *parser, BlockKind kind) {
     scope->identifiers = da_init(4, sizeof(AstIdentifier *));
     scope->members = da_init(4, sizeof(AstDeclaration *));
     scope->belongs_to_struct = NULL;
-    scope->belongs_to_enum = NULL;
+    scope->scope_number = global_scope_counter++;
 
     parser->current_scope = scope;
     return scope;
@@ -98,7 +94,7 @@ AstIdentifier *find_in_scope(AstBlock *scope, char *ident_name, Ast *used_at) {
             // and checking that main exists, without making variations of this function. 
             Ast *declared_at = &ident->head;
             if (is_a_before_b(used_at, declared_at)) {
-                // Case where identifier is used before being declared
+                printf("warning: %s is being used before its been declared\n", ident_name);
                 break;
             }
         }
@@ -150,12 +146,13 @@ AstIdentifier *add_identifier_to_scope(AstBlock *scope, AstIdentifier *ident) {
 }
 
 AstDeclaration *add_declaration_to_scope(AstBlock *scope, AstDeclaration *decl) {
-    AstIdentifier *existing = find_in_scope(scope, decl->identifier->name, NULL); // Passing NULL here as the used_at site so that we don't care about the ordering of declarations and they can refer to each other
+    AstDeclaration *existing = find_member_in_scope(scope, decl->identifier->name);
     if (existing) {
-        assert(existing->belongs_to_decl);
-        return existing->belongs_to_decl;
+        assert(existing);
+        return existing;
     };
 
+    decl->member_index = scope->members.count;
     da_append(&scope->members, decl);
 
     return NULL;
@@ -163,12 +160,10 @@ AstDeclaration *add_declaration_to_scope(AstBlock *scope, AstDeclaration *decl) 
 
 Parser parser_init(Lexer *lexer) {
     Parser parser = {0};
-    parser.lexer           = lexer;
-    parser.ast_nodes       = arena_init(4096);
-    parser.ident_table     = symbol_table_init();
-    parser.function_table  = symbol_table_init();
-    parser.type_table      = type_table_init();
-    parser.current_scope   = NULL;
+    parser.lexer         = lexer;
+    parser.ast_nodes     = arena_init(4096);
+    parser.type_table    = type_table_init();
+    parser.current_scope = NULL;
 
     return parser;
 }
@@ -449,6 +444,7 @@ Type *parse_type(Parser *parser) {
         if (next.type != ']') {
             Token token = peek_token(parser, -1);
             report_error_range(parser, token.end, token.end, "Expected a closing bracket here");
+            // @Cleanup - Should return instead of barfing here
             exit(1);
         }
         eat_token(parser);
@@ -613,39 +609,7 @@ AstStruct *parse_struct(Parser *parser) {
 
     scope = parse_block(parser, scope);
     if (!scope) return NULL;
-
     close_block(parser);
-
-    // next = peek_next_token(parser);
-    // expect(parser, next, '{');
-    // eat_token(parser);
-
-    // AstStruct *ast_struct    = (AstStruct *)(ast_allocate(parser, sizeof(AstStruct)));
-    // ast_struct->member_table = symbol_table_init();
-
-    // // Parse members
-    // next = peek_next_token(parser);
-    // int member_index = 0;
-    // while (next.type != '}' && next.type != TOKEN_END) {
-    //     AstDeclaration *member = parse_declaration(parser, DECLARATION_IS_STRUCT_MEMBER);
-    //     member->member_index = member_index;
-
-    //     next = peek_next_token(parser);
-    //     expect(parser, next, ';');
-    //     eat_token(parser);
-
-    //     Symbol *existing = symbol_add_struct_member(&ast_struct->member_table, member);
-    //     if (existing != NULL) {
-    //         report_error_ast(parser, LABEL_ERROR, (Ast *)(member->identifier), "Redeclaration of member variable '%s'", member->identifier->name);
-    //         report_error_ast(parser, LABEL_NOTE, (Ast *)(existing->as.identifier), "Here is the previous declaration ...");
-    //         exit(1);
-    //     }
-
-    //     next = peek_next_token(parser);
-    //     member_index++;
-    // }
-    // expect(parser, next, '}');
-    // eat_token(parser);
 
     ast_struct->head.type  = AST_STRUCT;
     ast_struct->head.start = ident_token.start;
@@ -1034,23 +998,20 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->parameters      = da_init(2, sizeof(AstDeclaration *));
 
     Token ident_token = peek_next_token(parser);
-    expect(parser, ident_token, TOKEN_IDENTIFIER); // Should be impossible to fail
+    expect(parser, ident_token, TOKEN_IDENTIFIER);
     eat_token(parser);
 
     Token next = peek_next_token(parser);
-    expect(parser, next, TOKEN_DOUBLE_COLON); // Should also be impossible to fail
+    expect(parser, next, TOKEN_DOUBLE_COLON);
     eat_token(parser);
 
     next = peek_next_token(parser);
-    expect(parser, next, '('); // Should also be impossible to fail
+    expect(parser, next, '(');
     eat_token(parser);
 
-    AstBlock *body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters will be pushed down into the scope of the body
+    AstBlock *body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters can be pushed down into the scope of the body
     bool first_parameter_seen = false;
     while (true) {
-        //
-        //  Parse parameter list
-        //
         next = peek_next_token(parser);
         if (next.type == ')') {
             eat_token(parser); 
@@ -1083,7 +1044,6 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
 
         Type *type = parse_type(parser);
 
-        // Tell 'make_declaration' that the paramters should not be sized into the scope as they live at the callee site
         AstDeclaration *param = make_declaration(parser, param_ident, NULL, type, DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_FUNCTION_PARAMETER);
         da_append(&func_defn->parameters, param);
         first_parameter_seen = true;
@@ -1101,11 +1061,13 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     if (!body) return NULL;
     close_block(parser);
 
-    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, return_type); // @Incomplete - The return type here is not correct. It should be set in the typer to be of function type, which we currently do not have
+    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // The type of the identifier is set to a type representation of this function later down
+    ident->flags |= IDENTIFIER_IS_NAME_OF_FUNCTION;
+
     AstIdentifier *existing = add_identifier_to_scope(parser->current_scope, ident);
     if (existing) {
         report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of function %s", ident->name);
-        report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "   ... Here is the previously defined function");
+        report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "... Here is the previously defined function");
         return NULL;
     }
 
@@ -1116,7 +1078,15 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->body        = body;
     func_defn->return_type = return_type;
 
-    symbol_add_function_defn(&parser->function_table, func_defn); // @Remove
+    TypeFunction *func    = type_alloc(&parser->type_table, sizeof(TypeFunction));
+    func->head.head.type  = AST_TYPE;
+    func->head.head.start = func_defn->head.start;
+    func->head.head.end   = func_defn->head.end;
+    func->head.kind       = TYPE_FUNCTION;
+    func->node            = func_defn;
+
+    // This is later down
+    ident->type = (Type *)func;
 
     return func_defn;
 }

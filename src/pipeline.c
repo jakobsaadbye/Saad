@@ -79,7 +79,7 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
     Parser parser = parser_init(&lexer);
     AstCode *code = (AstCode *) parse_top_level_code(&parser);
     if (code == NULL) {
-        printf("There were errors during parsing ...\n");
+        // printf("There were errors during parsing ...\n");
         return_and_cleanup;
     } 
     report.parse_time_end = clock();
@@ -90,7 +90,7 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
     Typer typer = typer_init(&parser, &ce);
     ok = check_code(&typer, code);
     if (!ok) {
-        printf("There were errors during typing ...\n");
+        // printf("There were errors during typing ...\n");
         return_and_cleanup;
     }
     report.typer_time_end = clock();

@@ -54,6 +54,18 @@ bool check_code(Typer *typer, AstCode *code) {
     return true;
 }
 
+void dump_scope(AstBlock *scope) {
+    AstBlock *s = scope;
+    while (s) {
+        for (int i = 0; i < s->identifiers.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)s->identifiers.items)[i];
+            printf("(#%d, %s, Ln %d, Col %d)\n", s->scope_number, ident->name, ident->head.start.line, ident->head.start.col);
+        }
+        s = s->parent;
+        printf("\n");
+    }
+}
+
 bool check_block(Typer *typer, AstBlock *block) {
     bool ok;
 
@@ -64,6 +76,7 @@ bool check_block(Typer *typer, AstBlock *block) {
         if (!ok) return false;
     }
     typer->current_scope = block->parent;
+
 
     return true;
 }
@@ -290,14 +303,17 @@ bool types_are_equal(Type *lhs, Type *rhs) {
 }
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
-    // @ScopeRefactoring - We need a function type in order to handle this
-    Symbol *func_symbol = symbol_lookup(&typer->parser->function_table, call->identifer->name, (Ast *)call);
-    if (func_symbol == NULL) {
+    AstIdentifier *func_ident = lookup_from_scope(typer->current_scope, call->identifer->name, NULL);
+    if (func_ident == NULL) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Unknown function '%s'", call->identifer->name);
         return NULL;
     }
+    if (func_ident->type->kind != TYPE_FUNCTION) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "%s is not the name of a function. Type of %s is %s", func_ident->name, func_ident->name, type_to_str(func_ident->type));
+        return NULL;
+    }
 
-    AstFunctionDefn *func_defn = func_symbol->as.function_defn;
+    AstFunctionDefn *func_defn = ((TypeFunction *)func_ident->type)->node;
     
     if (call->arguments.count != func_defn->parameters.count) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Mismatch in number of arguments. Function '%s' takes %d %s, but %d were supplied", func_defn->identifier->name, func_defn->parameters.count, func_defn->parameters.count == 1 ? "parameter" : "parameters", call->arguments.count);
@@ -701,6 +717,8 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_FUNCTION_DEFN: {
         AstFunctionDefn *func_defn = (AstFunctionDefn *)(stmt);
         typer->enclosing_function = func_defn;
+
+        typer->current_scope = func_defn->body;
         bool ok = check_block(typer, func_defn->body);
         if (!ok) return false;
 
@@ -1318,7 +1336,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     XXX;
 }
 
-// @Remove - Still kinda handy until we don't use AstIdentifier as the primary lookup in scopes
+// @Cleanup - Still kinda handy until we don't use AstIdentifier as the primary lookup in scopes
 AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name) {
     return find_member_in_scope(struct_defn->scope, name);
 }

@@ -16,9 +16,9 @@ int main(int argc, char const *argv[]) {
 
     bool success = send_through_pipeline(program, input_file_path, true);
     if (success) {
-        printf("\n\nCompiled successfully\n\n");
+        printf("\n\nCompiled successfully.\n\n");
     } else {
-        printf("There were errors\n\n");
+        printf("There were errors.\n\n");
     }
 
     free(program);

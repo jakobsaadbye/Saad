@@ -7,11 +7,8 @@ typedef struct CodeGenerator {
 
     Parser *parser;
 
-    SymbolTable ident_table;
-    SymbolTable function_table;
-    TypeTable   type_table;
-
     AstBlock *current_scope;
+    TypeTable type_table;
 
     int base_ptr;
 
@@ -75,8 +72,6 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.code = sb_init(1024);
 
     cg.parser         = parser;
-    cg.ident_table    = parser->ident_table;
-    cg.function_table = parser->function_table;
     cg.type_table     = parser->type_table;
     cg.current_scope  = parser->current_scope;
     cg.base_ptr       = 0;
@@ -518,6 +513,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
     emit_block(cg, func_defn->body);
 
+    // @Incomplete - We should make a emit_pop() here i think
     sb_append(&cg->code, "L%d:\n", return_label);
     if (func_defn->return_type->kind == TYPE_INTEGER) {
         sb_append(&cg->code, "   pop\t\trax\n");

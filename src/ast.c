@@ -1,5 +1,5 @@
 #include "lexer.c"
-#include "symbol_table.h"
+#include "lib/table.c"
 
 #define MAX_STATEMENTS_WITHIN_BLOCK 64
 
@@ -86,6 +86,7 @@ typedef enum TypeKind {
     TYPE_POINTER,
     TYPE_STRUCT,
     TYPE_ENUM,
+    TYPE_FUNCTION,
 } TypeKind;
 
 typedef enum TypeFlags {
@@ -114,9 +115,10 @@ typedef struct AstCode {
 } AstCode;
 
 typedef enum IdentifierFlags {
-    IDENTIFIER_IS_NAME_OF_ENUM   = 1 << 0,
-    IDENTIFIER_IS_NAME_OF_STRUCT = 1 << 1,
-    IDENTIFIER_IS_CONSTANT       = 1 << 2,
+    IDENTIFIER_IS_NAME_OF_ENUM     = 1 << 0,
+    IDENTIFIER_IS_NAME_OF_STRUCT   = 1 << 1,
+    IDENTIFIER_IS_NAME_OF_FUNCTION = 1 << 2,
+    IDENTIFIER_IS_CONSTANT         = 1 << 3,
 } IdentifierFlags;
 
 typedef struct AstIdentifier {
@@ -124,12 +126,12 @@ typedef struct AstIdentifier {
 
     Type  *type;
     IdentifierFlags flags;
-    char      *name;
-    int        length;
+    char  *name;
+    int    length;
 
     AstDeclaration *belongs_to_decl;
 
-    int stack_offset;
+    int    stack_offset;
 } AstIdentifier;
 
 typedef enum DeclarationFlags {
@@ -169,8 +171,6 @@ typedef struct AstAssignment {
     AstExpr  *expr;
 } AstAssignment;
 
-// 2. Structures and enums gets an AstBlock to hold their members
-
 typedef enum BlockKind {
     BLOCK_INVALID,
     BLOCK_IMPERATIVE,
@@ -186,19 +186,18 @@ typedef struct AstBlock {
     DynamicArray statements;
 
     DynamicArray identifiers;
-    DynamicArray members; // of *AstDeclaration. Used in enums or structs
+    DynamicArray members; // of *AstDeclaration. Used in structs
 
     AstStruct *belongs_to_struct;
-    AstEnum   *belongs_to_enum;
+
+    int scope_number; // Only for debug purposes
 } AstBlock;
 
 typedef struct AstStruct {
     Ast head;
 
     AstIdentifier *identifier;
-    SymbolTable    member_table; // of AstDeclaration // @Remove
-
-    AstBlock *scope;
+    AstBlock      *scope;
 } AstStruct;
 
 typedef struct AstEnum {
@@ -567,6 +566,11 @@ typedef struct TypeStruct {
     unsigned int alignment;
 } TypeStruct;
 
+typedef struct TypeFunction {
+    Type head;
+    AstFunctionDefn *node;
+} TypeFunction;
+
 typedef struct TypeTable {
     HashTable user_types;
     Arena     types; // @Speed - Allocating types seperately from the ast nodes might be bad for cache locality as we are usually looking at the ast node and the type together. 
@@ -607,13 +611,6 @@ void *type_alloc(TypeTable *tt, size_t size) {
     return arena_allocate(&tt->types, size);
 }
 
-Type *type_var(TypeTable *tt, TypeKind kind, char *name) {
-    Type *result = type_alloc(tt, sizeof(Type));
-    result->kind = kind;
-    result->as.name = name;
-    return result;
-}
-
 char *type_to_str(Type *type) {
     switch (type->kind) {
     case TYPE_INVALID:
@@ -627,21 +624,38 @@ char *type_to_str(Type *type) {
     }
     case TYPE_POINTER: {
         TypePointer *ptr = (TypePointer *)(type);
-        StringBuilder builder = sb_init(32);
-        sb_append(&builder, "*%s", type_to_str(ptr->pointer_to));
+        StringBuilder sb = sb_init(32);
+        sb_append(&sb, "*%s", type_to_str(ptr->pointer_to));
 
-        return sb_to_string(&builder); // @Leak
+        return sb_to_string(&sb); // @Leak
     }
     case TYPE_ARRAY: {
         TypeArray *array = (TypeArray *)(type);
-        StringBuilder builder = sb_init(32);
-        sb_append(&builder, "[]%s", type_to_str(array->elem_type));
+        StringBuilder sb = sb_init(32);
+        sb_append(&sb, "[]%s", type_to_str(array->elem_type));
 
-        return sb_to_string(&builder); // @Leak
+        return sb_to_string(&sb); // @Leak
     }
     case TYPE_NAME:      return type->as.name;
     case TYPE_STRUCT:    return type->as.name;
     case TYPE_ENUM:      return type->as.name;
+    case TYPE_FUNCTION: {
+        TypeFunction *func = (TypeFunction *)(type);
+        StringBuilder sb = sb_init(32);
+
+        sb_append(&sb, "(");
+        for (int i = 0; i < func->node->parameters.count; i++) {
+            AstDeclaration *param = ((AstDeclaration **)func->node->parameters.items)[i];
+            sb_append(&sb, "%s", type_to_str(param->declared_type));
+            if (i + 1 < func->node->parameters.count) {
+                sb_append(&sb, ", ");
+            }
+        }
+        sb_append(&sb, ")");
+
+        sb_append(&sb, " -> %s", type_to_str(func->node->return_type));
+        return sb_to_string(&sb); // @Leak
+    }
     }
 
     printf("internal compiler error: Unknown type kind: %d in type_to_str()", type->kind);
