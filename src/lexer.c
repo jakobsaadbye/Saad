@@ -587,7 +587,7 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
 
         strncpy(val_str, src, pos_end.input_idx - pos_start.input_idx);
         double val = atof(val_str);
-        
+
         result.type = token_type;
         result.as_value.value.floating = val;
 

@@ -303,7 +303,7 @@ bool types_are_equal(Type *lhs, Type *rhs) {
 }
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
-    AstIdentifier *func_ident = lookup_from_scope(typer->current_scope, call->identifer->name, NULL); // @Note - Passing NULL here omits the checking that the function needs to exist before it can be called to allow arbitrary order. If, or when we get closues, this should probably work differently!
+    AstIdentifier *func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name, NULL); // @Note - Passing NULL here omits the checking that the function needs to exist before it can be called to allow arbitrary order. If, or when we get closues, this should probably work differently!
     if (func_ident == NULL) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Unknown function '%s'", call->identifer->name);
         return NULL;
@@ -359,7 +359,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         lhs_is_constant = false;
     }
     else if (is_identifier) {
-        ident = lookup_from_scope(typer->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs);
+        ident = lookup_from_scope(typer->parser, typer->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs);
         assert(ident); // Is checked in check_expression so no need to check it here also
         lhs_is_constant = ident->flags & IDENTIFIER_IS_CONSTANT;
     } else {
@@ -568,7 +568,7 @@ char *generate_c_printf_string(Typer *typer, AstPrint *print) {
             switch (arg_type->kind) {
                 case TYPE_BOOL:    format_specifier = "%s"; break;
                 case TYPE_INTEGER: format_specifier = "%lld"; break;
-                case TYPE_FLOAT:   format_specifier = "%lf"; break;
+                case TYPE_FLOAT:   format_specifier = arg_type->size == 4 ? "%f" : "%lf"; break;
                 case TYPE_STRING:  format_specifier = "%s"; break;
                 case TYPE_ENUM:    format_specifier = "%s"; break;
                 case TYPE_POINTER: format_specifier = "0x%p"; break;
@@ -1324,7 +1324,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     case LITERAL_NIL:       return (Type *)t_nil_ptr;
     case LITERAL_IDENTIFIER: {
         char   *ident_name   = literal->as.value.identifier.name;
-        AstIdentifier *ident = lookup_from_scope(typer->current_scope, ident_name, (Ast *)literal);
+        AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name, (Ast *)literal);
         if (ident == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared variable '%s'", ident_name);
             return NULL;

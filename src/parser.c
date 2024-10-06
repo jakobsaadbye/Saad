@@ -83,20 +83,10 @@ void close_block(Parser *parser) {
     parser->current_scope = parser->current_scope->parent;
 }
 
-AstIdentifier *find_in_scope(AstBlock *scope, char *ident_name, Ast *used_at) {
+AstIdentifier *find_in_scope(AstBlock *scope, char *ident_name) {
     AstIdentifier *found = NULL;
     for (int i = 0; i < scope->identifiers.count; i++) {
         AstIdentifier *ident = ((AstIdentifier **)scope->identifiers.items)[i];
-
-        if (used_at && used_at->type != AST_ERR) {
-            // This if-condition is abit of a @Hack to get around looking up ephemeral identifiers such as it 
-            // and checking that main exists, without making variations of this function. 
-            Ast *declared_at = &ident->head;
-            if (is_a_before_b(used_at, declared_at)) {
-                printf("warning: %s is being used before its been declared\n", ident_name);
-                break;
-            }
-        }
 
         if (strcmp(ident->name, ident_name) == 0) {
             found = ident;
@@ -119,21 +109,45 @@ AstDeclaration *find_member_in_scope(AstBlock *scope, char *name) {
     return found;
 }
 
-AstIdentifier *lookup_from_scope(AstBlock *scope, char *ident_name, Ast *used_at) {
+bool is_declared_before_used(Ast *declared_at, Ast *used_at) {
+    if (used_at && used_at->type != AST_ERR) {
+        if (is_a_before_b(used_at, declared_at)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+AstIdentifier *lookup_from_scope(Parser *parser, AstBlock *scope, char *ident_name, Ast *used_at) {
     AstBlock *searching_scope = scope;
     while (true) {
         if (searching_scope == NULL) return NULL;
 
-        AstIdentifier *found = find_in_scope(searching_scope, ident_name, used_at);
-        if (found) return found;
+        AstIdentifier *found = find_in_scope(searching_scope, ident_name);
+        if (found) {
+            if (!is_declared_before_used((Ast *)found, used_at)) {
+                report_error_ast(parser, LABEL_ERROR, used_at, "%s is being used before its being declared", ident_name);
+                report_error_ast(parser, LABEL_NOTE, (Ast *)found, "... first being declared here");
+                return NULL;
+            }
+            return found;
+        }
 
         searching_scope = searching_scope->parent;
     }
 }
 
-AstIdentifier *add_identifier_to_scope(AstBlock *scope, AstIdentifier *ident) {
-    AstIdentifier *existing = find_in_scope(scope, ident->name, (Ast *)ident);
-    if (existing) return existing;
+AstIdentifier *add_identifier_to_scope(Parser *parser, AstBlock *scope, AstIdentifier *ident) {
+    AstIdentifier *existing = find_in_scope(scope, ident->name);
+    if (existing) {
+        if (!is_declared_before_used((Ast *)existing, (Ast *)ident)) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "%s is being used before its being declared", ident->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "... first being declared here");
+            return NULL;
+        }
+        return existing;
+    }
 
     da_append(&scope->identifiers, ident);
 
@@ -473,7 +487,7 @@ AstEnum *parse_enum(Parser *parser) {
     // @ScopeRefactoring
     {
         ident->flags |= IDENTIFIER_IS_NAME_OF_ENUM;
-        AstIdentifier *existing = add_identifier_to_scope(parser->current_scope, ident);
+        AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
         if (existing) {
             report_error_ast(parser, LABEL_ERROR, (Ast *)(ident), "Type '%s' already defined", existing->name);
             report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous definition of '%s'", existing->name);
@@ -742,8 +756,8 @@ AstFor *parse_for(Parser *parser) {
     if (iterator || index) {
         // Push down the iterator into the scope of the body
         body = new_block(parser, BLOCK_IMPERATIVE);
-        if (iterator) add_identifier_to_scope(body, iterator);
-        if (index)    add_identifier_to_scope(body, index);
+        if (iterator) add_identifier_to_scope(parser, body, iterator);
+        if (index)    add_identifier_to_scope(parser, body, index);
         
         body = parse_block(parser, body);
         if (!body) return NULL;
@@ -1059,7 +1073,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // The type of the identifier is set to a type representation of this function later down
     ident->flags |= IDENTIFIER_IS_NAME_OF_FUNCTION;
 
-    AstIdentifier *existing = add_identifier_to_scope(parser->current_scope, ident);
+    AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
     if (existing) {
         report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of function %s", ident->name);
         report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "... Here is the previously defined function");
@@ -1325,7 +1339,7 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *exp
 
     // @ScopeRefactoring - We want to get rid of the use of identifiers and just have them as declarations at some point
     if (parser->current_scope->kind == BLOCK_IMPERATIVE) {
-        AstIdentifier *existing = add_identifier_to_scope(parser->current_scope, ident);
+        AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
         if (existing != NULL) {
             report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.value.identifier.name);
             report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous declaration ...");

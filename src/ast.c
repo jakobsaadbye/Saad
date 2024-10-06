@@ -689,9 +689,6 @@ bool is_signed_integer(Type *type) {
 }
 
 bool is_a_before_b (Ast *a, Ast *b) {
-    if ((b->start.line - a->start.line) > 0) return true;
-    if ((b->start.line - a->start.line) < 0) return false;
-    else {
-        return (b->start.col - a->start.col) < 0;
-    }
+    if (a->start.input_idx < b->start.input_idx) return true;
+    return false;
 }

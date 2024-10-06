@@ -89,7 +89,7 @@ void go_nuts(CodeGenerator *cg, AstCode *code) {
 }
 
 void check_main_exists(CodeGenerator *cg) {
-    AstIdentifier *main = lookup_from_scope(cg->current_scope, "main", NULL);
+    AstIdentifier *main = lookup_from_scope(cg->parser, cg->current_scope, "main", NULL);
     if (main == NULL) {
         printf("Error: Missing function 'main' as entry-point to the program\n");
         exit(1);
@@ -277,7 +277,7 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     bool offset_is_runtime_computed = false;
     int base_offset = 0;
     if (assign->lhs->head.type == AST_LITERAL) {
-        AstIdentifier *ident = lookup_from_scope(cg->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs);
+        AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs);
         assert(ident);
 
         if (ident->type->kind == TYPE_POINTER) {
@@ -752,7 +752,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
                 sb_append(&cg->code, "   movq\t\t%s, xmm0\n", reg);
             } else if (arg_type->size == 8) {
                 // Already aligned
-            }
+            } else XXX;
         }
         else if (arg_type->kind == TYPE_BOOL) {
             int true_label        = make_label_number(cg);
@@ -969,7 +969,7 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         switch (lit->kind) {
         case LITERAL_BOOLEAN: break; // Immediate value is used
         case LITERAL_INTEGER: break; // Immediate value is used 
-        case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", decl->identifier->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup
+        case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", decl->identifier->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
         case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", decl->identifier->name, lit->as.value.string.data); break; // :IdentifierNameAsConstant @Cleanup
         case LITERAL_NIL:     XXX;
         case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
@@ -1238,7 +1238,7 @@ void emit_unary_inside_member_access(CodeGenerator *cg, AstUnary *unary, AstMemb
         assert(unary->expr->evaluated_type->kind == TYPE_POINTER);
 
         if (unary->expr->head.type == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
-            AstIdentifier *ident = lookup_from_scope(cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name, (Ast *)unary->expr);
+            AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name, (Ast *)unary->expr);
             assert(ident->type->kind == TYPE_POINTER);
 
             sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", ident->stack_offset);
@@ -1296,7 +1296,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
         }
     }
     if (ma->left->head.type == AST_LITERAL && ((AstLiteral *)(ma->left))->kind == LITERAL_IDENTIFIER) {
-        AstIdentifier *ident = lookup_from_scope(cg->current_scope, ((AstLiteral *)(ma->left))->as.value.identifier.name, (Ast *)(ma->left));
+        AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(ma->left))->as.value.identifier.name, (Ast *)(ma->left));
 
         if (ident->type->kind == TYPE_POINTER) {
             // Field access through pointer
@@ -1321,7 +1321,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
 
         if (cursor->head.type == AST_LITERAL) {
             assert(((AstLiteral *)(cursor))->kind == LITERAL_IDENTIFIER);
-            AstIdentifier *ident = lookup_from_scope(cg->current_scope, ((AstLiteral *)(cursor))->as.value.identifier.name, (Ast *)cursor);
+            AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(cursor))->as.value.identifier.name, (Ast *)cursor);
             assert(ident && ident->type->kind == TYPE_ARRAY);
 
             emit_array_access_offset(cg, array_ac);
@@ -1375,7 +1375,7 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue)
         expr = ((AstArrayAccess *)(expr))->accessing;
     }
     if (expr->head.type == AST_LITERAL && ((AstLiteral *)(expr))->kind == LITERAL_IDENTIFIER) {
-        AstIdentifier *ident = lookup_from_scope(cg->current_scope, ((AstLiteral *)(expr))->as.value.identifier.name, (Ast *)expr);
+        AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(expr))->as.value.identifier.name, (Ast *)expr);
 
         type        = ident->type;
         base_offset = ident->stack_offset;
@@ -1504,7 +1504,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         }
         if (unary->operator == OP_ADDRESS_OF) {
             if (unary->expr->head.type == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
-                AstIdentifier *ident = lookup_from_scope(cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name, (Ast *)unary->expr);
+                AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name, (Ast *)unary->expr);
                 assert(ident);
 
                 sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", ident->stack_offset);
@@ -1590,13 +1590,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         }
         case LITERAL_FLOAT: {
             if (lit->head.evaluated_type->size == 4) {
-                sb_append(&cg->data, "   CF%d DD %lf\n", cg->constants, lit->as.value.floating);
+                sb_append(&cg->data, "   CF%d DD %.7lf\n", cg->constants, lit->as.value.floating);
                 sb_append(&cg->code, "   movss\t\txmm0, [CF%d]\n", cg->constants);
                 sb_append(&cg->code, "   movd\t\teax, xmm0\n");
                 sb_append(&cg->code, "   push\t\trax\n");
                 cg->constants++;
             } else if (lit->head.evaluated_type->size == 8) {
-                sb_append(&cg->data, "   CF%d DQ %lf\n", cg->constants, lit->as.value.floating);
+                sb_append(&cg->data, "   CF%d DQ %.15lf\n", cg->constants, lit->as.value.floating);
                 sb_append(&cg->code, "   movsd\t\txmm0, [CF%d]\n", cg->constants);
                 sb_append(&cg->code, "   movq\t\trax, xmm0\n");
                 sb_append(&cg->code, "   push\t\trax\n");
@@ -1620,7 +1620,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_IDENTIFIER: {
-            AstIdentifier *ident = lookup_from_scope(cg->current_scope, lit->as.value.identifier.name, (Ast *)lit);
+            AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, lit->as.value.identifier.name, (Ast *)lit);
             assert(ident);
 
             if (ident->belongs_to_decl && ident->belongs_to_decl->flags & DECLARATION_CONSTANT) {

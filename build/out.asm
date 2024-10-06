@@ -12,9 +12,9 @@ segment .data
    __DogKind.samoid DB "DogKind.samoid", 0
    __DogKind.chiwawa DB "DogKind.chiwawa", 0
    __DogKind.bulldog DB "DogKind.bulldog", 0
-   CF0 DD 20.000000
-   CF1 DD 0.500000
-   CF2 DD 80.000000
+   CF0 DD 20.0000000
+   CF1 DD 0.5000000
+   CF2 DD 80.0000000
 
 segment .text
    global main
