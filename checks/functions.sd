@@ -1,0 +1,29 @@
+foozle :: () -> string {
+    return "Foozle doozle, your **** is now a noodle!";
+}
+
+doozle :: () -> int {
+    return 5;
+}
+
+zoozle :: () -> bool {
+    return true;
+}
+
+snoozle :: () -> float {
+    f : f32 = 1234.45678;
+    return f;
+}
+
+boozle :: () -> *int {
+    a := 10;
+    return &a;
+}
+
+main :: () {
+    // assert(foozle() == "Foozle doozle, your **** is now a noodle!");
+    assert(doozle() == 5);
+    assert(zoozle() == true);
+    assert(snoozle() == 1234.45678);
+    assert(*boozle() == 10); // Should actually fail once we do functions properly!
+}

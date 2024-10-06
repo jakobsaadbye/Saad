@@ -1,27 +1,5 @@
-// foozle :: () -> string {
-//     return "Foozle doozle, your dick is now a noodle!";
-// }
-
-// doozle :: () -> int {
-//     return 5;
-// }
-
-// zoozle :: () -> bool {
-//     return true;
-// }
-
-// snoozle :: () -> f64 {
-//     f : f64 = 12345678910.456789123;
-//     return f;
-// }
-
-// boozle :: () -> *int {
-//     a := 10;
-//     return &a;
-// }
-
 main :: () {
-    a := 3 * 2.0;
-    print("%", a);
-    assert(a == 6.00);
+    r1 := false == true;
+    print("%", r1);
 }
+

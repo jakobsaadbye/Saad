@@ -1127,6 +1127,15 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
         return;
     }
 
+    if (l_kind == TYPE_BOOL && r_kind == TYPE_BOOL) {
+        sb_append(&cg->code, "   pop\t\trbx\n");
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   cmp\t\tal, bl\n");
+        sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
+        sb_append(&cg->code, "   push\t\trax\n");
+        return;
+    }
+
     printf("%s:%d: compiler-error: There were unhandled cases in 'emit_comparison_operator', while doing %s '%s' %s\n", __FILE__, __LINE__, type_to_str(l_type), token_type_to_str(bin->operator), type_to_str(r_type));
     exit(1);
 }

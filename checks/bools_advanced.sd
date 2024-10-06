@@ -6,10 +6,24 @@ main :: () {
     e := false && true;
     f := 2.5 + 1 > 4 || 2.0 * 3 == 6.0;
 
+    g := false == true;
+    h := false < true;
+    i := false <= true;
+    j := false > true;
+    k := false >= true;
+
     assert(a);
     assert(b);
     assert(c);
     assert(!d);
     assert(!e);
     assert(f);
+
+    assert(!g);
+    assert(h);
+    assert(i);
+    assert(!j);
+    assert(!k);
+
+
 }
