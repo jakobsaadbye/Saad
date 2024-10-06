@@ -103,7 +103,7 @@ main:: () {
         assert((*(*ptr2)).data == 69);
     }
 
-    // Checking that is also works inside for-loops
+    // Checking that it also works inside for-loops
     {
         n1 : Node;
         n2 : Node;

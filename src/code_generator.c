@@ -47,7 +47,7 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign);
 void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue);
 void emit_expression(CodeGenerator *cg, AstExpr *expr);
 
-void emit_integer_to_float_conversion(CodeGenerator *cg, TypeKind l_kind, TypeKind r_kind);
+void emit_integer_to_float_conversion(CodeGenerator *cg, Type *l_type, Type *r_type);
 void emit_initialization(CodeGenerator *cg, int dest_offset, AstExpr *expr, Type *lhs_type, Type *rhs_type);
 void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, Type *lhs_type, Type *rhs_type);
 void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_computed, Type *src_type, bool lvalue);
@@ -251,6 +251,26 @@ void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
     }
 }
 
+char *cvtsi2ss_or_cvtsi2sd(Type *float_type) {
+    assert(float_type->kind == TYPE_FLOAT);
+
+    if (float_type->size == 4) return "cvtsi2ss";
+    if (float_type->size == 8) return "cvtsi2sd";
+
+    printf("Internal Compiler Error: Unhandled cases in cvtsi2ss_or_cvtsi2sd(). Got float type of size %d", float_type->size);
+    exit(1);
+}
+
+char *movd_or_movq(Type *float_type) {
+    assert(float_type->kind == TYPE_FLOAT);
+
+    if (float_type->size == 4) return "movd";
+    if (float_type->size == 8) return "movq";
+
+    printf("Internal Compiler Error: Unhandled cases in movd_or_movq(). Got float type of size %d", float_type->size);
+    exit(1);
+}
+
 void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     emit_expression(cg, assign->expr);
 
@@ -328,16 +348,19 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     }
     else if (assign->lhs->evaluated_type->kind == TYPE_FLOAT) {
 
-        if (assign->expr->evaluated_type->kind == TYPE_INTEGER) {
-            sb_append(&cg->code, "   pop\t\trbx\n");
-            sb_append(&cg->code, "   cvtsi2ss\txmm1, rbx\n");
-        } else {
-            sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
-            sb_append(&cg->code, "   add\t\trsp, 4\n");
-        }
-        
-        sb_append(&cg->code, "   movss\t\txmm0, DWORD %s\n", address_str);
+        Type *lhs_type = assign->lhs->evaluated_type;
+        Type *rhs_type = assign->expr->evaluated_type;
 
+        sb_append(&cg->code, "   pop\t\trbx\n");
+        if (rhs_type->kind == TYPE_INTEGER) {
+            sb_append(&cg->code, "   %s\txmm1, rbx\n", cvtsi2ss_or_cvtsi2sd(lhs_type));
+        } else {
+            sb_append(&cg->code, "   %s\t\txmm1, %s\n", movd_or_movq(rhs_type), REG_B(rhs_type));
+        }
+
+        sb_append(&cg->code, "   %s\t\txmm0, %s\n", movd_or_movq(lhs_type), address_str);
+
+        // @FloatRefactor - These operations should handle 32 and 64 bit floats
         switch (assign->op) {
         case ASSIGN_PLUS_EQUAL:   sb_append(&cg->code, "   addss\t\txmm0, xmm1\n"); break;
         case ASSIGN_MINUS_EQUAL:  sb_append(&cg->code, "   subss\t\txmm0, xmm1\n"); break;
@@ -346,7 +369,7 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
         default: exit(1); // Unreachable
         }
 
-        sb_append(&cg->code, "   movss\t\tDWORD %s, xmm0\n", address_str);
+        sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(lhs_type), address_str);
     } else {
         XXX;
     }
@@ -484,15 +507,43 @@ void emit_return(CodeGenerator *cg, AstReturn *ast_return) {
     sb_append(&cg->code, "   jmp\t\tL%d\n", ast_return->enclosing_function->return_label);
 }
 
+void emit_pop_r_value(CodeGenerator *cg, Type *type) {
+    switch (type->kind) {
+    case TYPE_VOID: {
+        sb_append(&cg->code, "   mov\t\trax, 0\n");
+        return;
+    }
+    case TYPE_BOOL:
+    case TYPE_INTEGER:
+    case TYPE_ENUM:
+    case TYPE_STRING: {
+        sb_append(&cg->code, "   pop\t\trax\n");
+        return;
+    }
+    case TYPE_FLOAT: {
+        // @Incomplete - Missing int to float conversion
+        sb_append(&cg->code, "   pop\t\trax\n");
+        return;
+    }
+    case TYPE_POINTER: {
+        sb_append(&cg->code, "   pop\t\trax\n");
+        return;
+    }
+    case TYPE_ARRAY: {
+        sb_append(&cg->code, "   pop\t\trax\n"); // data
+        sb_append(&cg->code, "   pop\t\trcx\n"); // count
+        return;
+    }
+    default:
+    XXX;
+    }
+}
+
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "%s:\n", func_defn->identifier->name);
     sb_append(&cg->code, "   push\t\trbp\n");
     sb_append(&cg->code, "   mov\t\trbp, rsp\n");
-
-    // @Remove???
-    // Enter the scope of the function body to know how much stack space we should allocate for the function
-    // enter_scope(&cg->ident_table);
 
     size_t bytes_allocated = func_defn->bytes_allocated;;
     if (strcmp("main", func_defn->identifier->name) == 0) {
@@ -507,22 +558,14 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
         param->identifier->stack_offset = 16 + (i * 8);
     }
 
-    // Make a label for the return code so that any return statements within the function can jump to this. e.g for conditionals
+    // Make a label for the return code so that return statements within the function can jump to this
     int return_label = make_label_number(cg);
     func_defn->return_label = return_label;
 
     emit_block(cg, func_defn->body);
 
-    // @Incomplete - We should make a emit_pop() here i think
     sb_append(&cg->code, "L%d:\n", return_label);
-    if (func_defn->return_type->kind == TYPE_INTEGER) {
-        sb_append(&cg->code, "   pop\t\trax\n");
-    } else if (func_defn->return_type->kind == TYPE_VOID) {
-        sb_append(&cg->code, "   mov\t\trax, 0\n");
-        // Do nothing
-    } else {
-        XXX;
-    }
+    emit_pop_r_value(cg, func_defn->return_type);
     if (bytes_allocated) sb_append(&cg->code, "   add\t\trsp, %d\n", aligned_allocated);
     sb_append(&cg->code, "   pop\t\trbp\n");
     sb_append(&cg->code, "   ret\n");
@@ -701,11 +744,15 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
             sb_append(&cg->code, "   pop\t\t%s\n", reg);
         }
         else if (arg_type->kind == TYPE_FLOAT) {
-            sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-            sb_append(&cg->code, "   add\t\trsp, 4\n");
-            sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
-            sb_append(&cg->code, "   movapd\txmm1, xmm0\n");
-            sb_append(&cg->code, "   movq\t\t%s, xmm0\n", reg);
+            // @FloatRefactor - Should use %lf or %f depending on the float size
+            sb_append(&cg->code, "   pop\t\t%s\n", reg);
+            if (arg_type->size == 4) {
+                sb_append(&cg->code, "   movq\t\txmm0, %s\n", reg);
+                sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
+                sb_append(&cg->code, "   movq\t\t%s, xmm0\n", reg);
+            } else if (arg_type->size == 8) {
+                // Already aligned
+            }
         }
         else if (arg_type->kind == TYPE_BOOL) {
             int true_label        = make_label_number(cg);
@@ -802,6 +849,8 @@ void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type, bool is_arr
     }
 }
 
+
+
 void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, Type *lhs_type, Type *rhs_type) {
 
     char address_str[16];
@@ -823,17 +872,14 @@ void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is
         return;
     }
     case TYPE_FLOAT: {
+        sb_append(&cg->code, "   pop\t\trax\n");
         if (rhs_type->kind == TYPE_INTEGER) {
-            // Int to float conversion 
             // @Note - I feel like this conversion from int to float should be dealt with at the typing level instead of here. 
             // One idea is to just change it at the check_delcarartion level. If we have a float on the left and an integer on the right, just change the right hand side type to be integer
-            sb_append(&cg->code, "   pop\t\trax\n");
-            sb_append(&cg->code, "   cvtsi2ss\txmm0, rax\n");
-            sb_append(&cg->code, "   movss\t\tDWORD %s, xmm0\n", address_str);
+            sb_append(&cg->code, "   %s\txmm0, rax\n", cvtsi2ss_or_cvtsi2sd(lhs_type));
+            sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(lhs_type), address_str);
         } else {
-            sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-            sb_append(&cg->code, "   add\t\trsp, 4\n");
-            sb_append(&cg->code, "   movss\t\tDWORD %s, xmm0\n", address_str);
+            sb_append(&cg->code, "   mov\t\t%s, %s\n", address_str, REG_A(lhs_type));
         }
         return;
     }
@@ -1016,15 +1062,17 @@ void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
         (l_kind == TYPE_INTEGER && r_kind == TYPE_FLOAT) ||
         (l_kind == TYPE_FLOAT   && r_kind == TYPE_INTEGER)) {
         
-        emit_integer_to_float_conversion(cg, l_kind, r_kind);
+        // @FloatRefactor - These operations should handle 32 and 64 bit floats
+        emit_integer_to_float_conversion(cg, l_type, r_type);
         if      (bin->operator == '+') sb_append(&cg->code, "   addss\t\txmm0, xmm1\n");
         else if (bin->operator == '-') sb_append(&cg->code, "   subss\t\txmm0, xmm1\n");
         else if (bin->operator == '*') sb_append(&cg->code, "   mulss\t\txmm0, xmm1\n");
         else if (bin->operator == '/') sb_append(&cg->code, "   divss\t\txmm0, xmm1\n");
         else exit(1); // Should not happen
 
-        sb_append(&cg->code, "   sub\t\trsp, 4\n");
-        sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
+        Type *float_type = l_kind == TYPE_FLOAT ? l_type : r_type;
+        sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(float_type), REG_A(float_type));
+        sb_append(&cg->code, "   push\t\trax\n");
         return;
     }
 
@@ -1062,7 +1110,7 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
         (l_kind == TYPE_INTEGER && r_kind == TYPE_FLOAT) ||
         (l_kind == TYPE_FLOAT   && r_kind == TYPE_INTEGER)) 
     { 
-        emit_integer_to_float_conversion(cg, l_kind, r_kind);
+        emit_integer_to_float_conversion(cg, l_type, r_type);
 
         sb_append(&cg->code, "   comiss\txmm0, xmm1\n");
         sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
@@ -1083,23 +1131,23 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
     exit(1);
 }
 
-void emit_integer_to_float_conversion(CodeGenerator *cg, TypeKind l_kind, TypeKind r_kind) {
-    if (l_kind == TYPE_FLOAT && r_kind == TYPE_INTEGER) {
+void emit_integer_to_float_conversion(CodeGenerator *cg, Type *l_type, Type *r_type) {
+    if (l_type->kind == TYPE_FLOAT && r_type->kind == TYPE_INTEGER) {
         sb_append(&cg->code, "   pop\t\trbx\n");
-        sb_append(&cg->code, "   cvtsi2ss\txmm1, rbx\n");
-        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-        sb_append(&cg->code, "   add\t\trsp, 4\n");
-    }
-    else if (l_kind == TYPE_INTEGER && r_kind == TYPE_FLOAT) {
-        sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
-        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "   %s\txmm1, %s\n", cvtsi2ss_or_cvtsi2sd(l_type), REG_B(l_type));
         sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   cvtsi2ss\txmm0, rax\n");
+        sb_append(&cg->code, "   %s\txmm0, %s\n", movd_or_movq(l_type), REG_A(l_type));
+    }
+    else if (l_type->kind == TYPE_INTEGER && r_type->kind == TYPE_FLOAT) {
+        sb_append(&cg->code, "   pop\t\trbx\n");
+        sb_append(&cg->code, "   %s\txmm1, %s\n", movd_or_movq(r_type), REG_B(r_type));
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   %s\txmm0, %s\n", cvtsi2ss_or_cvtsi2sd(r_type), REG_A(r_type));
     } else {
-        sb_append(&cg->code, "   movss\t\txmm1, [rsp]\n");
-        sb_append(&cg->code, "   add\t\trsp, 4\n");
-        sb_append(&cg->code, "   movss\t\txmm0, [rsp]\n");
-        sb_append(&cg->code, "   add\t\trsp, 4\n");
+        sb_append(&cg->code, "   pop\t\trbx\n");
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   %s\txmm1, %s\n", movd_or_movq(r_type), REG_B(r_type));
+        sb_append(&cg->code, "   %s\txmm0, %s\n", movd_or_movq(r_type), REG_A(r_type));
     }
 }
 
@@ -1368,9 +1416,8 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         return;
     }
     case TYPE_FLOAT: {
-        sb_append(&cg->code, "   %s\t\txmm0, %s\n", src_type->size == 4 ? "movss" : "movsd", src);
-        sb_append(&cg->code, "   sub\t\trsp, %d\n", src_type->size);
-        sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
+        sb_append(&cg->code, "   mov\t\t%s, %s\n", REG_A(src_type), src);
+        sb_append(&cg->code, "   push\t\trax\n");
         return;
     }
     case TYPE_POINTER: {
@@ -1533,11 +1580,19 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_FLOAT: {
-            sb_append(&cg->data, "   CF%d DD %lf\n", cg->constants, lit->as.value.floating);
-            sb_append(&cg->code, "   movss\t\txmm0, [CF%d]\n", cg->constants);
-            sb_append(&cg->code, "   sub\t\trsp, 4\n");
-            sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
-            cg->constants++;
+            if (lit->head.evaluated_type->size == 4) {
+                sb_append(&cg->data, "   CF%d DD %lf\n", cg->constants, lit->as.value.floating);
+                sb_append(&cg->code, "   movss\t\txmm0, [CF%d]\n", cg->constants);
+                sb_append(&cg->code, "   movd\t\teax, xmm0\n");
+                sb_append(&cg->code, "   push\t\trax\n");
+                cg->constants++;
+            } else if (lit->head.evaluated_type->size == 8) {
+                sb_append(&cg->data, "   CF%d DQ %lf\n", cg->constants, lit->as.value.floating);
+                sb_append(&cg->code, "   movsd\t\txmm0, [CF%d]\n", cg->constants);
+                sb_append(&cg->code, "   movq\t\trax, xmm0\n");
+                sb_append(&cg->code, "   push\t\trax\n");
+                cg->constants++;
+            } else XXX;
             return;
         }
         case LITERAL_STRING: {
@@ -1572,10 +1627,15 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                         return;
                     }
                     case LITERAL_FLOAT: {
-                        // @Incomplete - We need to check if float is 32 or 64 bit constant. Right now we just assume 32 bit
-                        sb_append(&cg->code, "   movss\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant @Cleanup - Should the identifier name really be used as the constant name??? Not good if we have the same identifier name in two seperate blocks inside same function!
-                        sb_append(&cg->code, "   sub\t\trsp, 4\n"); 
-                        sb_append(&cg->code, "   movss\t\t[rsp], xmm0\n");
+                        if (lit->head.evaluated_type->size == 4) {
+                            sb_append(&cg->code, "   movss\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant @Cleanup - Should the identifier name really be used as the constant name??? Not good if we have the same identifier name in two seperate blocks inside same function!
+                            sb_append(&cg->code, "   movd\t\teax, xmm0\n");
+                            sb_append(&cg->code, "   push\t\trax\n");
+                        } else if (lit->head.evaluated_type->size == 8) {
+                            sb_append(&cg->code, "   movsd\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant
+                            sb_append(&cg->code, "   movq\t\trax, xmm0\n");
+                            sb_append(&cg->code, "   push\t\trax\n");
+                        } else XXX;
                         return;
                     }
                     case LITERAL_STRING: {

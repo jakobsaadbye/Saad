@@ -1,4 +1,11 @@
 Current TODO:
+    - :FloatRefactor
+    - %lf and %f for printf instead of just %lf
+    - Functions not working with returns types other than int or void
+    - A global base_offset on the code generator is not sufficient when we have multiple functions.
+      The base pointer needs to be remembered and reset when jumping to a new function. Otherwise,
+      the variables gets wrong addresses.
+
     - :WrongForLoopSizing (remove temporary hack of aligning functions to 32 bytes just to fix for-loops wrong size!)
     - @Investigate - examples/for_loops crashes once in a while. Is it a hisenbug?
     - Make Array be a struct where you can do array.count or array.data
@@ -9,7 +16,6 @@ Current TODO:
     - Unary dot for enum access
 
 Roadmap:
-    - Revisit of for-loops (DONE)
     - Pointer types (Mostly done, void pointer autocast is missing)
     - Array types (Mostly done, multidimensional arrays + heap allocated is still missing)
     - Constants (Mostly done. Missing as struct member)

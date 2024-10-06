@@ -303,7 +303,7 @@ bool types_are_equal(Type *lhs, Type *rhs) {
 }
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
-    AstIdentifier *func_ident = lookup_from_scope(typer->current_scope, call->identifer->name, NULL);
+    AstIdentifier *func_ident = lookup_from_scope(typer->current_scope, call->identifer->name, NULL); // @Note - Passing NULL here omits the checking that the function needs to exist before it can be called to allow arbitrary order. If, or when we get closues, this should probably work differently!
     if (func_ident == NULL) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Unknown function '%s'", call->identifer->name);
         return NULL;

@@ -63,8 +63,7 @@ void report_error_range(Parser *parser, Pos start, Pos end, const char *message,
 void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const char *message, ...);
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
 
-
-int global_scope_counter = 0;
+int global_scope_counter = 0; // Only for debug purposes
 
 AstBlock *new_block(Parser *parser, BlockKind kind) {
     AstBlock *scope = ast_allocate(parser, sizeof(AstBlock));
@@ -130,10 +129,6 @@ AstIdentifier *lookup_from_scope(AstBlock *scope, char *ident_name, Ast *used_at
 
         searching_scope = searching_scope->parent;
     }
-}
-
-AstIdentifier *lookup_scope(Parser *parser, char *ident_name, Ast *site) {
-    return lookup_from_scope(parser->current_scope, ident_name, site);
 }
 
 AstIdentifier *add_identifier_to_scope(AstBlock *scope, AstIdentifier *ident) {
