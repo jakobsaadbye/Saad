@@ -1,21 +1,9 @@
+#include "string_builder.h"
+
 #include <stdarg.h>
-#include "stdlib.h"
+#include <stdio.h>
 #include "strings.h"
-
-#define MAX_STRING_LEN 2048
-
-typedef struct StringBuilder {
-    char   *buffer;
-    size_t  cursor;
-    size_t  capacity;
-} StringBuilder;
-
-
-StringBuilder sb_init(size_t init_capicity);
-void sb_append(StringBuilder *sb, const char *string, ...);
-void sb_free(StringBuilder *sb);
-char *sb_to_string(StringBuilder *sb);
-
+#include "stdlib.h"
 
 StringBuilder sb_init(size_t init_capicity) {
     char *buffer = (char *)(malloc(init_capicity));

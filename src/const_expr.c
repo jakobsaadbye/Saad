@@ -1,4 +1,4 @@
-#include "parser.c"
+#include "scope.h"
 
 typedef struct ConstEvaluater {
     Parser *parser;

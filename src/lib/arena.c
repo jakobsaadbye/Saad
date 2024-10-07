@@ -1,18 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-typedef struct Chunk Chunk;
-typedef struct Chunk {
-    unsigned char *data;
-    size_t cursor;
-    size_t capacity;
-    Chunk *prev;
-} Chunk;
-
-typedef struct Arena {
-    Chunk *current_chunk;
-} Arena;
+#include "arena.h"
 
 Chunk *make_new_chunk(Chunk *old_chunk, size_t capacity) {
     Chunk *new_chunk = malloc(sizeof(Chunk));

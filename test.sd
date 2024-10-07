@@ -1,76 +1,10 @@
-// main :: () {
-    
-//     x : float = 0;
-//     y : f32   = 1234.123456789;
-//     z : f64   = 1234.123456789;
-
-//     print("%", x);
-//     print("%", y);
-//     print("%", z);
-
-// }
-
-
 main :: () {
     
-    // Exclusive range
-    for i in 0..10 {
-        print("%", i);
-    }
-    
-    print("");
-    
-    // Inclusive range
-    for i in 0...10 {
-        print("%", i);
-    }
-    
-    print("");
-    
-    // Ranges can be arbitrary expressions
-    a := 0;
-    b := 10;
-    for i in a...b+10 {
-        print("%", i);
-    }
-    
-    print("");
+    x : float = 0;
+    y : f32   = 1234.123456789;
+    z : f64   = 1234.123456789;
 
-    // If no name for an iterator is given then the iterator will be named 'it'
-    for 0..10 {
-        print("%", it);
-    }
-    
-    print("");
-
-    
-    // Looping over arrays has the same syntax
-    x := [1, 1, 2, 3, 5, 8, 11, 19];
-    for x {
-        print("%", it);
-    }
-
-    print("");
-    
-    // If no expression is given, its an infinite loop like in Go
-    for {
-        print("To infinity and beyond!");
-        break;
-    }
-
-    print("");
-
-    // Its also possible to include the index
-    fibonacci_numbers := [1, 1, 2, 3, 5, 8, 11, 19];
-    for n, i in fibonacci_numbers {
-        print("(%, %)", i, n);
-    }
-
-    // And it also works with ranges ()
-    for n, i in 10...20 {
-        print("(%, %)", i, n);
-    }
-    
-    print("");
-
+    print("%", x);
+    print("%", y);
+    print("%", z);
 }

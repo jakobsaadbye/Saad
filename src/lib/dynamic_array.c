@@ -1,14 +1,8 @@
+#include "dynamic_array.h"
+
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define da_append(da, item) _da_append(da, &item);
-
-typedef struct DynamicArray {
-    int item_size;
-    unsigned char *items;
-    int count;
-    int capacity;
-} DynamicArray;
 
 DynamicArray da_init(unsigned int init_cap, unsigned int item_size) {
     DynamicArray da = {0};

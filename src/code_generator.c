@@ -744,7 +744,6 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
             sb_append(&cg->code, "   pop\t\t%s\n", reg);
         }
         else if (arg_type->kind == TYPE_FLOAT) {
-            // @FloatRefactor - Should use %lf or %f depending on the float size
             sb_append(&cg->code, "   pop\t\t%s\n", reg);
             if (arg_type->size == 4) {
                 sb_append(&cg->code, "   movq\t\txmm0, %s\n", reg);
