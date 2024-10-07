@@ -1,5 +1,7 @@
 #include "scope.h"
 
+#include <stdarg.h>
+
 #define MAX_PRECEDENCE 99
 #define MIN_PRECEDENCE -99
 

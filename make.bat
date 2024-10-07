@@ -4,7 +4,7 @@
 set CFLAGS=-Wall -Wextra -pedantic -ggdb
 
 :: List of source files (space-separated)
-set FILES=ast lexer parser scope lib/string_builder lib/dynamic_array lib/table lib/arena
+set FILES=ast lexer parser scope
 
 :: Compile each source file
 for %%f in (%FILES%) do (
@@ -17,8 +17,4 @@ gcc %CFLAGS% -o ./bin/saad.exe ^
     build/lexer.o ^
     build/parser.o ^
     build/scope.o ^
-    build/lib/string_builder.o ^
-    build/lib/dynamic_array.o ^
-    build/lib/table.o ^
-    build/lib/arena.o ^
     src/main.c

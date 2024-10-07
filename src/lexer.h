@@ -7,7 +7,6 @@
 #include <string.h>
 #include <assert.h>
 #include "lib/arena.h"
-#include "lib/string_builder.h"
 
 #define MAX_TOKENS 1024
 #define MAX_DIGITS 32

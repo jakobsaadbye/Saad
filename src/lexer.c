@@ -1,5 +1,10 @@
 #include "lexer.h"
 
+#define ARENA_IMPLEMENTATION
+#include "lib/arena.h"
+
+#include <stdarg.h>
+
 const char *LABEL_NOTE    = COLOR_ICE     "note"    COLOR_RESET;
 const char *LABEL_ERROR   = COLOR_RED     "error"   COLOR_RESET;
 const char *LABEL_WARNING = COLOR_MAGENTA "warning" COLOR_RESET;

@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "*.sd": "odin",
+        "*.c": "c",
         "lexer.h": "c",
         "parser.h": "c",
         "string.h": "c",
@@ -23,6 +24,8 @@
         "string_builder.c": "cpp",
         "table.h": "c",
         "dynamic_array.h": "c",
-        "arena.h": "c"
+        "arena.h": "c",
+        "h_only_string_builder.h": "c",
+        "string_builder.h": "c"
     }
 }

@@ -1,4 +1,5 @@
 #include "const_expr.c"
+#include "lib/string_builder.h"
 
 typedef struct Typer {
     Parser *parser;
