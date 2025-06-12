@@ -9,12 +9,20 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
+<<<<<<< HEAD
    __DogKind.samoid DB ".samoid", 0
    __DogKind.chiwawa DB ".chiwawa", 0
    __DogKind.bulldog DB ".bulldog", 0
    CF0 DD 20.0000000
    CF1 DD 0.5000000
    CF2 DD 80.0000000
+=======
+   CF0 DD 1234.1234568
+   CF1 DQ 1234.123456789000102
+   CS2 DB `%f`, 10, 0 
+   CS3 DB `%f`, 10, 0 
+   CS4 DB `%lf`, 10, 0 
+>>>>>>> 8e175f92326432b8a95f6f9fd2ec11d43b94fc6a
 
 segment .text
    global main
@@ -33,6 +41,7 @@ assert_fail:
    mov		rcx, 1
    call		ExitProcess
 
+<<<<<<< HEAD
 get_enum_string_DogKind:
    mov		r8, 0
    cmp		rdx, r8
@@ -64,6 +73,8 @@ enum_case_1:
 enum_case_2:
    mov		rax, __DogKind.bulldog
    ret
+=======
+>>>>>>> 8e175f92326432b8a95f6f9fd2ec11d43b94fc6a
 
 ; bytes total    : 20
 ; bytes arguments: 0
@@ -72,35 +83,54 @@ main:
    mov		rbp, rsp
    sub		rsp, 56
 
-   ; initialization of 'samoid'
-   mov		DWORD -16[rbp], 0
-   mov		DWORD -12[rbp], 0
-   mov		DWORD -8[rbp], 0
+   ; initialization of 'x'
    mov		DWORD -4[rbp], 0
-   push		0
-   pop		rax
-   mov		DWORD -16[rbp], eax
-   mov		rax, 4
+   mov		rax, 0
    push		rax
    pop		rax
-   mov		DWORD -12[rbp], eax
+   cvtsi2ss	xmm0, rax
+   movd		-4[rbp], xmm0
+
+   ; initialization of 'y'
+   mov		DWORD -8[rbp], 0
    movss		xmm0, [CF0]
    movd		eax, xmm0
    push		rax
    pop		rax
    mov		-8[rbp], eax
-   movss		xmm0, [CF1]
-   movd		eax, xmm0
+
+   ; initialization of 'z'
+   mov		DWORD -16[rbp], 0
+   movsd		xmm0, [CF1]
+   movq		rax, xmm0
    push		rax
    pop		rax
-   mov		-4[rbp], eax
+   mov		-16[rbp], rax
 
-   ; initialization of 'bmi'
-   mov		DWORD -20[rbp], 0
-   mov		eax, -8[rbp]
-   push		rax
+   ; expression of print
    mov		eax, -4[rbp]
    push		rax
+   pop		rdx
+   movq		xmm0, rdx
+   cvtss2sd	xmm0, xmm0
+   movq		rdx, xmm0
+   mov		rcx, CS2
+   call		printf
+
+   ; expression of print
+   mov		eax, -8[rbp]
+   push		rax
+   pop		rdx
+   movq		xmm0, rdx
+   cvtss2sd	xmm0, xmm0
+   movq		rdx, xmm0
+   mov		rcx, CS3
+   call		printf
+
+   ; expression of print
+   mov		rax, -16[rbp]
+   push		rax
+<<<<<<< HEAD
    mov		eax, -4[rbp]
    push		rax
    pop		rbx
@@ -148,6 +178,12 @@ main:
    mov		rdx, 24
    call		assert
 L4:
+=======
+   pop		rdx
+   mov		rcx, CS4
+   call		printf
+L0:
+>>>>>>> 8e175f92326432b8a95f6f9fd2ec11d43b94fc6a
    mov		rax, 0
    add		rsp, 56
    pop		rbp
