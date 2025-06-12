@@ -81,7 +81,7 @@ char *type_to_str(Type *type) {
         sb_append(&sb, "(");
         for (int i = 0; i < func->node->parameters.count; i++) {
             AstDeclaration *param = ((AstDeclaration **)func->node->parameters.items)[i];
-            sb_append(&sb, "%s", type_to_str(param->declared_type));
+            sb_append(&sb, "%s", type_to_str(param->type));
             if (i + 1 < func->node->parameters.count) {
                 sb_append(&sb, ", ");
             }

@@ -8,6 +8,7 @@ typedef struct CodeGenerator {
     Parser *parser;
 
     AstBlock *current_scope;
+    AstFunctionDefn *current_function_defn;
     TypeTable type_table;
 
     int base_ptr;
@@ -74,6 +75,7 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.parser         = parser;
     cg.type_table     = parser->type_table;
     cg.current_scope  = parser->current_scope;
+    cg.current_function_defn = NULL;
     cg.base_ptr       = 0;
     cg.constants      = 0;
     cg.labels         = 0;
@@ -203,16 +205,16 @@ void emit_break_or_continue(CodeGenerator *cg, AstBreakOrContinue *boc) {
 void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
     for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
-        sb_append(&cg->data, "   __%s.%s DB \"%s.%s\", 0\n", ast_enum->identifier->name, etor->name, ast_enum->identifier->name, etor->name);
+        sb_append(&cg->data, "   __%s.%s DB \".%s\", 0\n", ast_enum->identifier->name, etor->name, etor->name);
     }
 
 
-    // char *print_enum(char *buf, int value)
+    // char *get_enum_string_<ENUM_NAME>(char *buf, int value)
     // - buf is in rcx
     // - value is in rdx
     // - returned string is in rax
     int case_label = make_label_number(cg);
-    sb_append(&cg->code, "print_enum_%s:\n", ast_enum->identifier->name);
+    sb_append(&cg->code, "get_enum_string_%s:\n", ast_enum->identifier->name);
     for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
         sb_append(&cg->code, "   mov\t\tr8, %d\n", etor->value);
@@ -540,23 +542,34 @@ void emit_pop_r_value(CodeGenerator *cg, Type *type) {
 }
 
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
+    cg->current_function_defn = func_defn;
+
+    int bytes_allocated = func_defn->num_bytes_total;
+    int bytes_args      = func_defn->num_bytes_args;
+
     sb_append(&cg->code, "\n");
+    sb_append(&cg->code, "; bytes total    : %d\n", bytes_allocated);
+    sb_append(&cg->code, "; bytes arguments: %d\n", bytes_args);
     sb_append(&cg->code, "%s:\n", func_defn->identifier->name);
     sb_append(&cg->code, "   push\t\trbp\n");
     sb_append(&cg->code, "   mov\t\trbp, rsp\n");
 
-    size_t bytes_allocated = func_defn->bytes_allocated;;
+    
     if (strcmp("main", func_defn->identifier->name) == 0) {
-        bytes_allocated += 32; // shadow space that is for some reason needed for main??? @Investigate
+        bytes_allocated += 32; // shadow space required by msvc
     }
-    size_t aligned_allocated = align_value((int)(bytes_allocated), 32); // :WrongForLoopSizing @Temporary @Hack Would like it if this was only 16 byte aligned instead of 32, but it seems like there is some problem with sizing for-loops correctly that causes not enough space to be allocated
+
+    int aligned_allocated = align_value((int)(bytes_allocated), 8); // :WrongForLoopSizing @Temporary @Hack Would like it if this was only 16 byte aligned instead of 32, but it seems like there is some problem with sizing for-loops correctly that causes not enough space to be allocated
     
     if (bytes_allocated) sb_append(&cg->code, "   sub\t\trsp, %d\n", aligned_allocated);
 
     for (int i = 0; i < func_defn->parameters.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
-        param->identifier->stack_offset = 16 + (i * 8);
+        param->ident->stack_offset = 16 + (i * 8);
     }
+
+    // Any allocated space for declarations goes below the space for arguments, so here we bump the base ptr down by that amount
+    cg->base_ptr -= bytes_args;
 
     // Make a label for the return code so that return statements within the function can jump to this
     int return_label = make_label_number(cg);
@@ -710,6 +723,38 @@ char *get_function_argument_register(int arg_index) {
     XXX;
 }
 
+void move_argument_to_register_or_stack(CodeGenerator *cg, int arg_index, int arg_total) {
+    if (arg_index > 3) {
+        // Goes on the stack
+
+        int offset = -32;   // Start at shadow space
+        offset -= (arg_total - arg_index - 1) * 8;
+
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", offset);
+    } else {
+        // Goes in register
+
+        char *reg = NULL;
+        if (arg_index == 0) reg = "rcx";
+        if (arg_index == 1) reg = "rdx";
+        if (arg_index == 2) reg = "r8";
+        if (arg_index == 3) reg = "r9";
+        if (reg == NULL) {
+            printf("%s:%d: Compiler Bug: Failed to assign argument to a valid msvc register", __FILE__, __LINE__);
+            exit(1);
+        }
+
+        sb_append(&cg->code, "   mov\t\t%s, rax\n", reg);
+    }
+}
+
+void emit_enum_arg_string(CodeGenerator *cg, AstExpr *arg, int arg_index) {
+    sb_append(&cg->code, "   mov\t\trcx, enum_buffer_%d\n", arg_index);
+    sb_append(&cg->code, "   pop\t\trdx\n"); // enum integer value
+    sb_append(&cg->code, "   call\t\tget_enum_string_%s\n", ((TypeEnum *)(arg->evaluated_type))->identifier->name);
+    sb_append(&cg->code, "   push\t\trax\n");
+}
+
 void emit_print(CodeGenerator *cg, AstPrint *print) {
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; expression of print\n");
@@ -718,13 +763,17 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
     int num_enum_arguments = 0;
     for (int i = 1; i < print->arguments.count; i++) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
+
         emit_expression(cg, arg);
+
         if (arg->evaluated_type->kind == TYPE_ENUM) {
+            // Special case for enum printing
+            emit_enum_arg_string(cg, arg, num_enum_arguments);
             num_enum_arguments += 1;
         }
     }
 
-    // Potentially allocate space for enum integer to string conversion
+    // Potentially allocate more space for enum integer to string conversion
     if (num_enum_arguments > cg->enum_scratch_buffers) {
         for (int i = cg->enum_scratch_buffers; i < num_enum_arguments; i++) {
             sb_append(&cg->data, "   enum_buffer_%d times 20 DB 0\n", i); // 20 is the length of the largest integer number 2^64sb_append(&cg->data, "")
@@ -733,25 +782,27 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
     }
 
     // Pop and assign registers
-    int enum_buffer_index = 0;
-    for (int i = print->arguments.count - 1; i >= 1; i--) {
+    int arg_count = print->arguments.count;
+    for (int i = arg_count - 1; i >= 1; i--) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
 
         Type *arg_type = arg->evaluated_type;
-        char *reg = get_function_argument_register(i);
 
         if (arg_type->kind == TYPE_INTEGER) {
-            sb_append(&cg->code, "   pop\t\t%s\n", reg);
+            sb_append(&cg->code, "   pop\t\trax\n");
+            move_argument_to_register_or_stack(cg, i, arg_count);
         }
         else if (arg_type->kind == TYPE_FLOAT) {
-            sb_append(&cg->code, "   pop\t\t%s\n", reg);
+            sb_append(&cg->code, "   pop\t\trax\n");
             if (arg_type->size == 4) {
-                sb_append(&cg->code, "   movq\t\txmm0, %s\n", reg);
+                sb_append(&cg->code, "   movq\t\txmm0, rax\n");
                 sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
-                sb_append(&cg->code, "   movq\t\t%s, xmm0\n", reg);
+                sb_append(&cg->code, "   movq\t\trax, xmm0\n");
             } else if (arg_type->size == 8) {
                 // Already aligned
-            } else XXX;
+            }
+
+            move_argument_to_register_or_stack(cg, i, arg_count);
         }
         else if (arg_type->kind == TYPE_BOOL) {
             int true_label        = make_label_number(cg);
@@ -759,41 +810,31 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
             sb_append(&cg->code, "   pop\t\trax\n");
             sb_append(&cg->code, "   cmp\t\tal, 0\n");
             sb_append(&cg->code, "   jnz\t\tL%d\n", true_label);
-            sb_append(&cg->code, "   mov\t\t%s, string_false\n", reg);
+            sb_append(&cg->code, "   mov\t\trax, string_false\n");
             sb_append(&cg->code, "   jmp\t\tL%d\n", fallthrough_label);
             sb_append(&cg->code, "L%d:\n", true_label);
-            sb_append(&cg->code, "   mov\t\t%s, string_true\n", reg);
+            sb_append(&cg->code, "   mov\t\trax, string_true\n");
             sb_append(&cg->code, "L%d:\n", fallthrough_label);
+            move_argument_to_register_or_stack(cg, i, arg_count);
         }
         else if (arg_type->kind == TYPE_STRING) {
-            sb_append(&cg->code, "   pop\t\t%s\n", reg);
+            sb_append(&cg->code, "   pop\t\trax\n");
+            move_argument_to_register_or_stack(cg, i, arg_count);
         }
         else if (arg_type->kind == TYPE_ENUM) {
-            sb_append(&cg->code, "   mov\t\trax, enum_buffer_%d\n", enum_buffer_index);
-            sb_append(&cg->code, "   pop\t\trbx\n");
-
-            // Save current registers
-            for (int j = print->arguments.count - 1; j > i; j--)
-                sb_append(&cg->code, "   push\t\t%s   ; storing\n", get_function_argument_register(j));
-
-            sb_append(&cg->code, "   mov\t\trcx, rax\n");
-            sb_append(&cg->code, "   mov\t\trdx, rbx\n");
-
-            sb_append(&cg->code, "   call\t\tprint_enum_%s\n", ((TypeEnum *)(arg_type))->identifier->name);
-            sb_append(&cg->code, "   mov\t\t%s, rax\n", reg);
-
-            // Restore registers
-            for (int j = i + 1; (int) j < print->arguments.count; j++) 
-                sb_append(&cg->code, "   pop\t\t%s   ; restore\n", get_function_argument_register(j));
-
-            enum_buffer_index += 1;
+            sb_append(&cg->code, "   pop\t\trax\n");
+            move_argument_to_register_or_stack(cg, i, arg_count);
         }
         else if (arg_type->kind == TYPE_POINTER) {
-            sb_append(&cg->code, "   pop\t\t%s\n", reg);
+            sb_append(&cg->code, "   pop\t\trax\n");
+            move_argument_to_register_or_stack(cg, i, arg_count);
         }
         else if (arg_type->kind == TYPE_ARRAY) {
-            sb_append(&cg->code, "   pop\t\t%s\n", reg);
+            sb_append(&cg->code, "   pop\t\trax\n");
             sb_append(&cg->code, "   pop\t\trbx\n"); // Don't use the length for anything
+            move_argument_to_register_or_stack(cg, i, arg_count);
+        } else if (arg_type->kind == TYPE_STRUCT) {
+            XXX;
         }
         else {
             // Unhandled cases
@@ -804,7 +845,25 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
     int const_number = cg->constants++;
     sb_append(&cg->data, "   CS%d DB `%s`, 10, 0 \n", const_number, print->c_string);
     sb_append(&cg->code, "   mov\t\trcx, CS%d\n", const_number);
-    sb_append(&cg->code, "   call\t\tprintf\n");
+
+
+    if (arg_count <= 4) {
+        // No need to align the stack as all the arguments are in registers
+        sb_append(&cg->code, "   call\t\tprintf\n");
+    } else {
+        // Offset the stack pointer to point at the start of the arguments stack
+        assert(cg->current_function_defn);
+        AstFunctionDefn *func = cg->current_function_defn;
+        int bytes_total = func->num_bytes_total;
+        int bytes_args  = (arg_count - 5) * 8;
+
+        int offset = align_value(bytes_total, 8) - (bytes_args + 32);
+
+        if (offset > 0) sb_append(&cg->code, "   add\t\trsp, %d\n", offset);
+        sb_append(&cg->code, "   call\t\tprintf\n");
+        if (offset > 0) sb_append(&cg->code, "   sub\t\trsp, %d\n", offset);
+    }
+        
 }
 
 void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type, bool is_array_initialization) {
@@ -821,7 +880,7 @@ void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type, bool is_arr
 
         for (int i = 0; i < struct_defn->scope->members.count; i++) {
             AstDeclaration *member = ((AstDeclaration **)(struct_defn->scope->members.items))[i];
-            zero_initialize(cg, dest_offset + member->member_offset, member->declared_type, member->declared_type->kind == TYPE_ARRAY);
+            zero_initialize(cg, dest_offset + member->member_offset, member->type, member->type->kind == TYPE_ARRAY);
         }
         break;
     }
@@ -930,7 +989,7 @@ void emit_struct_initialization(CodeGenerator *cg, int dest_offset, AstStructLit
 
         int member_offset = dest_offset + init->member->member_offset;
 
-        emit_initialization(cg, member_offset, init->value, init->member->declared_type, init->value->evaluated_type);
+        emit_initialization(cg, member_offset, init->value, init->member->type, init->value->evaluated_type);
     }
 }
 
@@ -968,8 +1027,8 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         switch (lit->kind) {
         case LITERAL_BOOLEAN: break; // Immediate value is used
         case LITERAL_INTEGER: break; // Immediate value is used 
-        case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", decl->identifier->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
-        case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", decl->identifier->name, lit->as.value.string.data); break; // :IdentifierNameAsConstant @Cleanup
+        case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", decl->ident->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
+        case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", decl->ident->name, lit->as.value.string.data); break; // :IdentifierNameAsConstant @Cleanup
         case LITERAL_NIL:     XXX;
         case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
         }
@@ -980,8 +1039,8 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     int base_array_offset = -1;
     bool is_array_initialization = false;
 
-    int type_size = decl->declared_type->size;
-    if (decl->declared_type->kind == TYPE_ARRAY) {
+    int type_size = decl->type->size;
+    if (decl->type->kind == TYPE_ARRAY) {
         // We are still storing the full type and size information about the array
         // on the declaration on the stack, but also reserve 16 bytes for the data + count that we have to 
         // be aware of whenever we are dealing with the array.
@@ -996,11 +1055,11 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     cg->base_ptr -= type_size;
     cg->base_ptr  = align_value(cg->base_ptr, type_size);
 
-    decl->identifier->stack_offset = cg->base_ptr;
-    int identifier_offset          = cg->base_ptr;
+    decl->ident->stack_offset = cg->base_ptr;
+    int identifier_offset     = cg->base_ptr;
 
     if (is_array_initialization) {
-        cg->base_ptr -= decl->declared_type->size;
+        cg->base_ptr -= decl->type->size;
         cg->base_ptr  = align_value(cg->base_ptr, 8);
 
         base_array_offset = cg->base_ptr;
@@ -1008,21 +1067,21 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     }
 
     sb_append(&cg->code, "\n");
-    sb_append(&cg->code, "   ; initialization of '%s'\n", decl->identifier->name);
+    sb_append(&cg->code, "   ; initialization of '%s'\n", decl->ident->name);
     
-    zero_initialize(cg, identifier_offset, decl->declared_type, false);
+    zero_initialize(cg, identifier_offset, decl->type, false);
     if (is_array_initialization) {
-        zero_initialize(cg, base_array_offset, decl->declared_type, true);
+        zero_initialize(cg, base_array_offset, decl->type, true);
     }
 
     if (decl->expr) {
         if (is_array_initialization) {
             // @Cleanup - This is a little mehh. Too implicit that we are actually doing two different things. Maybe split up into different functions for array initialization???
-            emit_initialization(cg, base_array_offset, decl->expr, decl->declared_type, decl->expr->evaluated_type);        // to initialize array
+            emit_initialization(cg, base_array_offset, decl->expr, decl->type, decl->expr->evaluated_type);        // to initialize array
             emit_expression(cg, decl->expr);
-            emit_simple_initialization(cg, identifier_offset, false, decl->declared_type, decl->expr->evaluated_type); // to initialize data + count
+            emit_simple_initialization(cg, identifier_offset, false, decl->type, decl->expr->evaluated_type); // to initialize data + count
         } else {
-            emit_initialization(cg, identifier_offset, decl->expr, decl->declared_type, decl->expr->evaluated_type);
+            emit_initialization(cg, identifier_offset, decl->expr, decl->type, decl->expr->evaluated_type);
         }
     } 
 }
@@ -1418,7 +1477,7 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
     case TYPE_INTEGER: {
         sb_append(&cg->code, "   mov\t\t%s, %s %s\n", REG_A(src_type), WIDTH(src_type), src);
         if (is_signed_integer(src_type) && src_type->size != 8) {
-            sb_append(&cg->code, "   movsx\t\trax, %s\n", REG_A(src_type));
+            sb_append(&cg->code, "   movsx\trax, %s\n", REG_A(src_type));
         }
         sb_append(&cg->code, "   push\t\trax\n");
         return;
@@ -1559,7 +1618,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
         if (ma->access_kind == MEMBER_ACCESS_STRUCT) {
             AstDeclaration *member = ma->struct_member;
-            emit_move_and_push(cg, result.base_offset, result.is_runtime_computed, member->declared_type, false);
+            emit_move_and_push(cg, result.base_offset, result.is_runtime_computed, member->type, false);
         } else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
             sb_append(&cg->code, "   push\t\t%d\n", ma->enum_member->value);
             return;

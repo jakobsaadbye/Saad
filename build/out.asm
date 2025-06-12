@@ -9,9 +9,9 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   __DogKind.samoid DB "DogKind.samoid", 0
-   __DogKind.chiwawa DB "DogKind.chiwawa", 0
-   __DogKind.bulldog DB "DogKind.bulldog", 0
+   __DogKind.samoid DB ".samoid", 0
+   __DogKind.chiwawa DB ".chiwawa", 0
+   __DogKind.bulldog DB ".bulldog", 0
    CF0 DD 20.0000000
    CF1 DD 0.5000000
    CF2 DD 80.0000000
@@ -33,7 +33,7 @@ assert_fail:
    mov		rcx, 1
    call		ExitProcess
 
-print_enum_DogKind:
+get_enum_string_DogKind:
    mov		r8, 0
    cmp		rdx, r8
    jz			enum_case_0
@@ -65,10 +65,12 @@ enum_case_2:
    mov		rax, __DogKind.bulldog
    ret
 
+; bytes total    : 20
+; bytes arguments: 0
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 64
+   sub		rsp, 56
 
    ; initialization of 'samoid'
    mov		DWORD -16[rbp], 0
@@ -133,7 +135,7 @@ main:
    mov		rdx, 23
    call		assert
    mov		eax, DWORD -12[rbp]
-   movsx		rax, eax
+   movsx	rax, eax
    push		rax
    mov		rax, 4
    push		rax
@@ -147,6 +149,6 @@ main:
    call		assert
 L4:
    mov		rax, 0
-   add		rsp, 64
+   add		rsp, 56
    pop		rbp
    ret

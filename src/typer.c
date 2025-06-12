@@ -29,6 +29,7 @@ bool types_are_equal(Type *lhs, Type *rhs);
 bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
 AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name);
+char *generate_c_format_specifier_for_type(Type *type);
 
 Typer typer_init(Parser *parser, ConstEvaluater *ce) {
     Typer typer = {0};
@@ -197,37 +198,37 @@ bool check_for_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
 
 bool check_declaration(Typer *typer, AstDeclaration *decl) {
     if (decl->flags & DECLARATION_TYPED) {
-        Type *resolved_type = resolve_type(typer, decl->declared_type, decl);
+        Type *resolved_type = resolve_type(typer, decl->type, decl);
         if (!resolved_type) return false;
 
-        decl->identifier->type = resolved_type;
-        decl->declared_type    = resolved_type;
+        decl->ident->type = resolved_type;
+        decl->type    = resolved_type;
         
-        Type *expr_type = check_expression(typer, decl->expr, decl->declared_type);
+        Type *expr_type = check_expression(typer, decl->expr, decl->type);
         if (!expr_type) return false;
-        if (!types_are_equal(decl->declared_type, expr_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "'%s' is said to be of type %s, but expression is of type %s", decl->identifier->name, type_to_str(decl->declared_type), type_to_str(expr_type));
+        if (!types_are_equal(decl->type, expr_type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "'%s' is said to be of type %s, but expression is of type %s", decl->ident->name, type_to_str(decl->type), type_to_str(expr_type));
             return false;
         }
 
         if (expr_type->kind == TYPE_ARRAY) {
-            decl->identifier->type = expr_type;
-            decl->declared_type    = expr_type;
+            decl->ident->type = expr_type;
+            decl->type    = expr_type;
         }
     }
     else if (decl->flags & DECLARATION_TYPED_NO_EXPR) {
-        Type *resolved_type = resolve_type(typer, decl->declared_type, decl);
+        Type *resolved_type = resolve_type(typer, decl->type, decl);
         if (!resolved_type) return false;
 
-        decl->identifier->type = resolved_type;
-        decl->declared_type    = resolved_type;
+        decl->ident->type = resolved_type;
+        decl->type    = resolved_type;
     }
     else if (decl->flags & DECLARATION_INFER) {
         Type *expr_type = check_expression(typer, decl->expr, NULL);
         if (!expr_type) return false;
 
-        decl->identifier->type = expr_type;
-        decl->declared_type    = expr_type;
+        decl->ident->type = expr_type;
+        decl->type    = expr_type;
     }
     else if (decl->flags & DECLARATION_CONSTANT) {
         Type *expr_type  = check_expression(typer, decl->expr, NULL);
@@ -245,22 +246,22 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
             return false;
         }
 
-        decl->identifier->type = expr_type;
-        decl->declared_type    = expr_type;
+        decl->ident->type = expr_type;
+        decl->type    = expr_type;
     }
 
-    bool ok = check_for_integer_overflow(typer, decl->declared_type, decl->expr);
+    bool ok = check_for_integer_overflow(typer, decl->type, decl->expr);
     if (!ok) return false;
     
     if (decl->flags & (DECLARATION_IS_FUNCTION_PARAMETER | DECLARATION_IS_STRUCT_MEMBER)) {
         // Omit sizing the declaration as it is done at the call site
     } else {
         if (typer->enclosing_function != NULL) {
-            typer->enclosing_function->bytes_allocated += decl->declared_type->size;
+            typer->enclosing_function->num_bytes_total += decl->type->size;
 
             if (decl->expr && decl->expr->head.type == AST_ARRAY_LITERAL) {
                 // A little iffy, if we wanna keep it this way
-                typer->enclosing_function->bytes_allocated += 16; // data + count
+                typer->enclosing_function->num_bytes_total += 16; // data + count
             }
         } else {
             if (decl->flags & DECLARATION_CONSTANT) {
@@ -328,8 +329,8 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         Type *arg_type = check_expression(typer, arg, NULL);
         if (!arg_type) return NULL;
 
-        if (!types_are_equal(arg->evaluated_type, param->declared_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", type_to_str(param->declared_type), type_to_str(arg_type));
+        if (!types_are_equal(arg->evaluated_type, param->type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", type_to_str(param->type), type_to_str(arg_type));
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
             return NULL;
         }
@@ -368,7 +369,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     }
 
     if (lhs_is_constant) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign new value to constant '%s'", is_member ? member->identifier->name : ident->name);
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign new value to constant '%s'", is_member ? member->ident->name : ident->name);
         return false;
     }
 
@@ -401,7 +402,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
 
     if (!types_are_equal(lhs_type, expr_type)) {
         if (is_member) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to member '%s' of type '%s'", type_to_str(expr_type), member->identifier->name, type_to_str(lhs_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to member '%s' of type '%s'", type_to_str(expr_type), member->ident->name, type_to_str(lhs_type));
         } else if (is_identifier) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to variable '%s' of type '%s'", type_to_str(expr_type), ident->name, type_to_str(lhs_type));
         } else if (is_array_ac) {
@@ -442,9 +443,9 @@ bool check_struct(Typer *typer, AstStruct *ast_struct) {
     for (int i = 0; i < members.count; i++) {
         AstDeclaration *member = ((AstDeclaration **)members.items)[i];
         
-        int member_size = member->declared_type->size;
-        if (member->declared_type->kind == TYPE_STRUCT) {
-            alignment = ((TypeStruct *)(member->declared_type))->alignment;
+        int member_size = member->type->size;
+        if (member->type->kind == TYPE_STRUCT) {
+            alignment = ((TypeStruct *)(member->type))->alignment;
         } else {
             alignment = member_size;
         }
@@ -492,9 +493,9 @@ bool check_for(Typer *typer, AstFor *ast_for) {
 
         // allocate space for the iterator, start, end and optionally for the index
         assert(typer->enclosing_function != NULL);
-        typer->enclosing_function->bytes_allocated += 24;
+        typer->enclosing_function->num_bytes_total += 24;
         if (ast_for->index) {
-            typer->enclosing_function->bytes_allocated += 8;
+            typer->enclosing_function->num_bytes_total += 8;
         }
     } 
     else {
@@ -512,7 +513,7 @@ bool check_for(Typer *typer, AstFor *ast_for) {
 
         // Allocate space for iterator, pointer to head of array, stop condition (count) and index
         assert(typer->enclosing_function != NULL);
-        typer->enclosing_function->bytes_allocated += align_value(ast_for->iterator->type->size, 8) + 24;
+        typer->enclosing_function->num_bytes_total += align_value(ast_for->iterator->type->size, 8) + 24;
     }
 
     bool ok = check_block(typer, ast_for->body);
@@ -552,8 +553,12 @@ char *generate_c_printf_string(Typer *typer, AstPrint *print) {
         c += 1;
     }
 
-    if (num_specifiers != print->arguments.count - 1) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg0, "Mismatch in the number of specifiers and arguments. Got %d specifiers and %d arguments", num_specifiers, print->arguments.count - 1);
+    int num_arguments = print->arguments.count - 1;
+    if (num_specifiers != num_arguments) {
+        char *specifier_str = num_specifiers == 1 ? "specifier" : "specifiers";
+        char *argument_str  = num_arguments == 1  ? "argument" : "arguments";
+
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)print, "Mismatch in the number of specifiers and arguments. Got %d %s but %d %s", num_specifiers, specifier_str,  num_arguments, argument_str);
         return NULL;
     }
 
@@ -564,20 +569,10 @@ char *generate_c_printf_string(Typer *typer, AstPrint *print) {
     int arg_index = 1; // Starts at 1 to skip the constant string
     while (*c != '\0') {
         if (*c == '%') {
-            Type *arg_type = ((AstExpr **)print->arguments.items)[arg_index]->evaluated_type;
-            char *format_specifier = "";
-            switch (arg_type->kind) {
-                case TYPE_BOOL:    format_specifier = "%s"; break;
-                case TYPE_INTEGER: format_specifier = "%lld"; break;
-                case TYPE_FLOAT:   format_specifier = arg_type->size == 4 ? "%f" : "%lf"; break;
-                case TYPE_STRING:  format_specifier = "%s"; break;
-                case TYPE_ENUM:    format_specifier = "%s"; break;
-                case TYPE_POINTER: format_specifier = "0x%p"; break;
-                case TYPE_ARRAY:   format_specifier = "0x%p"; break;
-                default:
-                    printf("Internal Compiler Error: Got unknown argument type %s in generate_c_printf_string()\n", type_to_str(arg_type));
-                    return NULL;
-            }
+            AstExpr *arg      = ((AstExpr **)print->arguments.items)[arg_index];
+            Type    *arg_type = arg->evaluated_type;
+            
+            char *format_specifier = generate_c_format_specifier_for_type(arg_type);
 
             // Copy everything upto this point in the src string
             sb_copy(&sb, copied, chars_to_copy);
@@ -598,7 +593,50 @@ char *generate_c_printf_string(Typer *typer, AstPrint *print) {
     // Copy the tail
     sb_copy(&sb, copied, chars_to_copy);
 
-    return sb_to_string(&sb);
+    char *str = sb_to_string(&sb);
+
+    return str;
+}
+
+char *generate_c_format_specifier_for_type(Type *type) {
+    switch (type->kind) {
+    case TYPE_BOOL:    return "%s";
+    case TYPE_INTEGER: return type->size == 4 ? "%d" : "%lld";
+    case TYPE_FLOAT:   return type->size == 4 ? "%f" : "%lf";
+    case TYPE_STRING:  return "%s";
+    case TYPE_ENUM:    return "%s";
+    case TYPE_POINTER: return "0x%p";
+    case TYPE_ARRAY:   return "0x%p";
+    case TYPE_STRUCT: {
+        StringBuilder builder = sb_init(8);
+
+        AstStruct *ast_struct = ((TypeStruct *)(type))->node;
+        DynamicArray members = ast_struct->scope->members;
+
+        sb_append(&builder, "{ ");
+        for (int i = 0; i < members.count; i++) {
+            AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+            char           *member_name = member->ident->name;
+            Type           *member_type = member->type;
+
+            char *format_specifier = generate_c_format_specifier_for_type(member_type);
+
+            sb_append(&builder, "%s = %s", member_name, format_specifier);
+
+            if (i != members.count - 1) {
+                sb_append(&builder, ", ");
+            }
+
+            printf("%s\n", member_name);
+        }
+        sb_append(&builder, "} ");
+
+        return sb_to_string(&builder);
+    }
+    default:
+        printf("Internal Compiler Error: Got unknown argument type %s in generate_c_format_specifier_for_type()\n", type_to_str(type));
+        return NULL;
+}
 }
 
 bool check_statement(Typer *typer, Ast *stmt) {
@@ -609,28 +647,41 @@ bool check_statement(Typer *typer, Ast *stmt) {
         AstPrint *print = (AstPrint *)(stmt);
         if (print->arguments.count < 1) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)print, "Missing first argument to print");
-            return NULL;
+            return false;
         }
 
         for (int i = 0; i < print->arguments.count; i++) {
             AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
             Type *arg_type = check_expression(typer, arg, NULL);
-            if (!arg_type) return NULL;
+            if (!arg_type) return false;
             if (i == 0) {
                 if (arg_type->kind != TYPE_STRING) {
                     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Print expects the first argument to have type string, but argument is of type %s", type_to_str(arg_type));
-                    return NULL;
+                    return false;
                 }
                 if (arg->head.type != AST_LITERAL && ((AstLiteral *)arg)->kind != LITERAL_STRING) {
                     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "First argument to printf must be a constant string");
-                    return NULL;
+                    return false;
                 }
 
             }
         }
 
+        // Since we are pushing all of the arguments on the stack to later pop them,
+        // we need to allocate 8 bytes of space for each one of them.
+        // @NOTE: We reuse the stack space for arguments
+        // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170 
+        int arg_space = (print->arguments.count - 1) * 8;  // 8 bytes per argument
+        int current_args_space = typer->enclosing_function->num_bytes_args;
+        int diff = arg_space - current_args_space;
+        if (diff > 0) {
+            typer->enclosing_function->num_bytes_args = arg_space;
+            typer->enclosing_function->num_bytes_total += diff;
+        }
+
+
         char *c_string = generate_c_printf_string(typer, print);
-        if (!c_string) return NULL;
+        if (!c_string) return false;
 
         print->c_string = c_string;
 
@@ -1084,7 +1135,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
 
         ma->access_kind   = MEMBER_ACCESS_STRUCT;
         ma->struct_member = member;
-        return member->declared_type;
+        return member->type;
     } else {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "Invalid member expression");
         return NULL;
@@ -1149,12 +1200,12 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_ty
                 return NULL;
             }
 
-            Type *member_type = member->declared_type;
+            Type *member_type = member->type;
             Type *value_type  = check_expression(typer, init->value, member_type); // @Note - Passing down the member_type here, makes it possible for sub-struct initialization without explicitly having to type them
             if (!value_type) return NULL;
 
             if (!types_are_equal(member_type, value_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", member->identifier->name, type_to_str(member_type), type_to_str(value_type));
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", member->ident->name, type_to_str(member_type), type_to_str(value_type));
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
                 return NULL;
             }
@@ -1168,12 +1219,12 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_ty
             }
             
             AstDeclaration *member = ((AstDeclaration **)(members.items))[i];
-            Type *member_type = member->declared_type;
+            Type *member_type = member->type;
             Type *value_type  = check_expression(typer, init->value, member_type);
             if (!value_type) return NULL;
 
             if (!types_are_equal(member_type, value_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->identifier->name, type_to_str(member_type), type_to_str(value_type));
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->ident->name, type_to_str(member_type), type_to_str(value_type));
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
                 return NULL;
             }

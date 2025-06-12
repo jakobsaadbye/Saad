@@ -37,7 +37,7 @@ AstDeclaration *find_member_in_scope(AstBlock *scope, char *name) {
     AstDeclaration *found = NULL;
     for (int i = 0; i < scope->members.count; i++) {
         AstDeclaration *member = ((AstDeclaration **)scope->members.items)[i];
-        if (strcmp(name, member->identifier->name) == 0) {
+        if (strcmp(name, member->ident->name) == 0) {
             found = member;
             break;
         }
@@ -97,7 +97,7 @@ AstIdentifier *add_identifier_to_scope(Parser *parser, AstBlock *scope, AstIdent
 }
 
 AstDeclaration *add_declaration_to_scope(AstBlock *scope, AstDeclaration *decl) {
-    AstDeclaration *existing = find_member_in_scope(scope, decl->identifier->name);
+    AstDeclaration *existing = find_member_in_scope(scope, decl->ident->name);
     if (existing) {
         assert(existing);
         return existing;

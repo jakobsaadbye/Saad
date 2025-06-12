@@ -1,10 +1,11 @@
-main :: () {
-    
-    x : float = 0;
-    y : f32   = 1234.123456789;
-    z : f64   = 1234.123456789;
+Fruit :: enum {
+    mango,
+    dragonfruit,
+    kiwi,
+}
 
-    print("%", x);
-    print("%", y);
-    print("%", z);
+main :: () {
+    f := Fruit.mango;
+    f = 0;
+    print("Lets eat a % and a %", Fruit.mango, f);
 }

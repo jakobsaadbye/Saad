@@ -222,7 +222,7 @@ bool lex(Lexer *lexer) {
             continue;
         }
 
-        report_error_here(lexer, "Unknown character '%c'", c);
+        report_error_here(lexer, "Syntax Error: Unknown character '%c'", c);
         return false;
     }
 

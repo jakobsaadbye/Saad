@@ -971,6 +971,8 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->identifier  = ident;
     func_defn->body        = body;
     func_defn->return_type = return_type;
+    func_defn->num_bytes_total = 0;
+    func_defn->num_bytes_args  = 0;
 
     TypeFunction *func    = type_alloc(&parser->type_table, sizeof(TypeFunction));
     func->head.head.type  = AST_TYPE;
@@ -1211,8 +1213,8 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *exp
     decl->head.type         = AST_DECLARATION;
     decl->head.start        = ident_token.start;
     decl->head.end          = expr != NULL ? expr->head.end : type->head.end;
-    decl->identifier        = ident;
-    decl->declared_type     = type;
+    decl->ident        = ident;
+    decl->type     = type;
     decl->flags             = flags;
     decl->expr              = expr;
 

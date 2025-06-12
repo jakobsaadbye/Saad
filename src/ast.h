@@ -122,10 +122,10 @@ typedef enum DeclarationFlags {
 typedef struct AstDeclaration {
     Ast head;
 
-    DeclarationFlags flags;
-    AstIdentifier   *identifier;
-    Type            *declared_type;
+    AstIdentifier   *ident;
+    Type            *type;
     AstExpr         *expr;
+    DeclarationFlags flags;
 
     int member_index;   // Used to know the insertion order of a struct member
     int member_offset;  // Relative offset of the member within the struct
@@ -161,8 +161,8 @@ typedef struct AstBlock {
 
     DynamicArray statements;
 
-    DynamicArray identifiers;
-    DynamicArray members; // of *AstDeclaration. Used in structs
+    DynamicArray identifiers; // of *AstIdentifier
+    DynamicArray members;     // of *AstDeclaration. Used in structs
 
     AstStruct *belongs_to_struct;
 
@@ -214,7 +214,8 @@ typedef struct AstFunctionDefn {
     Type *return_type;
     AstBlock *body;
 
-    int bytes_allocated; // Number of bytes allocated in the function
+    int num_bytes_total; // Number of bytes allocated in the function
+    int num_bytes_args;  // Number of bytes allocated from passing arguments to functions
     
     int return_label;
 } AstFunctionDefn;
@@ -230,7 +231,7 @@ typedef struct AstPrint {
     Ast head;
 
     DynamicArray arguments; // of *AstExpr
-    char *c_string; // Generated c string
+    char *c_string;         // Generated c string in typer
 } AstPrint;
 
 typedef struct AstAssert {
@@ -437,7 +438,7 @@ typedef enum TypeFlags {
 } TypeFlags;
 
 typedef struct Type {
-    Ast  head;
+    Ast       head;
     TypeKind  kind;
     TypeFlags flags;
 
