@@ -9,20 +9,11 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-<<<<<<< HEAD
-   __DogKind.samoid DB ".samoid", 0
-   __DogKind.chiwawa DB ".chiwawa", 0
-   __DogKind.bulldog DB ".bulldog", 0
-   CF0 DD 20.0000000
-   CF1 DD 0.5000000
-   CF2 DD 80.0000000
-=======
-   CF0 DD 1234.1234568
-   CF1 DQ 1234.123456789000102
-   CS2 DB `%f`, 10, 0 
-   CS3 DB `%f`, 10, 0 
-   CS4 DB `%lf`, 10, 0 
->>>>>>> 8e175f92326432b8a95f6f9fd2ec11d43b94fc6a
+   __Fruit.mango DB ".mango", 0
+   __Fruit.kiwi DB ".kiwi", 0
+   CS0 DB "Saadbye Inc.", 0 
+   CS1 DB "Grønhøjgårdsvej 17", 0 
+   CS2 DB `{ x = %f, y = %f, z = %f, w = %f }`, 10, 0 
 
 segment .text
    global main
@@ -41,17 +32,13 @@ assert_fail:
    mov		rcx, 1
    call		ExitProcess
 
-<<<<<<< HEAD
-get_enum_string_DogKind:
+get_enum_string_Fruit:
    mov		r8, 0
    cmp		rdx, r8
    jz			enum_case_0
    mov		r8, 1
    cmp		rdx, r8
    jz			enum_case_1
-   mov		r8, 2
-   cmp		rdx, r8
-   jz			enum_case_2
    push		rcx
    mov		r8, rdx
    mov		rdx, fmt_int
@@ -65,126 +52,173 @@ get_enum_string_DogKind:
    pop		rbx
    ret
 enum_case_0:
-   mov		rax, __DogKind.samoid
+   mov		rax, __Fruit.mango
    ret
 enum_case_1:
-   mov		rax, __DogKind.chiwawa
+   mov		rax, __Fruit.kiwi
    ret
-enum_case_2:
-   mov		rax, __DogKind.bulldog
-   ret
-=======
->>>>>>> 8e175f92326432b8a95f6f9fd2ec11d43b94fc6a
 
-; bytes total    : 20
-; bytes arguments: 0
+; bytes total    : 128
+; bytes arguments: 40
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 56
+   sub		rsp, 160
 
-   ; initialization of 'x'
-   mov		DWORD -4[rbp], 0
-   mov		rax, 0
+   ; initialization of 'b'
+   mov		DWORD -80[rbp], 0
+   mov		DWORD -76[rbp], 0
+   mov		QWORD -72[rbp], 0
+   mov		QWORD -64[rbp], 0
+   mov		DWORD -56[rbp], 0
+   mov		DWORD -52[rbp], 0
+   mov		DWORD -48[rbp], 0
+   mov		DWORD -44[rbp], 0
+   push		0
+   pop		rax
+   mov		DWORD -80[rbp], eax
+   mov		rax, 2
+   push		rax
+   pop		rax
+   mov		DWORD -76[rbp], eax
+   mov		rax, CS0
+   push		rax
+   pop		rax
+   mov		QWORD -72[rbp], rax
+   mov		rax, CS1
+   push		rax
+   pop		rax
+   mov		QWORD -64[rbp], rax
+   mov		rax, 69
+   push		rax
+   pop		rax
+   mov		DWORD -56[rbp], eax
+   mov		rax, 420
+   push		rax
+   pop		rax
+   mov		DWORD -52[rbp], eax
+   mov		rax, 1337
+   push		rax
+   pop		rax
+   mov		DWORD -48[rbp], eax
+   push		1
+   pop		rax
+   mov		DWORD -44[rbp], eax
+   mov		rax, 10
+   push		rax
+   mov		rax, 20
+   push		rax
+   pop		rbx
+   pop		rax
+   mov		-96[rbp], rax
+   mov		-104[rbp], rbx
+   mov		rax, -96[rbp]
+   mov		-88[rbp], rax
+   mov		QWORD -112[rbp], 0
+L4:
+   mov		rax, -104[rbp]
+   cmp		-88[rbp], rax
+   jg		L6
+
+   ; initialization of 'q'
+   mov		DWORD -128[rbp], 0
+   mov		DWORD -124[rbp], 0
+   mov		DWORD -120[rbp], 0
+   mov		DWORD -116[rbp], 0
+   mov		rax, QWORD -88[rbp]
    push		rax
    pop		rax
    cvtsi2ss	xmm0, rax
-   movd		-4[rbp], xmm0
-
-   ; initialization of 'y'
-   mov		DWORD -8[rbp], 0
-   movss		xmm0, [CF0]
-   movd		eax, xmm0
+   movd		-128[rbp], xmm0
+   mov		rax, QWORD -88[rbp]
+   push		rax
+   mov		rax, 1
+   push		rax
+   pop		rbx
+   pop		rax
+   add		rax, rbx
    push		rax
    pop		rax
-   mov		-8[rbp], eax
+   cvtsi2ss	xmm0, rax
+   movd		-124[rbp], xmm0
+   mov		rax, QWORD -88[rbp]
+   push		rax
+   mov		rax, 2
+   push		rax
+   pop		rbx
+   pop		rax
+   add		rax, rbx
+   push		rax
+   pop		rax
+   cvtsi2ss	xmm0, rax
+   movd		-120[rbp], xmm0
+   mov		rax, QWORD -88[rbp]
+   push		rax
+   mov		rax, 3
+   push		rax
+   pop		rbx
+   pop		rax
+   add		rax, rbx
+   push		rax
+   pop		rax
+   cvtsi2ss	xmm0, rax
+   movd		-116[rbp], xmm0
 
-   ; initialization of 'z'
-   mov		DWORD -16[rbp], 0
-   movsd		xmm0, [CF1]
+   ; expression of print
+   lea		rax, QWORD -128[rbp]
+   push		rax
+   pop		r9
+   lea		rbx, 0[r9]
+   mov		eax, [rbx]
+   push		rax
+   pop		rax
+   movq		xmm0, rax
+   cvtss2sd	xmm0, xmm0
+   movq		rax, xmm0
+   push		rax
+   lea		rbx, 4[r9]
+   mov		eax, [rbx]
+   push		rax
+   pop		rax
+   movq		xmm0, rax
+   cvtss2sd	xmm0, xmm0
+   movq		rax, xmm0
+   push		rax
+   lea		rbx, 8[r9]
+   mov		eax, [rbx]
+   push		rax
+   pop		rax
+   movq		xmm0, rax
+   cvtss2sd	xmm0, xmm0
+   movq		rax, xmm0
+   push		rax
+   lea		rbx, 12[r9]
+   mov		eax, [rbx]
+   push		rax
+   pop		rax
+   movq		xmm0, rax
+   cvtss2sd	xmm0, xmm0
    movq		rax, xmm0
    push		rax
    pop		rax
-   mov		-16[rbp], rax
-
-   ; expression of print
-   mov		eax, -4[rbp]
-   push		rax
-   pop		rdx
-   movq		xmm0, rdx
-   cvtss2sd	xmm0, xmm0
-   movq		rdx, xmm0
+   mov		QWORD -32[rbp], rax
+   pop		rax
+   mov		r9, rax
+   pop		rax
+   mov		r8, rax
+   pop		rax
+   mov		rdx, rax
    mov		rcx, CS2
+   mov		rax, QWORD -32[rbp]
+   mov		QWORD [rsp + 32], rax
    call		printf
-
-   ; expression of print
-   mov		eax, -8[rbp]
-   push		rax
-   pop		rdx
-   movq		xmm0, rdx
-   cvtss2sd	xmm0, xmm0
-   movq		rdx, xmm0
-   mov		rcx, CS3
-   call		printf
-
-   ; expression of print
-   mov		rax, -16[rbp]
-   push		rax
-<<<<<<< HEAD
-   mov		eax, -4[rbp]
-   push		rax
-   pop		rbx
-   pop		rax
-   movd	xmm1, ebx
-   movd	xmm0, eax
-   mulss		xmm0, xmm1
-   movd		eax, xmm0
-   push		rax
-   pop		rbx
-   pop		rax
-   movd	xmm1, ebx
-   movd	xmm0, eax
-   divss		xmm0, xmm1
-   movd		eax, xmm0
-   push		rax
-   pop		rax
-   mov		-20[rbp], eax
-   mov		eax, -20[rbp]
-   push		rax
-   movss		xmm0, [CF2]
-   movd		eax, xmm0
-   push		rax
-   pop		rbx
-   pop		rax
-   movd	xmm1, ebx
-   movd	xmm0, eax
-   comiss	xmm0, xmm1
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 23
-   call		assert
-   mov		eax, DWORD -12[rbp]
-   movsx	rax, eax
-   push		rax
-   mov		rax, 4
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 24
-   call		assert
-L4:
-=======
-   pop		rdx
-   mov		rcx, CS4
-   call		printf
-L0:
->>>>>>> 8e175f92326432b8a95f6f9fd2ec11d43b94fc6a
+L5:
+   inc		QWORD -88[rbp]
+   inc		QWORD -112[rbp]
+   jmp		L4
+L6:
+L3:
    mov		rax, 0
-   add		rsp, 56
+   add		rsp, 160
    pop		rbp
    ret

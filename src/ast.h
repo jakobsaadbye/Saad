@@ -232,6 +232,7 @@ typedef struct AstPrint {
 
     DynamicArray arguments; // of *AstExpr
     char *c_string;         // Generated c string in typer
+    int   c_args;           // Number of arguments that needs to be supplied to the c_string
 } AstPrint;
 
 typedef struct AstAssert {
@@ -434,7 +435,7 @@ typedef enum TypeKind {
 } TypeKind;
 
 typedef enum TypeFlags {
-    TYPE_IS_DEFINITION = 1 << 0,
+    TYPE_IS_FULLY_SIZED = 1 << 0,
 } TypeFlags;
 
 typedef struct Type {

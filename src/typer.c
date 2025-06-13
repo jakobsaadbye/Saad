@@ -445,6 +445,13 @@ bool check_struct(Typer *typer, AstStruct *ast_struct) {
         
         int member_size = member->type->size;
         if (member->type->kind == TYPE_STRUCT) {
+            if (!(member->type->flags & TYPE_IS_FULLY_SIZED)) {
+                AstStruct *nested_struct = ((TypeStruct *)member->type)->node;
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)member, "Error: Temporarily, nested structs needs to be declared before the struct they appear in.");
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)nested_struct, "Move this struct above the struct using it");
+                return false;
+            }
+
             alignment = ((TypeStruct *)(member->type))->alignment;
         } else {
             alignment = member_size;
@@ -458,6 +465,7 @@ bool check_struct(Typer *typer, AstStruct *ast_struct) {
     }
 
     type_struct->head.size  = align_value(offset, largest_alignment);
+    type_struct->head.flags |= TYPE_IS_FULLY_SIZED;
     type_struct->alignment  = largest_alignment;
 
     return true;
@@ -610,9 +618,10 @@ char *generate_c_format_specifier_for_type(Type *type) {
     case TYPE_STRUCT: {
         StringBuilder builder = sb_init(8);
 
-        AstStruct *ast_struct = ((TypeStruct *)(type))->node;
-        DynamicArray members = ast_struct->scope->members;
+        AstStruct *struct_ = ((TypeStruct *)(type))->node;
+        DynamicArray members = struct_->scope->members;
 
+        // sb_append(&builder, "(%s)", struct_->identifier->name);
         sb_append(&builder, "{ ");
         for (int i = 0; i < members.count; i++) {
             AstDeclaration *member = ((AstDeclaration **)members.items)[i];
@@ -626,10 +635,8 @@ char *generate_c_format_specifier_for_type(Type *type) {
             if (i != members.count - 1) {
                 sb_append(&builder, ", ");
             }
-
-            printf("%s\n", member_name);
         }
-        sb_append(&builder, "} ");
+        sb_append(&builder, " }");
 
         return sb_to_string(&builder);
     }
@@ -637,6 +644,23 @@ char *generate_c_format_specifier_for_type(Type *type) {
         printf("Internal Compiler Error: Got unknown argument type %s in generate_c_format_specifier_for_type()\n", type_to_str(type));
         return NULL;
 }
+}
+
+int count_nested_sizeable_struct_members(Typer *typer, AstStruct *struct_, int count) {
+    DynamicArray members = struct_->scope->members;
+
+    for (int i = 0; i < members.count; i++) {
+        AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+
+        if (member->type->kind == TYPE_STRUCT) {
+            AstStruct *nested_struct = ((TypeStruct *)member->type)->node;
+            count += count_nested_sizeable_struct_members(typer, nested_struct, 0);
+        } else {
+            count += 1;
+        }
+    }
+
+    return count;
 }
 
 bool check_statement(Typer *typer, Ast *stmt) {
@@ -663,20 +687,39 @@ bool check_statement(Typer *typer, Ast *stmt) {
                     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "First argument to printf must be a constant string");
                     return false;
                 }
-
             }
         }
+
+        //
+        //  Do sizing of the arguments
+        //
 
         // Since we are pushing all of the arguments on the stack to later pop them,
         // we need to allocate 8 bytes of space for each one of them.
         // @NOTE: We reuse the stack space for arguments
         // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170 
-        int arg_space = (print->arguments.count - 1) * 8;  // 8 bytes per argument
-        int current_args_space = typer->enclosing_function->num_bytes_args;
-        int diff = arg_space - current_args_space;
-        if (diff > 0) {
-            typer->enclosing_function->num_bytes_args = arg_space;
-            typer->enclosing_function->num_bytes_total += diff;
+        int num_c_args = 1;
+        for (int i = 1; i < print->arguments.count; i++) {
+            AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
+            Type    *arg_type = arg->evaluated_type;
+
+            if (arg_type->kind == TYPE_STRUCT) {
+                AstStruct *struct_ = ((TypeStruct *)arg_type)->node;
+                num_c_args += count_nested_sizeable_struct_members(typer, struct_, 0);
+            } else {
+                num_c_args += 1;
+            }
+        }
+        print->c_args = num_c_args;
+
+        if (num_c_args > 4) {
+            int bytes_args = num_c_args * 8;
+            int current_bytes_args = typer->enclosing_function->num_bytes_args;
+            int diff = bytes_args - current_bytes_args;
+            if (diff > 0) {
+                typer->enclosing_function->num_bytes_args = bytes_args;
+                typer->enclosing_function->num_bytes_total += diff;
+            }
         }
 
 

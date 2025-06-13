@@ -728,7 +728,7 @@ void move_argument_to_register_or_stack(CodeGenerator *cg, int arg_index, int ar
         // Goes on the stack
 
         int offset = -32;   // Start at shadow space
-        offset -= (arg_total - arg_index - 1) * 8;
+        offset    -= (arg_total - arg_index - 1) * 8;
 
         sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", offset);
     } else {
@@ -740,7 +740,7 @@ void move_argument_to_register_or_stack(CodeGenerator *cg, int arg_index, int ar
         if (arg_index == 2) reg = "r8";
         if (arg_index == 3) reg = "r9";
         if (reg == NULL) {
-            printf("%s:%d: Compiler Bug: Failed to assign argument to a valid msvc register", __FILE__, __LINE__);
+            printf("%s:%d: Internal Compiler Error: Failed to assign argument to a valid msvc register. arg_index = %d, arg_total = %d", __FILE__, __LINE__, arg_index, arg_total);
             exit(1);
         }
 
@@ -748,11 +748,106 @@ void move_argument_to_register_or_stack(CodeGenerator *cg, int arg_index, int ar
     }
 }
 
-void emit_enum_arg_string(CodeGenerator *cg, AstExpr *arg, int arg_index) {
-    sb_append(&cg->code, "   mov\t\trcx, enum_buffer_%d\n", arg_index);
-    sb_append(&cg->code, "   pop\t\trdx\n"); // enum integer value
-    sb_append(&cg->code, "   call\t\tget_enum_string_%s\n", ((TypeEnum *)(arg->evaluated_type))->identifier->name);
-    sb_append(&cg->code, "   push\t\trax\n");
+void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_arguments, int struct_depth, int struct_base_offset) {
+    switch (arg_type->kind) {
+    case TYPE_FLOAT: {
+        if (arg_type->size == 4) {
+            sb_append(&cg->code, "   pop\t\trax\n");
+            sb_append(&cg->code, "   movq\t\txmm0, rax\n");
+            sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
+            sb_append(&cg->code, "   movq\t\trax, xmm0\n");
+            sb_append(&cg->code, "   push\t\trax\n");
+        } else if (arg_type->size == 8) {
+            // Already aligned
+        }
+        break;
+    }
+    case TYPE_BOOL: {
+        int true_label        = make_label_number(cg);
+        int fallthrough_label = make_label_number(cg);
+        sb_append(&cg->code, "   pop\t\trax\n");
+        sb_append(&cg->code, "   cmp\t\tal, 0\n");
+        sb_append(&cg->code, "   jnz\t\tL%d\n", true_label);
+        sb_append(&cg->code, "   mov\t\trax, string_false\n");
+        sb_append(&cg->code, "   jmp\t\tL%d\n", fallthrough_label);
+        sb_append(&cg->code, "L%d:\n", true_label);
+        sb_append(&cg->code, "   mov\t\trax, string_true\n");
+        sb_append(&cg->code, "L%d:\n", fallthrough_label);
+        sb_append(&cg->code, "   push\t\trax\n");
+        break;
+    }
+    case TYPE_ENUM: {
+        int buffer_index = *num_enum_arguments;
+        sb_append(&cg->code, "   pop\t\trdx\n"); // enum integer value
+        sb_append(&cg->code, "   mov\t\trcx, enum_buffer_%d\n", buffer_index);
+        sb_append(&cg->code, "   call\t\tget_enum_string_%s\n", ((TypeEnum *)(arg_type))->identifier->name);
+        sb_append(&cg->code, "   push\t\trax\n");
+        *num_enum_arguments += 1;
+        break;
+    }
+    case TYPE_STRUCT: {
+        // @Cleanup @Hack - This is really a bad hack for trying to save the struct offset at a stack location.
+        // The problem with saving the offset on the stack, is that we are pushing alot of values so its not easy to get
+        // a stable stack address. Maybe we could do something like the enum scratch buffers to allocate space upfront for these types of scenarios? But for now i simply don't bother ...
+        // char *safe_offset_register = "r9";
+        // if (struct_depth == 1) safe_offset_register = "r10";
+        // if (struct_depth == 2) safe_offset_register = "r11";
+        // if (struct_depth == 3) safe_offset_register = "r12";
+        // if (struct_depth == 4) safe_offset_register = "r13";
+        // if (struct_depth == 5) safe_offset_register = "r14";
+        // if (struct_depth == 6) safe_offset_register = "r15";
+        // if (struct_depth == 7) {
+        //     printf("%s:%d: Internal Compiler Error: Recursion limit reached on the number of nested structures that can be printed. This will be fixed in the future though.", __FILE__, __LINE__);
+        //     XXX;
+        // }
+
+        // @NOTE - register r9 needs to be kept safe during the printout of the structure
+        if (struct_depth == 0) {
+            sb_append(&cg->code, "   pop\t\tr9\n");
+        }
+
+        AstStruct *struct_ = ((TypeStruct *)arg_type)->node;
+        DynamicArray members = struct_->scope->members;
+        for (int i = 0; i < members.count; i++) {
+            AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+
+            int   m_offset = struct_base_offset + member->member_offset;
+            Type *m_type   = member->type;
+
+            if (m_type->kind == TYPE_STRUCT) {
+                // Save the base offset before recursing
+                struct_base_offset = m_offset;
+            } else {
+                // Push each member on the stack
+                sb_append(&cg->code, "   lea\t\trbx, %d[r9]\n", m_offset);
+                emit_move_and_push(cg, 0, true, m_type, false);
+            }
+
+            // Do any transforms necessary to print the struct member
+            emit_printable_value(cg, m_type, num_enum_arguments, struct_depth + 1, struct_base_offset);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+void pop_struct_members_from_print(CodeGenerator *cg, AstStruct *struct_, int *c_arg_index, int c_args) {
+    DynamicArray members = struct_->scope->members;
+    for (int i = struct_->scope->members.count - 1; i >= 0; i--) {
+        AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+
+        if (member->type->kind == TYPE_STRUCT) {
+            AstStruct *nested_struct = ((TypeStruct *)member->type)->node;
+            pop_struct_members_from_print(cg, nested_struct, c_arg_index, c_args);
+        } else {
+            sb_append(&cg->code, "   pop\t\trax\n");
+            move_argument_to_register_or_stack(cg, *c_arg_index, c_args);
+            *c_arg_index -= 1;
+        }
+
+    }
 }
 
 void emit_print(CodeGenerator *cg, AstPrint *print) {
@@ -763,82 +858,57 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
     int num_enum_arguments = 0;
     for (int i = 1; i < print->arguments.count; i++) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
+        Type    *arg_type = arg->evaluated_type;
 
         emit_expression(cg, arg);
-
-        if (arg->evaluated_type->kind == TYPE_ENUM) {
-            // Special case for enum printing
-            emit_enum_arg_string(cg, arg, num_enum_arguments);
-            num_enum_arguments += 1;
-        }
+        emit_printable_value(cg, arg_type, &num_enum_arguments, 0, 0);
     }
 
     // Potentially allocate more space for enum integer to string conversion
     if (num_enum_arguments > cg->enum_scratch_buffers) {
         for (int i = cg->enum_scratch_buffers; i < num_enum_arguments; i++) {
-            sb_append(&cg->data, "   enum_buffer_%d times 20 DB 0\n", i); // 20 is the length of the largest integer number 2^64sb_append(&cg->data, "")
+            sb_append(&cg->data, "   enum_buffer_%d times 20 DB 0\n", i); // 20 is the length of the largest integer number 2^64
         }
         cg->enum_scratch_buffers = num_enum_arguments;
     }
+
+    // This tells where we are in the generated c argument list which might
+    // be different from the argument index as struct arguments gets a c argument
+    // per member
+    int c_args      = print->c_args;
+    int c_arg_index = c_args - 1;
 
     // Pop and assign registers
     int arg_count = print->arguments.count;
     for (int i = arg_count - 1; i >= 1; i--) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
+        Type    *arg_type = arg->evaluated_type;
 
-        Type *arg_type = arg->evaluated_type;
-
-        if (arg_type->kind == TYPE_INTEGER) {
-            sb_append(&cg->code, "   pop\t\trax\n");
-            move_argument_to_register_or_stack(cg, i, arg_count);
-        }
-        else if (arg_type->kind == TYPE_FLOAT) {
-            sb_append(&cg->code, "   pop\t\trax\n");
-            if (arg_type->size == 4) {
-                sb_append(&cg->code, "   movq\t\txmm0, rax\n");
-                sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
-                sb_append(&cg->code, "   movq\t\trax, xmm0\n");
-            } else if (arg_type->size == 8) {
-                // Already aligned
+        switch (arg_type->kind) {
+            case TYPE_INTEGER:
+            case TYPE_FLOAT:
+            case TYPE_BOOL:
+            case TYPE_STRING:
+            case TYPE_ENUM:
+            case TYPE_POINTER: {
+                sb_append(&cg->code, "   pop\t\trax\n");
+                move_argument_to_register_or_stack(cg, c_arg_index, c_args);
+                c_arg_index -= 1;
+                break;
             }
-
-            move_argument_to_register_or_stack(cg, i, arg_count);
-        }
-        else if (arg_type->kind == TYPE_BOOL) {
-            int true_label        = make_label_number(cg);
-            int fallthrough_label = make_label_number(cg);
-            sb_append(&cg->code, "   pop\t\trax\n");
-            sb_append(&cg->code, "   cmp\t\tal, 0\n");
-            sb_append(&cg->code, "   jnz\t\tL%d\n", true_label);
-            sb_append(&cg->code, "   mov\t\trax, string_false\n");
-            sb_append(&cg->code, "   jmp\t\tL%d\n", fallthrough_label);
-            sb_append(&cg->code, "L%d:\n", true_label);
-            sb_append(&cg->code, "   mov\t\trax, string_true\n");
-            sb_append(&cg->code, "L%d:\n", fallthrough_label);
-            move_argument_to_register_or_stack(cg, i, arg_count);
-        }
-        else if (arg_type->kind == TYPE_STRING) {
-            sb_append(&cg->code, "   pop\t\trax\n");
-            move_argument_to_register_or_stack(cg, i, arg_count);
-        }
-        else if (arg_type->kind == TYPE_ENUM) {
-            sb_append(&cg->code, "   pop\t\trax\n");
-            move_argument_to_register_or_stack(cg, i, arg_count);
-        }
-        else if (arg_type->kind == TYPE_POINTER) {
-            sb_append(&cg->code, "   pop\t\trax\n");
-            move_argument_to_register_or_stack(cg, i, arg_count);
-        }
-        else if (arg_type->kind == TYPE_ARRAY) {
-            sb_append(&cg->code, "   pop\t\trax\n");
-            sb_append(&cg->code, "   pop\t\trbx\n"); // Don't use the length for anything
-            move_argument_to_register_or_stack(cg, i, arg_count);
-        } else if (arg_type->kind == TYPE_STRUCT) {
-            XXX;
-        }
-        else {
-            // Unhandled cases
-            XXX;
+            case TYPE_ARRAY: {
+                sb_append(&cg->code, "   pop\t\trax\n");
+                sb_append(&cg->code, "   pop\t\trbx\n"); // Don't use the length for anything
+                move_argument_to_register_or_stack(cg, c_arg_index, c_args);
+                c_arg_index -= 1;
+                break;
+            }
+            case TYPE_STRUCT: {
+                AstStruct *struct_ = ((TypeStruct *)arg_type)->node;
+                pop_struct_members_from_print(cg, struct_, &c_arg_index, c_args);
+                break;
+            }
+            default: XXX;
         }
     }
 
@@ -847,21 +917,22 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
     sb_append(&cg->code, "   mov\t\trcx, CS%d\n", const_number);
 
 
-    if (arg_count <= 4) {
+    if (c_args <= 4) {
         // No need to align the stack as all the arguments are in registers
         sb_append(&cg->code, "   call\t\tprintf\n");
     } else {
-        // Offset the stack pointer to point at the start of the arguments stack
-        assert(cg->current_function_defn);
-        AstFunctionDefn *func = cg->current_function_defn;
-        int bytes_total = func->num_bytes_total;
-        int bytes_args  = (arg_count - 5) * 8;
 
-        int offset = align_value(bytes_total, 8) - (bytes_args + 32);
+        // We need to put all the fixed placed stack allocated arguments relative to the stack pointer
+        for (int i = 0; i < c_args - 4; i++) {
+            int temp_offset   = 32 + (i * 8);
+            int stack_offset  = 32 + (c_args - 4 - i - 1) * 8;
 
-        if (offset > 0) sb_append(&cg->code, "   add\t\trsp, %d\n", offset);
+            sb_append(&cg->code, "   mov\t\trax, QWORD -%d[rbp]\n", temp_offset);
+            sb_append(&cg->code, "   mov\t\tQWORD [rsp + %d], rax\n", stack_offset);
+
+        }
+
         sb_append(&cg->code, "   call\t\tprintf\n");
-        if (offset > 0) sb_append(&cg->code, "   sub\t\trsp, %d\n", offset);
     }
         
 }
@@ -1477,7 +1548,7 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
     case TYPE_INTEGER: {
         sb_append(&cg->code, "   mov\t\t%s, %s %s\n", REG_A(src_type), WIDTH(src_type), src);
         if (is_signed_integer(src_type) && src_type->size != 8) {
-            sb_append(&cg->code, "   movsx\trax, %s\n", REG_A(src_type));
+            sb_append(&cg->code, "   movsx\t\trax, %s\n", REG_A(src_type));
         }
         sb_append(&cg->code, "   push\t\trax\n");
         return;
@@ -1503,10 +1574,14 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         sb_append(&cg->code, "   push\t\trax\n");
         return;
     }
-    case TYPE_STRUCT:
+    case TYPE_STRUCT: {
+        sb_append(&cg->code, "   lea\t\trax, QWORD %d[rbp]\n", src_offset);
+        sb_append(&cg->code, "   push\t\trax\n");
+        return;
+    }
     default:
         printf("internal-compiler-error: Unhandled case %s in emit_move_and_push()", type_to_str(src_type));
-        exit(1);
+        XXX;
     }
 }
 
@@ -1608,7 +1683,6 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     }
     case AST_ARRAY_ACCESS: {
         AstArrayAccess *array_ac  = (AstArrayAccess *)(expr);
-        
         emit_array_access(cg, array_ac, false);
         return;
     }

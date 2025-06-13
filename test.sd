@@ -1,11 +1,53 @@
 Fruit :: enum {
     mango,
-    dragonfruit,
     kiwi,
 }
 
+Store :: struct {
+    name    : string;
+    address : string;
+    id      : int;
+    id1      : int;
+    id2      : int;
+    fruit_of_the_month : Fruit;
+}
+
+Blender :: struct {
+    preferred_fruit : Fruit;
+    blades          : int;
+    manufacturer    : Store;
+}
+
+
+Vector3 :: struct {
+    x : float;
+    y : float;
+    z : float;
+}
+
+Quaternion :: struct {
+    x : float;
+    y : float;
+    z : float;
+    w : float;
+}
+
 main :: () {
-    f := Fruit.mango;
-    f = 0;
-    print("Lets eat a % and a %", Fruit.mango, f);
+    b := Blender.{
+        preferred_fruit = .mango,
+        blades = 2,
+        manufacturer = .{
+            name = "Saadbye Inc.",
+            address = "Grønhøjgårdsvej 17",
+            id = 69,
+            id1 = 420,
+            id2 = 1337,
+            fruit_of_the_month = .kiwi
+        }
+    };
+
+    for i, index in 10...20 {
+        q := Quaternion.{i, i+1, i+2, i+3};
+        print("%", q);
+    }
 }
