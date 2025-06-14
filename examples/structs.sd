@@ -12,23 +12,23 @@ Fuel :: enum {
 }
 
 Engine :: struct {
-    type : EngineType;
-    fuel : Fuel;
+    type      : EngineType;
+    fuel      : Fuel;
     cylinders : int;
-    capacity : float;
+    capacity  : float;
 }
 
 Car :: struct {
-    doors : int;
+    doors     : int;
     max_speed : float;
-    engine : Engine;
+    engine    : Engine;
 }
 
 main :: () {
-    bugatti := Car.{
+    bugatti := Car{
         doors = 4,
         max_speed = 320,
-        engine = .{
+        engine = {
             type = DEFAULT_ENGINE_TYPE,
             fuel = .gasoline,
             cylinders = 8,

@@ -19,10 +19,9 @@ Blender :: struct {
 }
 
 
-Vector3 :: struct {
+Vector2 :: struct {
     x : float;
     y : float;
-    z : float;
 }
 
 Quaternion :: struct {
@@ -33,28 +32,16 @@ Quaternion :: struct {
 }
 
 main :: () {
-    b := Blender.{
-        preferred_fruit = .mango,
-        blades = 2,
-        manufacturer = .{
-            name = "Saadbye Inc.",
-            address = "Grønhøjgårdsvej 17",
-            id = 69,
-            id1 = 420,
-            id2 = 1337,
-            fruit_of_the_month = .kiwi
-        }
-    };
+    a : []Vector2 = [
+        { 1, 2 },
+        { 2, 3 },
+        { 3, 4 },
+        { 4, 5 },
+    ];
 
-    // print("%", b);
+    b := Vector2{4, 9};
 
-    // for i, index in 10...20 {
-    //     q := Quaternion.{i, i+1, i+2, i+3};
-    //     print("%", q);
-    // }
-
-    v := Vector3.{4, 9, 11};
-    a : *Blender = &b;
-    print("%", *a);
-
+    for a {
+        print("%", it);
+    }
 }

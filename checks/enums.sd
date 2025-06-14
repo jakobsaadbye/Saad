@@ -22,8 +22,8 @@ Status :: enum {
 
 main :: () {
     // Checking enum values in struct + enum arithmetic
-    dog1 := Dog.{ .samoid };
-    dog2 := Dog.{ .bulldog };
+    dog1 := Dog{ .samoid };
+    dog2 := Dog{ .bulldog };
     dog2.kind = -.chiwawa + .bulldog;
 
     assert(dog2.kind == DogKind.chiwawa);

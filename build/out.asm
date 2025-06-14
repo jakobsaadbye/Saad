@@ -11,11 +11,7 @@ segment .data
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
    __Fruit.mango DB ".mango", 0
    __Fruit.kiwi DB ".kiwi", 0
-   CS0 DB "Saadbye Inc.", 0 
-   CS1 DB "Grønhøjgårdsvej 17", 0 
-   enum_buffer_0 times 20 DB 0
-   enum_buffer_1 times 20 DB 0
-   CS2 DB `{ preferred_fruit = %s, blades = %d, manufacturer = { name = %s, address = %s, id = %d, id1 = %d, id2 = %d, fruit_of_the_month = %s } }`, 10, 0 
+   CS0 DB `{ x = %f, y = %f }`, 10, 0 
 
 segment .text
    global main
@@ -60,153 +56,138 @@ enum_case_1:
    mov		rax, __Fruit.kiwi
    ret
 
-; bytes total    : 132
-; bytes arguments: 72
+; bytes total    : 88
+; bytes arguments: 0
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 168
+   sub		rsp, 120
 
-   ; initialization of 'b'
-   mov		DWORD -120[rbp], 0
-   mov		DWORD -116[rbp], 0
-   mov		QWORD -112[rbp], 0
-   mov		QWORD -104[rbp], 0
-   mov		DWORD -96[rbp], 0
-   mov		DWORD -92[rbp], 0
-   mov		DWORD -88[rbp], 0
-   mov		DWORD -84[rbp], 0
-   push		0
+   ; initialization of 'a'
+   mov		QWORD -16[rbp], 0
+   mov		QWORD -8[rbp], 0
+   mov		DWORD -48[rbp], 0
+   mov		DWORD -44[rbp], 0
+   mov		DWORD -40[rbp], 0
+   mov		DWORD -36[rbp], 0
+   mov		DWORD -32[rbp], 0
+   mov		DWORD -28[rbp], 0
+   mov		DWORD -24[rbp], 0
+   mov		DWORD -20[rbp], 0
+   mov		rax, 1
+   push		rax
    pop		rax
-   mov		DWORD -120[rbp], eax
+   cvtsi2ss	xmm0, rax
+   movd		-48[rbp], xmm0
    mov		rax, 2
    push		rax
    pop		rax
-   mov		DWORD -116[rbp], eax
-   mov		rax, CS0
+   cvtsi2ss	xmm0, rax
+   movd		-44[rbp], xmm0
+   mov		rax, 2
    push		rax
    pop		rax
-   mov		QWORD -112[rbp], rax
-   mov		rax, CS1
+   cvtsi2ss	xmm0, rax
+   movd		-40[rbp], xmm0
+   mov		rax, 3
    push		rax
    pop		rax
-   mov		QWORD -104[rbp], rax
-   mov		rax, 69
+   cvtsi2ss	xmm0, rax
+   movd		-36[rbp], xmm0
+   mov		rax, 3
    push		rax
    pop		rax
-   mov		DWORD -96[rbp], eax
-   mov		rax, 420
-   push		rax
-   pop		rax
-   mov		DWORD -92[rbp], eax
-   mov		rax, 1337
-   push		rax
-   pop		rax
-   mov		DWORD -88[rbp], eax
-   push		1
-   pop		rax
-   mov		DWORD -84[rbp], eax
-
-   ; initialization of 'v'
-   mov		DWORD -132[rbp], 0
-   mov		DWORD -128[rbp], 0
-   mov		DWORD -124[rbp], 0
+   cvtsi2ss	xmm0, rax
+   movd		-32[rbp], xmm0
    mov		rax, 4
    push		rax
    pop		rax
    cvtsi2ss	xmm0, rax
-   movd		-132[rbp], xmm0
+   movd		-28[rbp], xmm0
+   mov		rax, 4
+   push		rax
+   pop		rax
+   cvtsi2ss	xmm0, rax
+   movd		-24[rbp], xmm0
+   mov		rax, 5
+   push		rax
+   pop		rax
+   cvtsi2ss	xmm0, rax
+   movd		-20[rbp], xmm0
+   push		4
+   lea		rax, -48[rbp]
+   push		rax
+   pop		rax
+   pop		rcx
+   mov		QWORD -16[rbp], rax
+   mov		QWORD -8[rbp], rcx
+
+   ; initialization of 'b'
+   mov		DWORD -56[rbp], 0
+   mov		DWORD -52[rbp], 0
+   mov		rax, 4
+   push		rax
+   pop		rax
+   cvtsi2ss	xmm0, rax
+   movd		-56[rbp], xmm0
    mov		rax, 9
    push		rax
    pop		rax
    cvtsi2ss	xmm0, rax
-   movd		-128[rbp], xmm0
-   mov		rax, 11
+   movd		-52[rbp], xmm0
+   mov		rax, QWORD -16[rbp]
+   mov		rbx, QWORD -8[rbp]
+   push		rbx
    push		rax
+   ; For-loop
    pop		rax
-   cvtsi2ss	xmm0, rax
-   movd		-124[rbp], xmm0
-
-   ; initialization of 'a'
-   mov		QWORD -144[rbp], 0
-   lea		rax, -120[rbp]
-   push		rax
-   pop		rax
-   mov		QWORD -144[rbp], rax
+   pop		rbx
+   mov		-72[rbp], rax     ; data
+   mov		-80[rbp], rbx     ; count
+   mov		QWORD -88[rbp], 0 ; index
+L4:
+   mov		rbx, -80[rbp]
+   mov		rax, -88[rbp]
+   cmp		rax, rbx
+   jge		L6
+   mov		rbx, -72[rbp]
+   imul		rax, 8
+   add		rbx, rax
+   mov		rax, QWORD [rbx]
+   mov		-64[rbp], rax 
 
    ; expression of print
-   mov		rax, -144[rbp]
-   push		rax
-   pop		rbx
-   lea		rax, [rbx]
+   lea		rax, -64[rbp]
    push		rax
    pop		r9
    lea		rbx, 0[r9]
-   mov		eax, DWORD [rbx]
+   mov		eax, [rbx]
    push		rax
-   pop		rdx
-   mov		rcx, enum_buffer_0
-   call		get_enum_string_Fruit
+   pop		rax
+   movq		xmm0, rax
+   cvtss2sd	xmm0, xmm0
+   movq		rax, xmm0
    push		rax
    lea		rbx, 4[r9]
-   mov		eax, DWORD [rbx]
-   movsx		rax, eax
-   push		rax
-   lea		rbx, 8[r9]
-   mov		rax, QWORD [rbx]
-   push		rax
-   lea		rbx, 16[r9]
-   mov		rax, QWORD [rbx]
-   push		rax
-   lea		rbx, 24[r9]
-   mov		eax, DWORD [rbx]
-   movsx		rax, eax
-   push		rax
-   lea		rbx, 28[r9]
-   mov		eax, DWORD [rbx]
-   movsx		rax, eax
-   push		rax
-   lea		rbx, 32[r9]
-   mov		eax, DWORD [rbx]
-   movsx		rax, eax
-   push		rax
-   lea		rbx, 36[r9]
-   mov		eax, DWORD [rbx]
-   push		rax
-   pop		rdx
-   mov		rcx, enum_buffer_1
-   call		get_enum_string_Fruit
+   mov		eax, [rbx]
    push		rax
    pop		rax
-   mov		QWORD -32[rbp], rax
-   pop		rax
-   mov		QWORD -40[rbp], rax
-   pop		rax
-   mov		QWORD -48[rbp], rax
-   pop		rax
-   mov		QWORD -56[rbp], rax
-   pop		rax
-   mov		QWORD -64[rbp], rax
-   pop		rax
-   mov		r9, rax
+   movq		xmm0, rax
+   cvtss2sd	xmm0, xmm0
+   movq		rax, xmm0
+   push		rax
    pop		rax
    mov		r8, rax
    pop		rax
    mov		rdx, rax
-   mov		rcx, CS2
-   mov		rax, QWORD -32[rbp]
-   mov		QWORD [rsp + 64], rax
-   mov		rax, QWORD -40[rbp]
-   mov		QWORD [rsp + 56], rax
-   mov		rax, QWORD -48[rbp]
-   mov		QWORD [rsp + 48], rax
-   mov		rax, QWORD -56[rbp]
-   mov		QWORD [rsp + 40], rax
-   mov		rax, QWORD -64[rbp]
-   mov		QWORD [rsp + 32], rax
+   mov		rcx, CS0
    call		printf
+L5:
+   inc		QWORD -88[rbp]
+   jmp		L4
+L6:
 L3:
    mov		rax, 0
-   add		rsp, 168
+   add		rsp, 120
    pop		rbp
    ret

@@ -58,6 +58,7 @@ Parser parser_init(Lexer *lexer) {
     parser.ast_nodes     = arena_init(4096);
     parser.type_table    = type_table_init();
     parser.current_scope = NULL;
+    parser.inside_statement_header = false;
 
     return parser;
 }
@@ -580,6 +581,8 @@ AstFor *parse_for(Parser *parser) {
     Token for_token = peek_next_token(parser);
     eat_token(parser);
 
+    parser->inside_statement_header = true;
+
     Token next = peek_next_token(parser);
     if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_IN) {
         iterator = make_identifier_from_token(parser, next, NULL);
@@ -635,6 +638,8 @@ AstFor *parse_for(Parser *parser) {
         iterator = make_identifier_from_string(parser, "it", NULL); // type is set later
         kind = FOR_WITH_EXPR;
     }
+
+    parser->inside_statement_header = false;
     
 
     AstBlock *body;
@@ -714,10 +719,6 @@ AstStructLiteral *parse_struct_literal(Parser *parser) {
     }
 
     Token next = peek_next_token(parser);
-    expect(parser, next, '.');
-    eat_token(parser);
-
-    next = peek_next_token(parser);
     expect(parser, next, '{');
     eat_token(parser);
 
@@ -991,7 +992,10 @@ AstIf *parse_if(Parser *parser) {
     Token if_token = peek_next_token(parser);
     eat_token(parser);
 
+    parser->inside_statement_header = true;
     AstExpr *condition = parse_expression(parser, MIN_PRECEDENCE);
+    parser->inside_statement_header = false;
+
     if (!condition) return NULL;
 
     AstBlock *block = parse_block(parser, NULL);
@@ -1014,8 +1018,10 @@ AstIf *parse_if(Parser *parser) {
             if (next.type == TOKEN_IF) {
                 eat_token(parser);
                 
+                parser->inside_statement_header = true;            
                 AstExpr *condition = parse_expression(parser, MIN_PRECEDENCE);
                 if (!condition) return NULL;
+                parser->inside_statement_header = false;
                 AstBlock *block = parse_block(parser, NULL);
                 if (!block) return NULL;
 
@@ -1473,13 +1479,22 @@ AstExpr *parse_leaf(Parser *parser) {
         return make_literal_node(parser, t);
     }
 
+    report_error_token(parser, LABEL_ERROR, t, "Syntax Error: Invalid start of expression");
     return NULL;
 }
 
 bool starts_struct_literal(Parser *parser) {
+    // Prevent parsing an ending identifer and open bracket as a struct literal if we are in a statement header
+    //
+    // for a {...}
+    //     ^^^
+    // here the identifier 'a' and bracket would otherwise be parsed as a struct literal
+    if (parser->inside_statement_header) return false;
+
     Token next = peek_next_token(parser);
-    if (next.type == '.' && peek_token(parser, 1).type == '{') return true;
-    if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '.' && peek_token(parser, 2).type == '{') return true;
+    if (next.type == '{') return true;
+    if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '{') return true;
+
     return false;
 }
 

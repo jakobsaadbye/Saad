@@ -3,25 +3,39 @@
         {
             "type": "cppbuild",
             "label": "Debug launch",
-            "command": "C:/mingw64/bin/gcc.exe",
-            "args": [
-                "-fdiagnostics-color=always",
-                "-g",
-                "C:/Saad/src/main.c",
-                "-o",
-                "C:/Saad/bin/saad.exe"
-            ],
+            "command": "make",
+            "args": [],
             "options": {
-                "cwd": "C:/mingw64/bin"
+                "cwd": "C:\\Saad"
             },
-            "problemMatcher": [
-                "$gcc"
-            ],
+            "problemMatcher": [],
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
         },
+        // {
+        //     "type": "cppbuild",
+        //     "label": "Debug launch",
+        //     "command": "C:/mingw64/bin/gcc.exe",
+        //     "args": [
+        //         "-fdiagnostics-color=always",
+        //         "-g",
+        //         "C:/Saad/src/main.c",
+        //         "-o",
+        //         "C:/Saad/bin/saad.exe"
+        //     ],
+        //     "options": {
+        //         "cwd": "C:/mingw64/bin"
+        //     },
+        //     "problemMatcher": [
+        //         "$gcc"
+        //     ],
+        //     "group": {
+        //         "kind": "build",
+        //         "isDefault": true
+        //     },
+        // },
         {
             "type": "cppbuild",
             "label": "Debug checker",

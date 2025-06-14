@@ -11,6 +11,7 @@ typedef struct Parser {
     AstBlock *current_scope;
     TypeTable type_table;
 
+    bool inside_statement_header;
 } Parser;
 
 Parser   parser_init(Lexer *lexer);
