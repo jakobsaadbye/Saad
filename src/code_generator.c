@@ -1560,10 +1560,10 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
     }
     case TYPE_POINTER: {
         if (lvalue) {
-            sb_append(&cg->code, "   push\t\trbx\n");
+            sb_append(&cg->code, "   push\t\trax\n");
         } else {
-            sb_append(&cg->code, "   mov\t\trbx, %s\n", src);
-            sb_append(&cg->code, "   push\t\trbx\n");
+            sb_append(&cg->code, "   mov\t\trax, %s\n", src);
+            sb_append(&cg->code, "   push\t\trax\n");
         }
         return;
     }
@@ -1575,7 +1575,7 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         return;
     }
     case TYPE_STRUCT: {
-        sb_append(&cg->code, "   lea\t\trax, QWORD %d[rbp]\n", src_offset);
+        sb_append(&cg->code, "   lea\t\trax, %s\n", src);
         sb_append(&cg->code, "   push\t\trax\n");
         return;
     }

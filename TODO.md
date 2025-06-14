@@ -1,6 +1,5 @@
 Current TODO:
     - :FloatRefactor
-    - %lf and %f for printf instead of just %lf
     - Functions not working with returns types other than int or void
     - A global base_offset on the code generator is not sufficient when we have multiple functions.
       The base pointer needs to be remembered and reset when jumping to a new function. Otherwise,

@@ -46,8 +46,15 @@ main :: () {
         }
     };
 
-    for i, index in 10...20 {
-        q := Quaternion.{i, i+1, i+2, i+3};
-        print("%", q);
-    }
+    // print("%", b);
+
+    // for i, index in 10...20 {
+    //     q := Quaternion.{i, i+1, i+2, i+3};
+    //     print("%", q);
+    // }
+
+    v := Vector3.{4, 9, 11};
+    a : *Blender = &b;
+    print("%", *a);
+
 }
