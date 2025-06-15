@@ -66,6 +66,7 @@ typedef enum TokenType {
     TOKEN_DOUBLE_DOT   = 153,
     TOKEN_TRIPLE_DOT   = 154,
     TOKEN_IN           = 155,
+    TOKEN_XX           = 156,
 
     TOKEN_PRINT        = 160,
     TOKEN_ASSERT       = 161,
@@ -76,6 +77,7 @@ typedef enum TokenType {
     TOKEN_CONTINUE     = 166,
     TOKEN_FOR          = 167,
     TOKEN_TYPEOF       = 168,
+    TOKEN_CAST         = 169,
 
     TOKEN_STRUCT  = 180,
     TOKEN_ENUM    = 181,

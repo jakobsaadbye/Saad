@@ -19,6 +19,7 @@ bool  check_statement(Typer *typer, Ast *stmt);
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type);
 Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type);
 Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type);
+Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type);
 Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type);
 Type *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Type *ctx_type);
 Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_type);
@@ -83,6 +84,8 @@ bool check_block(Typer *typer, AstBlock *block) {
     return true;
 }
 
+
+
 Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
     if (is_primitive_type(type->kind)) {
         return type;
@@ -115,7 +118,7 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
         if (decl) {
             if (array->capacity_expr) {
                 AstExpr *constexpr = simplify_expression(typer->ce, typer->current_scope, array->capacity_expr);
-                if (constexpr->head.type != AST_LITERAL && ((AstLiteral *)(constexpr))->kind != LITERAL_INTEGER) {
+                if (constexpr->head.kind != AST_LITERAL && ((AstLiteral *)(constexpr))->kind != LITERAL_INTEGER) {
                     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be an integer constant");
                     return NULL;
                 }
@@ -173,7 +176,7 @@ bool check_for_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
         return true;
     }
 
-    if (expr->head.type == AST_LITERAL) {
+    if (expr->head.kind == AST_LITERAL) {
         AstLiteral *lit = (AstLiteral *)(expr);
 
         if (lit->kind == LITERAL_INTEGER) {
@@ -235,7 +238,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         if (!expr_type) return false;
 
         AstExpr *const_expr = simplify_expression(typer->ce, typer->current_scope, decl->expr);
-        if (const_expr->head.type == AST_LITERAL) {
+        if (const_expr->head.kind == AST_LITERAL) {
             // Swap out the current expression for the simplified expression
             // @Speed? @Note - We might in the future cleanup the already allocated expression tree as its no longer needed after this swap.
             //                 We might be taking many cache misses if we leave big gaps in the allocated ast nodes, so something like packing the ast nodes could be
@@ -259,7 +262,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         if (typer->enclosing_function != NULL) {
             typer->enclosing_function->num_bytes_total += decl->type->size;
 
-            if (decl->expr && decl->expr->head.type == AST_ARRAY_LITERAL) {
+            if (decl->expr && decl->expr->head.kind == AST_ARRAY_LITERAL) {
                 // A little iffy, if we wanna keep it this way
                 typer->enclosing_function->num_bytes_total += 16; // data + count
             }
@@ -285,16 +288,22 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         //
         // Allow int to float implicit casting
         if (lhs->kind == TYPE_FLOAT && rhs->kind == TYPE_INTEGER) return true;
+        if (lhs->kind == TYPE_FLOAT && rhs->kind == TYPE_FLOAT && lhs->size != rhs->size) return false; // @Incomplete - We don't want to do this when we are dealing with literals that are untyped. Generally we want to prevent implicit down-cast e,g f64 -> f32
+
         else return lhs->kind == rhs->kind;
-    } else if (lhs->kind == TYPE_ENUM && rhs->kind == TYPE_INTEGER) {
+    } 
+    else if (lhs->kind == TYPE_ENUM && rhs->kind == TYPE_INTEGER) {
         return true;
-    } else if ((lhs->kind == TYPE_STRUCT && rhs->kind == TYPE_STRUCT) || (lhs->kind == TYPE_ENUM   && rhs->kind == TYPE_ENUM)) {
+    } 
+    else if ((lhs->kind == TYPE_STRUCT && rhs->kind == TYPE_STRUCT) || (lhs->kind == TYPE_ENUM   && rhs->kind == TYPE_ENUM)) {
         return strcmp(lhs->as.name, rhs->as.name) == 0;
-    } else if (lhs->kind == TYPE_ARRAY && rhs->kind == TYPE_ARRAY) {
+    } 
+    else if (lhs->kind == TYPE_ARRAY && rhs->kind == TYPE_ARRAY) {
         Type *left_elem_type  = ((TypeArray *)(lhs))->elem_type;
         Type *right_elem_type = ((TypeArray *)(rhs))->elem_type;
         return types_are_equal(left_elem_type, right_elem_type);
-    } else if (lhs->kind == TYPE_POINTER && rhs->kind == TYPE_POINTER) {
+    } 
+    else if (lhs->kind == TYPE_POINTER && rhs->kind == TYPE_POINTER) {
         Type *left_points_to  = ((TypePointer *)(lhs))->pointer_to;
         Type *right_points_to = ((TypePointer *)(rhs))->pointer_to;
         if (right_points_to->kind == TYPE_VOID) {
@@ -329,17 +338,17 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     for (int i = 0; i < call->arguments.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
         AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
-        Type *arg_type = check_expression(typer, arg, NULL);
+        Type *arg_type = check_expression(typer, arg, param->type);
         if (!arg_type) return NULL;
 
-        if (!types_are_equal(arg->evaluated_type, param->type)) {
+        if (!types_are_equal(arg->type, param->type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", type_to_str(param->type), type_to_str(arg_type));
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
             return NULL;
         }
     }
 
-    call->head.evaluated_type = func_defn->return_type;
+    call->head.type = func_defn->return_type;
 
     return func_defn->return_type;
 }
@@ -350,9 +359,9 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     Type *expr_type = check_expression(typer, assign->expr, lhs_type);
     if (!expr_type) return false;
 
-    bool is_member     = assign->lhs->head.type == AST_MEMBER_ACCESS;
-    bool is_array_ac   = assign->lhs->head.type == AST_ARRAY_ACCESS;
-    bool is_identifier = assign->lhs->head.type == AST_LITERAL && ((AstLiteral *)(assign->lhs))->kind == LITERAL_IDENTIFIER;
+    bool is_member     = assign->lhs->head.kind == AST_MEMBER_ACCESS;
+    bool is_array_ac   = assign->lhs->head.kind == AST_ARRAY_ACCESS;
+    bool is_identifier = assign->lhs->head.kind == AST_LITERAL && ((AstLiteral *)(assign->lhs))->kind == LITERAL_IDENTIFIER;
 
     AstDeclaration *member = NULL;
     AstIdentifier  *ident  = NULL;
@@ -482,7 +491,7 @@ bool check_for(Typer *typer, AstFor *ast_for) {
     if (ast_for->kind == FOR_INFINITY_AND_BEYOND) {
         // Nothing to check!
     }
-    else if (ast_for->iterable->head.type == AST_RANGE_EXPR) {
+    else if (ast_for->iterable->head.kind == AST_RANGE_EXPR) {
         // @Incomplete - Need to set type of index if being used!
         AstRangeExpr *range = (AstRangeExpr *)(ast_for->iterable);
         
@@ -551,7 +560,7 @@ char *generate_c_printf_string(Typer *typer, AstPrint *print) {
     assert(print->arguments.count >= 1);
 
     AstExpr *arg0 = ((AstExpr **)print->arguments.items)[0];
-    assert(arg0->head.type == AST_LITERAL && ((AstLiteral *)arg0)->kind == LITERAL_STRING);
+    assert(arg0->head.kind == AST_LITERAL && ((AstLiteral *)arg0)->kind == LITERAL_STRING);
 
     StringBuilder sb = sb_init(((AstLiteral *)arg0)->as.value.string.length + 1);
     char *head = ((AstLiteral *)arg0)->as.value.string.data;
@@ -583,7 +592,7 @@ char *generate_c_printf_string(Typer *typer, AstPrint *print) {
     while (*c != '\0') {
         if (*c == '%') {
             AstExpr *arg      = ((AstExpr **)print->arguments.items)[arg_index];
-            Type    *arg_type = arg->evaluated_type;
+            Type    *arg_type = arg->type;
             
             char *format_specifier = generate_c_format_specifier_for_type(arg_type);
 
@@ -669,7 +678,7 @@ int count_nested_sizeable_struct_members(Typer *typer, AstStruct *struct_, int c
 }
 
 bool check_statement(Typer *typer, Ast *stmt) {
-    switch (stmt->type) {
+    switch (stmt->kind) {
     case AST_DECLARATION: return check_declaration(typer, (AstDeclaration *)(stmt));
     case AST_ASSIGNMENT:  return check_assignment(typer, (AstAssignment *)(stmt));
     case AST_PRINT: {
@@ -688,7 +697,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
                     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Print expects the first argument to have type string, but argument is of type %s", type_to_str(arg_type));
                     return false;
                 }
-                if (arg->head.type != AST_LITERAL && ((AstLiteral *)arg)->kind != LITERAL_STRING) {
+                if (arg->head.kind != AST_LITERAL && ((AstLiteral *)arg)->kind != LITERAL_STRING) {
                     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "First argument to printf must be a constant string");
                     return false;
                 }
@@ -706,7 +715,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
         int num_c_args = 1;
         for (int i = 1; i < print->arguments.count; i++) {
             AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
-            Type    *arg_type = arg->evaluated_type;
+            Type    *arg_type = arg->type;
 
             if (arg_type->kind == TYPE_STRUCT) {
                 AstStruct *struct_ = ((TypeStruct *)arg_type)->node;
@@ -793,8 +802,8 @@ bool check_statement(Typer *typer, Ast *stmt) {
         Type *ok = check_expression(typer, ast_return->expr, ef->return_type);
         if (!ok) return false;
 
-        if (!types_are_equal(ast_return->expr->evaluated_type, ef->return_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_return), "Type mismatch. Returning type %s from function '%s' with return type %s", type_to_str(ast_return->expr->evaluated_type), ef->identifier->name, type_to_str(ef->return_type));
+        if (!types_are_equal(ast_return->expr->type, ef->return_type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_return), "Type mismatch. Returning type %s from function '%s' with return type %s", type_to_str(ast_return->expr->type), ef->identifier->name, type_to_str(ef->return_type));
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(ef), "... Here is the function signature for '%s'", ef->identifier->name);
             return false;
         }
@@ -850,12 +859,12 @@ bool check_statement(Typer *typer, Ast *stmt) {
                 if (!ok) return NULL;
 
                 AstExpr *constexpr = simplify_expression(typer->ce, typer->current_scope, etor->expr); // @ScopeRefactoring - We still need to give enums their own scope. This probably doesn't work!!!
-                if (constexpr->head.type != AST_LITERAL) {
+                if (constexpr->head.kind != AST_LITERAL) {
                     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Value must be a constant expression");
                     return false;
                 }
-                if (constexpr->evaluated_type->kind != TYPE_INTEGER) { // @Robustness - Check that the value of the integer does not overflow the backing type if made explicit. Maybe if the value goes beyond the default int we promote the integer type to fit the largest value???
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Enum value must have type int, but value is of type %s", type_to_str(etor->expr->evaluated_type));
+                if (constexpr->type->kind != TYPE_INTEGER) { // @Robustness - Check that the value of the integer does not overflow the backing type if made explicit. Maybe if the value goes beyond the default int we promote the integer type to fit the largest value???
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Enum value must have type int, but value is of type %s", type_to_str(etor->expr->type));
                     return false;
                 }
 
@@ -1018,7 +1027,7 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
         if (!first_element_type) return NULL;
 
         TypeArray *array       = type_alloc(&typer->parser->type_table, sizeof(TypeArray));
-        array->head.head.type  = AST_TYPE;
+        array->head.head.kind  = AST_TYPE;
         array->head.head.start = array_lit->head.head.start;
         array->head.head.end   = array_lit->head.head.end;
         array->head.kind       = TYPE_ARRAY;
@@ -1055,7 +1064,7 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
     }
 
     // @Hack - Reassigning the element type, as the pointer gets outdated when doing copies of the array type
-    Type *first_element_type = ((AstExpr **)(array_lit->expressions.items))[0]->evaluated_type;
+    Type *first_element_type = ((AstExpr **)(array_lit->expressions.items))[0]->type;
     array->elem_type = first_element_type;
 
     //
@@ -1104,22 +1113,23 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
 
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     Type *result = NULL;
-    if      (expr->head.type == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
-    else if (expr->head.type == AST_BINARY)         result = check_binary(typer, (AstBinary *)(expr), ctx_type);
-    else if (expr->head.type == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
-    else if (expr->head.type == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr), ctx_type);
-    else if (expr->head.type == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), ctx_type);
-    else if (expr->head.type == AST_ARRAY_LITERAL)  result = check_array_literal(typer, (AstArrayLiteral *)(expr), ctx_type);
-    else if (expr->head.type == AST_ENUM_LITERAL)   result = check_enum_literal(typer, (AstEnumLiteral *)(expr), ctx_type);
-    else if (expr->head.type == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr));
-    else if (expr->head.type == AST_ARRAY_ACCESS)   result = check_array_access(typer, (AstArrayAccess *)(expr));
-    else if (expr->head.type == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_S64); // @Investigate - Shouldn't this be checked for both sides being integers???
+    if      (expr->head.kind == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
+    else if (expr->head.kind == AST_BINARY)         result = check_binary(typer, (AstBinary *)(expr), ctx_type);
+    else if (expr->head.kind == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
+    else if (expr->head.kind == AST_CAST)           result = check_cast(typer, (AstCast *)(expr), ctx_type);
+    else if (expr->head.kind == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr), ctx_type);
+    else if (expr->head.kind == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), ctx_type);
+    else if (expr->head.kind == AST_ARRAY_LITERAL)  result = check_array_literal(typer, (AstArrayLiteral *)(expr), ctx_type);
+    else if (expr->head.kind == AST_ENUM_LITERAL)   result = check_enum_literal(typer, (AstEnumLiteral *)(expr), ctx_type);
+    else if (expr->head.kind == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr));
+    else if (expr->head.kind == AST_ARRAY_ACCESS)   result = check_array_access(typer, (AstArrayAccess *)(expr));
+    else if (expr->head.kind == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_S64); // @Investigate - Shouldn't this be checked for both sides being integers???
     else {
         printf("%s:%d: compiler-error: Unhandled cases in 'type_expression'. Expression was of type %s", __FILE__, __LINE__, ast_to_str((Ast *)expr));
         exit(1);
     }
 
-    expr->evaluated_type = result;
+    expr->type = result;
     return result;
 }
 
@@ -1133,13 +1143,13 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     //            That way, i wouldn't need to have an access kind for the member
     //
     AstExpr *lhs = ma->left;
-    if (type_lhs->kind == TYPE_ENUM && lhs->head.type == AST_LITERAL && ((AstLiteral *)(lhs))->kind == LITERAL_IDENTIFIER) {
+    if (type_lhs->kind == TYPE_ENUM && lhs->head.kind == AST_LITERAL && ((AstLiteral *)(lhs))->kind == LITERAL_IDENTIFIER) {
         char *ident_name    = ((AstLiteral *)(lhs))->as.value.identifier.name;
         TypeEnum *enum_defn = ((TypeEnum *)(type_lhs));
         if (strcmp(ident_name, enum_defn->identifier->name) == 0) {
 
             AstExpr *rhs = ma->right;
-            if (rhs->head.type == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
+            if (rhs->head.kind == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
                 char *name = ((AstLiteral *)(rhs))->as.value.identifier.name;
                 AstEnumerator *enum_member = find_enum_member(enum_defn->node, name);
                 if (!enum_member) {
@@ -1179,7 +1189,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
 
 
     AstExpr *rhs = ma->right;
-    if (rhs->head.type == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
+    if (rhs->head.kind == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
         char *member_name = ((AstLiteral *)(rhs))->as.value.identifier.name;
         
         AstDeclaration *member = get_struct_member(struct_defn->node, member_name);
@@ -1303,9 +1313,38 @@ Type *biggest_type(Type *lhs, Type *rhs) {
 }
 
 Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
-    Type *ti_lhs = check_expression(typer, binary->left, ctx_type);
-    Type *ti_rhs = check_expression(typer, binary->right, ctx_type);
+
+    Type *ti_lhs = NULL;
+    Type *ti_rhs = NULL;
+
+    // Use the type info from the opposite side of an auto-cast to give it a context type
+    bool checked_by_autocast = false;
+    if (binary->left->head.kind == AST_CAST || binary->right->head.kind == AST_CAST) {
+        if (binary->left->head.kind == AST_CAST) {
+            AstCast *cast = (AstCast *)binary->left;
+            if (cast->is_auto && !ctx_type) {
+                ti_rhs = check_expression(typer, binary->right, NULL);
+                ti_lhs = check_expression(typer, binary->left, ti_rhs);
+                checked_by_autocast = true;
+            }
+        }
+        else if (binary->right->head.kind == AST_CAST) {
+            AstCast *cast = (AstCast *)binary->right;
+            if (cast->is_auto && !ctx_type) {
+                ti_lhs = check_expression(typer, binary->left, NULL);
+                ti_rhs = check_expression(typer, binary->right, ti_lhs);
+                checked_by_autocast = true;
+            }
+        }
+    }
+
+    if (!checked_by_autocast) {
+        ti_lhs = check_expression(typer, binary->left, ctx_type);
+        ti_rhs = check_expression(typer, binary->right, ctx_type);
+    }
+
     if (!ti_lhs || !ti_rhs) return NULL;
+
 
     TypeKind lhs = ti_lhs->kind;
     TypeKind rhs = ti_rhs->kind;
@@ -1369,13 +1408,13 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     } 
     else if (unary->operator == OP_ADDRESS_OF) {
         bool lvalue = false;
-        if (unary->expr->head.type == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
+        if (unary->expr->head.kind == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
             lvalue = true;
         }
-        else if (unary->expr->head.type == AST_ARRAY_ACCESS) {
+        else if (unary->expr->head.kind == AST_ARRAY_ACCESS) {
             lvalue = true;
         }
-        else if (unary->expr->head.type == AST_MEMBER_ACCESS) {
+        else if (unary->expr->head.kind == AST_MEMBER_ACCESS) {
             lvalue = true;
         }
 
@@ -1385,7 +1424,7 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
         }
 
         TypePointer *ptr     = type_alloc(&typer->parser->type_table, sizeof(TypePointer));
-        ptr->head.head.type  = AST_TYPE;
+        ptr->head.head.kind  = AST_TYPE;
         ptr->head.head.start = expr_type->head.start;
         ptr->head.head.end   = expr_type->head.end;
         ptr->head.kind       = TYPE_POINTER;
@@ -1405,6 +1444,50 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     else {
         XXX;
     }
+}
+
+bool can_cast_into_type(Type *from, Type *to) {
+    if (from->kind == to->kind) return true;
+
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_FLOAT) return true;
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_ENUM) return true;
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_BOOL) return true;
+    if (from->kind == TYPE_FLOAT   && to->kind == TYPE_INTEGER) return true;
+    if (from->kind == TYPE_ENUM    && to->kind == TYPE_INTEGER) return true;
+    if (from->kind == TYPE_BOOL    && to->kind == TYPE_INTEGER) return true;
+
+    return false;
+}
+
+Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
+
+    Type *wanted_type = NULL;
+    if (cast->is_auto) {
+        if (ctx_type == NULL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "Unable to infer what the auto-cast type should be from the context");
+            return NULL;
+        }
+
+        wanted_type = ctx_type;
+    } else {
+
+        cast->cast_to = resolve_type(typer, cast->cast_to, NULL);
+        if (!cast->cast_to) return NULL;
+
+        wanted_type = cast->cast_to;
+    }
+
+    Type *expr_type = check_expression(typer, cast->expr, NULL);
+    if (!expr_type) return NULL;
+
+    if (!can_cast_into_type(expr_type, wanted_type)) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "Invalid Cast: Type %s can not be casted to a %s", type_to_str(expr_type), type_to_str(wanted_type));
+        return NULL;
+    }
+
+    cast->cast_to = wanted_type;
+
+    return wanted_type;
 }
 
 bool is_comparison_operator(TokenType op) {

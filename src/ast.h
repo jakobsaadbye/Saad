@@ -14,7 +14,7 @@ typedef struct AstEnum AstEnum;
 typedef struct Type Type;
 typedef struct TypeTable TypeTable;
 
-typedef enum AstType {
+typedef enum AstKind {
     AST_ERR,
     AST_BLOCK,
     AST_STRUCT,
@@ -41,13 +41,14 @@ typedef enum AstType {
     AST_RANGE_EXPR,
     AST_BINARY,
     AST_UNARY,
+    AST_CAST,
     AST_IDENTIFIER,
     AST_SUBSCRIPT,
     AST_ACCESSOR,
     AST_MEMBER_ACCESS,
     AST_ARRAY_ACCESS,
     AST_LITERAL,
-} AstType;
+} AstKind;
 
 typedef enum OperatorType {     // Here so that operators with the same symbols still can have different enumerations f.x unary minus and binary minus
     OP_LOGICAL_OR         = TOKEN_LOGICAL_OR,
@@ -72,18 +73,19 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
     OP_SUBSCRIPT    = '[',
     OP_ADDRESS_OF   = '&',
     OP_POINTER_DEREFERENCE = 2, // Picked arbitrarily. Should just not conflict with the others
+    OP_CAST         = TOKEN_CAST,
 } OperatorType;
 
 typedef struct Ast {
-    AstType type;
+    AstKind kind;
 
     Pos start;
     Pos end;
 } Ast;
 
 typedef struct AstExpr {
-    Ast  head;
-    Type *evaluated_type;
+    Ast   head;
+    Type *type;
 } AstExpr;
 
 typedef struct AstCode {
@@ -368,6 +370,13 @@ typedef struct AstUnary {
     AstExpr     *expr;
 } AstUnary;
 
+typedef struct AstCast {
+    AstExpr  head;
+    AstExpr *expr;
+    Type    *cast_to;  // Explicit type cast e.g "cast(f64)x"
+    bool     is_auto;  // Weather its an auto-cast "xx 2 / 4.0"
+} AstCast;
+
 typedef struct AstStructLiteral {
     AstExpr head;
 
@@ -409,7 +418,7 @@ typedef struct AstLiteral {
 } AstLiteral;
 
 static const char *ast_to_str(Ast *ast) {
-    switch (ast->type) {
+    switch (ast->kind) {
     case AST_ERR:                return "AST_ERR";
     case AST_BLOCK:              return "AST_BLOCK";
     case AST_DECLARATION:        return "AST_DECLARATION";
@@ -435,6 +444,7 @@ static const char *ast_to_str(Ast *ast) {
     case AST_RANGE_EXPR:         return "AST_RANGE_EXPR";
     case AST_BINARY:             return "AST_BINARY";
     case AST_UNARY:              return "AST_UNARY";
+    case AST_CAST:               return "AST_CAST";
     case AST_LITERAL:            return "AST_LITERAL";
     case AST_SUBSCRIPT:          return "AST_SUBSCRIPT";
     case AST_ACCESSOR:           return "AST_ACCESSOR";
@@ -443,7 +453,7 @@ static const char *ast_to_str(Ast *ast) {
     case AST_IDENTIFIER:         return "AST_IDENTIFIER";
     case AST_TYPE:               return "AST_TYPE";
     }
-    printf("%s:%d: compiler-error: Could not give the name of AST node with type id %d\n", __FILE__, __LINE__, ast->type);
+    printf("%s:%d: compiler-error: Could not give the name of AST node with type id %d\n", __FILE__, __LINE__, ast->kind);
     exit(1);
 }
 

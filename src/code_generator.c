@@ -195,7 +195,7 @@ void emit_block(CodeGenerator *cg, AstBlock *block) {
 }
 
 void emit_statement(CodeGenerator *cg, Ast *node) {
-    switch (node->type) {
+    switch (node->kind) {
     case AST_DECLARATION:       emit_declaration(cg, (AstDeclaration *)(node)); break;
     case AST_ASSIGNMENT:        emit_assignment(cg, (AstAssignment *)(node)); break;
     case AST_FUNCTION_DEFN:     emit_function_defn(cg, (AstFunctionDefn *)(node)); break;
@@ -304,12 +304,12 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
 
     bool offset_is_runtime_computed = false;
     int base_offset = 0;
-    if (assign->lhs->head.type == AST_LITERAL) {
+    if (assign->lhs->head.kind == AST_LITERAL) {
         AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs);
         assert(ident);
 
         if (ident->type->kind == TYPE_POINTER) {
-            if (assign->expr->evaluated_type->kind != TYPE_POINTER) {
+            if (assign->expr->type->kind != TYPE_POINTER) {
                 // We are updating the value at the address that is pointed to
                 sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", ident->stack_offset);
                 base_offset = 0;
@@ -324,13 +324,13 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
             offset_is_runtime_computed = false;
         }
     }
-    else if (assign->lhs->head.type == AST_MEMBER_ACCESS) {
+    else if (assign->lhs->head.kind == AST_MEMBER_ACCESS) {
         AstMemberAccess *ma = (AstMemberAccess *)(assign->lhs);
         MemberAccessResult result = emit_member_access(cg, ma);
         base_offset = result.base_offset;
         offset_is_runtime_computed = result.is_runtime_computed;
     }
-    else if (assign->lhs->head.type == AST_ARRAY_ACCESS) {
+    else if (assign->lhs->head.kind == AST_ARRAY_ACCESS) {
         AstArrayAccess *array_ac = (AstArrayAccess *)(assign->lhs);
         emit_array_access(cg, array_ac, true);
         offset_is_runtime_computed = true;
@@ -347,11 +347,11 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     }
 
     if (assign->op == ASSIGN_EQUAL) {
-        emit_simple_initialization(cg, base_offset, offset_is_runtime_computed, assign->lhs->evaluated_type, assign->expr->evaluated_type);
+        emit_simple_initialization(cg, base_offset, offset_is_runtime_computed, assign->lhs->type, assign->expr->type);
         return;
     }
 
-    if (assign->lhs->evaluated_type->kind == TYPE_INTEGER) {
+    if (assign->lhs->type->kind == TYPE_INTEGER) {
         POP(RAX);
         switch (assign->op) {
         case ASSIGN_PLUS_EQUAL:  sb_append(&cg->code, "   add\t\t%s, eax\n", address_str); break;
@@ -374,10 +374,10 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
         default: exit(1); // Unreachable
         }
     }
-    else if (assign->lhs->evaluated_type->kind == TYPE_FLOAT) {
+    else if (assign->lhs->type->kind == TYPE_FLOAT) {
 
-        Type *lhs_type = assign->lhs->evaluated_type;
-        Type *rhs_type = assign->expr->evaluated_type;
+        Type *lhs_type = assign->lhs->type;
+        Type *rhs_type = assign->expr->type;
 
         POP(RBX);
         if (rhs_type->kind == TYPE_INTEGER) {
@@ -417,7 +417,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         sb_append(&cg->code, "   jmp\t\tL%d\n", cond_label);
         sb_append(&cg->code, "L%d:\n", done_label);
     }
-    else if (ast_for->iterable->head.type == AST_RANGE_EXPR) {
+    else if (ast_for->iterable->head.kind == AST_RANGE_EXPR) {
         AstRangeExpr * range = (AstRangeExpr *)(ast_for->iterable);
         
         // allocate space for start and end range values 
@@ -613,6 +613,39 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "   ret\n");
 }
 
+void emit_cast(CodeGenerator *cg, AstCast *cast) {
+    emit_expression(cg, cast->expr);
+
+    Type *from = cast->expr->type;
+    Type *to   = cast->cast_to;
+
+    if (from->kind == to->kind && from->size == to->size) return; // ignore
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_INTEGER) return;                   // already zero extended in the push
+
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_FLOAT) {
+        POP(RAX);
+
+        if (is_signed_integer(from)) {
+            char *op = to->size == 4 ? "cvtsi2ss" : "cvtsi2sd";
+            sb_append(&cg->code, "   %s\txmm0, rax\n", op);
+            sb_append(&cg->code, "   movq\trax, xmm0\n");
+            PUSH(RAX);
+            return;
+        } else {
+
+            XXX;
+        }
+
+    }
+    else if (from->kind == TYPE_INTEGER && to->kind == TYPE_ENUM) XXX;
+    else if (from->kind == TYPE_INTEGER && to->kind == TYPE_BOOL) XXX;
+    else if (from->kind == TYPE_FLOAT   && to->kind == TYPE_INTEGER) XXX;
+    else if (from->kind == TYPE_ENUM    && to->kind == TYPE_INTEGER) XXX;
+    else if (from->kind == TYPE_BOOL    && to->kind == TYPE_INTEGER) XXX;
+
+    return;
+}
+
 void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
 
     int arg_count = call->arguments.count;
@@ -626,7 +659,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     // Pop the arguments
     for (int i = arg_count - 1; i >= 0; i--) {
         AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
-        Type    *arg_type = arg->evaluated_type;
+        Type    *arg_type = arg->type;
 
         POP(RAX);
 
@@ -665,14 +698,12 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     bool align_stack = false;
     if (cg->num_pushed_arguments % 2 == 1) align_stack = true;
 
-    printf("push count = %d\n", cg->num_pushed_arguments);
-
     if (align_stack) sb_append(&cg->code, "   sub\t\trsp, 8\n");
     sb_append(&cg->code, "   call\t\t%s\n", call->identifer->name);
     if (align_stack) sb_append(&cg->code, "   add\t\trsp, 8\n");
 
 
-    Type *return_type = call->head.evaluated_type;
+    Type *return_type = call->head.type;
     if (return_type->kind == TYPE_FLOAT) {
         if (return_type->size == 4) {
             sb_append(&cg->code, "   movd\t\teax, xmm0\n");
@@ -756,7 +787,7 @@ void emit_assert(CodeGenerator *cg, AstAssert *assertion) {
 }
 
 void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof) {
-    Type *expr_type = ast_typeof->expr->evaluated_type;
+    Type *expr_type = ast_typeof->expr->type;
 
     char *type_name  = type_to_str(expr_type);
     int   type_label = make_label_number(cg);
@@ -933,7 +964,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
     int num_enum_arguments = 0;
     for (int i = 1; i < print->arguments.count; i++) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
-        Type    *arg_type = arg->evaluated_type;
+        Type    *arg_type = arg->type;
 
         emit_expression(cg, arg);
         emit_printable_value(cg, arg_type, &num_enum_arguments, 0, 0);
@@ -958,7 +989,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
     int arg_count = print->arguments.count;
     for (int i = arg_count - 1; i >= 1; i--) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
-        Type    *arg_type = arg->evaluated_type;
+        Type    *arg_type = arg->type;
 
         // @Incomplete: We need to also count pushed struct members
         cg->num_pushed_arguments -= 1;
@@ -1148,28 +1179,28 @@ void emit_struct_initialization(CodeGenerator *cg, int dest_offset, AstStructLit
 
         int member_offset = dest_offset + init->member->member_offset;
 
-        emit_initialization(cg, member_offset, init->value, init->member->type, init->value->evaluated_type);
+        emit_initialization(cg, member_offset, init->value, init->member->type, init->value->type);
     }
 }
 
 void emit_array_initialization(CodeGenerator *cg, int dest_offset, AstArrayLiteral *array_lit, Type *lhs_type) {
     assert(lhs_type->kind == TYPE_ARRAY);
     
-    int elem_size   = ((TypeArray *)(array_lit->head.evaluated_type))->elem_type->size;
+    int elem_size   = ((TypeArray *)(array_lit->head.type))->elem_type->size;
     for (int i = 0; i < array_lit->expressions.count; i++) {
         AstExpr *expr = ((AstExpr **)(array_lit->expressions.items))[i];
 
         int elem_offset = dest_offset + (i * elem_size);
 
-        emit_initialization(cg, elem_offset, expr, ((TypeArray *)(lhs_type))->elem_type, expr->evaluated_type);
+        emit_initialization(cg, elem_offset, expr, ((TypeArray *)(lhs_type))->elem_type, expr->type);
     }
 }
 
 void emit_initialization(CodeGenerator *cg, int dest_offset, AstExpr *expr, Type *lhs_type, Type *rhs_type) {
-    if (expr->head.type == AST_STRUCT_LITERAL) {
+    if (expr->head.kind == AST_STRUCT_LITERAL) {
         emit_struct_initialization(cg, dest_offset, (AstStructLiteral *)(expr));
     }
-    else if (expr->head.type == AST_ARRAY_LITERAL) {
+    else if (expr->head.kind == AST_ARRAY_LITERAL) {
         emit_array_initialization(cg, dest_offset, (AstArrayLiteral *)(expr), lhs_type);
     }
     else {
@@ -1180,7 +1211,7 @@ void emit_initialization(CodeGenerator *cg, int dest_offset, AstExpr *expr, Type
 
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     if (decl->flags & DECLARATION_CONSTANT) {
-        assert(decl->expr->head.type == AST_LITERAL);
+        assert(decl->expr->head.kind == AST_LITERAL);
         AstLiteral *lit = (AstLiteral *)(decl->expr);
 
         switch (lit->kind) {
@@ -1204,7 +1235,7 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         // on the declaration on the stack, but also reserve 16 bytes for the data + count that we have to 
         // be aware of whenever we are dealing with the array.
         type_size = 16;
-        if (decl->expr && decl->expr->head.type == AST_ARRAY_LITERAL) {
+        if (decl->expr && decl->expr->head.kind == AST_ARRAY_LITERAL) {
             is_array_initialization = true;
         } else {
             // Could just be an assignment to a variable of type array. In that case, we DON'T want to allocate
@@ -1236,18 +1267,18 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     if (decl->expr) {
         if (is_array_initialization) {
             // @Cleanup - This is a little mehh. Too implicit that we are actually doing two different things. Maybe split up into different functions for array initialization???
-            emit_initialization(cg, base_array_offset, decl->expr, decl->type, decl->expr->evaluated_type);        // to initialize array
+            emit_initialization(cg, base_array_offset, decl->expr, decl->type, decl->expr->type);        // to initialize array
             emit_expression(cg, decl->expr);
-            emit_simple_initialization(cg, identifier_offset, false, decl->type, decl->expr->evaluated_type); // to initialize data + count
+            emit_simple_initialization(cg, identifier_offset, false, decl->type, decl->expr->type); // to initialize data + count
         } else {
-            emit_initialization(cg, identifier_offset, decl->expr, decl->type, decl->expr->evaluated_type);
+            emit_initialization(cg, identifier_offset, decl->expr, decl->type, decl->expr->type);
         }
     } 
 }
 
 void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
-    Type *l_type = bin->left->evaluated_type;
-    Type *r_type = bin->right->evaluated_type;
+    Type *l_type = bin->left->type;
+    Type *r_type = bin->right->type;
 
     TypeKind l_kind = l_type->kind;
     TypeKind r_kind = r_type->kind;
@@ -1325,8 +1356,8 @@ void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
 void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
     assert(is_comparison_operator(bin->operator));
 
-    Type *l_type = bin->left->evaluated_type;
-    Type *r_type = bin->right->evaluated_type;
+    Type *l_type = bin->left->type;
+    Type *r_type = bin->right->type;
 
     TypeKind l_kind = l_type->kind;
     TypeKind r_kind = r_type->kind;
@@ -1448,10 +1479,10 @@ void emit_array_access_offset(CodeGenerator *cg, AstArrayAccess *array_ac) {
 
         emit_expression(cg, current->subscript);
         POP(RAX);
-        sb_append(&cg->code, "   imul\t\trax, %d\n", current->head.evaluated_type->size);
+        sb_append(&cg->code, "   imul\t\trax, %d\n", current->head.type->size);
         PUSH(RAX);
 
-        if (current->accessing->head.type == AST_ARRAY_ACCESS) {
+        if (current->accessing->head.kind == AST_ARRAY_ACCESS) {
             current = (AstArrayAccess *)(current->accessing);
         } else {
             break;
@@ -1462,7 +1493,7 @@ void emit_array_access_offset(CodeGenerator *cg, AstArrayAccess *array_ac) {
     while (true) {
         POP(RAX);
 
-        if (current->accessing->head.type == AST_ARRAY_ACCESS) {
+        if (current->accessing->head.kind == AST_ARRAY_ACCESS) {
             POP(RBX);
             sb_append(&cg->code, "   add\t\trax, rbx\n");
             PUSH(RAX);
@@ -1476,16 +1507,16 @@ void emit_array_access_offset(CodeGenerator *cg, AstArrayAccess *array_ac) {
 
 void emit_unary_inside_member_access(CodeGenerator *cg, AstUnary *unary, AstMemberAccess *ma) {
     if (unary->operator == OP_POINTER_DEREFERENCE) {
-        assert(unary->expr->evaluated_type->kind == TYPE_POINTER);
+        assert(unary->expr->type->kind == TYPE_POINTER);
 
-        if (unary->expr->head.type == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
+        if (unary->expr->head.kind == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
             AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name, (Ast *)unary->expr);
             assert(ident->type->kind == TYPE_POINTER);
 
             sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", ident->stack_offset);
             sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
         }
-        else if (unary->expr->head.type == AST_MEMBER_ACCESS) {
+        else if (unary->expr->head.kind == AST_MEMBER_ACCESS) {
             MemberAccessResult result = emit_member_access(cg, (AstMemberAccess *)(unary->expr));
             if (result.is_runtime_computed) {
                 sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
@@ -1495,7 +1526,7 @@ void emit_unary_inside_member_access(CodeGenerator *cg, AstUnary *unary, AstMemb
 
             sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
         } 
-        else if (unary->expr->head.type == AST_UNARY) {
+        else if (unary->expr->head.kind == AST_UNARY) {
             emit_unary_inside_member_access(cg, (AstUnary *)(unary->expr), ma);
             sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
         }
@@ -1510,12 +1541,12 @@ void emit_unary_inside_member_access(CodeGenerator *cg, AstUnary *unary, AstMemb
 }
 
 MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
-    if (ma->left->head.type == AST_MEMBER_ACCESS) {
+    if (ma->left->head.kind == AST_MEMBER_ACCESS) {
         AstMemberAccess *left = (AstMemberAccess *)(ma->left);
 
         MemberAccessResult result = emit_member_access(cg, left);
 
-        Type *left_type = left->head.evaluated_type;
+        Type *left_type = left->head.type;
 
         if (result.is_runtime_computed) {
             if (left_type->kind == TYPE_POINTER) {
@@ -1536,7 +1567,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
             };
         }
     }
-    if (ma->left->head.type == AST_LITERAL && ((AstLiteral *)(ma->left))->kind == LITERAL_IDENTIFIER) {
+    if (ma->left->head.kind == AST_LITERAL && ((AstLiteral *)(ma->left))->kind == LITERAL_IDENTIFIER) {
         AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(ma->left))->as.value.identifier.name, (Ast *)(ma->left));
 
         if (ident->type->kind == TYPE_POINTER) {
@@ -1552,15 +1583,15 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
             };
         }
     }
-    if (ma->left->head.type == AST_ARRAY_ACCESS) {
+    if (ma->left->head.kind == AST_ARRAY_ACCESS) {
         AstArrayAccess *array_ac = (AstArrayAccess *)(ma->left);
 
         AstExpr *cursor = array_ac->accessing;
-        while(cursor->head.type == AST_ARRAY_ACCESS) {
+        while(cursor->head.kind == AST_ARRAY_ACCESS) {
             cursor = ((AstArrayAccess *)(cursor))->accessing;
         }
 
-        if (cursor->head.type == AST_LITERAL) {
+        if (cursor->head.kind == AST_LITERAL) {
             assert(((AstLiteral *)(cursor))->kind == LITERAL_IDENTIFIER);
             AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(cursor))->as.value.identifier.name, (Ast *)cursor);
             assert(ident && ident->type->kind == TYPE_ARRAY);
@@ -1576,7 +1607,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
 
             return (MemberAccessResult){0, true};
         }
-        else if (cursor->head.type == AST_MEMBER_ACCESS) {
+        else if (cursor->head.kind == AST_MEMBER_ACCESS) {
             AstMemberAccess *left = (AstMemberAccess *)(cursor);
             MemberAccessResult result = emit_member_access(cg, left);
             assert(result.is_runtime_computed);
@@ -1594,7 +1625,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
             XXX;
         }
     }
-    else if (ma->left->head.type == AST_UNARY) {
+    else if (ma->left->head.kind == AST_UNARY) {
         emit_unary_inside_member_access(cg, (AstUnary *)(ma->left), ma);
         return (MemberAccessResult){0, true};
     }
@@ -1612,10 +1643,10 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue)
     int base_offset = 0;
 
     AstExpr *expr = array_ac->accessing;
-    while (expr->head.type == AST_ARRAY_ACCESS) {
+    while (expr->head.kind == AST_ARRAY_ACCESS) {
         expr = ((AstArrayAccess *)(expr))->accessing;
     }
-    if (expr->head.type == AST_LITERAL && ((AstLiteral *)(expr))->kind == LITERAL_IDENTIFIER) {
+    if (expr->head.kind == AST_LITERAL && ((AstLiteral *)(expr))->kind == LITERAL_IDENTIFIER) {
         AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(expr))->as.value.identifier.name, (Ast *)expr);
 
         type        = ident->type;
@@ -1708,7 +1739,7 @@ bool is_arithmetic_operator(TokenType op) {
 }
 
 void emit_expression(CodeGenerator *cg, AstExpr *expr) {
-    switch (expr->head.type) {
+    switch (expr->head.kind) {
     case AST_BINARY: {
         AstBinary *bin = (AstBinary *)(expr);
         TokenType op = bin->operator;
@@ -1725,15 +1756,15 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             emit_expression(cg, unary->expr);
             POP(RAX);
 
-            if (unary->expr->evaluated_type->kind == TYPE_BOOL) {
+            if (unary->expr->type->kind == TYPE_BOOL) {
                 sb_append(&cg->code, "   not\t\trax\n");
             }
-            else if (unary->expr->evaluated_type->kind == TYPE_POINTER) {
+            else if (unary->expr->type->kind == TYPE_POINTER) {
                 sb_append(&cg->code, "   test\t\trax, rax\n");
                 sb_append(&cg->code, "   sete\t\tal\n");
                 sb_append(&cg->code, "   movzx\t\trax, al\n");
             } else {
-                printf("Internal Compiler Error: Unexpected unary expression type '%s' in emit_expression<AST_UNARY>", type_to_str(unary->expr->evaluated_type));
+                printf("Internal Compiler Error: Unexpected unary expression type '%s' in emit_expression<AST_UNARY>", type_to_str(unary->expr->type));
                 exit(1);
             }
 
@@ -1748,7 +1779,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         if (unary->operator == OP_ADDRESS_OF) {
-            if (unary->expr->head.type == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
+            if (unary->expr->head.kind == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
                 AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name, (Ast *)unary->expr);
                 assert(ident);
 
@@ -1756,12 +1787,12 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 PUSH(RAX);
                 return;
             }
-            else if (unary->expr->head.type == AST_ARRAY_ACCESS) {
+            else if (unary->expr->head.kind == AST_ARRAY_ACCESS) {
                 emit_array_access(cg, (AstArrayAccess *)(unary->expr), true);
                 PUSH(RBX);
                 return;
             }
-            else if (unary->expr->head.type == AST_MEMBER_ACCESS) {
+            else if (unary->expr->head.kind == AST_MEMBER_ACCESS) {
                 MemberAccessResult result = emit_member_access(cg, (AstMemberAccess *)unary->expr);
                 if (result.is_runtime_computed) {
                     PUSH(RBX);
@@ -1777,7 +1808,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         if (unary->operator == OP_POINTER_DEREFERENCE) {
             emit_expression(cg, unary->expr);
 
-            Type *dereferenced_type = unary->head.evaluated_type;
+            Type *dereferenced_type = unary->head.type;
             POP(RBX);
 
             emit_move_and_push(cg, 0, true, dereferenced_type, false);
@@ -1786,6 +1817,11 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         }
 
         XXX;
+    }
+    case AST_CAST: {
+        AstCast *cast = (AstCast *)(expr);
+        emit_cast(cg, cast);
+        return;
     }
     case AST_FUNCTION_CALL: {
         AstFunctionCall *call = (AstFunctionCall *)(expr);
@@ -1836,13 +1872,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_FLOAT: {
-            if (lit->head.evaluated_type->size == 4) {
+            if (lit->head.type->size == 4) {
                 sb_append(&cg->data, "   CF%d DD %.7lf\n", cg->constants, lit->as.value.floating);
                 sb_append(&cg->code, "   movss\t\txmm0, [CF%d]\n", cg->constants);
                 sb_append(&cg->code, "   movd\t\teax, xmm0\n");
                 PUSH(RAX);
                 cg->constants++;
-            } else if (lit->head.evaluated_type->size == 8) {
+            } else if (lit->head.type->size == 8) {
                 sb_append(&cg->data, "   CF%d DQ %.15lf\n", cg->constants, lit->as.value.floating);
                 sb_append(&cg->code, "   movsd\t\txmm0, [CF%d]\n", cg->constants);
                 sb_append(&cg->code, "   movq\t\trax, xmm0\n");
@@ -1872,7 +1908,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             assert(ident);
 
             if (ident->belongs_to_decl && ident->belongs_to_decl->flags & DECLARATION_CONSTANT) {
-                assert(ident->belongs_to_decl->expr->head.type == AST_LITERAL);
+                assert(ident->belongs_to_decl->expr->head.kind == AST_LITERAL);
                 AstLiteral *lit = (AstLiteral *)(ident->belongs_to_decl->expr);
                 switch (lit->kind) {
                     case LITERAL_BOOLEAN: {
@@ -1886,11 +1922,11 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                         return;
                     }
                     case LITERAL_FLOAT: {
-                        if (lit->head.evaluated_type->size == 4) {
+                        if (lit->head.type->size == 4) {
                             sb_append(&cg->code, "   movss\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant @Cleanup - Should the identifier name really be used as the constant name??? Not good if we have the same identifier name in two seperate blocks inside same function!
                             sb_append(&cg->code, "   movd\t\teax, xmm0\n");
                             PUSH(RAX);
-                        } else if (lit->head.evaluated_type->size == 8) {
+                        } else if (lit->head.type->size == 8) {
                             sb_append(&cg->code, "   movsd\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant
                             sb_append(&cg->code, "   movq\t\trax, xmm0\n");
                             PUSH(RAX);

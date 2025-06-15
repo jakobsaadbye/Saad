@@ -1,11 +1,22 @@
-sin   :: (angle: f64) -> f64 #extern "C"
-cos   :: (angle: f64) -> f64 #extern "C"
-floor :: (value: f64) -> f64 #extern "C"
+// sin   :: (angle: f64) -> f64 #extern "C"
+// cos   :: (angle: f64) -> f64 #extern "C"
+// floor :: (value: f64) -> f64 #extern "C"
 
-PI  :: 3.1415929;
-TAU :: PI * 2;
+// PI  :: 3.1415929;
+// TAU :: PI * 2;
+
+foo :: (n: f64) -> f64 {
+    return n*n;
+}
 
 main :: () {
-    print("sin(%)=%", sin(PI), PI);
+
+    x : f32 = 1;
+    y : f64 = 1;
+    z : f32 = xx (x + y);
+
+    typeof(foo(xx z));
+    typeof(z);
+    print("%", z);
 }
 

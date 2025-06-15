@@ -44,6 +44,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_DOUBLE_DOT:    return "DOUBLE_DOT";
         case TOKEN_TRIPLE_DOT:    return "TRIPLE_DOT";
         case TOKEN_IN:            return "IN";
+        case TOKEN_XX:            return "XX";
         case TOKEN_LOGICAL_OR:    return "LOGICAL_OR";
         case TOKEN_LOGICAL_AND:   return "LOGICAL_AND";
         case TOKEN_LESS_EQUAL:    return "LESS_EQUAL";
@@ -63,6 +64,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_FOR:           return "FOR";
         case TOKEN_IF:            return "IF";
         case TOKEN_ELSE:          return "ELSE";
+        case TOKEN_CAST:          return "CAST";
         case TOKEN_TYPE_INT:      return "TYPE_INT";
         case TOKEN_TYPE_U8:       return "TYPE_U8";
         case TOKEN_TYPE_U16:      return "TYPE_U16";
@@ -179,21 +181,6 @@ bool lex(Lexer *lexer) {
             }
         }
 
-        if (starts_identifier(c)) {
-            Pos pos_start = get_current_position(lexer);
-            eat_character(lexer);
-
-            char next = peek_next_char(lexer);
-            while (proceeds_identifier(next)) {
-                eat_character(lexer);
-                next = peek_next_char(lexer);
-            }
-
-            make_identifier(lexer, pos_start);
-
-            continue;
-        }
-
         {
             // Triple character tokens
             TokenType token = is_triple_character_token(lexer);
@@ -219,6 +206,21 @@ bool lex(Lexer *lexer) {
         if (is_single_character_token(c)) {
             eat_character(lexer);
             make_single_character_token(lexer, (TokenType)(c));
+            continue;
+        }
+
+        if (starts_identifier(c)) {
+            Pos pos_start = get_current_position(lexer);
+            eat_character(lexer);
+
+            char next = peek_next_char(lexer);
+            while (proceeds_identifier(next)) {
+                eat_character(lexer);
+                next = peek_next_char(lexer);
+            }
+
+            make_identifier(lexer, pos_start);
+
             continue;
         }
 
@@ -301,6 +303,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "true") == 0) token = TOKEN_TRUE;
         if (strcmp(text, "else") == 0) token = TOKEN_ELSE;
         if (strcmp(text, "enum") == 0) token = TOKEN_ENUM;
+        if (strcmp(text, "cast") == 0) token = TOKEN_CAST;
     }
     if (keyword_len == 5) {
         if (strcmp(text, "float") == 0) token = TOKEN_TYPE_FLOAT;
@@ -550,6 +553,7 @@ TokenType is_double_character_token(Lexer *lexer) {
     if (c == '-' && next == '=') return TOKEN_MINUS_EQUAL;
     if (c == '*' && next == '=') return TOKEN_TIMES_EQUAL;
     if (c == '/' && next == '=') return TOKEN_DIVIDE_EQUAL;
+    if (c == 'x' && next == 'x') return TOKEN_XX;
 
     return (TokenType)(0);
 }

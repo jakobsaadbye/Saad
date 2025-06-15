@@ -9,18 +9,18 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   C_PI DD 3.141593
-   C_TAU DD 6.283186
-   CS0 DB `sin(%lf)=%f`, 10, 0 
+   __DogKind.samoid DB ".samoid", 0
+   __DogKind.chiwawa DB ".chiwawa", 0
+   __DogKind.bulldog DB ".bulldog", 0
+   CF0 DD 20.0000000
+   CF1 DD 0.5000000
+   CF2 DD 80.0000000
 segment .text
    global main
    extern printf
    extern sprintf
    extern ExitProcess
    extern malloc
-   extern sin
-   extern cos
-   extern floor
 
 
 assert:
@@ -33,40 +33,122 @@ assert_fail:
    mov		rcx, 1
    call		ExitProcess
 
+get_enum_string_DogKind:
+   mov		r8, 0
+   cmp		rdx, r8
+   jz			enum_case_0
+   mov		r8, 1
+   cmp		rdx, r8
+   jz			enum_case_1
+   mov		r8, 2
+   cmp		rdx, r8
+   jz			enum_case_2
+   push		rcx
+   mov		r8, rdx
+   mov		rdx, fmt_int
+   push		r8
+   push		rdx
+   push		rcx
+   call		sprintf
+   pop		rax
+   pop		rbx
+   pop		rbx
+   pop		rbx
+   ret
+enum_case_0:
+   mov		rax, __DogKind.samoid
+   ret
+enum_case_1:
+   mov		rax, __DogKind.chiwawa
+   ret
+enum_case_2:
+   mov		rax, __DogKind.bulldog
+   ret
 
-; bytes total    : 0
+; bytes total    : 20
 ; bytes arguments: 0
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 32
+   sub		rsp, 64
 
-   ; expression of print
-   movss		xmm0, [C_PI]
+   ; initialization of 'samoid'
+   mov		DWORD -16[rbp], 0
+   mov		DWORD -12[rbp], 0
+   mov		DWORD -8[rbp], 0
+   mov		DWORD -4[rbp], 0
+   push		0
+   pop		rax
+   mov		DWORD -16[rbp], eax
+   mov		rax, 4
+   push		rax
+   pop		rax
+   mov		DWORD -12[rbp], eax
+   movss		xmm0, [CF0]
    movd		eax, xmm0
    push		rax
    pop		rax
-   movd		xmm0, eax
-   cvtss2sd	xmm0, xmm0
-   call		sin
-   movq		rax, xmm0
-   push		rax
-   movss		xmm0, [C_PI]
+   mov		-8[rbp], eax
+   movss		xmm0, [CF1]
    movd		eax, xmm0
    push		rax
    pop		rax
+   mov		-4[rbp], eax
+
+   ; initialization of 'bmi'
+   mov		DWORD -20[rbp], 0
+   mov		eax, -8[rbp]
+   push		rax
+   mov		eax, -4[rbp]
+   push		rax
+   mov		eax, -4[rbp]
+   push		rax
+   pop		rbx
+   pop		rax
+   movd		xmm1, ebx
    movd		xmm0, eax
-   cvtss2sd	xmm0, xmm0
-   movq		rax, xmm0
+   mulss		xmm0, xmm1
+   movd		eax, xmm0
+   push		rax
+   pop		rbx
+   pop		rax
+   movd		xmm1, ebx
+   movd		xmm0, eax
+   divss		xmm0, xmm1
+   movd		eax, xmm0
    push		rax
    pop		rax
-   mov		r8, rax
+   mov		-20[rbp], eax
+   mov		eax, -20[rbp]
+   push		rax
+   movss		xmm0, [CF2]
+   movd		eax, xmm0
+   push		rax
+   pop		rbx
    pop		rax
-   mov		rdx, rax
-   mov		rcx, CS0
-   call		printf
-L0:
+   movd		xmm1, ebx
+   movd		xmm0, eax
+   comiss	xmm0, xmm1
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 23
+   call		assert
+   mov		eax, DWORD -12[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 4
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 24
+   call		assert
+L4:
    mov		rax, 0
-   add		rsp, 32
+   add		rsp, 64
    pop		rbp
    ret

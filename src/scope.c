@@ -52,7 +52,7 @@ bool is_a_before_b (Ast *a, Ast *b) {
 }
 
 bool is_declared_before_used(Ast *declared_at, Ast *used_at) {
-    if (used_at && used_at->type != AST_ERR) {
+    if (used_at && used_at->kind != AST_ERR) {
         if (is_a_before_b(used_at, declared_at)) {
             return false;
         }
