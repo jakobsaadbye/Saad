@@ -71,15 +71,21 @@ const char *REG_D(Type *type);
 #define RBX "rbx"
 #define RCX "rcx"
 #define RDX "rdx"
+#define R8  "r8"
+#define R9  "r9"
+#define RBP "rbp"
+#define RSP "rsp"
 
 #define PUSH(reg)                                \
     sb_append(&cg->code, "   push\t\t"reg"\n");  \
     cg->num_pushed_arguments += 1                \
-
+    
 #define POP(reg)                                 \
     sb_append(&cg->code, "   pop\t\t"reg"\n");   \
     cg->num_pushed_arguments -= 1                \
-
+    
+#define INCR_PUSH_COUNT()                        \
+    cg->num_pushed_arguments += 1                \
 
 
 CodeGenerator code_generator_init(Parser *parser) {
@@ -246,21 +252,21 @@ void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
     }
 
     // Case integer value
-    sb_append(&cg->code, "   push\t\trcx\n");
+    PUSH(RCX);
     sb_append(&cg->code, "   mov\t\tr8, rdx\n");
     sb_append(&cg->code, "   mov\t\trdx, fmt_int\n");
 
-    sb_append(&cg->code, "   push\t\tr8\n");
-    sb_append(&cg->code, "   push\t\trdx\n");
-    sb_append(&cg->code, "   push\t\trcx\n");
+    PUSH(R8);
+    PUSH(RDX);
+    PUSH(RCX);
 
     sb_append(&cg->code, "   call\t\tsprintf\n"); // @Note - For some reason sprintf reads its arguments from the stack instead of in rcx, rdx ... ??? Say what
 
-    sb_append(&cg->code, "   pop\t\trax\n");
+    POP(RAX);
 
-    sb_append(&cg->code, "   pop\t\trbx\n");
-    sb_append(&cg->code, "   pop\t\trbx\n");
-    sb_append(&cg->code, "   pop\t\trbx\n");
+    POP(RBX);
+    POP(RBX);
+    POP(RBX);
 
     sb_append(&cg->code, "   ret\n");
 
@@ -346,7 +352,7 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     }
 
     if (assign->lhs->evaluated_type->kind == TYPE_INTEGER) {
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         switch (assign->op) {
         case ASSIGN_PLUS_EQUAL:  sb_append(&cg->code, "   add\t\t%s, eax\n", address_str); break;
         case ASSIGN_MINUS_EQUAL: sb_append(&cg->code, "   sub\t\t%s, eax\n", address_str); break;
@@ -373,7 +379,7 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
         Type *lhs_type = assign->lhs->evaluated_type;
         Type *rhs_type = assign->expr->evaluated_type;
 
-        sb_append(&cg->code, "   pop\t\trbx\n");
+        POP(RBX);
         if (rhs_type->kind == TYPE_INTEGER) {
             sb_append(&cg->code, "   %s\txmm1, rbx\n", cvtsi2ss_or_cvtsi2sd(lhs_type));
         } else {
@@ -435,8 +441,8 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         emit_expression(cg, range->start);
         emit_expression(cg, range->end);
 
-        sb_append(&cg->code, "   pop\t\trbx\n");
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RBX);
+        POP(RAX);
         sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", offset_start);
         sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", offset_end);
 
@@ -483,8 +489,8 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         emit_expression(cg, iterable);
 
         sb_append(&cg->code, "   ; For-loop\n");
-        sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   pop\t\trbx\n");
+        POP(RAX);
+        POP(RBX);
         sb_append(&cg->code, "   mov\t\t%d[rbp], rax     ; data\n", offset_data);
         sb_append(&cg->code, "   mov\t\t%d[rbp], rbx     ; count\n", offset_count);
         sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0 ; index\n", offset_index);
@@ -539,21 +545,21 @@ void emit_pop_r_value(CodeGenerator *cg, Type *type) {
     case TYPE_INTEGER:
     case TYPE_ENUM:
     case TYPE_STRING: {
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         return;
     }
     case TYPE_FLOAT: {
         // @Incomplete - Missing int to float conversion
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         return;
     }
     case TYPE_POINTER: {
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         return;
     }
     case TYPE_ARRAY: {
-        sb_append(&cg->code, "   pop\t\trax\n"); // data
-        sb_append(&cg->code, "   pop\t\trcx\n"); // count
+        POP(RAX); // data
+        POP(RCX); // count
         return;
     }
     default:
@@ -576,7 +582,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "; bytes total    : %d\n", bytes_allocated);
     sb_append(&cg->code, "; bytes arguments: %d\n", bytes_args);
     sb_append(&cg->code, "%s:\n", func_defn->identifier->name);
-    sb_append(&cg->code, "   push\t\trbp\n");
+    PUSH(RBP);
     sb_append(&cg->code, "   mov\t\trbp, rsp\n");
 
     bytes_allocated += 32; // shadow space required by msvc
@@ -603,7 +609,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "L%d:\n", return_label);
     emit_pop_r_value(cg, func_defn->return_type);
     if (bytes_allocated) sb_append(&cg->code, "   add\t\trsp, %d\n", aligned_allocated);
-    sb_append(&cg->code, "   pop\t\trbp\n");
+    POP(RBP);
     sb_append(&cg->code, "   ret\n");
 }
 
@@ -622,6 +628,8 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
         AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
         Type    *arg_type = arg->evaluated_type;
 
+        POP(RAX);
+
         char *reg = NULL;
         if (arg_type->kind == TYPE_INTEGER) {
             if (i == 0) reg = "rcx";
@@ -630,7 +638,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
             if (i == 3) reg = "r9";
             if (i > 3) XXX;
 
-            sb_append(&cg->code, "   pop\t\t%s\n", reg);
+            sb_append(&cg->code, "   mov\t\t%s, rax\n", reg);
         }
         else if (arg_type->kind == TYPE_FLOAT) {
             if (i == 0) reg = "xmm0";
@@ -638,8 +646,6 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
             if (i == 2) reg = "xmm2";
             if (i == 3) reg = "xmm3";
             if (i > 3) XXX;
-
-            sb_append(&cg->code, "   pop\t\trax\n");
 
             if (arg_type->size == 4) {
                 sb_append(&cg->code, "   movd\t\txmm0, eax\n");
@@ -658,6 +664,8 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     // pushed arguments.
     bool align_stack = false;
     if (cg->num_pushed_arguments % 2 == 1) align_stack = true;
+
+    printf("push count = %d\n", cg->num_pushed_arguments);
 
     if (align_stack) sb_append(&cg->code, "   sub\t\trsp, 8\n");
     sb_append(&cg->code, "   call\t\t%s\n", call->identifer->name);
@@ -684,7 +692,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
     if (ast_if->else_ifs.count > 0)  first_else_if_label = make_label_number(cg);
     if (ast_if->else_block)          else_label          = make_label_number(cg);
 
-    sb_append(&cg->code, "   pop\t\trax\n");
+    POP(RAX);
     sb_append(&cg->code, "   cmp\t\tal, 0\n");
 
     if (first_else_if_label != -1) {
@@ -708,7 +716,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
 
         emit_expression(cg, else_if->condition);
 
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         sb_append(&cg->code, "   cmp\t\tal, 0\n");
 
         bool more_else_ifs_to_come = i + 1 < ast_if->else_ifs.count;
@@ -742,7 +750,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
 void emit_assert(CodeGenerator *cg, AstAssert *assertion) {
     emit_expression(cg, assertion->expr);
 
-    sb_append(&cg->code, "   pop\t\trcx\n");
+    POP(RCX);
     sb_append(&cg->code, "   mov\t\trdx, %d\n", assertion->head.start.line);
     sb_append(&cg->code, "   call\t\tassert\n");
 }
@@ -833,11 +841,11 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
     switch (arg_type->kind) {
     case TYPE_FLOAT: {
         if (arg_type->size == 4) {
-            sb_append(&cg->code, "   pop\t\trax\n");
+            POP(RAX);
             sb_append(&cg->code, "   movd\t\txmm0, eax\n");
             sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
             sb_append(&cg->code, "   movq\t\trax, xmm0\n");
-            sb_append(&cg->code, "   push\t\trax\n");
+            PUSH(RAX);
         } else if (arg_type->size == 8) {
             // Already aligned
         }
@@ -846,7 +854,7 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
     case TYPE_BOOL: {
         int true_label        = make_label_number(cg);
         int fallthrough_label = make_label_number(cg);
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         sb_append(&cg->code, "   cmp\t\tal, 0\n");
         sb_append(&cg->code, "   jnz\t\tL%d\n", true_label);
         sb_append(&cg->code, "   mov\t\trax, string_false\n");
@@ -854,22 +862,22 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
         sb_append(&cg->code, "L%d:\n", true_label);
         sb_append(&cg->code, "   mov\t\trax, string_true\n");
         sb_append(&cg->code, "L%d:\n", fallthrough_label);
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
         break;
     }
     case TYPE_ENUM: {
         int buffer_index = *num_enum_arguments;
-        sb_append(&cg->code, "   pop\t\trdx\n"); // enum integer value
+        POP(RDX); // enum integer value
         sb_append(&cg->code, "   mov\t\trcx, enum_buffer_%d\n", buffer_index);
         sb_append(&cg->code, "   call\t\tget_enum_string_%s\n", ((TypeEnum *)(arg_type))->identifier->name);
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
         *num_enum_arguments += 1;
         break;
     }
     case TYPE_STRUCT: {
         // @NOTE - register r9 needs to be kept safe during the printout of the structure
         if (struct_depth == 0) {
-            sb_append(&cg->code, "   pop\t\tr9\n");
+            POP(R9);
         }
 
         AstStruct *struct_ = ((TypeStruct *)arg_type)->node;
@@ -908,7 +916,7 @@ void pop_struct_members_from_print(CodeGenerator *cg, AstStruct *struct_, int *c
             AstStruct *nested_struct = ((TypeStruct *)member->type)->node;
             pop_struct_members_from_print(cg, nested_struct, c_arg_index, c_args);
         } else {
-            sb_append(&cg->code, "   pop\t\trax\n");
+            POP(RAX);
             move_argument_to_register_or_stack(cg, *c_arg_index, c_args);
             *c_arg_index -= 1;
         }
@@ -962,14 +970,14 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
             case TYPE_STRING:
             case TYPE_ENUM:
             case TYPE_POINTER: {
-                sb_append(&cg->code, "   pop\t\trax\n");
+                POP(RAX);
                 move_argument_to_register_or_stack(cg, c_arg_index, c_args);
                 c_arg_index -= 1;
                 break;
             }
             case TYPE_ARRAY: {
-                sb_append(&cg->code, "   pop\t\trax\n");
-                sb_append(&cg->code, "   pop\t\trbx\n"); // Don't use the length for anything
+                POP(RAX);
+                POP(RBX); // Don't use the length for anything
                 move_argument_to_register_or_stack(cg, c_arg_index, c_args);
                 c_arg_index -= 1;
                 break;
@@ -1056,17 +1064,17 @@ void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is
 
     switch (lhs_type->kind) {
     case TYPE_BOOL: {
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         sb_append(&cg->code, "   mov\t\tBYTE %s, al\n", address_str);
         return;
     }
     case TYPE_INTEGER: {
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         sb_append(&cg->code, "   mov\t\t%s %s, %s\n", WIDTH(lhs_type), address_str, REG_A(lhs_type));
         return;
     }
     case TYPE_FLOAT: {
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         if (rhs_type->kind == TYPE_INTEGER) {
             // @Note - I feel like this conversion from int to float should be dealt with at the typing level instead of here. 
             // One idea is to just change it at the check_delcarartion level. If we have a float on the left and an integer on the right, just change the right hand side type to be integer
@@ -1093,18 +1101,18 @@ void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is
         return;
     }
     case TYPE_STRING: {
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         sb_append(&cg->code, "   mov\t\tQWORD %s, rax\n", address_str);
         return;
     }
     case TYPE_ENUM: {
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         sb_append(&cg->code, "   mov\t\tDWORD %s, eax\n", address_str);
         return;
     }
     case TYPE_POINTER: {
         if (rhs_type->kind == TYPE_POINTER) {
-            sb_append(&cg->code, "   pop\t\trax\n");
+            POP(RAX);
             sb_append(&cg->code, "   mov\t\tQWORD %s, rax\n", address_str);
         } else {
             // Follow the pointer to get the base address
@@ -1118,8 +1126,8 @@ void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is
         return;
     }
     case TYPE_ARRAY: {
-        sb_append(&cg->code, "   pop\t\trax\n"); // data
-        sb_append(&cg->code, "   pop\t\trcx\n"); // count
+        POP(RAX); // data
+        POP(RCX); // count
         if (dest_is_runtime_computed) {
             sb_append(&cg->code, "   mov\t\tQWORD [rbx], rax\n");
             sb_append(&cg->code, "   mov\t\tQWORD [rbx + 8], rax\n");
@@ -1252,8 +1260,8 @@ void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
 
     // Integer case
     if (l_kind == TYPE_INTEGER && r_kind == TYPE_INTEGER) {
-        sb_append(&cg->code, "   pop\t\trbx\n");
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RBX);
+        POP(RAX);
         if      (bin->operator == '+') sb_append(&cg->code, "   add\t\trax, rbx\n");
         else if (bin->operator == '-') sb_append(&cg->code, "   sub\t\trax, rbx\n");
         else if (bin->operator == '*') sb_append(&cg->code, "   imul\t\trax, rbx\n");
@@ -1262,7 +1270,7 @@ void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
             sb_append(&cg->code, "   idiv\t\trbx\n");
         } else exit(1); // Should not happen
 
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
         return;
     }
 
@@ -1304,7 +1312,7 @@ void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
         } else {
             sb_append(&cg->code, "   movd\t\teax, xmm0\n");
         }
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
 
         return;
     }
@@ -1331,11 +1339,11 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
     emit_expression(cg, bin->right);
 
     if (l_kind == TYPE_INTEGER && r_kind == TYPE_INTEGER) {
-        sb_append(&cg->code, "   pop\t\trbx\n");
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RBX);
+        POP(RAX);
         sb_append(&cg->code, "   cmp\t\trax, rbx\n");
         sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
 
         return;
     }
@@ -1347,25 +1355,25 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
 
         sb_append(&cg->code, "   comiss\txmm0, xmm1\n");
         sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
 
         return;
     }
     if (l_kind == TYPE_POINTER && r_kind == TYPE_POINTER) {
-        sb_append(&cg->code, "   pop\t\trbx\n");
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RBX);
+        POP(RAX);
         sb_append(&cg->code, "   cmp\t\trax, rbx\n");
         sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
         return;
     }
 
     if (l_kind == TYPE_BOOL && r_kind == TYPE_BOOL) {
-        sb_append(&cg->code, "   pop\t\trbx\n");
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RBX);
+        POP(RAX);
         sb_append(&cg->code, "   cmp\t\tal, bl\n");
         sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
         return;
     }
 
@@ -1375,19 +1383,19 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
 
 void emit_integer_to_float_conversion(CodeGenerator *cg, Type *l_type, Type *r_type) {
     if (l_type->kind == TYPE_FLOAT && r_type->kind == TYPE_INTEGER) {
-        sb_append(&cg->code, "   pop\t\trbx\n");
+        POP(RBX);
         sb_append(&cg->code, "   %s\txmm1, %s\n", cvtsi2ss_or_cvtsi2sd(l_type), REG_B(l_type));
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         sb_append(&cg->code, "   %s\t\txmm0, %s\n", movd_or_movq(l_type), REG_A(l_type));
     }
     else if (l_type->kind == TYPE_INTEGER && r_type->kind == TYPE_FLOAT) {
-        sb_append(&cg->code, "   pop\t\trbx\n");
+        POP(RBX);
         sb_append(&cg->code, "   %s\t\txmm1, %s\n", movd_or_movq(r_type), REG_B(r_type));
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         sb_append(&cg->code, "   %s\txmm0, %s\n", cvtsi2ss_or_cvtsi2sd(r_type), REG_A(r_type));
     } else {
-        sb_append(&cg->code, "   pop\t\trbx\n");
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RBX);
+        POP(RAX);
         sb_append(&cg->code, "   %s\t\txmm1, %s\n", movd_or_movq(r_type), REG_B(r_type));
         sb_append(&cg->code, "   %s\t\txmm0, %s\n", movd_or_movq(r_type), REG_A(r_type));
     }
@@ -1401,10 +1409,10 @@ void emit_boolean_operator(CodeGenerator *cg, AstBinary *bin) {
 
     const char *bool_instruction = boolean_operator_to_instruction(bin->operator);
     sb_append(&cg->code, "\n");
-    sb_append(&cg->code, "   pop\t\trbx\n");
-    sb_append(&cg->code, "   pop\t\trax\n");
+    POP(RBX);
+    POP(RAX);
     sb_append(&cg->code, "   %s\t\tal, bl\n", bool_instruction);
-    sb_append(&cg->code, "   push\t\trax\n");
+    PUSH(RAX);
 }
 
 const char *comparison_operator_to_set_instruction(TokenType op) {
@@ -1439,9 +1447,9 @@ void emit_array_access_offset(CodeGenerator *cg, AstArrayAccess *array_ac) {
     while (true) {
 
         emit_expression(cg, current->subscript);
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
         sb_append(&cg->code, "   imul\t\trax, %d\n", current->head.evaluated_type->size);
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
 
         if (current->accessing->head.type == AST_ARRAY_ACCESS) {
             current = (AstArrayAccess *)(current->accessing);
@@ -1452,12 +1460,12 @@ void emit_array_access_offset(CodeGenerator *cg, AstArrayAccess *array_ac) {
 
     current = array_ac;
     while (true) {
-        sb_append(&cg->code, "   pop\t\trax\n");
+        POP(RAX);
 
         if (current->accessing->head.type == AST_ARRAY_ACCESS) {
-            sb_append(&cg->code, "   pop\t\trbx\n");
+            POP(RBX);
             sb_append(&cg->code, "   add\t\trax, rbx\n");
-            sb_append(&cg->code, "   push\t\trax\n");
+            PUSH(RAX);
 
             current = (AstArrayAccess *)(current->accessing);
         } else {
@@ -1646,7 +1654,7 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
     case TYPE_STRING:
     case TYPE_ENUM: {
         sb_append(&cg->code, "   mov\t\t%s, %s %s\n", REG_A(src_type), WIDTH(src_type), src);
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
         return;
     }
     case TYPE_INTEGER: {
@@ -1654,33 +1662,33 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         if (is_signed_integer(src_type) && src_type->size != 8) {
             sb_append(&cg->code, "   movsx\t\trax, %s\n", REG_A(src_type));
         }
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
         return;
     }
     case TYPE_FLOAT: {
         sb_append(&cg->code, "   mov\t\t%s, %s\n", REG_A(src_type), src);
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
         return;
     }
     case TYPE_POINTER: {
         if (lvalue) {
-            sb_append(&cg->code, "   push\t\trax\n");
+            PUSH(RAX);
         } else {
             sb_append(&cg->code, "   mov\t\trax, %s\n", src);
-            sb_append(&cg->code, "   push\t\trax\n");
+            PUSH(RAX);
         }
         return;
     }
     case TYPE_ARRAY: {
         sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", src_offset);
         sb_append(&cg->code, "   mov\t\trbx, QWORD %d[rbp]\n", src_offset + 8);
-        sb_append(&cg->code, "   push\t\trbx\n");
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RBX);
+        PUSH(RAX);
         return;
     }
     case TYPE_STRUCT: {
         sb_append(&cg->code, "   lea\t\trax, %s\n", src);
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
         return;
     }
     default:
@@ -1715,7 +1723,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         AstUnary *unary = (AstUnary *)(expr);
         if (unary->operator == OP_NOT) {
             emit_expression(cg, unary->expr);
-            sb_append(&cg->code, "   pop\t\trax\n");
+            POP(RAX);
 
             if (unary->expr->evaluated_type->kind == TYPE_BOOL) {
                 sb_append(&cg->code, "   not\t\trax\n");
@@ -1729,14 +1737,14 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 exit(1);
             }
 
-            sb_append(&cg->code, "   push\t\trax\n");
+            PUSH(RAX);
             return;
         }
         if (unary->operator == OP_UNARY_MINUS) {
             emit_expression(cg, unary->expr);
-            sb_append(&cg->code, "   pop\t\trax\n");
+            POP(RAX);
             sb_append(&cg->code, "   neg\t\trax\n");
-            sb_append(&cg->code, "   push\t\trax\n");
+            PUSH(RAX);
             return;
         }
         if (unary->operator == OP_ADDRESS_OF) {
@@ -1745,21 +1753,21 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 assert(ident);
 
                 sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", ident->stack_offset);
-                sb_append(&cg->code, "   push\t\trax\n");
+                PUSH(RAX);
                 return;
             }
             else if (unary->expr->head.type == AST_ARRAY_ACCESS) {
                 emit_array_access(cg, (AstArrayAccess *)(unary->expr), true);
-                sb_append(&cg->code, "   push\t\trbx\n");
+                PUSH(RBX);
                 return;
             }
             else if (unary->expr->head.type == AST_MEMBER_ACCESS) {
                 MemberAccessResult result = emit_member_access(cg, (AstMemberAccess *)unary->expr);
                 if (result.is_runtime_computed) {
-                    sb_append(&cg->code, "   push\t\trbx\n");
+                    PUSH(RBX);
                 } else {
                     sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", result.base_offset);
-                    sb_append(&cg->code, "   push\t\trbx\n");
+                    PUSH(RBX);
                 }
                 return;
             } else {
@@ -1770,7 +1778,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             emit_expression(cg, unary->expr);
 
             Type *dereferenced_type = unary->head.evaluated_type;
-            sb_append(&cg->code, "   pop\t\trbx\n");
+            POP(RBX);
 
             emit_move_and_push(cg, 0, true, dereferenced_type, false);
 
@@ -1799,6 +1807,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             emit_move_and_push(cg, result.base_offset, result.is_runtime_computed, member->type, false);
         } else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
             sb_append(&cg->code, "   push\t\t%d\n", ma->enum_member->value);
+            INCR_PUSH_COUNT();
             return;
         }
 
@@ -1807,13 +1816,15 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     case AST_ENUM_LITERAL : {
         AstEnumLiteral *elit = (AstEnumLiteral *)(expr);
         sb_append(&cg->code, "   push\t\t%d\n", elit->enum_member->value);
+        INCR_PUSH_COUNT();
         return;
     }
     case AST_ARRAY_LITERAL : {
         AstArrayLiteral *array_lit = (AstArrayLiteral *)(expr);
         sb_append(&cg->code, "   push\t\t%d\n", array_lit->expressions.count);
+        INCR_PUSH_COUNT();
         sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", array_lit->base_offset);
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
         break;
     }
     case AST_LITERAL: {
@@ -1821,7 +1832,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         switch (lit->kind) {
         case LITERAL_INTEGER: {
             sb_append(&cg->code, "   mov\t\trax, %llu\n", lit->as.value.integer); // @Incomplete - Need to check if signed or unsigned!!!
-            sb_append(&cg->code, "   push\t\trax\n");
+            PUSH(RAX);
             return;
         }
         case LITERAL_FLOAT: {
@@ -1829,13 +1840,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 sb_append(&cg->data, "   CF%d DD %.7lf\n", cg->constants, lit->as.value.floating);
                 sb_append(&cg->code, "   movss\t\txmm0, [CF%d]\n", cg->constants);
                 sb_append(&cg->code, "   movd\t\teax, xmm0\n");
-                sb_append(&cg->code, "   push\t\trax\n");
+                PUSH(RAX);
                 cg->constants++;
             } else if (lit->head.evaluated_type->size == 8) {
                 sb_append(&cg->data, "   CF%d DQ %.15lf\n", cg->constants, lit->as.value.floating);
                 sb_append(&cg->code, "   movsd\t\txmm0, [CF%d]\n", cg->constants);
                 sb_append(&cg->code, "   movq\t\trax, xmm0\n");
-                sb_append(&cg->code, "   push\t\trax\n");
+                PUSH(RAX);
                 cg->constants++;
             } else XXX;
             return;
@@ -1843,16 +1854,17 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         case LITERAL_STRING: {
             sb_append(&cg->data, "   CS%d DB \"%s\", 0 \n", cg->constants, lit->as.value.string.data);
             sb_append(&cg->code, "   mov\t\trax, CS%d\n", cg->constants);
-            sb_append(&cg->code, "   push\t\trax\n", cg->constants);
+            PUSH(RAX);
             cg->constants++;
             return;
         }
         case LITERAL_BOOLEAN: {
             sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);
+            INCR_PUSH_COUNT();
             return;
         }
         case LITERAL_NIL: {
-            sb_append(&cg->code, "   push\t\t0\n");
+            PUSH("0");
             return;
         }
         case LITERAL_IDENTIFIER: {
@@ -1865,27 +1877,29 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 switch (lit->kind) {
                     case LITERAL_BOOLEAN: {
                         sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);
+                        INCR_PUSH_COUNT();
                         return;
                     }
                     case LITERAL_INTEGER: {
                         sb_append(&cg->code, "   push\t\t%lld\n", lit->as.value.integer);
+                        INCR_PUSH_COUNT();
                         return;
                     }
                     case LITERAL_FLOAT: {
                         if (lit->head.evaluated_type->size == 4) {
                             sb_append(&cg->code, "   movss\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant @Cleanup - Should the identifier name really be used as the constant name??? Not good if we have the same identifier name in two seperate blocks inside same function!
                             sb_append(&cg->code, "   movd\t\teax, xmm0\n");
-                            sb_append(&cg->code, "   push\t\trax\n");
+                            PUSH(RAX);
                         } else if (lit->head.evaluated_type->size == 8) {
                             sb_append(&cg->code, "   movsd\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant
                             sb_append(&cg->code, "   movq\t\trax, xmm0\n");
-                            sb_append(&cg->code, "   push\t\trax\n");
+                            PUSH(RAX);
                         } else XXX;
                         return;
                     }
                     case LITERAL_STRING: {
                         sb_append(&cg->code, "   mov\t\trax, C_%s\n", ident->name); // :IdentifierNameAsConstant @Cleanup
-                        sb_append(&cg->code, "   push\t\trax");
+                        PUSH(RAX);
                         return;
                     }
                     case LITERAL_NIL: XXX;

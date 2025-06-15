@@ -11,7 +11,7 @@ segment .data
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
    C_PI DD 3.141593
    C_TAU DD 6.283186
-   CS0 DB `sin(%f)=%lf`, 10, 0 
+   CS0 DB `sin(%lf)=%f`, 10, 0 
 segment .text
    global main
    extern printf
@@ -48,6 +48,7 @@ main:
    pop		rax
    movd		xmm0, eax
    cvtss2sd	xmm0, xmm0
+   call		sin
    movq		rax, xmm0
    push		rax
    movss		xmm0, [C_PI]
@@ -56,7 +57,6 @@ main:
    pop		rax
    movd		xmm0, eax
    cvtss2sd	xmm0, xmm0
-   call		sin
    movq		rax, xmm0
    push		rax
    pop		rax

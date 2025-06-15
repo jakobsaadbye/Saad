@@ -27,12 +27,12 @@ Car :: struct {
 main :: () {
     bugatti := Car{
         doors = 4,
-        max_speed = 320,
+        max_speed = 320.0,
         engine = {
             type = DEFAULT_ENGINE_TYPE,
             fuel = .gasoline,
             cylinders = 8,
-            capacity = 30
+            capacity = 30.0
         }
     };
 

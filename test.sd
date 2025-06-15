@@ -6,6 +6,6 @@ PI  :: 3.1415929;
 TAU :: PI * 2;
 
 main :: () {
-    print("sin(%)=%", PI, sin(PI));
+    print("sin(%)=%", sin(PI), PI);
 }
 

@@ -280,14 +280,12 @@ bool types_are_equal(Type *lhs, Type *rhs) {
     assert(!(lhs->kind == TYPE_NAME || rhs->kind == TYPE_NAME)); // Type slots should have been resolved at this point
 
     if (is_primitive_type(lhs->kind) && is_primitive_type(rhs->kind)) {
-        return lhs->kind == rhs->kind;
-
         // @Incomplete - I think we only want constants that are untyped integers to implicitly convert
-        // and not any integer type. E.g passing a variable declared as an int to a function accepting a float
+        // and not any integer type. E.g passing a variable declared as an int to a function accepting a float should fail
         //
         // Allow int to float implicit casting
-        // if (lhs->kind == TYPE_FLOAT && rhs->kind == TYPE_INTEGER) return true;
-        // else return lhs->kind == rhs->kind;
+        if (lhs->kind == TYPE_FLOAT && rhs->kind == TYPE_INTEGER) return true;
+        else return lhs->kind == rhs->kind;
     } else if (lhs->kind == TYPE_ENUM && rhs->kind == TYPE_INTEGER) {
         return true;
     } else if ((lhs->kind == TYPE_STRUCT && rhs->kind == TYPE_STRUCT) || (lhs->kind == TYPE_ENUM   && rhs->kind == TYPE_ENUM)) {
