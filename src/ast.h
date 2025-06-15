@@ -28,6 +28,7 @@ typedef enum AstType {
     AST_FUNCTION_CALL,
     AST_DECLARATION,
     AST_ASSIGNMENT,
+    AST_DIRECTIVE,
     AST_PRINT,
     AST_ASSERT,
     AST_TYPEOF,
@@ -147,6 +148,30 @@ typedef struct AstAssignment {
     AstExpr  *expr;
 } AstAssignment;
 
+
+typedef enum DirectiveKind {
+    DIRECTIVE_INVALID,
+    DIRECTIVE_IMPORT,
+    DIRECTIVE_EXTERN,
+} DirectiveKind;
+
+extern const char *directive_names[];
+
+typedef enum Abi {
+    ABI_INVALID,
+    ABI_C,
+} Abi;
+
+typedef struct AstDirective {
+    Ast           head;
+    DirectiveKind kind;
+
+    union {
+        char      *import_name;
+        Abi        extern_abi;
+    };
+} AstDirective;
+
 typedef enum BlockKind {
     BLOCK_INVALID,
     BLOCK_IMPERATIVE,
@@ -218,6 +243,8 @@ typedef struct AstFunctionDefn {
     int num_bytes_args;  // Number of bytes allocated from passing arguments to functions
     
     int return_label;
+
+    bool is_extern;
 } AstFunctionDefn;
 
 typedef struct AstFunctionCall {
@@ -387,6 +414,7 @@ static const char *ast_to_str(Ast *ast) {
     case AST_BLOCK:              return "AST_BLOCK";
     case AST_DECLARATION:        return "AST_DECLARATION";
     case AST_ASSIGNMENT:         return "AST_ASSIGNMENT";
+    case AST_DIRECTIVE:          return "AST_DIRECTIVE";
     case AST_PRINT:              return "AST_PRINT";
     case AST_ASSERT:             return "AST_ASSERT";
     case AST_TYPEOF:             return "AST_TYPEOF";

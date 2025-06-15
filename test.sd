@@ -1,47 +1,11 @@
-Fruit :: enum {
-    mango,
-    kiwi,
-}
+sin   :: (angle: f64) -> f64 #extern "C"
+cos   :: (angle: f64) -> f64 #extern "C"
+floor :: (value: f64) -> f64 #extern "C"
 
-Store :: struct {
-    name    : string;
-    address : string;
-    id      : int;
-    id1      : int;
-    id2      : int;
-    fruit_of_the_month : Fruit;
-}
-
-Blender :: struct {
-    preferred_fruit : Fruit;
-    blades          : int;
-    manufacturer    : Store;
-}
-
-
-Vector2 :: struct {
-    x : float;
-    y : float;
-}
-
-Quaternion :: struct {
-    x : float;
-    y : float;
-    z : float;
-    w : float;
-}
+PI  :: 3.1415929;
+TAU :: PI * 2;
 
 main :: () {
-    a : []Vector2 = [
-        { 1, 2 },
-        { 2, 3 },
-        { 3, 4 },
-        { 4, 5 },
-    ];
-
-    b := Vector2{4, 9};
-
-    for a {
-        print("%", it);
-    }
+    print("sin(%)=%", PI, sin(PI));
 }
+

@@ -4,6 +4,7 @@ typedef struct CodeGenerator {
     StringBuilder head;     // Declaring bit target and other misc stuff
     StringBuilder data;     // Corresponding to section .data
     StringBuilder code;     // Corresponding to section .text
+    StringBuilder code_header;  // Header of externs, globals etc within the .text section
 
     Parser *parser;
 
@@ -17,6 +18,7 @@ typedef struct CodeGenerator {
     size_t labels;      // For coditional jumps
 
     int enum_scratch_buffers; // Used for printing enum values where an int to string conversion needs to take place
+    int num_pushed_arguments;
     
 } CodeGenerator;
 
@@ -65,12 +67,27 @@ const char *REG_B(Type *type);
 const char *REG_C(Type *type);
 const char *REG_D(Type *type);
 
+#define RAX "rax"
+#define RBX "rbx"
+#define RCX "rcx"
+#define RDX "rdx"
+
+#define PUSH(reg)                                \
+    sb_append(&cg->code, "   push\t\t"reg"\n");  \
+    cg->num_pushed_arguments += 1                \
+
+#define POP(reg)                                 \
+    sb_append(&cg->code, "   pop\t\t"reg"\n");   \
+    cg->num_pushed_arguments -= 1                \
+
+
 
 CodeGenerator code_generator_init(Parser *parser) {
     CodeGenerator cg = {0};
     cg.head = sb_init(1024);
     cg.data = sb_init(1024);
     cg.code = sb_init(1024);
+    cg.code_header = sb_init(1024);
 
     cg.parser         = parser;
     cg.type_table     = parser->type_table;
@@ -80,6 +97,7 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.constants      = 0;
     cg.labels         = 0;
     cg.enum_scratch_buffers = 0;
+    cg.num_pushed_arguments = 0;
 
     return cg;
 }
@@ -107,6 +125,8 @@ void code_generator_dump(CodeGenerator *cg, const char *output_path) {
 
     fwrite(cg->head.buffer, 1, cg->head.cursor, f);
     fwrite(cg->data.buffer, 1, cg->data.cursor, f);
+    fwrite(cg->code_header.buffer, 1, cg->code_header.cursor, f);
+    fwrite("\n", 1, 1, f);
     fwrite(cg->code.buffer, 1, cg->code.cursor, f);
 
     fclose(f);
@@ -127,13 +147,13 @@ void emit_header(CodeGenerator *cg) {
     sb_append(&cg->data, "   string_assert_fail  DB \"Assertion failed at line %s\", 10, 0\n", "%d");
     sb_append(&cg->code, "\n");
 
-    sb_append(&cg->code, "segment .text\n");
-    sb_append(&cg->code, "   global main\n");
-    sb_append(&cg->code, "   extern printf\n");
-    sb_append(&cg->code, "   extern sprintf\n");
-    sb_append(&cg->code, "   extern ExitProcess\n");
-    sb_append(&cg->code, "   extern malloc\n");
-    sb_append(&cg->code, "\n");
+    sb_append(&cg->code_header, "segment .text\n");
+    sb_append(&cg->code_header, "   global main\n");
+
+    sb_append(&cg->code_header, "   extern printf\n");
+    sb_append(&cg->code_header, "   extern sprintf\n");
+    sb_append(&cg->code_header, "   extern ExitProcess\n");
+    sb_append(&cg->code_header, "   extern malloc\n");
 
     emit_builtin_functions(cg);
 }
@@ -544,6 +564,11 @@ void emit_pop_r_value(CodeGenerator *cg, Type *type) {
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     cg->current_function_defn = func_defn;
 
+    if (func_defn->is_extern) {
+        sb_append(&cg->code_header, "   extern %s\n", func_defn->identifier->name);
+        return;
+    }
+
     int bytes_allocated = func_defn->num_bytes_total;
     int bytes_args      = func_defn->num_bytes_args;
 
@@ -554,12 +579,10 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "   push\t\trbp\n");
     sb_append(&cg->code, "   mov\t\trbp, rsp\n");
 
-    
-    if (strcmp("main", func_defn->identifier->name) == 0) {
-        bytes_allocated += 32; // shadow space required by msvc
-    }
+    bytes_allocated += 32; // shadow space required by msvc
+    bytes_allocated += bytes_args;
 
-    int aligned_allocated = align_value((int)(bytes_allocated), 8); // :WrongForLoopSizing @Temporary @Hack Would like it if this was only 16 byte aligned instead of 32, but it seems like there is some problem with sizing for-loops correctly that causes not enough space to be allocated
+    int aligned_allocated = align_value((int)(bytes_allocated), 16); // :WrongForLoopSizing @Temporary @Hack Would like it if this was only 16 byte aligned instead of 32, but it seems like there is some problem with sizing for-loops correctly that causes not enough space to be allocated
     
     if (bytes_allocated) sb_append(&cg->code, "   sub\t\trsp, %d\n", aligned_allocated);
 
@@ -585,13 +608,71 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 }
 
 void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
-    for (int i = (int)(call->arguments.count) - 1; i >= 0; i--) {
-        AstExpr *arg = ((AstExpr **)(call->arguments.items))[i];
+
+    int arg_count = call->arguments.count;
+
+    // Push all the arguments
+    for (int i = 0; i < arg_count; i++) {
+        AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
         emit_expression(cg, arg);
     }
 
+    // Pop the arguments
+    for (int i = arg_count - 1; i >= 0; i--) {
+        AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
+        Type    *arg_type = arg->evaluated_type;
+
+        char *reg = NULL;
+        if (arg_type->kind == TYPE_INTEGER) {
+            if (i == 0) reg = "rcx";
+            if (i == 1) reg = "rdx";
+            if (i == 2) reg = "r8";
+            if (i == 3) reg = "r9";
+            if (i > 3) XXX;
+
+            sb_append(&cg->code, "   pop\t\t%s\n", reg);
+        }
+        else if (arg_type->kind == TYPE_FLOAT) {
+            if (i == 0) reg = "xmm0";
+            if (i == 1) reg = "xmm1";
+            if (i == 2) reg = "xmm2";
+            if (i == 3) reg = "xmm3";
+            if (i > 3) XXX;
+
+            sb_append(&cg->code, "   pop\t\trax\n");
+
+            if (arg_type->size == 4) {
+                sb_append(&cg->code, "   movd\t\txmm0, eax\n");
+                sb_append(&cg->code, "   cvtss2sd\t%s, xmm0\n", reg);
+            } 
+            else if (arg_type->size == 8) {
+                sb_append(&cg->code, "   movq\t\t%s, rax\n", reg);
+            }
+
+        }
+        else XXX;
+    }
+
+    // We need to align the stack to a 16-byte boundary before the call.
+    // It may be misaligned if we are currently inside another function that has
+    // pushed arguments.
+    bool align_stack = false;
+    if (cg->num_pushed_arguments % 2 == 1) align_stack = true;
+
+    if (align_stack) sb_append(&cg->code, "   sub\t\trsp, 8\n");
     sb_append(&cg->code, "   call\t\t%s\n", call->identifer->name);
-    sb_append(&cg->code, "   add\t\trsp, %d\n", call->arguments.count * 8);
+    if (align_stack) sb_append(&cg->code, "   add\t\trsp, 8\n");
+
+
+    Type *return_type = call->head.evaluated_type;
+    if (return_type->kind == TYPE_FLOAT) {
+        if (return_type->size == 4) {
+            sb_append(&cg->code, "   movd\t\teax, xmm0\n");
+        } 
+        else if (return_type->size == 8) {
+            sb_append(&cg->code, "   movq\t\trax, xmm0\n");
+        }
+    }
 }
 
 void emit_if(CodeGenerator *cg, AstIf *ast_if) {
@@ -753,7 +834,7 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
     case TYPE_FLOAT: {
         if (arg_type->size == 4) {
             sb_append(&cg->code, "   pop\t\trax\n");
-            sb_append(&cg->code, "   movq\t\txmm0, rax\n");
+            sb_append(&cg->code, "   movd\t\txmm0, eax\n");
             sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
             sb_append(&cg->code, "   movq\t\trax, xmm0\n");
             sb_append(&cg->code, "   push\t\trax\n");
@@ -786,21 +867,6 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
         break;
     }
     case TYPE_STRUCT: {
-        // @Cleanup @Hack - This is really a bad hack for trying to save the struct offset at a stack location.
-        // The problem with saving the offset on the stack, is that we are pushing alot of values so its not easy to get
-        // a stable stack address. Maybe we could do something like the enum scratch buffers to allocate space upfront for these types of scenarios? But for now i simply don't bother ...
-        // char *safe_offset_register = "r9";
-        // if (struct_depth == 1) safe_offset_register = "r10";
-        // if (struct_depth == 2) safe_offset_register = "r11";
-        // if (struct_depth == 3) safe_offset_register = "r12";
-        // if (struct_depth == 4) safe_offset_register = "r13";
-        // if (struct_depth == 5) safe_offset_register = "r14";
-        // if (struct_depth == 6) safe_offset_register = "r15";
-        // if (struct_depth == 7) {
-        //     printf("%s:%d: Internal Compiler Error: Recursion limit reached on the number of nested structures that can be printed. This will be fixed in the future though.", __FILE__, __LINE__);
-        //     XXX;
-        // }
-
         // @NOTE - register r9 needs to be kept safe during the printout of the structure
         if (struct_depth == 0) {
             sb_append(&cg->code, "   pop\t\tr9\n");
@@ -855,6 +921,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
     sb_append(&cg->code, "   ; expression of print\n");
 
     // Push all the arguments on the stack
+    cg->num_pushed_arguments = 0;
     int num_enum_arguments = 0;
     for (int i = 1; i < print->arguments.count; i++) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
@@ -862,6 +929,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
 
         emit_expression(cg, arg);
         emit_printable_value(cg, arg_type, &num_enum_arguments, 0, 0);
+        // cg->num_pushed_arguments += 1;
     }
 
     // Potentially allocate more space for enum integer to string conversion
@@ -883,6 +951,9 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
     for (int i = arg_count - 1; i >= 1; i--) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
         Type    *arg_type = arg->evaluated_type;
+
+        // @Incomplete: We need to also count pushed struct members
+        cg->num_pushed_arguments -= 1;
 
         switch (arg_type->kind) {
             case TYPE_INTEGER:
@@ -917,11 +988,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
     sb_append(&cg->code, "   mov\t\trcx, CS%d\n", const_number);
 
 
-    if (c_args <= 4) {
-        // No need to align the stack as all the arguments are in registers
-        sb_append(&cg->code, "   call\t\tprintf\n");
-    } else {
-
+    if (c_args > 4) {
         // We need to put all the fixed placed stack allocated arguments relative to the stack pointer
         for (int i = 0; i < c_args - 4; i++) {
             int temp_offset   = 32 + (i * 8);
@@ -929,11 +996,11 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
 
             sb_append(&cg->code, "   mov\t\trax, QWORD -%d[rbp]\n", temp_offset);
             sb_append(&cg->code, "   mov\t\tQWORD [rsp + %d], rax\n", stack_offset);
-
         }
-
-        sb_append(&cg->code, "   call\t\tprintf\n");
     }
+
+    // No need to align the stack as all the arguments are in registers
+    sb_append(&cg->code, "   call\t\tprintf\n");
         
 }
 
@@ -978,8 +1045,6 @@ void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type, bool is_arr
     }
 }
 
-
-
 void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, Type *lhs_type, Type *rhs_type) {
 
     char address_str[16];
@@ -1007,9 +1072,24 @@ void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is
             // One idea is to just change it at the check_delcarartion level. If we have a float on the left and an integer on the right, just change the right hand side type to be integer
             sb_append(&cg->code, "   %s\txmm0, rax\n", cvtsi2ss_or_cvtsi2sd(lhs_type));
             sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(lhs_type), address_str);
-        } else {
-            sb_append(&cg->code, "   mov\t\t%s, %s\n", address_str, REG_A(lhs_type));
         }
+        else if (rhs_type->kind == TYPE_FLOAT) {
+            if (lhs_type->size == 8 && rhs_type->size == 4) {
+                sb_append(&cg->code, "   movd\t\txmm0, eax\n");
+                sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
+                sb_append(&cg->code, "   movsd\t\t%s, xmm0\n", address_str);
+            }
+            else if (lhs_type->size == 4 && rhs_type->size == 8) {
+                sb_append(&cg->code, "   movq\t\txmm0, rax\n");
+                sb_append(&cg->code, "   cvtsd2ss\txmm0, xmm0\n");
+                sb_append(&cg->code, "   movss\t\t%s, xmm0\n", address_str);
+            }
+            else {
+                sb_append(&cg->code, "   mov\t\t%s, %s\n", address_str, REG_A(lhs_type));
+            }
+        }
+        else XXX;
+
         return;
     }
     case TYPE_STRING: {
@@ -1193,15 +1273,39 @@ void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
         
         // @FloatRefactor - These operations should handle 32 and 64 bit floats
         emit_integer_to_float_conversion(cg, l_type, r_type);
-        if      (bin->operator == '+') sb_append(&cg->code, "   addss\t\txmm0, xmm1\n");
-        else if (bin->operator == '-') sb_append(&cg->code, "   subss\t\txmm0, xmm1\n");
-        else if (bin->operator == '*') sb_append(&cg->code, "   mulss\t\txmm0, xmm1\n");
-        else if (bin->operator == '/') sb_append(&cg->code, "   divss\t\txmm0, xmm1\n");
-        else exit(1); // Should not happen
 
-        Type *float_type = l_kind == TYPE_FLOAT ? l_type : r_type;
-        sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(float_type), REG_A(float_type));
+        if (l_kind == TYPE_FLOAT && r_kind == TYPE_FLOAT) {
+            if (l_type->size == 4 && r_type->size == 8) {
+                sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
+            }
+            else if (l_type->size == 8 && r_type->size == 4) {
+                sb_append(&cg->code, "   cvtss2sd\txmm1, xmm1\n");
+            } 
+        }
+
+        bool use_64_bit_float_operation = (l_type->size == 8 || r_type->size == 8);
+
+        if (use_64_bit_float_operation) {
+            if      (bin->operator == '+') sb_append(&cg->code, "   addsd\t\txmm0, xmm1\n");
+            else if (bin->operator == '-') sb_append(&cg->code, "   subsd\t\txmm0, xmm1\n");
+            else if (bin->operator == '*') sb_append(&cg->code, "   mulsd\t\txmm0, xmm1\n");
+            else if (bin->operator == '/') sb_append(&cg->code, "   divsd\t\txmm0, xmm1\n");
+            else XXX;
+        } else {
+            if      (bin->operator == '+') sb_append(&cg->code, "   addss\t\txmm0, xmm1\n");
+            else if (bin->operator == '-') sb_append(&cg->code, "   subss\t\txmm0, xmm1\n");
+            else if (bin->operator == '*') sb_append(&cg->code, "   mulss\t\txmm0, xmm1\n");
+            else if (bin->operator == '/') sb_append(&cg->code, "   divss\t\txmm0, xmm1\n");
+            else XXX;
+        }
+
+        if (use_64_bit_float_operation) {
+            sb_append(&cg->code, "   movq\t\trax, xmm0\n");
+        } else {
+            sb_append(&cg->code, "   movd\t\teax, xmm0\n");
+        }
         sb_append(&cg->code, "   push\t\trax\n");
+
         return;
     }
 
@@ -1274,18 +1378,18 @@ void emit_integer_to_float_conversion(CodeGenerator *cg, Type *l_type, Type *r_t
         sb_append(&cg->code, "   pop\t\trbx\n");
         sb_append(&cg->code, "   %s\txmm1, %s\n", cvtsi2ss_or_cvtsi2sd(l_type), REG_B(l_type));
         sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   %s\txmm0, %s\n", movd_or_movq(l_type), REG_A(l_type));
+        sb_append(&cg->code, "   %s\t\txmm0, %s\n", movd_or_movq(l_type), REG_A(l_type));
     }
     else if (l_type->kind == TYPE_INTEGER && r_type->kind == TYPE_FLOAT) {
         sb_append(&cg->code, "   pop\t\trbx\n");
-        sb_append(&cg->code, "   %s\txmm1, %s\n", movd_or_movq(r_type), REG_B(r_type));
+        sb_append(&cg->code, "   %s\t\txmm1, %s\n", movd_or_movq(r_type), REG_B(r_type));
         sb_append(&cg->code, "   pop\t\trax\n");
         sb_append(&cg->code, "   %s\txmm0, %s\n", cvtsi2ss_or_cvtsi2sd(r_type), REG_A(r_type));
     } else {
         sb_append(&cg->code, "   pop\t\trbx\n");
         sb_append(&cg->code, "   pop\t\trax\n");
-        sb_append(&cg->code, "   %s\txmm1, %s\n", movd_or_movq(r_type), REG_B(r_type));
-        sb_append(&cg->code, "   %s\txmm0, %s\n", movd_or_movq(r_type), REG_A(r_type));
+        sb_append(&cg->code, "   %s\t\txmm1, %s\n", movd_or_movq(r_type), REG_B(r_type));
+        sb_append(&cg->code, "   %s\t\txmm0, %s\n", movd_or_movq(r_type), REG_A(r_type));
     }
 }
 
@@ -1678,7 +1782,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     case AST_FUNCTION_CALL: {
         AstFunctionCall *call = (AstFunctionCall *)(expr);
         emit_function_call(cg, call);
-        sb_append(&cg->code, "   push\t\trax\n");
+        PUSH(RAX);
         return;
     }
     case AST_ARRAY_ACCESS: {

@@ -7,6 +7,14 @@
 #include "lib/string_builder.h"
 #include "lib/dynamic_array.h"
 
+
+const char *directive_names[] = {
+    "invalid",
+    "import",
+    "extern"
+};
+
+
 TypePointer *t_nil_ptr = &(TypePointer){
     .head = {.kind = TYPE_POINTER, .size = 8},
     .pointer_to = (Type *)&(TypePrimitive){.kind = PRIMITIVE_VOID, .head = {.kind = TYPE_VOID, .size = 0}}

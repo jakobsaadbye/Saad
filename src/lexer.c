@@ -576,6 +576,7 @@ bool is_single_character_token(char c) {
     if (c == ',') return true;
     if (c == ':') return true;
     if (c == '.') return true;
+    if (c == '#') return true;
     return false;
 }
 

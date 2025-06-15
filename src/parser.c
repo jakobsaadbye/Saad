@@ -10,6 +10,7 @@ AstCode         *parse_top_level_code(Parser *parser);
 Ast             *parse_statement(Parser *parser);
 AstDeclaration  *parse_declaration(Parser *parser, DeclarationFlags flags);
 AstAssignment   *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token);
+AstDirective    *parse_directive(Parser *parser);
 AstFunctionDefn *parse_function_defn(Parser *parser);
 AstFunctionCall *parse_function_call(Parser *parser);
 AstStruct       *parse_struct(Parser *parser);
@@ -81,6 +82,77 @@ AstCode *parse_top_level_code(Parser *parser) {
     }
 
     return code;
+}
+
+AstDirective *parse_directive(Parser *parser) {
+    Token next = peek_next_token(parser);
+    expect(parser, next, '#');
+    eat_token(parser);
+
+    Token hash_tag = next;
+
+    next = peek_next_token(parser);
+    if (next.type != TOKEN_IDENTIFIER) {
+        report_error_token(parser, LABEL_ERROR, next, "Syntax Error: Expected the name of a directive");
+        return NULL;
+    }
+    eat_token(parser);
+
+    char *dir_str = next.as_value.value.string.data;
+    
+    DirectiveKind dir_kind = DIRECTIVE_INVALID;    
+    if (strcmp(dir_str, "import") == 0) dir_kind = DIRECTIVE_IMPORT;
+    if (strcmp(dir_str, "extern") == 0) dir_kind = DIRECTIVE_EXTERN;
+
+    if (dir_kind == DIRECTIVE_INVALID) {
+        report_error_token(parser, LABEL_ERROR, next, "Syntax Error: '%s' is not the name of a directive", dir_str);
+        return NULL;
+    }
+
+    AstDirective *dir = ast_allocate(parser, sizeof(AstDirective));
+    dir->head.type   = AST_DIRECTIVE;
+    dir->head.start  = hash_tag.start;
+    dir->kind        = dir_kind;
+
+    if (dir_kind == DIRECTIVE_IMPORT) {
+        Token tok = peek_next_token(parser);
+        if (tok.type != TOKEN_STRING) {
+            report_error_token(parser, LABEL_ERROR, next, "Syntax Error: Expected an import string");
+            return NULL;
+        }
+        eat_token(parser);
+
+        char *import_name = tok.as_value.value.string.data;
+
+        dir->import_name = import_name;
+        dir->head.end    = tok.end;
+    }
+
+    if (dir_kind == DIRECTIVE_EXTERN) {
+        Token tok = peek_next_token(parser);
+        if (tok.type != TOKEN_STRING) {
+            report_error_token(parser, LABEL_ERROR, next, "Syntax Error: Expected the extern ABI string. Currently only \"C\"");
+            return NULL;
+        }
+        eat_token(parser);
+
+        char *abi_string = tok.as_value.value.string.data;
+
+        Abi abi = ABI_INVALID;
+        if (strcmp(abi_string, "c") == 0) abi = ABI_C;
+        if (strcmp(abi_string, "C") == 0) abi = ABI_C;
+
+        if (abi == ABI_INVALID) {
+            report_error_token(parser, LABEL_ERROR, tok, "Syntax Error: '%s' is not a valid abi. The following abi's are possible: [\"C\"]", abi_string);
+            return NULL;
+        }
+
+        dir->extern_abi = abi;
+        dir->head.end   = tok.end;
+    }
+
+    return dir;
+
 }
 
 AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
@@ -209,6 +281,10 @@ Ast *parse_statement(Parser *parser) {
     else if (token.type == TOKEN_FOR) {
         stmt = (Ast *)(parse_for(parser));
         statement_ends_with_semicolon = false;
+        matched_a_statement = true;
+    }
+    else if (token.type == '#') {
+        stmt = (Ast *) parse_directive(parser);
         matched_a_statement = true;
     }
     else if (token.type == '{') {
@@ -952,8 +1028,25 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         return_type = parse_type(parser);;
     }
 
-    body = parse_block(parser, body); // Here we tell parse_block to explicitly not make a new lexical scope, but instead use our existing function body
-    if (!body) return NULL;
+
+    bool is_extern = false;
+    next = peek_next_token(parser);
+    if (next.type == '#') {
+        AstDirective *dir = parse_directive(parser);
+        if (!dir) return NULL;
+
+        if (dir->kind != DIRECTIVE_EXTERN || dir->extern_abi != ABI_C) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)dir, "The #%s directive is not valid in this context", directive_names[dir->kind]);
+            return NULL;
+        }
+
+        is_extern = true;
+    }
+
+    if (!is_extern) {
+        body = parse_block(parser, body); // Here we tell parse_block to explicitly not make a new lexical scope, but instead use our existing function header
+        if (!body) return NULL;
+    }
     close_block(parser);
 
     AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // The type of the identifier is set to a type representation of this function later down
@@ -974,6 +1067,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->return_type = return_type;
     func_defn->num_bytes_total = 0;
     func_defn->num_bytes_args  = 0;
+    func_defn->is_extern   = is_extern;
 
     TypeFunction *func    = type_alloc(&parser->type_table, sizeof(TypeFunction));
     func->head.head.type  = AST_TYPE;
