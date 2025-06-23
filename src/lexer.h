@@ -46,7 +46,7 @@ typedef enum TokenType {
     TOKEN_BOOLEAN    = 132,
     TOKEN_FALSE      = 133,
     TOKEN_TRUE       = 134,
-    TOKEN_NIL        = 135,
+    TOKEN_NULL       = 135,
 
     TOKEN_LOGICAL_OR    = 140,
     TOKEN_LOGICAL_AND   = 141,

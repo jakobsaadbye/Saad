@@ -24,9 +24,12 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type);
 Type *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Type *ctx_type);
 Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_type);
 Type *check_member_access(Typer *typer, AstMemberAccess * ma);
+Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
 
 char *type_to_str(Type *type);
 bool types_are_equal(Type *lhs, Type *rhs);
+bool can_cast_implicitly(Type *from, Type *to);
+bool can_cast_explicitly(Type *from, Type *to);
 bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
 AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name);
@@ -84,15 +87,13 @@ bool check_block(Typer *typer, AstBlock *block) {
     return true;
 }
 
-
-
 Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
     if (is_primitive_type(type->kind)) {
         return type;
     } 
 
     if (type->kind == TYPE_NAME) {
-        Type *found = type_lookup(&typer->parser->type_table, type->as.name);
+        Type *found = type_lookup(&typer->parser->type_table, type->name);
         if (found == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Unknown type '%s'", type_to_str(type));
             return NULL;
@@ -160,6 +161,7 @@ unsigned long long max_integer_value(TypePrimitive *type) {
     case PRIMITIVE_S16: return S16_MAX;
     case PRIMITIVE_S32: return S32_MAX;
     case PRIMITIVE_S64: return S64_MAX;
+    case PRIMITIVE_UNTYPED_INT: return U64_MAX;
     default:
         printf("Internal compiler error: Unknown type kind %d in max_integer_value()", type->kind);
         exit(1);
@@ -199,13 +201,27 @@ bool check_for_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
     return true;
 }
 
+void concretise_untyped_literal(AstDeclaration *decl) {
+    if (decl->type->kind == TYPE_INTEGER) {
+        TypePrimitive *tp = (TypePrimitive *)decl->type;
+        if (tp->kind == PRIMITIVE_UNTYPED_INT) {
+            if (!(decl->flags & DECLARATION_CONSTANT)) {
+                // Turn into a simple integer
+                // @Incomplete - We should give it the lowest representable integer type based on the integer value
+                decl->ident->type = primitive_type(PRIMITIVE_INT);
+                decl->type        = primitive_type(PRIMITIVE_INT);
+            }
+        }
+    }
+}
+
 bool check_declaration(Typer *typer, AstDeclaration *decl) {
     if (decl->flags & DECLARATION_TYPED) {
         Type *resolved_type = resolve_type(typer, decl->type, decl);
         if (!resolved_type) return false;
 
         decl->ident->type = resolved_type;
-        decl->type    = resolved_type;
+        decl->type        = resolved_type;
         
         Type *expr_type = check_expression(typer, decl->expr, decl->type);
         if (!expr_type) return false;
@@ -216,7 +232,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
 
         if (expr_type->kind == TYPE_ARRAY) {
             decl->ident->type = expr_type;
-            decl->type    = expr_type;
+            decl->type        = expr_type;
         }
     }
     else if (decl->flags & DECLARATION_TYPED_NO_EXPR) {
@@ -224,14 +240,14 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         if (!resolved_type) return false;
 
         decl->ident->type = resolved_type;
-        decl->type    = resolved_type;
+        decl->type        = resolved_type;
     }
     else if (decl->flags & DECLARATION_INFER) {
         Type *expr_type = check_expression(typer, decl->expr, NULL);
         if (!expr_type) return false;
 
         decl->ident->type = expr_type;
-        decl->type    = expr_type;
+        decl->type        = expr_type;
     }
     else if (decl->flags & DECLARATION_CONSTANT) {
         Type *expr_type  = check_expression(typer, decl->expr, NULL);
@@ -250,8 +266,10 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         }
 
         decl->ident->type = expr_type;
-        decl->type    = expr_type;
+        decl->type        = expr_type;
     }
+
+    concretise_untyped_literal(decl);
 
     bool ok = check_for_integer_overflow(typer, decl->type, decl->expr);
     if (!ok) return false;
@@ -280,30 +298,32 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
 }
 
 bool types_are_equal(Type *lhs, Type *rhs) {
-    assert(!(lhs->kind == TYPE_NAME || rhs->kind == TYPE_NAME)); // Type slots should have been resolved at this point
+    assert(!(lhs->kind == TYPE_NAME || rhs->kind == TYPE_NAME)); // Type names should have been resolved at this point
 
     if (is_primitive_type(lhs->kind) && is_primitive_type(rhs->kind)) {
         // @Incomplete - I think we only want constants that are untyped integers to implicitly convert
         // and not any integer type. E.g passing a variable declared as an int to a function accepting a float should fail
         //
         // Allow int to float implicit casting
-        if (lhs->kind == TYPE_FLOAT && rhs->kind == TYPE_INTEGER) return true;
-        if (lhs->kind == TYPE_FLOAT && rhs->kind == TYPE_FLOAT && lhs->size != rhs->size) return false; // @Incomplete - We don't want to do this when we are dealing with literals that are untyped. Generally we want to prevent implicit down-cast e,g f64 -> f32
+        return can_cast_implicitly(rhs, lhs);
 
-        else return lhs->kind == rhs->kind;
+        // if (lhs->kind == TYPE_FLOAT && rhs->kind == TYPE_INTEGER) return true;
+        // if (lhs->kind == TYPE_FLOAT && rhs->kind == TYPE_FLOAT) {
+        //     // Only say they are equal if we can up-cast from f32 -> f64, not the other way around
+        //     return lhs->size >= rhs->size;  // @Incomplete - We don't want to do this when we are dealing with literals that are untyped. Generally we want to prevent implicit down-cast e,g f64 -> f32  
+        // } else {
+        //     return lhs->kind == rhs->kind;
+        // }
     } 
-    else if (lhs->kind == TYPE_ENUM && rhs->kind == TYPE_INTEGER) {
-        return true;
+    if ((lhs->kind == TYPE_STRUCT && rhs->kind == TYPE_STRUCT) || (lhs->kind == TYPE_ENUM && rhs->kind == TYPE_ENUM)) {
+        return strcmp(lhs->name, rhs->name) == 0;
     } 
-    else if ((lhs->kind == TYPE_STRUCT && rhs->kind == TYPE_STRUCT) || (lhs->kind == TYPE_ENUM   && rhs->kind == TYPE_ENUM)) {
-        return strcmp(lhs->as.name, rhs->as.name) == 0;
-    } 
-    else if (lhs->kind == TYPE_ARRAY && rhs->kind == TYPE_ARRAY) {
+    if (lhs->kind == TYPE_ARRAY && rhs->kind == TYPE_ARRAY) {
         Type *left_elem_type  = ((TypeArray *)(lhs))->elem_type;
         Type *right_elem_type = ((TypeArray *)(rhs))->elem_type;
         return types_are_equal(left_elem_type, right_elem_type);
     } 
-    else if (lhs->kind == TYPE_POINTER && rhs->kind == TYPE_POINTER) {
+    if (lhs->kind == TYPE_POINTER && rhs->kind == TYPE_POINTER) {
         Type *left_points_to  = ((TypePointer *)(lhs))->pointer_to;
         Type *right_points_to = ((TypePointer *)(rhs))->pointer_to;
         if (right_points_to->kind == TYPE_VOID) {
@@ -311,9 +331,8 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         }
         return types_are_equal(left_points_to, right_points_to);
     }
-    else {
-        return false;
-    }
+
+    return false;
 }
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
@@ -341,7 +360,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         Type *arg_type = check_expression(typer, arg, param->type);
         if (!arg_type) return NULL;
 
-        if (!types_are_equal(arg->type, param->type)) {
+        if (!types_are_equal(param->type, arg->type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", type_to_str(param->type), type_to_str(arg_type));
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
             return NULL;
@@ -845,54 +864,54 @@ bool check_statement(Typer *typer, Ast *stmt) {
         return true;
     }
     case AST_STRUCT: return check_struct(typer, (AstStruct *)(stmt));
-    case AST_ENUM: {
-        AstEnum *ast_enum = (AstEnum *)(stmt);
-
-        TypeEnum *enum_defn = (TypeEnum *)(type_lookup(&typer->parser->type_table, ast_enum->identifier->name));
-        assert(enum_defn != NULL); // Was put in during parsing
-
-        int auto_increment_value = 0;
-        for (int i = 0; i < ast_enum->enumerators.count; i++) {
-            AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
-            if (etor->expr) {
-                Type *ok = check_expression(typer, etor->expr, (Type *)(enum_defn)); // Type definition of the enum gets to be the ctx type so we can refer to enum members inside the enum with the shorthand syntax .ENUM_MEMBER
-                if (!ok) return NULL;
-
-                AstExpr *constexpr = simplify_expression(typer->ce, typer->current_scope, etor->expr); // @ScopeRefactoring - We still need to give enums their own scope. This probably doesn't work!!!
-                if (constexpr->head.kind != AST_LITERAL) {
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Value must be a constant expression");
-                    return false;
-                }
-                if (constexpr->type->kind != TYPE_INTEGER) { // @Robustness - Check that the value of the integer does not overflow the backing type if made explicit. Maybe if the value goes beyond the default int we promote the integer type to fit the largest value???
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Enum value must have type int, but value is of type %s", type_to_str(etor->expr->type));
-                    return false;
-                }
-
-                etor->value = ((AstLiteral *)(constexpr))->as.value.integer;
-                auto_increment_value = etor->value + 1;
-            } else {
-                etor->value = auto_increment_value;
-                auto_increment_value++;
-            }
-            
-            AstEnumerator *enumerator_with_same_value = enum_value_is_unique(ast_enum, etor->value);
-            if (enumerator_with_same_value) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Enum values must be unique. Both '%s' and '%s' have value %d", etor->name, enumerator_with_same_value->name, etor->value);
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(enumerator_with_same_value), "Here is the enum member with the same value ...");
-                return false;
-            }
-
-            etor->is_typechecked = true;
-        }
-
-
-        enum_defn->head.size = enum_defn->backing_type->size;
-        return true;
-    }
+    case AST_ENUM: return check_enum_defn(typer, (AstEnum *)stmt);
     case AST_FOR: return check_for(typer, (AstFor *)(stmt));
     default:
         XXX;
     }
+}
+
+Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
+    TypeEnum *enum_defn = (TypeEnum *)(type_lookup(&typer->parser->type_table, ast_enum->identifier->name));
+    assert(enum_defn != NULL); // Was put in during parsing
+
+    int auto_increment_value = 0;
+    for (int i = 0; i < ast_enum->enumerators.count; i++) {
+        AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
+        if (etor->expr) {
+            Type *ok = check_expression(typer, etor->expr, (Type *)(enum_defn)); // Type definition of the enum gets to be the ctx type so we can refer to enum members inside the enum with the shorthand syntax .ENUM_MEMBER
+            if (!ok) return NULL;
+
+            AstExpr *constexpr = simplify_expression(typer->ce, typer->current_scope, etor->expr); // @ScopeRefactoring - We still need to give enums their own scope. This probably doesn't work!!!
+            if (constexpr->head.kind != AST_LITERAL) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Value must be a constant expression");
+                return NULL;
+            }
+            if (constexpr->type->kind != TYPE_INTEGER) { // @Robustness - Check that the value of the integer does not overflow the backing type if made explicit. Maybe if the value goes beyond the default int we promote the integer type to fit the largest value???
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Enum value must have type int, but value is of type %s", type_to_str(etor->expr->type));
+                return NULL;
+            }
+
+            etor->value = ((AstLiteral *)(constexpr))->as.value.integer;
+            auto_increment_value = etor->value + 1;
+        } else {
+            etor->value = auto_increment_value;
+            auto_increment_value++;
+        }
+        
+        AstEnumerator *enumerator_with_same_value = enum_value_is_unique(ast_enum, etor->value);
+        if (enumerator_with_same_value) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Enum values must be unique. Both '%s' and '%s' have value %d", etor->name, enumerator_with_same_value->name, etor->value);
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(enumerator_with_same_value), "Here is the enum member with the same value ...");
+            return NULL;
+        }
+
+        etor->is_typechecked = true;
+    }
+
+
+    enum_defn->head.size = enum_defn->backing_type->size;
+    return (Type *)enum_defn;
 }
 
 AstEnumerator *find_enum_member(AstEnum *enum_defn, char *name) {
@@ -1220,14 +1239,14 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_ty
         }
 
         if (type->kind == TYPE_NAME) {
-            Type *found = type_lookup(&typer->parser->type_table, type->as.name);
+            Type *found = type_lookup(&typer->parser->type_table, type->name);
             if (!found) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Unknown type '%s'", type_to_str(type));
                 return NULL;
             }
 
             if (found->kind != TYPE_STRUCT) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "'%s' is not the name of a struct. Type of '%s' is '%s'", found->as.name, found->as.name, type_to_str(type));
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "'%s' is not the name of a struct. Type of '%s' is '%s'", found->name, found->name, type_to_str(type));
                 return NULL;
             }
             
@@ -1354,14 +1373,15 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         return NULL;
     }
 
-    if (lhs == TYPE_ENUM) lhs = TYPE_INTEGER;
-    if (rhs == TYPE_ENUM) rhs = TYPE_INTEGER;
-
     if (strchr("+-*/^", binary->operator)) {
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
         if (lhs == TYPE_FLOAT   && rhs == TYPE_FLOAT)   return biggest_type(ti_lhs, ti_rhs);
         if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return ti_lhs;
         if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return ti_rhs;
+        if ((lhs == TYPE_INTEGER && rhs == TYPE_ENUM) || (lhs == TYPE_ENUM && rhs == TYPE_INTEGER)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)binary, "Enums must be explicitly casted to integers before applying arithmetic on them");
+            return NULL;
+        }
     }
     if (binary->operator == '%') {
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
@@ -1376,6 +1396,11 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_POINTER && rhs == TYPE_POINTER) return primitive_type(PRIMITIVE_BOOL);
+        if (lhs == TYPE_ENUM    && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_BOOL);
+        if (lhs == TYPE_INTEGER && rhs == TYPE_ENUM)    return primitive_type(PRIMITIVE_BOOL);
+
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Type '%s' and '%s' are not comparable", type_to_str(ti_lhs), type_to_str(ti_rhs));
+        return NULL;
     }
 
     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Type '%s' and '%s' is not compatible with operator %s\n", type_to_str(ti_lhs), type_to_str(ti_rhs), token_type_to_str(binary->operator));
@@ -1446,15 +1471,43 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     }
 }
 
-bool can_cast_into_type(Type *from, Type *to) {
-    if (from->kind == to->kind) return true;
+bool can_cast_implicitly(Type *from, Type *to) {
+    // Can we cast without truncation?
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_INTEGER) return from->size <= to->size;
+    if (from->kind == TYPE_FLOAT   && to->kind == TYPE_FLOAT)   return from->size <= to->size;
 
+    // Allow untyped integers to cast to floats
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_FLOAT) {
+        bool is_untyped_int = ((TypePrimitive *)from)->kind == PRIMITIVE_UNTYPED_INT;
+        return is_untyped_int;
+    }
+
+    if (from->kind == TYPE_BOOL   && to->kind == TYPE_BOOL) return true;
+    if (from->kind == TYPE_STRING && to->kind == TYPE_STRING) return true;
+
+    return false;
+}
+
+bool can_cast_explicitly(Type *from, Type *to) {
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_INTEGER) return true;
     if (from->kind == TYPE_INTEGER && to->kind == TYPE_FLOAT) return true;
-    if (from->kind == TYPE_INTEGER && to->kind == TYPE_ENUM) return true;
     if (from->kind == TYPE_INTEGER && to->kind == TYPE_BOOL) return true;
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_ENUM) return true;
+
+    if (from->kind == TYPE_FLOAT   && to->kind == TYPE_FLOAT) return true;
     if (from->kind == TYPE_FLOAT   && to->kind == TYPE_INTEGER) return true;
+    if (from->kind == TYPE_FLOAT   && to->kind == TYPE_BOOL) return true;
+
     if (from->kind == TYPE_ENUM    && to->kind == TYPE_INTEGER) return true;
+    if (from->kind == TYPE_ENUM    && to->kind == TYPE_ENUM) {
+        return strcmp(from->name, to->name) == 0;
+    }
+
     if (from->kind == TYPE_BOOL    && to->kind == TYPE_INTEGER) return true;
+    if (from->kind == TYPE_BOOL    && to->kind == TYPE_FLOAT) return true;  
+
+    if (from->kind == TYPE_POINTER && to->kind == TYPE_INTEGER) return true;    // address to a u64 number
+    if (from->kind == TYPE_POINTER && to->kind == TYPE_BOOL) return true;       // null pointer = false, otherwise = true
 
     return false;
 }
@@ -1467,20 +1520,17 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "Unable to infer what the auto-cast type should be from the context");
             return NULL;
         }
-
         wanted_type = ctx_type;
     } else {
-
         cast->cast_to = resolve_type(typer, cast->cast_to, NULL);
         if (!cast->cast_to) return NULL;
-
         wanted_type = cast->cast_to;
     }
 
     Type *expr_type = check_expression(typer, cast->expr, NULL);
     if (!expr_type) return NULL;
 
-    if (!can_cast_into_type(expr_type, wanted_type)) {
+    if (!can_cast_explicitly(expr_type, wanted_type)) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "Invalid Cast: Type %s can not be casted to a %s", type_to_str(expr_type), type_to_str(wanted_type));
         return NULL;
     }
@@ -1508,11 +1558,11 @@ bool is_boolean_operator(TokenType op) {
 
 Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     switch (literal->kind) {
-    case LITERAL_INTEGER:   return (ctx_type && ctx_type->kind == TYPE_INTEGER) ? ctx_type : primitive_type(PRIMITIVE_INT);
+    case LITERAL_INTEGER:   return (ctx_type && ctx_type->kind == TYPE_INTEGER) ? ctx_type : primitive_type(PRIMITIVE_UNTYPED_INT);
     case LITERAL_FLOAT:     return (ctx_type && ctx_type->kind == TYPE_FLOAT)   ? ctx_type : primitive_type(PRIMITIVE_FLOAT);
     case LITERAL_STRING:    return (ctx_type && ctx_type->kind == TYPE_STRING)  ? ctx_type : primitive_type(PRIMITIVE_STRING);
     case LITERAL_BOOLEAN:   return (ctx_type && ctx_type->kind == TYPE_BOOL)    ? ctx_type : primitive_type(PRIMITIVE_BOOL);
-    case LITERAL_NIL:       return (Type *)t_nil_ptr;
+    case LITERAL_NULL:      return (Type *)t_null_ptr;
     case LITERAL_IDENTIFIER: {
         char   *ident_name   = literal->as.value.identifier.name;
         AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name, (Ast *)literal);

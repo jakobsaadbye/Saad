@@ -370,7 +370,7 @@ Type *parse_type(Parser *parser) {
         ti->head.start = next.start;
         ti->head.end   = next.end;
         ti->kind       = TYPE_NAME;
-        ti->as.name    = next.as_value.value.identifier.name;
+        ti->name    = next.as_value.value.identifier.name;
         return ti;
     }
 
@@ -548,7 +548,7 @@ AstEnum *parse_enum(Parser *parser) {
     type_enum->head.head.start = ast_enum->head.start;
     type_enum->head.head.end   = ast_enum->head.end;
     type_enum->head.kind       = TYPE_ENUM;
-    type_enum->head.as.name    = ident->name;
+    type_enum->head.name    = ident->name;
     type_enum->node            = ast_enum; // @Improvement - Probably also need to copy over the hashtable of enumerators
     type_enum->identifier      = ast_enum->identifier;
     type_enum->backing_type    = primitive_type(PRIMITIVE_INT); // @Improvement - Support for having a backing integer type
@@ -599,7 +599,7 @@ AstStruct *parse_struct(Parser *parser) {
     type_struct->head.head.start = ast_struct->head.start;
     type_struct->head.head.end   = ast_struct->head.end;
     type_struct->head.kind       = TYPE_STRUCT;
-    type_struct->head.as.name    = ident->name;
+    type_struct->head.name       = ident->name;
     type_struct->identifier      = ident;
     type_struct->node            = ast_struct;
     Type *existing               = type_add_user_defined(&parser->type_table, (Type *)(type_struct));
@@ -689,7 +689,7 @@ AstCast *parse_cast(Parser *parser) {
         AstCast *cast         = ast_allocate(parser, sizeof(AstCast));
         cast->head.head.kind  = AST_CAST;
         cast->head.head.start = cast_token.start;
-        cast->head.head.end   = next.end;
+        cast->head.head.end   = expr->head.end;
         cast->expr            = expr;
         cast->cast_to         = cast_to;
         cast->is_auto         = false;
@@ -1536,7 +1536,7 @@ AstExpr *parse_leaf(Parser *parser) {
     if (t.type == TOKEN_BOOLEAN ||
         t.type == TOKEN_INTEGER ||
         t.type == TOKEN_FLOAT   ||
-        t.type == TOKEN_NIL     ||
+        t.type == TOKEN_NULL    ||
         t.type == TOKEN_STRING
     ) {
         eat_token(parser);
@@ -1726,7 +1726,7 @@ bool is_literal(Token token) {
     if (token.type == TOKEN_INTEGER)    return true;
     if (token.type == TOKEN_FLOAT)      return true;
     if (token.type == TOKEN_STRING)     return true;
-    if (token.type == TOKEN_NIL)        return true;
+    if (token.type == TOKEN_NULL)       return true;
     if (token.type == TOKEN_IDENTIFIER) return true;
     return false;
 }

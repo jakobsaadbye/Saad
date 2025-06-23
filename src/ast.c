@@ -15,14 +15,14 @@ const char *directive_names[] = {
 };
 
 
-TypePointer *t_nil_ptr = &(TypePointer){
+TypePointer *t_null_ptr = &(TypePointer){
     .head = {.kind = TYPE_POINTER, .size = 8},
-    .pointer_to = (Type *)&(TypePrimitive){.kind = PRIMITIVE_VOID, .head = {.kind = TYPE_VOID, .size = 0}}
+    .pointer_to = (Type *)&(TypePrimitive){.kind = PRIMITIVE_VOID, .name = "void", .head = {.kind = TYPE_VOID, .size = 0}}
 };
 
 bool compare_user_types(const void *key, const void *item) {
     Type *ti = (*(Type **)(item));
-    return strcmp((const char *)(key), ti->as.name) == 0;
+    return strcmp((const char *)(key), ti->name) == 0;
 }
 
 TypeTable type_table_init(void) {
@@ -41,12 +41,12 @@ Type *type_lookup(TypeTable *tt, char *name) {
 }
 
 Type *type_add_user_defined(TypeTable *tt, Type *type) {
-    Type *existing = (Type *)(hash_table_get(&tt->user_types, type->as.name));
+    Type *existing = (Type *)(hash_table_get(&tt->user_types, type->name));
     if (existing) {
         return existing;
     }
 
-    hash_table_add(&tt->user_types, type->as.name, &type);
+    hash_table_add(&tt->user_types, type->name, &type);
     return NULL;
 }
 
@@ -79,9 +79,9 @@ char *type_to_str(Type *type) {
 
         return sb_to_string(&sb); // @Leak
     }
-    case TYPE_NAME:      return type->as.name;
-    case TYPE_STRUCT:    return type->as.name;
-    case TYPE_ENUM:      return type->as.name;
+    case TYPE_NAME:      return type->name;
+    case TYPE_STRUCT:    return type->name;
+    case TYPE_ENUM:      return "enum";
     case TYPE_FUNCTION: {
         TypeFunction *func = (TypeFunction *)(type);
         StringBuilder sb = sb_init(32);
@@ -101,7 +101,7 @@ char *type_to_str(Type *type) {
     }
     }
 
-    printf("internal compiler error: Unknown type kind: %d in type_to_str()", type->kind);
+    printf("Internal Compiler Error: Unknown type kind: %d in type_to_str()", type->kind);
     exit(1);
 }
 

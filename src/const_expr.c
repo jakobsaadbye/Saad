@@ -136,6 +136,10 @@ AstExpr *simplify_expression(ConstEvaluater *ce, AstBlock *scope, AstExpr *expr)
 
             return expr;
         }
+        case AST_CAST: {
+            AstCast *cast = (AstCast *)expr;
+            return simplify_expression(ce, scope, cast->expr);
+        }
         case AST_STRUCT_LITERAL:
         case AST_ENUM_LITERAL: {
             AstEnumLiteral *lit = (AstEnumLiteral *)(expr);

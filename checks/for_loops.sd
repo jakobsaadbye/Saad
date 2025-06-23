@@ -27,7 +27,7 @@ main :: () {
 
         n0.next = &n1;
         n1.next = &n2;
-        n2.next = nil;
+        n2.next = null;
 
         n0.data = 69;
         n1.data = 420;
@@ -35,12 +35,12 @@ main :: () {
 
         cursor := &n0;
         for {
-            if cursor == nil {
+            if cursor == null {
                 break;
             }
             cursor = cursor.next;
         }
 
-        assert(cursor == nil);
+        assert(cursor == null);
     }
 }

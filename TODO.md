@@ -1,3 +1,8 @@
+TODO:
+
+- Proper casting
+- Function calls
+
 Current TODO:
     - :FloatRefactor
     - Functions not working with returns types other than int or void

@@ -406,7 +406,7 @@ typedef enum LiteralKind {
     LITERAL_INTEGER     = TOKEN_INTEGER,
     LITERAL_FLOAT       = TOKEN_FLOAT,
     LITERAL_STRING      = TOKEN_STRING,
-    LITERAL_NIL         = TOKEN_NIL,
+    LITERAL_NULL        = TOKEN_NULL,
     LITERAL_IDENTIFIER  = TOKEN_IDENTIFIER,
 } LiteralKind;
 
@@ -473,18 +473,15 @@ typedef enum TypeKind {
 } TypeKind;
 
 typedef enum TypeFlags {
-    TYPE_IS_FULLY_SIZED = 1 << 0,
+    TYPE_IS_FULLY_SIZED      = 1 << 0,
 } TypeFlags;
 
 typedef struct Type {
     Ast       head;
     TypeKind  kind;
     TypeFlags flags;
-
-    int size;
-    union {
-        char *name; // A name to a struct or enum // @Cleanup - No need to be a union
-    } as;
+    int       size;
+    char     *name; // A name to a struct or enum
 } Type;
 
 typedef enum PrimitiveKind {
@@ -508,13 +505,15 @@ typedef enum PrimitiveKind {
     PRIMITIVE_BOOL,
     PRIMITIVE_VOID,
 
+    PRIMITIVE_UNTYPED_INT,
+
     PRIMITIVE_COUNT,
 } PrimitiveKind;
 
 typedef struct TypePrimitive {
-    Type      head;
-    PrimitiveKind kind;
-    char *name;
+    Type           head;
+    PrimitiveKind  kind;
+    char          *name;
 } TypePrimitive;
 
 // @Note - maybe make each of these into a global variable instead with prefix t_<TYPE>
@@ -535,6 +534,7 @@ static TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.kind = PRIMITIVE_STRING,  .name = "string",    .head = {.kind = TYPE_STRING,  .size = 8}},
     {.kind = PRIMITIVE_BOOL,    .name = "bool",      .head = {.kind = TYPE_BOOL,    .size = 1}},
     {.kind = PRIMITIVE_VOID,    .name = "void",      .head = {.kind = TYPE_VOID,    .size = 0}},
+    {.kind = PRIMITIVE_UNTYPED_INT, .name = "untyped(int)", .head = {.kind = TYPE_INTEGER, .size = 4}},
 };
 
 
@@ -547,7 +547,7 @@ typedef struct TypePointer {
     Type *pointer_to;
 } TypePointer;
 
-extern TypePointer *t_nil_ptr;
+extern TypePointer *t_null_ptr;
 
 typedef enum ArrayFlags {
     ARRAY_IS_STATIC                         = 1 << 0,

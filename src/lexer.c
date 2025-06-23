@@ -37,7 +37,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_BOOLEAN:       return "BOOLEAN";
         case TOKEN_FALSE:         return "FALSE";
         case TOKEN_TRUE:          return "TRUE";
-        case TOKEN_NIL:           return "NIL";
+        case TOKEN_NULL:          return "NULL";
         case TOKEN_DOUBLE_COLON:  return "DOUBLE_COLON";
         case TOKEN_COLON_EQUAL:   return "COLON_EQUAL";
         case TOKEN_RIGHT_ARROW:   return "RIGHT_ARROW";
@@ -93,7 +93,7 @@ bool lex(Lexer *lexer) {
     while (peek_next_char(lexer) != '\0') {
         char c = peek_next_char(lexer);
 
-        if (c == ' ') {
+        if (c == ' ' || c == '\t') {
             eat_character(lexer);
             continue;
         }
@@ -181,6 +181,21 @@ bool lex(Lexer *lexer) {
             }
         }
 
+        if (starts_identifier(c)) {
+            Pos pos_start = get_current_position(lexer);
+            eat_character(lexer);
+
+            char next = peek_next_char(lexer);
+            while (proceeds_identifier(next)) {
+                eat_character(lexer);
+                next = peek_next_char(lexer);
+            }
+
+            make_identifier(lexer, pos_start);
+
+            continue;
+        }
+
         {
             // Triple character tokens
             TokenType token = is_triple_character_token(lexer);
@@ -206,21 +221,6 @@ bool lex(Lexer *lexer) {
         if (is_single_character_token(c)) {
             eat_character(lexer);
             make_single_character_token(lexer, (TokenType)(c));
-            continue;
-        }
-
-        if (starts_identifier(c)) {
-            Pos pos_start = get_current_position(lexer);
-            eat_character(lexer);
-
-            char next = peek_next_char(lexer);
-            while (proceeds_identifier(next)) {
-                eat_character(lexer);
-                next = peek_next_char(lexer);
-            }
-
-            make_identifier(lexer, pos_start);
-
             continue;
         }
 
@@ -283,9 +283,9 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "in") == 0) token = TOKEN_IN;
         if (strcmp(text, "u8") == 0) token = TOKEN_TYPE_U8;
         if (strcmp(text, "s8") == 0) token = TOKEN_TYPE_S8;
+        if (strcmp(text, "xx") == 0) token = TOKEN_XX;
     }
     if (keyword_len == 3) {
-        if (strcmp(text, "nil") == 0) token = TOKEN_NIL;
         if (strcmp(text, "int") == 0) token = TOKEN_TYPE_INT;
         if (strcmp(text, "for") == 0) token = TOKEN_FOR;
         if (strcmp(text, "u16") == 0) token = TOKEN_TYPE_U16;
@@ -298,6 +298,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "f64") == 0) token = TOKEN_TYPE_F64;
     }
     if (keyword_len == 4) {
+        if (strcmp(text, "null") == 0) token = TOKEN_NULL;
         if (strcmp(text, "bool") == 0) token = TOKEN_TYPE_BOOL;
         if (strcmp(text, "void") == 0) token = TOKEN_TYPE_VOID;
         if (strcmp(text, "true") == 0) token = TOKEN_TRUE;
@@ -553,7 +554,6 @@ TokenType is_double_character_token(Lexer *lexer) {
     if (c == '-' && next == '=') return TOKEN_MINUS_EQUAL;
     if (c == '*' && next == '=') return TOKEN_TIMES_EQUAL;
     if (c == '/' && next == '=') return TOKEN_DIVIDE_EQUAL;
-    if (c == 'x' && next == 'x') return TOKEN_XX;
 
     return (TokenType)(0);
 }

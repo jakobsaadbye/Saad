@@ -619,30 +619,76 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
     Type *from = cast->expr->type;
     Type *to   = cast->cast_to;
 
-    if (from->kind == to->kind && from->size == to->size) return; // ignore
-    if (from->kind == TYPE_INTEGER && to->kind == TYPE_INTEGER) return;                   // already zero extended in the push
 
+    //
+    //  Follows the casting rules defined in can_cast_explicitly()
+    //
+
+    // Int -> X
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_INTEGER) return;    // already zero extended in the push
     if (from->kind == TYPE_INTEGER && to->kind == TYPE_FLOAT) {
         POP(RAX);
+        char *op = to->size == 4 ? "cvtsi2ss" : "cvtsi2sd";
+        sb_append(&cg->code, "   %s\txmm0, rax\n", op);
+        sb_append(&cg->code, "   movq\trax, xmm0\n");
+        PUSH(RAX);
+        return;
+    }
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_ENUM) return;    // already handled when pushing enums
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_BOOL) return;    // 0 = false, otherwise = true
 
-        if (is_signed_integer(from)) {
-            char *op = to->size == 4 ? "cvtsi2ss" : "cvtsi2sd";
-            sb_append(&cg->code, "   %s\txmm0, rax\n", op);
-            sb_append(&cg->code, "   movq\trax, xmm0\n");
+    // Float -> X
+    if (from->kind == TYPE_FLOAT && to->kind == TYPE_FLOAT) {
+        if (from->size == 8 && to->size == 4) {
+            POP(RAX);
+            sb_append(&cg->code, "   movq\t\txmm0, rax\n");
+            sb_append(&cg->code, "   cvtsd2ss\txmm0, xmm0\n");
+            sb_append(&cg->code, "   movq\t\trax, xmm0\n");
             PUSH(RAX);
             return;
-        } else {
-
-            XXX;
         }
-
+        else if (from->size == 4 && to->size == 8) {
+            POP(RAX);
+            sb_append(&cg->code, "   movq\t\txmm0, rax\n");
+            sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
+            sb_append(&cg->code, "   movq\t\trax, xmm0\n");
+            PUSH(RAX);
+            return;
+        } 
+        else {
+            return;
+        }
     }
-    else if (from->kind == TYPE_INTEGER && to->kind == TYPE_ENUM) XXX;
-    else if (from->kind == TYPE_INTEGER && to->kind == TYPE_BOOL) XXX;
-    else if (from->kind == TYPE_FLOAT   && to->kind == TYPE_INTEGER) XXX;
-    else if (from->kind == TYPE_ENUM    && to->kind == TYPE_INTEGER) XXX;
-    else if (from->kind == TYPE_BOOL    && to->kind == TYPE_INTEGER) XXX;
+    if (from->kind == TYPE_FLOAT && to->kind == TYPE_INTEGER) {
+        POP(RAX);
+        sb_append(&cg->code, "   movq\t\txmm0, rax\n");
+        if (from->size == 8) {
+            sb_append(&cg->code, "   cvttsd2si\t\trax, xmm0\n");
+        } else if (from->size == 4) {
+            sb_append(&cg->code, "   cvttss2si\t\teax, xmm0\n");
+        } else {
+            XXX; // unreachable!
+        }
+        PUSH(RAX);
+        return;
+    }
+    if (from->kind == TYPE_FLOAT && to->kind == TYPE_BOOL) {
+        POP(RAX);
+        sb_append(&cg->code, "   movq\t\txmm0, rax\n");
+        sb_append(&cg->code, "   xorps\t\txmm1, xmm1\n");   // clear to 0.0
+        sb_append(&cg->code, "   ucomiss\txmm0, xmm1\n");   // unordered compare of float == 0.0
+        sb_append(&cg->code, "   setne\t\tal\n");           // result is stored in zero-flag
+        sb_append(&cg->code, "   movsx\t\trax, al\n");      // sign-extend result
+        PUSH(RAX);
+        return;
+    }
 
+
+    if (from->kind == TYPE_ENUM    && to->kind == TYPE_INTEGER) return;
+    if (from->kind == TYPE_BOOL    && to->kind == TYPE_INTEGER) XXX;
+
+
+    printf("%s:%d: Compiler Error: There were unhandled cases in 'emit_cast'. Casting from '%s' -> '%s' \n", __FILE__, __LINE__, type_to_str(from), type_to_str(to));
     return;
 }
 
@@ -1219,7 +1265,7 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         case LITERAL_INTEGER: break; // Immediate value is used 
         case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", decl->ident->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
         case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", decl->ident->name, lit->as.value.string.data); break; // :IdentifierNameAsConstant @Cleanup
-        case LITERAL_NIL:     XXX;
+        case LITERAL_NULL:    XXX; // @TODO
         case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
         }
 
@@ -1895,11 +1941,11 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_BOOLEAN: {
-            sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);
+            sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? 1 : 0);
             INCR_PUSH_COUNT();
             return;
         }
-        case LITERAL_NIL: {
+        case LITERAL_NULL: {
             PUSH("0");
             return;
         }
@@ -1938,7 +1984,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                         PUSH(RAX);
                         return;
                     }
-                    case LITERAL_NIL: XXX;
+                    case LITERAL_NULL: XXX; // @TODO
                     case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
                 }
             } else {
