@@ -684,8 +684,18 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
     }
 
 
-    if (from->kind == TYPE_ENUM    && to->kind == TYPE_INTEGER) return;
-    if (from->kind == TYPE_BOOL    && to->kind == TYPE_INTEGER) XXX;
+    if (from->kind == TYPE_ENUM    && to->kind == TYPE_INTEGER) return; // handled
+    if (from->kind == TYPE_ENUM    && to->kind == TYPE_ENUM)    return; // handled
+
+    if (from->kind == TYPE_BOOL    && to->kind == TYPE_INTEGER) return; // handled
+    if (from->kind == TYPE_BOOL    && to->kind == TYPE_FLOAT) {
+        POP(RAX);
+        char *cvt = to->size == 8 ? "cvtsi2sd" : "cvtsi2ss";
+        sb_append(&cg->code, "   %s\txmm0, rax\n", cvt);
+        sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(to), REG_A(to));
+        PUSH(RAX);
+        return;
+    }
 
 
     printf("%s:%d: Compiler Error: There were unhandled cases in 'emit_cast'. Casting from '%s' -> '%s' \n", __FILE__, __LINE__, type_to_str(from), type_to_str(to));
@@ -1430,11 +1440,34 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
     { 
         emit_integer_to_float_conversion(cg, l_type, r_type);
 
-        sb_append(&cg->code, "   comiss\txmm0, xmm1\n");
-        sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
-        PUSH(RAX);
-
-        return;
+        if (l_kind == TYPE_FLOAT && r_kind == TYPE_FLOAT) {
+            if (l_type->size == 4 && r_type->size == 4) {
+                sb_append(&cg->code, "   comiss\txmm0, xmm1\n");
+            } else if (l_type->size == 8 && r_type->size == 8) {
+                sb_append(&cg->code, "   comisd\txmm0, xmm1\n");
+            } else if (l_type->size == 8 && r_type->size == 4) {
+                sb_append(&cg->code, "   cvtss2sd\txmm1, xmm1\n");
+                sb_append(&cg->code, "   comisd\txmm0, xmm1\n");
+            } else if (l_type->size == 4 && r_type->size == 8) {
+                sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
+                sb_append(&cg->code, "   comisd\txmm0, xmm1\n");
+            } else {
+                XXX; // unreachable
+            }
+            sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
+            PUSH(RAX);
+            return;
+        } else {
+            Type *float_type = l_kind == TYPE_FLOAT ? l_type : r_type;
+            if (float_type->size == 8) {
+                sb_append(&cg->code, "   comisd\txmm0, xmm1\n");
+            } else {
+                sb_append(&cg->code, "   comiss\txmm0, xmm1\n");
+            }
+            sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
+            PUSH(RAX);
+            return;
+        }
     }
     if (l_kind == TYPE_POINTER && r_kind == TYPE_POINTER) {
         POP(RBX);
@@ -1474,7 +1507,7 @@ void emit_integer_to_float_conversion(CodeGenerator *cg, Type *l_type, Type *r_t
         POP(RBX);
         POP(RAX);
         sb_append(&cg->code, "   %s\t\txmm1, %s\n", movd_or_movq(r_type), REG_B(r_type));
-        sb_append(&cg->code, "   %s\t\txmm0, %s\n", movd_or_movq(r_type), REG_A(r_type));
+        sb_append(&cg->code, "   %s\t\txmm0, %s\n", movd_or_movq(l_type), REG_A(l_type));
     }
 }
 
@@ -1801,19 +1834,9 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         if (unary->operator == OP_NOT) {
             emit_expression(cg, unary->expr);
             POP(RAX);
-
-            if (unary->expr->type->kind == TYPE_BOOL) {
-                sb_append(&cg->code, "   not\t\trax\n");
-            }
-            else if (unary->expr->type->kind == TYPE_POINTER) {
-                sb_append(&cg->code, "   test\t\trax, rax\n");
-                sb_append(&cg->code, "   sete\t\tal\n");
-                sb_append(&cg->code, "   movzx\t\trax, al\n");
-            } else {
-                printf("Internal Compiler Error: Unexpected unary expression type '%s' in emit_expression<AST_UNARY>", type_to_str(unary->expr->type));
-                exit(1);
-            }
-
+            sb_append(&cg->code, "   test\t\trax, rax\n");
+            sb_append(&cg->code, "   sete\t\tal\n");
+            sb_append(&cg->code, "   movzx\t\trax, al\n");
             PUSH(RAX);
             return;
         }

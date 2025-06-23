@@ -1337,14 +1337,14 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
     Type *ti_rhs = NULL;
 
     // Use the type info from the opposite side of an auto-cast to give it a context type
-    bool checked_by_autocast = false;
+    bool checked_both_sides = false;
     if (binary->left->head.kind == AST_CAST || binary->right->head.kind == AST_CAST) {
         if (binary->left->head.kind == AST_CAST) {
             AstCast *cast = (AstCast *)binary->left;
             if (cast->is_auto && !ctx_type) {
                 ti_rhs = check_expression(typer, binary->right, NULL);
                 ti_lhs = check_expression(typer, binary->left, ti_rhs);
-                checked_by_autocast = true;
+                checked_both_sides = true;
             }
         }
         else if (binary->right->head.kind == AST_CAST) {
@@ -1352,12 +1352,43 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
             if (cast->is_auto && !ctx_type) {
                 ti_lhs = check_expression(typer, binary->left, NULL);
                 ti_rhs = check_expression(typer, binary->right, ti_lhs);
-                checked_by_autocast = true;
+                checked_both_sides = true;
             }
         }
     }
 
-    if (!checked_by_autocast) {
+    if (is_comparison_operator(binary->operator)) {
+        // If one of the two sides contains an enum literal then use the other side to provide a potential enum
+        // context type so that we can have expressions like this: "if x == .Some_Enum"
+        if (binary->left->head.kind == AST_ENUM_LITERAL || binary->right->head.kind == AST_ENUM_LITERAL) {
+            bool enum_lit_is_lhs = binary->left->head.kind == AST_ENUM_LITERAL;
+            AstExpr *enum_side  = enum_lit_is_lhs ? binary->left  : binary->right;
+            AstExpr *other_side = enum_lit_is_lhs ? binary->right : binary->left;
+
+            Type *os_type = check_expression(typer, other_side, ctx_type);
+            if (!os_type) return NULL;
+
+            if (os_type->kind == TYPE_ENUM) {
+                Type *es_type = check_expression(typer, enum_side, os_type);
+                if (!es_type) return NULL;
+
+                ti_lhs = enum_lit_is_lhs ? es_type : os_type;
+                ti_rhs = enum_lit_is_lhs ? os_type : es_type;
+                checked_both_sides = true;
+            } else {
+                // Check if we can concretize the enum literal with the ctx type
+                Type *es_type = check_expression(typer, enum_side, ctx_type);
+                if (!es_type) return NULL;
+
+                ti_lhs = enum_lit_is_lhs ? es_type : os_type;
+                ti_rhs = enum_lit_is_lhs ? os_type : es_type;
+                checked_both_sides = true;
+            }
+        }
+    }
+
+
+    if (!checked_both_sides) {
         ti_lhs = check_expression(typer, binary->left, ctx_type);
         ti_rhs = check_expression(typer, binary->right, ctx_type);
     }
@@ -1391,13 +1422,21 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
     }
     if (is_comparison_operator(binary->operator)) {
         if (lhs == TYPE_BOOL    && rhs == TYPE_BOOL)    return primitive_type(PRIMITIVE_BOOL);
+        
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_BOOL);
+        if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_FLOAT   && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_BOOL);
-        if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_POINTER && rhs == TYPE_POINTER) return primitive_type(PRIMITIVE_BOOL);
+
+        if (lhs == TYPE_ENUM    && rhs == TYPE_ENUM) {
+            if (strcmp(ti_lhs->name, ti_rhs->name) == 0) {
+                return primitive_type(PRIMITIVE_BOOL);
+            }
+        }
         if (lhs == TYPE_ENUM    && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_INTEGER && rhs == TYPE_ENUM)    return primitive_type(PRIMITIVE_BOOL);
+
 
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Type '%s' and '%s' are not comparable", type_to_str(ti_lhs), type_to_str(ti_rhs));
         return NULL;
