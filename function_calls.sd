@@ -1,0 +1,33 @@
+sin :: (angle: f64) -> f64 #extern "C"
+
+sum :: (a: float, b: int, c: float, d: int, e: float, f: float, g: float, h: int) -> float {
+	return a + b + c + d + e + f + g + h;
+}
+
+add :: (a: int, b: int) -> int {
+	return a + b;
+}
+
+sum2 :: (a: int, b: int, c: int, d: int, e: int) -> int {
+	return a + b + c + d + e;
+}
+
+main :: () {
+	
+	// Call with more than 4 arguments
+
+	r := sum(1, 2, 3, 4, 5, 6, 7, 8);
+	print("%", r);
+	assert(r == 36);
+
+	r1 := add(add(add(add(1, 2), 3), 4), 5);
+	print("%", r1);
+	assert(r1 == 15);
+
+	r2 := sum2(1, 2, 3, 4, sum2(1, 2, 3, 4, 5));
+	print("%", r2);
+	assert(r2 == 25);
+
+	x := 3.14 * 0.5;
+	print("sin(%) = %", x, sin(x));
+}

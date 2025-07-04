@@ -8,11 +8,9 @@ typedef struct CodeGenerator {
 
     Parser *parser;
 
-    AstBlock *current_scope;
-    AstFunctionDefn *current_function_defn;
+    AstBlock        *current_scope;
+    AstFunctionDefn *func;  // Current enclosing function
     TypeTable type_table;
-
-    int base_ptr;
 
     size_t constants;   // For float and string literals
     size_t labels;      // For coditional jumps
@@ -55,11 +53,12 @@ void emit_initialization(CodeGenerator *cg, int dest_offset, AstExpr *expr, Type
 void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, Type *lhs_type, Type *rhs_type);
 void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_computed, Type *src_type, bool lvalue);
 
+MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma);
+
 void check_main_exists(CodeGenerator *cg);
 int make_label_number(CodeGenerator *cg);
 const char *comparison_operator_to_set_instruction(TokenType op);
 const char *boolean_operator_to_instruction(TokenType op);
-MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma);
 char *WIDTH(Type *type);
 
 const char *REG_A(Type *type);
@@ -98,8 +97,7 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.parser         = parser;
     cg.type_table     = parser->type_table;
     cg.current_scope  = parser->current_scope;
-    cg.current_function_defn = NULL;
-    cg.base_ptr       = 0;
+    cg.func           = NULL;
     cg.constants      = 0;
     cg.labels         = 0;
     cg.enum_scratch_buffers = 0;
@@ -423,16 +421,16 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         // allocate space for start and end range values 
         int size_iterator = ast_for->iterator->type->size;
 
-        cg->base_ptr = align_value(cg->base_ptr, size_iterator);
+        cg->func->base_ptr = align_value(cg->func->base_ptr, size_iterator);
 
-        int offset_iterator = cg->base_ptr - size_iterator;
+        int offset_iterator = cg->func->base_ptr - size_iterator;
         int offset_start    = offset_iterator - 8;
         int offset_end      = offset_iterator - 16;
         int offset_index    = offset_iterator - 24; // Only used if an index is also specified
 
-        cg->base_ptr -= size_iterator + 16;
+        cg->func->base_ptr -= size_iterator + 16;
         if (ast_for->index) {
-            cg->base_ptr -= 8;
+            cg->func->base_ptr -= 8;
             ast_for->index->stack_offset = offset_index;
         }
         ast_for->iterator->stack_offset = offset_iterator;
@@ -474,11 +472,11 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         //
         // :WrongForLoopSizing @Investigate - Might have to do with the fact that we are not aligning the stack before allocating space for the iterator!
         int aligned_iterator_size = align_value(iterator->type->size, 8);
-        int offset_iterator       = cg->base_ptr - aligned_iterator_size;
+        int offset_iterator       = cg->func->base_ptr - aligned_iterator_size;
         int offset_data           = offset_iterator - 8;
         int offset_count          = offset_iterator - 16;
         int offset_index          = offset_iterator - 24;
-        cg->base_ptr             -= 24 + aligned_iterator_size;
+        cg->func->base_ptr             -= 24 + aligned_iterator_size;
         
         assert(iterator);
         iterator->stack_offset = offset_iterator;
@@ -532,6 +530,23 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
 
 void emit_return(CodeGenerator *cg, AstReturn *ast_return) {
     emit_expression(cg, ast_return->expr);
+
+    // Place the return value into the correct register
+    // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170#return-values
+
+    Type *expr_type = ast_return->expr->type;
+    Type *return_type = ast_return->enclosing_function->return_type;
+
+    if (is_untyped_literal(expr_type) && return_type->kind == TYPE_FLOAT) {
+
+        // Here we just convert the integer to a float
+        assert(expr_type->kind == TYPE_INTEGER);
+        POP(RAX);
+        sb_append(&cg->code, "   %s\txmm0, %s\n", cvtsi2ss_or_cvtsi2sd(return_type), REG_A(expr_type));
+        sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(return_type), REG_A(expr_type));
+        PUSH(RAX);
+    }
+
     sb_append(&cg->code, "   jmp\t\tL%d\n", ast_return->enclosing_function->return_label);
 }
 
@@ -551,6 +566,7 @@ void emit_pop_r_value(CodeGenerator *cg, Type *type) {
     case TYPE_FLOAT: {
         // @Incomplete - Missing int to float conversion
         POP(RAX);
+        sb_append(&cg->code, "   %s\t\txmm0, %s\n", movd_or_movq(type), REG_A(type));
         return;
     }
     case TYPE_POINTER: {
@@ -562,43 +578,183 @@ void emit_pop_r_value(CodeGenerator *cg, Type *type) {
         POP(RCX); // count
         return;
     }
-    default:
-    XXX;
+    case TYPE_STRUCT: {
+        TypeStruct *struct_defn = (TypeStruct *)type;
+        
+        return;
+    }
+    case TYPE_FUNCTION:
+    default: XXX;
+    }
+}
+
+typedef enum Register {
+    REG_RAX,
+    REG_RBX,
+    REG_RCX,
+    REG_RDX,
+    REG_RSI,
+    REG_RDI,
+    REG_RBP,
+    REG_RSP,
+    REG_R8,
+    REG_R9,
+    REG_R10,
+    REG_R11,
+    REG_R12,
+    REG_R13,
+    REG_R14,
+    REG_R15,
+
+    REG_XMM0,
+    REG_XMM1,
+    REG_XMM2,
+    REG_XMM3,
+    REG_XMM4,
+    REG_XMM5,
+    REG_XMM6,
+    REG_XMM7,
+} Register;
+
+char *gpr_register_names[16][4] = {
+    { "rax", "eax",  "ax",   "al"   },
+    { "rbx", "ebx",  "bx",   "bl"   },
+    { "rcx", "ecx",  "cx",   "cl"   },
+    { "rdx", "edx",  "dx",   "dl"   },
+    { "rsi", "esi",  "si",   "sil"  },
+    { "rdi", "edi",  "di",   "dil"  },
+    { "rbp", "ebp",  "bp",   "bpl"  },
+    { "rsp", "esp",  "sp",   "spl"  },
+    { "r8 ", "r8d",  "r8w",  "r8b"  },
+    { "r9 ", "r9d",  "r9w",  "r9b"  },
+    { "r10", "r10d", "r10w", "r10b" },
+    { "r11", "r11d", "r11w", "r11b" },
+    { "r12", "r12d", "r12w", "r12b" },
+    { "r13", "r13d", "r13w", "r13b" },
+    { "r14", "r14d", "r14w", "r14b" },
+    { "r15", "r15d", "r15w", "r15b" },
+};
+
+char *sse_register_names[8] = {
+    "xmm0",
+    "xmm1",
+    "xmm2",
+    "xmm3",
+    "xmm4",
+    "xmm5",
+    "xmm6",
+    "xmm7",
+};
+
+char *register_string(Register reg, int width) {
+    assert(width >= 0 && width <= 8);
+
+    if (reg <= REG_R15) {
+        int i = -1;
+        if (width == 8) i = 0;
+        if (width == 4) i = 1;
+        if (width == 2) i = 2;
+        if (width == 1) i = 3;
+        assert(i != -1);
+
+        return gpr_register_names[reg][i];
+    } 
+    else if (reg <= REG_XMM7) {
+        int i = reg - REG_XMM0;
+        return sse_register_names[i];
+    }
+    else {
+        XXX;
+    }
+}
+
+void MOV_ADDR_REG(CodeGenerator *cg, int dst_addr, Register src_reg, Type *src_type) {
+    char *src_reg_string = register_string(src_reg, src_type->size);
+
+    if (src_type->kind == TYPE_FLOAT) {
+        if (src_type->size == 8) sb_append(&cg->code, "   movq\t\t%d[rbp], %s\n", dst_addr, src_reg_string);
+        else                     sb_append(&cg->code, "   movd\t\t%d[rbp], %s\n", dst_addr, src_reg_string);
+    } else {
+        sb_append(&cg->code, "   mov\t\t%d[rbp], %s\n", dst_addr, src_reg_string);
+    }
+}
+
+void MOV_ADDR_ADDR(CodeGenerator *cg, int dst_addr, Type *dst_type, int src_addr, Type *src_type) {
+    if (src_type->kind == TYPE_FLOAT) {
+        sb_append(&cg->code, "   %s\t\t%s, %d[rbp]\n", movd_or_movq(src_type), REG_A(src_type), src_addr);
+        sb_append(&cg->code, "   %s\t\t%d[rbp], %s\n", movd_or_movq(dst_type), dst_addr, REG_A(src_type));
+    } else {
+        sb_append(&cg->code, "   mov\t\t%s, %d[rbp]\n", REG_A(src_type), src_addr);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], %s\n", dst_addr, REG_A(src_type));
     }
 }
 
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
-    cg->current_function_defn = func_defn;
+    cg->func = func_defn;
 
     if (func_defn->is_extern) {
         sb_append(&cg->code_header, "   extern %s\n", func_defn->identifier->name);
         return;
     }
 
-    int bytes_allocated = func_defn->num_bytes_total;
-    int bytes_args      = func_defn->num_bytes_args;
+    int bytes_args      = func_defn->num_bytes_args * 2; // We need twice the amount of space for arguments as we also need temporary space for them while popping arguments in a function call
+    int bytes_locals    = func_defn->num_bytes_locals;
+    int bytes_total     = align_value(32 + bytes_args + bytes_locals, 16);
 
     sb_append(&cg->code, "\n");
-    sb_append(&cg->code, "; bytes total    : %d\n", bytes_allocated);
+    sb_append(&cg->code, "; bytes locals   : %d\n", bytes_locals);
     sb_append(&cg->code, "; bytes arguments: %d\n", bytes_args);
+    sb_append(&cg->code, "; bytes total    : %d\n", bytes_total);
     sb_append(&cg->code, "%s:\n", func_defn->identifier->name);
+
+    //
+    // Prolog
+    //
+
     PUSH(RBP);
     sb_append(&cg->code, "   mov\t\trbp, rsp\n");
-
-    bytes_allocated += 32; // shadow space required by msvc
-    bytes_allocated += bytes_args;
-
-    int aligned_allocated = align_value((int)(bytes_allocated), 16); // :WrongForLoopSizing @Temporary @Hack Would like it if this was only 16 byte aligned instead of 32, but it seems like there is some problem with sizing for-loops correctly that causes not enough space to be allocated
+    sb_append(&cg->code, "   sub\t\trsp, %d\n", bytes_total);
     
-    if (bytes_allocated) sb_append(&cg->code, "   sub\t\trsp, %d\n", aligned_allocated);
-
+    // Reserve space for stack arguments to called functions
+    cg->func->base_ptr -= bytes_args / 2.0;
+    
+    // Move arguments to this function into their home addresses
     for (int i = 0; i < func_defn->parameters.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
-        param->ident->stack_offset = 16 + (i * 8);
+        Type           *param_type = param->type;
+        
+        // Bump the base pointer down by the size of the parameter type
+        cg->func->base_ptr -= param_type->size;
+        cg->func->base_ptr  = align_value(cg->func->base_ptr, param_type->size);
+        
+        // Assign the offset to the parameter
+        int param_offset = cg->func->base_ptr;
+        param->ident->stack_offset = param_offset;
+        
+        if (i < 4) {
+            Register arg_reg = 0;
+            if (param_type->kind == TYPE_FLOAT) {
+                if (i == 0) arg_reg = REG_XMM0;
+                if (i == 1) arg_reg = REG_XMM1;
+                if (i == 2) arg_reg = REG_XMM2;
+                if (i == 3) arg_reg = REG_XMM3;
+            } else {
+                if (i == 0) arg_reg = REG_RCX;
+                if (i == 1) arg_reg = REG_RDX;
+                if (i == 2) arg_reg = REG_R8;
+                if (i == 3) arg_reg = REG_R9;
+            }
+            assert(arg_reg != 0);
+            
+            MOV_ADDR_REG(cg, param_offset, arg_reg, param_type);
+        } else {
+            // Argument was passed on the stack and can be found at rbp+48 and above
+            int arg_base_offset = 48;   // shadow-space=32, func call=8, push rbp=8
+            int arg_offset = arg_base_offset + (i - 4) * 8;
+            sb_append(&cg->code, "   mov\t\trax, [rbp+%d]\n", arg_offset);
+            sb_append(&cg->code, "   mov\t\t%d[rbp], %s\n", param_offset, REG_A(param_type));
+        }
     }
-
-    // Any allocated space for declarations goes below the space for arguments, so here we bump the base ptr down by that amount
-    cg->base_ptr -= bytes_args;
 
     // Make a label for the return code so that return statements within the function can jump to this
     int return_label = make_label_number(cg);
@@ -606,9 +762,12 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
     emit_block(cg, func_defn->body);
 
+    //
+    // Epilog
+    //
     sb_append(&cg->code, "L%d:\n", return_label);
     emit_pop_r_value(cg, func_defn->return_type);
-    if (bytes_allocated) sb_append(&cg->code, "   add\t\trsp, %d\n", aligned_allocated);
+    sb_append(&cg->code, "   add\t\trsp, %d\n", bytes_total);
     POP(RBP);
     sb_append(&cg->code, "   ret\n");
 }
@@ -702,6 +861,44 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
     return;
 }
 
+void move_func_argument_to_register_or_stack(CodeGenerator *cg, int arg_index, int arg_count, Type *arg_type, Type *param_type) {
+    if (arg_index < 4) {
+        // Pass the argument in a register
+        Register reg = 0;
+        if (arg_type->kind == TYPE_FLOAT || (param_type->kind == TYPE_FLOAT && is_untyped_literal(arg_type) && ((TypePrimitive *)arg_type)->kind == PRIMITIVE_UNTYPED_INT) ) {
+            if (arg_index == 0) reg = REG_XMM0;
+            if (arg_index == 1) reg = REG_XMM1;
+            if (arg_index == 2) reg = REG_XMM2;
+            if (arg_index == 3) reg = REG_XMM3;
+            assert(reg != 0);
+
+            char *xmm_reg = register_string(reg, 0);
+
+            sb_append(&cg->code, "   %s\t\t%s, %s\n", movd_or_movq(param_type), xmm_reg, REG_A(param_type));
+        } 
+        else {
+            if (arg_type->kind == TYPE_ARRAY) XXX;
+            if (arg_type->kind == TYPE_STRUCT) XXX;
+            if (arg_type->kind == TYPE_FUNCTION) XXX;
+
+            if (arg_index == 0) reg = REG_RCX;
+            if (arg_index == 1) reg = REG_RDX;
+            if (arg_index == 2) reg = REG_R8;
+            if (arg_index == 3) reg = REG_R9;
+            assert(reg != 0);
+            
+            char *gpr_reg = register_string(reg, arg_type->size);
+            
+            sb_append(&cg->code, "   mov\t\t%s, %s\n", gpr_reg, REG_A(arg_type));
+        }
+    } else {
+        // Put the argument into temporary storage
+        int temp_idx    = arg_count - arg_index;
+        int temp_offset = -temp_idx * 8;
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", temp_offset);
+    }
+}
+
 void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
 
     int arg_count = call->arguments.count;
@@ -714,50 +911,82 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
 
     // Pop the arguments
     for (int i = arg_count - 1; i >= 0; i--) {
-        AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
+        AstExpr *arg      = ((AstExpr **)call->arguments.items)[i];
         Type    *arg_type = arg->type;
 
-        POP(RAX);
+        AstDeclaration *param = ((AstDeclaration **)call->func_defn->parameters.items)[i];
+        Type           *param_type = param->type;
+        
+        switch (arg_type->kind) {
+            case TYPE_INTEGER: {
+                POP(RAX);
+                
+                if (param_type->kind == TYPE_FLOAT && is_untyped_literal(arg_type) && ((TypePrimitive *)arg_type)->kind == PRIMITIVE_UNTYPED_INT) {
+                    // Convert the untyped int to be a float
+                    sb_append(&cg->code, "   %s\txmm0, %s\n", cvtsi2ss_or_cvtsi2sd(param_type), REG_A(arg_type));
+                    sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(param_type), REG_A(arg_type));
+                }
 
-        char *reg = NULL;
-        if (arg_type->kind == TYPE_INTEGER) {
-            if (i == 0) reg = "rcx";
-            if (i == 1) reg = "rdx";
-            if (i == 2) reg = "r8";
-            if (i == 3) reg = "r9";
-            if (i > 3) XXX;
-
-            sb_append(&cg->code, "   mov\t\t%s, rax\n", reg);
-        }
-        else if (arg_type->kind == TYPE_FLOAT) {
-            if (i == 0) reg = "xmm0";
-            if (i == 1) reg = "xmm1";
-            if (i == 2) reg = "xmm2";
-            if (i == 3) reg = "xmm3";
-            if (i > 3) XXX;
-
-            if (arg_type->size == 4) {
-                sb_append(&cg->code, "   movd\t\txmm0, eax\n");
-                sb_append(&cg->code, "   cvtss2sd\t%s, xmm0\n", reg);
-            } 
-            else if (arg_type->size == 8) {
-                sb_append(&cg->code, "   movq\t\t%s, rax\n", reg);
+                break;
             }
+            case TYPE_BOOL:
+            case TYPE_STRING:
+            case TYPE_ENUM:
+            case TYPE_POINTER: {
+                POP(RAX);
+                break;
+            }
+            case TYPE_FLOAT: {
+                POP(RAX);
 
+                if (arg_type->size == 4 && param_type->size == 8) {
+                    sb_append(&cg->code, "   movd\t\txmm0, eax\n");
+                    sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
+                    sb_append(&cg->code, "   movq\t\trax, xmm0\n");
+                } else {
+                    // We don't go from f64 -> f32 without it needing to have a cast, so we should not hit the following assert!
+                    assert(arg_type->size == param_type->size);
+                }
+
+                break;
+            }
+            case TYPE_ARRAY:
+            case TYPE_STRUCT:
+            default: XXX;
         }
-        else XXX;
+
+        move_func_argument_to_register_or_stack(cg, i, arg_count, arg_type, param_type);
+
     }
 
-    // We need to align the stack to a 16-byte boundary before the call.
-    // It may be misaligned if we are currently inside another function that has
-    // pushed arguments.
-    bool align_stack = false;
-    if (cg->num_pushed_arguments % 2 == 1) align_stack = true;
+    if (arg_count > 4) {
+        // Put the arguments from temporary storage onto the stack now that the stack pointer is not being moved by the popping of arguments
+        int stack_arg_count = arg_count - 4;
+        for (int i = 0; i < stack_arg_count; i++) {
+            int temp_offset   = (i + 1) * 8;
+            int stack_offset  = 32 + (stack_arg_count - i - 1) * 8;
 
-    if (align_stack) sb_append(&cg->code, "   sub\t\trsp, 8\n");
-    sb_append(&cg->code, "   call\t\t%s\n", call->identifer->name);
-    if (align_stack) sb_append(&cg->code, "   add\t\trsp, 8\n");
+            sb_append(&cg->code, "   mov\t\trax, QWORD -%d[rbp]\n", temp_offset);
+            sb_append(&cg->code, "   mov\t\tQWORD [rsp+%d], rax\n", stack_offset);
+        }
+    }
 
+
+    AstFunctionDefn *func_defn = call->func_defn;
+
+    if (func_defn->call_conv == CALLING_CONV_MSVC) {
+        bool align_stack = cg->num_pushed_arguments % 2 == 1;
+
+        // Boundary needs to be 16 byte aligned
+        if (align_stack) sb_append(&cg->code, "   sub\t\trsp, 8\n");
+        sb_append(&cg->code, "   call\t\t%s\n", call->identifer->name);
+        if (align_stack) sb_append(&cg->code, "   add\t\trsp, 8\n");
+    }
+    else {
+        // Assume standard calling convention (SAAD)
+        sb_append(&cg->code, "   call\t\t%s\n", call->identifer->name);
+    }
+    
 
     Type *return_type = call->head.type;
     if (return_type->kind == TYPE_FLOAT) {
@@ -767,6 +996,8 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
         else if (return_type->size == 8) {
             sb_append(&cg->code, "   movq\t\trax, xmm0\n");
         }
+    } else {
+        // The result is already in rax
     }
 }
 
@@ -791,7 +1022,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
     }
 
     sb_append(&cg->code, "   ; block of if\n");
-    emit_block(cg, ast_if->block);
+    emit_block(cg, ast_if->then_block);
     sb_append(&cg->code, "   jmp L%d\n", done_label);
 
     int next_if_else_label = first_else_if_label;
@@ -819,7 +1050,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
             }
         }
 
-        emit_block(cg, else_if->block);
+        emit_block(cg, else_if->then_block);
         sb_append(&cg->code, "   jmp L%d\n", done_label);
     }
 
@@ -882,20 +1113,6 @@ const char *REG_D(Type *type) {
     if (type->size == 2) return "dx";
     if (type->size <= 4) return "edx";
     if (type->size <= 8) return "rdx";
-    XXX;
-}
-
-char *get_function_argument_register(int arg_index) {
-    if (arg_index == 0) return "rcx";
-    if (arg_index == 1) return "rdx";
-    if (arg_index == 2) return "r8";
-    if (arg_index == 3) return "r9";
-    if (arg_index == 4) return "r10";
-    if (arg_index == 5) return "r11";
-    if (arg_index == 6) return "r12";
-    if (arg_index == 7) return "r13";
-    if (arg_index == 8) return "r14";
-    if (arg_index == 9) return "r15";
     XXX;
 }
 
@@ -962,7 +1179,7 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
         break;
     }
     case TYPE_STRUCT: {
-        // @NOTE - register r9 needs to be kept safe during the printout of the structure
+        // @Note @Hack - register r9 needs to be kept safe during the printout of the structure
         if (struct_depth == 0) {
             POP(R9);
         }
@@ -1024,7 +1241,6 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
 
         emit_expression(cg, arg);
         emit_printable_value(cg, arg_type, &num_enum_arguments, 0, 0);
-        // cg->num_pushed_arguments += 1;
     }
 
     // Potentially allocate more space for enum integer to string conversion
@@ -1298,17 +1514,17 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
             // the size of the array
         }
     }
-    cg->base_ptr -= type_size;
-    cg->base_ptr  = align_value(cg->base_ptr, type_size);
+    cg->func->base_ptr -= type_size;
+    cg->func->base_ptr  = align_value(cg->func->base_ptr, type_size);
 
-    decl->ident->stack_offset = cg->base_ptr;
-    int identifier_offset     = cg->base_ptr;
+    decl->ident->stack_offset = cg->func->base_ptr;
+    int identifier_offset     = cg->func->base_ptr;
 
     if (is_array_initialization) {
-        cg->base_ptr -= decl->type->size;
-        cg->base_ptr  = align_value(cg->base_ptr, 8);
+        cg->func->base_ptr -= decl->type->size;
+        cg->func->base_ptr  = align_value(cg->func->base_ptr, 8);
 
-        base_array_offset = cg->base_ptr;
+        base_array_offset = cg->func->base_ptr;
         ((AstArrayLiteral *)decl->expr)->base_offset = base_array_offset; // @Incomplete - Need a function to set the base array offset on all child arrays of the array literal!
     }
 

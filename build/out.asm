@@ -65,8 +65,9 @@ enum_case_2:
    mov		rax, __DogKind.bulldog
    ret
 
-; bytes total    : 20
+; bytes locals   : 20
 ; bytes arguments: 0
+; bytes total    : 64
 main:
    push		rbp
    mov		rbp, rsp

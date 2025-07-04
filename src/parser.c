@@ -1078,19 +1078,24 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         return_type = parse_type(parser);;
     }
 
+    CallingConv call_conv = CALLING_CONV_SAAD;
+    bool        is_extern = false;
 
-    bool is_extern = false;
     next = peek_next_token(parser);
     if (next.type == '#') {
         AstDirective *dir = parse_directive(parser);
         if (!dir) return NULL;
 
-        if (dir->kind != DIRECTIVE_EXTERN || dir->extern_abi != ABI_C) {
+        if (dir->kind != DIRECTIVE_EXTERN) {
             report_error_ast(parser, LABEL_ERROR, (Ast *)dir, "The #%s directive is not valid in this context", directive_names[dir->kind]);
             return NULL;
         }
 
         is_extern = true;
+
+        if (dir->extern_abi == ABI_C) {
+            call_conv = CALLING_CONV_MSVC;
+        }
     }
 
     if (!is_extern) {
@@ -1115,9 +1120,11 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->identifier  = ident;
     func_defn->body        = body;
     func_defn->return_type = return_type;
-    func_defn->num_bytes_total = 0;
-    func_defn->num_bytes_args  = 0;
     func_defn->is_extern   = is_extern;
+    func_defn->call_conv   = call_conv;
+    func_defn->num_bytes_locals = 0;
+    func_defn->num_bytes_args   = 0;
+    func_defn->base_ptr         = 0;
 
     TypeFunction *func    = type_alloc(&parser->type_table, sizeof(TypeFunction));
     func->head.head.kind  = AST_TYPE;
@@ -1149,7 +1156,7 @@ AstIf *parse_if(Parser *parser) {
     ast_if->head.kind = AST_IF;
     ast_if->head.start = if_token.start;
     ast_if->head.end = block->head.end;
-    ast_if->block = block;
+    ast_if->then_block = block;
     ast_if->condition = condition;
     ast_if->else_ifs = da_init(2, sizeof(AstIf));
 
@@ -1173,7 +1180,7 @@ AstIf *parse_if(Parser *parser) {
                 else_if.head.kind = AST_IF;
                 else_if.head.start = else_token.start;
                 else_if.head.end = block->head.end;
-                else_if.block = block;
+                else_if.then_block = block;
                 else_if.condition = condition;
 
                 da_append(&ast_if->else_ifs, else_if);

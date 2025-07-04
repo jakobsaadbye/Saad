@@ -233,80 +233,83 @@ typedef struct AstEnumLiteral {
     AstEnumerator *enum_member;
 } AstEnumLiteral;
 
+typedef enum CallingConv {
+    CALLING_CONV_SAAD,  // @Note - Currently this is just the same as MSVC but we might differ in the future?
+    CALLING_CONV_MSVC,
+    CALLING_CONV_SYSTEM_V,
+    CALLING_CONV_C_DECL,
+    CALLING_CONV_STD_CALL,
+    CALLING_CONV_FAST_CALL,
+} CallingConv;
+
 typedef struct AstFunctionDefn {
-    Ast head;
-
-    AstIdentifier *identifier;
-    DynamicArray parameters; // of AstDeclaration
-    Type *return_type;
-    AstBlock *body;
-
-    int num_bytes_total; // Number of bytes allocated in the function
-    int num_bytes_args;  // Number of bytes allocated from passing arguments to functions
-    
+    Ast             head;
+    AstIdentifier  *identifier;
+    DynamicArray    parameters; // of *AstDeclaration
+    AstBlock       *body;
+    Type           *return_type;
+    CallingConv     call_conv;
+    bool            is_extern;
+ 
+    int num_bytes_locals; // Number of bytes allocated for variables in the function
+    int num_bytes_args;   // Number of bytes allocated from passing arguments to functions
+    int base_ptr;         // Where rbp is currently at in codegen  
     int return_label;
 
-    bool is_extern;
 } AstFunctionDefn;
 
 typedef struct AstFunctionCall {
-    AstExpr head;
-
-    AstIdentifier *identifer;
-    DynamicArray arguments; // of AstExpr
+    AstExpr          head;
+    AstIdentifier   *identifer;
+    AstFunctionDefn *func_defn;
+    DynamicArray     arguments; // of *AstExpr
 } AstFunctionCall;
 
 typedef struct AstPrint {
-    Ast head;
-
-    DynamicArray arguments; // of *AstExpr
-    char *c_string;         // Generated c string in typer
-    int   c_args;           // Number of arguments that needs to be supplied to the c_string
+    Ast           head;
+    DynamicArray  arguments;    // of *AstExpr
+    char         *c_string;     // Generated c string in typer
+    int           c_args;       // Number of arguments that needs to be supplied to the c_string
 } AstPrint;
 
 typedef struct AstAssert {
-    Ast head;
-
+    Ast      head;
     AstExpr *expr;
 } AstAssert;
 
 typedef struct AstTypeof {
-    Ast head;
-
+    Ast      head;
     AstExpr *expr;
 } AstTypeof;
 
 typedef struct AstReturn {
-    Ast head;
-
-    AstExpr *expr;
+    Ast              head;
+    AstExpr         *expr;
     AstFunctionDefn *enclosing_function;
 } AstReturn;
 
 typedef struct AstIf {
-    Ast head;
-
-    AstExpr *condition;
-    AstBlock *block;
-    AstBlock *else_block;
-    DynamicArray else_ifs;  // of *AstIf
+    Ast           head;
+    AstExpr      *condition;
+    AstBlock     *then_block;
+    AstBlock     *else_block;
+    DynamicArray  else_ifs;  // of *AstIf
 } AstIf;
 
 typedef enum ForKind {
-    FOR_WITH_NAMED_ITERATOR = 1,
-    FOR_WITH_NAMED_ITERATOR_AND_INDEX = 2,
-    FOR_WITH_EXPR = 3,
-    FOR_INFINITY_AND_BEYOND = 4,
+    FOR_WITH_NAMED_ITERATOR,
+    FOR_WITH_NAMED_ITERATOR_AND_INDEX,
+    FOR_WITH_EXPR,
+    FOR_INFINITY_AND_BEYOND,
 } ForKind;
 
 typedef struct AstFor {
-    Ast head;
-
-    ForKind kind;
+    Ast            head;
+    ForKind        kind;
     AstIdentifier *iterator;
     AstIdentifier *index;
-    AstExpr *iterable;
-    AstBlock *body;
+    AstExpr       *iterable;
+    AstBlock      *body;
 
     int post_expression_label; // Set in CodeGenerator so break and continue know where to branch to
     int done_label;
@@ -315,34 +318,30 @@ typedef struct AstFor {
 typedef struct AstBreakOrContinue {
     Ast head;
     
-    Token token; // Either has type TOKEN_BREAK or TOKEN_CONTINUE
+    Token token; // Either TOKEN_BREAK or TOKEN_CONTINUE
     AstFor *enclosing_for;
 } AstBreakOrContinue;
 
 typedef struct AstRangeExpr {
-    AstExpr head;
-
+    AstExpr  head;
     AstExpr* start;
     AstExpr* end;
     bool     inclusive;
 } AstRangeExpr;
 
 typedef struct AstBinary {
-    AstExpr head;
-
-    TokenType operator;
-    AstExpr  *left;
-    AstExpr  *right;
+    AstExpr    head;
+    TokenType  operator;
+    AstExpr   *left;
+    AstExpr   *right;
 } AstBinary;
 
 typedef struct AstArrayAccess {
-    AstExpr head;
-
+    AstExpr  head;
     AstExpr *accessing;
     AstExpr *subscript;
-    
-    Token open_bracket;
-    Token close_bracket;
+    Token    open_bracket;
+    Token    close_bracket;
 } AstArrayAccess;
 
 typedef enum MemberAccessKind {

@@ -25,6 +25,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Type 
 Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_type);
 Type *check_member_access(Typer *typer, AstMemberAccess * ma);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
+Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn);
 
 char *type_to_str(Type *type);
 bool types_are_equal(Type *lhs, Type *rhs);
@@ -32,6 +33,7 @@ bool can_cast_implicitly(Type *from, Type *to);
 bool can_cast_explicitly(Type *from, Type *to);
 bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
+bool is_untyped_literal(Type *type);
 AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name);
 char *generate_c_format_specifier_for_type(Type *type);
 
@@ -168,7 +170,7 @@ unsigned long long max_integer_value(TypePrimitive *type) {
     }
 }
 
-bool check_for_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
+bool leads_to_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
     assert(lhs_type);
     if (expr == NULL) return true;
     if (lhs_type->kind != TYPE_INTEGER && lhs_type->kind != TYPE_ENUM) return true;
@@ -271,26 +273,27 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
 
     concretise_untyped_literal(decl);
 
-    bool ok = check_for_integer_overflow(typer, decl->type, decl->expr);
+    bool ok = leads_to_integer_overflow(typer, decl->type, decl->expr);
     if (!ok) return false;
     
     if (decl->flags & (DECLARATION_IS_FUNCTION_PARAMETER | DECLARATION_IS_STRUCT_MEMBER)) {
         // Omit sizing the declaration as it is done at the call site
-    } else {
-        if (typer->enclosing_function != NULL) {
-            typer->enclosing_function->num_bytes_total += decl->type->size;
+        return true;
+    } 
 
-            if (decl->expr && decl->expr->head.kind == AST_ARRAY_LITERAL) {
-                // A little iffy, if we wanna keep it this way
-                typer->enclosing_function->num_bytes_total += 16; // data + count
-            }
+    if (typer->enclosing_function != NULL) {
+        typer->enclosing_function->num_bytes_locals += decl->type->size;
+
+        if (decl->expr && decl->expr->head.kind == AST_ARRAY_LITERAL) {
+            // A little iffy, if we wanna keep it this way
+            typer->enclosing_function->num_bytes_locals += 16; // data + count
+        }
+    } else {
+        if (decl->flags & DECLARATION_CONSTANT) {
+            // Constants don't need to be sized
         } else {
-            if (decl->flags & DECLARATION_CONSTANT) {
-                // Constants don't need to be sized
-            } else {
-                // @TODO: Non-constant declarations in global scope should also be sized. Variables that live in global scope, should probably have some defined stack address of where they live, so they can be referenced locally. Still an open question on how i would do this.
-                XXX;
-            }
+            // @TODO: Non-constant declarations in global scope should also be sized. Variables that live in global scope, should probably have some defined stack address of where they live, so they can be referenced locally. Still an open question on how i would do this.
+            XXX;
         }
     }
 
@@ -335,6 +338,15 @@ bool types_are_equal(Type *lhs, Type *rhs) {
     return false;
 }
 
+void allocate_temporary_stack_space(AstFunctionDefn *func_defn, int size_bytes) {
+    // Expand the temporary stack space for a function if the number of size_bytes exceeds the current
+    // temporary stack space
+    int current_bytes_args = func_defn->num_bytes_args;
+    if (size_bytes > current_bytes_args) {
+        func_defn->num_bytes_args = size_bytes;
+    }
+}
+
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     AstIdentifier *func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name, NULL); // @Note - Passing NULL here omits the checking that the function needs to exist before it can be called to allow arbitrary order. If, or when we get closues, this should probably work differently!
     if (func_ident == NULL) {
@@ -356,17 +368,29 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
     for (int i = 0; i < call->arguments.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
+
         AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
         Type *arg_type = check_expression(typer, arg, param->type);
         if (!arg_type) return NULL;
 
         if (!types_are_equal(param->type, arg->type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", type_to_str(param->type), type_to_str(arg_type));
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param), "Here is the definition of '%s'", param->ident->name);
             return NULL;
         }
     }
 
+    //
+    // Allocate space for arguments and potentially for the return value
+    // @Note - We follow the msvc x86 calling convention
+    // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170#parameter-passing 
+    //
+    int bytes_arguments    = call->arguments.count > 4 ? (call->arguments.count - 4) * 8 : 0;
+    int bytes_return_value = func_defn->return_type->size > 8 ? func_defn->return_type->size : 0;
+    int bytes_call         = bytes_arguments + bytes_return_value;
+    allocate_temporary_stack_space(typer->enclosing_function, bytes_call);
+
+    call->func_defn = func_defn;
     call->head.type = func_defn->return_type;
 
     return func_defn->return_type;
@@ -425,7 +449,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
                 return false;
             }
 
-            bool ok = check_for_integer_overflow(typer, points_to, assign->expr);
+            bool ok = leads_to_integer_overflow(typer, points_to, assign->expr);
             if (!ok) return false;
 
             return true;
@@ -448,7 +472,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     }
 
 
-    bool ok = check_for_integer_overflow(typer, lhs_type, assign->expr);
+    bool ok = leads_to_integer_overflow(typer, lhs_type, assign->expr);
     if (!ok) return false;
 
     return true;
@@ -508,7 +532,7 @@ bool check_for(Typer *typer, AstFor *ast_for) {
     typer->enclosing_for = ast_for;
 
     if (ast_for->kind == FOR_INFINITY_AND_BEYOND) {
-        // Nothing to check!
+        // No header to check!
     }
     else if (ast_for->iterable->head.kind == AST_RANGE_EXPR) {
         // @Incomplete - Need to set type of index if being used!
@@ -527,16 +551,16 @@ bool check_for(Typer *typer, AstFor *ast_for) {
             return NULL;
         }
 
-        ast_for->iterator->type = primitive_type(PRIMITIVE_S64);
+        ast_for->iterator->type = primitive_type(PRIMITIVE_S32);
         if (ast_for->index) {
-            ast_for->index->type = primitive_type(PRIMITIVE_S64);
+            ast_for->index->type = primitive_type(PRIMITIVE_S32);
         }
 
         // allocate space for the iterator, start, end and optionally for the index
         assert(typer->enclosing_function != NULL);
-        typer->enclosing_function->num_bytes_total += 24;
+        typer->enclosing_function->num_bytes_locals += 24;
         if (ast_for->index) {
-            typer->enclosing_function->num_bytes_total += 8;
+            typer->enclosing_function->num_bytes_locals += 8;
         }
     } 
     else {
@@ -549,12 +573,12 @@ bool check_for(Typer *typer, AstFor *ast_for) {
 
         ast_for->iterator->type = ((TypeArray *)(iterable_type))->elem_type;
         if (ast_for->index) {
-            ast_for->index->type = primitive_type(PRIMITIVE_S64);
+            ast_for->index->type = primitive_type(PRIMITIVE_S32);
         }
 
         // Allocate space for iterator, pointer to head of array, stop condition (count) and index
         assert(typer->enclosing_function != NULL);
-        typer->enclosing_function->num_bytes_total += align_value(ast_for->iterator->type->size, 8) + 24;
+        typer->enclosing_function->num_bytes_locals += align_value(ast_for->iterator->type->size, 8) + 24;
     }
 
     bool ok = check_block(typer, ast_for->body);
@@ -751,7 +775,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
             int diff = bytes_args - current_bytes_args;
             if (diff > 0) {
                 typer->enclosing_function->num_bytes_args = bytes_args;
-                typer->enclosing_function->num_bytes_total += diff;
+                typer->enclosing_function->num_bytes_locals += diff;
             }
         }
 
@@ -787,7 +811,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
             return false;
         }
 
-        bool ok = check_block(typer, ast_if->block);
+        bool ok = check_block(typer, ast_if->then_block);
         if (!ok) return false;
 
         for (int i = 0; i < ast_if->else_ifs.count; i++) {
@@ -842,33 +866,70 @@ bool check_statement(Typer *typer, Ast *stmt) {
 
         return true;
     }
-    case AST_FUNCTION_DEFN: {
-        AstFunctionDefn *func_defn = (AstFunctionDefn *)(stmt);
-        typer->enclosing_function = func_defn;
-
-
-        for (int i = 0; i < func_defn->parameters.count; i++) {
-            AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
-            bool ok = check_declaration(typer, param);
-            if (!ok) return NULL;
-        }
-
-        typer->current_scope = func_defn->body;
-
-        bool ok = check_block(typer, func_defn->body);
-        if (!ok) return false;
-
-        func_defn->return_type = resolve_type(typer, func_defn->return_type, NULL);
-
-        typer->enclosing_function = NULL;
-        return true;
-    }
+    case AST_FUNCTION_DEFN: return check_function_defn(typer, (AstFunctionDefn *)(stmt));
     case AST_STRUCT: return check_struct(typer, (AstStruct *)(stmt));
     case AST_ENUM: return check_enum_defn(typer, (AstEnum *)stmt);
     case AST_FOR: return check_for(typer, (AstFor *)(stmt));
     default:
         XXX;
     }
+}
+
+#define For(T, arr, body)                                      \
+    for (int _i = 0; _i < (arr).count; _i++) {                 \
+        T it = ((T *)(arr).items)[_i];                         \
+        int it_index = _i;                                     \
+        (void)it_index;                                        \
+        body                                                   \
+    }
+
+
+Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
+    typer->enclosing_function = func_defn;
+
+    for (int i = 0; i < func_defn->parameters.count; i++) {
+        AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
+        bool ok = check_declaration(typer, param);
+        if (!ok) return NULL;
+    }
+    
+    Type *return_type = resolve_type(typer, func_defn->return_type, NULL);
+    if (!return_type) return NULL;
+    func_defn->return_type = return_type;
+
+    typer->current_scope = func_defn->body;
+
+    bool ok = check_block(typer, func_defn->body);
+    if (!ok) return NULL;
+
+    typer->enclosing_function = NULL;
+
+    // Do a narrow scan for a return statement
+    bool has_return = false;
+    For (Ast*, func_defn->body->statements, {
+        if (it->kind == AST_RETURN) {
+            has_return = true;
+            break;
+        }
+    });
+
+    if (!has_return && func_defn->return_type->kind != TYPE_VOID) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)func_defn, "Function is missing a return");
+        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)func_defn, "Put an explicit return at the outer scope of the function. In the future we should be able to detect nested returns");
+        return NULL;
+    }
+
+
+    //
+    // Do sizing for parameters and return value
+    //
+    for (int i = 0; i < func_defn->parameters.count; i++) {
+        AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
+        func_defn->num_bytes_locals += param->type->size;
+    }
+
+
+    return return_type;
 }
 
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
@@ -1069,7 +1130,7 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
     for (int i = 0; i < array_lit->expressions.count; i++) {
         AstExpr *expr = ((AstExpr **)(array_lit->expressions.items))[i];
 
-        bool ok = check_for_integer_overflow(typer, array->elem_type, expr);
+        bool ok = leads_to_integer_overflow(typer, array->elem_type, expr);
         if (!ok) return NULL;
 
         if (infer_type_from_first_element && i == 0) continue;
@@ -1132,11 +1193,11 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
 
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     Type *result = NULL;
-    if      (expr->head.kind == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
+    if      (expr->head.kind == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr), ctx_type);
     else if (expr->head.kind == AST_BINARY)         result = check_binary(typer, (AstBinary *)(expr), ctx_type);
     else if (expr->head.kind == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
     else if (expr->head.kind == AST_CAST)           result = check_cast(typer, (AstCast *)(expr), ctx_type);
-    else if (expr->head.kind == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr), ctx_type);
+    else if (expr->head.kind == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
     else if (expr->head.kind == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), ctx_type);
     else if (expr->head.kind == AST_ARRAY_LITERAL)  result = check_array_literal(typer, (AstArrayLiteral *)(expr), ctx_type);
     else if (expr->head.kind == AST_ENUM_LITERAL)   result = check_enum_literal(typer, (AstEnumLiteral *)(expr), ctx_type);
@@ -1228,7 +1289,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
 
 }
 
-Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_type) {
+Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_type) {
     TypeStruct *struct_defn = NULL;
     if (literal->explicit_type) {
         // Explicit type is used
@@ -1253,23 +1314,29 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_ty
             literal->explicit_type = found;
             struct_defn = (TypeStruct *)(found);
         } else {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Struct literal cannot conform to type '%s'", type_to_str(lhs_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Struct literal cannot conform to type '%s'", type_to_str(ctx_type));
             return NULL;
         }
     }
     else {
         // Type is inferred from the type on the declaration
-        if (lhs_type == NULL) {
+        if (ctx_type == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Type of struct literal could not be infered from the context");
             return NULL;
         }
 
-        if (lhs_type->kind != TYPE_STRUCT) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Struct literal cannot conform to type '%s'", type_to_str(lhs_type));
+        if (ctx_type->kind == TYPE_NAME) {
+            printf("%s:%d: Internal Compiler Error: Struct or enum type was not specialized before infering the struct literal", __FILE__, __LINE__);
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(literal), "... while infering this struct literal of type '%s'", type_to_str(ctx_type));
             return NULL;
         }
 
-        struct_defn = (TypeStruct *)(lhs_type);
+        if (ctx_type->kind != TYPE_STRUCT) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Struct literal cannot conform to type '%s'", type_to_str(ctx_type));
+            return NULL;
+        }
+
+        struct_defn = (TypeStruct *)(ctx_type);
     }
 
     DynamicArray members = struct_defn->node->scope->members;
@@ -1322,7 +1389,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *lhs_ty
     if (literal->explicit_type != NULL) {
         return literal->explicit_type;
     } else {
-        return lhs_type;
+        return ctx_type;
     }
 }
 
@@ -1422,7 +1489,7 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
     }
     if (is_comparison_operator(binary->operator)) {
         if (lhs == TYPE_BOOL    && rhs == TYPE_BOOL)    return primitive_type(PRIMITIVE_BOOL);
-        
+
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_FLOAT   && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_BOOL);
@@ -1517,8 +1584,10 @@ bool can_cast_implicitly(Type *from, Type *to) {
 
     // Allow untyped integers to cast to floats
     if (from->kind == TYPE_INTEGER && to->kind == TYPE_FLOAT) {
-        bool is_untyped_int = ((TypePrimitive *)from)->kind == PRIMITIVE_UNTYPED_INT;
-        return is_untyped_int;
+        return ((TypePrimitive *)from)->kind == PRIMITIVE_UNTYPED_INT;
+    }
+    if (from->kind == TYPE_FLOAT && to->kind == TYPE_INTEGER) {
+        return ((TypePrimitive *)to)->kind == PRIMITIVE_UNTYPED_INT;
     }
 
     if (from->kind == TYPE_BOOL   && to->kind == TYPE_BOOL) return true;
@@ -1620,4 +1689,13 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 // @Cleanup - Still kinda handy until we don't use AstIdentifier as the primary lookup in scopes
 AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name) {
     return find_member_in_scope(struct_defn->scope, name);
+}
+
+bool is_untyped_literal(Type *type) {
+    if (type->kind == TYPE_INTEGER) {
+        TypePrimitive *prim = (TypePrimitive *)type;
+        return prim->kind == PRIMITIVE_UNTYPED_INT;
+    }
+
+    return false;
 }
