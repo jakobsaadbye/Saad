@@ -62,6 +62,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_BREAK:         return "BREAK";
         case TOKEN_CONTINUE:      return "CONTINUE";
         case TOKEN_FOR:           return "FOR";
+        case TOKEN_WHILE:         return "WHILE";
         case TOKEN_IF:            return "IF";
         case TOKEN_ELSE:          return "ELSE";
         case TOKEN_CAST:          return "CAST";
@@ -311,6 +312,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "print") == 0) token = TOKEN_PRINT;
         if (strcmp(text, "false") == 0) token = TOKEN_FALSE;
         if (strcmp(text, "break") == 0) token = TOKEN_BREAK;
+        if (strcmp(text, "while") == 0) token = TOKEN_WHILE;
     }
     if (keyword_len == 6) {
         if (strcmp(text, "struct") == 0) token = TOKEN_STRUCT;

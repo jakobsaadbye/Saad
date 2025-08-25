@@ -17,6 +17,7 @@ AstStruct       *parse_struct(Parser *parser);
 AstEnum         *parse_enum(Parser *parser);
 AstIf           *parse_if(Parser *parser);
 AstFor          *parse_for(Parser *parser);
+AstWhile        *parse_while(Parser *parser);
 AstCast         *parse_cast(Parser *parser);
 AstPrint        *parse_print(Parser *parser);
 AstAssert       *parse_assert(Parser *parser);
@@ -282,6 +283,11 @@ Ast *parse_statement(Parser *parser) {
     }
     else if (token.type == TOKEN_FOR) {
         stmt = (Ast *)(parse_for(parser));
+        statement_ends_with_semicolon = false;
+        matched_a_statement = true;
+    }
+    else if (token.type == TOKEN_WHILE) {
+        stmt = (Ast *)(parse_while(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
@@ -795,6 +801,31 @@ AstFor *parse_for(Parser *parser) {
     ast_for->body = body;
 
     return ast_for;
+}
+
+AstWhile *parse_while(Parser *parser) {
+    Token while_token = peek_next_token(parser);
+    eat_token(parser);
+    assert(while_token.type == TOKEN_WHILE);
+
+    parser->inside_statement_header = true;
+    AstExpr *condition = parse_expression(parser, MIN_PRECEDENCE);
+    if (!condition) return NULL;
+    parser->inside_statement_header = false;
+    
+    AstBlock *body = parse_block(parser, NULL);
+    if (!body) return NULL;
+
+    AstWhile *ast_while = ast_allocate(parser, sizeof(AstWhile));
+    ast_while->head.kind = AST_WHILE;
+    ast_while->head.start = while_token.start;
+    ast_while->head.end = body->head.end;
+    ast_while->condition = condition;
+    ast_while->body = body;
+    ast_while->condition_label = 0;
+    ast_while->done_label = 0;
+
+    return ast_while;
 }
 
 AstExpr *parse_range_or_normal_expression(Parser *parser) {

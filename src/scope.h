@@ -12,4 +12,6 @@ AstIdentifier  *lookup_from_scope(Parser *parser, AstBlock *scope, char *ident_n
 AstIdentifier  *add_identifier_to_scope(Parser *parser, AstBlock *scope, AstIdentifier *ident);
 AstDeclaration *add_declaration_to_scope(AstBlock *scope, AstDeclaration *decl);
 
+bool is_a_before_b (Ast *a, Ast *b);
+
 #endif

@@ -36,6 +36,7 @@ typedef enum AstKind {
     AST_BREAK_OR_CONTINUE,
     AST_IF,
     AST_FOR,
+    AST_WHILE,
     AST_EXPR,
     AST_TYPE,
     AST_RANGE_EXPR,
@@ -317,11 +318,24 @@ typedef struct AstFor {
     int done_label;
 } AstFor;
 
+typedef struct AstWhile {
+    Ast       head;
+    AstExpr  *condition;
+    AstBlock *body;
+
+    int condition_label; // Set in CodeGenerator so break and continue know where to branch to
+    int done_label;
+} AstWhile;
+
 typedef struct AstBreakOrContinue {
-    Ast head;
-    
-    Token token; // Either TOKEN_BREAK or TOKEN_CONTINUE
-    AstFor *enclosing_for;
+    Ast       head;
+    Token     token;           // Either TOKEN_BREAK or TOKEN_CONTINUE
+    TokenType enclosing_loop;  // Either TOKEN_FOR or TOKEN_WHILE
+    union {
+        AstFor   *for_loop;
+        AstWhile *while_loop;
+    } enclosing;
+
 } AstBreakOrContinue;
 
 typedef struct AstRangeExpr {
@@ -439,6 +453,7 @@ static const char *ast_to_str(Ast *ast) {
     case AST_IF:                 return "AST_IF";
     case AST_RETURN:             return "AST_RETURN";
     case AST_FOR:                return "AST_FOR";
+    case AST_WHILE:              return "AST_WHILE";
     case AST_BREAK_OR_CONTINUE:  return "AST_BREAK_OR_CONTINUE";
     case AST_EXPR:               return "AST_EXPR";
     case AST_RANGE_EXPR:         return "AST_RANGE_EXPR";

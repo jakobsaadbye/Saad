@@ -40,6 +40,7 @@ void emit_assert(CodeGenerator *cg, AstAssert *assertion);
 void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof);
 void emit_if(CodeGenerator *cg, AstIf *ast_if);
 void emit_for(CodeGenerator *cg, AstFor *ast_for);
+void emit_while(CodeGenerator *cg, AstWhile *ast_while);
 void emit_break_or_continue(CodeGenerator *cg, AstBreakOrContinue *boc);
 void emit_enum(CodeGenerator *cg, AstEnum *ast_enum);
 void emit_struct(CodeGenerator *cg, AstStruct *ast_struct);
@@ -210,8 +211,9 @@ void emit_statement(CodeGenerator *cg, Ast *node) {
     case AST_TYPEOF:            emit_typeof(cg, (AstTypeof *)(node)); break;
     case AST_IF:                emit_if(cg, (AstIf *)(node)); break;
     case AST_FOR:               emit_for(cg, (AstFor *)(node)); break;
+    case AST_WHILE:             emit_while(cg, (AstWhile *)(node)); break;
     case AST_ENUM:              emit_enum(cg, (AstEnum *)(node)); break;
-    case AST_STRUCT:        break;
+    case AST_STRUCT: break;
     default:
         printf("compiler-error: emit_statement not implemented for %s\n", ast_to_str(node));
         XXX;
@@ -219,14 +221,19 @@ void emit_statement(CodeGenerator *cg, Ast *node) {
 }
 
 void emit_break_or_continue(CodeGenerator *cg, AstBreakOrContinue *boc) {
-    assert(boc->enclosing_for);
 
     if (boc->token.type == TOKEN_BREAK) {
-        sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing_for->done_label);
-    } else if (boc->token.type == TOKEN_CONTINUE) {
-        sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing_for->post_expression_label);
+        if (boc->enclosing_loop == TOKEN_FOR) {
+            sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing.for_loop->done_label);
+        } else {
+            sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing.while_loop->done_label);
+        }
     } else {
-        XXX; // Shouldn't happen
+        if (boc->enclosing_loop == TOKEN_FOR) {
+            sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing.for_loop->post_expression_label);
+        } else {
+            sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing.while_loop->condition_label);
+        }
     }
 }
 
@@ -530,6 +537,29 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
 
         sb_append(&cg->code, "L%d:\n", done_label);
     }
+}
+
+void emit_while(CodeGenerator *cg, AstWhile *ast_while) {
+    int cond_label = make_label_number(cg);
+    int done_label = make_label_number(cg);
+
+    // Set the labels so that break and continue statements knows where to jump
+    ast_while->condition_label = cond_label;
+    ast_while->done_label = done_label;
+
+    sb_append(&cg->code, "L%d:\n", cond_label);
+    emit_expression(cg, ast_while->condition);
+    POP(RAX);
+    sb_append(&cg->code, "   cmp\t\tal, 0\n");
+    sb_append(&cg->code, "   jz\t\t\tL%d\n", done_label);
+    
+    sb_append(&cg->code, "   ; While body\n");
+    emit_block(cg, ast_while->body);
+    sb_append(&cg->code, "   jmp\t\t\tL%d\n", cond_label);
+
+    sb_append(&cg->code, "L%d:\n", done_label);
+
+    return;
 }
 
 void emit_return(CodeGenerator *cg, AstReturn *ast_return) {
@@ -1091,12 +1121,12 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     AstFunctionDefn *func_defn = call->func_defn;
 
     if (func_defn->call_conv == CALLING_CONV_MSVC) {
-        bool align_stack = cg->num_pushed_arguments % 2 == 1;
+        // bool align_stack = cg->num_pushed_arguments % 2 == 1;
 
         // Boundary needs to be 16 byte aligned
-        if (align_stack) sb_append(&cg->code, "   sub\t\trsp, 8\n");
+        // if (align_stack) sb_append(&cg->code, "   sub\t\trsp, 8\n");
         sb_append(&cg->code, "   call\t\t%s\n", call->identifer->name);
-        if (align_stack) sb_append(&cg->code, "   add\t\trsp, 8\n");
+        // if (align_stack) sb_append(&cg->code, "   add\t\trsp, 8\n");
     }
     else {
         // Assume standard calling convention (SAAD)

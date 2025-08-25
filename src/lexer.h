@@ -76,8 +76,9 @@ typedef enum TokenType {
     TOKEN_BREAK        = 165,
     TOKEN_CONTINUE     = 166,
     TOKEN_FOR          = 167,
-    TOKEN_TYPEOF       = 168,
-    TOKEN_CAST         = 169,
+    TOKEN_WHILE        = 168,
+    TOKEN_TYPEOF       = 169,
+    TOKEN_CAST         = 170,
 
     TOKEN_STRUCT  = 180,
     TOKEN_ENUM    = 181,

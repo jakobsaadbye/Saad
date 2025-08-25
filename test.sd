@@ -16,10 +16,6 @@ Vector4 :: struct {
 	w: float;
 }
 
-// Where do struct literals appear?
-// - initialization,  a := Vector2{1, 2}
-// - returns,         return Vector2{3, 4};
-
 foo :: () -> Vector3 {
 	return {1, 4, 9};
 }
@@ -27,4 +23,7 @@ foo :: () -> Vector3 {
 main :: () {
 	a := foo().x + foo().y + foo().z;
 	print("%", a);
+	
+	b := foo().x * foo().y * foo().z;
+	print("%", b);
 }

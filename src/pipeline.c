@@ -104,7 +104,8 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
 
     report.asm_and_link_time_start = clock();
     system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
-    int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -lkernel32 -lmsvcrt");
+    // int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -lkernel32 -lmsvcrt");
+    int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -Lpackages/raylib/lib -lraylib -lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid");
     if (exit_code != 0) return_and_cleanup;
     report.asm_and_link_time_end = clock();
 

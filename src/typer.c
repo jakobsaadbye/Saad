@@ -8,7 +8,8 @@ typedef struct Typer {
     AstBlock *current_scope;
 
     AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
-    AstFor          *enclosing_for; // Used by break or continue statements to know where to branch to
+    AstFor          *enclosing_for;      // Used by break or continue statements to know where to branch to
+    AstWhile        *enclosing_while;    // Same as above
 
     DynamicArray flattened_array; // of *DynamicArray of *TypeArray. Used to infer size of array literals
     int array_literal_depth;
@@ -24,6 +25,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type);
 Type *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Type *ctx_type);
 Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_type);
 Type *check_member_access(Typer *typer, AstMemberAccess * ma);
+bool  check_break_or_continue(Typer *typer, AstBreakOrContinue *boc);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn);
 
@@ -48,6 +50,7 @@ Typer typer_init(Parser *parser, ConstEvaluater *ce) {
     typer.current_scope = parser->current_scope;
     typer.enclosing_function = NULL;
     typer.enclosing_for = NULL;
+    typer.enclosing_while = NULL;
 
     typer.array_literal_depth = 0;
 
@@ -603,6 +606,25 @@ bool check_for(Typer *typer, AstFor *ast_for) {
     return true;
 }
 
+bool check_while(Typer *typer, AstWhile *ast_while) {
+    typer->enclosing_while = ast_while;
+
+    Type *cond_type = check_expression(typer, ast_while->condition, NULL);
+    if (!cond_type) return false;
+
+    if (cond_type->kind != TYPE_BOOL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_while->condition, "Type mistmatch. Expeced a bool, but got type %s", type_to_str(cond_type));
+        return false;
+    }
+
+    bool ok = check_block(typer, ast_while->body);
+    if (!ok) return false;
+
+    typer->enclosing_while = NULL;
+
+    return true;
+}
+
 AstEnumerator *enum_value_is_unique(AstEnum *ast_enum, int value) {
     for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
@@ -868,25 +890,45 @@ bool check_statement(Typer *typer, Ast *stmt) {
         ast_return->enclosing_function = ef;
         return true;
     }
-    case AST_BREAK_OR_CONTINUE: {
-        AstBreakOrContinue *boc = (AstBreakOrContinue *)(stmt);
-        AstFor *enclosing_for = typer->enclosing_for;
-        if (!enclosing_for) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(boc), "%s is only allowed inside for-loop's", boc->token.type ==TOKEN_BREAK ? "break" : "continue");
-            return false;
-        }
-
-        boc->enclosing_for = enclosing_for;
-
-        return true;
-    }
+    case AST_BREAK_OR_CONTINUE: return check_break_or_continue(typer, (AstBreakOrContinue *)(stmt));
     case AST_FUNCTION_DEFN: return check_function_defn(typer, (AstFunctionDefn *)(stmt));
     case AST_STRUCT: return check_struct_defn(typer, (AstStruct *)(stmt));
     case AST_ENUM: return check_enum_defn(typer, (AstEnum *)stmt);
     case AST_FOR: return check_for(typer, (AstFor *)(stmt));
+    case AST_WHILE: return check_while(typer, (AstWhile *)(stmt));
     default:
         XXX;
     }
+}
+
+bool check_break_or_continue(Typer *typer, AstBreakOrContinue *boc) {
+
+    if (!typer->enclosing_for && !typer->enclosing_while) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(boc), "%s is only allowed inside for-loops or while-loops", boc->token.type ==TOKEN_BREAK ? "break" : "continue");
+        return false;
+    }
+
+    if (typer->enclosing_for && typer->enclosing_while) {
+        // We are inside a for loop and a while loop. We need to figure out
+        // which is the inner one
+        if (is_a_before_b((Ast *)typer->enclosing_for, (Ast *)typer->enclosing_while)) {
+            boc->enclosing_loop = TOKEN_WHILE;
+            boc->enclosing.while_loop = typer->enclosing_while;
+        } else {
+            boc->enclosing_loop = TOKEN_FOR;
+            boc->enclosing.for_loop = typer->enclosing_for;
+        }
+    }
+
+    if (typer->enclosing_for) {
+        boc->enclosing_loop = TOKEN_FOR;
+        boc->enclosing.for_loop = typer->enclosing_for;
+    } else {
+        boc->enclosing_loop = TOKEN_WHILE;
+        boc->enclosing.while_loop = typer->enclosing_while;
+    }
+
+    return true;
 }
 
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
@@ -918,7 +960,7 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         }
     });
 
-    if (!has_return && func_defn->return_type->kind != TYPE_VOID) {
+    if (!has_return && func_defn->return_type->kind != TYPE_VOID && !func_defn->is_extern) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)func_defn, "Function is missing a return");
         report_error_ast(typer->parser, LABEL_NOTE, (Ast *)func_defn, "Put an explicit return at the outer scope of the function. In the future we should be able to detect nested returns");
         return NULL;

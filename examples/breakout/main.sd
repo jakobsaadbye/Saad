@@ -1,0 +1,24 @@
+InitWindow :: (width: int, height: int, title: string) #extern "C"
+WindowShouldClose :: () -> bool #extern "C"
+
+main :: () {
+    // InitWindow(800, 600, "Breakout in Saad");
+
+    counter := 0;
+    should_quit := false;
+
+    while !should_quit {
+
+        counter += 1;
+        
+        if counter == 10 { 
+            break;
+        }
+
+        if counter == 5 {
+            continue;
+        }
+
+        print("counter is %", counter);
+    }
+}
