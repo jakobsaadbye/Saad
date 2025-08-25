@@ -194,6 +194,9 @@ void emit_block(CodeGenerator *cg, AstBlock *block) {
 }
 
 void emit_statement(CodeGenerator *cg, Ast *node) {
+
+    reset_temporary_storage(cg->enclosing_function);
+
     switch (node->kind) {
     case AST_DECLARATION:       emit_declaration(cg, (AstDeclaration *)(node)); break;
     case AST_ASSIGNMENT:        emit_assignment(cg, (AstAssignment *)(node)); break;
@@ -1076,7 +1079,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
         }
     }
 
-    // Put large return values into the beginning registers / temporaries
+    // Put large return values into the hidden slots allocated by the caller
     if (num_large_return_values > 0) {
         // @Hardcoded @Future - Right now we only deal with maximum 1 large return value which we have reserved space for
         // in the function. Here we give the function a hidden pointer to that return value that the function knows it should write to
@@ -1590,7 +1593,7 @@ void emit_struct_literal(CodeGenerator *cg, AstStructLiteral *struct_lit, int ds
     for (int i = 0; i < struct_lit->initializers.count; i++) {
         AstStructInitializer *init = ((AstStructInitializer **)(struct_lit->initializers.items))[i];
 
-        int dst_offset = dst_base_offset - init->member->member_offset;
+        int dst_offset = dst_base_offset + init->member->member_offset;
 
         if (init->value->head.kind == AST_STRUCT_LITERAL) {
             emit_struct_literal(cg, (AstStructLiteral *)init->value, dst_offset);
@@ -1598,7 +1601,7 @@ void emit_struct_literal(CodeGenerator *cg, AstStructLiteral *struct_lit, int ds
             XXX;
         } else {
             emit_expression(cg, init->value);
-            emit_simple_initialization(cg, dst_offset, false, true, init->member->type, init->value->type);
+            emit_simple_initialization(cg, dst_offset, false, false, init->member->type, init->value->type);
         }
     }
 }
@@ -1994,6 +1997,13 @@ void emit_unary_inside_member_access(CodeGenerator *cg, AstUnary *unary, AstMemb
 }
 
 MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
+
+    // @Note: We handle each of the different nodes that appears on the left hand side
+    // of the member access to grab its corresponding address. 
+    // @Improvement: It might be cleaner to have emit_expression have two modes
+    // for emitting the r-value or as an l-value. In that case, i think we could get rid of most of the below
+    // code if we knew we always had an l-value.
+
     if (ma->left->head.kind == AST_MEMBER_ACCESS) {
         AstMemberAccess *left = (AstMemberAccess *)(ma->left);
 
@@ -2020,6 +2030,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
             };
         }
     }
+
     if (ma->left->head.kind == AST_LITERAL && ((AstLiteral *)(ma->left))->kind == LITERAL_IDENTIFIER) {
         AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(ma->left))->as.value.identifier.name, (Ast *)(ma->left));
 
@@ -2036,6 +2047,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
             };
         }
     }
+
     if (ma->left->head.kind == AST_ARRAY_ACCESS) {
         AstArrayAccess *array_ac = (AstArrayAccess *)(ma->left);
 
@@ -2078,14 +2090,31 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
             XXX;
         }
     }
-    else if (ma->left->head.kind == AST_UNARY) {
+
+    if (ma->left->head.kind == AST_STRUCT_LITERAL) {
+        emit_expression(cg, ma->left);
+        POP(RAX);
+        sb_append(&cg->code, "   mov\t\trbx, rax\n");
+        sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
+
+        return (MemberAccessResult){0, true};
+    }
+
+    if (ma->left->head.kind == AST_FUNCTION_CALL) {
+        emit_expression(cg, ma->left);
+        POP(RAX);
+        sb_append(&cg->code, "   mov\t\trbx, rax\n");
+        sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
+
+        return (MemberAccessResult){0, true};
+    }
+
+    if (ma->left->head.kind == AST_UNARY) {
         emit_unary_inside_member_access(cg, (AstUnary *)(ma->left), ma);
         return (MemberAccessResult){0, true};
     }
-    else {
-        XXX;
-    }
 
+    XXX;
 }
 
 // If lvalue is set, the final offset will be in rbx, otherwise the rvalue needs to be popped/moved from stack
@@ -2307,26 +2336,28 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         break;
     }
     case AST_STRUCT_LITERAL: {
-        // Struct initialization happens in the assignment or declaration. 
-        //
-        // @Incomplete - We assume we are used in a return expression. e.g 'return Vector3{1, 4, 9}'
-        //                                                                      ^^^^^^^^^^^^^^^^
-        // @Incomplete - Move structs that fits in 8 bytes into a register instead of allocating stack space for it
-        int stack_space = align_value(expr->type->size, 8);
+        // @Todo: Struct literals that appear in a declaration are handled in 'emit_struct_literal', although, we should probably change this ...
+        AstStructLiteral *struct_lit = (AstStructLiteral *)expr;
 
-        sb_append(&cg->code, "   sub\t\trsp, %d\n", stack_space);
-        
+        int struct_size = struct_lit->head.type->size;
+        if (struct_size <= 8) {
+            // @Incomplete: Just goes in a register
+            XXX;
+        }
+
+        int temp_loc = allocate_temporary_value(cg->enclosing_function, struct_lit->head.type->size);
+
         // Zero initialize the stack space for the struct
-        sb_append(&cg->code, "   xor\t\trax, rax\n");
-        sb_append(&cg->code, "   lea\t\trdi, %d[rsp]\n", +stack_space);
-        sb_append(&cg->code, "   mov\t\trcx, %d\n", (stack_space / 8) - 1);
-        sb_append(&cg->code, "   rep\t\tstosq\n");
+        // sb_append(&cg->code, "   xor\t\trax, rax\n");
+        // sb_append(&cg->code, "   lea\t\trdi, %d[rsp]\n", +stack_space);
+        // sb_append(&cg->code, "   mov\t\trcx, %d\n", (stack_space / 8) - 1);
+        // sb_append(&cg->code, "   rep\t\tstosq\n");
 
         // Populate the stack with the struct
-        emit_struct_literal(cg, (AstStructLiteral *)expr, +stack_space);
+        emit_struct_literal(cg, (AstStructLiteral *)expr, temp_loc);
 
         // Return pointer to struct literal
-        sb_append(&cg->code, "   lea\t\trax, %d[rsp]\n", +stack_space);
+        sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", temp_loc);
         PUSH(RAX);
 
         break;

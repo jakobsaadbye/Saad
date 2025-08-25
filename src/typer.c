@@ -932,6 +932,11 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         func_defn->num_bytes_locals += param->type->size;
     }
 
+    // Do sizing of large return values
+    if (func_defn->return_type->size > 8) {
+        func_defn->num_bytes_locals += 8;
+    }
+
 
     return return_type;
 }
@@ -1390,11 +1395,19 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         }
     }
 
+    Type *evaluated_type;
     if (literal->explicit_type != NULL) {
-        return literal->explicit_type;
+        evaluated_type = literal->explicit_type;
     } else {
-        return ctx_type;
+        evaluated_type = ctx_type;
     }
+
+    // Reserve space for the struct literal if its bigger than 8 bytes
+    if (evaluated_type->size > 8) {
+        reserve_temporary_storage(typer->enclosing_function, evaluated_type->size);
+    }
+
+    return evaluated_type;
 }
 
 Type *biggest_type(Type *lhs, Type *rhs) {
@@ -1691,7 +1704,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 }
 
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size) {
-    func_defn->temp_ptr += align_value(size, 8);
+    func_defn->temp_ptr += size;
     
     if (func_defn->temp_ptr > func_defn->num_bytes_temporaries) {
         func_defn->num_bytes_temporaries = func_defn->temp_ptr;
@@ -1700,7 +1713,7 @@ void reserve_temporary_storage(AstFunctionDefn *func_defn, int size) {
 
 int allocate_temporary_value(AstFunctionDefn *func_defn, int size) {
     // Temporary storage lives after the shadow-space and local variables
-    int aligned_size = align_value(size, 8);
+    int aligned_size = size;
     int loc = - (align_value(func_defn->num_bytes_locals, 8) + func_defn->temp_ptr + aligned_size);
 
     func_defn->temp_ptr += aligned_size;
