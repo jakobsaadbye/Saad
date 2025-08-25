@@ -54,6 +54,7 @@ void report_error_range(Parser *parser, Pos start, Pos end, const char *message,
 void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const char *message, ...);
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
 
+
 Parser parser_init(Lexer *lexer) {
     Parser parser = {0};
     parser.lexer         = lexer;
@@ -1122,9 +1123,10 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->return_type = return_type;
     func_defn->is_extern   = is_extern;
     func_defn->call_conv   = call_conv;
-    func_defn->num_bytes_locals = 0;
-    func_defn->num_bytes_args   = 0;
-    func_defn->base_ptr         = 0;
+    func_defn->num_bytes_locals       = 0;
+    func_defn->num_bytes_temporaries  = 0;
+    func_defn->base_ptr               = 0;
+    func_defn->temp_ptr               = 0;
 
     TypeFunction *func    = type_alloc(&parser->type_table, sizeof(TypeFunction));
     func->head.head.kind  = AST_TYPE;

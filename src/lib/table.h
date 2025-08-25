@@ -15,9 +15,9 @@ typedef struct Node {
 } Node;
 
 typedef struct LinkedList {
-    size_t length;
-    Node *head;
-    Node *tail;
+    size_t  length;
+    Node   *head;
+    Node   *tail;
 } LinkedList;
 
 typedef struct HashTable {

@@ -9,8 +9,8 @@ typedef struct CodeGenerator {
     Parser *parser;
 
     AstBlock        *current_scope;
-    AstFunctionDefn *func;  // Current enclosing function
-    TypeTable type_table;
+    AstFunctionDefn *enclosing_function;  // Current enclosing function
+    TypeTable        type_table;
 
     size_t constants;   // For float and string literals
     size_t labels;      // For coditional jumps
@@ -50,11 +50,12 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr);
 
 void emit_integer_to_float_conversion(CodeGenerator *cg, Type *l_type, Type *r_type);
 void emit_initialization(CodeGenerator *cg, int dest_offset, AstExpr *expr, Type *lhs_type, Type *rhs_type);
-void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, Type *lhs_type, Type *rhs_type);
+void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, bool dest_is_relative_to_rsp, Type *lhs_type, Type *rhs_type);
 void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_computed, Type *src_type, bool lvalue);
 
 MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma);
 
+bool has_large_return_type(AstFunctionDefn *func_defn);
 void check_main_exists(CodeGenerator *cg);
 int make_label_number(CodeGenerator *cg);
 const char *comparison_operator_to_set_instruction(TokenType op);
@@ -97,7 +98,7 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.parser         = parser;
     cg.type_table     = parser->type_table;
     cg.current_scope  = parser->current_scope;
-    cg.func           = NULL;
+    cg.enclosing_function           = NULL;
     cg.constants      = 0;
     cg.labels         = 0;
     cg.enum_scratch_buffers = 0;
@@ -345,7 +346,7 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     }
 
     if (assign->op == ASSIGN_EQUAL) {
-        emit_simple_initialization(cg, base_offset, offset_is_runtime_computed, assign->lhs->type, assign->expr->type);
+        emit_simple_initialization(cg, base_offset, offset_is_runtime_computed, false, assign->lhs->type, assign->expr->type);
         return;
     }
 
@@ -421,16 +422,16 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         // allocate space for start and end range values 
         int size_iterator = ast_for->iterator->type->size;
 
-        cg->func->base_ptr = align_value(cg->func->base_ptr, size_iterator);
+        cg->enclosing_function->base_ptr = align_value(cg->enclosing_function->base_ptr, size_iterator);
 
-        int offset_iterator = cg->func->base_ptr - size_iterator;
+        int offset_iterator = cg->enclosing_function->base_ptr - size_iterator;
         int offset_start    = offset_iterator - 8;
         int offset_end      = offset_iterator - 16;
         int offset_index    = offset_iterator - 24; // Only used if an index is also specified
 
-        cg->func->base_ptr -= size_iterator + 16;
+        cg->enclosing_function->base_ptr -= size_iterator + 16;
         if (ast_for->index) {
-            cg->func->base_ptr -= 8;
+            cg->enclosing_function->base_ptr -= 8;
             ast_for->index->stack_offset = offset_index;
         }
         ast_for->iterator->stack_offset = offset_iterator;
@@ -472,11 +473,11 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         //
         // :WrongForLoopSizing @Investigate - Might have to do with the fact that we are not aligning the stack before allocating space for the iterator!
         int aligned_iterator_size = align_value(iterator->type->size, 8);
-        int offset_iterator       = cg->func->base_ptr - aligned_iterator_size;
+        int offset_iterator       = cg->enclosing_function->base_ptr - aligned_iterator_size;
         int offset_data           = offset_iterator - 8;
         int offset_count          = offset_iterator - 16;
         int offset_index          = offset_iterator - 24;
-        cg->func->base_ptr             -= 24 + aligned_iterator_size;
+        cg->enclosing_function->base_ptr             -= 24 + aligned_iterator_size;
         
         assert(iterator);
         iterator->stack_offset = offset_iterator;
@@ -529,10 +530,8 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
 }
 
 void emit_return(CodeGenerator *cg, AstReturn *ast_return) {
-    emit_expression(cg, ast_return->expr);
 
-    // Place the return value into the correct register
-    // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170#return-values
+    emit_expression(cg, ast_return->expr);
 
     Type *expr_type = ast_return->expr->type;
     Type *return_type = ast_return->enclosing_function->return_type;
@@ -550,8 +549,33 @@ void emit_return(CodeGenerator *cg, AstReturn *ast_return) {
     sb_append(&cg->code, "   jmp\t\tL%d\n", ast_return->enclosing_function->return_label);
 }
 
-void emit_pop_r_value(CodeGenerator *cg, Type *type) {
-    switch (type->kind) {
+/* Source address is expected to be in rbx. Destination address is expected to be in rcx */ 
+void copy_struct(CodeGenerator *cg, TypeStruct *struct_defn, int dst_base_offset, int src_base_offset) {
+
+    DynamicArray members = ((TypeStruct *)struct_defn)->members;
+    for (int i = 0; i < members.count; i++) {
+        AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+        
+        int src_offset = src_base_offset + member->member_offset;
+        int dst_offset = dst_base_offset + member->member_offset;
+
+        if (member->type->kind == TYPE_STRUCT) {
+            copy_struct(cg, (TypeStruct *)member->type, dst_offset, src_offset);
+        } 
+        else {
+            sb_append(&cg->code, "   mov\t\t%s, %d[rbx]\n", REG_A(member->type), src_offset);
+            sb_append(&cg->code, "   mov\t\t%d[rcx], %s\n", dst_offset, REG_A(member->type));
+        }
+    }
+}
+
+void emit_return_value(CodeGenerator *cg, AstFunctionDefn *func_defn) {
+    // Moves the pushed value of the return expression into the 
+    // correct register or stack location expected by the caller
+
+    Type *return_type = func_defn->return_type;
+
+    switch (return_type->kind) {
     case TYPE_VOID: {
         sb_append(&cg->code, "   mov\t\trax, 0\n");
         return;
@@ -559,18 +583,18 @@ void emit_pop_r_value(CodeGenerator *cg, Type *type) {
     case TYPE_BOOL:
     case TYPE_INTEGER:
     case TYPE_ENUM:
-    case TYPE_STRING: {
+    case TYPE_STRING:
+    case TYPE_POINTER: {
         POP(RAX);
         return;
     }
     case TYPE_FLOAT: {
-        // @Incomplete - Missing int to float conversion
         POP(RAX);
-        sb_append(&cg->code, "   %s\t\txmm0, %s\n", movd_or_movq(type), REG_A(type));
-        return;
-    }
-    case TYPE_POINTER: {
-        POP(RAX);
+        if (return_type->size == 8) {
+            sb_append(&cg->code, "   movq\t\txmm0, rax\n");
+        } else {
+            sb_append(&cg->code, "   movd\t\txmm0, eax\n");
+        }
         return;
     }
     case TYPE_ARRAY: {
@@ -579,7 +603,25 @@ void emit_pop_r_value(CodeGenerator *cg, Type *type) {
         return;
     }
     case TYPE_STRUCT: {
-        TypeStruct *struct_defn = (TypeStruct *)type;
+        POP(RAX); // address of struct
+        
+        int struct_size = align_value(return_type->size, 8);
+        if (struct_size <= 8) {
+            // Struct fits in a register, so the struct is just returned in rax
+            sb_append(&cg->code, "   mov\t\trax, [rax]\n");
+            return;
+        }
+
+        // Copy the struct to the allocated return value
+        TypeStruct *struct_defn = (TypeStruct *)return_type;
+
+        sb_append(&cg->code, "   mov\t\trbx, rax\n");
+        sb_append(&cg->code, "   mov\t\trcx, -8[rbp]\n");
+
+        copy_struct(cg, struct_defn, 0, 0);
+        
+        // Return a pointer to the returned struct
+        sb_append(&cg->code, "   mov\t\trax, -8[rbp]\n");
         
         return;
     }
@@ -690,20 +732,20 @@ void MOV_ADDR_ADDR(CodeGenerator *cg, int dst_addr, Type *dst_type, int src_addr
 }
 
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
-    cg->func = func_defn;
+    cg->enclosing_function = func_defn;
 
     if (func_defn->is_extern) {
         sb_append(&cg->code_header, "   extern %s\n", func_defn->identifier->name);
         return;
     }
 
-    int bytes_args      = func_defn->num_bytes_args * 2; // We need twice the amount of space for arguments as we also need temporary space for them while popping arguments in a function call
-    int bytes_locals    = func_defn->num_bytes_locals;
-    int bytes_total     = align_value(32 + bytes_args + bytes_locals, 16);
+    int bytes_locals      = func_defn->num_bytes_locals;
+    int bytes_temporaries = func_defn->num_bytes_temporaries; // We need twice the amount of space for arguments as we also need temporary space for them while popping arguments in a function call
+    int bytes_total       = align_value(32 + bytes_locals + bytes_temporaries, 16);
 
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "; bytes locals   : %d\n", bytes_locals);
-    sb_append(&cg->code, "; bytes arguments: %d\n", bytes_args);
+    sb_append(&cg->code, "; bytes temp     : %d\n", bytes_temporaries);
     sb_append(&cg->code, "; bytes total    : %d\n", bytes_total);
     sb_append(&cg->code, "%s:\n", func_defn->identifier->name);
 
@@ -714,35 +756,44 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     PUSH(RBP);
     sb_append(&cg->code, "   mov\t\trbp, rsp\n");
     sb_append(&cg->code, "   sub\t\trsp, %d\n", bytes_total);
-    
-    // Reserve space for stack arguments to called functions
-    cg->func->base_ptr -= bytes_args / 2.0;
-    
+
+    // Move hidden struct return pointers (if any) to the first parts of the stack
+    int num_large_return_values = func_defn->return_type->size > 8 ? 1 : 0;
+    if (num_large_return_values > 0) {
+        cg->enclosing_function->base_ptr -= 8;
+        sb_append(&cg->code, "   mov\t\t-8[rbp], rcx\t; Return 0\n");
+    }
+
     // Move arguments to this function into their home addresses
     for (int i = 0; i < func_defn->parameters.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
         Type           *param_type = param->type;
         
         // Bump the base pointer down by the size of the parameter type
-        cg->func->base_ptr -= param_type->size;
-        cg->func->base_ptr  = align_value(cg->func->base_ptr, param_type->size);
+        cg->enclosing_function->base_ptr -= param_type->size;
+        cg->enclosing_function->base_ptr  = align_value(cg->enclosing_function->base_ptr, param_type->size);
         
         // Assign the offset to the parameter
-        int param_offset = cg->func->base_ptr;
+        int param_offset = cg->enclosing_function->base_ptr;
         param->ident->stack_offset = param_offset;
         
-        if (i < 4) {
+        int arg_index = i;
+
+        // Shift the args by the number of hidden return parameters
+        arg_index += num_large_return_values;
+
+        if (arg_index < 4) {
             Register arg_reg = 0;
             if (param_type->kind == TYPE_FLOAT) {
-                if (i == 0) arg_reg = REG_XMM0;
-                if (i == 1) arg_reg = REG_XMM1;
-                if (i == 2) arg_reg = REG_XMM2;
-                if (i == 3) arg_reg = REG_XMM3;
+                if (arg_index == 0) arg_reg = REG_XMM0;
+                if (arg_index == 1) arg_reg = REG_XMM1;
+                if (arg_index == 2) arg_reg = REG_XMM2;
+                if (arg_index == 3) arg_reg = REG_XMM3;
             } else {
-                if (i == 0) arg_reg = REG_RCX;
-                if (i == 1) arg_reg = REG_RDX;
-                if (i == 2) arg_reg = REG_R8;
-                if (i == 3) arg_reg = REG_R9;
+                if (arg_index == 0) arg_reg = REG_RCX;
+                if (arg_index == 1) arg_reg = REG_RDX;
+                if (arg_index == 2) arg_reg = REG_R8;
+                if (arg_index == 3) arg_reg = REG_R9;
             }
             assert(arg_reg != 0);
             
@@ -750,13 +801,13 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
         } else {
             // Argument was passed on the stack and can be found at rbp+48 and above
             int arg_base_offset = 48;   // shadow-space=32, func call=8, push rbp=8
-            int arg_offset = arg_base_offset + (i - 4) * 8;
+            int arg_offset = arg_base_offset + (arg_index - 4) * 8;
             sb_append(&cg->code, "   mov\t\trax, [rbp+%d]\n", arg_offset);
             sb_append(&cg->code, "   mov\t\t%d[rbp], %s\n", param_offset, REG_A(param_type));
         }
     }
 
-    // Make a label for the return code so that return statements within the function can jump to this
+    // Make a label for the return statements to jump to
     int return_label = make_label_number(cg);
     func_defn->return_label = return_label;
 
@@ -766,7 +817,9 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     // Epilog
     //
     sb_append(&cg->code, "L%d:\n", return_label);
-    emit_pop_r_value(cg, func_defn->return_type);
+
+    emit_return_value(cg, func_defn);
+
     sb_append(&cg->code, "   add\t\trsp, %d\n", bytes_total);
     POP(RBP);
     sb_append(&cg->code, "   ret\n");
@@ -861,7 +914,15 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
     return;
 }
 
-void move_func_argument_to_register_or_stack(CodeGenerator *cg, int arg_index, int arg_count, Type *arg_type, Type *param_type) {
+void move_func_argument_to_register_or_temp(CodeGenerator *cg, int arg_index, int arg_count, Type *arg_type, Type *param_type) {
+
+    // Arguments gets put in either registers or known temporary stack locations.
+    // We shift over the argument slot by the amount of large return types. So the layout is something like this:
+    //
+    // (Large_Return_0, Large_Return_1, Arg_0, Arg_1, ...)
+    //      rcx              rdx          r8     r9
+    //
+    
     if (arg_index < 4) {
         // Pass the argument in a register
         Register reg = 0;
@@ -877,31 +938,53 @@ void move_func_argument_to_register_or_stack(CodeGenerator *cg, int arg_index, i
             sb_append(&cg->code, "   %s\t\t%s, %s\n", movd_or_movq(param_type), xmm_reg, REG_A(param_type));
         } 
         else {
-            if (arg_type->kind == TYPE_ARRAY) XXX;
-            if (arg_type->kind == TYPE_STRUCT) XXX;
-            if (arg_type->kind == TYPE_FUNCTION) XXX;
+            bool fits_in_8_bytes = arg_type->size <= 8;
 
-            if (arg_index == 0) reg = REG_RCX;
-            if (arg_index == 1) reg = REG_RDX;
-            if (arg_index == 2) reg = REG_R8;
-            if (arg_index == 3) reg = REG_R9;
-            assert(reg != 0);
-            
-            char *gpr_reg = register_string(reg, arg_type->size);
-            
-            sb_append(&cg->code, "   mov\t\t%s, %s\n", gpr_reg, REG_A(arg_type));
+            if (fits_in_8_bytes) {
+                if (arg_index == 0) reg = REG_RCX;
+                if (arg_index == 1) reg = REG_RDX;
+                if (arg_index == 2) reg = REG_R8;
+                if (arg_index == 3) reg = REG_R9;
+                assert(reg != 0);
+                
+                if (arg_type->kind == TYPE_STRUCT) {
+                    // Copy the data pointed to in rax
+                    sb_append(&cg->code, "   mov\t\t%s, [rax]\n", REG_A(arg_type));
+                }
+
+                char *gpr_reg = register_string(reg, arg_type->size);
+                
+                sb_append(&cg->code, "   mov\t\t%s, %s\n", gpr_reg, REG_A(arg_type));
+            }
+            else {
+                // Put the argument into temporary storage
+                int temp_idx    = arg_count - arg_index;
+                int temp_offset = -temp_idx * 8;
+
+                sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", temp_offset);
+            }
         }
     } else {
         // Put the argument into temporary storage
         int temp_idx    = arg_count - arg_index;
         int temp_offset = -temp_idx * 8;
+
         sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", temp_offset);
     }
 }
 
-void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
+inline bool has_large_return_type(AstFunctionDefn *func_defn) {
+    return func_defn->return_type->size > 8;
+}
 
+void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
+    
     int arg_count = call->arguments.count;
+    int num_large_return_values = 0;
+
+    if (call->func_defn->return_type->size > 8) {
+        num_large_return_values = 1;
+    }
 
     // Push all the arguments
     for (int i = 0; i < arg_count; i++) {
@@ -923,8 +1006,8 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
                 
                 if (param_type->kind == TYPE_FLOAT && is_untyped_literal(arg_type) && ((TypePrimitive *)arg_type)->kind == PRIMITIVE_UNTYPED_INT) {
                     // Convert the untyped int to be a float
-                    sb_append(&cg->code, "   %s\txmm0, %s\n", cvtsi2ss_or_cvtsi2sd(param_type), REG_A(arg_type));
-                    sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(param_type), REG_A(arg_type));
+                    sb_append(&cg->code, "   %s\txmm0, rax\n", cvtsi2ss_or_cvtsi2sd(param_type));
+                    sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(param_type), REG_A(param_type));
                 }
 
                 break;
@@ -950,27 +1033,57 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
 
                 break;
             }
-            case TYPE_ARRAY:
-            case TYPE_STRUCT:
+            case TYPE_ARRAY: XXX;
+            case TYPE_STRUCT: {
+                POP(RAX); // Here we just pop the pointer to the struct. We will copy the struct by value
+                break;
+            }
             default: XXX;
         }
 
-        move_func_argument_to_register_or_stack(cg, i, arg_count, arg_type, param_type);
-
+        move_func_argument_to_register_or_temp(cg, i + num_large_return_values, arg_count, arg_type, param_type);
     }
 
-    if (arg_count > 4) {
-        // Put the arguments from temporary storage onto the stack now that the stack pointer is not being moved by the popping of arguments
-        int stack_arg_count = arg_count - 4;
-        for (int i = 0; i < stack_arg_count; i++) {
-            int temp_offset   = (i + 1) * 8;
-            int stack_offset  = 32 + (stack_arg_count - i - 1) * 8;
+    // Put the arguments from temporary storage onto the stack now that the stack pointer is not being moved by the popping of arguments
+    int temp_offset = -8;
+    int stack_offset = 32;
+    for (int i = arg_count - 1; i >= 0; i--) {
+        AstExpr *arg      = ((AstExpr **)call->arguments.items)[i];
+        Type    *arg_type = arg->type;
+        
+        bool fits_in_8_bytes = arg_type->size <= 8;
 
-            sb_append(&cg->code, "   mov\t\trax, QWORD -%d[rbp]\n", temp_offset);
+        if (fits_in_8_bytes && i + num_large_return_values < 4) {
+            // Argument was put in a register
+            continue;
+        }
+
+        // Grab the argument from temporary storage
+        sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", temp_offset);
+        temp_offset -= 8;
+
+        // Move the value from temp storage into an 8 byte stack slot known by the callee
+        if (arg_type->kind == TYPE_STRUCT) {
+            emit_simple_initialization(cg, stack_offset, false, true, arg_type, NULL);
+            stack_offset += arg_type->size;
+        }
+        else if (arg_type->kind == TYPE_ARRAY) {
+            XXX;
+        }
+        else {
             sb_append(&cg->code, "   mov\t\tQWORD [rsp+%d], rax\n", stack_offset);
+            stack_offset += 8;
         }
     }
 
+    // Put large return values into the beginning registers / temporaries
+    if (num_large_return_values > 0) {
+        // @Hardcoded @Future - Right now we only deal with maximum 1 large return value which we have reserved space for
+        // in the function. Here we give the function a hidden pointer to that return value that the function knows it should write to
+        int temp_loc = allocate_temporary_value(cg->enclosing_function, call->func_defn->return_type->size);
+
+        sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\t\t; Return value 0\n", temp_loc);
+    }
 
     AstFunctionDefn *func_defn = call->func_defn;
 
@@ -1189,20 +1302,17 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
         for (int i = 0; i < members.count; i++) {
             AstDeclaration *member = ((AstDeclaration **)members.items)[i];
 
-            int   m_offset = struct_base_offset + member->member_offset;
-            Type *m_type   = member->type;
+            int offset = struct_base_offset + member->member_offset;
 
-            if (m_type->kind == TYPE_STRUCT) {
-                // Save the base offset before recursing
-                struct_base_offset = m_offset;
+            if (member->type->kind == TYPE_STRUCT) {
+                // Recurse on the sub struct
+                emit_printable_value(cg, member->type, num_enum_arguments, struct_depth + 1, offset);
             } else {
-                // Push each member on the stack
-                sb_append(&cg->code, "   lea\t\trbx, %d[r9]\n", m_offset);
-                emit_move_and_push(cg, 0, true, m_type, false);
+                // Push the member value on the stack
+                sb_append(&cg->code, "   lea\t\trbx, %d[r9]\n", offset);
+                emit_move_and_push(cg, 0, true, member->type, false);
+                emit_printable_value(cg, member->type, num_enum_arguments, struct_depth + 1, struct_base_offset);
             }
-
-            // Do any transforms necessary to print the struct member
-            emit_printable_value(cg, m_type, num_enum_arguments, struct_depth + 1, struct_base_offset);
         }
         break;
     }
@@ -1240,6 +1350,11 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
         Type    *arg_type = arg->type;
 
         emit_expression(cg, arg);
+
+        // Note: Here we transform some of the expressions to match a C printf call. E.g
+        // we emit each struct member when printing structs. 
+        // @Future: At some point we want to rely on our own printf so we can get rid of some the print
+        // complexities.
         emit_printable_value(cg, arg_type, &num_enum_arguments, 0, 0);
     }
 
@@ -1315,21 +1430,21 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
         
 }
 
-void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type, bool is_array_initialization) {
+void zero_initialize(CodeGenerator *cg, int dst_offset, Type *type, bool is_array_initialization) {
     switch (type->kind) {
-    case TYPE_INTEGER: sb_append(&cg->code, "   mov\t\t%s %d[rbp], 0\n", WIDTH(type), dest_offset); break;
-    case TYPE_FLOAT:   sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", dest_offset); break;
-    case TYPE_BOOL:    sb_append(&cg->code, "   mov\t\tBYTE %d[rbp], 0\n",  dest_offset); break;
-    case TYPE_STRING:  sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dest_offset); break;
-    case TYPE_ENUM:    sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", dest_offset); break;
-    case TYPE_POINTER: sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dest_offset); break;
+    case TYPE_INTEGER: sb_append(&cg->code, "   mov\t\t%s %d[rbp], 0\n", WIDTH(type), dst_offset); break;
+    case TYPE_FLOAT:   sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", dst_offset); break;
+    case TYPE_BOOL:    sb_append(&cg->code, "   mov\t\tBYTE %d[rbp], 0\n",  dst_offset); break;
+    case TYPE_STRING:  sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset); break;
+    case TYPE_ENUM:    sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", dst_offset); break;
+    case TYPE_POINTER: sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset); break;
     case TYPE_STRUCT: {
         AstStruct *struct_defn = ((TypeStruct *)(type))->node;
         assert(struct_defn != NULL);
 
         for (int i = 0; i < struct_defn->scope->members.count; i++) {
             AstDeclaration *member = ((AstDeclaration **)(struct_defn->scope->members.items))[i];
-            zero_initialize(cg, dest_offset + member->member_offset, member->type, member->type->kind == TYPE_ARRAY);
+            zero_initialize(cg, dst_offset - member->member_offset, member->type, member->type->kind == TYPE_ARRAY);
         }
         break;
     }
@@ -1341,11 +1456,11 @@ void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type, bool is_arr
         TypeArray *array = (TypeArray *)(type);
         if (is_array_initialization) {
             for (int i = 0; i < array->capicity; i++) {
-                zero_initialize(cg, dest_offset + (i * array->elem_type->size), array->elem_type, true);
+                zero_initialize(cg, dst_offset + (i * array->elem_type->size), array->elem_type, true);
             }
         } else {
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dest_offset); // data
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dest_offset + 8); // count
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset); // data
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset + 8); // count
         }
 
         break;
@@ -1356,13 +1471,17 @@ void zero_initialize(CodeGenerator *cg, int dest_offset, Type *type, bool is_arr
     }
 }
 
-void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, Type *lhs_type, Type *rhs_type) {
+void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_runtime_computed, bool dst_is_relative_to_rsp, Type *lhs_type, Type *rhs_type) {
 
     char address_str[16];
-    if (dest_is_runtime_computed) {
+    if (dst_is_runtime_computed) {
         sprintf(address_str, "[rbx]");
     } else {
-        sprintf(address_str, "%d[rbp]", dest_offset);
+        if (dst_is_relative_to_rsp) {
+            sprintf(address_str, "%d[rsp]", dst_offset);
+        } else {
+            sprintf(address_str, "%d[rbp]", dst_offset);
+        }
     }
 
     switch (lhs_type->kind) {
@@ -1378,28 +1497,30 @@ void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is
     }
     case TYPE_FLOAT: {
         POP(RAX);
-        if (rhs_type->kind == TYPE_INTEGER) {
-            // @Note - I feel like this conversion from int to float should be dealt with at the typing level instead of here. 
-            // One idea is to just change it at the check_delcarartion level. If we have a float on the left and an integer on the right, just change the right hand side type to be integer
-            sb_append(&cg->code, "   %s\txmm0, rax\n", cvtsi2ss_or_cvtsi2sd(lhs_type));
-            sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(lhs_type), address_str);
+        if (rhs_type) {
+            if (rhs_type->kind == TYPE_INTEGER) {
+                // @Note - I feel like this conversion from int to float should be dealt with at the typing level instead of here. 
+                // One idea is to just change it at the check_declarartion level. If we have a float on the left and an integer on the right, just change the right hand side type to be integer
+                sb_append(&cg->code, "   %s\txmm0, rax\n", cvtsi2ss_or_cvtsi2sd(lhs_type));
+                sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(lhs_type), address_str);
+            }
+            else if (rhs_type->kind == TYPE_FLOAT) {
+                if (lhs_type->size == 8 && rhs_type->size == 4) {
+                    sb_append(&cg->code, "   movd\t\txmm0, eax\n");
+                    sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
+                    sb_append(&cg->code, "   movsd\t\t%s, xmm0\n", address_str);
+                }
+                else if (lhs_type->size == 4 && rhs_type->size == 8) {
+                    sb_append(&cg->code, "   movq\t\txmm0, rax\n");
+                    sb_append(&cg->code, "   cvtsd2ss\txmm0, xmm0\n");
+                    sb_append(&cg->code, "   movss\t\t%s, xmm0\n", address_str);
+                }
+                else {
+                    sb_append(&cg->code, "   mov\t\t%s, %s\n", address_str, REG_A(lhs_type));
+                }
+            }
+            else XXX;
         }
-        else if (rhs_type->kind == TYPE_FLOAT) {
-            if (lhs_type->size == 8 && rhs_type->size == 4) {
-                sb_append(&cg->code, "   movd\t\txmm0, eax\n");
-                sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
-                sb_append(&cg->code, "   movsd\t\t%s, xmm0\n", address_str);
-            }
-            else if (lhs_type->size == 4 && rhs_type->size == 8) {
-                sb_append(&cg->code, "   movq\t\txmm0, rax\n");
-                sb_append(&cg->code, "   cvtsd2ss\txmm0, xmm0\n");
-                sb_append(&cg->code, "   movss\t\t%s, xmm0\n", address_str);
-            }
-            else {
-                sb_append(&cg->code, "   mov\t\t%s, %s\n", address_str, REG_A(lhs_type));
-            }
-        }
-        else XXX;
 
         return;
     }
@@ -1419,29 +1540,66 @@ void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is
             sb_append(&cg->code, "   mov\t\tQWORD %s, rax\n", address_str);
         } else {
             // Follow the pointer to get the base address
-            assert(dest_is_runtime_computed);
+            assert(dst_is_runtime_computed);
             Type *points_to = ((TypePointer *)(lhs_type))->pointer_to;
             if (points_to->kind == TYPE_POINTER) {
                 sb_append(&cg->code, "   mov\t\trbx, %s\n", address_str);
             }
-            emit_simple_initialization(cg, 0, true, points_to, rhs_type);
+            emit_simple_initialization(cg, 0, true, dst_is_relative_to_rsp, points_to, rhs_type);
         }
         return;
     }
     case TYPE_ARRAY: {
         POP(RAX); // data
         POP(RCX); // count
-        if (dest_is_runtime_computed) {
+        if (dst_is_runtime_computed) {
             sb_append(&cg->code, "   mov\t\tQWORD [rbx], rax\n");
             sb_append(&cg->code, "   mov\t\tQWORD [rbx + 8], rax\n");
         } else {
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", dest_offset);
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rcx\n", dest_offset + 8);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", dst_offset);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rcx\n", dst_offset + 8);
         }
+        return;
+    }
+    case TYPE_STRUCT: {
+        POP(RAX);
+        
+        // If the struct fitted in 8 bytes, then the entire struct
+        // its is in rax, so we can just move it directly to the destination, otherwise we have the pointer to the struct in rax
+        // and need to do a mem copy to the destination
+        
+        if (lhs_type->size <= 8) {
+            sb_append(&cg->code, "   mov\t\t%s, %s\n", address_str, REG_A(lhs_type));
+        } else {
+            assert(dst_is_runtime_computed == false); // @Investigate - is this even true???
+
+            sb_append(&cg->code, "   mov\t\trbx, rax\n");
+            sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\n", dst_offset);
+            copy_struct(cg, (TypeStruct *)lhs_type, 0, 0);
+        }
+
         return;
     }
     default:
     XXX;
+    }
+}
+
+/* Emits the struct literal relative to the stack */
+void emit_struct_literal(CodeGenerator *cg, AstStructLiteral *struct_lit, int dst_base_offset) {
+    for (int i = 0; i < struct_lit->initializers.count; i++) {
+        AstStructInitializer *init = ((AstStructInitializer **)(struct_lit->initializers.items))[i];
+
+        int dst_offset = dst_base_offset - init->member->member_offset;
+
+        if (init->value->head.kind == AST_STRUCT_LITERAL) {
+            emit_struct_literal(cg, (AstStructLiteral *)init->value, dst_offset);
+        } else if (init->value->head.kind == AST_ARRAY_LITERAL) {
+            XXX;
+        } else {
+            emit_expression(cg, init->value);
+            emit_simple_initialization(cg, dst_offset, false, true, init->member->type, init->value->type);
+        }
     }
 }
 
@@ -1458,7 +1616,7 @@ void emit_struct_initialization(CodeGenerator *cg, int dest_offset, AstStructLit
 void emit_array_initialization(CodeGenerator *cg, int dest_offset, AstArrayLiteral *array_lit, Type *lhs_type) {
     assert(lhs_type->kind == TYPE_ARRAY);
     
-    int elem_size   = ((TypeArray *)(array_lit->head.type))->elem_type->size;
+    int elem_size = ((TypeArray *)(array_lit->head.type))->elem_type->size;
     for (int i = 0; i < array_lit->expressions.count; i++) {
         AstExpr *expr = ((AstExpr **)(array_lit->expressions.items))[i];
 
@@ -1477,7 +1635,7 @@ void emit_initialization(CodeGenerator *cg, int dest_offset, AstExpr *expr, Type
     }
     else {
         emit_expression(cg, expr);
-        emit_simple_initialization(cg, dest_offset, false, lhs_type, rhs_type);
+        emit_simple_initialization(cg, dest_offset, false, false, lhs_type, rhs_type);
     }
 }
 
@@ -1514,38 +1672,38 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
             // the size of the array
         }
     }
-    cg->func->base_ptr -= type_size;
-    cg->func->base_ptr  = align_value(cg->func->base_ptr, type_size);
+    cg->enclosing_function->base_ptr -= type_size;
+    cg->enclosing_function->base_ptr  = align_value(cg->enclosing_function->base_ptr, type_size);
 
-    decl->ident->stack_offset = cg->func->base_ptr;
-    int identifier_offset     = cg->func->base_ptr;
+    decl->ident->stack_offset = cg->enclosing_function->base_ptr;
+    int identifier_offset     = cg->enclosing_function->base_ptr;
 
     if (is_array_initialization) {
-        cg->func->base_ptr -= decl->type->size;
-        cg->func->base_ptr  = align_value(cg->func->base_ptr, 8);
+        cg->enclosing_function->base_ptr -= decl->type->size;
+        cg->enclosing_function->base_ptr  = align_value(cg->enclosing_function->base_ptr, 8);
 
-        base_array_offset = cg->func->base_ptr;
+        base_array_offset = cg->enclosing_function->base_ptr;
         ((AstArrayLiteral *)decl->expr)->base_offset = base_array_offset; // @Incomplete - Need a function to set the base array offset on all child arrays of the array literal!
     }
 
     sb_append(&cg->code, "\n");
-    sb_append(&cg->code, "   ; initialization of '%s'\n", decl->ident->name);
+    sb_append(&cg->code, "   ; Ln %d: $%s = %d\n", decl->ident->head.start.line, decl->ident->name, decl->ident->stack_offset);
     
-    zero_initialize(cg, identifier_offset, decl->type, false);
-    if (is_array_initialization) {
-        zero_initialize(cg, base_array_offset, decl->type, true);
+    // Zero initialize if there is no expression to assign to
+    if (decl->expr == NULL) {
+        zero_initialize(cg, identifier_offset, decl->type, is_array_initialization);
     }
-
-    if (decl->expr) {
+    else {
         if (is_array_initialization) {
-            // @Cleanup - This is a little mehh. Too implicit that we are actually doing two different things. Maybe split up into different functions for array initialization???
-            emit_initialization(cg, base_array_offset, decl->expr, decl->type, decl->expr->type);        // to initialize array
+            // @Cleanup - This is just looks confusing. Too implicit that we are actually doing two different things. Maybe split up into different functions for array initialization???
+            emit_initialization(cg, base_array_offset, decl->expr, decl->type, decl->expr->type);         // to initialize array
             emit_expression(cg, decl->expr);
-            emit_simple_initialization(cg, identifier_offset, false, decl->type, decl->expr->type); // to initialize data + count
-        } else {
+            emit_simple_initialization(cg, identifier_offset, false, false, decl->type, decl->expr->type); // to initialize data + count
+        } 
+        else {
             emit_initialization(cg, identifier_offset, decl->expr, decl->type, decl->expr->type);
         }
-    } 
+    }
 }
 
 void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
@@ -2134,18 +2292,43 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
         return;
     }
-    case AST_ENUM_LITERAL : {
+    case AST_ENUM_LITERAL: {
         AstEnumLiteral *elit = (AstEnumLiteral *)(expr);
         sb_append(&cg->code, "   push\t\t%d\n", elit->enum_member->value);
         INCR_PUSH_COUNT();
         return;
     }
-    case AST_ARRAY_LITERAL : {
+    case AST_ARRAY_LITERAL: {
         AstArrayLiteral *array_lit = (AstArrayLiteral *)(expr);
         sb_append(&cg->code, "   push\t\t%d\n", array_lit->expressions.count);
         INCR_PUSH_COUNT();
         sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", array_lit->base_offset);
         PUSH(RAX);
+        break;
+    }
+    case AST_STRUCT_LITERAL: {
+        // Struct initialization happens in the assignment or declaration. 
+        //
+        // @Incomplete - We assume we are used in a return expression. e.g 'return Vector3{1, 4, 9}'
+        //                                                                      ^^^^^^^^^^^^^^^^
+        // @Incomplete - Move structs that fits in 8 bytes into a register instead of allocating stack space for it
+        int stack_space = align_value(expr->type->size, 8);
+
+        sb_append(&cg->code, "   sub\t\trsp, %d\n", stack_space);
+        
+        // Zero initialize the stack space for the struct
+        sb_append(&cg->code, "   xor\t\trax, rax\n");
+        sb_append(&cg->code, "   lea\t\trdi, %d[rsp]\n", +stack_space);
+        sb_append(&cg->code, "   mov\t\trcx, %d\n", (stack_space / 8) - 1);
+        sb_append(&cg->code, "   rep\t\tstosq\n");
+
+        // Populate the stack with the struct
+        emit_struct_literal(cg, (AstStructLiteral *)expr, +stack_space);
+
+        // Return pointer to struct literal
+        sb_append(&cg->code, "   lea\t\trax, %d[rsp]\n", +stack_space);
+        PUSH(RAX);
+
         break;
     }
     case AST_LITERAL: {
@@ -2226,7 +2409,8 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                     case LITERAL_NULL: XXX; // @TODO
                     case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
                 }
-            } else {
+            } 
+            else {
                 emit_move_and_push(cg, ident->stack_offset, false, ident->type, false);
                 return;
             }
@@ -2234,9 +2418,6 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         
         XXX;
     }
-    case AST_STRUCT_LITERAL:
-        // Handled in either the assignment or declaration
-        break;
     default:
         printf("%s:%d: compiler-error: There were unhandled cases in 'emit_expression' with %s\n", __FILE__, __LINE__, ast_to_str((Ast *)expr));
         exit(1);

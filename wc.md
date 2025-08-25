@@ -1,4 +1,11 @@
-# Line count of project C-files
+# Line count of the compiler with lib
+
+## With lib
 ```console
-wc -l ./src/*.c | Sort-Object -Descending
+wc -l ./src/*.c, ./src/*.h, ./src/lib/*.c, ./src/lib/*.h | Sort-Object -Descending
+```
+
+## Without lib
+```console
+wc -l ./src/*.c, ./src/*.h | Sort-Object -Descending
 ```

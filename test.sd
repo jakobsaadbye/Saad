@@ -1,35 +1,63 @@
 Vector2 :: struct {
-	x : f32;
-	y : f32;
+	x: float;
+	y: float;
 }
 
 Vector3 :: struct {
-	x : f32;
-	y : f32;
-	z : f32;
+	x: float;
+	y: float;
+	z: float;
 }
 
-// All parameters does fit in 8 bytes
-v2_add :: (a: Vector2, b: Vector2) -> Vector2 {
-	return {
-		x = a.x + b.x,
-		y = a.y + b.y,
-	};
+Vector4 :: struct {
+	x: float;
+	y: float;
+	z: float;
+	w: float;
 }
 
-// Parameters needs to be passed on the stack
-// v3_add :: (a: Vector3, b: Vector3) -> Vector3 {
-// 	return {
-// 		x = a.x + b.x,
-// 		y = a.y + b.y,
-// 		z = a.z + b.z,
-// 	};
-// }
+EntityKind :: enum {
+	Monster,
+	Human,
+}
+
+Entity :: struct {
+	kind:		 EntityKind;
+	position:    Vector3;
+	orientation: Vector3;
+	color: 		 Vector3;
+}
+
+large_return :: () -> Vector4 {
+	r := Vector4{1, 4, 9};
+	return r;
+}
+
+small_return :: () -> Vector2 {
+	r := Vector2{420, 69};
+	return r;
+}
+
+args_and_large_return_value :: (x: float, y: float, z: float) -> Vector3 {
+	r := Vector3{x, y, z};
+	return r;
+}
 
 main :: () {
-	a: Vector2 = {1, 3};
-	b: Vector2 = {4, 9};
-	c := v2_add(a, b);
+	v1 := large_return();
+	print("%", v1);
 
-	print("%", c);
+	v2 := small_return();
+	print("%", v2);
+
+	v3 := args_and_large_return_value(27, 11, 98);
+	print("%", v3);
+	// e := new_entity();
+
+	// empty_e := empty_entity();
+
+	// e1 : Entity; 
+	// v : Vector3 = {1, 4, 9};
+	// print("%", e);
+	// print("%", v);
 }

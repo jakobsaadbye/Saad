@@ -23,3 +23,12 @@ int   align_value(int value, int alignment);
 void report_error_range(Parser *parser, Pos start, Pos end, const char *message, ...);
 void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const char *message, ...);
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
+
+#define For(T, arr, body)                                      \
+    for (int _i = 0; _i < (arr).count; _i++) {                 \
+        T it = ((T *)(arr).items)[_i];                         \
+        int it_index = _i;                                     \
+        (void)it_index;                                        \
+        body                                                   \
+    }                                                          
+

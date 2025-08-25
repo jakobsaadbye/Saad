@@ -2,7 +2,9 @@
 #include "../src/lib/file.c"
 #include "../src/pipeline.c"
 
-void check_entire_directory(const char *dir_name, bool failing_is_success) {
+#define TEST_OUTPUT_LEN 60
+
+void check_entire_directory(const char *dir_name, bool should_fail) {
     DIR *dir = opendir(dir_name);
     if (dir == NULL) {
         printf("error: Failed to open directory '%s'", dir_name);
@@ -24,32 +26,40 @@ void check_entire_directory(const char *dir_name, bool failing_is_success) {
         }
         char *extension = c + 1;
 
-        if (strcmp(extension, "sd") == 0) {
-            char file_path[512];
-            sprintf(file_path, "%s/%s", dir_name, filename);
+        if (strcmp(extension, "sd") != 0) continue;
 
-            printf("Run %s\t\t", file_path);
-            
-            bool ok = false;
-            char *program = read_entire_file(file_path);
-            bool compiled = send_through_pipeline(program, file_path, false);
+        char file_path[512];
+        sprintf(file_path, "%s/%s", dir_name, filename);
 
-            if (failing_is_success)
-                ok = !compiled;
-            else
-                ok = compiled;
+        char pad_str[TEST_OUTPUT_LEN];
+        memset(pad_str, 0, TEST_OUTPUT_LEN);
 
-            if (ok) {
-                printf("OK\n");
-                succeeded += 1;
-            } else {
-                printf("FAILED\n");
-                failed += 1;
-            }
-
-            free(program);
-            num_tests += 1;
+        int pad_len = TEST_OUTPUT_LEN - strlen(file_path);
+        for (int i = 0; i < pad_len; i++) {
+            pad_str[i] = '.';
         }
+
+        printf("Run %s %s ", file_path, pad_str);
+        
+        char *program = read_entire_file(file_path);
+        bool compiled = send_through_pipeline(program, file_path, false);
+        
+        bool ok = false;
+        if (should_fail)
+            ok = !compiled;
+        else
+            ok = compiled;
+
+        if (ok) {
+            printf("OK\n");
+            succeeded += 1;
+        } else {
+            printf("FAILED\n");
+            failed += 1;
+        }
+
+        free(program);
+        num_tests += 1;
     }
 
     printf("\nRan %d tests, %d OK, %d FAILED\n", num_tests, succeeded, failed);

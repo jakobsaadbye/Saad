@@ -1,5 +1,12 @@
 TODO:
 
+
+Today:
+
+- Introduce a temporary allocation strategy for temporary values, such as function arguments and big return types
+
+
+
 - Function calls
    - Variadic functions
    - Default arguments

@@ -34,8 +34,12 @@ bool can_cast_explicitly(Type *from, Type *to);
 bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
 bool is_untyped_literal(Type *type);
+void reserve_temporary_storage(AstFunctionDefn *func_defn, int size);
+int allocate_temporary_value(AstFunctionDefn *func_defn, int size);
+void reset_temporary_storage();
 AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name);
 char *generate_c_format_specifier_for_type(Type *type);
+
 
 Typer typer_init(Parser *parser, ConstEvaluater *ce) {
     Typer typer = {0};
@@ -338,15 +342,6 @@ bool types_are_equal(Type *lhs, Type *rhs) {
     return false;
 }
 
-void allocate_temporary_stack_space(AstFunctionDefn *func_defn, int size_bytes) {
-    // Expand the temporary stack space for a function if the number of size_bytes exceeds the current
-    // temporary stack space
-    int current_bytes_args = func_defn->num_bytes_args;
-    if (size_bytes > current_bytes_args) {
-        func_defn->num_bytes_args = size_bytes;
-    }
-}
-
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     AstIdentifier *func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name, NULL); // @Note - Passing NULL here omits the checking that the function needs to exist before it can be called to allow arbitrary order. If, or when we get closues, this should probably work differently!
     if (func_ident == NULL) {
@@ -380,18 +375,37 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         }
     }
 
+    call->head.type = func_defn->return_type;
+    call->func_defn = func_defn;
+
     //
-    // Allocate space for arguments and potentially for the return value
-    // @Note - We follow the msvc x86 calling convention
+    // Allocate space for arguments and potentially for the return value in the calling function
+    // @Note - We try and follow the msvc x86 calling convention ???
     // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170#parameter-passing 
     //
-    int bytes_arguments    = call->arguments.count > 4 ? (call->arguments.count - 4) * 8 : 0;
-    int bytes_return_value = func_defn->return_type->size > 8 ? func_defn->return_type->size : 0;
-    int bytes_call         = bytes_arguments + bytes_return_value;
-    allocate_temporary_stack_space(typer->enclosing_function, bytes_call);
 
-    call->func_defn = func_defn;
-    call->head.type = func_defn->return_type;
+    int bytes_arguments = 0;
+    For (AstExpr*, call->arguments, {
+        Type *arg_type = it->type;
+        if (it_index < 4) {
+            if (arg_type->size > 8) {
+                // Argument goes on stack
+                bytes_arguments += arg_type->size;
+            } else {
+                // Argument fits into a register
+            }
+        } else {
+            // Argument goes on stack
+            bytes_arguments += align_value(arg_type->size, 8);
+        }
+    });
+
+    reserve_temporary_storage(typer->enclosing_function, bytes_arguments);
+    
+    bool big_return_value = func_defn->return_type->size > 8;
+    if (big_return_value) {
+        reserve_temporary_storage(typer->enclosing_function, func_defn->return_type->size);
+    }
 
     return func_defn->return_type;
 }
@@ -478,7 +492,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     return true;
 }
 
-bool check_struct(Typer *typer, AstStruct *ast_struct) {
+bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     TypeStruct *type_struct = (TypeStruct *)(type_lookup(&typer->parser->type_table, ast_struct->identifier->name));
     assert(type_struct != NULL && type_struct->head.kind == TYPE_STRUCT);
 
@@ -524,6 +538,7 @@ bool check_struct(Typer *typer, AstStruct *ast_struct) {
     type_struct->head.size  = align_value(offset, largest_alignment);
     type_struct->head.flags |= TYPE_IS_FULLY_SIZED;
     type_struct->alignment  = largest_alignment;
+    type_struct->members    = members;
 
     return true;
 }
@@ -721,6 +736,11 @@ int count_nested_sizeable_struct_members(Typer *typer, AstStruct *struct_, int c
 }
 
 bool check_statement(Typer *typer, Ast *stmt) {
+
+    // Each statement might reserve a chunk of memory for temporary values such as function arguments and return values.
+    // This call limits the lifetime of the temporary storage to that of a single statement.
+    reset_temporary_storage(typer->enclosing_function);
+
     switch (stmt->kind) {
     case AST_DECLARATION: return check_declaration(typer, (AstDeclaration *)(stmt));
     case AST_ASSIGNMENT:  return check_assignment(typer, (AstAssignment *)(stmt));
@@ -770,15 +790,9 @@ bool check_statement(Typer *typer, Ast *stmt) {
         print->c_args = num_c_args;
 
         if (num_c_args > 4) {
-            int bytes_args = num_c_args * 8;
-            int current_bytes_args = typer->enclosing_function->num_bytes_args;
-            int diff = bytes_args - current_bytes_args;
-            if (diff > 0) {
-                typer->enclosing_function->num_bytes_args = bytes_args;
-                typer->enclosing_function->num_bytes_locals += diff;
-            }
+            int bytes_args = (num_c_args - 4) * 8;
+            reserve_temporary_storage(typer->enclosing_function, bytes_args);
         }
-
 
         char *c_string = generate_c_printf_string(typer, print);
         if (!c_string) return false;
@@ -867,22 +881,13 @@ bool check_statement(Typer *typer, Ast *stmt) {
         return true;
     }
     case AST_FUNCTION_DEFN: return check_function_defn(typer, (AstFunctionDefn *)(stmt));
-    case AST_STRUCT: return check_struct(typer, (AstStruct *)(stmt));
+    case AST_STRUCT: return check_struct_defn(typer, (AstStruct *)(stmt));
     case AST_ENUM: return check_enum_defn(typer, (AstEnum *)stmt);
     case AST_FOR: return check_for(typer, (AstFor *)(stmt));
     default:
         XXX;
     }
 }
-
-#define For(T, arr, body)                                      \
-    for (int _i = 0; _i < (arr).count; _i++) {                 \
-        T it = ((T *)(arr).items)[_i];                         \
-        int it_index = _i;                                     \
-        (void)it_index;                                        \
-        body                                                   \
-    }
-
 
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     typer->enclosing_function = func_defn;
@@ -919,9 +924,8 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         return NULL;
     }
 
-
     //
-    // Do sizing for parameters and return value
+    // Do sizing for parameters
     //
     for (int i = 0; i < func_defn->parameters.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
@@ -1550,7 +1554,7 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
         }
 
         if (!lvalue) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Invalid lvalue");
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Expression is not an addressable value (lvalue)");
             return NULL;
         }
 
@@ -1684,6 +1688,30 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     }}
 
     XXX;
+}
+
+void reserve_temporary_storage(AstFunctionDefn *func_defn, int size) {
+    func_defn->temp_ptr += align_value(size, 8);
+    
+    if (func_defn->temp_ptr > func_defn->num_bytes_temporaries) {
+        func_defn->num_bytes_temporaries = func_defn->temp_ptr;
+    }
+}
+
+int allocate_temporary_value(AstFunctionDefn *func_defn, int size) {
+    // Temporary storage lives after the shadow-space and local variables
+    int aligned_size = align_value(size, 8);
+    int loc = - (align_value(func_defn->num_bytes_locals, 8) + func_defn->temp_ptr + aligned_size);
+
+    func_defn->temp_ptr += aligned_size;
+
+    return loc;
+}
+
+void reset_temporary_storage(AstFunctionDefn *func_defn) {
+    if (func_defn == NULL) return;
+
+    func_defn->temp_ptr = 0;
 }
 
 // @Cleanup - Still kinda handy until we don't use AstIdentifier as the primary lookup in scopes

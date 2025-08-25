@@ -131,7 +131,7 @@ typedef struct AstDeclaration {
     DeclarationFlags flags;
 
     int member_index;   // Used to know the insertion order of a struct member
-    int member_offset;  // Relative offset of the member within the struct
+    int member_offset;  // Relative positive offset of the member within the struct
 } AstDeclaration;
 
 typedef enum AssignOp {
@@ -251,9 +251,11 @@ typedef struct AstFunctionDefn {
     CallingConv     call_conv;
     bool            is_extern;
  
-    int num_bytes_locals; // Number of bytes allocated for variables in the function
-    int num_bytes_args;   // Number of bytes allocated from passing arguments to functions
-    int base_ptr;         // Where rbp is currently at in codegen  
+    int num_bytes_locals;      // Number of bytes allocated for variables in the function
+    int num_bytes_temporaries; // Number of bytes allocated for temporaries in the function
+    int base_ptr;              // Where rbp is currently at in codegen
+    int temp_ptr;              // Offset to allocate temporary stack locations (used for function calls and function arguments). The lifetime of the temporary storage is as long as a statement, to allow expressions to be fully evaluated
+
     int return_label;
 
 } AstFunctionDefn;
@@ -261,7 +263,7 @@ typedef struct AstFunctionDefn {
 typedef struct AstFunctionCall {
     AstExpr          head;
     AstIdentifier   *identifer;
-    AstFunctionDefn *func_defn;
+    AstFunctionDefn *func_defn;    // The called function
     DynamicArray     arguments; // of *AstExpr
 } AstFunctionCall;
 
@@ -377,10 +379,9 @@ typedef struct AstCast {
 } AstCast;
 
 typedef struct AstStructLiteral {
-    AstExpr head;
-
-    Type     *explicit_type;
-    DynamicArray initializers; // of AstStructInitializer
+    AstExpr       head;
+    Type         *explicit_type;
+    DynamicArray  initializers; // of AstStructInitializer
 } AstStructLiteral;
 
 typedef struct AstStructInitializer {
@@ -582,12 +583,11 @@ typedef struct TypeEnumValue {
 } TypeEnumValue;
 
 typedef struct TypeStruct {
-    Type head;
-    AstStruct *node;
-
+    Type           head;
+    AstStruct     *node;
     AstIdentifier *identifier;
-
-    unsigned int alignment;
+    DynamicArray   members; // of *AstDeclaration @Note - Copy into the node's the scope members
+    unsigned int   alignment;
 } TypeStruct;
 
 typedef struct TypeFunction {
