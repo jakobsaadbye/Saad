@@ -1445,9 +1445,8 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
     }
 
     // Reserve space for the struct literal if its bigger than 8 bytes
-    if (evaluated_type->size > 8) {
-        reserve_temporary_storage(typer->enclosing_function, evaluated_type->size);
-    }
+    // @Incomplete: Handle structs smaller than 8 bytes! They should'nt need to be put on the stack!
+    reserve_temporary_storage(typer->enclosing_function, evaluated_type->size);
 
     return evaluated_type;
 }

@@ -1,24 +1,41 @@
-InitWindow :: (width: int, height: int, title: string) #extern "C"
+Color :: struct {
+    r: u8;
+    g: u8;
+    b: u8;
+    a: u8;
+}
+
+// Window-related functions
+InitWindow        :: (width: int, height: int, title: string) #extern "C"
+CloseWindow       :: () #extern "C"
 WindowShouldClose :: () -> bool #extern "C"
+SetTargetFPS      :: (fps: int) #extern "C"
+BeginDrawing      :: () #extern "C"
+EndDrawing        :: () #extern "C"
+ClearBackground   :: (color: Color) #extern "C"
+
+// Text drawing functions
+DrawFPS  :: (posX: int, posY: int) #extern "C"                                                  // Draw current FPS
+DrawText :: (text: string, posX: int, posY: int, fontSize: int, color: Color) #extern "C"       // Draw text (using default font)
+// DrawTextEx :: (Font font, const char *text, Vector2 position, float fontSize, float spacing, Color tint); // Draw text using font and additional parameters
+// DrawTextPro :: (Font font, const char *text, Vector2 position, Vector2 origin, float rotation, float fontSize, float spacing, Color tint); // Draw text using Font and pro parameters (rotation)
+// DrawTextCodepoint :: (Font font, int codepoint, Vector2 position, float fontSize, Color tint); // Draw one character (codepoint)
+// DrawTextCodepoints :: (Font font, const int *codepoints, int count, Vector2 position, float fontSize, float spacing, Color tint); // Draw multiple character (codepoint)
+
 
 main :: () {
-    // InitWindow(800, 600, "Breakout in Saad");
+    window_width := 800;
+    window_height := 600;
+    InitWindow(window_width, window_height, "Breakout in Saad");
 
-    counter := 0;
-    should_quit := false;
+    SetTargetFPS(60);
 
-    while !should_quit {
-
-        counter += 1;
-        
-        if counter == 10 { 
-            break;
-        }
-
-        if counter == 5 {
-            continue;
-        }
-
-        print("counter is %", counter);
+    while !WindowShouldClose() {
+        BeginDrawing();
+        ClearBackground({ 233, 30, 30, 255 });
+        DrawFPS(xx (window_width * 0.5), xx (window_height * 0.5));
+        EndDrawing();
     }
+
+    CloseWindow();
 }

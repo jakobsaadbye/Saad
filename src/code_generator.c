@@ -1262,14 +1262,18 @@ const char *REG_D(Type *type) {
     XXX;
 }
 
-void move_argument_to_register_or_stack(CodeGenerator *cg, int arg_index, int arg_total) {
+void move_argument_to_register_or_stack(CodeGenerator *cg, Type *arg_type, int arg_index, int arg_total) {
     if (arg_index > 3) {
         // Goes on the stack
 
         int offset = -32;   // Start at shadow space
         offset    -= (arg_total - arg_index - 1) * 8;
 
-        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", offset);
+        if (arg_type->size < 8) {
+            sb_append(&cg->code, "   movzx\t\trax, %s\n", REG_A(arg_type));
+        }
+
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", offset, REG_A(arg_type));
     } else {
         // Goes in register
 
@@ -1283,7 +1287,7 @@ void move_argument_to_register_or_stack(CodeGenerator *cg, int arg_index, int ar
             exit(1);
         }
 
-        sb_append(&cg->code, "   mov\t\t%s, rax\n", reg);
+        sb_append(&cg->code, "   movzx\t\t%s, %s\n", reg, REG_A(arg_type));
     }
 }
 
@@ -1364,7 +1368,7 @@ void pop_struct_members_from_print(CodeGenerator *cg, AstStruct *struct_, int *c
             pop_struct_members_from_print(cg, nested_struct, c_arg_index, c_args);
         } else {
             POP(RAX);
-            move_argument_to_register_or_stack(cg, *c_arg_index, c_args);
+            move_argument_to_register_or_stack(cg, member->type, *c_arg_index, c_args);
             *c_arg_index -= 1;
         }
 
@@ -1422,14 +1426,14 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
             case TYPE_ENUM:
             case TYPE_POINTER: {
                 POP(RAX);
-                move_argument_to_register_or_stack(cg, c_arg_index, c_args);
+                move_argument_to_register_or_stack(cg, arg_type, c_arg_index, c_args);
                 c_arg_index -= 1;
                 break;
             }
             case TYPE_ARRAY: {
                 POP(RAX);
                 POP(RBX); // Don't use the length for anything
-                move_argument_to_register_or_stack(cg, c_arg_index, c_args);
+                move_argument_to_register_or_stack(cg, arg_type, c_arg_index, c_args);
                 c_arg_index -= 1;
                 break;
             }
@@ -1453,7 +1457,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
             int temp_offset   = 32 + (i * 8);
             int stack_offset  = 32 + (c_args - 4 - i - 1) * 8;
 
-            sb_append(&cg->code, "   mov\t\trax, QWORD -%d[rbp]\n", temp_offset);
+            sb_append(&cg->code, "   mov\t\trax, -%d[rbp]\n", temp_offset);
             sb_append(&cg->code, "   mov\t\tQWORD [rsp + %d], rax\n", stack_offset);
         }
     }
@@ -2370,12 +2374,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         AstStructLiteral *struct_lit = (AstStructLiteral *)expr;
 
         int struct_size = struct_lit->head.type->size;
-        if (struct_size <= 8) {
-            // @Incomplete: Just goes in a register
-            XXX;
-        }
 
-        int temp_loc = allocate_temporary_value(cg->enclosing_function, struct_lit->head.type->size);
+        // if (struct_size <= 8) {
+        //     // @Incomplete: Just goes in a register
+        //     XXX;
+        // }
+
+        int temp_loc = allocate_temporary_value(cg->enclosing_function, struct_size);
 
         // Zero initialize the stack space for the struct
         // sb_append(&cg->code, "   xor\t\trax, rax\n");

@@ -1,29 +1,16 @@
-Vector2 :: struct {
-	x: float;
-	y: float;
+Color :: struct {
+    r: u8;
+    g: u8;
+    b: u8;
+    a: u8;
 }
 
-Vector3 :: struct {
-	x: float;
-	y: float;
-	z: float;
-}
-
-Vector4 :: struct {
-	x: float;
-	y: float;
-	z: float;
-	w: float;
-}
-
-foo :: () -> Vector3 {
-	return {1, 4, 9};
+DrawText :: (text: string, posX: int, posY: int, fontSize: int, color: Color) -> Color {
+    return color;
 }
 
 main :: () {
-	a := foo().x + foo().y + foo().z;
-	print("%", a);
-	
-	b := foo().x * foo().y * foo().z;
-	print("%", b);
+	color := Color{40, 60, 80, 100};
+	print("%", color);
+	// c := DrawText("Hellope", 69, 420, 24, color);
 }
