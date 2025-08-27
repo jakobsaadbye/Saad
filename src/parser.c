@@ -1090,7 +1090,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
 
         next = peek_next_token(parser);
         if (next.type != ':') {
-            report_error_token(parser, LABEL_ERROR, next, "Expected a : before the type");
+            report_error_token(parser, LABEL_ERROR, param_ident, "Expected a : after the parameter name");
             exit(1);
         }
         eat_token(parser);

@@ -33,7 +33,7 @@ main :: () {
     while !WindowShouldClose() {
         BeginDrawing();
         ClearBackground({ 233, 30, 30, 255 });
-        DrawFPS(xx (window_width * 0.5), xx (window_height * 0.5));
+        DrawText("Breakout in our language!", xx (window_width * 0.5), xx (window_height * 0.5), 24, {255, 255, 255, 255});
         EndDrawing();
     }
 

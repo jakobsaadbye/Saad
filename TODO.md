@@ -3,8 +3,19 @@ TODO:
 
 Today:
 
-- Introduce a temporary allocation strategy for temporary values, such as function arguments and big return types
+- Do a fast-path for struct initialization where the expression tree is only 1-level deep to prevent too many asm instructions
+- Asignign to functions with void type should not be allowed!!!!!!!!
 
+e.g like this
+mov		rax, 1
+push		rax
+mov		rax, 2
+push		rax
+mov		rax, 3
+push		rax
+mov		rax, 4
+push		rax
+lea		rax, -4[rbp]
 
 
 - Function calls

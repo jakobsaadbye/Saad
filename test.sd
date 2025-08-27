@@ -5,12 +5,29 @@ Color :: struct {
     a: u8;
 }
 
-DrawText :: (text: string, posX: int, posY: int, fontSize: int, color: Color) -> Color {
-    return color;
+Vector3 :: struct {
+    x : float;
+    y : float;
+    z : float;
+}
+
+// DrawText :: (text: string, posX: int, posY: int, fontSize: int, color: Color) -> Color {
+//     return color;
+// }
+
+foo :: (v1: Vector3, v2: Vector3, v3: Vector3, v4: Vector3, v5: Vector3, v6: Vector3, v7: Vector3) -> float {
+    print("v1 = %", v1);
+    print("v2 = %", v2);
+    print("v3 = %", v3);
+    print("v4 = %", v4);
+    print("v5 = %", v5);
+    print("v6 = %", v6);
+    print("v7 = %", v7);
+
+    return 5.5;
 }
 
 main :: () {
-	color := Color{40, 60, 80, 100};
-	print("%", color);
-	// c := DrawText("Hellope", 69, 420, 24, color);
+	v := foo({1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 12}, {13, 14, 15}, {16, 17, 18}, {19, 20, 21});
+    print("%", v);
 }

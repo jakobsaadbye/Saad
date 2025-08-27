@@ -37,7 +37,8 @@ bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
 bool is_untyped_literal(Type *type);
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size);
-int allocate_temporary_value(AstFunctionDefn *func_defn, int size);
+int push_temporary_value(AstFunctionDefn *func_defn, int size);
+int pop_temporary_value(AstFunctionDefn *func_defn);
 void reset_temporary_storage();
 AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name);
 char *generate_c_format_specifier_for_type(Type *type);
@@ -1752,12 +1753,27 @@ void reserve_temporary_storage(AstFunctionDefn *func_defn, int size) {
     }
 }
 
-int allocate_temporary_value(AstFunctionDefn *func_defn, int size) {
+int push_temporary_value(AstFunctionDefn *func_defn, int size) {
     // Temporary storage lives after the shadow-space and local variables
     int aligned_size = size;
     int loc = - (align_value(func_defn->num_bytes_locals, 8) + func_defn->temp_ptr + aligned_size);
 
+    // Assert that we don't use more space than what we have reserved during the sizing step!
+    assert(func_defn->num_bytes_temporaries > func_defn->temp_ptr);
+
     func_defn->temp_ptr += aligned_size;
+
+    return loc;
+}
+
+// Pop the latest 8 bytes from temporary storage
+int pop_temporary_value(AstFunctionDefn *func_defn) {
+    assert(func_defn);
+
+    int loc = - (align_value(func_defn->num_bytes_locals, 8) + func_defn->temp_ptr);
+
+    func_defn->temp_ptr -= 8;
+    assert(func_defn->temp_ptr >= 0);
 
     return loc;
 }
