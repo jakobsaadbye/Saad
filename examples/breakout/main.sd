@@ -22,18 +22,54 @@ DrawText :: (text: string, posX: int, posY: int, fontSize: int, color: Color) #e
 // DrawTextCodepoint :: (Font font, int codepoint, Vector2 position, float fontSize, Color tint); // Draw one character (codepoint)
 // DrawTextCodepoints :: (Font font, const int *codepoints, int count, Vector2 position, float fontSize, float spacing, Color tint); // Draw multiple character (codepoint)
 
+// Basic shapes drawing functions
+DrawCircle    :: (centerX: int, centerY: int, radius: float, color: Color) #extern "C"
+DrawRectangle :: (posX: int, posY: int, width: int, height: int, color: Color) #extern "C"
+
+// Text font info functions
+MeasureText :: (text: string, fontSize: int) -> int #extern "C"
+
+BALL_SIZE :: 24;
 
 main :: () {
-    window_width := 800;
-    window_height := 600;
-    InitWindow(window_width, window_height, "Breakout in Saad");
+    window_width := 1200;
+    window_height := 800;
+    InitWindow(window_width, window_height, "Super Breakout");
 
-    SetTargetFPS(60);
+    SetTargetFPS(120);
+
+    text := "Super Breakout";
+    text_len := MeasureText(text, 24);
+
+    ball_x    := window_width * 0.5;
+    ball_y    := window_height * 0.5;
+    ball_vel_x  := 4.0;
+    ball_vel_y  := 4.0;
 
     while !WindowShouldClose() {
+
+        new_x := ball_x + ball_vel_x;
+        new_y := ball_y + ball_vel_y;
+
+        if (new_x < 0 || new_x > window_width) {
+            ball_vel_x = -1.0 * ball_vel_x;
+        }
+
+        if (new_y < 0 || new_y > window_height) {
+            ball_vel_y = -1.0 * ball_vel_y;
+        }
+
+        ball_x += ball_vel_x;
+        ball_y += ball_vel_y;
+
+
         BeginDrawing();
-        ClearBackground({ 233, 30, 30, 255 });
-        DrawText("Breakout in our language!", xx (window_width * 0.5), xx (window_height * 0.5), 24, {255, 255, 255, 255});
+        ClearBackground({ 30, 30, 30, 30 });
+        DrawText(text, xx (window_width * 0.5 - text_len * 0.5), 24, 24, {255, 255, 255, 255});
+
+        // Draw the ball
+        DrawRectangle(xx ball_x, xx ball_y, BALL_SIZE, BALL_SIZE, {255, 255, 255, 255});
+
         EndDrawing();
     }
 

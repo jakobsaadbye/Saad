@@ -2294,7 +2294,24 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         if (unary->operator == OP_UNARY_MINUS) {
             emit_expression(cg, unary->expr);
             POP(RAX);
-            sb_append(&cg->code, "   neg\t\trax\n");
+            Type *type = unary->expr->type;
+            if (type->kind == TYPE_FLOAT) {
+                if (type->size == 4) {
+                    sb_append(&cg->code, "   movd\t\txmm0, eax\n");
+                    sb_append(&cg->code, "   xorpd\t\txmm1, xmm1\n");
+                    sb_append(&cg->code, "   subss\t\txmm1, xmm0\n");
+                    sb_append(&cg->code, "   movd\t\teax, xmm1\n");
+                } else {
+                    sb_append(&cg->code, "   movq\t\txmm0, rax\n");
+                    sb_append(&cg->code, "   xorpd\t\txmm1, xmm1\n");
+                    sb_append(&cg->code, "   subsd\t\txmm1, xmm0\n");
+                    sb_append(&cg->code, "   movq\t\trax, xmm1\n");
+                }
+            } else if (type->kind == TYPE_INTEGER) {
+                sb_append(&cg->code, "   neg\t\trax\n");
+            } else {
+                XXX;
+            }
             PUSH(RAX);
             return;
         }
