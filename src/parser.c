@@ -1754,11 +1754,11 @@ void vomit_token(Parser *parser) {
 }
 
 Token peek_token(Parser *parser, int lookahead) {
-    return parser->lexer->tokens[parser->current_token_index + lookahead];
+    return ((Token *)parser->lexer->tokens.items)[parser->current_token_index + lookahead];
 }
 
 Token peek_next_token(Parser *parser) {
-    return parser->lexer->tokens[parser->current_token_index];
+    return ((Token *)parser->lexer->tokens.items)[parser->current_token_index];
 }
 
 bool is_literal(Token token) {

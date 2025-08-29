@@ -30,6 +30,10 @@ void arena_free_all(Arena *arena);
 
 Chunk *make_new_chunk(Chunk *old_chunk, size_t capacity) {
     Chunk *new_chunk = malloc(sizeof(Chunk));
+    if (new_chunk == NULL) {
+        printf("Failed to allocate a new chunk of memory for the arena");
+        exit(1);
+    }
 
     new_chunk->data = (unsigned char*) malloc(capacity);
     new_chunk->cursor = 0;

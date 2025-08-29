@@ -1049,7 +1049,11 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) 
     AstEnumerator *found = find_enum_member(enum_defn->node, enum_name);
     if (!found) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "'%s' is not a member of enum '%s'", enum_name, enum_defn->identifier->name);
-        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(enum_defn), "Here is the definition of '%s'", enum_defn->identifier->name);
+
+        if (enum_defn->node->enumerators.count <= 5) {
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(enum_defn), "Here is the definition of '%s'", enum_defn->identifier->name);
+        }
+
         return NULL;
     }
 

@@ -2,10 +2,8 @@
 
 #define TABLE_IMPLEMENTATION
 #define STRING_BUILDER_IMPLEMENTATION
-#define DYNAMIC_ARRAY_IMPLEMENTATION
 #include "lib/table.h"
 #include "lib/string_builder.h"
-#include "lib/dynamic_array.h"
 
 
 const char *directive_names[] = {
@@ -13,7 +11,6 @@ const char *directive_names[] = {
     "import",
     "extern"
 };
-
 
 TypePointer *t_null_ptr = &(TypePointer){
     .head = {.kind = TYPE_POINTER, .size = 8},

@@ -1,5 +1,8 @@
 #include "lexer.h"
 
+#define DYNAMIC_ARRAY_IMPLEMENTATION
+#include "lib/dynamic_array.h"
+
 #define ARENA_IMPLEMENTATION
 #include "lib/arena.h"
 
@@ -13,7 +16,9 @@ Lexer lexer_init(char *input_str, const char *file_path) {
     Lexer lexer = {0};
     lexer.input_str = input_str;
     lexer.file_path = file_path;
-    lexer.identifier_names = arena_init(1024);
+
+    lexer.tokens = da_init(4096, sizeof(Token));
+    lexer.identifier_names = arena_init(4096);
 
     lexer.char_idx = 0;
     lexer.col = 1;
@@ -92,6 +97,7 @@ char *token_type_to_str(TokenType token_type) {
 
 bool lex(Lexer *lexer) {
     while (peek_next_char(lexer) != '\0') {
+        
         char c = peek_next_char(lexer);
 
         if (c == ' ' || c == '\t') {
@@ -339,8 +345,13 @@ void make_identifier(Lexer *lexer, Pos pos_start) {
     //            identifier ...
     int   ident_length = pos_end.input_idx - pos_start.input_idx;
     char *temp_buffer  = (char *)(malloc(ident_length + 1));
+    if (temp_buffer == NULL) {
+        printf("Internal Compiler Error: Failed to allocate memory for temporary buffer for an identifier");
+        exit(1);
+    }
     memset(temp_buffer, '\0', ident_length + 1);
     memcpy(temp_buffer, &lexer->input_str[pos_start.input_idx], ident_length);
+
     char *ident_name   = (char *)(arena_allocate(&lexer->identifier_names, ident_length + 1));
     memcpy(ident_name, temp_buffer, ident_length + 1);
     free(temp_buffer);
@@ -369,15 +380,16 @@ void make_token(Lexer *lexer, TokenType token_type, Pos pos_start) {
 }
 
 void make_single_character_token(Lexer *lexer, TokenType token_type) {
-    Pos start = get_current_position(lexer);
+    
+    Pos start        = get_current_position(lexer);
     start.col       -= 1;
     start.input_idx -= 1;
+
     make_token(lexer, token_type, start);
 }
 
 void push_token(Lexer *lexer, Token token) {
-    lexer->tokens[lexer->token_index_cursor] = token;
-    lexer->token_index_cursor++;
+    da_append(&lexer->tokens, token);
 }
 
 void make_literal_here(Lexer *lexer, TokenType token_type, Pos pos_start) {

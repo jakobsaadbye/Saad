@@ -12,8 +12,9 @@
 
 void dump_tokens(Lexer *lexer) {
     printf("\nTokens: \n");
-    for (unsigned int i = 0; i < lexer->token_index_cursor; i++) {
-        printf("%s ", token_type_to_str(lexer->tokens[i].type));
+    for (int i = 0; i < lexer->tokens.count; i++) {
+        Token token = ((Token *)lexer->tokens.items)[i];
+        printf("%s ", token_type_to_str(token.type));
     }
     printf("\n\n");
 }

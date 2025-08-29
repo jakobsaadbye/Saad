@@ -14,28 +14,20 @@
                 "isDefault": true
             },
         },
-        // {
-        //     "type": "cppbuild",
-        //     "label": "Debug launch",
-        //     "command": "C:/mingw64/bin/gcc.exe",
-        //     "args": [
-        //         "-fdiagnostics-color=always",
-        //         "-g",
-        //         "C:/Saad/src/main.c",
-        //         "-o",
-        //         "C:/Saad/bin/saad.exe"
-        //     ],
-        //     "options": {
-        //         "cwd": "C:/mingw64/bin"
-        //     },
-        //     "problemMatcher": [
-        //         "$gcc"
-        //     ],
-        //     "group": {
-        //         "kind": "build",
-        //         "isDefault": true
-        //     },
-        // },
+        {
+            "type": "cppbuild",
+            "label": "Debug breakout",
+            "command": "make",
+            "args": [],
+            "options": {
+                "cwd": "C:\\Saad"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+        },
         {
             "type": "cppbuild",
             "label": "Debug checker",
@@ -60,13 +52,13 @@
         },
         {
             "type": "cppbuild",
-            "label": "C/C++: gcc.exe build active file", 
+            "label": "C/C++: gcc.exe build active file",
             "command": "C:/mingw64/bin/gcc.exe",
             "args": [
                 "-fdiagnostics-color=always",
                 "-Wall",
                 "-g",
-                "${file}", 
+                "${file}",
                 "-o",
                 "${fileDirname}/${fileBasenameNoExtension}.exe"
             ],

@@ -6,9 +6,10 @@
 #include <stdbool.h>
 #include <string.h>
 #include <assert.h>
-#include "lib/arena.h"
 
-#define MAX_TOKENS 1024
+#include "lib/arena.h"
+#include "lib/dynamic_array.h"
+
 #define MAX_DIGITS 32
 #define IDENT_NAME_BUFFER_SIZE (size_t)1024
 
@@ -143,8 +144,7 @@ typedef struct Lexer {
     char *input_str;
     const char *file_path;
 
-    Token tokens[MAX_TOKENS]; // @Cleanup - Turn into a dynamic array
-    unsigned int token_index_cursor;
+    DynamicArray tokens; // of Token
 
     Arena identifier_names;
 
