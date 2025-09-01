@@ -1,12 +1,21 @@
-TODO:
-
-
 Today:
+-------------
 
+Revisit arrays
+  - Static arrays
+  - Dynamic arrays
+  - Slice structure with .data and .count
+  - Passing arrays to functions (Can we make it interopable with C without any modifications?)
+
+
+
+Later:
+-------------
 - Do a fast-path for struct initialization where the expression tree is only 1-level deep to prevent too many asm instructions
 - Asignign to functions with void type should not be allowed!!!!!!!!
+- If, For and While statements should accept a statement instead of a block as their body to do inline style versions
 
-e.g like this
+Optimize this
 mov		rax, 1
 push		rax
 mov		rax, 2

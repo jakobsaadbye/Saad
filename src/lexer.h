@@ -31,6 +31,7 @@
 #define COLOR_WHITE   "\x1B[37m"
 #define COLOR_WHITE_BOLD  "\x1B[1;37m"
 
+extern const char *LABEL_HINT;
 extern const char *LABEL_NOTE;
 extern const char *LABEL_ERROR;
 extern const char *LABEL_WARNING;

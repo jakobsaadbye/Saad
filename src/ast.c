@@ -6,6 +6,73 @@
 #include "lib/string_builder.h"
 
 
+const char *ast_to_str(Ast *ast) {
+    switch (ast->kind) {
+    case AST_ERR:                return "AST_ERR";
+    case AST_BLOCK:              return "AST_BLOCK";
+    case AST_DECLARATION:        return "AST_DECLARATION";
+    case AST_ASSIGNMENT:         return "AST_ASSIGNMENT";
+    case AST_DIRECTIVE:          return "AST_DIRECTIVE";
+    case AST_PRINT:              return "AST_PRINT";
+    case AST_ASSERT:             return "AST_ASSERT";
+    case AST_TYPEOF:             return "AST_TYPEOF";
+    case AST_STRUCT:             return "AST_STRUCT";
+    case AST_STRUCT_LITERAL:     return "AST_STRUCT_LITERAL";
+    case AST_STRUCT_INITIALIZER: return "AST_STRUCT_INITIALIZER";
+    case AST_ARRAY_LITERAL:      return "AST_ARRAY_LITERAL";
+    case AST_ENUM:               return "AST_ENUM";
+    case AST_ENUMERATOR:         return "AST_ENUMERATOR";
+    case AST_ENUM_LITERAL:       return "AST_ENUM_LITERAL";
+    case AST_FUNCTION_DEFN:      return "AST_FUNCTION_DEFN";
+    case AST_FUNCTION_CALL:      return "AST_FUNCTION_CALL";
+    case AST_IF:                 return "AST_IF";
+    case AST_RETURN:             return "AST_RETURN";
+    case AST_FOR:                return "AST_FOR";
+    case AST_WHILE:              return "AST_WHILE";
+    case AST_BREAK_OR_CONTINUE:  return "AST_BREAK_OR_CONTINUE";
+    case AST_EXPR:               return "AST_EXPR";
+    case AST_RANGE_EXPR:         return "AST_RANGE_EXPR";
+    case AST_BINARY:             return "AST_BINARY";
+    case AST_UNARY:              return "AST_UNARY";
+    case AST_CAST:               return "AST_CAST";
+    case AST_LITERAL:            return "AST_LITERAL";
+    case AST_SUBSCRIPT:          return "AST_SUBSCRIPT";
+    case AST_ACCESSOR:           return "AST_ACCESSOR";
+    case AST_MEMBER_ACCESS:      return "AST_MEMBER_ACCESS";
+    case AST_ARRAY_ACCESS:       return "AST_ARRAY_ACCESS";
+    case AST_IDENTIFIER:         return "AST_IDENTIFIER";
+    case AST_TYPE:               return "AST_TYPE";
+    }
+    printf("%s:%d: compiler-error: Could not give the name of AST node with type id %d\n", __FILE__, __LINE__, ast->kind);
+    exit(1);
+}
+
+// @Note - maybe make each of these into a global variable instead with prefix t_<TYPE>
+TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
+    {.kind = PRIMITIVE_INVALID, .name = "invalid",   .head = {.kind = TYPE_INVALID, .size = 0}},
+    {.kind = PRIMITIVE_INT,     .name = "int",       .head = {.kind = TYPE_INTEGER, .size = 4}},
+    {.kind = PRIMITIVE_U8,      .name = "u8",        .head = {.kind = TYPE_INTEGER, .size = 1}},
+    {.kind = PRIMITIVE_U16,     .name = "u16",       .head = {.kind = TYPE_INTEGER, .size = 2}},
+    {.kind = PRIMITIVE_U32,     .name = "u32",       .head = {.kind = TYPE_INTEGER, .size = 4}},
+    {.kind = PRIMITIVE_U64,     .name = "u64",       .head = {.kind = TYPE_INTEGER, .size = 8}},
+    {.kind = PRIMITIVE_S8,      .name = "s8",        .head = {.kind = TYPE_INTEGER, .size = 1}},
+    {.kind = PRIMITIVE_S16,     .name = "s16",       .head = {.kind = TYPE_INTEGER, .size = 2}},
+    {.kind = PRIMITIVE_S32,     .name = "s32",       .head = {.kind = TYPE_INTEGER, .size = 4}},
+    {.kind = PRIMITIVE_S64,     .name = "s64",       .head = {.kind = TYPE_INTEGER, .size = 8}},
+    {.kind = PRIMITIVE_FLOAT,   .name = "float",     .head = {.kind = TYPE_FLOAT,   .size = 4}},
+    {.kind = PRIMITIVE_F32,     .name = "f32",       .head = {.kind = TYPE_FLOAT,   .size = 4}},
+    {.kind = PRIMITIVE_F64,     .name = "f64",       .head = {.kind = TYPE_FLOAT,   .size = 8}},
+    {.kind = PRIMITIVE_STRING,  .name = "string",    .head = {.kind = TYPE_STRING,  .size = 8}},
+    {.kind = PRIMITIVE_BOOL,    .name = "bool",      .head = {.kind = TYPE_BOOL,    .size = 1}},
+    {.kind = PRIMITIVE_VOID,    .name = "void",      .head = {.kind = TYPE_VOID,    .size = 0}},
+    {.kind = PRIMITIVE_UNTYPED_INT, .name = "untyped(int)", .head = {.kind = TYPE_INTEGER, .size = 4}},
+};
+
+Type *primitive_type(PrimitiveKind kind) {
+    return (Type *)(&primitive_types[kind]);
+}
+
+
 const char *directive_names[] = {
     "invalid",
     "import",
@@ -111,6 +178,7 @@ bool is_primitive_type(TypeKind kind) {
 
     return false;
 }
+
 
 bool is_signed_integer(Type *type) {
     assert(type->kind == TYPE_INTEGER);

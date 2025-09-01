@@ -25,6 +25,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type);
 Type *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Type *ctx_type);
 Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_type);
 Type *check_member_access(Typer *typer, AstMemberAccess * ma);
+Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
 bool  check_break_or_continue(Typer *typer, AstBreakOrContinue *boc);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn);
@@ -126,6 +127,8 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
     if (type->kind == TYPE_ARRAY) {
         TypeArray *array = (TypeArray *)(type);
 
+        // We might be here from a declaration, otherwise we are here from an array literal
+
         if (decl) {
             if (array->capacity_expr) {
                 AstExpr *constexpr = simplify_expression(typer->ce, typer->current_scope, array->capacity_expr);
@@ -140,9 +143,9 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
                     return NULL;
                 }
 
-                array->capicity = capacity;
+                array->capacity = capacity;
             }
-            if (array->flags & ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY && decl->expr == NULL) { // @Note - This might also be the case for function parameters that also don't allow an expression to be present
+            if (!array->is_dynamic && array->capacity_expr == NULL && decl->expr == NULL) { // @Note - This might also be the case for function parameters that also don't allow an expression to be present
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array), "Missing array initializer to determine size of array");
                 return NULL;
             }
@@ -152,7 +155,7 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
         if (!elem_type) return NULL;
 
         array->elem_type  = elem_type;
-        array->head.size  = array->capicity * elem_type->size; 
+        array->head.size  = array->capacity * elem_type->size; 
 
         return (Type *)(array);
     }
@@ -236,7 +239,8 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         Type *expr_type = check_expression(typer, decl->expr, decl->type);
         if (!expr_type) return false;
         if (!types_are_equal(decl->type, expr_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "'%s' is said to be of type %s, but expression is of type %s", decl->ident->name, type_to_str(decl->type), type_to_str(expr_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", decl->ident->name, type_to_str(decl->type), type_to_str(expr_type));
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "You might need to cast the expression to match the type of the declaration");
             return false;
         }
 
@@ -834,10 +838,6 @@ bool check_statement(Typer *typer, Ast *stmt) {
 
         return true;
     }
-    case AST_TYPEOF: {
-        AstTypeof *ast_typeof = (AstTypeof *)(stmt);
-        return check_expression(typer, ast_typeof->expr, NULL);
-    }
     case AST_IF: {
         AstIf *ast_if = (AstIf *)(stmt);
         Type *condition_type = check_expression(typer, ast_if->condition, NULL);
@@ -1096,10 +1096,10 @@ void do_sizing_of_entire_array(DynamicArray *flattened_array) {
         // Static specified size
         //
         TypeArray *array = ((TypeArray **)(elements.items))[0];
-        if (array->flags & ARRAY_IS_STATIC) {
-            assert(array->capicity != 0 && array->capacity_expr != NULL);
+        if (!array->is_dynamic && array->capacity_expr != NULL) {
+            assert(array->capacity != 0);
 
-            array->head.size = array->capicity * array->elem_type->size;
+            array->head.size = array->capacity * array->elem_type->size;
             continue;
         }
 
@@ -1128,7 +1128,7 @@ void do_sizing_of_entire_array(DynamicArray *flattened_array) {
         for (int j = 0; j < elements.count; j++) {
             TypeArray *array = ((TypeArray **)(elements.items))[j];
 
-            array->capicity  = capacity_of_biggest_array;
+            array->capacity  = capacity_of_biggest_array;
             array->head.size = size_of_biggest_array;
         }
     }
@@ -1162,13 +1162,20 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
         Type *first_element_type = check_expression(typer, ((AstExpr **)(array_lit->expressions.items))[0], NULL);
         if (!first_element_type) return NULL;
 
+
+        TypeStruct *struct_defn = generate_struct_type_with_data_and_count(typer->parser, first_element_type, "Array");
+
         TypeArray *array       = type_alloc(&typer->parser->type_table, sizeof(TypeArray));
         array->head.head.kind  = AST_TYPE;
         array->head.head.start = array_lit->head.head.start;
         array->head.head.end   = array_lit->head.head.end;
         array->head.kind       = TYPE_ARRAY;
-        array->flags           = ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY;
         array->elem_type       = first_element_type;
+        array->struct_defn     = struct_defn;
+        array->capacity_expr   = NULL;
+        array->capacity        = 0;
+        array->is_dynamic      = false;
+
 
         ctx_type = (Type *)(array);
     }
@@ -1207,8 +1214,8 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
     //  Sizing of the array
     //
     if (array->capacity_expr) {
-        if (array_lit->expressions.count > array->capicity) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Trying to assign %d elements to array with size %d", array_lit->expressions.count, array->capicity);
+        if (array_lit->expressions.count > array->capacity) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Trying to assign %d elements to array with size %d", array_lit->expressions.count, array->capacity);
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(array->capacity_expr), "Here is the specified size of that array");
             return NULL;
         }
@@ -1247,6 +1254,13 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
     return ((TypeArray *)(type_being_accessed))->elem_type;
 }
 
+Type *check_typeof(Typer *typer, AstTypeof *ast_typeof) {
+    Type *expr_type = check_expression(typer, ast_typeof->expr, NULL);
+    if (!expr_type) return NULL;
+
+    return primitive_type(PRIMITIVE_STRING);
+}
+
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     Type *result = NULL;
     if      (expr->head.kind == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr), ctx_type);
@@ -1259,6 +1273,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_ENUM_LITERAL)   result = check_enum_literal(typer, (AstEnumLiteral *)(expr), ctx_type);
     else if (expr->head.kind == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr));
     else if (expr->head.kind == AST_ARRAY_ACCESS)   result = check_array_access(typer, (AstArrayAccess *)(expr));
+    else if (expr->head.kind == AST_TYPEOF)         result = check_typeof(typer, (AstTypeof *)(expr));
     else if (expr->head.kind == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_S64); // @Investigate - Shouldn't this be checked for both sides being integers???
     else {
         printf("%s:%d: compiler-error: Unhandled cases in 'type_expression'. Expression was of type %s", __FILE__, __LINE__, ast_to_str((Ast *)expr));
@@ -1304,8 +1319,9 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     //
     // 2'nd case : Member access on struct
     //
-    TypeStruct *struct_defn;
+    TypeStruct *struct_defn = NULL;
     bool valid_lhs = false;
+
     if (type_lhs->kind == TYPE_POINTER) {
         Type *points_to = ((TypePointer *)(type_lhs))->pointer_to;
 
@@ -1318,6 +1334,13 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         struct_defn = (TypeStruct *)(type_lhs);
         valid_lhs = true;
     }
+    else if (type_lhs->kind == TYPE_ARRAY) {
+        TypeArray *array_defn = (TypeArray *)(type_lhs);
+
+        struct_defn = array_defn->struct_defn;
+        valid_lhs = true;
+    }
+
     if (!valid_lhs) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->left), "Cannot field access into expression of type %s", type_to_str(type_lhs));
         return NULL;
@@ -1331,7 +1354,13 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         AstDeclaration *member = get_struct_member(struct_defn->node, member_name);
         if (!member) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a member of '%s'", member_name, type_to_str((Type *)struct_defn));
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn), "Here is the definition of %s", type_to_str((Type *)struct_defn));
+
+            if (type_lhs->kind == TYPE_ARRAY) {
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(rhs), "Arrays only have the members .data and .count");
+            } else {
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn), "Here is the definition of %s", type_to_str((Type *)struct_defn));
+            }
+
             return NULL;
         }
 

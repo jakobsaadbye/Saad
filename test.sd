@@ -1,253 +1,49 @@
-//////////////////////////////////////////////////////////////////////////////////////
-//  Raylib library functions
-//////////////////////////////////////////////////////////////////////////////////////
+// Todo:
+//
+// Make a arrays be small structs with .data and .count
 
-Color :: struct {
-    r: u8;
-    g: u8;
-    b: u8;
-    a: u8;
-}
-
-Rectangle :: struct {
+Vector3 :: struct {
     x: float;
     y: float;
-    width: float;
-    height: float;
+    z: float;
 }
 
-KeyboardKey :: enum {
-    NULL            = 0,        // Key: NULL, used for no key pressed
-    // Alphanumeric keys
-    APOSTROPHE      = 39,       // Key: '
-    COMMA           = 44,       // Key: ,
-    MINUS           = 45,       // Key: -
-    PERIOD          = 46,       // Key: .
-    SLASH           = 47,       // Key: /
-    ZERO            = 48,       // Key: 0
-    ONE             = 49,       // Key: 1
-    TWO             = 50,       // Key: 2
-    THREE           = 51,       // Key: 3
-    FOUR            = 52,       // Key: 4
-    FIVE            = 53,       // Key: 5
-    SIX             = 54,       // Key: 6
-    SEVEN           = 55,       // Key: 7
-    EIGHT           = 56,       // Key: 8
-    NINE            = 57,       // Key: 9
-    SEMICOLON       = 59,       // Key: ;
-    EQUAL           = 61,       // Key: =
-    A               = 65,       // Key: A | a
-    B               = 66,       // Key: B | b
-    C               = 67,       // Key: C | c
-    D               = 68,       // Key: D | d
-    E               = 69,       // Key: E | e
-    F               = 70,       // Key: F | f
-    G               = 71,       // Key: G | g
-    H               = 72,       // Key: H | h
-    I               = 73,       // Key: I | i
-    J               = 74,       // Key: J | j
-    K               = 75,       // Key: K | k
-    L               = 76,       // Key: L | l
-    M               = 77,       // Key: M | m
-    N               = 78,       // Key: N | n
-    O               = 79,       // Key: O | o
-    P               = 80,       // Key: P | p
-    Q               = 81,       // Key: Q | q
-    R               = 82,       // Key: R | r
-    S               = 83,       // Key: S | s
-    T               = 84,       // Key: T | t
-    U               = 85,       // Key: U | u
-    V               = 86,       // Key: V | v
-    W               = 87,       // Key: W | w
-    X               = 88,       // Key: X | x
-    Y               = 89,       // Key: Y | y
-    Z               = 90,       // Key: Z | z
-    LEFT_BRACKET    = 91,       // Key: [
-    BACKSLASH       = 92,       // Key: '\'
-    RIGHT_BRACKET   = 93,       // Key: ]
-    GRAVE           = 96,       // Key: `
-    // Function keys
-    SPACE           = 32,       // Key: Space
-    ESCAPE          = 256,      // Key: Esc
-    ENTER           = 257,      // Key: Enter
-    TAB             = 258,      // Key: Tab
-    BACKSPACE       = 259,      // Key: Backspace
-    INSERT          = 260,      // Key: Ins
-    DELETE          = 261,      // Key: Del
-    RIGHT           = 262,      // Key: Cursor right
-    LEFT            = 263,      // Key: Cursor left
-    DOWN            = 264,      // Key: Cursor down
-    UP              = 265,      // Key: Cursor up
-    PAGE_UP         = 266,      // Key: Page up
-    PAGE_DOWN       = 267,      // Key: Page down
-    HOME            = 268,      // Key: Home
-    END             = 269,      // Key: End
-    CAPS_LOCK       = 280,      // Key: Caps lock
-    SCROLL_LOCK     = 281,      // Key: Scroll down
-    NUM_LOCK        = 282,      // Key: Num lock
-    PRINT_SCREEN    = 283,      // Key: Print screen
-    PAUSE           = 284,      // Key: Pause
-    F1              = 290,      // Key: F1
-    F2              = 291,      // Key: F2
-    F3              = 292,      // Key: F3
-    F4              = 293,      // Key: F4
-    F5              = 294,      // Key: F5
-    F6              = 295,      // Key: F6
-    F7              = 296,      // Key: F7
-    F8              = 297,      // Key: F8
-    F9              = 298,      // Key: F9
-    F10             = 299,      // Key: F10
-    F11             = 300,      // Key: F11
-    F12             = 301,      // Key: F12
-    LEFT_SHIFT      = 340,      // Key: Shift left
-    LEFT_CONTROL    = 341,      // Key: Control left
-    LEFT_ALT        = 342,      // Key: Alt left
-    LEFT_SUPER      = 343,      // Key: Super left
-    RIGHT_SHIFT     = 344,      // Key: Shift right
-    RIGHT_CONTROL   = 345,      // Key: Control right
-    RIGHT_ALT       = 346,      // Key: Alt right
-    RIGHT_SUPER     = 347,      // Key: Super right
-    KB_MENU         = 348,      // Key: KB menu
-    // Keypad keys
-    KP_0            = 320,      // Key: Keypad 0
-    KP_1            = 321,      // Key: Keypad 1
-    KP_2            = 322,      // Key: Keypad 2
-    KP_3            = 323,      // Key: Keypad 3
-    KP_4            = 324,      // Key: Keypad 4
-    KP_5            = 325,      // Key: Keypad 5
-    KP_6            = 326,      // Key: Keypad 6
-    KP_7            = 327,      // Key: Keypad 7
-    KP_8            = 328,      // Key: Keypad 8
-    KP_9            = 329,      // Key: Keypad 9
-    KP_DECIMAL      = 330,      // Key: Keypad .
-    KP_DIVIDE       = 331,      // Key: Keypad /
-    KP_MULTIPLY     = 332,      // Key: Keypad *
-    KP_SUBTRACT     = 333,      // Key: Keypad -
-    KP_ADD          = 334,      // Key: Keypad +
-    KP_ENTER        = 335,      // Key: Keypad Enter
-    KP_EQUAL        = 336,      // Key: Keypad =
-}
-
-// Window-related functions
-InitWindow        :: (width: int, height: int, title: string) #extern "C"
-CloseWindow       :: () #extern "C"
-WindowShouldClose :: () -> bool #extern "C"
-BeginDrawing      :: () #extern "C"
-EndDrawing        :: () #extern "C"
-ClearBackground   :: (color: Color) #extern "C"
-
-// Text drawing functions
-DrawFPS  :: (posX: int, posY: int) #extern "C"                                                  // Draw current FPS
-DrawText :: (text: string, posX: int, posY: int, fontSize: int, color: Color) #extern "C"       // Draw text (using default font)
-// DrawTextEx :: (Font font, const char *text, Vector2 position, float fontSize, float spacing, Color tint); // Draw text using font and additional parameters
-// DrawTextPro :: (Font font, const char *text, Vector2 position, Vector2 origin, float rotation, float fontSize, float spacing, Color tint); // Draw text using Font and pro parameters (rotation)
-// DrawTextCodepoint :: (Font font, int codepoint, Vector2 position, float fontSize, Color tint); // Draw one character (codepoint)
-// DrawTextCodepoints :: (Font font, const int *codepoints, int count, Vector2 position, float fontSize, float spacing, Color tint); // Draw multiple character (codepoint)
-
-// Basic shapes drawing functions
-DrawCircle    :: (centerX: int, centerY: int, radius: float, color: Color) #extern "C"
-DrawRectangle :: (posX: int, posY: int, width: int, height: int, color: Color) #extern "C"
-
-// Text font info functions
-MeasureText :: (text: string, fontSize: int) -> int #extern "C"
-
-// Timing-related functions
-SetTargetFPS :: (fps: int) #extern "C"
-GetFrameTime :: () -> f32 #extern "C"
-GetTime      :: () -> f64 #extern "C"
-
-// Input-related functions: keyboard
-IsKeyPressed  :: (key: int) -> bool #extern "C"
-IsKeyDown     :: (key: int) -> bool #extern "C"
-GetKeyPressed :: () -> KeyboardKey #extern "C"
-
-//////////////////////////////////////////////////////////////////////////////////////
-
-
-//////////////////////////////////////////////////////////////////////////////////////
-//  C math.h functions
-//////////////////////////////////////////////////////////////////////////////////////
-round :: (value: f64) -> f64 #extern "C"
-
-
-//////////////////////////////////////////////////////////////////////////////////////
-
-BALL_SIZE :: 20;
-
+// Mesh :: struct {}
 
 main :: () {
+    // positions := [Vector3{1, 2, 3}, {4, 5, 6}];
+    
+    // for positions {
+    //     print("%", it);
+    // }
+    
+    // m Mesh;
 
-    COLOR_WHITE := Color{255, 255, 255, 255};
+    arr := [1, 2, 3];
 
-    window_width := 1200;
-    window_height := 800;
+    x : s32 = 2;
+    y : s64 = 4;
+    z : int = x + y;
 
-    InitWindow(window_width, window_height, "Super Breakout");
+    print("%", z);
 
-    SetTargetFPS(120);
-
-    text := "Super Breakout";
-    text_len := MeasureText(text, 24);
-
-    ball_x     := window_width * 0.5;
-    ball_y     := window_height * 0.5;
-    ball_vel_x := 400.0;
-    ball_vel_y := 400.0;
-
-    bar_width  := 160.0;
-    bar_height := 15.0;
-    bar_x := window_width * 0.5 - bar_width * 0.5;
-    bar_y := window_height - 60.0;
-
-    while !WindowShouldClose() {
-
-        dt := GetFrameTime();
-
-        // Input
-        // bar_vel = 0.0;
-        bar_vel := 0.0;
-
-        key_pressed := GetKeyPressed();
-        if key_pressed == .A || key_pressed == .LEFT {
-            bar_vel -= 40.0;
-        }
-        if key_pressed == .D || key_pressed == .RIGHT {
-            bar_vel += 40.0;
-        }
-
-        // Collisions with walls
-        if ball_x < 0 || ball_x + BALL_SIZE > window_width {
-            ball_vel_x = -ball_vel_x;
-        }
-
-        if ball_y < 0 || ball_y + BALL_SIZE > window_height {
-            ball_vel_y = -ball_vel_y;
-        }
-
-        // Collisions with the bar
-        if (ball_x >= bar_x && ball_x <= bar_x + bar_width) && (ball_y >= bar_y && ball_y <= bar_y + bar_height) {
-
-        }
-
-        ball_x += ball_vel_x * dt;
-        ball_y += ball_vel_y * dt;
-
-        bar_x += bar_vel;
-
-        BeginDrawing();
-        ClearBackground({ 30, 30, 30, 30 });
-        DrawFPS(window_width - 100, 16);
-        DrawText(text, xx (window_width * 0.5 - text_len * 0.5), 24, 24, COLOR_WHITE);
-
-        // Draw the ball
-        DrawRectangle(xx ball_x, xx ball_y, BALL_SIZE, BALL_SIZE, COLOR_WHITE);
-        
-        // Draw the bar
-        DrawRectangle(xx bar_x, xx bar_y, xx bar_width, xx bar_height, COLOR_WHITE);
+    // static: []int = [1, 2, 3];
 
 
-        EndDrawing();
-    }
 
-    CloseWindow();
+    // for static {
+    //     print("%", it);
+    // }
+
+    // m.verticies = new [16]Vector3;
+
+    // Dynamic array of Vector3
+    // a := new []Vector3{1, 4, 9};
+
+    // b []
+
+    // Static array of 16
+    // b [16]Vector3;
+
+    // mesh []int
 }

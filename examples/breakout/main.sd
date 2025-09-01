@@ -174,6 +174,16 @@ round :: (value: f64) -> f64 #extern "C"
 
 BALL_SIZE :: 20;
 
+Brick :: struct {
+    x:     int;
+    y:     int;
+    color: Color;
+    dead:  bool;
+}
+
+BRICK_WIDTH  :: 40;
+BRICK_HEIGHT :: 50;
+BRICK_PADDING :: 10;
 
 main :: () {
 
@@ -193,12 +203,47 @@ main :: () {
     ball_y     := window_height * 0.5;
     ball_vel_x := 400.0;
     ball_vel_y := 400.0;
+    ball_size  := 20;
 
     bar_width  := 160.0;
     bar_height := 15.0;
     bar_x := window_width * 0.5 - bar_width * 0.5;
     bar_y := window_height - 60.0;
     bar_vel := 0.0;
+    bar_speed := 400.0;
+
+    bricks : [64]Brick;
+
+    // Initiate the bricks
+    for row in 0..8 {
+        for col in 0..8 {
+            index := row * 8 + col;
+
+            x := BRICK_WIDTH  * col + BRICK_PADDING;
+            y := BRICK_HEIGHT * row + BRICK_PADDING;
+
+            color := Color{230, 10, 10, 255};
+
+            brick := Brick{
+                x = x,
+                y = y,
+                color = color,
+                dead = false,
+            };
+
+            bricks[index] = brick;
+        }
+    }
+
+    for row in 0..8 {
+        for col in 0..8 {
+            index := row * 8 + col;
+
+            brick := &bricks[index];
+
+            print("%", brick);
+        }
+    }
 
     while !WindowShouldClose() {
 
@@ -208,40 +253,53 @@ main :: () {
         bar_vel = 0.0;
 
         if IsKeyDown(.A) || IsKeyDown(.LEFT) {
-            bar_vel -= 5.0;
+            bar_vel -= bar_speed;
         }
         if IsKeyDown(.D) || IsKeyDown(.RIGHT) {
-            bar_vel += 5.0;
+            bar_vel += bar_speed;
         }
 
+        // Simulate the next ball and bar position
+        new_ball_x := ball_x + ball_vel_x * dt;
+        new_ball_y := ball_y + ball_vel_y * dt;
+        new_bar_x  := bar_x + bar_vel * dt;
+
         // Collisions ball and walls
-        if ball_x < 0 || ball_x + BALL_SIZE > window_width {
+        if new_ball_x < 0 || new_ball_x + ball_size > window_width {
             ball_vel_x = -ball_vel_x;
         }
 
-        if ball_y < 0 || ball_y + BALL_SIZE > window_height {
+        if new_ball_y < 0 || new_ball_y + ball_size > window_height {
             ball_vel_y = -ball_vel_y;
         }
 
         // Collision ball and bar
-        if (ball_x >= bar_x && ball_x <= bar_x + bar_width) && (ball_y >= bar_y && ball_y <= bar_y + bar_height) {
+        if (new_ball_x + ball_size >= new_bar_x && new_ball_x <= new_bar_x + bar_width) && (new_ball_y + ball_size >= bar_y && new_ball_y <= bar_y + bar_height) {
 
+            // Determine which way the ball should go based on how much its stuck
+            // within the bar
+            stuck_x := new_ball_x + ball_size - new_bar_x;
+            stuck_y := new_ball_y + ball_size - bar_y;
+
+            if stuck_x > stuck_y {
+                ball_vel_y = -ball_vel_y;
+            } else {
+                ball_vel_x = -ball_vel_x;
+            }
         }
 
         // Collision bar and walls
-        if bar_x < 0 {
+        if new_bar_x < 0 || new_bar_x + bar_width > window_width {
             bar_vel = 0;
-            bar_x = 0;
-        }
-        if bar_x + bar_width > window_width {
-            bar_vel = 0;
-            bar_x = window_width - bar_width;
         }
 
+        // Do position updates
         ball_x += ball_vel_x * dt;
         ball_y += ball_vel_y * dt;
 
-        bar_x += bar_vel;
+        bar_x  += bar_vel * dt;
+
+
 
         BeginDrawing();
         ClearBackground({ 30, 30, 30, 30 });
@@ -249,7 +307,7 @@ main :: () {
         DrawText(text, xx (window_width * 0.5 - text_len * 0.5), 24, 24, COLOR_WHITE);
 
         // Draw the ball
-        DrawRectangle(xx ball_x, xx ball_y, BALL_SIZE, BALL_SIZE, COLOR_WHITE);
+        DrawRectangle(xx ball_x, xx ball_y, xx ball_size, xx ball_size, COLOR_WHITE);
         
         // Draw the bar
         DrawRectangle(xx bar_x, xx bar_y, xx bar_width, xx bar_height, COLOR_WHITE);

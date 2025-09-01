@@ -8,7 +8,8 @@ set FILES=ast lexer parser scope
 
 :: Compile each source file
 for %%f in (%FILES%) do (
-    gcc -c src/%%f.c -o build/%%f.o
+    :: gcc -c src/%%f.c -o build/%%f.o
+    gcc %CFLAGS% -c src/%%f.c -o build/%%f.o
 )
 
 :: Link all object files into one executable

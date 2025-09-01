@@ -208,7 +208,6 @@ void emit_statement(CodeGenerator *cg, Ast *node) {
     case AST_BLOCK:             emit_block(cg, (AstBlock *)(node)); break;
     case AST_PRINT:             emit_print(cg, (AstPrint *)(node)); break;
     case AST_ASSERT:            emit_assert(cg, (AstAssert *)(node)); break;
-    case AST_TYPEOF:            emit_typeof(cg, (AstTypeof *)(node)); break;
     case AST_IF:                emit_if(cg, (AstIf *)(node)); break;
     case AST_FOR:               emit_for(cg, (AstFor *)(node)); break;
     case AST_WHILE:             emit_while(cg, (AstWhile *)(node)); break;
@@ -430,16 +429,15 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         AstRangeExpr * range = (AstRangeExpr *)(ast_for->iterable);
         
         // allocate space for start and end range values 
-        int size_iterator = ast_for->iterator->type->size;
 
-        cg->enclosing_function->base_ptr = align_value(cg->enclosing_function->base_ptr, size_iterator);
+        cg->enclosing_function->base_ptr = align_value(cg->enclosing_function->base_ptr, 8);
 
-        int offset_iterator = cg->enclosing_function->base_ptr - size_iterator;
+        int offset_iterator = cg->enclosing_function->base_ptr - 8;
         int offset_start    = offset_iterator - 8;
         int offset_end      = offset_iterator - 16;
         int offset_index    = offset_iterator - 24; // Only used if an index is also specified
 
-        cg->enclosing_function->base_ptr -= size_iterator + 16;
+        cg->enclosing_function->base_ptr -= 24;
         if (ast_for->index) {
             cg->enclosing_function->base_ptr -= 8;
             ast_for->index->stack_offset = offset_index;
@@ -452,24 +450,24 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
 
         POP(RBX);
         POP(RAX);
-        sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", offset_start);
-        sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", offset_end);
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", offset_start);
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rbx\n", offset_end);
 
         // initialize iterator and optionally the index
-        sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", offset_start);
-        sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", offset_iterator);
-        if (ast_for->index)  sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", offset_index);
+        sb_append(&cg->code, "   mov\t\teax, DWORD %d[rbp]\n", offset_start);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], eax\n", offset_iterator);
+        if (ast_for->index)  sb_append(&cg->code, "   mov\t\tDWORD %d[rbp], 0\n", offset_index);
 
         sb_append(&cg->code, "L%d:\n", cond_label);
-        sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", offset_end);
-        sb_append(&cg->code, "   cmp\t\t%d[rbp], rax\n", offset_iterator);
+        sb_append(&cg->code, "   mov\t\teax, %d[rbp]\n", offset_end);
+        sb_append(&cg->code, "   cmp\t\t%d[rbp], eax\n", offset_iterator);
         sb_append(&cg->code, "   %s\t\tL%d\n", range->inclusive ? "jg" : "jge", done_label);
 
         emit_block(cg, ast_for->body);
         
         sb_append(&cg->code, "L%d:\n", post_expression_label);
-        sb_append(&cg->code, "   inc\t\tQWORD %d[rbp]\n", offset_iterator);
-        if (ast_for->index)  sb_append(&cg->code, "   inc\t\tQWORD %d[rbp]\n", offset_index);
+        sb_append(&cg->code, "   inc\t\tDWORD %d[rbp]\n", offset_iterator);
+        if (ast_for->index)  sb_append(&cg->code, "   inc\t\tDWORD %d[rbp]\n", offset_index);
         sb_append(&cg->code, "   jmp\t\tL%d\n", cond_label);
 
         sb_append(&cg->code, "L%d:\n", done_label);
@@ -487,7 +485,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         int offset_data           = offset_iterator - 8;
         int offset_count          = offset_iterator - 16;
         int offset_index          = offset_iterator - 24;
-        cg->enclosing_function->base_ptr             -= 24 + aligned_iterator_size;
+        cg->enclosing_function->base_ptr -= 24 + aligned_iterator_size;
         
         assert(iterator);
         iterator->stack_offset = offset_iterator;
@@ -1236,14 +1234,12 @@ void emit_assert(CodeGenerator *cg, AstAssert *assertion) {
 }
 
 void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof) {
-    Type *expr_type = ast_typeof->expr->type;
+    char *type_name = type_to_str(ast_typeof->expr->type);
 
-    char *type_name  = type_to_str(expr_type);
-    int   type_label = make_label_number(cg);
+    int const_number = cg->constants++;
 
-    sb_append(&cg->data, "   T%d\tDB \"%s\", 10, 0\n", type_label, type_name);
-    sb_append(&cg->code, "   mov\t\trcx, T%d\n", type_label);
-    sb_append(&cg->code, "   call\t\tprintf\n");
+    sb_append(&cg->data, "   CS%d\tDB \"%s\", 10, 0\n", const_number, type_name);
+    sb_append(&cg->code, "   mov\t\trax, CS%d\n", const_number);
 }
 
 const char *REG_A(Type *type) {
@@ -1365,6 +1361,9 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
             }
         }
         break;
+    }
+    case TYPE_ARRAY: {
+        
     }
     default:
         break;
@@ -1506,7 +1505,7 @@ void zero_initialize(CodeGenerator *cg, int dst_offset, Type *type, bool is_arra
 
         TypeArray *array = (TypeArray *)(type);
         if (is_array_initialization) {
-            for (int i = 0; i < array->capicity; i++) {
+            for (int i = 0; i < array->capacity; i++) {
                 zero_initialize(cg, dst_offset + (i * array->elem_type->size), array->elem_type, true);
             }
         } else {
@@ -1622,7 +1621,6 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
         if (lhs_type->size <= 8) {
             sb_append(&cg->code, "   mov\t\t%s, %s\n", address_str, REG_A(lhs_type));
         } else {
-            assert(dst_is_runtime_computed == false); // @Investigate - is this even true???
 
             // Source is already in rax
             sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", dst_offset);
@@ -2356,13 +2354,11 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         XXX;
     }
     case AST_CAST: {
-        AstCast *cast = (AstCast *)(expr);
-        emit_cast(cg, cast);
+        emit_cast(cg, (AstCast *)(expr));
         return;
     }
     case AST_FUNCTION_CALL: {
-        AstFunctionCall *call = (AstFunctionCall *)(expr);
-        emit_function_call(cg, call);
+        emit_function_call(cg, (AstFunctionCall *)(expr));
         PUSH(RAX);
         return;
     }
@@ -2384,6 +2380,11 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
 
+        return;
+    }
+    case AST_TYPEOF: {
+        emit_typeof(cg, (AstTypeof *)expr);
+        PUSH(RAX);
         return;
     }
     case AST_ENUM_LITERAL: {

@@ -77,11 +77,15 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
     OP_CAST         = TOKEN_CAST,
 } OperatorType;
 
-typedef struct Ast {
-    AstKind kind;
+typedef enum AstFlags {
+    AST_FLAG_COMPILER_GENERATED = 1 << 0,
+} AstFlags;
 
-    Pos start;
-    Pos end;
+typedef struct Ast {
+    AstKind  kind;
+    AstFlags flags;
+    Pos      start;
+    Pos      end;
 } Ast;
 
 typedef struct AstExpr {
@@ -90,7 +94,7 @@ typedef struct AstExpr {
 } AstExpr;
 
 typedef struct AstCode {
-    Ast      head;
+    Ast          head;
     DynamicArray statements;
 } AstCode;
 
@@ -121,6 +125,7 @@ typedef enum DeclarationFlags {
     DECLARATION_CONSTANT              = 1 << 3,
     DECLARATION_IS_STRUCT_MEMBER      = 1 << 4,
     DECLARATION_IS_FUNCTION_PARAMETER = 1 << 5,
+    DECLARATION_IS_COMPILER_GENERATED = 1 << 6,
 } DeclarationFlags;
 
 typedef struct AstDeclaration {
@@ -151,14 +156,13 @@ typedef struct AstAssignment {
     AstExpr  *expr;
 } AstAssignment;
 
-
 typedef enum DirectiveKind {
     DIRECTIVE_INVALID,
     DIRECTIVE_IMPORT,
     DIRECTIVE_EXTERN,
 } DirectiveKind;
 
-extern const char *directive_names[];
+extern const char *directive_names[]; // Defined in ast.c
 
 typedef enum Abi {
     ABI_INVALID,
@@ -281,7 +285,7 @@ typedef struct AstAssert {
 } AstAssert;
 
 typedef struct AstTypeof {
-    Ast      head;
+    AstExpr  head;
     AstExpr *expr;
 } AstTypeof;
 
@@ -431,46 +435,10 @@ typedef struct AstLiteral {
     As_value    as;
 } AstLiteral;
 
-static const char *ast_to_str(Ast *ast) {
-    switch (ast->kind) {
-    case AST_ERR:                return "AST_ERR";
-    case AST_BLOCK:              return "AST_BLOCK";
-    case AST_DECLARATION:        return "AST_DECLARATION";
-    case AST_ASSIGNMENT:         return "AST_ASSIGNMENT";
-    case AST_DIRECTIVE:          return "AST_DIRECTIVE";
-    case AST_PRINT:              return "AST_PRINT";
-    case AST_ASSERT:             return "AST_ASSERT";
-    case AST_TYPEOF:             return "AST_TYPEOF";
-    case AST_STRUCT:             return "AST_STRUCT";
-    case AST_STRUCT_LITERAL:     return "AST_STRUCT_LITERAL";
-    case AST_STRUCT_INITIALIZER: return "AST_STRUCT_INITIALIZER";
-    case AST_ARRAY_LITERAL:      return "AST_ARRAY_LITERAL";
-    case AST_ENUM:               return "AST_ENUM";
-    case AST_ENUMERATOR:         return "AST_ENUMERATOR";
-    case AST_ENUM_LITERAL:       return "AST_ENUM_LITERAL";
-    case AST_FUNCTION_DEFN:      return "AST_FUNCTION_DEFN";
-    case AST_FUNCTION_CALL:      return "AST_FUNCTION_CALL";
-    case AST_IF:                 return "AST_IF";
-    case AST_RETURN:             return "AST_RETURN";
-    case AST_FOR:                return "AST_FOR";
-    case AST_WHILE:              return "AST_WHILE";
-    case AST_BREAK_OR_CONTINUE:  return "AST_BREAK_OR_CONTINUE";
-    case AST_EXPR:               return "AST_EXPR";
-    case AST_RANGE_EXPR:         return "AST_RANGE_EXPR";
-    case AST_BINARY:             return "AST_BINARY";
-    case AST_UNARY:              return "AST_UNARY";
-    case AST_CAST:               return "AST_CAST";
-    case AST_LITERAL:            return "AST_LITERAL";
-    case AST_SUBSCRIPT:          return "AST_SUBSCRIPT";
-    case AST_ACCESSOR:           return "AST_ACCESSOR";
-    case AST_MEMBER_ACCESS:      return "AST_MEMBER_ACCESS";
-    case AST_ARRAY_ACCESS:       return "AST_ARRAY_ACCESS";
-    case AST_IDENTIFIER:         return "AST_IDENTIFIER";
-    case AST_TYPE:               return "AST_TYPE";
-    }
-    printf("%s:%d: compiler-error: Could not give the name of AST node with type id %d\n", __FILE__, __LINE__, ast->kind);
-    exit(1);
-}
+const char *ast_to_str(Ast *ast); // Defined in ast.c
+
+
+typedef struct TypeStruct TypeStruct;
 
 typedef enum TypeKind {
     TYPE_INVALID,
@@ -531,31 +499,9 @@ typedef struct TypePrimitive {
     char          *name;
 } TypePrimitive;
 
-// @Note - maybe make each of these into a global variable instead with prefix t_<TYPE>
-static TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
-    {.kind = PRIMITIVE_INVALID, .name = "invalid",   .head = {.kind = TYPE_INVALID, .size = 0}},
-    {.kind = PRIMITIVE_INT,     .name = "int",       .head = {.kind = TYPE_INTEGER, .size = 4}},
-    {.kind = PRIMITIVE_U8,      .name = "u8",        .head = {.kind = TYPE_INTEGER, .size = 1}},
-    {.kind = PRIMITIVE_U16,     .name = "u16",       .head = {.kind = TYPE_INTEGER, .size = 2}},
-    {.kind = PRIMITIVE_U32,     .name = "u32",       .head = {.kind = TYPE_INTEGER, .size = 4}},
-    {.kind = PRIMITIVE_U64,     .name = "u64",       .head = {.kind = TYPE_INTEGER, .size = 8}},
-    {.kind = PRIMITIVE_S8,      .name = "s8",        .head = {.kind = TYPE_INTEGER, .size = 1}},
-    {.kind = PRIMITIVE_S16,     .name = "s16",       .head = {.kind = TYPE_INTEGER, .size = 2}},
-    {.kind = PRIMITIVE_S32,     .name = "s32",       .head = {.kind = TYPE_INTEGER, .size = 4}},
-    {.kind = PRIMITIVE_S64,     .name = "s64",       .head = {.kind = TYPE_INTEGER, .size = 8}},
-    {.kind = PRIMITIVE_FLOAT,   .name = "float",     .head = {.kind = TYPE_FLOAT,   .size = 4}},
-    {.kind = PRIMITIVE_F32,     .name = "f32",       .head = {.kind = TYPE_FLOAT,   .size = 4}},
-    {.kind = PRIMITIVE_F64,     .name = "f64",       .head = {.kind = TYPE_FLOAT,   .size = 8}},
-    {.kind = PRIMITIVE_STRING,  .name = "string",    .head = {.kind = TYPE_STRING,  .size = 8}},
-    {.kind = PRIMITIVE_BOOL,    .name = "bool",      .head = {.kind = TYPE_BOOL,    .size = 1}},
-    {.kind = PRIMITIVE_VOID,    .name = "void",      .head = {.kind = TYPE_VOID,    .size = 0}},
-    {.kind = PRIMITIVE_UNTYPED_INT, .name = "untyped(int)", .head = {.kind = TYPE_INTEGER, .size = 4}},
-};
 
-
-static Type *primitive_type(PrimitiveKind kind) {
-    return (Type *)(&primitive_types[kind]);
-}
+extern TypePrimitive primitive_types[PRIMITIVE_COUNT]; // Defined in ast.c
+Type *primitive_type(PrimitiveKind kind);              // Defined in ast.c
 
 typedef struct TypePointer {
     Type head;
@@ -564,21 +510,14 @@ typedef struct TypePointer {
 
 extern TypePointer *t_null_ptr;
 
-typedef enum ArrayFlags {
-    ARRAY_IS_STATIC                         = 1 << 0,
-    ARRAY_IS_STATIC_WITH_INFERRED_CAPACITY  = 1 << 1,
-    ARRAY_IS_DYNAMIC                        = 1 << 2,
-} ArrayFlags;
-
 typedef struct TypeArray {
-    Type head;
+    Type             head;
     AstArrayLiteral *node;
-    
-    ArrayFlags flags;
-    Type *elem_type;
-
-    AstExpr  *capacity_expr;
-    long long capicity; // Will be set in in typer
+    Type            *elem_type;
+    TypeStruct      *struct_defn;      // A generated struct to hold the .data and .count members
+    AstExpr         *capacity_expr;    // If null, then the size was infered from the array literal
+    long long        capacity;         // Will be set in typer
+    bool             is_dynamic;       // false = static
 } TypeArray;
 
 typedef struct TypeEnum {

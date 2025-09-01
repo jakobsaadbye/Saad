@@ -8,6 +8,7 @@
 
 #include <stdarg.h>
 
+const char *LABEL_HINT    = COLOR_ICE     "hint"    COLOR_RESET;
 const char *LABEL_NOTE    = COLOR_ICE     "note"    COLOR_RESET;
 const char *LABEL_ERROR   = COLOR_RED     "error"   COLOR_RESET;
 const char *LABEL_WARNING = COLOR_MAGENTA "warning" COLOR_RESET;
@@ -616,6 +617,12 @@ void report_error_here(Lexer *lexer, const char *message, ...) {
 void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, const char *template, va_list args) {
     char message[MAX_ERROR_LEN];
     vsnprintf(message, MAX_ERROR_LEN, template, args);
+    
+    if (start.line == -1) {
+        // Skip reporting code line of location
+        printf("\n" COLOR_WHITE_BOLD "%s " COLOR_RESET "%s" ": %s\n", lexer->file_path, label, message);
+        return;
+    }
 
     // Header
     printf("\n" COLOR_WHITE_BOLD "%s:%d:%d " COLOR_RESET "%s" ": %s\n", lexer->file_path, start.line, start.col, label, message);
