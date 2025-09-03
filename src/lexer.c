@@ -72,6 +72,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_IF:            return "IF";
         case TOKEN_ELSE:          return "ELSE";
         case TOKEN_CAST:          return "CAST";
+        case TOKEN_NEW:           return "NEW";
         case TOKEN_TYPE_INT:      return "TYPE_INT";
         case TOKEN_TYPE_U8:       return "TYPE_U8";
         case TOKEN_TYPE_U16:      return "TYPE_U16";
@@ -294,6 +295,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "xx") == 0) token = TOKEN_XX;
     }
     if (keyword_len == 3) {
+        if (strcmp(text, "new") == 0) token = TOKEN_NEW;
         if (strcmp(text, "int") == 0) token = TOKEN_TYPE_INT;
         if (strcmp(text, "for") == 0) token = TOKEN_FOR;
         if (strcmp(text, "u16") == 0) token = TOKEN_TYPE_U16;

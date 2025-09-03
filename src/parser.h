@@ -21,7 +21,10 @@ void *ast_allocate(Parser *parser, size_t size);
 int   align_value(int value, int alignment);
 
 void report_error_range(Parser *parser, Pos start, Pos end, const char *message, ...);
+
+
 void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const char *message, ...);
+
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
 
 TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_pointed_to_by_data, char *struct_name);

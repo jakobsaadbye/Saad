@@ -35,6 +35,7 @@ const char *ast_to_str(Ast *ast) {
     case AST_BINARY:             return "AST_BINARY";
     case AST_UNARY:              return "AST_UNARY";
     case AST_CAST:               return "AST_CAST";
+    case AST_NEW:                return "AST_NEW";
     case AST_LITERAL:            return "AST_LITERAL";
     case AST_SUBSCRIPT:          return "AST_SUBSCRIPT";
     case AST_ACCESSOR:           return "AST_ACCESSOR";
@@ -65,7 +66,8 @@ TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.kind = PRIMITIVE_STRING,  .name = "string",    .head = {.kind = TYPE_STRING,  .size = 8}},
     {.kind = PRIMITIVE_BOOL,    .name = "bool",      .head = {.kind = TYPE_BOOL,    .size = 1}},
     {.kind = PRIMITIVE_VOID,    .name = "void",      .head = {.kind = TYPE_VOID,    .size = 0}},
-    {.kind = PRIMITIVE_UNTYPED_INT, .name = "untyped(int)", .head = {.kind = TYPE_INTEGER, .size = 4}},
+    {.kind = PRIMITIVE_UNTYPED_INT,   .name = "untyped(int)", .head = {.kind = TYPE_INTEGER, .size = 4}},
+    {.kind = PRIMITIVE_UNTYPED_FLOAT, .name = "untyped(float)", .head = {.kind = TYPE_FLOAT, .size = 4}},
 };
 
 Type *primitive_type(PrimitiveKind kind) {
@@ -139,7 +141,12 @@ char *type_to_str(Type *type) {
     case TYPE_ARRAY: {
         TypeArray *array = (TypeArray *)(type);
         StringBuilder sb = sb_init(32);
-        sb_append(&sb, "[]%s", type_to_str(array->elem_type));
+
+        if (array->is_dynamic) {
+            sb_append(&sb, "[..]%s", type_to_str(array->elem_type));
+        } else {
+            sb_append(&sb, "[%d]%s", array->capacity, type_to_str(array->elem_type));
+        }
 
         return sb_to_string(&sb); // @Leak
     }

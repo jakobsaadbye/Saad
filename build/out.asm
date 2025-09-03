@@ -9,13 +9,20 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   CS0 DB `%d`, 10, 0 
+   CF0 DD 1.0000000
+   CF1 DD 4.0000000
+   CS2 DB `{ x = %f, y = %f, z = %f }`, 10, 0 
+   CS3	DB "untyped(int)", 10, 0
+   CS4 DB `%s`, 10, 0 
 segment .text
    global main
+   extern ExitProcess
    extern printf
    extern sprintf
-   extern ExitProcess
    extern malloc
+   extern calloc
+   extern free
+   extern memset
 
 
 assert:
@@ -29,71 +36,86 @@ assert_fail:
    call		ExitProcess
 
 
-; bytes locals   : 40
-; bytes temp     : 0
-; bytes total    : 80
+; bytes locals   : 12
+; bytes temp     : 12
+; bytes total    : 64
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 80
+   sub		rsp, 64
 
-   ; Ln 22: $arr = -16
-   mov		rax, 1
+   ; Ln 12: $v : Vector3 = -12
+   movss		xmm0, [CF0]
+   movd		eax, xmm0
    push		rax
    pop		rax
-   mov		DWORD -32[rbp], eax
-   mov		rax, 2
+   mov		-28[rbp], eax
+   movss		xmm0, [CF1]
+   movd		eax, xmm0
    push		rax
    pop		rax
-   mov		DWORD -28[rbp], eax
-   mov		rax, 3
+   mov		-24[rbp], eax
+   push		10
+   pop		rax
+   cvtsi2ss	xmm0, rax
+   movd		-20[rbp], xmm0
+   lea		rax, -28[rbp]
    push		rax
    pop		rax
-   mov		DWORD -24[rbp], eax
-   push		3
-   lea		rax, -32[rbp]
-   push		rax
-   pop		rax
-   pop		rcx
-   mov		QWORD -16[rbp], rax
-   mov		QWORD -8[rbp], rcx
-
-   ; Ln 24: $x = -36
-   mov		rax, 2
-   push		rax
-   pop		rax
-   mov		DWORD -36[rbp], eax
-
-   ; Ln 25: $y = -40
-   mov		rax, 4
-   push		rax
-   pop		rax
-   mov		DWORD -40[rbp], eax
-
-   ; Ln 26: $z = -44
-   mov		eax, DWORD -36[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		eax, DWORD -40[rbp]
-   movsx		rax, eax
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		DWORD -44[rbp], eax
+   lea		rbx, -12[rbp]
+   mov		ecx, 0[rax]
+   mov		0[rbx], ecx
+   mov		ecx, 4[rax]
+   mov		4[rbx], ecx
+   mov		ecx, 8[rax]
+   mov		8[rbx], ecx
 
    ; expression of print
-   mov		eax, DWORD -44[rbp]
-   movsx		rax, eax
+   lea		rax, -12[rbp]
+   push		rax
+   pop		r9
+   lea		rbx, 0[r9]
+   mov		eax, [rbx]
+   push		rax
+   pop		rax
+   movd		xmm0, eax
+   cvtss2sd	xmm0, xmm0
+   movq		rax, xmm0
+   push		rax
+   lea		rbx, 4[r9]
+   mov		eax, [rbx]
+   push		rax
+   pop		rax
+   movd		xmm0, eax
+   cvtss2sd	xmm0, xmm0
+   movq		rax, xmm0
+   push		rax
+   lea		rbx, 8[r9]
+   mov		eax, [rbx]
+   push		rax
+   pop		rax
+   movd		xmm0, eax
+   cvtss2sd	xmm0, xmm0
+   movq		rax, xmm0
+   push		rax
+   pop		rax
+   mov		r9, rax
+   pop		rax
+   mov		r8, rax
+   pop		rax
+   mov		rdx, rax
+   mov		rcx, CS2
+   call		printf
+
+   ; expression of print
+   mov		rax, CS3
    push		rax
    pop		rax
    mov		rdx, rax
-   mov		rcx, CS0
+   mov		rcx, CS4
    call		printf
 L0:
    mov		rax, 0
-   add		rsp, 80
+   add		rsp, 64
    pop		rbp
    ret

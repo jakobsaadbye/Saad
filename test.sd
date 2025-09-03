@@ -1,49 +1,19 @@
-// Todo:
-//
-// Make a arrays be small structs with .data and .count
-
 Vector3 :: struct {
     x: float;
     y: float;
     z: float;
 }
 
-// Mesh :: struct {}
+MAX_NUMS :: 10;
+
 
 main :: () {
-    // positions := [Vector3{1, 2, 3}, {4, 5, 6}];
+    // v : [MAX_NUMS]float = [1, 2, 3, 4];
+    v := Vector3{1, 4, MAX_NUMS};
     
-    // for positions {
-    //     print("%", it);
-    // }
-    
-    // m Mesh;
-
-    arr := [1, 2, 3];
-
-    x : s32 = 2;
-    y : s64 = 4;
-    z : int = x + y;
-
-    print("%", z);
-
-    // static: []int = [1, 2, 3];
-
-
-
-    // for static {
-    //     print("%", it);
+    print("%", v);
+    // for i in 0..MAX_NUMS {
+    //     print("%", v[i]);
     // }
 
-    // m.verticies = new [16]Vector3;
-
-    // Dynamic array of Vector3
-    // a := new []Vector3{1, 4, 9};
-
-    // b []
-
-    // Static array of 16
-    // b [16]Vector3;
-
-    // mesh []int
 }

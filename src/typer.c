@@ -36,7 +36,9 @@ bool can_cast_implicitly(Type *from, Type *to);
 bool can_cast_explicitly(Type *from, Type *to);
 bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
-bool is_untyped_literal(Type *type);
+bool is_untyped_type(Type *type);
+bool is_untyped_literal(AstExpr *expr);
+void statically_cast_literal(AstLiteral *untyped_literal, Type *cast_into);
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size);
 int push_temporary_value(AstFunctionDefn *func_defn, int size);
 int pop_temporary_value(AstFunctionDefn *func_defn);
@@ -98,6 +100,17 @@ bool check_block(Typer *typer, AstBlock *block) {
     return true;
 }
 
+int round_up_to_nearest_power_of_two(int value) {
+    if (value <= 1) return 1;
+    value--;
+    value |= value >> 1;
+    value |= value >> 2;
+    value |= value >> 4;
+    value |= value >> 8;
+    value |= value >> 16;
+    return value + 1;
+}
+
 Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
     if (is_primitive_type(type->kind)) {
         return type;
@@ -144,18 +157,25 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
                 }
 
                 array->capacity = capacity;
-            }
+            } 
+
             if (!array->is_dynamic && array->capacity_expr == NULL && decl->expr == NULL) { // @Note - This might also be the case for function parameters that also don't allow an expression to be present
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array), "Missing array initializer to determine size of array");
                 return NULL;
             }
         }
 
+        // Resolve the size of any inner element type
         Type *elem_type = resolve_type(typer, array->elem_type, decl);
         if (!elem_type) return NULL;
 
-        array->elem_type  = elem_type;
-        array->head.size  = array->capacity * elem_type->size; 
+        if (array->is_dynamic) {
+            // Reserve 24 bytes for .data, .count and .cap
+            array->head.size = 24;
+        } else {
+            // Reserve 16 bytes for .data, .count + the size of the array
+            array->head.size = 16 + array->capacity * elem_type->size; 
+        }
 
         return (Type *)(array);
     }
@@ -214,18 +234,17 @@ bool leads_to_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
     return true;
 }
 
-void concretise_untyped_literal(AstDeclaration *decl) {
-    if (decl->type->kind == TYPE_INTEGER) {
-        TypePrimitive *tp = (TypePrimitive *)decl->type;
-        if (tp->kind == PRIMITIVE_UNTYPED_INT) {
-            if (!(decl->flags & DECLARATION_CONSTANT)) {
-                // Turn into a simple integer
-                // @Incomplete - We should give it the lowest representable integer type based on the integer value
-                decl->ident->type = primitive_type(PRIMITIVE_INT);
-                decl->type        = primitive_type(PRIMITIVE_INT);
-            }
-        }
+Type *solidify_untyped_type(Type *untyped_type) {
+    assert(is_untyped_type(untyped_type));
+
+    TypePrimitive *prim = (TypePrimitive *) untyped_type;
+
+    if (prim->kind == PRIMITIVE_UNTYPED_INT) {
+        // @Incomplete - We should give it the lowest representable integer type based on the integer value
+        return primitive_type(PRIMITIVE_INT);
     }
+
+    return untyped_type;
 }
 
 bool check_declaration(Typer *typer, AstDeclaration *decl) {
@@ -240,14 +259,9 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         if (!expr_type) return false;
         if (!types_are_equal(decl->type, expr_type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", decl->ident->name, type_to_str(decl->type), type_to_str(expr_type));
-            report_error_ast(typer->parser, LABEL_HINT, NULL, "You might need to cast the expression to match the type of the declaration");
             return false;
         }
 
-        if (expr_type->kind == TYPE_ARRAY) {
-            decl->ident->type = expr_type;
-            decl->type        = expr_type;
-        }
     }
     else if (decl->flags & DECLARATION_TYPED_NO_EXPR) {
         Type *resolved_type = resolve_type(typer, decl->type, decl);
@@ -283,7 +297,12 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         decl->type        = expr_type;
     }
 
-    concretise_untyped_literal(decl);
+    if (decl->expr && is_untyped_type(decl->expr->type) && !(decl->flags & DECLARATION_CONSTANT)) {
+        Type *solidified_type = solidify_untyped_type(decl->expr->type);
+
+        decl->ident->type = solidified_type;
+        decl->type        = solidified_type;
+    }
 
     bool ok = leads_to_integer_overflow(typer, decl->type, decl->expr);
     if (!ok) return false;
@@ -1146,18 +1165,15 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
         return ctx_type;
     }
 
-    if (typer->array_literal_depth == 0) {
-        typer->flattened_array = da_init(4, sizeof(DynamicArray));
-    }
-    typer->array_literal_depth += 1;
-
+    TypeArray *array                   = (TypeArray *) ctx_type;
     bool infer_type_from_first_element = ctx_type == NULL;
+
     if (infer_type_from_first_element) {
+
         if (array_lit->expressions.count == 0) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Couldn't infer type of array literal from the context as it didn't contain any elements");
             return NULL;
         }
-
         
         Type *first_element_type = check_expression(typer, ((AstExpr **)(array_lit->expressions.items))[0], NULL);
         if (!first_element_type) return NULL;
@@ -1165,7 +1181,7 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
 
         TypeStruct *struct_defn = generate_struct_type_with_data_and_count(typer->parser, first_element_type, "Array");
 
-        TypeArray *array       = type_alloc(&typer->parser->type_table, sizeof(TypeArray));
+        array                  = ast_allocate(typer->parser, sizeof(TypeArray));
         array->head.head.kind  = AST_TYPE;
         array->head.head.start = array_lit->head.head.start;
         array->head.head.end   = array_lit->head.head.end;
@@ -1173,47 +1189,15 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
         array->elem_type       = first_element_type;
         array->struct_defn     = struct_defn;
         array->capacity_expr   = NULL;
-        array->capacity        = 0;
+        array->capacity        = array_lit->expressions.count;
+        array->count           = array_lit->expressions.count;
         array->is_dynamic      = false;
 
-
-        ctx_type = (Type *)(array);
     }
 
-    if(ctx_type->kind != TYPE_ARRAY) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Expected element to have type %s, but element is of type []%s", type_to_str(ctx_type), type_to_str(ctx_type));
-        return NULL;
-    }
-
-    // Copying ctx_type to not alter its size and capacity
-    TypeArray *array = type_alloc(&typer->parser->type_table, sizeof(TypeArray));
-    memcpy(array, ctx_type, sizeof(TypeArray));
-    array->node = array_lit;
-
-    for (int i = 0; i < array_lit->expressions.count; i++) {
-        AstExpr *expr = ((AstExpr **)(array_lit->expressions.items))[i];
-
-        bool ok = leads_to_integer_overflow(typer, array->elem_type, expr);
-        if (!ok) return NULL;
-
-        if (infer_type_from_first_element && i == 0) continue;
-
-        Type *expr_type = check_expression(typer, expr, array->elem_type);
-        if (!expr_type) return NULL;
-        if (!types_are_equal(array->elem_type, expr_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(expr), "Expected element to have type %s, but element is of type %s", type_to_str(array->elem_type), type_to_str(expr_type));
-            return NULL;
-        }
-    }
-
-    // @Hack - Reassigning the element type, as the pointer gets outdated when doing copies of the array type
-    Type *first_element_type = ((AstExpr **)(array_lit->expressions.items))[0]->type;
-    array->elem_type = first_element_type;
-
-    //
-    //  Sizing of the array
-    //
     if (array->capacity_expr) {
+        assert(!array->is_dynamic);
+
         if (array_lit->expressions.count > array->capacity) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Trying to assign %d elements to array with size %d", array_lit->expressions.count, array->capacity);
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(array->capacity_expr), "Here is the specified size of that array");
@@ -1221,15 +1205,40 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
         }
     }
 
-    // @Note - We have to size the array no matter what, as we allow inferred array sizes in sized arrays. F.x we could have
-    // 'a : [][10][] int' where the size of the second dimension with the specified capacity is still unknown due to the last dimension being unknown
-    queue_array_to_be_sized(&typer->flattened_array, array, typer->array_literal_depth - 1);
+    // Typecheck each of the expressions
+    for (int i = 0; i < array_lit->expressions.count; i++) {
+        AstExpr *expr = ((AstExpr **)(array_lit->expressions.items))[i];
 
-    typer->array_literal_depth -= 1;
-    if (typer->array_literal_depth == 0) {
-        do_sizing_of_entire_array(&typer->flattened_array);
-        free_flattened_array(&typer->flattened_array);
+        bool ok = leads_to_integer_overflow(typer, array->elem_type, expr);
+        if (!ok) return NULL;
+
+        if (infer_type_from_first_element && i == 0) continue;  // We already type checked this expression
+
+        Type *expr_type = check_expression(typer, expr, array->elem_type);
+        if (!expr_type) return NULL;
+
+        if (!types_are_equal(array->elem_type, expr_type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(expr), "Expected element to have type %s, but element is of type %s", type_to_str(array->elem_type), type_to_str(expr_type));
+            return NULL;
+        }
     }
+
+    if (array->is_dynamic) {
+        array->head.size = 24;
+        array->count     = array_lit->expressions.count;
+        array->capacity  = round_up_to_nearest_power_of_two(array_lit->expressions.count);
+    } else {
+        array->head.size = 16 + array->capacity * array->elem_type->size;
+        array->count     = array_lit->expressions.count;
+        if (array->capacity_expr) {
+            // The capacity is already set
+            assert(array->capacity > 0);
+        } else {
+            array->capacity  = array_lit->expressions.count;
+        }
+    }
+
+    array->node = array_lit;
 
     return (Type *)(array);
 }
@@ -1261,6 +1270,34 @@ Type *check_typeof(Typer *typer, AstTypeof *ast_typeof) {
     return primitive_type(PRIMITIVE_STRING);
 }
 
+Type *check_new(Typer *typer, AstNew *ast_new, Type *ctx_type) {
+    Type *expr_type = check_expression(typer, ast_new->expr, ctx_type);
+    if (!expr_type) return NULL;
+
+    if (expr_type->kind == TYPE_STRUCT) {
+        TypePointer *ptr_to_struct     = ast_allocate(typer->parser, sizeof(TypePointer));
+        ptr_to_struct->head.head.kind  = AST_TYPE;
+        ptr_to_struct->head.head.start = expr_type->head.start;
+        ptr_to_struct->head.head.end   = expr_type->head.end;
+        ptr_to_struct->head.kind       = TYPE_POINTER;
+        ptr_to_struct->head.size       = 8;
+        ptr_to_struct->pointer_to      = expr_type;    
+
+        return (Type *) ptr_to_struct;
+    }
+
+    if (expr_type->kind == TYPE_ARRAY) {
+        // Modify the array to be a dynamic array
+        TypeArray *array = (TypeArray *)expr_type;
+        array->is_dynamic = true;
+
+        return (Type *) array;
+    }
+
+    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_new->expr, "Invalid expression to new. Only arrays and structs can be newed");
+    return NULL;
+}
+
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     Type *result = NULL;
     if      (expr->head.kind == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr), ctx_type);
@@ -1274,6 +1311,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr));
     else if (expr->head.kind == AST_ARRAY_ACCESS)   result = check_array_access(typer, (AstArrayAccess *)(expr));
     else if (expr->head.kind == AST_TYPEOF)         result = check_typeof(typer, (AstTypeof *)(expr));
+    else if (expr->head.kind == AST_NEW)            result = check_new(typer, (AstNew *)(expr), ctx_type);
     else if (expr->head.kind == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_S64); // @Investigate - Shouldn't this be checked for both sides being integers???
     else {
         printf("%s:%d: compiler-error: Unhandled cases in 'type_expression'. Expression was of type %s", __FILE__, __LINE__, ast_to_str((Ast *)expr));
@@ -1356,7 +1394,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a member of '%s'", member_name, type_to_str((Type *)struct_defn));
 
             if (type_lhs->kind == TYPE_ARRAY) {
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(rhs), "Arrays only have the members .data and .count");
+                report_error_ast(typer->parser, LABEL_NOTE, NULL, "Arrays only have the members .data and .count");
             } else {
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn), "Here is the definition of %s", type_to_str((Type *)struct_defn));
             }
@@ -1757,9 +1795,26 @@ bool is_boolean_operator(TokenType op) {
 }
 
 Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
+
     switch (literal->kind) {
-    case LITERAL_INTEGER:   return (ctx_type && ctx_type->kind == TYPE_INTEGER) ? ctx_type : primitive_type(PRIMITIVE_UNTYPED_INT);
-    case LITERAL_FLOAT:     return (ctx_type && ctx_type->kind == TYPE_FLOAT)   ? ctx_type : primitive_type(PRIMITIVE_FLOAT);
+    case LITERAL_INTEGER: {
+        if (ctx_type) {
+
+            // Statically cast untyped integer literals into a float literal to avoid run-time casting
+            if (ctx_type->kind == TYPE_FLOAT) {
+                double float_value = (double) literal->as.value.integer;
+    
+                literal->kind              = LITERAL_FLOAT;
+                literal->as.value.floating = float_value;
+                literal->head.type         = ctx_type;
+            }
+
+            return ctx_type;
+        }
+
+        return primitive_type(PRIMITIVE_UNTYPED_INT);
+    }
+    case LITERAL_FLOAT:     return (ctx_type && ctx_type->kind == TYPE_FLOAT)   ? ctx_type : primitive_type(PRIMITIVE_UNTYPED_FLOAT);
     case LITERAL_STRING:    return (ctx_type && ctx_type->kind == TYPE_STRING)  ? ctx_type : primitive_type(PRIMITIVE_STRING);
     case LITERAL_BOOLEAN:   return (ctx_type && ctx_type->kind == TYPE_BOOL)    ? ctx_type : primitive_type(PRIMITIVE_BOOL);
     case LITERAL_NULL:      return (Type *)t_null_ptr;
@@ -1822,9 +1877,21 @@ AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name) {
     return find_member_in_scope(struct_defn->scope, name);
 }
 
-bool is_untyped_literal(Type *type) {
+bool is_untyped_literal(AstExpr *expr) {
+    bool is_literal = expr->head.kind == AST_LITERAL;
+    return is_literal && is_untyped_type(expr->type);
+}
+
+bool is_untyped_type(Type *type) {
+    if (type == NULL) return false;
+
+    TypePrimitive *prim = (TypePrimitive *)type;
+
     if (type->kind == TYPE_INTEGER) {
-        TypePrimitive *prim = (TypePrimitive *)type;
+        return prim->kind == PRIMITIVE_UNTYPED_INT;
+    }
+
+    if (type->kind == TYPE_INTEGER) {
         return prim->kind == PRIMITIVE_UNTYPED_INT;
     }
 

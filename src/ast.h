@@ -31,7 +31,6 @@ typedef enum AstKind {
     AST_DIRECTIVE,
     AST_PRINT,
     AST_ASSERT,
-    AST_TYPEOF,
     AST_RETURN,
     AST_BREAK_OR_CONTINUE,
     AST_IF,
@@ -43,6 +42,8 @@ typedef enum AstKind {
     AST_BINARY,
     AST_UNARY,
     AST_CAST,
+    AST_TYPEOF,
+    AST_NEW,
     AST_IDENTIFIER,
     AST_SUBSCRIPT,
     AST_ACCESSOR,
@@ -78,7 +79,8 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
 } OperatorType;
 
 typedef enum AstFlags {
-    AST_FLAG_COMPILER_GENERATED = 1 << 0,
+    AST_FLAG_COMPILER_GENERATED     = 1 << 0,
+    AST_FLAG_CODEGEN_USED_FAST_PATH = 1 << 1,
 } AstFlags;
 
 typedef struct Ast {
@@ -278,6 +280,11 @@ typedef struct AstPrint {
     char         *c_string;     // Generated c string in typer
     int           c_args;       // Number of arguments that needs to be supplied to the c_string
 } AstPrint;
+
+typedef struct AstNew {
+    AstExpr  head;
+    AstExpr *expr;
+} AstNew;
 
 typedef struct AstAssert {
     Ast      head;
@@ -489,6 +496,7 @@ typedef enum PrimitiveKind {
     PRIMITIVE_VOID,
 
     PRIMITIVE_UNTYPED_INT,
+    PRIMITIVE_UNTYPED_FLOAT,
 
     PRIMITIVE_COUNT,
 } PrimitiveKind;
@@ -510,6 +518,16 @@ typedef struct TypePointer {
 
 extern TypePointer *t_null_ptr;
 
+// Static arrays:
+//
+// type size = 16 + capacity * sizeOf(elem_type)
+//
+// | .data | .count | e0 | e1 | eN
+
+// Dynamic arrays:
+//
+// type size = 16 bytes
+
 typedef struct TypeArray {
     Type             head;
     AstArrayLiteral *node;
@@ -517,6 +535,7 @@ typedef struct TypeArray {
     TypeStruct      *struct_defn;      // A generated struct to hold the .data and .count members
     AstExpr         *capacity_expr;    // If null, then the size was infered from the array literal
     long long        capacity;         // Will be set in typer
+    long long        count;            // Compile time number of elements in the array. Used for compile-time bounds checking
     bool             is_dynamic;       // false = static
 } TypeArray;
 
