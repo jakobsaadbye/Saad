@@ -140,29 +140,29 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
     if (type->kind == TYPE_ARRAY) {
         TypeArray *array = (TypeArray *)(type);
 
-        // We might be here from a declaration, otherwise we are here from an array literal
+        // @Investigate: Do we get called here with an array literal???
+        assert(decl);
 
-        if (decl) {
-            if (array->capacity_expr) {
-                AstExpr *constexpr = simplify_expression(typer->ce, typer->current_scope, array->capacity_expr);
-                if (constexpr->head.kind != AST_LITERAL && ((AstLiteral *)(constexpr))->kind != LITERAL_INTEGER) {
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be an integer constant");
-                    return NULL;
-                }
-
-                long long capacity = ((AstLiteral *)(constexpr))->as.value.integer;
-                if (capacity < 0) {
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be non-negative. Value is %lld", capacity);
-                    return NULL;
-                }
-
-                array->capacity = capacity;
-            } 
-
-            if (!array->is_dynamic && array->capacity_expr == NULL && decl->expr == NULL) { // @Note - This might also be the case for function parameters that also don't allow an expression to be present
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array), "Missing array initializer to determine size of array");
+        if (array->capacity_expr) {
+            AstExpr *constexpr = simplify_expression(typer->ce, typer->current_scope, array->capacity_expr);
+            if (constexpr->head.kind != AST_LITERAL && ((AstLiteral *)(constexpr))->kind != LITERAL_INTEGER) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be an integer constant");
                 return NULL;
             }
+
+            long long capacity = ((AstLiteral *)(constexpr))->as.value.integer;
+            if (capacity < 0) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be non-negative. Value is %lld", capacity);
+                return NULL;
+            }
+
+            array->capacity = capacity;
+            array->count    = capacity;
+        } 
+
+        if (!array->is_dynamic && array->capacity_expr == NULL && decl->expr == NULL) { // @Note - This might also be the case for function parameters that also don't allow an expression to be present
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array), "Missing array initializer to determine size of array");
+            return NULL;
         }
 
         // Resolve the size of any inner element type
@@ -260,6 +260,16 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         if (!types_are_equal(decl->type, expr_type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", decl->ident->name, type_to_str(decl->type), type_to_str(expr_type));
             return false;
+        }
+
+        // Special case for array with unknown capacity. We use the type we get from evaluating the expression.
+        if (resolved_type->kind == TYPE_ARRAY) {
+            TypeArray *array = (TypeArray *) resolved_type;
+
+            if (!array->capacity_expr) {
+                decl->ident->type = expr_type;
+                decl->type        = expr_type;
+            }
         }
 
     }
@@ -1228,14 +1238,14 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
         array->count     = array_lit->expressions.count;
         array->capacity  = round_up_to_nearest_power_of_two(array_lit->expressions.count);
     } else {
-        array->head.size = 16 + array->capacity * array->elem_type->size;
-        array->count     = array_lit->expressions.count;
-        if (array->capacity_expr) {
-            // The capacity is already set
-            assert(array->capacity > 0);
+        if (!array->capacity_expr) {
+            array->count    = array_lit->expressions.count;
+            array->capacity = array_lit->expressions.count;
         } else {
-            array->capacity  = array_lit->expressions.count;
+            // Count and capacity is already be set
+            assert(array->count > 0 && array->capacity > 0);
         }
+        array->head.size = 16 + array->capacity * array->elem_type->size;
     }
 
     array->node = array_lit;
@@ -1394,7 +1404,12 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a member of '%s'", member_name, type_to_str((Type *)struct_defn));
 
             if (type_lhs->kind == TYPE_ARRAY) {
-                report_error_ast(typer->parser, LABEL_NOTE, NULL, "Arrays only have the members .data and .count");
+                TypeArray *array = (TypeArray *) type_lhs;
+                if (array->is_dynamic) {
+                    report_error_ast(typer->parser, LABEL_NOTE, NULL, "Dynamic arrays have the members .data, .count and .cap");
+                } else {
+                    report_error_ast(typer->parser, LABEL_NOTE, NULL, "Arrays have the members .data and .count");
+                }
             } else {
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn), "Here is the definition of %s", type_to_str((Type *)struct_defn));
             }

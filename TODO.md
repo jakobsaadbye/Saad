@@ -1,8 +1,6 @@
 Today:
 -------------
 
-- Statically try and cast untyped integers in struct members to their correct type instead of a run-time cast
-
 Revisit arrays
   - Static arrays
   - Dynamic arrays

@@ -1,7 +1,7 @@
 #include "typer.c"
 
 typedef enum CodeGenFlags {
-    CODEGEN_TRY_EMIT_EXPRESSION_TO_FAST_PATH = 1 << 0,
+    CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE = 1 << 0,
 } CodeGenFlags;
 
 typedef struct CodeGenerator {
@@ -21,7 +21,7 @@ typedef struct CodeGenerator {
 
     CodeGenFlags flags;
 
-    int fast_path_address;    // Used in emit_expression() to assign directly to this address instead of a stack push & pop
+    int variable_address;    // Used in emit_expression() to assign directly to this address instead of a stack push & pop
 
     int enum_scratch_buffers; // Used for printing enum values where an int to string conversion needs to take place
     int num_pushed_arguments;
@@ -111,7 +111,7 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.constants      = 0;
     cg.labels         = 0;
     cg.flags          = 0;
-    cg.fast_path_address    = 0;
+    cg.variable_address    = 0;
     cg.enum_scratch_buffers = 0;
     cg.num_pushed_arguments = 0;
 
@@ -1750,11 +1750,11 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         // In this example, the struct is directly moved into 'a' instead of doing
         // an extra copy. The same is true for array literals.
 
-        cg->flags            |= CODEGEN_TRY_EMIT_EXPRESSION_TO_FAST_PATH;
-        cg->fast_path_address = decl->ident->stack_offset;
+        cg->flags            |= CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE;
+        cg->variable_address  = decl->ident->stack_offset;
         emit_expression(cg, decl->expr);
 
-        if (decl->expr->head.flags & AST_FLAG_CODEGEN_USED_FAST_PATH) {
+        if (decl->expr->head.flags & AST_FLAG_CG_EXPR_ASSIGNED_DIRECTLY_TO_VARIABLE) {
             // Expression is already assigned to the identifier
             return;
         }
@@ -2275,10 +2275,10 @@ bool is_arithmetic_operator(TokenType op) {
 void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
     // Check if we can use a fast-path address to move to
-    bool use_fast_path = cg->flags & CODEGEN_TRY_EMIT_EXPRESSION_TO_FAST_PATH;
+    bool assigning_to_variable = cg->flags & CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE;
 
     // Reset any expression flags
-    cg->flags &= ~CODEGEN_TRY_EMIT_EXPRESSION_TO_FAST_PATH;
+    cg->flags &= ~CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE;
 
     switch (expr->head.kind) {
     case AST_BINARY: {
@@ -2415,53 +2415,55 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         AstArrayLiteral *array_lit = (AstArrayLiteral *)(expr);
         TypeArray       *array = (TypeArray *)(expr->type);
 
-        // @Incomplete: For dynamic arrays we shouldn't allocate to rsp but instead to a pointer we get back from a call to malloc
+        int base_offset;
+        char *relative_to;
 
-        int base_offset  = -1;
-        char *rsp_or_rbp = RSP;
-
-        if (use_fast_path) {
-            base_offset       = cg->fast_path_address;
-            rsp_or_rbp        = RBP;
-            expr->head.flags |= AST_FLAG_CODEGEN_USED_FAST_PATH;
+        if (assigning_to_variable) {
+            base_offset       = cg->variable_address;
+            relative_to       = RBP;
+            expr->head.flags |= AST_FLAG_CG_EXPR_ASSIGNED_DIRECTLY_TO_VARIABLE;
         } else {
-            base_offset = push_temporary_value(cg->enclosing_function, array->head.size);
-            rsp_or_rbp  = RSP;
+            base_offset  = push_temporary_value(cg->enclosing_function, array->head.size);
+            relative_to  = RSP;
         }
-
-        if (array->is_dynamic) {
-            XXX;
-        }
-
-        // TEST DYNAMIC AND FIX STRUCT ASSIGNMENT!
 
         int elem_0_offset = base_offset + (array->is_dynamic ? 24 : 16);
 
         // Array header
-        sb_append(&cg->code, "   lea\t\trax, %d[%s]\n", elem_0_offset, rsp_or_rbp);
-        sb_append(&cg->code, "   mov\t\t%d[%s], rax\n", base_offset + 0, rsp_or_rbp);
-        sb_append(&cg->code, "   mov\t\tQWORD %d[%s], %d\n",  base_offset + 8, rsp_or_rbp, array->count);
-        if (array->is_dynamic) {
-            sb_append(&cg->code, "   mov\t\ttQWORD %d[%s], %d\n", base_offset + 16, rsp_or_rbp, array->capacity);
+        if (!array->is_dynamic) {
+            sb_append(&cg->code, "   lea\t\trax, %d[%s]\n",      elem_0_offset,   relative_to);
+            sb_append(&cg->code, "   mov\t\t%d[%s], rax\n",      base_offset + 0, relative_to);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[%s], %d\n", base_offset + 8, relative_to, array->count);
+            
         }
         
+        // if (array->is_dynamic) {
+            //     sb_append(&cg->code, "   mov\t\tQWORD %d[%s], %d\n", base_offset + 16, relative_to, array->capacity);
+            // }
+            
         for (int i = 0; i < array_lit->expressions.count; i++) {
             AstExpr *elem = ((AstExpr **) array_lit->expressions.items)[i];
             
             int elem_i_offset = elem_0_offset + (i * elem->type->size);
-            
+                
             emit_expression(cg, elem);
-
+                
             // @Incomplete: Check weather to initialize relative to rsp, rbp or a defined address
-            emit_simple_initialization(cg, elem_i_offset, false, false, elem->type, elem->type);
+            if (array->is_dynamic) {
+                elem_i_offset = i * elem->type->size;
+                sb_append(&cg->code, "   mov\t\trax, %d[rbp] ; elem %d\n", base_offset, i);
+                sb_append(&cg->code, "   lea\t\trbx, [rax + %d]\n", elem_i_offset);
+            }
+
+            emit_simple_initialization(cg, elem_i_offset, array->is_dynamic, !assigning_to_variable, elem->type, elem->type);
         }
         
-        if (use_fast_path) {
+        if (assigning_to_variable) {
             // Skip pushing the value
             break;
         }
 
-        sb_append(&cg->code, "   lea\t\trax, %d[%s]\n", base_offset, rsp_or_rbp);
+        sb_append(&cg->code, "   lea\t\trax, %d[%s]\n", base_offset, relative_to);
         PUSH(RAX);
 
         break;

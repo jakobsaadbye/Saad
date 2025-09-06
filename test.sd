@@ -8,12 +8,24 @@ MAX_NUMS :: 10;
 
 
 main :: () {
-    // v : [MAX_NUMS]float = [1, 2, 3, 4];
-    v := Vector3{1, 4, MAX_NUMS};
+    static:           [10]float = [1, 2, 3, 4];
+    static_inferred:  []float   = [1, 2, 3, 4];
+    dynamic:          [..]float = [1, 2, 3, 4];
     
-    print("%", v);
-    // for i in 0..MAX_NUMS {
-    //     print("%", v[i]);
-    // }
+    for static {
+        print("%", it);
+    }
+
+    print("");
+
+    for static_inferred {
+        print("%", it);
+    }
+
+    print("");
+
+    for dynamic {
+        print("%", it);
+    }
 
 }
