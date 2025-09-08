@@ -1,20 +1,20 @@
 main :: () {
     
+    print("Exclusive range");
     // Exclusive range
     for i in 0..10 {
         print("%", i);
     }
     
-    print("");
-    
+    print("Inclusive range");
     // Inclusive range
     for i in 0...10 {
         print("%", i);
     }
     
-    print("");
     
     // Ranges can be arbitrary expressions
+    print("Ranges with variables");
     a := 0;
     b := 10;
     for i in a...b+10 {
@@ -23,41 +23,41 @@ main :: () {
     
     print("");
 
-    // If no name for an iterator is given then the iterator will be named 'it'
+    // // If no name for an iterator is given then the iterator will be named 'it'
     for 0..10 {
         print("%", it);
     }
     
-    print("");
+    // print("");
 
     
-    // Looping over arrays has the same syntax
+    // // Looping over arrays has the same syntax
     x := [1, 1, 2, 3, 5, 8, 11, 19];
     for x {
         print("%", it);
     }
 
-    print("");
+    // print("");
     
-    // If no expression is given, its an infinite loop like in Go
-    for {
-        print("To infinity and beyond!");
-        break;
-    }
+    // // If no expression is given, its an infinite loop like in Go
+    // for {
+    //     print("To infinity and beyond!");
+    //     break;
+    // }
 
-    print("");
+    // print("");
 
-    // Its also possible to include the index
-    fibonacci_numbers := [1, 1, 2, 3, 5, 8, 11, 19];
-    for n, i in fibonacci_numbers {
-        print("(%, %)", i, n);
-    }
+    // // Its also possible to include the index
+    // fibonacci_numbers := [1, 1, 2, 3, 5, 8, 11, 19];
+    // for n, i in fibonacci_numbers {
+    //     print("(%, %)", i, n);
+    // }
 
-    // And it also works with ranges ()
-    for n, i in 10...20 {
-        print("(%, %)", i, n);
-    }
+    // // And it also works with ranges ()
+    // for n, i in 10...20 {
+    //     print("(%, %)", i, n);
+    // }
     
-    print("");
+    // print("");
 
 }

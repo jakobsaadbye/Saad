@@ -169,6 +169,8 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
         Type *elem_type = resolve_type(typer, array->elem_type, decl);
         if (!elem_type) return NULL;
 
+        array->elem_type = elem_type;
+
         if (array->is_dynamic) {
             // Reserve 24 bytes for .data, .count and .cap
             array->head.size = 24;
@@ -234,6 +236,7 @@ bool leads_to_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
     return true;
 }
 
+// Returns the concrete type of an untyped type. E.g untyped(int) -> int
 Type *solidify_untyped_type(Type *untyped_type) {
     assert(is_untyped_type(untyped_type));
 
@@ -324,11 +327,6 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
 
     if (typer->enclosing_function != NULL) {
         typer->enclosing_function->num_bytes_locals += decl->type->size;
-
-        if (decl->expr && decl->expr->head.kind == AST_ARRAY_LITERAL) {
-            // A little iffy, if we wanna keep it this way
-            typer->enclosing_function->num_bytes_locals += 16; // data + count
-        }
     } else {
         if (decl->flags & DECLARATION_CONSTANT) {
             // Constants don't need to be sized
@@ -1188,6 +1186,11 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
         Type *first_element_type = check_expression(typer, ((AstExpr **)(array_lit->expressions.items))[0], NULL);
         if (!first_element_type) return NULL;
 
+        if (is_untyped_type(first_element_type)) {
+            // Solidify the type so we don't get arrays of untyped integers for example
+            first_element_type = solidify_untyped_type(first_element_type);
+        }
+
 
         TypeStruct *struct_defn = generate_struct_type_with_data_and_count(typer->parser, first_element_type, "Array");
 
@@ -1268,6 +1271,12 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
     if (subscript_type->kind != TYPE_INTEGER && subscript_type->kind != TYPE_ENUM) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(subscript), "Array subscript must be an integer or enum type, got type %s", type_to_str(subscript_type));
         return NULL;
+    }
+
+    // Reserve temporary space for the array literal if its
+    // used in a quick array lookup like:  [1, 2, 3][0];
+    if (array_ac->accessing->head.kind == AST_ARRAY_LITERAL) {
+        reserve_temporary_storage(typer->enclosing_function, array_ac->accessing->type->size);
     }
 
     return ((TypeArray *)(type_being_accessed))->elem_type;
@@ -1815,6 +1824,8 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     case LITERAL_INTEGER: {
         if (ctx_type) {
 
+            // Try and coerce the interger literal into the context type
+
             // Statically cast untyped integer literals into a float literal to avoid run-time casting
             if (ctx_type->kind == TYPE_FLOAT) {
                 double float_value = (double) literal->as.value.integer;
@@ -1822,9 +1833,16 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
                 literal->kind              = LITERAL_FLOAT;
                 literal->as.value.floating = float_value;
                 literal->head.type         = ctx_type;
+
+                return ctx_type;
             }
 
-            return ctx_type;
+            if (ctx_type->kind == TYPE_INTEGER) {
+                return ctx_type;
+            }
+
+            // We couldn't coerce the integer type to the context type. Fallback to an untyped literal
+
         }
 
         return primitive_type(PRIMITIVE_UNTYPED_INT);

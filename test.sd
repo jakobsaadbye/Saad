@@ -1,31 +1,25 @@
-Vector3 :: struct {
+Vector2 :: struct {
     x: float;
     y: float;
-    z: float;
 }
 
-MAX_NUMS :: 10;
-
+Entity :: struct {
+    pos: [2]Vector2; // offset = 0, elem_0 = 16
+}
 
 main :: () {
-    static:           [10]float = [1, 2, 3, 4];
-    static_inferred:  []float   = [1, 2, 3, 4];
-    dynamic:          [..]float = [1, 2, 3, 4];
-    
-    for static {
-        print("%", it);
-    }
 
-    print("");
+    // e := Entity{pos = [{1, 3}, {4, 9}]};
 
-    for static_inferred {
-        print("%", it);
-    }
+    // static := [1, 2, 3][0];
+    // print("%", static);
+    // dynamic : [..]int = [1, 2, 3];
 
-    print("");
+    // for dynamic {
+    //     print("%", it);
+    // }
 
-    for dynamic {
-        print("%", it);
-    }
-
+    // for static {
+    //     print("%", it);
+    // }
 }
