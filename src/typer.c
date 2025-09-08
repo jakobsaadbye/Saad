@@ -11,6 +11,8 @@ typedef struct Typer {
     AstFor          *enclosing_for;      // Used by break or continue statements to know where to branch to
     AstWhile        *enclosing_while;    // Same as above
 
+    AstDeclaration  *inside_declaration; // Set if we are currently type checking a declaration
+
     DynamicArray flattened_array; // of *DynamicArray of *TypeArray. Used to infer size of array literals
     int array_literal_depth;
 } Typer;
@@ -55,6 +57,8 @@ Typer typer_init(Parser *parser, ConstEvaluater *ce) {
     typer.enclosing_function = NULL;
     typer.enclosing_for = NULL;
     typer.enclosing_while = NULL;
+
+    typer.inside_declaration = NULL;
 
     typer.array_literal_depth = 0;
 
@@ -251,6 +255,9 @@ Type *solidify_untyped_type(Type *untyped_type) {
 }
 
 bool check_declaration(Typer *typer, AstDeclaration *decl) {
+
+    typer->inside_declaration = decl;
+
     if (decl->flags & DECLARATION_TYPED) {
         Type *resolved_type = resolve_type(typer, decl->type, decl);
         if (!resolved_type) return false;
@@ -790,6 +797,11 @@ int count_nested_sizeable_struct_members(Typer *typer, AstStruct *struct_, int c
 }
 
 bool check_statement(Typer *typer, Ast *stmt) {
+
+    // When doing sizing of a function, we sometimes reserve temporary space for array literals
+    // and struct literals, but we try and avoid it if we are declaring a new variable. Therefore
+    // this "flag" is used to reduce temporary sizing
+    typer->inside_declaration = NULL;
 
     // Each statement might reserve a chunk of memory for temporary values such as function arguments and return values.
     // This call limits the lifetime of the temporary storage to that of a single statement.
@@ -1533,18 +1545,20 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         }
     }
 
-    Type *evaluated_type;
-    if (literal->explicit_type != NULL) {
-        evaluated_type = literal->explicit_type;
-    } else {
-        evaluated_type = ctx_type;
+    // @Cleanup: I think we can remove the commented out code
+    // Type *evaluated_struct;
+    // if (literal->explicit_type != NULL) {
+    //     evaluated_struct = literal->explicit_type;
+    // } else {
+    //     evaluated_struct = ctx_type;
+    // }
+
+    // Reserve space for the struct literal if its bigger than 8 bytes and we are not currently declaring a variable
+    if (!typer->inside_declaration && struct_defn->head.size > 8) {
+        reserve_temporary_storage(typer->enclosing_function, struct_defn->head.size);
     }
 
-    // Reserve space for the struct literal if its bigger than 8 bytes
-    // @Incomplete: Handle structs smaller than 8 bytes! They should'nt need to be put on the stack!
-    reserve_temporary_storage(typer->enclosing_function, evaluated_type->size);
-
-    return evaluated_type;
+    return (Type *) struct_defn;
 }
 
 Type *biggest_type(Type *lhs, Type *rhs) {

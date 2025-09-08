@@ -1532,10 +1532,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
         
 }
 
-void zero_initialize(CodeGenerator *cg, AstDeclaration *decl, int dst_offset) {
-
-    Type *type = decl->type;
-
+void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset) {
     switch (type->kind) {
     case TYPE_INTEGER:
     case TYPE_FLOAT:
@@ -1543,23 +1540,17 @@ void zero_initialize(CodeGenerator *cg, AstDeclaration *decl, int dst_offset) {
     case TYPE_STRING:
     case TYPE_ENUM:
     case TYPE_POINTER: {
-        if (decl->expr != NULL) return; // Don't bother to zero initialize
-
         sb_append(&cg->code, "   mov\t\t%s %d[rbp], 0\n", WIDTH(type), dst_offset);
         return;
     } 
 
     case TYPE_STRUCT: {
-
-        // Don't bother to zero initialize. The struct literal is directly into the identifier
-        if (decl->expr != NULL) return;
-
         AstStruct *struct_defn = ((TypeStruct *)(type))->node;
         assert(struct_defn != NULL);
 
         for (int i = 0; i < struct_defn->scope->members.count; i++) {
             AstDeclaration *member = ((AstDeclaration **)(struct_defn->scope->members.items))[i];
-            zero_initialize(cg, member, dst_offset - member->member_offset);
+            zero_initialize(cg, member->type, dst_offset + member->member_offset);
         }
 
         return;
@@ -1758,6 +1749,16 @@ void emit_array_literal(CodeGenerator *cg, AstArrayLiteral *array_lit, int base_
 
 // Allocates the struct literal relative to base_offset[rbp]
 void emit_struct_literal(CodeGenerator *cg, AstStructLiteral *struct_lit, int base_offset) {
+
+    TypeStruct *struct_defn = (TypeStruct *) struct_lit->head.type;
+
+    if (struct_lit->initializers.count != struct_defn->members.count) {
+        // Zero initialize just all the fields
+        // @Improvement: We should proably be smart about zero initializing just
+        //               the members that don't have a designated initializer
+        zero_initialize(cg, (Type *) struct_defn, base_offset);
+    }
+
     for (int i = 0; i < struct_lit->initializers.count; i++) {
         AstStructInitializer *init = ((AstStructInitializer **)(struct_lit->initializers.items))[i];
 
@@ -1804,9 +1805,14 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; Ln %d: $%s : %s = %d\n", decl->ident->head.start.line, decl->ident->name, type_to_str(decl->type), decl->ident->stack_offset);
     
-    zero_initialize(cg, decl, decl->ident->stack_offset);
-
-    if (decl->expr) {
+    if (!decl->expr) {
+        zero_initialize(cg, decl->type, decl->ident->stack_offset);
+    }
+    else {
+        
+        if (decl->type->kind == TYPE_ARRAY) {
+            zero_initialize(cg, decl->type, decl->ident->stack_offset);
+        }
 
         // The following "fast-path" code is here to omit emit_expression()
         // from first doing a copy of the value of the expression on the stack followed 

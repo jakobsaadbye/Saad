@@ -49,8 +49,6 @@ main :: () {
     print("--- Enum -> X casts ---");
     b1 := (xx HoldType.Crimp + 1);
     b2 := cast(HoldType)b1;
-    typeof(b1); // int
-    typeof(b2); // enum
     print("%", b1);
     print("%", b2);
 

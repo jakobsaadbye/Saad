@@ -288,11 +288,6 @@ Ast *parse_statement(Parser *parser) {
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
     }
-    else if (token.type == TOKEN_TYPEOF) {
-        stmt = (Ast *)(parse_typeof(parser));
-        statement_ends_with_semicolon = true;
-        matched_a_statement = true;
-    }
     else if (token.type == TOKEN_IF) {
         stmt = (Ast *)(parse_if(parser));
         statement_ends_with_semicolon = false;
@@ -336,7 +331,7 @@ Ast *parse_statement(Parser *parser) {
     }
 
     if (!matched_a_statement) {
-        report_error_token(parser, LABEL_ERROR, token, "Invalid statement");
+        report_error_token(parser, LABEL_ERROR, token, "Invalid start of statement");
         return NULL;
     }
     if (!stmt && matched_a_statement) {

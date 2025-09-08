@@ -33,99 +33,125 @@ assert_fail:
    call		ExitProcess
 
 
-; bytes locals   : 368
-; bytes temp     : 592
-; bytes total    : 992
+; bytes locals   : 28
+; bytes temp     : 0
+; bytes total    : 64
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 992
-
-   ; Ln 32: $doom : [2]Doom = -368
-   lea		rax, -352[rbp]
-   mov		QWORD -368[rbp], rax
-   mov		QWORD -360[rbp], 2
-   lea		rax, -336[rbp]
-   mov		QWORD -352[rbp], rax
-   mov		QWORD -344[rbp], 2
-   lea		rax, -320[rbp]
-   mov		QWORD -336[rbp], rax
-   mov		QWORD -328[rbp], 2
-   lea		rax, -304[rbp]
-   mov		QWORD -320[rbp], rax
-   mov		QWORD -312[rbp], 2
-   mov		rax, 5
+   sub		rsp, 64
+   mov		rax, 0
    push		rax
+   push		20
+   pop		rbx
    pop		rax
-   mov		DWORD -304[rbp], eax
-   mov		rax, 10
-   push		rax
-   pop		rax
-   mov		DWORD -300[rbp], eax
-   lea		rax, -160[rbp]
-   mov		QWORD -176[rbp], rax
-   mov		QWORD -168[rbp], 2
-   lea		rax, -144[rbp]
-   mov		QWORD -160[rbp], rax
-   mov		QWORD -152[rbp], 2
-   lea		rax, -128[rbp]
-   mov		QWORD -144[rbp], rax
-   mov		QWORD -136[rbp], 2
-   mov		rax, 15
-   push		rax
-   pop		rax
-   mov		DWORD -128[rbp], eax
-   mov		rax, 20
-   push		rax
-   pop		rax
-   mov		DWORD -124[rbp], eax
+   mov		QWORD -16[rbp], rax
+   mov		QWORD -24[rbp], rbx
+   mov		eax, DWORD -16[rbp]
+   mov		-8[rbp], eax
+L1:
+   mov		eax, -24[rbp]
+   cmp		-8[rbp], eax
+   jge		L3
 
    ; expression of print
-   mov		rax, 1
-   push		rax
-   pop		rax
-   imul		rax, 176
-   push		rax
-   pop		rax
-   mov		rbx, QWORD -368[rbp]   ; load pointer to .data
-   add		rbx, rax              ; add element offset
-   add		rbx, 0
-   mov		rax, 0
-   push		rax
-   pop		rax
-   imul		rax, 80
-   push		rax
-   pop		rax
-   mov		rbx, [rbx]       ; dereference .data pointer
-   add		rbx, rax              ; add element offset
-   add		rbx, 0
-   mov		rax, 0
-   push		rax
-   pop		rax
-   imul		rax, 32
-   push		rax
-   pop		rax
-   mov		rbx, [rbx]       ; dereference .data pointer
-   add		rbx, rax              ; add element offset
-   add		rbx, 0
-   mov		rax, 0
-   push		rax
-   pop		rax
-   imul		rax, 8
-   push		rax
-   pop		rax
-   mov		rbx, [rbx]       ; dereference .data pointer
-   add		rbx, rax              ; add element offset
-   add		rbx, 4
-   mov		eax, DWORD [rbx]
+   mov		eax, DWORD -8[rbp]
    movsx		rax, eax
+   push		rax
+   pop		rax
+   mov		ecx, eax
+   call		fib
    push		rax
    pop		rax
    mov		rdx, rax
    mov		rcx, CS0
    call		printf
+L2:
+   inc		DWORD -8[rbp]
+   jmp		L1
+L3:
 L0:
    mov		rax, 0
-   add		rsp, 992
+   add		rsp, 64
+   pop		rbp
+   ret
+
+; bytes locals   : 4
+; bytes temp     : 0
+; bytes total    : 48
+fib:
+   push		rbp
+   mov		rbp, rsp
+   sub		rsp, 48
+   mov		-4[rbp], ecx
+   mov		eax, DWORD -4[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 0
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   mov		eax, DWORD -4[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 1
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+
+   pop		rbx
+   pop		rax
+   or 		al, bl
+   push		rax
+   pop		rax
+   cmp		al, 0
+   jz			L5
+   ; block of if
+   mov		rax, 1
+   push		rax
+   jmp		L4
+   jmp L5
+; done
+L5:
+   mov		eax, DWORD -4[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 1
+   push		rax
+   pop		rbx
+   pop		rax
+   sub		rax, rbx
+   push		rax
+   pop		rax
+   mov		ecx, eax
+   call		fib
+   push		rax
+   mov		eax, DWORD -4[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 2
+   push		rax
+   pop		rbx
+   pop		rax
+   sub		rax, rbx
+   push		rax
+   pop		rax
+   mov		ecx, eax
+   call		fib
+   push		rax
+   pop		rbx
+   pop		rax
+   add		rax, rbx
+   push		rax
+   jmp		L4
+L4:
+   pop		rax
+   add		rsp, 48
    pop		rbp
    ret
