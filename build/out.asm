@@ -33,46 +33,91 @@ assert_fail:
    call		ExitProcess
 
 
-; bytes locals   : 4
-; bytes temp     : 28
-; bytes total    : 64
+; bytes locals   : 368
+; bytes temp     : 592
+; bytes total    : 992
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 64
+   sub		rsp, 992
 
-   ; Ln 14: $static : int = -4
-   lea		rax, -20[rbp]
-   mov		QWORD -36[rbp], rax
-   mov		QWORD -28[rbp], 3
+   ; Ln 32: $doom : [2]Doom = -368
+   lea		rax, -352[rbp]
+   mov		QWORD -368[rbp], rax
+   mov		QWORD -360[rbp], 2
+   lea		rax, -336[rbp]
+   mov		QWORD -352[rbp], rax
+   mov		QWORD -344[rbp], 2
+   lea		rax, -320[rbp]
+   mov		QWORD -336[rbp], rax
+   mov		QWORD -328[rbp], 2
+   lea		rax, -304[rbp]
+   mov		QWORD -320[rbp], rax
+   mov		QWORD -312[rbp], 2
+   mov		rax, 5
+   push		rax
+   pop		rax
+   mov		DWORD -304[rbp], eax
+   mov		rax, 10
+   push		rax
+   pop		rax
+   mov		DWORD -300[rbp], eax
+   lea		rax, -160[rbp]
+   mov		QWORD -176[rbp], rax
+   mov		QWORD -168[rbp], 2
+   lea		rax, -144[rbp]
+   mov		QWORD -160[rbp], rax
+   mov		QWORD -152[rbp], 2
+   lea		rax, -128[rbp]
+   mov		QWORD -144[rbp], rax
+   mov		QWORD -136[rbp], 2
+   mov		rax, 15
+   push		rax
+   pop		rax
+   mov		DWORD -128[rbp], eax
+   mov		rax, 20
+   push		rax
+   pop		rax
+   mov		DWORD -124[rbp], eax
+
+   ; expression of print
    mov		rax, 1
    push		rax
    pop		rax
-   mov		DWORD -20[rbp], eax
-   mov		rax, 2
+   imul		rax, 176
    push		rax
    pop		rax
-   mov		DWORD -16[rbp], eax
-   mov		rax, 3
-   push		rax
-   pop		rax
-   mov		DWORD -12[rbp], eax
+   mov		rbx, QWORD -368[rbp]   ; load pointer to .data
+   add		rbx, rax              ; add element offset
+   add		rbx, 0
    mov		rax, 0
    push		rax
    pop		rax
-   imul		rax, 4
+   imul		rax, 80
    push		rax
    pop		rax
-   mov		rbx, QWORD -36[rbp]   ; load pointer to .data
-   add		rbx, rax             ; add offset
+   mov		rbx, [rbx]       ; dereference .data pointer
+   add		rbx, rax              ; add element offset
+   add		rbx, 0
+   mov		rax, 0
+   push		rax
+   pop		rax
+   imul		rax, 32
+   push		rax
+   pop		rax
+   mov		rbx, [rbx]       ; dereference .data pointer
+   add		rbx, rax              ; add element offset
+   add		rbx, 0
+   mov		rax, 0
+   push		rax
+   pop		rax
+   imul		rax, 8
+   push		rax
+   pop		rax
+   mov		rbx, [rbx]       ; dereference .data pointer
+   add		rbx, rax              ; add element offset
+   add		rbx, 4
    mov		eax, DWORD [rbx]
-   movsx		rax, eax
-   push		rax
-   pop		rax
-   mov		DWORD -4[rbp], eax
-
-   ; expression of print
-   mov		eax, DWORD -4[rbp]
    movsx		rax, eax
    push		rax
    pop		rax
@@ -81,6 +126,6 @@ main:
    call		printf
 L0:
    mov		rax, 0
-   add		rsp, 64
+   add		rsp, 992
    pop		rbp
    ret

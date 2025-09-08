@@ -489,13 +489,13 @@ TypeStruct *generate_struct_for_dynamic_array(Parser *parser, Type *type_data) {
 
     dynamic_array->head.size = 24;
 
-    // Add .cap for the runtime capacity of the array
-    AstDeclaration *cap = generate_declaration(parser, "cap", NULL, primitive_type(PRIMITIVE_S64), DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_STRUCT_MEMBER);
+    // Add .capacity for the runtime capacity of the array
+    AstDeclaration *capacity = generate_declaration(parser, "capacity", NULL, primitive_type(PRIMITIVE_S64), DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_STRUCT_MEMBER);
 
-    cap->member_index   = 2;
-    cap->member_offset  = 16;
+    capacity->member_index   = 2;
+    capacity->member_offset  = 16;
 
-    add_declaration_to_scope(dynamic_array->node->scope, cap);
+    add_declaration_to_scope(dynamic_array->node->scope, capacity);
 
     return dynamic_array;
 }

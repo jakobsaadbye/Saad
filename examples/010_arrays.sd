@@ -1,0 +1,49 @@
+main :: () {
+    // In Saad, all arrays are like slices like in Go. They store a pointer to the data
+    // and the length. which both can be accessed through .data and .count.
+    // I don't like the term slice that Go introduced and i think it would be best
+    // if we all just think about arrays as storing their lenghts which circumvents
+    // alot of the problems you have in C with passing around array lenghts + you get
+    // nice benefits such as terce for-loops.
+
+    // There are two types of arrays: Static and dynamic
+
+    //
+    // Static arrays:
+    //
+    //    Static arrays are always allocated on the stack and has the following memory layout:
+    //
+    //      0        8       16               16 + sizeof(elem) * n
+    //    .data | .count | elem_0 | elem_1 | ... | elem_n |
+    //      |----------------^
+
+    // Declares an array of 10 integers and assigns the first 3 elements. The rest are zeroed
+    my_sized_array: [10]int = [1, 2, 3];
+
+    // Declares an array of [8]int, the size of which was infered from the right
+    my_inferred_size_array: []int = [1, 1, 2, 3, 5, 8, 13, 21];
+
+    // Declares the array as [3]int where the type was infered from the first element and size from the array literal
+    my_inferred_array := [27, 11, 2000];
+
+    // The data and count can be accessed as if the array was a regular struct
+    print("my_inferred_size_array.data  = %", my_inferred_size_array.data);
+    print("my_inferred_size_array.count = %", my_inferred_size_array.count);
+    
+    //
+    // Dynamic arrays:
+    //
+    //    Dynamic arrays are allocated on the heap and follows the same memory layout as static
+    //    arrays apart from having an extra .capacity member which gives the current capacity
+    //    of the dynamic array. The capacity is always a power of two.
+    //    
+    
+    // Declares a dynamic array with initial capacity of 4
+    my_dynamic_array : [..]int = [1, 2, 3];
+    
+    // Declares a dynamic array with initial capacity of 2
+    my_dynamic_array_with_no_initialization : [..]int;
+    
+    print("my_dynamic_array.capacity = %", my_dynamic_array.capacity);
+
+}

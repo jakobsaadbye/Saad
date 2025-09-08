@@ -3,7 +3,7 @@
 
 typedef struct Typer {
     Parser *parser;
-    ConstEvaluater *ce;
+    ConstEvaluater *const_evaluator;
 
     AstBlock *current_scope;
 
@@ -50,7 +50,7 @@ char *generate_c_format_specifier_for_type(Type *type);
 Typer typer_init(Parser *parser, ConstEvaluater *ce) {
     Typer typer = {0};
     typer.parser = parser;
-    typer.ce = ce;
+    typer.const_evaluator = ce;
     typer.current_scope = parser->current_scope;
     typer.enclosing_function = NULL;
     typer.enclosing_for = NULL;
@@ -144,7 +144,7 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
         assert(decl);
 
         if (array->capacity_expr) {
-            AstExpr *constexpr = simplify_expression(typer->ce, typer->current_scope, array->capacity_expr);
+            AstExpr *constexpr = simplify_expression(typer->const_evaluator, typer->current_scope, array->capacity_expr);
             if (constexpr->head.kind != AST_LITERAL && ((AstLiteral *)(constexpr))->kind != LITERAL_INTEGER) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be an integer constant");
                 return NULL;
@@ -172,7 +172,7 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
         array->elem_type = elem_type;
 
         if (array->is_dynamic) {
-            // Reserve 24 bytes for .data, .count and .cap
+            // Reserve 24 bytes for .data, .count and .capacity
             array->head.size = 24;
         } else {
             // Reserve 16 bytes for .data, .count + the size of the array
@@ -294,7 +294,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         Type *expr_type  = check_expression(typer, decl->expr, NULL);
         if (!expr_type) return false;
 
-        AstExpr *const_expr = simplify_expression(typer->ce, typer->current_scope, decl->expr);
+        AstExpr *const_expr = simplify_expression(typer->const_evaluator, typer->current_scope, decl->expr);
         if (const_expr->head.kind == AST_LITERAL) {
             // Swap out the current expression for the simplified expression
             // @Speed? @Note - We might in the future cleanup the already allocated expression tree as its no longer needed after this swap.
@@ -1022,7 +1022,7 @@ Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
             Type *ok = check_expression(typer, etor->expr, (Type *)(enum_defn)); // Type definition of the enum gets to be the ctx type so we can refer to enum members inside the enum with the shorthand syntax .ENUM_MEMBER
             if (!ok) return NULL;
 
-            AstExpr *constexpr = simplify_expression(typer->ce, typer->current_scope, etor->expr); // @ScopeRefactoring - We still need to give enums their own scope. This probably doesn't work!!!
+            AstExpr *constexpr = simplify_expression(typer->const_evaluator, typer->current_scope, etor->expr); // @ScopeRefactoring - We still need to give enums their own scope. This probably doesn't work!!!
             if (constexpr->head.kind != AST_LITERAL) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Value must be a constant expression");
                 return NULL;
@@ -1415,7 +1415,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
             if (type_lhs->kind == TYPE_ARRAY) {
                 TypeArray *array = (TypeArray *) type_lhs;
                 if (array->is_dynamic) {
-                    report_error_ast(typer->parser, LABEL_NOTE, NULL, "Dynamic arrays have the members .data, .count and .cap");
+                    report_error_ast(typer->parser, LABEL_NOTE, NULL, "Dynamic arrays have the members .data, .count and .capacity");
                 } else {
                     report_error_ast(typer->parser, LABEL_NOTE, NULL, "Arrays have the members .data and .count");
                 }
