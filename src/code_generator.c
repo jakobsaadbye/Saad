@@ -323,10 +323,14 @@ char *movd_or_movq(Type *float_type) {
 }
 
 void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
-    emit_expression(cg, assign->expr);
 
-    bool offset_is_runtime_computed = false;
+    
+    //
+    // Get the offset to assign to
+    //
     int base_offset = 0;
+    bool offset_is_runtime_computed = false;
+
     if (assign->lhs->head.kind == AST_LITERAL) {
         AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs);
         assert(ident);
@@ -362,16 +366,29 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
         XXX;
     }
 
+    // @Speed: I think we should try to utilize direct assignment if we can. Currently
+    //         the problem is in knowing weather or not the direct assignment took place or not in.
+    //         f.x in struct reassignment: 'my_struct = Vector2{5, 6}'. We first emit the struct literal temporarily
+    //         and then perform a memcopy.
+
+    // if (!offset_is_runtime_computed) {
+    //     cg->flags            |= CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE;
+    //     cg->variable_address  = base_offset;
+    // }
+
+    emit_expression(cg, assign->expr);
+
+
+    if (assign->op == ASSIGN_EQUAL) {
+        emit_simple_initialization(cg, base_offset, offset_is_runtime_computed, false, assign->lhs->type, assign->expr->type);
+        return;
+    }
+    
     char address_str[16];
     if (offset_is_runtime_computed) {
         sprintf(address_str, "[rbx]");
     } else {
         sprintf(address_str, "%d[rbp]", base_offset);
-    }
-
-    if (assign->op == ASSIGN_EQUAL) {
-        emit_simple_initialization(cg, base_offset, offset_is_runtime_computed, false, assign->lhs->type, assign->expr->type);
-        return;
     }
 
     if (assign->lhs->type->kind == TYPE_INTEGER) {
@@ -880,9 +897,12 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
                 sb_append(&cg->code, "   mov\t\trax, %s\n", register_string(arg_reg, 8));
                 sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", param_offset);
                 emit_copy_struct(cg, (TypeStruct *)param->type, 0, 0);
+                
             } else if (param->type->kind == TYPE_ARRAY) {
-                // @Incomplete
-                XXX;
+                TypeArray *array = (TypeArray *) param->type;
+                sb_append(&cg->code, "   mov\t\trax, %s\n", register_string(arg_reg, 8));
+                sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", param_offset);
+                emit_copy_struct(cg, array->struct_defn, 0, 0);
             } else {
                 XXX;
             }
@@ -1113,7 +1133,10 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
 
                 break;
             }
-            case TYPE_ARRAY: XXX;
+            case TYPE_ARRAY: {
+                POP(RAX); // Pop the pointer to the start of the array
+                break;
+            }
             case TYPE_STRUCT: {
                 POP(RAX); // Here we just pop the pointer to the struct. We will copy the struct by value
                 break;
@@ -1585,6 +1608,8 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset) {
                 sb_append(&cg->code, "   call\t\tmemset\n");    // void *memset(void *ptr, int x, size_t n);
             } else {
                 // The array is fully initialized from the array literal
+                sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset + 0);
+                sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset + 8);
             }
         }
 
@@ -1675,16 +1700,30 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
         return;
     }
     case TYPE_ARRAY: {
-        POP(RAX); // Pointer to start of the array
+        POP(RAX); // pointer to array
 
-        POP(RCX); // count
+        TypeArray *array = (TypeArray *) lhs_type;
+
         if (dst_is_runtime_computed) {
-            sb_append(&cg->code, "   mov\t\tQWORD [rbx], rax\n");
-            sb_append(&cg->code, "   mov\t\tQWORD [rbx + 8], rax\n");
+            sb_append(&cg->code, "   mov\t\trcx, 0[rax]\n");
+            sb_append(&cg->code, "   mov\t\trdx, 8[rax]\n");
+            sb_append(&cg->code, "   mov\t\t0[rbx], rcx\n");
+            sb_append(&cg->code, "   mov\t\t8[rbx], rdx\n");
+            if (array->is_dynamic) {
+                sb_append(&cg->code, "   mov\t\tr8, 16[rax]\n");
+                sb_append(&cg->code, "   mov\t\t16[rbx], r8\n");
+            }
         } else {
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", dst_offset);
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rcx\n", dst_offset + 8);
+            sb_append(&cg->code, "   mov\t\trcx, 0[rax]\n");
+            sb_append(&cg->code, "   mov\t\trdx, 8[rax]\n");
+            sb_append(&cg->code, "   mov\t\t%d[rbp], rcx\n", dst_offset);
+            sb_append(&cg->code, "   mov\t\t%d[rbp], rdx\n", dst_offset + 8);
+            if (array->is_dynamic) {
+                sb_append(&cg->code, "   mov\t\tr8, 16[rax]\n");
+                sb_append(&cg->code, "   mov\t\t%d[rbp], r8\n", dst_offset + 16);
+            }
         }
+
         return;
     }
     case TYPE_STRUCT: {
@@ -1752,12 +1791,9 @@ void emit_struct_literal(CodeGenerator *cg, AstStructLiteral *struct_lit, int ba
 
     TypeStruct *struct_defn = (TypeStruct *) struct_lit->head.type;
 
-    if (struct_lit->initializers.count != struct_defn->members.count) {
-        // Zero initialize just all the fields
-        // @Improvement: We should proably be smart about zero initializing just
-        //               the members that don't have a designated initializer
-        zero_initialize(cg, (Type *) struct_defn, base_offset);
-    }
+    // @Improvement: We should proably be smart about zero initializing just
+    //               the members that don't have a designated initializer for
+    zero_initialize(cg, (Type *) struct_defn, base_offset);
 
     for (int i = 0; i < struct_lit->initializers.count; i++) {
         AstStructInitializer *init = ((AstStructInitializer **)(struct_lit->initializers.items))[i];
@@ -2350,7 +2386,7 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue)
     emit_move_and_push(cg, 0, true, innermost_type, lvalue);
 }
 
-// Src is [rbx], Dest is size of type
+// If src_is_runtime_computed = true, then the source offset is expected to be in rbx
 void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_computed, Type *src_type, bool lvalue) {
     char src[16];
     if (src_is_runtime_computed) {

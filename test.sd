@@ -14,23 +14,18 @@ Entity :: struct {
 }
 
 GameState :: struct {
-    entities: [10]Entity;
+    entities: []Vector2;
+}
+
+print_ints :: (nums: []int) {
+    print("%", typeof(nums));
+    for nums {
+        print("%", it);
+    }
 }
 
 main :: () {
+    nums: [..]int = [1, 2, 3];
 
-    // entities : []Entity = [
-    //     { position = {1, 4} },
-    //     { position = {5, 9} },
-    // ];
-
-    v := Vector3{1, 4, 9};
-
-    print("%", v);
-
-    // gs := GameState{};
-
-    // print("%", gs.entities[0].position.x);
-
-
+    print_ints(nums);
 }

@@ -516,17 +516,7 @@ typedef struct TypePointer {
     Type *pointer_to;
 } TypePointer;
 
-extern TypePointer *t_null_ptr;
-
-// Static arrays:
-//
-// type size = 16 + capacity * sizeOf(elem_type)
-//
-// | .data | .count | e0 | e1 | eN
-
-// Dynamic arrays:
-//
-// type size = 16 bytes
+extern TypePointer *type_null_ptr;
 
 typedef struct TypeArray {
     Type             head;
@@ -540,11 +530,10 @@ typedef struct TypeArray {
 } TypeArray;
 
 typedef struct TypeEnum {
-    Type head;
-    AstEnum *node;
-    
+    Type           head;
+    AstEnum       *node;
     AstIdentifier *identifier;
-    Type *backing_type;
+    Type          *backing_type;
 } TypeEnum;
 
 typedef struct TypeEnumValue {

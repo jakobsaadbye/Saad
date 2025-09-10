@@ -162,12 +162,16 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
 
             array->capacity = capacity;
             array->count    = capacity;
-        } 
-
-        if (!array->is_dynamic && array->capacity_expr == NULL && decl->expr == NULL) { // @Note - This might also be the case for function parameters that also don't allow an expression to be present
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array), "Missing array initializer to determine size of array");
-            return NULL;
+        } else {
+            array->capacity = 0;
+            array->count    = 0;
         }
+
+        // @Cleanup @Remove
+        // if (!array->is_dynamic && array->capacity_expr == NULL && decl->expr == NULL) { // @Note - This might also be the case for function parameters that also don't allow an expression to be present
+        //     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array), "Missing array initializer to determine size of array");
+        //     return NULL;
+        // }
 
         // Resolve the size of any inner element type
         Type *elem_type = resolve_type(typer, array->elem_type, decl);
@@ -530,6 +534,16 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
 
     bool ok = leads_to_integer_overflow(typer, lhs_type, assign->expr);
     if (!ok) return false;
+
+    if (assign->expr->head.kind == AST_ARRAY_LITERAL) {
+        TypeArray *array = (TypeArray *) assign->expr->type;
+
+        if (!array->is_dynamic) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Cannot reassign a statically declared array to array literal as it does not occupy any space");
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Assign the array literal to an identifier first before assigning it in the original expression");
+            return false;
+        }
+    }
 
     return true;
 }
@@ -1864,7 +1878,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     case LITERAL_FLOAT:     return (ctx_type && ctx_type->kind == TYPE_FLOAT)   ? ctx_type : primitive_type(PRIMITIVE_UNTYPED_FLOAT);
     case LITERAL_STRING:    return (ctx_type && ctx_type->kind == TYPE_STRING)  ? ctx_type : primitive_type(PRIMITIVE_STRING);
     case LITERAL_BOOLEAN:   return (ctx_type && ctx_type->kind == TYPE_BOOL)    ? ctx_type : primitive_type(PRIMITIVE_BOOL);
-    case LITERAL_NULL:      return (Type *)t_null_ptr;
+    case LITERAL_NULL:      return (Type *) type_null_ptr;
     case LITERAL_IDENTIFIER: {
         char   *ident_name   = literal->as.value.identifier.name;
         AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name, (Ast *)literal);
@@ -1874,6 +1888,25 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         }
 
         assert(ident->type);
+
+        // Reserve temporary storage for the value of the identifier if its bigger than 8 bytes
+        // if (ident->type->size > 8) {
+
+        //     if (ident->type->kind == TYPE_ARRAY) {
+        //         TypeArray *array = (TypeArray *) ident->type;
+
+        //         // Only reserve space for copying the .data, .count and possibly .capacity
+        //         if (array->is_dynamic) {
+        //             reserve_temporary_storage(typer->enclosing_function, 24);
+        //         } else {
+        //             reserve_temporary_storage(typer->enclosing_function, 16);
+        //         }
+        //     } 
+        //     else {
+        //         reserve_temporary_storage(typer->enclosing_function, ident->type->size);
+        //     }
+        // }
+
         return ident->type;
     }}
 

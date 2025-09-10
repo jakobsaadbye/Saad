@@ -81,7 +81,7 @@ const char *directive_names[] = {
     "extern"
 };
 
-TypePointer *t_null_ptr = &(TypePointer){
+TypePointer *type_null_ptr = &(TypePointer){
     .head = {.kind = TYPE_POINTER, .size = 8},
     .pointer_to = (Type *)&(TypePrimitive){.kind = PRIMITIVE_VOID, .name = "void", .head = {.kind = TYPE_VOID, .size = 0}}
 };
@@ -145,7 +145,12 @@ char *type_to_str(Type *type) {
         if (array->is_dynamic) {
             sb_append(&sb, "[..]%s", type_to_str(array->elem_type));
         } else {
-            sb_append(&sb, "[%d]%s", array->capacity, type_to_str(array->elem_type));
+            if (array->capacity == 0) {
+                // Slice
+                sb_append(&sb, "[]%s", type_to_str(array->elem_type));
+            } else {
+                sb_append(&sb, "[%d]%s", array->capacity, type_to_str(array->elem_type));
+            }
         }
 
         return sb_to_string(&sb); // @Leak
