@@ -324,9 +324,13 @@ char *movd_or_movq(Type *float_type) {
 
 void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
 
-    
+    sb_append(&cg->code, "   ; Ln %d: Assignment\n", assign->head.start.line);
+
+    emit_expression(cg, assign->expr);
+
     //
-    // Get the offset to assign to
+    // Get the offset to assign to. If its a runtime offset like an array subscript, then the address
+    // will be in rbx after this block
     //
     int base_offset = 0;
     bool offset_is_runtime_computed = false;
@@ -375,9 +379,6 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     //     cg->flags            |= CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE;
     //     cg->variable_address  = base_offset;
     // }
-
-    emit_expression(cg, assign->expr);
-
 
     if (assign->op == ASSIGN_EQUAL) {
         emit_simple_initialization(cg, base_offset, offset_is_runtime_computed, false, assign->lhs->type, assign->expr->type);
@@ -452,6 +453,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
     ast_for->done_label            = done_label;
     
     if (!ast_for->iterable) {
+        sb_append(&cg->code, "   ; Infinite for-loop\n");
         sb_append(&cg->code, "L%d:\n", cond_label);
         emit_block(cg, ast_for->body);
         sb_append(&cg->code, "   jmp\t\tL%d\n", cond_label);
@@ -476,7 +478,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         }
         ast_for->iterator->stack_offset = offset_iterator;
 
-
+        sb_append(&cg->code, "   ; Ln %d: Ranged for-loop\n", ast_for->head.start.line);
         emit_expression(cg, range->start);
         emit_expression(cg, range->end);
 
@@ -525,7 +527,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
             index->stack_offset = offset_index;
         }
 
-        sb_append(&cg->code, "   ; For-loop\n");
+        sb_append(&cg->code, "   ; Ln %d: For-loop\n", ast_for->head.start.line);
         emit_expression(cg, iterable);
 
         POP(RAX);
@@ -619,7 +621,7 @@ void emit_copy_struct(CodeGenerator *cg, TypeStruct *struct_defn, int dst_base_o
     // Try and move the struct in registers
     if (struct_defn->head.size <= 8) {
         sb_append(&cg->code, "   mov\t\t%s, %d[rax]\n", REG_C((Type *) struct_defn), src_base_offset);
-        sb_append(&cg->code, "   mov\t\t%d[rbx], %s\n", REG_C((Type *) struct_defn), dst_base_offset);
+        sb_append(&cg->code, "   mov\t\t%d[rbx], %s\n", dst_base_offset, REG_C((Type *) struct_defn));
         return;
     }
 
@@ -1737,17 +1739,16 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
     }
     case TYPE_STRUCT: {
         POP(RAX);
-        
-        // If the struct fitted in 8 bytes, then the entire struct
-        // is in rax, so we can just move it directly to the destination, otherwise we have the pointer to the struct in rax
-        // and need to do a mem copy to the destination
-        
-        if (lhs_type->size <= 8) {
-            sb_append(&cg->code, "   mov\t\t%s, %s\n", address_str, REG_A(lhs_type));
+    
+        // @Speed: We should move structs smaller than 8 bytes in registers instead of doing a memcpy
+
+        sb_append(&cg->code, "   ; Copy struct\n");
+        if (dst_is_runtime_computed) {
+            // Destination address for struct copy is already in rbx
         } else {
             sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", dst_offset);
-            emit_copy_struct(cg, (TypeStruct *)lhs_type, 0, 0);
         }
+        emit_copy_struct(cg, (TypeStruct *)lhs_type, 0, 0);
 
         return;
     }
@@ -2327,7 +2328,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
     XXX;
 }
 
-// If lvalue is true, the returned result will be the address of the indexed element in rbx, otherwise it will be the value of the indexed value in rax
+// If lvalue is true, the returned result will be the address of the indexed element, returned in rbx, otherwise it will be the value of the indexed value returned in rax
 //
 // @Refactor: The way we handle array access and member accesses i think should be refactored to be more robust. The thing that should change
 //            is to notify emit_expression() to produce an l-value when being called. That way its easier for us to do math on the addresses.

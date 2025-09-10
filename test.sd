@@ -3,33 +3,24 @@ Vector2 :: struct {
     y: float;
 }
 
-Vector3 :: struct {
-    x: float;
-    y: float;
-    z: float;
-}
-
-Entity :: struct {
-    position: Vector2;
-}
-
-GameState :: struct {
-    entities: []Vector2;
-}
-
-print_ints :: (nums: []int) {
-    for n, i in nums {
-        print("% = %", i, n);
-    }
-}
-
-roll_random_dice :: (amount: int) -> []int {
-    roll: [..]int = [3, 27, 1, 4, 5];
-    return roll;
+Brick :: struct {
+    x:     int;
+    y:     int;
+    dead:  bool;
 }
 
 main :: () {
-    roll := roll_random_dice(6);
 
-    print_ints(roll);
+    bricks: [9]Brick;
+
+    for row in 0..3 {
+        for col in 0..3 {
+            index := (row * 3) + col;
+            bricks[index] = Brick{x = col, y = row, dead = false};
+        }
+    }
+
+    for bricks {
+        print("%", it);
+    }
 }

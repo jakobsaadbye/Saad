@@ -9,7 +9,7 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   CS0 DB `%d = %d`, 10, 0 
+   CS0 DB `Brick{ x = %d, y = %d, dead = %s }`, 10, 0 
 segment .text
    global main
    extern ExitProcess
@@ -33,152 +33,174 @@ assert_fail:
    call		ExitProcess
 
 
-; bytes locals   : 48
-; bytes temp     : 0
-; bytes total    : 80
-print_ints:
+; bytes locals   : 216
+; bytes temp     : 12
+; bytes total    : 272
+main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 80
-   mov		rax, rcx
-   lea		rbx, -16[rbp]
-   mov		r8, 16
+   sub		rsp, 272
+
+   ; Ln 14: $bricks : [9]Brick = -128
+   lea		rax, -112[rbp]
+   mov		QWORD -128[rbp], rax
+   mov		QWORD -120[rbp], 9
+   mov		rcx, rax
+   mov		rdx, 0
+   mov		r8, 108
+   call		memset
+   ; Ln 16: Ranged for-loop
+   mov		rax, 0
+   push		rax
+   mov		rax, 3
+   push		rax
+   pop		rbx
+   pop		rax
+   mov		QWORD -144[rbp], rax
+   mov		QWORD -152[rbp], rbx
+   mov		eax, DWORD -144[rbp]
+   mov		-136[rbp], eax
+L1:
+   mov		eax, -152[rbp]
+   cmp		-136[rbp], eax
+   jge		L3
+   ; Ln 17: Ranged for-loop
+   mov		rax, 0
+   push		rax
+   mov		rax, 3
+   push		rax
+   pop		rbx
+   pop		rax
+   mov		QWORD -168[rbp], rax
+   mov		QWORD -176[rbp], rbx
+   mov		eax, DWORD -168[rbp]
+   mov		-160[rbp], eax
+L4:
+   mov		eax, -176[rbp]
+   cmp		-160[rbp], eax
+   jge		L6
+
+   ; Ln 18: $index : s32 = -180
+   mov		eax, DWORD -136[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 3
+   push		rax
+   pop		rbx
+   pop		rax
+   imul		rax, rbx
+   push		rax
+   mov		eax, DWORD -160[rbp]
+   movsx		rax, eax
+   push		rax
+   pop		rbx
+   pop		rax
+   add		rax, rbx
+   push		rax
+   pop		rax
+   mov		DWORD -180[rbp], eax
+   ; Ln 19: Assignment
+   mov		DWORD -228[rbp], 0
+   mov		DWORD -224[rbp], 0
+   mov		BYTE -220[rbp], 0
+   mov		eax, DWORD -160[rbp]
+   movsx		rax, eax
+   push		rax
+   pop		rax
+   mov		DWORD -228[rbp], eax
+   mov		eax, DWORD -136[rbp]
+   movsx		rax, eax
+   push		rax
+   pop		rax
+   mov		DWORD -224[rbp], eax
+   push		0
+   pop		rax
+   mov		BYTE -220[rbp], al
+   lea		rax, -228[rbp]
+   push		rax
+   mov		eax, DWORD -180[rbp]
+   movsx		rax, eax
+   push		rax
+   pop		rax
+   imul		rax, 12
+   push		rax
+   pop		rax
+   mov		rbx, QWORD -128[rbp]   ; load pointer to .data
+   add		rbx, rax              ; add element offset
+   pop		rax
+   ; Copy struct
+   mov		r8, 12
    lea		rdx, 0[rax]
    lea		rcx, 0[rbx]
    call		memcpy
-   ; For-loop
-   lea		rax, -16[rbp]
+L5:
+   inc		DWORD -160[rbp]
+   jmp		L4
+L6:
+L2:
+   inc		DWORD -136[rbp]
+   jmp		L1
+L3:
+   ; Ln 23: For-loop
+   lea		rax, -128[rbp]
    push		rax
    pop		rax
    mov		rbx, 0[rax]
    mov		rcx, 8[rax]
-   mov		-32[rbp], rbx     ; data
-   mov		-40[rbp], rcx     ; count
-   mov		QWORD -48[rbp], 0 ; index
-L1:
-   mov		rbx, -40[rbp]
-   mov		rax, -48[rbp]
+   mov		-204[rbp], rbx     ; data
+   mov		-212[rbp], rcx     ; count
+   mov		QWORD -220[rbp], 0 ; index
+L7:
+   mov		rbx, -212[rbp]
+   mov		rax, -220[rbp]
    cmp		rax, rbx
-   jge		L3
-   mov		rbx, -32[rbp]
-   imul		rax, 4
+   jge		L9
+   mov		rbx, -204[rbp]
+   imul		rax, 12
    add		rbx, rax
-   mov		eax, DWORD [rbx]
-   mov		-24[rbp], eax 
+   mov		rax, [rbx + 0]
+   mov		-196[rbp], rax
+   mov		rax, [rbx + 8]
+   mov		-188[rbp], rax
 
    ; expression of print
-   mov		eax, DWORD -48[rbp]
+   lea		rax, -196[rbp]
+   push		rax
+   pop		r9
+   lea		rbx, 0[r9]
+   mov		eax, DWORD [rbx]
    movsx		rax, eax
    push		rax
-   mov		eax, DWORD -24[rbp]
+   lea		rbx, 4[r9]
+   mov		eax, DWORD [rbx]
    movsx		rax, eax
    push		rax
+   lea		rbx, 8[r9]
+   mov		al, BYTE [rbx]
+   push		rax
+   pop		rax
+   cmp		al, 0
+   jnz		L10
+   mov		rax, string_false
+   jmp		L11
+L10:
+   mov		rax, string_true
+L11:
+   push		rax
+   pop		rax
+   mov		r9, rax
    pop		rax
    mov		r8, rax
    pop		rax
    mov		rdx, rax
    mov		rcx, CS0
    call		printf
-L2:
-   inc		QWORD -48[rbp]
-   jmp		L1
-L3:
+L8:
+   inc		QWORD -220[rbp]
+   jmp		L7
+L9:
 L0:
    mov		rax, 0
-   add		rsp, 80
-   pop		rbp
-   ret
-
-; bytes locals   : 36
-; bytes temp     : 0
-; bytes total    : 80
-roll_random_dice:
-   push		rbp
-   mov		rbp, rsp
-   sub		rsp, 80
-   mov		-8[rbp], rcx	; Return 0
-   mov		-12[rbp], edx
-
-   ; Ln 27: $roll : [..]int = -40
-   mov		rdx, 4
-   mov		rcx, 8
-   call		calloc
-   mov		QWORD -40[rbp], rax
-   mov		QWORD -32[rbp], 5
-   mov		QWORD -24[rbp], 8
-   mov		rax, 3
-   push		rax
-   mov		rax, -40[rbp] ; elem 0
-   lea		rbx, [rax + 0]
-   pop		rax
-   mov		DWORD [rbx], eax
-   mov		rax, 27
-   push		rax
-   mov		rax, -40[rbp] ; elem 1
-   lea		rbx, [rax + 4]
-   pop		rax
-   mov		DWORD [rbx], eax
-   mov		rax, 1
-   push		rax
-   mov		rax, -40[rbp] ; elem 2
-   lea		rbx, [rax + 8]
-   pop		rax
-   mov		DWORD [rbx], eax
-   mov		rax, 4
-   push		rax
-   mov		rax, -40[rbp] ; elem 3
-   lea		rbx, [rax + 12]
-   pop		rax
-   mov		DWORD [rbx], eax
-   mov		rax, 5
-   push		rax
-   mov		rax, -40[rbp] ; elem 4
-   lea		rbx, [rax + 16]
-   pop		rax
-   mov		DWORD [rbx], eax
-   lea		rax, -40[rbp]
-   push		rax
-   jmp		L4
-L4:
-   pop		rax
-   mov		rbx, -8[rbp]
-   mov		r8, 16
-   lea		rdx, 0[rax]
-   lea		rcx, 0[rbx]
-   call		memcpy
-   mov		rax, -8[rbp]
-   add		rsp, 80
-   pop		rbp
-   ret
-
-; bytes locals   : 16
-; bytes temp     : 16
-; bytes total    : 64
-main:
-   push		rbp
-   mov		rbp, rsp
-   sub		rsp, 64
-
-   ; Ln 32: $roll : []int = -16
-   mov		rax, 6
-   push		rax
-   pop		rax
-   mov		edx, eax
-   lea		rcx, -32[rbp]		; Return value 0
-   call		roll_random_dice
-   push		rax
-   pop		rax
-   mov		rcx, 0[rax]
-   mov		rdx, 8[rax]
-   mov		-16[rbp], rcx
-   mov		-8[rbp], rdx
-   lea		rax, -16[rbp]
-   push		rax
-   pop		rax
-   mov		rcx, rax
-   call		print_ints
-L5:
-   mov		rax, 0
-   add		rsp, 64
+   add		rsp, 272
    pop		rbp
    ret

@@ -239,7 +239,7 @@ main :: () {
         for col in 0..8 {
             index := row * 8 + col;
 
-            brick := &bricks[index];
+            brick := bricks[index];
 
             print("%", brick);
         }

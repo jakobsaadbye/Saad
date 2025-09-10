@@ -760,11 +760,11 @@ char *generate_c_format_specifier_for_type(Type *type) {
     case TYPE_STRUCT: {
         StringBuilder builder = sb_init(8);
 
-        AstStruct *struct_ = ((TypeStruct *)(type))->node;
-        DynamicArray members = struct_->scope->members;
+        TypeStruct *struct_defn = (TypeStruct *) type;
 
-        // sb_append(&builder, "(%s)", struct_->identifier->name);
-        sb_append(&builder, "{ ");
+        DynamicArray members = struct_defn->node->scope->members;
+
+        sb_append(&builder, "%s{ ", struct_defn->identifier->name);
         for (int i = 0; i < members.count; i++) {
             AstDeclaration *member = ((AstDeclaration **)members.items)[i];
             char           *member_name = member->ident->name;
@@ -1563,7 +1563,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
     // }
 
     // Reserve space for the struct literal if its bigger than 8 bytes and we are not currently declaring a variable
-    if (!typer->inside_declaration && struct_defn->head.size > 8) {
+    if (!typer->inside_declaration) {
         reserve_temporary_storage(typer->enclosing_function, struct_defn->head.size);
     }
 
