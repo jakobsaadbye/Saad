@@ -1,14 +1,7 @@
-Fix hash_table when collisions happen. Currently we crash if defining two structs with the same name !!!!
+- Fix hash_table when collisions happen. Currently we crash if defining two structs with the same name !!!!
 
 
-
-Today:
--------------
-
-Revisit arrays
-  - Static arrays
-  - Dynamic arrays
-  - Slice structure with .data and .count
+TODO:
   - Passing arrays to functions (Can we make it interopable with C without any modifications?)
 
 
@@ -39,14 +32,9 @@ lea		rax, -4[rbp]
 
 Current TODO:
     - :FloatRefactor
-    - Functions not working with returns types other than int or void
-    - A global base_offset on the code generator is not sufficient when we have multiple functions.
-      The base pointer needs to be remembered and reset when jumping to a new function. Otherwise,
-      the variables gets wrong addresses.
 
     - WrongForLoopSizing (remove temporary hack of aligning functions to 32 bytes just to fix for-loops wrong size!)
     - @Investigate - examples/for_loops crashes once in a while. Is it a hisenbug?
-    - Make Array be a struct where you can do array.count or array.data
 
     - Backing integer types for enums
     - Error messages with multiple color highlighting. (For cases where the red underline can be confusing. E.g when doing pointer dereference)
@@ -56,7 +44,6 @@ Roadmap:
     - Constants (Mostly done. Missing as struct member)
     - Switch statement
     - Heap allocation + Allocators
-    - Structs as function parameters
     - Struct default values
     - Bit operations
     - Compiling to LLVM

@@ -2,6 +2,7 @@
 
 typedef enum CodeGenFlags {
     CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE = 1 << 0,
+    CODEGEN_EMIT_EXPRESSION_AS_LVALUE                    = 1 << 1,
 } CodeGenFlags;
 
 typedef struct CodeGenerator {
@@ -42,6 +43,7 @@ void emit_code(CodeGenerator *cg, AstCode *code);
 void emit_statement(CodeGenerator *cg, Ast *node);
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn);
 void emit_function_call(CodeGenerator *cg, AstFunctionCall *call);
+void emit_function_return_value(CodeGenerator *cg, AstFunctionDefn *func_defn);
 void emit_return(CodeGenerator *cg, AstReturn *ast_return);
 void emit_print(CodeGenerator *cg, AstPrint *print_stmt);
 void emit_assert(CodeGenerator *cg, AstAssert *assertion);
@@ -514,12 +516,12 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         // Allocate space for iterator, pointer to head of array, stop condition (count) and index
         //
         // :WrongForLoopSizing @Investigate - Might have to do with the fact that we are not aligning the stack before allocating space for the iterator!
-        int aligned_iterator_size = align_value(iterator->type->size, 8);
+        int aligned_iterator_size = iterator->type->size;
         int offset_iterator       = cg->enclosing_function->base_ptr - aligned_iterator_size;
         int offset_data           = offset_iterator - 8;
         int offset_count          = offset_iterator - 16;
         int offset_index          = offset_iterator - 24;
-        cg->enclosing_function->base_ptr -= 24 + aligned_iterator_size;
+        cg->enclosing_function->base_ptr -= (24 + aligned_iterator_size);
         
         assert(iterator);
         iterator->stack_offset = offset_iterator;
@@ -557,7 +559,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
             sb_append(&cg->code, "   add\t\trbx, rax\n"); // rbx holds offset into beginning of struct
             int num_copies = aligned_iterator_size / 8;
             for (int i = 0; i < num_copies; i++) {
-                sb_append(&cg->code, "   mov\t\trax, [rbx + %d]\n", i * 8);
+                sb_append(&cg->code, "   mov\t\trax, %d[rbx]\n", i * 8);
                 sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", offset_iterator + (i * 8));
             }
         }
@@ -630,29 +632,11 @@ void emit_copy_struct(CodeGenerator *cg, TypeStruct *struct_defn, int dst_base_o
     sb_append(&cg->code, "   lea\t\trdx, %d[rax]\n", src_base_offset);
     sb_append(&cg->code, "   lea\t\trcx, %d[rbx]\n", dst_base_offset);
     sb_append(&cg->code, "   call\t\tmemcpy\n");    // void* memcpy( void* dest, const void* src, std::size_t count );
-
-
-
-    // DynamicArray members = ((TypeStruct *)struct_defn)->members;
-    // for (int i = 0; i < members.count; i++) {
-    //     AstDeclaration *member = ((AstDeclaration **)members.items)[i];
-        
-    //     int src_offset = src_base_offset + member->member_offset;
-    //     int dst_offset = dst_base_offset + member->member_offset;
-
-    //     if (member->type->kind == TYPE_STRUCT) {
-    //         emit_copy_struct(cg, (TypeStruct *)member->type, dst_offset, src_offset);
-    //     } 
-    //     else {
-    //         sb_append(&cg->code, "   mov\t\t%s, %d[rax]\n", REG_C(member->type), src_offset);
-    //         sb_append(&cg->code, "   mov\t\t%d[rbx], %s\n", dst_offset, REG_C(member->type));
-    //     }
-    // }
 }
 
-void emit_return_value(CodeGenerator *cg, AstFunctionDefn *func_defn) {
-    // Moves the pushed value of the return expression into the 
-    // correct register or stack location expected by the caller
+// Moves the pushed value of the return expression into the 
+// correct register or stack location expected by the caller
+void emit_function_return_value(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
     Type *return_type = func_defn->return_type;
 
@@ -693,12 +677,10 @@ void emit_return_value(CodeGenerator *cg, AstFunctionDefn *func_defn) {
         return;
     }
     case TYPE_STRUCT: {
-        POP(RAX); // address of struct
+        POP(RAX);
         
-        int struct_size = align_value(return_type->size, 8);
-        if (struct_size <= 8) {
+        if (return_type->size <= 8) {
             // Struct fits in a register, so the struct is just returned in rax
-            sb_append(&cg->code, "   mov\t\trax, [rax]\n");
             return;
         }
 
@@ -931,7 +913,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     //
     sb_append(&cg->code, "L%d:\n", return_label);
 
-    emit_return_value(cg, func_defn);
+    emit_function_return_value(cg, func_defn);
 
     sb_append(&cg->code, "   add\t\trsp, %d\n", bytes_total);
     POP(RBP);
@@ -1063,11 +1045,6 @@ void move_func_argument_to_register_or_temp(CodeGenerator *cg, int arg_index, Ty
                 // <= 8 bytes: Pass the entire value in the register
                 char *sized_reg = register_string(reg, arg_type->size);
                 
-                if (arg_type->kind == TYPE_STRUCT) {
-                    // Copy the data pointed to in rax
-                    sb_append(&cg->code, "   mov\t\t%s, [rax]\n", REG_A(arg_type));
-                }
-                
                 sb_append(&cg->code, "   mov\t\t%s, %s\n", sized_reg, REG_A(arg_type));
             } else {
                 // > 8 bytes: Pass a pointer to the value
@@ -1175,8 +1152,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
 
         if (arg_type->kind == TYPE_STRUCT && arg_type->size <= 8) {
             // Struct needs to be passed by value. Copy the struct referenced in rax
-            sb_append(&cg->code, "   mov\t\t%s, [rax]\n", REG_A(arg_type));
-            MOV_ADDR_REG(cg, stack_arg_offset, RSP, REG_RAX, arg_type);
+            sb_append(&cg->code, "   mov\t\t%d[rsp], %s\n", stack_arg_offset, REG_A(arg_type));
         } else if (arg_type->kind == TYPE_ARRAY) {
             // @Incomplete
             XXX;
@@ -1190,7 +1166,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
 
     // Put large return values into the hidden slots allocated by the caller
     if (num_large_return_values > 0) {
-        // @Hardcoded @Future - Right now we only deal with maximum 1 large return value which we have reserved space for
+        // @Hardcoded @Future - Right now we only deal with 1 large return value which we have reserved space for
         // in the function. Here we give the function a hidden pointer to that return value that the function knows it should write to
         int temp_loc = push_temporary_value(cg->enclosing_function, call->func_defn->return_type->size);
 
@@ -1487,6 +1463,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
         Type    *arg_type = arg->type;
 
+        cg->flags |= CODEGEN_EMIT_EXPRESSION_AS_LVALUE;
         emit_expression(cg, arg);
 
         // Note: Here we transform some of the expressions to match a C printf call. E.g
@@ -1527,15 +1504,9 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
             case TYPE_BOOL:
             case TYPE_STRING:
             case TYPE_ENUM:
-            case TYPE_POINTER: {
-                POP(RAX);
-                move_print_argument_to_register_or_temporary(cg, arg_type, c_arg_index);
-                c_arg_index -= 1;
-                break;
-            }
+            case TYPE_POINTER: 
             case TYPE_ARRAY: {
                 POP(RAX);
-                POP(RBX); // Don't use the length for anything
                 move_print_argument_to_register_or_temporary(cg, arg_type, c_arg_index);
                 c_arg_index -= 1;
                 break;
@@ -1745,14 +1716,20 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
         POP(RAX);
     
         // @Speed: We should move structs smaller than 8 bytes in registers instead of doing a memcpy
+        TypeStruct *struct_defn = (TypeStruct *) lhs_type;
 
         sb_append(&cg->code, "   ; Copy struct\n");
-        if (dst_is_runtime_computed) {
-            // Destination address for struct copy is already in rbx
-        } else {
-            sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", dst_offset);
+
+        if (struct_defn->head.size <= 8) {
+            // Copy the the struct from rax
+            sb_append(&cg->code, "   mov\t\t%s, %s\n", address_str, REG_A((Type *)struct_defn));
         }
-        emit_copy_struct(cg, (TypeStruct *)lhs_type, 0, 0);
+        else {
+            if (!dst_is_runtime_computed) {
+                sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", dst_offset);
+            }
+            emit_copy_struct(cg, struct_defn, 0, 0);
+        }
 
         return;
     }
@@ -1846,12 +1823,11 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
 
     int *base_ptr = &cg->enclosing_function->base_ptr;
 
-    *base_ptr -= decl->type->size;
+    *base_ptr                -= decl->type->size;
     decl->ident->stack_offset = *base_ptr;
 
     // Align the base ptr for the next declaration
-    *base_ptr  = align_value(*base_ptr, decl->type->size > 8 ? 8 : decl->type->size);
-
+    *base_ptr = align_value(*base_ptr, decl->type->size > 8 ? 8 : decl->type->size);
 
 
     sb_append(&cg->code, "\n");
@@ -2454,7 +2430,16 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         return;
     }
     case TYPE_STRUCT: {
-        sb_append(&cg->code, "   lea\t\trax, %s\n", src);
+        if (lvalue) {
+            sb_append(&cg->code, "   lea\t\trax, %s\n", src);
+        } else {
+            if (src_type->size <= 8) {
+                sb_append(&cg->code, "   mov\t\t%s, %s\n", REG_A(src_type), src);
+            } else {
+                sb_append(&cg->code, "   lea\t\trax, %s\n", src);
+            }
+        }
+
         PUSH(RAX);
         return;
     }
@@ -2478,9 +2463,11 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
     // Check if we can use a fast-path address to move to
     bool assigning_to_variable = cg->flags & CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE;
+    bool emit_as_lvalue        = cg->flags & CODEGEN_EMIT_EXPRESSION_AS_LVALUE;
 
-    // Reset any expression flags
+    // Reset any flags with the lifetime of 1 expression
     cg->flags &= ~CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE;
+    cg->flags &= ~CODEGEN_EMIT_EXPRESSION_AS_LVALUE;
 
     switch (expr->head.kind) {
     case AST_BINARY: {
@@ -2629,15 +2616,21 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         break;
     }
     case AST_STRUCT_LITERAL: {
-        AstStructLiteral *struct_literal = (AstStructLiteral *)(expr);
+        AstStructLiteral *struct_literal = (AstStructLiteral *) expr;
+        TypeStruct       *struct_defn    = (TypeStruct *) struct_literal->head.type;
 
         int allocation_offset = assigning_to_variable ? cg->variable_address : push_temporary_value(cg->enclosing_function, expr->type->size);
 
         emit_struct_literal(cg, struct_literal, allocation_offset);
 
         if (!assigning_to_variable) {
-            // Return pointer to struct literal
-            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", allocation_offset);
+            if (struct_defn->head.size <= 8) {
+                // Return the struct literal in rax
+                sb_append(&cg->code, "   mov\t\t%s, %d[rbp]\n", REG_A((Type *) struct_defn), allocation_offset);
+            } else {
+                // Return pointer to struct literal in rax
+                sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", allocation_offset);
+            }
             PUSH(RAX);
         }
 
@@ -2723,7 +2716,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 }
             } 
             else {
-                emit_move_and_push(cg, ident->stack_offset, false, ident->type, false);
+                emit_move_and_push(cg, ident->stack_offset, false, ident->type, emit_as_lvalue);
                 return;
             }
         }}

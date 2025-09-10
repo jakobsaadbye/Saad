@@ -181,9 +181,14 @@ Brick :: struct {
     dead:  bool;
 }
 
-BRICK_WIDTH  :: 40;
-BRICK_HEIGHT :: 50;
-BRICK_PADDING :: 10;
+BRICK_WIDTH  :: 80;
+BRICK_HEIGHT :: 20;
+BRICK_PADDING :: 15;
+
+BRICK_ROWS :: 8;
+BRICK_COLS :: 11;
+
+TOP_MARGIN :: 80;
 
 main :: () {
 
@@ -212,29 +217,28 @@ main :: () {
     bar_vel := 0.0;
     bar_speed := 400.0;
 
-    bricks : [64]Brick;
+    bricks : [BRICK_ROWS * BRICK_COLS] Brick;
 
     // Initiate the bricks
-    for row in 0..8 {
-        for col in 0..8 {
-            index := row * 8 + col;
+    brick_row_width := (BRICK_WIDTH + BRICK_PADDING) * BRICK_COLS - 1;
+    for row in 0..BRICK_ROWS {
+        for col in 0..BRICK_COLS {
+            index := row * BRICK_COLS + col;
+            
+            x := (BRICK_WIDTH + BRICK_PADDING)  * col + (window_width / 2) - (brick_row_width / 2);
+            y := (BRICK_HEIGHT + BRICK_PADDING) * row + TOP_MARGIN;
 
-            x := BRICK_WIDTH  * col + BRICK_PADDING;
-            y := BRICK_HEIGHT * row + BRICK_PADDING;
+            color := Color{33, 186, 10, 255};
 
             brick := Brick{
                 x = x,
                 y = y,
-                color = {230, 10, 10, 255},
+                color = color,
                 dead = false,
             };
 
             bricks[index] = brick;
         }
-    }
-
-    for brick in bricks {
-        print("%", brick);
     }
 
     while !WindowShouldClose() {
@@ -292,11 +296,16 @@ main :: () {
         bar_x  += bar_vel * dt;
 
 
-
+        //
+        // Drawing
+        //
         BeginDrawing();
         ClearBackground({ 30, 30, 30, 30 });
-        DrawFPS(window_width - 100, 16);
-        DrawText(text, xx (window_width * 0.5 - text_len * 0.5), 24, 24, COLOR_WHITE);
+        
+        // Draw bricks
+        for b in bricks {
+            DrawRectangle(b.x, b.y, BRICK_WIDTH, BRICK_HEIGHT, b.color);
+        }
 
         // Draw the ball
         DrawRectangle(xx ball_x, xx ball_y, xx ball_size, xx ball_size, COLOR_WHITE);
@@ -304,6 +313,8 @@ main :: () {
         // Draw the bar
         DrawRectangle(xx bar_x, xx bar_y, xx bar_width, xx bar_height, COLOR_WHITE);
 
+        DrawFPS(window_width - 100, 16);
+        DrawText(text, xx (window_width * 0.5 - text_len * 0.5), 24, 24, COLOR_WHITE);
 
         EndDrawing();
     }

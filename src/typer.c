@@ -41,6 +41,7 @@ bool is_boolean_operator(TokenType op);
 bool is_untyped_type(Type *type);
 bool is_untyped_literal(AstExpr *expr);
 void statically_cast_literal(AstLiteral *untyped_literal, Type *cast_into);
+void reserve_local_storage(AstFunctionDefn *func_defn, int size);
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size);
 int push_temporary_value(AstFunctionDefn *func_defn, int size);
 int pop_temporary_value(AstFunctionDefn *func_defn);
@@ -328,7 +329,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
     } 
 
     if (typer->enclosing_function != NULL) {
-        typer->enclosing_function->num_bytes_locals += decl->type->size;
+        reserve_local_storage(typer->enclosing_function, decl->type->size);
     } else {
         if (decl->flags & DECLARATION_CONSTANT) {
             // Constants don't need to be sized
@@ -622,11 +623,11 @@ bool check_for(Typer *typer, AstFor *ast_for) {
             ast_for->index->type = primitive_type(PRIMITIVE_S32);
         }
 
-        // allocate space for the iterator, start, end and optionally for the index
+        // Allocate space for the iterator, start, end and optionally for the index
         assert(typer->enclosing_function != NULL);
-        typer->enclosing_function->num_bytes_locals += 24;
+        reserve_local_storage(typer->enclosing_function, 24);
         if (ast_for->index) {
-            typer->enclosing_function->num_bytes_locals += 8;
+            reserve_local_storage(typer->enclosing_function, 8);
         }
     } 
     else {
@@ -644,7 +645,7 @@ bool check_for(Typer *typer, AstFor *ast_for) {
 
         // Allocate space for iterator, pointer to head of array, stop condition (count) and index
         assert(typer->enclosing_function != NULL);
-        typer->enclosing_function->num_bytes_locals += align_value(ast_for->iterator->type->size, 8) + 24;
+        reserve_local_storage(typer->enclosing_function, ast_for->iterator->type->size + 24);
     }
 
     bool ok = check_block(typer, ast_for->body);
@@ -1842,12 +1843,11 @@ bool is_boolean_operator(TokenType op) {
 }
 
 Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
-
     switch (literal->kind) {
     case LITERAL_INTEGER: {
         if (ctx_type) {
 
-            // Try and coerce the interger literal into the context type
+            // Try and coerce the integer literal into the context type
 
             // Statically cast untyped integer literals into a float literal to avoid run-time casting
             if (ctx_type->kind == TYPE_FLOAT) {
@@ -1865,12 +1865,11 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             }
 
             // We couldn't coerce the integer type to the context type. Fallback to an untyped literal
-
         }
 
         return primitive_type(PRIMITIVE_UNTYPED_INT);
     }
-    case LITERAL_FLOAT:     return (ctx_type && ctx_type->kind == TYPE_FLOAT)   ? ctx_type : primitive_type(PRIMITIVE_UNTYPED_FLOAT);
+    case LITERAL_FLOAT:     return (ctx_type && ctx_type->kind == TYPE_FLOAT)   ? ctx_type : primitive_type(PRIMITIVE_FLOAT);
     case LITERAL_STRING:    return (ctx_type && ctx_type->kind == TYPE_STRING)  ? ctx_type : primitive_type(PRIMITIVE_STRING);
     case LITERAL_BOOLEAN:   return (ctx_type && ctx_type->kind == TYPE_BOOL)    ? ctx_type : primitive_type(PRIMITIVE_BOOL);
     case LITERAL_NULL:      return (Type *) type_null_ptr;
@@ -1884,28 +1883,15 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 
         assert(ident->type);
 
-        // Reserve temporary storage for the value of the identifier if its bigger than 8 bytes
-        // if (ident->type->size > 8) {
-
-        //     if (ident->type->kind == TYPE_ARRAY) {
-        //         TypeArray *array = (TypeArray *) ident->type;
-
-        //         // Only reserve space for copying the .data, .count and possibly .capacity
-        //         if (array->is_dynamic) {
-        //             reserve_temporary_storage(typer->enclosing_function, 24);
-        //         } else {
-        //             reserve_temporary_storage(typer->enclosing_function, 16);
-        //         }
-        //     } 
-        //     else {
-        //         reserve_temporary_storage(typer->enclosing_function, ident->type->size);
-        //     }
-        // }
-
         return ident->type;
     }}
 
     XXX;
+}
+
+void reserve_local_storage(AstFunctionDefn *func_defn, int size) {
+    func_defn->num_bytes_locals += size;
+    func_defn->num_bytes_locals = align_value(func_defn->num_bytes_locals, size > 8 ? 8 : size);
 }
 
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size) {

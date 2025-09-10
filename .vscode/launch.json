@@ -36,7 +36,7 @@
             "preLaunchTask": "Debug breakout",
             "program": "C:\\Saad\\bin\\saad",
             "args": [
-                ".\\examples\\breakout\\main.sd"
+                ".\\examples\\breakout\\breakout.sd"
             ],
             "stopAtEntry": false,
             "cwd": "C:\\Saad",
