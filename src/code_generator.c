@@ -1371,6 +1371,10 @@ void move_print_argument_to_register_or_temporary(CodeGenerator *cg, Type *arg_t
         if (arg_index == 2) reg = R8;
         if (arg_index == 3) reg = R9;
 
+        if (arg_type->kind == TYPE_INTEGER && arg_type->size < 4) {
+            sb_append(&cg->code, "   movzx\t\trax, %s\n", REG_A(arg_type));
+        }
+
         sb_append(&cg->code, "   mov\t\t%s, rax\n", reg);
         
     } else {
@@ -1378,7 +1382,7 @@ void move_print_argument_to_register_or_temporary(CodeGenerator *cg, Type *arg_t
 
         int temp_loc = push_temporary_value(cg->enclosing_function, 8);
 
-        if (arg_type->size < 4) {
+        if (arg_type->kind == TYPE_INTEGER && arg_type->size < 4) {
             sb_append(&cg->code, "   movzx\t\trax, %s\n", REG_A(arg_type));
         }
 
@@ -1474,8 +1478,7 @@ void pop_struct_members_from_print(CodeGenerator *cg, AstStruct *struct_, int *c
 }
 
 void emit_print(CodeGenerator *cg, AstPrint *print) {
-    sb_append(&cg->code, "\n");
-    sb_append(&cg->code, "   ; expression of print\n");
+    sb_append(&cg->code, "   ; Ln %d Print\n", print->head.start.line);
 
     // Push all the arguments on the stack
     cg->num_pushed_arguments = 0;
@@ -1508,6 +1511,8 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
     int c_arg_index = c_args - 1;
 
     // Pop and assign registers
+    sb_append(&cg->code, "   ; Pop print arguments\n");
+
     int arg_count = print->arguments.count;
     for (int i = arg_count - 1; i >= 1; i--) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
@@ -1550,14 +1555,14 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
 
     if (c_args > 4) {
         // We need to put all the fixed placed stack allocated arguments relative to the stack pointer
-        int stack_offset = 32 + (c_args - 5) * 8;
+        int stack_offset = 32; // + (c_args - 5) * 8;
         for (int i = 0; i < c_args - 4; i++) {
             int temp_offset   = pop_temporary_value(cg->enclosing_function);
             
-            sb_append(&cg->code, "   mov\t\trax, -%d[rbp]\n", temp_offset);
-            sb_append(&cg->code, "   mov\t\tQWORD [rsp + %d], rax\n", stack_offset);
+            sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", temp_offset);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rsp], rax\n", stack_offset);
 
-            stack_offset  -= 8;
+            stack_offset  += 8;
         }
     }
 
@@ -1579,13 +1584,12 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset) {
     } 
 
     case TYPE_STRUCT: {
-        AstStruct *struct_defn = ((TypeStruct *)(type))->node;
-        assert(struct_defn != NULL);
+        TypeStruct *struct_defn = (TypeStruct *) type;
 
-        for (int i = 0; i < struct_defn->scope->members.count; i++) {
-            AstDeclaration *member = ((AstDeclaration **)(struct_defn->scope->members.items))[i];
-            zero_initialize(cg, member->type, dst_offset + member->member_offset);
-        }
+        sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\n", dst_offset);
+        sb_append(&cg->code, "   mov\t\trdx, 0\n");
+        sb_append(&cg->code, "   mov\t\tr8, %d\n", struct_defn->head.size);
+        sb_append(&cg->code, "   call\t\tmemset\n");    // void *memset(void *ptr, int x, size_t n);
 
         return;
     }
@@ -1843,9 +1847,11 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     int *base_ptr = &cg->enclosing_function->base_ptr;
 
     *base_ptr -= decl->type->size;
+    decl->ident->stack_offset = *base_ptr;
+
+    // Align the base ptr for the next declaration
     *base_ptr  = align_value(*base_ptr, decl->type->size > 8 ? 8 : decl->type->size);
 
-    decl->ident->stack_offset = *base_ptr;
 
 
     sb_append(&cg->code, "\n");

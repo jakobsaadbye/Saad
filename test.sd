@@ -3,24 +3,48 @@ Vector2 :: struct {
     y: float;
 }
 
+// Color :: struct {
+//     r: u8;
+//     g: u8;
+//     b: u8;
+//     a: u8;
+// }
+
+Color :: struct {
+    r: u8;
+    g: u8;
+    b: u8;
+    a: u8;
+}
+
+
+
 Brick :: struct {
     x:     int;
     y:     int;
+    color: Color;
     dead:  bool;
 }
 
 main :: () {
 
-    bricks: [9]Brick;
+    b := Brick{x = 5, y = 10, color = {127, 127, 127, 255}, dead = true};
+    // b := Brick{x = 5, y = 10, z = 15, dead = true};
+    // b := Brick{};
 
-    for row in 0..3 {
-        for col in 0..3 {
-            index := (row * 3) + col;
-            bricks[index] = Brick{x = col, y = row, dead = false};
-        }
-    }
+    // c := Color{127, 127, 127, 255};
 
-    for bricks {
-        print("%", it);
-    }
+    print("%", b);
+    // bricks: [9]Brick;
+
+    // for row in 0..3 {
+    //     for col in 0..3 {
+    //         index := (row * 3) + col;
+    //         bricks[index] = Brick{x = col, y = row, dead = false};
+    //     }
+    // }
+
+    // for bricks {
+    //     print("%", it);
+    // }
 }

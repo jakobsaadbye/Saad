@@ -222,12 +222,10 @@ main :: () {
             x := BRICK_WIDTH  * col + BRICK_PADDING;
             y := BRICK_HEIGHT * row + BRICK_PADDING;
 
-            color := Color{230, 10, 10, 255};
-
             brick := Brick{
                 x = x,
                 y = y,
-                color = color,
+                color = {230, 10, 10, 255},
                 dead = false,
             };
 
@@ -235,14 +233,8 @@ main :: () {
         }
     }
 
-    for row in 0..8 {
-        for col in 0..8 {
-            index := row * 8 + col;
-
-            brick := bricks[index];
-
-            print("%", brick);
-        }
+    for brick in bricks {
+        print("%", brick);
     }
 
     while !WindowShouldClose() {
