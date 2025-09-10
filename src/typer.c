@@ -115,7 +115,7 @@ int round_up_to_nearest_power_of_two(int value) {
     return value + 1;
 }
 
-Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
+Type *resolve_type(Typer *typer, Type *type) {
     if (is_primitive_type(type->kind)) {
         return type;
     } 
@@ -133,7 +133,7 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
     if (type->kind == TYPE_POINTER) {
         TypePointer *ptr = (TypePointer *)(type);
 
-        Type *points_to = resolve_type(typer, ptr->pointer_to, decl);
+        Type *points_to = resolve_type(typer, ptr->pointer_to);
         if (!points_to) return NULL;
 
         ptr->head.size = 8;
@@ -143,9 +143,6 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
 
     if (type->kind == TYPE_ARRAY) {
         TypeArray *array = (TypeArray *)(type);
-
-        // @Investigate: Do we get called here with an array literal???
-        assert(decl);
 
         if (array->capacity_expr) {
             AstExpr *constexpr = simplify_expression(typer->const_evaluator, typer->current_scope, array->capacity_expr);
@@ -167,14 +164,8 @@ Type *resolve_type(Typer *typer, Type *type, AstDeclaration *decl) {
             array->count    = 0;
         }
 
-        // @Cleanup @Remove
-        // if (!array->is_dynamic && array->capacity_expr == NULL && decl->expr == NULL) { // @Note - This might also be the case for function parameters that also don't allow an expression to be present
-        //     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array), "Missing array initializer to determine size of array");
-        //     return NULL;
-        // }
-
         // Resolve the size of any inner element type
-        Type *elem_type = resolve_type(typer, array->elem_type, decl);
+        Type *elem_type = resolve_type(typer, array->elem_type);
         if (!elem_type) return NULL;
 
         array->elem_type = elem_type;
@@ -263,7 +254,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
     typer->inside_declaration = decl;
 
     if (decl->flags & DECLARATION_TYPED) {
-        Type *resolved_type = resolve_type(typer, decl->type, decl);
+        Type *resolved_type = resolve_type(typer, decl->type);
         if (!resolved_type) return false;
 
         decl->ident->type = resolved_type;
@@ -288,7 +279,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
 
     }
     else if (decl->flags & DECLARATION_TYPED_NO_EXPR) {
-        Type *resolved_type = resolve_type(typer, decl->type, decl);
+        Type *resolved_type = resolve_type(typer, decl->type);
         if (!resolved_type) return false;
 
         decl->ident->type = resolved_type;
@@ -994,7 +985,7 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         if (!ok) return NULL;
     }
     
-    Type *return_type = resolve_type(typer, func_defn->return_type, NULL);
+    Type *return_type = resolve_type(typer, func_defn->return_type);
     if (!return_type) return NULL;
     func_defn->return_type = return_type;
 
@@ -1812,7 +1803,7 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
         }
         wanted_type = ctx_type;
     } else {
-        cast->cast_to = resolve_type(typer, cast->cast_to, NULL);
+        cast->cast_to = resolve_type(typer, cast->cast_to);
         if (!cast->cast_to) return NULL;
         wanted_type = cast->cast_to;
     }

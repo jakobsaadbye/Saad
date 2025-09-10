@@ -24,8 +24,16 @@ print_ints :: (nums: []int) {
     }
 }
 
-main :: () {
-    nums: [..]int = [1, 2, 3];
+roll_random_dice :: (amount: int) -> [..]int {
+    roll: [..]int = [3, 27, 1, 4, 5];
+    return roll;
+}
 
-    print_ints(nums);
+main :: () {
+    roll := roll_random_dice(6);
+
+    for roll {
+        print("%", it);
+    }
+    // print_ints(roll);
 }

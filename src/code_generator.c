@@ -677,8 +677,17 @@ void emit_return_value(CodeGenerator *cg, AstFunctionDefn *func_defn) {
         return;
     }
     case TYPE_ARRAY: {
-        POP(RAX); // data
-        POP(RCX); // count
+        TypeArray *array = (TypeArray *) return_type;
+
+        POP(RAX); // address of array
+
+        // Copy .data, .count and possibly .capacity to the allocated return slot
+
+        // Source is already in rax
+        sb_append(&cg->code, "   mov\t\trbx, -8[rbp]\n");   // @Improvement -8[rbp] is only because we currently only can have a single return value
+        emit_copy_struct(cg, array->struct_defn, 0, 0);
+        sb_append(&cg->code, "   mov\t\trax, -8[rbp]\n");
+        
         return;
     }
     case TYPE_STRUCT: {
@@ -1845,9 +1854,16 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         zero_initialize(cg, decl->type, decl->ident->stack_offset);
     }
     else {
-        
+
+        // Special zero initialization of arrays
         if (decl->type->kind == TYPE_ARRAY) {
-            zero_initialize(cg, decl->type, decl->ident->stack_offset);
+            TypeArray *array = (TypeArray *) decl->type;
+            if (array->capacity_expr || array->is_dynamic) {
+
+                // Zero initialize a static array as the capacity might differ from the array literal of the expression
+                // and also zero initialize for dynamic arrays for an initial call to calloc
+                zero_initialize(cg, decl->type, decl->ident->stack_offset);
+            }
         }
 
         // The following "fast-path" code is here to omit emit_expression()
