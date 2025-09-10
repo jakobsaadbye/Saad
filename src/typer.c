@@ -363,9 +363,13 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         return strcmp(lhs->name, rhs->name) == 0;
     } 
     if (lhs->kind == TYPE_ARRAY && rhs->kind == TYPE_ARRAY) {
-        Type *left_elem_type  = ((TypeArray *)(lhs))->elem_type;
-        Type *right_elem_type = ((TypeArray *)(rhs))->elem_type;
-        return types_are_equal(left_elem_type, right_elem_type);
+        TypeArray *lhs_array = (TypeArray *)lhs;
+        TypeArray *rhs_array = (TypeArray *)rhs;
+
+        // Allow dynamic array to "static" array cast but not the other way around
+        if (!lhs_array->is_dynamic && rhs_array->is_dynamic) return false;
+
+        return types_are_equal(lhs_array->elem_type, rhs_array->elem_type);
     } 
     if (lhs->kind == TYPE_POINTER && rhs->kind == TYPE_POINTER) {
         Type *left_points_to  = ((TypePointer *)(lhs))->pointer_to;
@@ -927,8 +931,8 @@ bool check_statement(Typer *typer, Ast *stmt) {
         if (!ok) return false;
 
         if (!types_are_equal(ast_return->expr->type, ef->return_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_return), "Type mismatch. Returning type %s from function '%s' with return type %s", type_to_str(ast_return->expr->type), ef->identifier->name, type_to_str(ef->return_type));
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(ef), "... Here is the function signature for '%s'", ef->identifier->name);
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_return->expr), "Type mismatch. Returning type %s from function '%s' with return type %s", type_to_str(ast_return->expr->type), ef->identifier->name, type_to_str(ef->return_type));
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(ef->return_type), "... Here is the return type of '%s'", ef->identifier->name);
             return false;
         }
 

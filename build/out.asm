@@ -9,10 +9,7 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   CS0	DB "[]int", 10, 0
-   CS1 DB `%s`, 10, 0 
-   CS2 DB `%d`, 10, 0 
-   CS3 DB `%d`, 10, 0 
+   CS0 DB `%d = %d`, 10, 0 
 segment .text
    global main
    extern ExitProcess
@@ -49,14 +46,6 @@ print_ints:
    lea		rdx, 0[rax]
    lea		rcx, 0[rbx]
    call		memcpy
-
-   ; expression of print
-   mov		rax, CS0
-   push		rax
-   pop		rax
-   mov		rdx, rax
-   mov		rcx, CS1
-   call		printf
    ; For-loop
    lea		rax, -16[rbp]
    push		rax
@@ -78,12 +67,17 @@ L1:
    mov		-24[rbp], eax 
 
    ; expression of print
+   mov		eax, DWORD -48[rbp]
+   movsx		rax, eax
+   push		rax
    mov		eax, DWORD -24[rbp]
    movsx		rax, eax
    push		rax
    pop		rax
+   mov		r8, rax
+   pop		rax
    mov		rdx, rax
-   mov		rcx, CS2
+   mov		rcx, CS0
    call		printf
 L2:
    inc		QWORD -48[rbp]
@@ -105,7 +99,7 @@ roll_random_dice:
    mov		-8[rbp], rcx	; Return 0
    mov		-12[rbp], edx
 
-   ; Ln 28: $roll : [..]int = -40
+   ; Ln 27: $roll : [..]int = -40
    mov		rdx, 4
    mov		rcx, 8
    call		calloc
@@ -148,7 +142,7 @@ roll_random_dice:
 L4:
    pop		rax
    mov		rbx, -8[rbp]
-   mov		r8, 24
+   mov		r8, 16
    lea		rdx, 0[rax]
    lea		rcx, 0[rbx]
    call		memcpy
@@ -157,69 +151,34 @@ L4:
    pop		rbp
    ret
 
-; bytes locals   : 56
-; bytes temp     : 24
-; bytes total    : 112
+; bytes locals   : 16
+; bytes temp     : 16
+; bytes total    : 64
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 112
+   sub		rsp, 64
 
-   ; Ln 33: $roll : [..]int = -24
-   mov		rdx, 4
-   mov		rcx, 0
-   call		calloc
-   mov		QWORD -24[rbp], rax
-   mov		QWORD -16[rbp], 0
-   mov		QWORD -8[rbp], 0
+   ; Ln 32: $roll : []int = -16
    mov		rax, 6
    push		rax
    pop		rax
    mov		edx, eax
-   lea		rcx, -80[rbp]		; Return value 0
+   lea		rcx, -32[rbp]		; Return value 0
    call		roll_random_dice
    push		rax
    pop		rax
    mov		rcx, 0[rax]
    mov		rdx, 8[rax]
-   mov		-24[rbp], rcx
-   mov		-16[rbp], rdx
-   mov		r8, 16[rax]
-   mov		-8[rbp], r8
-   ; For-loop
-   lea		rax, -24[rbp]
+   mov		-16[rbp], rcx
+   mov		-8[rbp], rdx
+   lea		rax, -16[rbp]
    push		rax
    pop		rax
-   mov		rbx, 0[rax]
-   mov		rcx, 8[rax]
-   mov		-40[rbp], rbx     ; data
-   mov		-48[rbp], rcx     ; count
-   mov		QWORD -56[rbp], 0 ; index
-L6:
-   mov		rbx, -48[rbp]
-   mov		rax, -56[rbp]
-   cmp		rax, rbx
-   jge		L8
-   mov		rbx, -40[rbp]
-   imul		rax, 4
-   add		rbx, rax
-   mov		eax, DWORD [rbx]
-   mov		-32[rbp], eax 
-
-   ; expression of print
-   mov		eax, DWORD -32[rbp]
-   movsx		rax, eax
-   push		rax
-   pop		rax
-   mov		rdx, rax
-   mov		rcx, CS3
-   call		printf
-L7:
-   inc		QWORD -56[rbp]
-   jmp		L6
-L8:
+   mov		rcx, rax
+   call		print_ints
 L5:
    mov		rax, 0
-   add		rsp, 112
+   add		rsp, 64
    pop		rbp
    ret

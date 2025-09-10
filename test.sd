@@ -18,13 +18,12 @@ GameState :: struct {
 }
 
 print_ints :: (nums: []int) {
-    print("%", typeof(nums));
-    for nums {
-        print("%", it);
+    for n, i in nums {
+        print("% = %", i, n);
     }
 }
 
-roll_random_dice :: (amount: int) -> [..]int {
+roll_random_dice :: (amount: int) -> []int {
     roll: [..]int = [3, 27, 1, 4, 5];
     return roll;
 }
@@ -32,8 +31,5 @@ roll_random_dice :: (amount: int) -> [..]int {
 main :: () {
     roll := roll_random_dice(6);
 
-    for roll {
-        print("%", it);
-    }
-    // print_ints(roll);
+    print_ints(roll);
 }
