@@ -102,7 +102,11 @@ bool lex(Lexer *lexer) {
         
         char c = peek_next_char(lexer);
 
-        if (c == ' ' || c == '\t') {
+        if (c == '\r') {
+            int k = 0;
+        }
+
+        if (c == ' ' || c == '\t' || c == '\r') {
             eat_character(lexer);
             continue;
         }
@@ -120,7 +124,9 @@ bool lex(Lexer *lexer) {
                 eat_character(lexer);
                 eat_character(lexer);
                 next = peek_next_char(lexer);
-                while (next != '\n' && next != '\0') {
+                while (true) {
+                    if (next == '\n') break;
+                    if (next == '\0') break;
                     eat_character(lexer);
                     next = peek_next_char(lexer);
                 }
@@ -233,7 +239,7 @@ bool lex(Lexer *lexer) {
             continue;
         }
 
-        report_error_here(lexer, "Syntax Error: Unknown character '%c'", c);
+        report_error_here(lexer, "Syntax Error: Unknown character: %d", (int) c);
         return false;
     }
 

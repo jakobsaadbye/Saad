@@ -1,55 +1,24 @@
-Vector2 :: struct {
-	x: float;
-	y: float;
-}
-
-Vector3 :: struct {
-	x: float;
-	y: float;
-	z: float;
-}
-
-Vector4 :: struct {
-	x: float;
-	y: float;
-	z: float;
-	w: float;
-}
-
-EntityKind :: enum {
-	Monster,
-	Human,
-}
-
-Entity :: struct {
-	kind:		 EntityKind;
-	position:    Vector3;
-	orientation: Vector3;
-	color: 		 Vector3;
-}
-
-large_return :: () -> Vector4 {
-	r := Vector4{1, 4, 9, 11};
-	return r;
-}
-
-small_return :: () -> Vector2 {
-	r := Vector2{420, 69};
-	return r;
-}
-
-args_and_large_return_value :: (x: float, y: float, z: float) -> Vector3 {
-	r := Vector3{x, y, z};
-	return r;
+foo :: () -> bool {
+	return true;
 }
 
 main :: () {
-	v1 := large_return();
-	print("%", v1);
+	while foo() {
+        // Collision ball and bricks
+        // for brick in bricks {
+        //     print("\n");
+        //     if (new_ball_x + ball_size >= brick.x && new_ball_x <= brick.x + BRICK_WIDTH) && (new_ball_y + ball_size >= brick.y && new_ball_y <= brick.y + BRICK_HEIGHT) {
 
-	v2 := small_return();
-	print("%", v2);
+        //         stuck_x := new_ball_x + ball_size - brick.x;
+        //         stuck_y := new_ball_y + ball_size - brick.y;
 
-	v3 := args_and_large_return_value(27, 11, 98);
-	print("%", v3);
+        //     }
+        // }
+
+        // Collision bar and walls
+
+		break;
+	}
+
+	foo();
 }

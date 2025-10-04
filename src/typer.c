@@ -1359,6 +1359,10 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
         exit(1);
     }
 
+    if (result == NULL) {
+        return NULL;
+    }
+
     expr->type = result;
     return result;
 }

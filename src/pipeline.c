@@ -10,9 +10,9 @@
     #include <io.h>
 #endif
 
-void dump_tokens(Lexer *lexer) {
+void dump_tokens(Lexer *lexer, int start_token_idx) {
     printf("\nTokens: \n");
-    for (int i = 0; i < lexer->tokens.count; i++) {
+    for (int i = start_token_idx; i < lexer->tokens.count; i++) {
         Token token = ((Token *)lexer->tokens.items)[i];
         printf("%s ", token_type_to_str(token.type));
     }
@@ -74,7 +74,7 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
     if (!ok) return_and_cleanup;
     report.lex_time_end = clock();
 
-    // dump_tokens(&lexer);
+    // dump_tokens(&lexer, 0);
 
     report.parse_time_start = clock();
     Parser parser = parser_init(&lexer);

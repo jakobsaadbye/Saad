@@ -284,6 +284,13 @@ main :: () {
             }
         }
 
+        // Collision ball and bricks
+        // for brick in bricks {
+        //     print("\n");
+        //     if (new_ball_x + ball_size >= brick.x && new_ball_x <= brick.x + BRICK_WIDTH) && (new_ball_y + ball_size >= brick.y && new_ball_y <= brick.y + BRICK_HEIGHT) {
+
+        //         stuck_x := new_ball_x + ball_size - brick.x;
+
         // Collision bar and walls
         if new_bar_x < 0 || new_bar_x + bar_width > window_width {
             bar_vel = 0;
@@ -292,7 +299,6 @@ main :: () {
         // Do position updates
         ball_x += ball_vel_x * dt;
         ball_y += ball_vel_y * dt;
-
         bar_x  += bar_vel * dt;
 
 
