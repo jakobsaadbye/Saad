@@ -79,8 +79,9 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
 } OperatorType;
 
 typedef enum AstFlags {
-    AST_FLAG_COMPILER_GENERATED     = 1 << 0,
+    AST_FLAG_COMPILER_GENERATED                    = 1 << 0,
     AST_FLAG_CG_EXPR_ASSIGNED_DIRECTLY_TO_VARIABLE = 1 << 1,
+    AST_FLAG_TYPE_IS_RESOLVED                      = 1 << 2, // Types that have this flag has gone through type checking
 } AstFlags;
 
 typedef struct Ast {
@@ -105,6 +106,7 @@ typedef enum IdentifierFlags {
     IDENTIFIER_IS_NAME_OF_STRUCT   = 1 << 1,
     IDENTIFIER_IS_NAME_OF_FUNCTION = 1 << 2,
     IDENTIFIER_IS_CONSTANT         = 1 << 3,
+    IDENTIFIER_IS_RESOLVED         = 1 << 4,
 } IdentifierFlags;
 
 typedef struct AstIdentifier {
@@ -463,7 +465,7 @@ typedef enum TypeKind {
 } TypeKind;
 
 typedef enum TypeFlags {
-    TYPE_IS_FULLY_SIZED      = 1 << 0,
+    TYPE_IS_FULLY_SIZED = 1 << 0,
 } TypeFlags;
 
 typedef struct Type {

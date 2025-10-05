@@ -803,7 +803,7 @@ AstFor *parse_for(Parser *parser) {
     ForKind kind = 0;
     AstIdentifier *index = NULL;
     AstIdentifier *iterator = NULL;
-    AstExpr *iterable = NULL;
+    AstExpr       *iterable = NULL;
 
     Token for_token = peek_next_token(parser);
     eat_token(parser);
@@ -1159,41 +1159,71 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     AstBlock *body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters can be pushed down into the scope of the body
     bool first_parameter_seen = false;
     while (true) {
+        if (!first_parameter_seen) {
+            next = peek_next_token(parser);
+            if (next.type == ')') {
+                eat_token(parser); 
+                break;
+            }
+        }
+
+        AstDeclaration *param = parse_declaration(parser, DECLARATION_IS_FUNCTION_PARAMETER);
+        if (!param) {
+            // @Todo: Error
+            return NULL;
+        }
+
+        if (!(param->flags & DECLARATION_TYPED_NO_EXPR)) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *) param, "Default arguments are currently not supported");
+            return NULL;
+        }
+
+        first_parameter_seen = true;
+        da_append(&func_defn->parameters, param);
+
         next = peek_next_token(parser);
         if (next.type == ')') {
             eat_token(parser); 
             break;
         }
 
+        if (next.type != ',') {
+            report_error_token(parser, LABEL_ERROR, next, "Expected a ',' between parameters");
+            return NULL;
+        }
+
+        eat_token(parser);
+
+
         // @Cleanup - This should probably use parse_declaration with a flag telling it that its a function parameter
-        if (first_parameter_seen) {
-            if (next.type != ',') {
-                report_error_token(parser, LABEL_ERROR, next, "Expected a ',' between parameters");
-                exit(1);    
-            }
-            eat_token(parser);
-            next = peek_next_token(parser);
-        }
+        // if (first_parameter_seen) {
+        //     if (next.type != ',') {
+        //         report_error_token(parser, LABEL_ERROR, next, "Expected a ',' between parameters");
+        //         exit(1);    
+        //     }
+        //     eat_token(parser);
+        //     next = peek_next_token(parser);
+        // }
 
-        if (next.type != TOKEN_IDENTIFIER) {
-            report_error_token(parser, LABEL_ERROR, next, "Expected an identifier");
-            exit(1);
-        }
-        Token param_ident = next;
-        eat_token(parser);
+        // if (next.type != TOKEN_IDENTIFIER) {
+        //     report_error_token(parser, LABEL_ERROR, next, "Expected an identifier");
+        //     exit(1);
+        // }
+        // Token param_ident = next;
+        // eat_token(parser);
 
-        next = peek_next_token(parser);
-        if (next.type != ':') {
-            report_error_token(parser, LABEL_ERROR, param_ident, "Expected a : after the parameter name");
-            exit(1);
-        }
-        eat_token(parser);
+        // next = peek_next_token(parser);
+        // if (next.type != ':') {
+        //     report_error_token(parser, LABEL_ERROR, param_ident, "Expected a : after the parameter name");
+        //     exit(1);
+        // }
+        // eat_token(parser);
 
-        Type *type = parse_type(parser);
+        // Type *type = parse_type(parser);
 
-        AstDeclaration *param = make_declaration(parser, param_ident, NULL, type, DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_FUNCTION_PARAMETER);
-        da_append(&func_defn->parameters, param);
-        first_parameter_seen = true;
+        // AstDeclaration *param = make_declaration(parser, param_ident, NULL, type, DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_FUNCTION_PARAMETER);
+        // da_append(&func_defn->parameters, param);
+        // first_parameter_seen = true;
     }
 
     Type *return_type = primitive_type(PRIMITIVE_VOID);
@@ -1446,7 +1476,10 @@ AstPrint *parse_print(Parser *parser) {
 
 AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
     Token ident = peek_next_token(parser);
-    expect(parser, ident, TOKEN_IDENTIFIER);
+    if (ident.type != TOKEN_IDENTIFIER) {
+        report_error_token(parser, LABEL_ERROR, ident, "Invalid declaration");
+        return NULL;
+    }
     eat_token(parser);
 
     Token next = peek_next_token(parser);
@@ -1454,7 +1487,7 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
     // Infer. e.g. a := b
     if (next.type == TOKEN_COLON_EQUAL) {
         if (parser->current_scope->belongs_to_struct) {
-            report_error_token(parser, LABEL_ERROR, ident, "Default struct values are not yet implemented!");
+            report_error_token(parser, LABEL_ERROR, ident, "Default struct values are not yet supported");
             return NULL;
         }
         eat_token(parser);

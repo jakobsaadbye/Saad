@@ -323,20 +323,27 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
     bool ok = leads_to_integer_overflow(typer, decl->type, decl->expr);
     if (!ok) return false;
     
+    // Mark the identifier as fully resolved
+    decl->ident->flags |= IDENTIFIER_IS_RESOLVED;
+
+    //
+    // Do sizing of the declaration
+    //
     if (decl->flags & (DECLARATION_IS_FUNCTION_PARAMETER | DECLARATION_IS_STRUCT_MEMBER)) {
         // Omit sizing the declaration as it is done at the call site
         return true;
-    } 
+    }
 
     if (typer->enclosing_function != NULL) {
         reserve_local_storage(typer->enclosing_function, decl->type->size);
+        return true;
+    } 
+
+    if (decl->flags & DECLARATION_CONSTANT) {
+        // Constants don't need to be sized
     } else {
-        if (decl->flags & DECLARATION_CONSTANT) {
-            // Constants don't need to be sized
-        } else {
-            // @TODO: Non-constant declarations in global scope should also be sized. Variables that live in global scope, should probably have some defined stack address of where they live, so they can be referenced locally. Still an open question on how i would do this.
-            XXX;
-        }
+        // @TODO: Non-constant declarations in global scope should also be sized. Variables that live in global scope, should probably have some defined stack address of where they live, so they can be referenced locally. Still an open question on how i would do this.
+        XXX;
     }
 
     return true;
@@ -385,7 +392,7 @@ bool types_are_equal(Type *lhs, Type *rhs) {
 }
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
-    AstIdentifier *func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name, NULL); // @Note - Passing NULL here omits the checking that the function needs to exist before it can be called to allow arbitrary order. If, or when we get closues, this should probably work differently!
+    AstIdentifier *func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name); 
     if (func_ident == NULL) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Unknown function '%s'", call->identifer->name);
         return NULL;
@@ -396,10 +403,27 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     }
 
     AstFunctionDefn *func_defn = ((TypeFunction *)func_ident->type)->node;
+
+    // Make sure that the function definition is fully resolved
+    if (!(func_defn->head.flags & AST_FLAG_TYPE_IS_RESOLVED)) {
+
+        // Save the current state of the typer as local info at this call site is probably overriden within check_function_defn()
+        Typer temp = *typer;
+
+        Type *func_return_type = check_function_defn(typer, func_defn);
+        if (!func_return_type) return NULL;
+
+        // Restore the typers state
+        typer->array_literal_depth = temp.array_literal_depth;
+        typer->current_scope       = temp.current_scope;
+        typer->enclosing_function  = temp.enclosing_function;
+        typer->enclosing_for       = temp.enclosing_for;
+        typer->enclosing_while     = temp.enclosing_while;
+    }
     
     if (call->arguments.count != func_defn->parameters.count) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Mismatch in number of arguments. Function '%s' takes %d %s, but %d were supplied", func_defn->identifier->name, func_defn->parameters.count, func_defn->parameters.count == 1 ? "parameter" : "parameters", call->arguments.count);
-        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn), "Here is the definition of %s", func_defn->identifier->name);
+        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
         return NULL;
     }
 
@@ -474,7 +498,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         lhs_is_constant = false;
     }
     else if (is_identifier) {
-        ident = lookup_from_scope(typer->parser, typer->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs);
+        ident = lookup_from_scope(typer->parser, typer->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name);
         assert(ident); // Is checked in check_expression so no need to check it here also
         lhs_is_constant = ident->flags & IDENTIFIER_IS_CONSTANT;
     } else {
@@ -598,9 +622,11 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
 bool check_for(Typer *typer, AstFor *ast_for) {
     typer->enclosing_for = ast_for;
 
+    // for {...}
     if (ast_for->kind == FOR_INFINITY_AND_BEYOND) {
         // No header to check!
     }
+    // for 0..10 {...}
     else if (ast_for->iterable->head.kind == AST_RANGE_EXPR) {
         // @Incomplete - Need to set type of index if being used!
         AstRangeExpr *range = (AstRangeExpr *)(ast_for->iterable);
@@ -619,8 +645,11 @@ bool check_for(Typer *typer, AstFor *ast_for) {
         }
 
         ast_for->iterator->type = primitive_type(PRIMITIVE_S32);
+        ast_for->iterator->flags |= IDENTIFIER_IS_RESOLVED;
+
         if (ast_for->index) {
             ast_for->index->type = primitive_type(PRIMITIVE_S32);
+            ast_for->index->flags |= IDENTIFIER_IS_RESOLVED;
         }
 
         // Allocate space for the iterator, start, end and optionally for the index
@@ -629,7 +658,8 @@ bool check_for(Typer *typer, AstFor *ast_for) {
         if (ast_for->index) {
             reserve_local_storage(typer->enclosing_function, 8);
         }
-    } 
+    }
+    // for x in xs {...}
     else {
         Type *iterable_type = check_expression(typer, (AstExpr *)ast_for->iterable, NULL);
         if (!iterable_type) return NULL;
@@ -639,8 +669,11 @@ bool check_for(Typer *typer, AstFor *ast_for) {
         }
 
         ast_for->iterator->type = ((TypeArray *)(iterable_type))->elem_type;
+        ast_for->iterator->flags |= IDENTIFIER_IS_RESOLVED;
+
         if (ast_for->index) {
             ast_for->index->type = primitive_type(PRIMITIVE_S32);
+            ast_for->index->flags |= IDENTIFIER_IS_RESOLVED;
         }
 
         // Allocate space for iterator, pointer to head of array, stop condition (count) and index
@@ -982,6 +1015,12 @@ bool check_break_or_continue(Typer *typer, AstBreakOrContinue *boc) {
 }
 
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
+
+    // Function might have already been type checked from an earlier function call
+    if (func_defn->head.flags & AST_FLAG_TYPE_IS_RESOLVED) {
+        return func_defn->return_type;
+    }
+
     typer->enclosing_function = func_defn;
 
     for (int i = 0; i < func_defn->parameters.count; i++) {
@@ -1015,6 +1054,9 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         report_error_ast(typer->parser, LABEL_NOTE, (Ast *)func_defn, "Put an explicit return at the outer scope of the function. In the future we should be able to detect nested returns");
         return NULL;
     }
+
+    // Mark the function as fully typed
+    func_defn->head.flags |= AST_FLAG_TYPE_IS_RESOLVED;
 
     //
     // Do sizing for parameters
@@ -1879,13 +1921,27 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     case LITERAL_NULL:      return (Type *) type_null_ptr;
     case LITERAL_IDENTIFIER: {
         char   *ident_name   = literal->as.value.identifier.name;
-        AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name, (Ast *)literal);
+        AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
         if (ident == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared variable '%s'", ident_name);
             return NULL;
         }
 
-        assert(ident->type);
+        bool needs_ordering_check = true;
+
+        if (needs_ordering_check) {
+            bool unresolved = !(ident->flags && IDENTIFIER_IS_RESOLVED);
+            if (is_a_before_b((Ast *) literal, (Ast *) ident) || unresolved) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "'%s' is used before its declared", ident->name);
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(ident), "'%s' is being declared here", ident->name);
+                return NULL;
+            }
+        }
+
+        if (!ident->type) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Internal Compiler Error: '%s' is unresolved", ident->name);
+            return NULL;
+        }
 
         return ident->type;
     }}

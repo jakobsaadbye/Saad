@@ -1,3 +1,5 @@
+- Test calling a function that is defined after!!1
+
 - Fix hash_table when collisions happen. Currently we crash if defining two structs with the same name !!!!
 
 

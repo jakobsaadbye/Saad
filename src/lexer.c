@@ -102,11 +102,7 @@ bool lex(Lexer *lexer) {
         
         char c = peek_next_char(lexer);
 
-        if (c == '\r') {
-            int k = 0;
-        }
-
-        if (c == ' ' || c == '\t' || c == '\r') {
+        if (c == ' ' || c == '\t') {
             eat_character(lexer);
             continue;
         }

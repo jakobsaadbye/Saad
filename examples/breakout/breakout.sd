@@ -148,6 +148,9 @@ DrawText :: (text: string, posX: int, posY: int, fontSize: int, color: Color) #e
 DrawCircle    :: (centerX: int, centerY: int, radius: float, color: Color) #extern "C"
 DrawRectangle :: (posX: int, posY: int, width: int, height: int, color: Color) #extern "C"
 
+// Basic shapes collision detection functions
+CheckCollisionRecs :: (rec1: Rectangle, rec2: Rectangle) -> bool #extern "C"                                           // Check collision between two rectangles
+
 // Text font info functions
 MeasureText :: (text: string, fontSize: int) -> int #extern "C"
 
@@ -170,16 +173,13 @@ GetKeyPressed :: () -> KeyboardKey #extern "C"
 round :: (value: f64) -> f64 #extern "C"
 
 
+
+
+
+
 //////////////////////////////////////////////////////////////////////////////////////
 
 BALL_SIZE :: 20;
-
-Brick :: struct {
-    x:     int;
-    y:     int;
-    color: Color;
-    dead:  bool;
-}
 
 BRICK_WIDTH  :: 80;
 BRICK_HEIGHT :: 20;
@@ -190,6 +190,49 @@ BRICK_COLS :: 11;
 
 TOP_MARGIN :: 80;
 
+Brick :: struct {
+    x:     int;
+    y:     int;
+    color: Color;
+    dead:  bool;
+}
+
+Bar :: struct {
+    x:      float;
+    y:      float;
+    width:  float;
+    height: float;
+    vel_x:  float;
+    speed:  float;
+
+}
+
+Ball :: struct {
+    x:      float;
+    y:      float;
+    size:   float;
+    vel_x:  float;
+    vel_y:  float;
+}
+
+get_ball_rect :: (ball: Ball) -> Rectangle {
+    return {
+        ball.x,
+        ball.y,
+        ball.size,
+        ball.size,
+    };
+}
+
+get_bar_rect :: (bar: Bar) -> Rectangle {
+    return {
+        bar.x,
+        bar.y,
+        bar.width,
+        bar.height,
+    };
+}
+
 main :: () {
 
     COLOR_WHITE := Color{255, 255, 255, 255};
@@ -199,23 +242,27 @@ main :: () {
 
     InitWindow(window_width, window_height, "Super Breakout");
 
-    SetTargetFPS(120);
+    SetTargetFPS(90);
 
     text := "Super Breakout";
     text_len := MeasureText(text, 24);
 
-    ball_x     := window_width * 0.5;
-    ball_y     := window_height * 0.5;
-    ball_vel_x := 400.0;
-    ball_vel_y := 400.0;
-    ball_size  := 20;
+    ball := Ball{
+        x = window_width * 0.5,
+        y = window_height * 0.5,
+        size = BALL_SIZE,
+        vel_x = 400.0,
+        vel_y = 400.0,
+    };
 
-    bar_width  := 160.0;
-    bar_height := 15.0;
-    bar_x := window_width * 0.5 - bar_width * 0.5;
-    bar_y := window_height - 60.0;
-    bar_vel := 0.0;
-    bar_speed := 400.0;
+    bar := Bar{
+        x = 160.0,
+        y = 15.0,
+        width = 200,
+        height = 40,
+        vel_x = 0,
+        speed = 400,
+    };
 
     bricks : [BRICK_ROWS * BRICK_COLS] Brick;
 
@@ -246,60 +293,62 @@ main :: () {
         dt := GetFrameTime();
 
         // Input
-        bar_vel = 0.0;
+        bar.vel_x = 0;
 
         if IsKeyDown(.A) || IsKeyDown(.LEFT) {
-            bar_vel -= bar_speed;
+            bar.vel_x -= bar.speed;
         }
         if IsKeyDown(.D) || IsKeyDown(.RIGHT) {
-            bar_vel += bar_speed;
+            bar.vel_x += bar.speed;
         }
 
         // Simulate the next ball and bar position
-        new_ball_x := ball_x + ball_vel_x * dt;
-        new_ball_y := ball_y + ball_vel_y * dt;
-        new_bar_x  := bar_x + bar_vel * dt;
+        next_ball := ball;
+        next_ball.x = ball.x + ball.vel_x * dt;
+        next_ball.y = ball.y + ball.vel_y * dt;
+
+        next_bar  := bar;
+        next_bar.x = bar.x + bar.vel_x * dt;
 
         // Collisions ball and walls
-        if new_ball_x < 0 || new_ball_x + ball_size > window_width {
-            ball_vel_x = -ball_vel_x;
+        if next_ball.x < 0 || next_ball.x + next_ball.size > window_width {
+            ball.vel_x = -ball.vel_x;
         }
 
-        if new_ball_y < 0 || new_ball_y + ball_size > window_height {
-            ball_vel_y = -ball_vel_y;
+        if next_ball.y < 0 || next_ball.y + next_ball.size > window_height {
+            ball.vel_y = -ball.vel_y;
         }
 
         // Collision ball and bar
-        if (new_ball_x + ball_size >= new_bar_x && new_ball_x <= new_bar_x + bar_width) && (new_ball_y + ball_size >= bar_y && new_ball_y <= bar_y + bar_height) {
+        ball_rect := get_ball_rect(ball);
+        bar_rect  := get_bar_rect(bar);
+
+        collides := CheckCollisionRecs(ball_rect, bar_rect);
+        if collides {
 
             // Determine which way the ball should go based on how much its stuck
             // within the bar
-            stuck_x := new_ball_x + ball_size - new_bar_x;
-            stuck_y := new_ball_y + ball_size - bar_y;
+            overlap := calculate_overlap(ball, bar, { ball.vel_x, ball.vel_y });
 
-            if stuck_x > stuck_y {
-                ball_vel_y = -ball_vel_y;
+            // Adjust direction and position of the ball to make it unstuck
+            if overlap.x < overlap.y {
+                ball.vel_x = -ball.vel_x;
+                ball.x    += overlap.x;
             } else {
-                ball_vel_x = -ball_vel_x;
+                ball.vel_y = -ball.vel_y;
+                ball.y    += overlap.y;
             }
         }
 
-        // Collision ball and bricks
-        // for brick in bricks {
-        //     print("\n");
-        //     if (new_ball_x + ball_size >= brick.x && new_ball_x <= brick.x + BRICK_WIDTH) && (new_ball_y + ball_size >= brick.y && new_ball_y <= brick.y + BRICK_HEIGHT) {
-
-        //         stuck_x := new_ball_x + ball_size - brick.x;
-
         // Collision bar and walls
-        if new_bar_x < 0 || new_bar_x + bar_width > window_width {
-            bar_vel = 0;
+        if next_bar.x < 0 || next_bar.x + bar.width > window_width {
+            bar.vel_x = 0;
         }
 
         // Do position updates
-        ball_x += ball_vel_x * dt;
-        ball_y += ball_vel_y * dt;
-        bar_x  += bar_vel * dt;
+        ball.x += ball.vel_x * dt;
+        ball.y += ball.vel_y * dt;
+        bar.x  += bar.vel_x * dt;
 
 
         //
@@ -314,10 +363,10 @@ main :: () {
         }
 
         // Draw the ball
-        DrawRectangle(xx ball_x, xx ball_y, xx ball_size, xx ball_size, COLOR_WHITE);
+        DrawRectangle(xx ball.x, xx ball.y, xx ball.size, xx ball.size, COLOR_WHITE);
         
         // Draw the bar
-        DrawRectangle(xx bar_x, xx bar_y, xx bar_width, xx bar_height, COLOR_WHITE);
+        DrawRectangle(xx bar.x, xx bar_y, xx bar.width, xx bar.height, COLOR_WHITE);
 
         DrawFPS(window_width - 100, 16);
         DrawText(text, xx (window_width * 0.5 - text_len * 0.5), 24, 24, COLOR_WHITE);
@@ -327,3 +376,21 @@ main :: () {
 
     CloseWindow();
 }
+
+calculate_overlap :: (a: Rectangle, b: Rectangle, velocity: Vector2) -> Vector2 {
+    overlap := Vector2{};
+
+    if velocity.x > 0 {
+        overlap.x = a.x + a.width - b.x; 
+    } else {
+        overlap.x = b.x + b.width - a.x; 
+    }
+
+    if velocity.y > 0 {
+        overlap.y = a.y + a.height - b.y; 
+    } else {
+        overlap.y = b.y + b.height - a.y; 
+    }
+
+    return overlap;
+}   

@@ -128,7 +128,7 @@ void go_nuts(CodeGenerator *cg, AstCode *code) {
 }
 
 void check_main_exists(CodeGenerator *cg) {
-    AstIdentifier *main = lookup_from_scope(cg->parser, cg->current_scope, "main", NULL);
+    AstIdentifier *main = lookup_from_scope(cg->parser, cg->current_scope, "main");
     if (main == NULL) {
         printf("Error: Missing function 'main' as entry-point to the program\n");
         exit(1);
@@ -338,7 +338,7 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     bool offset_is_runtime_computed = false;
 
     if (assign->lhs->head.kind == AST_LITERAL) {
-        AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name, (Ast *)assign->lhs);
+        AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name);
         assert(ident);
 
         if (ident->type->kind == TYPE_POINTER) {
@@ -2126,7 +2126,7 @@ void emit_unary_inside_member_access(CodeGenerator *cg, AstUnary *unary, AstMemb
         assert(unary->expr->type->kind == TYPE_POINTER);
 
         if (unary->expr->head.kind == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
-            AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name, (Ast *)unary->expr);
+            AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name);
             assert(ident->type->kind == TYPE_POINTER);
 
             sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", ident->stack_offset);
@@ -2210,7 +2210,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
     }
 
     if (ma->left->head.kind == AST_LITERAL && ((AstLiteral *)(ma->left))->kind == LITERAL_IDENTIFIER) {
-        AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(ma->left))->as.value.identifier.name, (Ast *)(ma->left));
+        AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(ma->left))->as.value.identifier.name);
 
         if (ident->type->kind == TYPE_POINTER) {
             // Field access through pointer
@@ -2237,50 +2237,6 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
         sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
 
         return (MemberAccessResult){0, true};
-
-        // AstExpr *cursor = array_ac->accessing;
-        // while(cursor->head.kind == AST_ARRAY_ACCESS) {
-        //     cursor = ((AstArrayAccess *)(cursor))->accessing;
-        // }
-
-        // if (cursor->head.kind == AST_LITERAL) {
-        //     assert(((AstLiteral *)(cursor))->kind == LITERAL_IDENTIFIER);
-        //     AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(cursor))->as.value.identifier.name, (Ast *)cursor);
-        //     assert(ident && ident->type->kind == TYPE_ARRAY);
-
-        //     emit_array_access_offset(cg, array_ac);
-
-
-        //     sb_append(&cg->code, "\n   ; Left is basic identifier\n");
-        //     sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", ident->stack_offset);         // load address to beginning of array
-        //     sb_append(&cg->code, "   add\t\trbx, rax\n");                                  // offset into array
-        //     sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset); // offset into member
-        //     sb_append(&cg->code, "\n");
-
-        //     return (MemberAccessResult){0, true};
-        // }
-        // else if (cursor->head.kind == AST_MEMBER_ACCESS) {
-        //     AstMemberAccess *left = (AstMemberAccess *)(cursor);
-        //     MemberAccessResult result = emit_member_access(cg, left);
-
-        //     if (!result.is_runtime_computed) {
-        //         sb_append(&cg->code, "   lea\t\trbx, %d[rbp] ; .%s\n", result.base_offset, left->struct_member->ident->name);
-        //     } else {
-        //         // emit_array_access_offset() expects the array offset to be in rbx which it already is
-        //     }
-
-        //     emit_array_access_offset(cg, array_ac);
-
-        //     sb_append(&cg->code, "\n   ; Left is member access\n");
-        //     sb_append(&cg->code, "   add\t\trbx, rax\n");                                    // offset into array
-        //     sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);   // offset into member
-        //     sb_append(&cg->code, "\n");
-
-        //     return (MemberAccessResult){0, true};
-        // }
-        // else {
-        //     XXX;
-        // }
     }
 
     if (ma->left->head.kind == AST_STRUCT_LITERAL) {
@@ -2327,7 +2283,7 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue)
     }
 
     if (expr->head.kind == AST_LITERAL && ((AstLiteral *)(expr))->kind == LITERAL_IDENTIFIER) {
-        AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(expr))->as.value.identifier.name, (Ast *)expr);
+        AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(expr))->as.value.identifier.name);
         assert(ident);
 
         type        = ident->type;
@@ -2517,7 +2473,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         }
         if (unary->operator == OP_ADDRESS_OF) {
             if (unary->expr->head.kind == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
-                AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name, (Ast *)unary->expr);
+                AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name);
                 assert(ident);
 
                 sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", ident->stack_offset);
@@ -2677,7 +2633,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_IDENTIFIER: {
-            AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, lit->as.value.identifier.name, (Ast *)lit);
+            AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, lit->as.value.identifier.name);
             assert(ident);
 
             if (ident->belongs_to_decl && ident->belongs_to_decl->flags & DECLARATION_CONSTANT) {

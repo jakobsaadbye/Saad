@@ -1,24 +1,15 @@
-foo :: () -> bool {
-	return true;
+Coffee :: struct {
+	acidity: int;
 }
 
 main :: () {
-	while foo() {
-        // Collision ball and bricks
-        // for brick in bricks {
-        //     print("\n");
-        //     if (new_ball_x + ball_size >= brick.x && new_ball_x <= brick.x + BRICK_WIDTH) && (new_ball_y + ball_size >= brick.y && new_ball_y <= brick.y + BRICK_HEIGHT) {
+	yes := should_buy({5});
+	print("%", yes);
+}
 
-        //         stuck_x := new_ball_x + ball_size - brick.x;
-        //         stuck_y := new_ball_y + ball_size - brick.y;
-
-        //     }
-        // }
-
-        // Collision bar and walls
-
-		break;
+should_buy :: (coffee: Coffee) -> bool {
+	if coffee.acidity < 5 {
+		return true;
 	}
-
-	foo();
+	return false;
 }

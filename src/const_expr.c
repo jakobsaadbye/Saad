@@ -128,7 +128,7 @@ AstExpr *simplify_expression(ConstEvaluater *ce, AstBlock *scope, AstExpr *expr)
             AstLiteral *lit = (AstLiteral *)(expr);
 
             if (lit->kind == LITERAL_IDENTIFIER) {
-                AstIdentifier *ident = lookup_from_scope(ce->parser, scope, lit->as.value.identifier.name, (Ast *)lit);
+                AstIdentifier *ident = lookup_from_scope(ce->parser, scope, lit->as.value.identifier.name);
                 if (ident->flags & IDENTIFIER_IS_CONSTANT) {
                     return simplify_expression(ce, scope, ident->belongs_to_decl->expr);
                 }

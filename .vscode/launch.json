@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug !!!",
+            "name": "Debug test.sd",
             "type": "cppdbg",
             "request": "launch",
             "preLaunchTask": "Debug launch",

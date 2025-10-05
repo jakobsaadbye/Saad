@@ -61,18 +61,15 @@ bool is_declared_before_used(Ast *declared_at, Ast *used_at) {
     return true;
 }
 
-AstIdentifier *lookup_from_scope(Parser *parser, AstBlock *scope, char *ident_name, Ast *used_at) {
+AstIdentifier *lookup_from_scope(Parser *parser, AstBlock *scope, char *ident_name) {
+    (void)parser;
+
     AstBlock *searching_scope = scope;
     while (true) {
         if (searching_scope == NULL) return NULL;
 
         AstIdentifier *found = find_in_scope(searching_scope, ident_name);
         if (found) {
-            if (!is_declared_before_used((Ast *)found, used_at)) {
-                report_error_ast(parser, LABEL_ERROR, used_at, "%s is being used before its being declared", ident_name);
-                report_error_ast(parser, LABEL_NOTE, (Ast *)found, "... first being declared here");
-                return NULL;
-            }
             return found;
         }
 
