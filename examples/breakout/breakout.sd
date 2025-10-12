@@ -326,25 +326,30 @@ main :: () {
         }
 
         // Collision ball and bar
-        next_ball_rect := get_ball_rect(next_ball);
+        next_ball_rect  := get_ball_rect(next_ball);
         next_bar_rect  := get_bar_rect(next_bar);
 
-        collides := CheckCollisionRecs(next_ball_rect, next_bar_rect);
-        if collides {
-
-            // Determine which way the ball should go based on how much its stuck
-            // within the bar
-            overlap := calculate_overlap(next_ball_rect, next_bar_rect, { ball.vel_x, ball.vel_y });
-
-            // Adjust direction and position of the ball to make it unstuck
-            if overlap.x < overlap.y {
-                ball.vel_x = -ball.vel_x;
-                ball.x    += overlap.x;
-            } else {
-                ball.vel_y = -ball.vel_y;
-                ball.y    += overlap.y;
-            }
+        if CheckCollisionRecs(next_ball_rect, next_bar_rect) {
+            bounce_ball(&ball, next_bar_rect);
         }
+
+        // Collision ball and bricks
+        // next_ball_rect = get_ball_rect(next_ball);
+
+        // for row in 0..BRICK_ROWS {
+        //     for col in 0..BRICK_COLS {
+        //         index := row * BRICK_COLS + col;
+        //         brick := &bricks[index];
+
+        //         brick_rect := Rectangle{xx brick.x, xx brick.y, BRICK_WIDTH, BRICK_HEIGHT};
+        //         if CheckCollisionRecs(next_ball_rect, brick_rect) {
+
+        //             overlap := calculate_ball_and_rectangle_overlap(next_ball_rect, brick_rect, { ball.vel_x, ball.vel_y });
+
+        //             brick.dead = true;
+        //         }
+        //     }
+        // }
 
         // Collision bar and walls
         if next_bar.x < 0 || next_bar.x + bar.width > window_width {
@@ -365,6 +370,10 @@ main :: () {
         
         // Draw bricks
         for b in bricks {
+            if b.dead {
+                continue;
+            }
+
             DrawRectangle(b.x, b.y, BRICK_WIDTH, BRICK_HEIGHT, b.color);
         }
 
@@ -383,20 +392,33 @@ main :: () {
     CloseWindow();
 }
 
-calculate_overlap :: (a: Rectangle, b: Rectangle, velocity: Vector2) -> Vector2 {
+bounce_ball :: (ball: *Ball, b: Rectangle) {
+
+    a := get_ball_rect(*ball);
+
     overlap := Vector2{};
 
-    if velocity.x > 0 {
+    // Figure out how much we overlap with the rectangle
+    if ball.vel_x > 0 {
         overlap.x = a.x + a.width - b.x; 
     } else {
         overlap.x = b.x + b.width - a.x; 
     }
 
-    if velocity.y > 0 {
+    if ball.vel_y > 0 {
         overlap.y = a.y + a.height - b.y; 
     } else {
         overlap.y = b.y + b.height - a.y; 
     }
 
-    return overlap;
+    // Adjust direction and position of the ball to make it unstuck
+    if overlap.x < overlap.y {
+        ball.vel_x = -ball.vel_x;
+        ball.x    += overlap.x;
+    } else {
+        ball.vel_y = -ball.vel_y;
+        ball.y    += overlap.y;
+    }
+
+    print("%", ball);
 }

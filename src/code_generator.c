@@ -328,7 +328,36 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
 
     sb_append(&cg->code, "   ; Ln %d: Assignment\n", assign->head.start.line);
 
-    emit_expression(cg, assign->expr);
+    // @Speed: I think we should try to utilize direct assignment if we can. Currently
+    //         the problem is in knowing weather or not the direct assignment took place or not in.
+    //         f.x in struct reassignment: 'my_struct = Vector2{5, 6}'. We first emit the struct literal temporarily
+    //         and then perform a memcopy.
+
+    if (assign->op == ASSIGN_EQUAL) {
+        emit_expression(cg, assign->expr);
+    } else {
+
+        // For all the compound assignments we do the binary operation between the expression on the left hand side as an r-value and the expression on the right
+        AstBinary bin       = {0};
+        bin.head.head.kind  = AST_BINARY;
+        bin.head.head.start = assign->head.start;
+        bin.head.head.end   = assign->head.end;
+        bin.head.type       = assign->expr->type;
+    
+        bin.left  = assign->lhs;
+        bin.right = assign->expr;
+    
+        switch (assign->op) {
+            case ASSIGN_PLUS_EQUAL:   bin.operator = '+'; break;
+            case ASSIGN_MINUS_EQUAL:  bin.operator = '-'; break;
+            case ASSIGN_TIMES_EQUAL:  bin.operator = '*'; break;
+            case ASSIGN_DIVIDE_EQUAL: bin.operator = '/'; break;
+            case ASSIGN_EQUAL:
+            default: XXX;
+        }
+    
+        emit_expression(cg, (AstExpr *)&bin);
+    }
 
     //
     // Get the offset to assign to. If its a runtime offset like an array subscript, then the address
@@ -372,78 +401,7 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
         XXX;
     }
 
-    // @Speed: I think we should try to utilize direct assignment if we can. Currently
-    //         the problem is in knowing weather or not the direct assignment took place or not in.
-    //         f.x in struct reassignment: 'my_struct = Vector2{5, 6}'. We first emit the struct literal temporarily
-    //         and then perform a memcopy.
-
-    // if (!offset_is_runtime_computed) {
-    //     cg->flags            |= CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE;
-    //     cg->variable_address  = base_offset;
-    // }
-
-    if (assign->op == ASSIGN_EQUAL) {
-        emit_simple_initialization(cg, base_offset, offset_is_runtime_computed, false, assign->lhs->type, assign->expr->type);
-        return;
-    }
-    
-    char address_str[16];
-    if (offset_is_runtime_computed) {
-        sprintf(address_str, "[rbx]");
-    } else {
-        sprintf(address_str, "%d[rbp]", base_offset);
-    }
-
-    if (assign->lhs->type->kind == TYPE_INTEGER) {
-        POP(RAX);
-        switch (assign->op) {
-        case ASSIGN_PLUS_EQUAL:  sb_append(&cg->code, "   add\t\t%s, eax\n", address_str); break;
-        case ASSIGN_MINUS_EQUAL: sb_append(&cg->code, "   sub\t\t%s, eax\n", address_str); break;
-        case ASSIGN_TIMES_EQUAL: {
-            sb_append(&cg->code, "   mov\t\tecx, DWORD %s\n", address_str);
-            sb_append(&cg->code, "   imul\t\tecx, eax\n"); 
-            sb_append(&cg->code, "   mov\t\tDWORD %s, ecx\n", address_str);
-            break;
-        } 
-        
-        case ASSIGN_DIVIDE_EQUAL: {
-            sb_append(&cg->code, "   mov\t\tecx, eax\n");
-            sb_append(&cg->code, "   mov\t\teax, DWORD %s\n", address_str);
-            sb_append(&cg->code, "   cqo\n");
-            sb_append(&cg->code, "   idiv\t\tecx\n");
-            sb_append(&cg->code, "   mov\t\tDWORD %s, eax\n", address_str);
-            break;
-        }
-        default: exit(1); // Unreachable
-        }
-    }
-    else if (assign->lhs->type->kind == TYPE_FLOAT) {
-
-        Type *lhs_type = assign->lhs->type;
-        Type *rhs_type = assign->expr->type;
-
-        POP(RBX);
-        if (rhs_type->kind == TYPE_INTEGER) {
-            sb_append(&cg->code, "   %s\txmm1, rbx\n", cvtsi2ss_or_cvtsi2sd(lhs_type));
-        } else {
-            sb_append(&cg->code, "   %s\t\txmm1, %s\n", movd_or_movq(rhs_type), REG_B(rhs_type));
-        }
-
-        sb_append(&cg->code, "   %s\t\txmm0, %s\n", movd_or_movq(lhs_type), address_str);
-
-        // @FloatRefactor - These operations should handle 32 and 64 bit floats
-        switch (assign->op) {
-        case ASSIGN_PLUS_EQUAL:   sb_append(&cg->code, "   addss\t\txmm0, xmm1\n"); break;
-        case ASSIGN_MINUS_EQUAL:  sb_append(&cg->code, "   subss\t\txmm0, xmm1\n"); break;
-        case ASSIGN_TIMES_EQUAL:  sb_append(&cg->code, "   mulss\t\txmm0, xmm1\n"); break;
-        case ASSIGN_DIVIDE_EQUAL: sb_append(&cg->code, "   divss\t\txmm0, xmm1\n"); break;
-        default: exit(1); // Unreachable
-        }
-
-        sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(lhs_type), address_str);
-    } else {
-        XXX;
-    }
+    emit_simple_initialization(cg, base_offset, offset_is_runtime_computed, false, assign->lhs->type, assign->expr->type);
 }
 
 void emit_for(CodeGenerator *cg, AstFor *ast_for) {

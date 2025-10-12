@@ -966,7 +966,9 @@ bool check_statement(Typer *typer, Ast *stmt) {
 
         if (!types_are_equal(ast_return->expr->type, ef->return_type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_return->expr), "Type mismatch. Returning type %s from function '%s' with return type %s", type_to_str(ast_return->expr->type), ef->identifier->name, type_to_str(ef->return_type));
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(ef->return_type), "... Here is the return type of '%s'", ef->identifier->name);
+            if (ef->return_type->kind != TYPE_VOID) {
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(ef->return_type), "... Here is the return type of '%s'", ef->identifier->name);
+            }
             return false;
         }
 
@@ -1746,12 +1748,11 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
 
     if (unary->operator == OP_NOT) {
         if (type_kind != TYPE_BOOL && type_kind != TYPE_POINTER) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Expression needs to be of type 'bool' or pointer. Got type %s\n", type_to_str(expr_type));
-            exit(1);
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Operator ! expects expression to be type bool or pointer. Got type %s\n", type_to_str(expr_type));
+            return NULL;
         }
 
         // @Note - If applied to a pointer, we will do a pointer to bool conversion
-
         return primitive_type(PRIMITIVE_BOOL);
     }
     else if (unary->operator == OP_UNARY_MINUS) {
@@ -1952,7 +1953,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 
 void reserve_local_storage(AstFunctionDefn *func_defn, int size) {
     func_defn->num_bytes_locals += size;
-    
+
     // @Todo: We should reserve the same amount of local-storage the same way as the codegenerator 
     // uses the memory, otherwise we either use up too much memory (like we do now) or the temporary 
     // storage is getting misplaced because of untracked padding or small alignments
