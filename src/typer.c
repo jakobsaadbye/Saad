@@ -1952,7 +1952,11 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 
 void reserve_local_storage(AstFunctionDefn *func_defn, int size) {
     func_defn->num_bytes_locals += size;
-    func_defn->num_bytes_locals = align_value(func_defn->num_bytes_locals, size > 8 ? 8 : size);
+    
+    // @Todo: We should reserve the same amount of local-storage the same way as the codegenerator 
+    // uses the memory, otherwise we either use up too much memory (like we do now) or the temporary 
+    // storage is getting misplaced because of untracked padding or small alignments
+    func_defn->num_bytes_locals = align_value(func_defn->num_bytes_locals, 8);
 }
 
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size) {

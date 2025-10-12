@@ -334,8 +334,7 @@ main :: () {
 
             // Determine which way the ball should go based on how much its stuck
             // within the bar
-            vel := Vector2{ ball.vel_x, ball.vel_y };
-            overlap := calculate_overlap(next_ball_rect, next_bar_rect, vel);
+            overlap := calculate_overlap(next_ball_rect, next_bar_rect, { ball.vel_x, ball.vel_y });
 
             // Adjust direction and position of the ball to make it unstuck
             if overlap.x < overlap.y {

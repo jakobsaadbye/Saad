@@ -1,55 +1,37 @@
-Vector2 :: struct {
-	x: float;
-	y: float;
+Rectangle :: struct {
+    x: float;
+    y: float;
+    width: float;
+    height: float;
 }
 
-Vector3 :: struct {
-	x: float;
-	y: float;
-	z: float;
+Ball :: struct {
+    x:      float;
+    y:      float;
+    size:   float;
+    vel_x:  float;
+    vel_y:  float;
 }
 
-Vector4 :: struct {
-	x: float;
-	y: float;
-	z: float;
-	w: float;
-}
-
-EntityKind :: enum {
-	Monster,
-	Human,
-}
-
-Entity :: struct {
-	kind:		 EntityKind;
-	position:    Vector3;
-	orientation: Vector3;
-	color: 		 Vector3;
-}
-
-large_return :: () -> Vector4 {
-	r := Vector4{1, 4, 9, 11};
-	return r;
-}
-
-small_return :: () -> Vector2 {
-	r := Vector2{420, 69};
-	return r;
-}
-
-args_and_large_return_value :: (x: float, y: float, z: float) -> Vector3 {
-	r := Vector3{x, y, z};
-	return r;
+get_ball_rect :: (ball: Ball) -> Rectangle {
+    return Rectangle{
+        ball.x,
+        ball.y,
+        ball.size,
+        ball.size,
+    };
 }
 
 main :: () {
-	v1 := large_return();
-	print("%", v1);
+    ball := Ball{
+        x = 600.0,
+        y = 650.0,
+        size = 20,
+        vel_x = 400.0,
+        vel_y = 400.0,
+    };
 
-	v2 := small_return();
-	print("%", v2);
+    rect := get_ball_rect(ball);
 
-	v3 := args_and_large_return_value(27, 11, 98);
-	print("%", v3);
+    print("%", rect);
 }
