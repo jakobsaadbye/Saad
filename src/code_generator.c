@@ -784,12 +784,15 @@ char *register_string(Register reg, int width) {
 
 // Moves the source register to the target offset relative to rbp or rsp
 void MOV_ADDR_REG(CodeGenerator *cg, int dst_offset, char *relative_to, Register src_reg, Type *src_type) {
-
     char *src_reg_string = register_string(src_reg, src_type->size > 8 ? 8 : src_type->size);
 
-    if (src_type->kind == TYPE_FLOAT) {
-        if (src_type->size == 8) sb_append(&cg->code, "   movq\t\t%d[%s], %s\n", dst_offset, relative_to, src_reg_string);
-        else                     sb_append(&cg->code, "   movd\t\t%d[%s], %s\n", dst_offset, relative_to, src_reg_string);
+    if (src_reg >= REG_XMM0) {
+        assert(src_type->kind == TYPE_FLOAT);
+        if (src_type->size == 8) {
+            sb_append(&cg->code, "   movq\t\t%d[%s], %s\n", dst_offset, relative_to, src_reg_string);
+        } else {
+            sb_append(&cg->code, "   movd\t\t%d[%s], %s\n", dst_offset, relative_to, src_reg_string);
+        }
     } else {
         sb_append(&cg->code, "   mov\t\t%d[%s], %s\n", dst_offset, relative_to, src_reg_string);
     }
@@ -806,6 +809,15 @@ void MOV_ADDR_ADDR(CodeGenerator *cg, int dst_addr, Type *dst_type, int src_addr
     }
 }
 
+char *get_argument_register_from_index(int index) {
+    if (index == 0) return "rcx";
+    if (index == 1) return "rdx";
+    if (index == 2) return "r8";
+    if (index == 3) return "r9";
+
+    XXX;
+}
+
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     cg->enclosing_function = func_defn;
 
@@ -813,6 +825,10 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
         sb_append(&cg->code_header, "   extern %s\n", func_defn->identifier->name);
         return;
     }
+
+    // Align local and temporary storage to 8 byte
+    func_defn->num_bytes_locals      = align_value(func_defn->num_bytes_locals, 8);
+    func_defn->num_bytes_temporaries = align_value(func_defn->num_bytes_temporaries, 8);
 
     int bytes_locals      = func_defn->num_bytes_locals;
     int bytes_temporaries = func_defn->num_bytes_temporaries; // We need twice the amount of space for arguments as we also need temporary space for them while popping arguments in a function call
@@ -839,6 +855,34 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
         sb_append(&cg->code, "   mov\t\t-8[rbp], rcx\t; Return 0\n");
     }
 
+    // Save big struct parameters into the shadow-space as we will be doing a memcpy that will override our input registers
+    bool is_arguments_in_shadow_space = false;
+
+    // Search for a big argument
+    for (int i = 0; i < func_defn->parameters.count; i++) {
+        AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
+        
+        if (i == 5) break; // None of the arguments were big
+
+        if (param->type->size > 8) {
+            is_arguments_in_shadow_space = true;
+            break;
+        }
+    }
+
+    if (is_arguments_in_shadow_space) {
+        for (int i = 0; i < func_defn->parameters.count; i++) {
+            int arg_index = i + num_large_return_values;
+
+            if (arg_index > 3) break;
+
+            int   save_address  = 16 + (arg_index * 8); // 16 bytes for push rbp and return address
+            char *save_register = get_argument_register_from_index(arg_index);
+
+            sb_append(&cg->code, "   mov\t\t%d[rbp], %s \t; Save arg %d \n", save_address, save_register, i);
+        }
+    }
+
     // Move arguments to this function into their home addresses
     for (int i = 0; i < func_defn->parameters.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
@@ -846,16 +890,20 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
         
         // Bump the base pointer down
         cg->enclosing_function->base_ptr -= param_type->size;
-        cg->enclosing_function->base_ptr = align_value(cg->enclosing_function->base_ptr, param_type->size);
+
+        // Align base pointer
+        cg->enclosing_function->base_ptr = align_value(cg->enclosing_function->base_ptr, param_type->size > 8 ? 8 : param_type->size);
         
         // Assign the offset to the parameter
-        int param_offset = cg->enclosing_function->base_ptr;
-        param->ident->stack_offset = param_offset;
+        param->ident->stack_offset = cg->enclosing_function->base_ptr;
+        int param_offset = param->ident->stack_offset;
         
         int arg_index = i;
 
         // Shift the args by the number of hidden return parameters
         arg_index += num_large_return_values;
+
+        sb_append(&cg->code, "   ; Copy %s -> %d\n", param->ident->name, param_offset);
 
         Register arg_reg = 0;
         if (arg_index < 4) {
@@ -872,28 +920,30 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
             }
             assert(arg_reg != 0);
 
-        } else {
-            // Argument was passed on the stack and can be found at rbp+48 and above
-            int arg_base_offset = 48;   // shadow-space=32, func call=8, push rbp=8
-            int arg_offset = arg_base_offset + (arg_index - 4) * 8;
-            sb_append(&cg->code, "   mov\t\trax, [rbp+%d]\n", arg_offset);
+        } 
 
-            arg_reg = REG_RAX;
-        }
+        int arg_address = 16 + (arg_index * 8);
 
         if (param->type->size <= 8) {
-            MOV_ADDR_REG(cg, param_offset, RBP, arg_reg, param_type);
+            if (is_arguments_in_shadow_space || arg_index >= 4) {
+                sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", arg_address);
+                MOV_ADDR_REG(cg, param_offset, RBP, REG_RAX, param_type);
+            } else {
+                MOV_ADDR_REG(cg, param_offset, RBP, arg_reg, param_type);
+            }
         } else {
-            // Argument was passed by reference. Copy the data pointed to by the register
-            if (param->type->kind == TYPE_STRUCT) {
-                sb_append(&cg->code, "   ; Copy %s -> %d\n", param->ident->name, param_offset);
+            // Argument was passed by reference and stored in the shadow space.
+            if (is_arguments_in_shadow_space || arg_index >= 4) {
+                sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", arg_address);
+            } else {
                 sb_append(&cg->code, "   mov\t\trax, %s\n", register_string(arg_reg, 8));
+            }
+
+            if (param->type->kind == TYPE_STRUCT) {
                 sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", param_offset);
                 emit_copy_struct(cg, (TypeStruct *)param->type, 0, 0);
-                
             } else if (param->type->kind == TYPE_ARRAY) {
                 TypeArray *array = (TypeArray *) param->type;
-                sb_append(&cg->code, "   mov\t\trax, %s\n", register_string(arg_reg, 8));
                 sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", param_offset);
                 emit_copy_struct(cg, array->struct_defn, 0, 0);
             } else {
@@ -1823,12 +1873,13 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
 
     int *base_ptr = &cg->enclosing_function->base_ptr;
 
-    *base_ptr                -= decl->type->size;
-    decl->ident->stack_offset = *base_ptr;
+    // Bump down the base pointer
+    *base_ptr -= decl->type->size;
 
-    // Align the base ptr for the next declaration
+    // Align the base ptr
     *base_ptr = align_value(*base_ptr, decl->type->size > 8 ? 8 : decl->type->size);
 
+    decl->ident->stack_offset = *base_ptr;
 
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; Ln %d: $%s : %s = %d\n", decl->ident->head.start.line, decl->ident->name, type_to_str(decl->type), decl->ident->stack_offset);

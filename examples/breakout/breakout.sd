@@ -16,6 +16,11 @@ Rectangle :: struct {
     height: float;
 }
 
+Vector2 :: struct {
+    x: float;
+    y: float;
+}
+
 KeyboardKey :: enum {
     NULL            = 0,        // Key: NULL, used for no key pressed
     // Alphanumeric keys
@@ -184,9 +189,10 @@ BALL_SIZE :: 20;
 BRICK_WIDTH  :: 80;
 BRICK_HEIGHT :: 20;
 BRICK_PADDING :: 15;
-
 BRICK_ROWS :: 8;
 BRICK_COLS :: 11;
+
+BAR_START_WIDTH :: 200;
 
 TOP_MARGIN :: 80;
 
@@ -217,10 +223,10 @@ Ball :: struct {
 
 get_ball_rect :: (ball: Ball) -> Rectangle {
     return {
-        ball.x,
-        ball.y,
-        ball.size,
-        ball.size,
+        x = ball.x,
+        y = ball.y,
+        width = ball.size,
+        height = ball.size,
     };
 }
 
@@ -256,10 +262,10 @@ main :: () {
     };
 
     bar := Bar{
-        x = 160.0,
-        y = 15.0,
-        width = 200,
-        height = 40,
+        x = window_width * 0.5 - BAR_START_WIDTH * 0.5,
+        y = window_height - 70,
+        width = BAR_START_WIDTH,
+        height = 20,
         vel_x = 0,
         speed = 400,
     };
@@ -306,10 +312,10 @@ main :: () {
         next_ball := ball;
         next_ball.x = ball.x + ball.vel_x * dt;
         next_ball.y = ball.y + ball.vel_y * dt;
-
+        
         next_bar  := bar;
         next_bar.x = bar.x + bar.vel_x * dt;
-
+        
         // Collisions ball and walls
         if next_ball.x < 0 || next_ball.x + next_ball.size > window_width {
             ball.vel_x = -ball.vel_x;
@@ -320,15 +326,16 @@ main :: () {
         }
 
         // Collision ball and bar
-        ball_rect := get_ball_rect(ball);
-        bar_rect  := get_bar_rect(bar);
+        next_ball_rect := get_ball_rect(next_ball);
+        next_bar_rect  := get_bar_rect(next_bar);
 
-        collides := CheckCollisionRecs(ball_rect, bar_rect);
+        collides := CheckCollisionRecs(next_ball_rect, next_bar_rect);
         if collides {
 
             // Determine which way the ball should go based on how much its stuck
             // within the bar
-            overlap := calculate_overlap(ball, bar, { ball.vel_x, ball.vel_y });
+            vel := Vector2{ ball.vel_x, ball.vel_y };
+            overlap := calculate_overlap(next_ball_rect, next_bar_rect, vel);
 
             // Adjust direction and position of the ball to make it unstuck
             if overlap.x < overlap.y {
@@ -366,7 +373,7 @@ main :: () {
         DrawRectangle(xx ball.x, xx ball.y, xx ball.size, xx ball.size, COLOR_WHITE);
         
         // Draw the bar
-        DrawRectangle(xx bar.x, xx bar_y, xx bar.width, xx bar.height, COLOR_WHITE);
+        DrawRectangle(xx bar.x, xx bar.y, xx bar.width, xx bar.height, COLOR_WHITE);
 
         DrawFPS(window_width - 100, 16);
         DrawText(text, xx (window_width * 0.5 - text_len * 0.5), 24, 24, COLOR_WHITE);
@@ -393,4 +400,4 @@ calculate_overlap :: (a: Rectangle, b: Rectangle, velocity: Vector2) -> Vector2 
     }
 
     return overlap;
-}   
+}

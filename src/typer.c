@@ -1033,6 +1033,10 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     if (!return_type) return NULL;
     func_defn->return_type = return_type;
 
+    // Mark the function as fully typed, when we have typechecked the function signature
+    // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again ...
+    func_defn->head.flags |= AST_FLAG_TYPE_IS_RESOLVED;
+
     typer->current_scope = func_defn->body;
 
     bool ok = check_block(typer, func_defn->body);
@@ -1054,9 +1058,6 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         report_error_ast(typer->parser, LABEL_NOTE, (Ast *)func_defn, "Put an explicit return at the outer scope of the function. In the future we should be able to detect nested returns");
         return NULL;
     }
-
-    // Mark the function as fully typed
-    func_defn->head.flags |= AST_FLAG_TYPE_IS_RESOLVED;
 
     //
     // Do sizing for parameters

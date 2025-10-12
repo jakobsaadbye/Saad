@@ -1,29 +1,34 @@
-foozle :: () -> string {
-    return "Foozle doozle, your **** is now a noodle!";
+Ball :: struct {
+    x:      float;
+    y:      float;
+    size:   float;
+    vel_x:  float;
+    vel_y:  float;
 }
 
-doozle :: () -> int {
-    return 5;
+Vector2 :: struct {
+	x: float;
+    y: float;
 }
 
-zoozle :: () -> bool {
-    return true;
-}
-
-snoozle :: () -> float {
-    f : f32 = 1234.45678;
-    return f;
-}
-
-boozle :: () -> *int {
-    a := 10;
-    return &a;
+Rectangle :: struct {
+	x:      float;
+    y:      float;
+    width:  float;
+    height: float;
 }
 
 main :: () {
-    // assert(foozle() == "Foozle doozle, your **** is now a noodle!");
-    assert(doozle() == 5);
-    assert(zoozle() == true);
-    assert(snoozle() == 1234.45678);
-    assert(*boozle() == 10); // Should actually fail once we do functions properly!
+    result := nightmare_func({200, 400, 20, 10}, {300, 500, 40, 5}, 5, {5, 5}, 2.5, {333, 555, 69, 420});
+    print("%", result);
+}
+
+nightmare_func :: (a: Rectangle, b: Rectangle, c: int, d: Vector2, e: f64, f: Rectangle) -> int {
+    print("%", a);
+    print("%", b);
+    print("%", c);
+    print("%", d);
+    print("%", e);
+    print("%", f);
+    return c;
 }
