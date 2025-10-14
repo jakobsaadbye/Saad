@@ -1,6 +1,8 @@
 //////////////////////////////////////////////////////////////////////////////////////
-//  Raylib library functions
+//  Raylib.h
 //////////////////////////////////////////////////////////////////////////////////////
+
+PI :: 3.14159265358979323846;
 
 Color :: struct {
     r: u8;
@@ -150,8 +152,9 @@ DrawText :: (text: string, posX: int, posY: int, fontSize: int, color: Color) #e
 // DrawTextCodepoints :: (Font font, const int *codepoints, int count, Vector2 position, float fontSize, float spacing, Color tint); // Draw multiple character (codepoint)
 
 // Basic shapes drawing functions
-DrawCircle    :: (centerX: int, centerY: int, radius: float, color: Color) #extern "C"
-DrawRectangle :: (posX: int, posY: int, width: int, height: int, color: Color) #extern "C"
+DrawCircle        :: (centerX: int, centerY: int, radius: float, color: Color) #extern "C"
+DrawRectangle     :: (posX: int, posY: int, width: int, height: int, color: Color) #extern "C"
+DrawRectangleRec  :: (rec: Rectangle, color: Color) #extern "C"
 
 // Basic shapes collision detection functions
 CheckCollisionRecs :: (rec1: Rectangle, rec2: Rectangle) -> bool #extern "C"                                           // Check collision between two rectangles
@@ -168,6 +171,7 @@ GetTime      :: () -> f64 #extern "C"
 IsKeyPressed  :: (key: KeyboardKey) -> bool #extern "C"
 IsKeyDown     :: (key: KeyboardKey) -> bool #extern "C"
 GetKeyPressed :: () -> KeyboardKey #extern "C"
+GetMousePosition :: () -> Vector2 #extern "C"
 
 //////////////////////////////////////////////////////////////////////////////////////
 
@@ -176,6 +180,14 @@ GetKeyPressed :: () -> KeyboardKey #extern "C"
 //  C math.h functions
 //////////////////////////////////////////////////////////////////////////////////////
 round :: (value: f64) -> f64 #extern "C"
+sin   :: (angle: f64) -> f64 #extern "C"
+cos   :: (angle: f64) -> f64 #extern "C"
+sqrt  :: (value: f64) -> f64 #extern "C"
+
+//////////////////////////////////////////////////////////////////////////////////////
+//  C stdlib functions
+//////////////////////////////////////////////////////////////////////////////////////
+sprintf :: (str: *u8, format: *u8, arg0: int) -> int #extern "C"
 
 
 
@@ -184,7 +196,7 @@ round :: (value: f64) -> f64 #extern "C"
 
 //////////////////////////////////////////////////////////////////////////////////////
 
-BALL_SIZE :: 20;
+BALL_SIZE :: 16;
 
 BRICK_WIDTH  :: 80;
 BRICK_HEIGHT :: 20;
@@ -192,7 +204,7 @@ BRICK_PADDING :: 15;
 BRICK_ROWS :: 8;
 BRICK_COLS :: 11;
 
-BAR_START_WIDTH :: 200;
+BAR_START_WIDTH :: 160;
 
 TOP_MARGIN :: 80;
 
@@ -208,9 +220,6 @@ Bar :: struct {
     y:      float;
     width:  float;
     height: float;
-    vel_x:  float;
-    speed:  float;
-
 }
 
 Ball :: struct {
@@ -250,30 +259,46 @@ main :: () {
 
     SetTargetFPS(90);
 
-    text := "Super Breakout";
-    text_len := MeasureText(text, 24);
+    game_title := "Super Breakout";
+    game_title_len := MeasureText(game_title, 24);
 
     ball := Ball{
         x = window_width * 0.5,
         y = window_height * 0.5,
         size = BALL_SIZE,
-        vel_x = 400.0,
-        vel_y = 400.0,
+        vel_x = 500.0,
+        vel_y = 500.0,
     };
 
     bar := Bar{
         x = window_width * 0.5 - BAR_START_WIDTH * 0.5,
         y = window_height - 70,
         width = BAR_START_WIDTH,
-        height = 20,
-        vel_x = 0,
-        speed = 400,
+        height = 15,
     };
 
-    bricks : [BRICK_ROWS * BRICK_COLS] Brick;
+    dead_zone := Rectangle{0, bar.y + bar.height, xx window_width, window_height - bar.y - bar.height};
 
+    score := 0;
+    score_text: [16]u8;
+
+    brick_colors : [BRICK_ROWS] Color = [
+        {195, 82, 123, 255},
+        {207, 68, 69, 255},
+        {198, 99, 49, 255},
+        {203, 159, 9, 255},
+        {61, 157, 57, 255},
+        {52, 60, 210, 255},
+        {116, 65, 209, 255},
+        {3, 184, 187, 255},
+    ];
+
+    
     // Initiate the bricks
+    bricks: [BRICK_ROWS * BRICK_COLS] Brick;
+
     brick_row_width := (BRICK_WIDTH + BRICK_PADDING) * BRICK_COLS - 1;
+
     for row in 0..BRICK_ROWS {
         for col in 0..BRICK_COLS {
             index := row * BRICK_COLS + col;
@@ -281,7 +306,7 @@ main :: () {
             x := (BRICK_WIDTH + BRICK_PADDING)  * col + (window_width / 2) - (brick_row_width / 2);
             y := (BRICK_HEIGHT + BRICK_PADDING) * row + TOP_MARGIN;
 
-            color := Color{33, 186, 10, 255};
+            color := brick_colors[row];
 
             brick := Brick{
                 x = x,
@@ -294,27 +319,38 @@ main :: () {
         }
     }
 
+    // Math for bouncing the ball with the bar at a certain angle
+    ANGLE_MIN := degree_to_radians(20.0);
+    ANGLE_MAX := degree_to_radians(160.0);
+
+
     while !WindowShouldClose() {
 
         dt := GetFrameTime();
 
+        //
         // Input
-        bar.vel_x = 0;
+        //
 
-        if IsKeyDown(.A) || IsKeyDown(.LEFT) {
-            bar.vel_x -= bar.speed;
+        mouse_pos := GetMousePosition();
+
+        bar.x = mouse_pos.x - bar.width * 0.5;
+
+        if bar.x < 0 {
+            bar.x = 0;
         }
-        if IsKeyDown(.D) || IsKeyDown(.RIGHT) {
-            bar.vel_x += bar.speed;
+        if bar.x > window_width - bar.width {
+            bar.x = xx window_width - bar.width;
         }
 
-        // Simulate the next ball and bar position
+        //
+        // Hit detection
+        //
+
+        // Simulate the next ball position
         next_ball := ball;
         next_ball.x = ball.x + ball.vel_x * dt;
         next_ball.y = ball.y + ball.vel_y * dt;
-        
-        next_bar  := bar;
-        next_bar.x = bar.x + bar.vel_x * dt;
         
         // Collisions ball and walls
         if next_ball.x < 0 || next_ball.x + next_ball.size > window_width {
@@ -326,40 +362,63 @@ main :: () {
         }
 
         // Collision ball and bar
-        next_ball_rect  := get_ball_rect(next_ball);
-        next_bar_rect  := get_bar_rect(next_bar);
+        next_ball_rect := get_ball_rect(next_ball);
+        bar_rect       := get_bar_rect(bar);
 
-        if CheckCollisionRecs(next_ball_rect, next_bar_rect) {
-            bounce_ball(&ball, next_bar_rect);
+        if CheckCollisionRecs(next_ball_rect, bar_rect) {
+
+            // The outbound angle of the ball when hitting the bar, follows that of a half circle.
+            // If the ball hits the far left of the bar, the out angle is 20 degree
+            // If the ball hits the far right of the bar, the out angle is 160 degree
+            // Everything in between, we lerp between those two angles, hence, if the ball hits
+            // the middle of the bar, the ball will go straight up in a 90 degree angle
+            dx := next_ball_rect.x + next_ball_rect.width * 0.5 - bar_rect.x;
+
+            t := dx / bar_rect.width;
+
+            // Clamp t
+            if t < 0 { t = 0; }
+            if t > 1.0 { t = 1.0; }
+
+            theta := lerp(ANGLE_MIN, ANGLE_MAX, t);
+
+            direction_vector := Vector2{
+                x = - xx cos(xx theta),
+                y = - xx sin(xx theta),
+            };
+
+            speed := cast(f32) sqrt(ball.vel_x*ball.vel_x + ball.vel_y*ball.vel_y);
+
+            ball.vel_x = direction_vector.x * speed;
+            ball.vel_y = direction_vector.y * speed;
         }
 
         // Collision ball and bricks
-        // next_ball_rect = get_ball_rect(next_ball);
+        next_ball_rect = get_ball_rect(next_ball);
+        
+        for row in 0..BRICK_ROWS {
+            for col in 0..BRICK_COLS {
+                index := row * BRICK_COLS + col;
+                brick := &bricks[index];
 
-        // for row in 0..BRICK_ROWS {
-        //     for col in 0..BRICK_COLS {
-        //         index := row * BRICK_COLS + col;
-        //         brick := &bricks[index];
+                if brick.dead { continue; } // mehhhh
 
-        //         brick_rect := Rectangle{xx brick.x, xx brick.y, BRICK_WIDTH, BRICK_HEIGHT};
-        //         if CheckCollisionRecs(next_ball_rect, brick_rect) {
-
-        //             overlap := calculate_ball_and_rectangle_overlap(next_ball_rect, brick_rect, { ball.vel_x, ball.vel_y });
-
-        //             brick.dead = true;
-        //         }
-        //     }
-        // }
-
-        // Collision bar and walls
-        if next_bar.x < 0 || next_bar.x + bar.width > window_width {
-            bar.vel_x = 0;
+                brick_rect := Rectangle{xx brick.x, xx brick.y, BRICK_WIDTH, BRICK_HEIGHT};
+                if CheckCollisionRecs(next_ball_rect, brick_rect) {
+                    bounce_ball(&ball, brick_rect);
+                    brick.dead = true;
+                    score     += 100;
+                    break;
+                }
+            }
         }
+
+        // Collision ball and dead zone
+        
 
         // Do position updates
         ball.x += ball.vel_x * dt;
         ball.y += ball.vel_y * dt;
-        bar.x  += bar.vel_x * dt;
 
 
         //
@@ -384,7 +443,18 @@ main :: () {
         DrawRectangle(xx bar.x, xx bar.y, xx bar.width, xx bar.height, COLOR_WHITE);
 
         DrawFPS(window_width - 100, 16);
-        DrawText(text, xx (window_width * 0.5 - text_len * 0.5), 24, 24, COLOR_WHITE);
+
+        // Draw title
+        DrawText(game_title, xx (window_width * 0.5 - game_title_len * 0.5), 24, 24, COLOR_WHITE);
+        
+        // Draw score
+        sprintf(score_text.data, xx "Score: %d", score);
+        DrawText(xx score_text.data, 20, 24, 24, COLOR_WHITE);
+
+
+
+        
+        // DrawRectangleRec(dead_zone, {255, 0, 0, 30});
 
         EndDrawing();
     }
@@ -392,11 +462,18 @@ main :: () {
     CloseWindow();
 }
 
+degree_to_radians :: (deg: f32) -> f32 {
+    return deg * (PI / 180.0);
+}
+
+lerp :: (a: f32, b: f32, t: f32) -> f32 {
+    return a + (b - a) * t;
+}
+
 bounce_ball :: (ball: *Ball, b: Rectangle) {
 
-    a := get_ball_rect(*ball);
-
     overlap := Vector2{};
+    a       := get_ball_rect(*ball);
 
     // Figure out how much we overlap with the rectangle
     if ball.vel_x > 0 {
@@ -419,6 +496,4 @@ bounce_ball :: (ball: *Ball, b: Rectangle) {
         ball.vel_y = -ball.vel_y;
         ball.y    += overlap.y;
     }
-
-    print("%", ball);
 }

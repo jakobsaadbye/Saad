@@ -112,8 +112,8 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
 
 
     if (output_to_console) {
-        exit_code = system(".\\build\\out.exe");
         print_compiler_report(report);
+        exit_code = system(".\\build\\out.exe");
     } else {
         exit_code = system(".\\build\\out.exe >nul");
     }

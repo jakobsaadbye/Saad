@@ -1842,6 +1842,19 @@ bool can_cast_explicitly(Type *from, Type *to) {
 
     if (from->kind == TYPE_POINTER && to->kind == TYPE_INTEGER) return true;    // address to a u64 number
     if (from->kind == TYPE_POINTER && to->kind == TYPE_BOOL) return true;       // null pointer = false, otherwise = true
+    if (from->kind == TYPE_POINTER && to->kind == TYPE_STRING) {
+        TypePointer *from_ptr = (TypePointer *)from;
+        if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_U8) {
+            return true;     // allow string to *u8
+        }
+    }
+
+    if (from->kind == TYPE_STRING && to->kind == TYPE_POINTER) {
+        TypePointer *to_ptr = (TypePointer *)to;
+        if (to_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)to_ptr->pointer_to)->kind == PRIMITIVE_U8) {
+            return true;     // allow string to *u8
+        }
+    }
 
     return false;
 }

@@ -936,7 +936,7 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
 
 
     //
-    //  Follows the casting rules defined in can_cast_explicitly()
+    // @Note: This should follow the exact casting rules defined in typer.c "can_cast_explicitly()""
     //
 
     // Int -> X
@@ -1010,6 +1010,20 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
         sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(to), REG_A(to));
         PUSH(RAX);
         return;
+    }
+
+    if (from->kind == TYPE_POINTER && to->kind == TYPE_STRING) {
+        TypePointer *from_ptr = (TypePointer *)from;
+        if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_U8) {
+            return; // handled
+        }
+    }
+
+    if (from->kind == TYPE_STRING && to->kind == TYPE_POINTER) {
+        TypePointer *to_ptr = (TypePointer *)to;
+        if (to_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)to_ptr->pointer_to)->kind == PRIMITIVE_U8) {
+            return; // handled
+        }
     }
 
 

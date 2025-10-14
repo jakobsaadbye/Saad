@@ -15,9 +15,11 @@ main :: () {
         vel_y = 400.0,
     };
 
-    ball_ptr := &ball;
+    update_ball(&ball);
 
-    ball_ptr.vel_y += 30;
+    print("ball %", ball);
+}
 
-    print("%", ball);
+update_ball :: (ball: *Ball) {
+    ball.vel_y += 30;
 }
