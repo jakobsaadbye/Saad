@@ -7,6 +7,19 @@ TODO:
   - Passing arrays to functions (Can we make it interopable with C without any modifications?)
 
 
+BUG FIXES:
+-------------------
+
+- Doing assignment to array member through a member access causes a crash
+
+  Repro:
+
+  ps.pickups[ps.free_index]
+
+  I think we are overriding rbx when doing the member offset calculation. We should do this differently!
+
+
+
 
 Later:
 -------------

@@ -1595,7 +1595,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
 
             if (!types_are_equal(member_type, value_type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->ident->name, type_to_str(member_type), type_to_str(value_type));
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(member), "Here is the member '%s' in %s", member->ident->name, struct_defn->identifier->name);
                 return NULL;
             }
 

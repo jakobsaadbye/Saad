@@ -479,11 +479,12 @@ typedef struct Type {
 typedef enum PrimitiveKind {
     PRIMITIVE_INVALID,
 
-    PRIMITIVE_INT, // alias for s32
+    PRIMITIVE_UINT, // alias for u32
     PRIMITIVE_U8,
     PRIMITIVE_U16,
     PRIMITIVE_U32,
     PRIMITIVE_U64,
+    PRIMITIVE_INT, // alias for s32
     PRIMITIVE_S8,
     PRIMITIVE_S16,
     PRIMITIVE_S32,

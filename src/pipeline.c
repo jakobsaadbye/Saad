@@ -1,6 +1,7 @@
 #include <time.h>
 #include <stdio.h>
 #include "code_generator.c"
+#include "lib/file.c"
 
 #ifdef __APPLE__
     #include <sys/uio.h>
@@ -60,6 +61,22 @@ void reset_stdout(void) {
 
 #define return_and_cleanup { reset_stdout(); return false; }
 
+void output_generated_code_to_file(CodeGenerator *cg, const char *output_path) {
+    FILE *f = fopen(output_path, "w");
+    if (f == NULL) {
+        printf("%s:%d: error: Failed to open file '%s'\n", __FILE__, __LINE__, output_path);
+        exit(1);
+    }
+
+    fwrite(cg->head.buffer, 1, cg->head.cursor, f);
+    fwrite(cg->data.buffer, 1, cg->data.cursor, f);
+    fwrite(cg->code_header.buffer, 1, cg->code_header.cursor, f);
+    fwrite("\n", 1, 1, f);
+    fwrite(cg->code.buffer, 1, cg->code.cursor, f);
+
+    fclose(f);
+}
+
 bool send_through_pipeline(char *program, const char *program_path, bool output_to_console) {
     CompilerReport report = {0};
 
@@ -99,8 +116,11 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
 
     report.codegen_time_start = clock();
     CodeGenerator cg = code_generator_init(&parser);
-    go_nuts(&cg, code);
-    code_generator_dump(&cg, "./build/out.asm");
+    begin_emit_code(&cg, code);
+
+    make_directory("build");
+
+    output_generated_code_to_file(&cg, "./build/out.asm");
     report.codegen_time_end = clock();
 
     report.asm_and_link_time_start = clock();

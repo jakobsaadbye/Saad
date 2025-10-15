@@ -372,7 +372,7 @@ Type *parse_type(Parser *parser) {
     if (is_primitive_type_token(next)) {
         eat_token(parser);
         TypePrimitive *ti = type_alloc(&parser->type_table, sizeof(TypePrimitive));
-        TypePrimitive *primitive = &primitive_types[(next.type - TOKEN_TYPE_INT) + 1]; // +1 to skip over invalid kind
+        TypePrimitive *primitive = &primitive_types[(next.type - TOKEN_TYPE_UINT) + 1]; // +1 to skip over invalid kind
         memcpy(ti, primitive, sizeof(TypePrimitive));
         ti->head.head.kind  = AST_TYPE;
         ti->head.head.start = next.start;
@@ -1962,7 +1962,7 @@ bool is_type_specifier(Token token) {
 }
 
 bool is_primitive_type_token(Token token) {
-    return (token.type >= TOKEN_TYPE_INT && token.type <= TOKEN_TYPE_VOID);
+    return (token.type >= TOKEN_TYPE_UINT && token.type <= TOKEN_TYPE_VOID);
 }
 
 bool is_assignment_operator(Token token) {

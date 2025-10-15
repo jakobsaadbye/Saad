@@ -87,11 +87,12 @@ typedef enum TokenType {
     TOKEN_ENUM    = 181,
 
     // @Important!!! - Order should follow PrimitiveKind order
-    TOKEN_TYPE_INT = 185,
+    TOKEN_TYPE_UINT = 185,
     TOKEN_TYPE_U8,
     TOKEN_TYPE_U16,
     TOKEN_TYPE_U32,
     TOKEN_TYPE_U64,
+    TOKEN_TYPE_INT,
     TOKEN_TYPE_S8,
     TOKEN_TYPE_S16,
     TOKEN_TYPE_S32,

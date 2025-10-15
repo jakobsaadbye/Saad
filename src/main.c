@@ -1,7 +1,6 @@
 #define DEBUG
 
 #include "pipeline.c"
-#include "lib/file.c"
 
 int main(int argc, char const *argv[]) {
     if (argc < 2) { 

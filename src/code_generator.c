@@ -34,7 +34,7 @@ typedef struct MemberAccessResult {
     bool is_runtime_computed;
 } MemberAccessResult;
 
-void go_nuts(CodeGenerator *cg, AstCode *code);
+void emit_code(CodeGenerator *cg, AstCode *code);
 void emit_builtin_functions(CodeGenerator *cg);
 void emit_header(CodeGenerator *cg);
 void emit_footer(CodeGenerator *cg);
@@ -121,7 +121,7 @@ CodeGenerator code_generator_init(Parser *parser) {
     return cg;
 }
 
-void go_nuts(CodeGenerator *cg, AstCode *code) {
+void begin_emit_code(CodeGenerator *cg, AstCode *code) {
     check_main_exists(cg);
     emit_header(cg);
     emit_code(cg, code);
@@ -133,22 +133,6 @@ void check_main_exists(CodeGenerator *cg) {
         printf("Error: Missing function 'main' as entry-point to the program\n");
         exit(1);
     }
-}
-
-void code_generator_dump(CodeGenerator *cg, const char *output_path) {
-    FILE *f = fopen(output_path, "w");
-    if (f == NULL) {
-        printf("%s:%d: error: Failed to open file '%s'\n", __FILE__, __LINE__, output_path);
-        exit(1);
-    }
-
-    fwrite(cg->head.buffer, 1, cg->head.cursor, f);
-    fwrite(cg->data.buffer, 1, cg->data.cursor, f);
-    fwrite(cg->code_header.buffer, 1, cg->code_header.cursor, f);
-    fwrite("\n", 1, 1, f);
-    fwrite(cg->code.buffer, 1, cg->code.cursor, f);
-
-    fclose(f);
 }
 
 void emit_header(CodeGenerator *cg) {

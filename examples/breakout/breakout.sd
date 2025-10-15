@@ -23,6 +23,24 @@ Vector2 :: struct {
     y: float;
 }
 
+// Image, pixel data stored in CPU memory (RAM)
+Image :: struct {
+    data: *void;             // Image raw data
+    width: int;              // Image base width
+    height: int;             // Image base height
+    mipmaps: int;            // Mipmap levels, 1 by default
+    format: int;             // Data format (PixelFormat type)
+}
+
+// Texture, tex data stored in GPU memory (VRAM)
+Texture :: struct {
+    id:      uint;        // OpenGL texture id
+    width:   int;         // Texture base width
+    height:  int;         // Texture base height
+    mipmaps: int;         // Mipmap levels, 1 by default
+    format:  int;         // Data format (PixelFormat type)
+}
+
 KeyboardKey :: enum {
     NULL            = 0,        // Key: NULL, used for no key pressed
     // Alphanumeric keys
@@ -135,6 +153,16 @@ KeyboardKey :: enum {
     KP_EQUAL        = 336,      // Key: Keypad =
 }
 
+// Image loading functions
+// NOTE: These functions do not require GPU access
+LoadImage :: (fileName: string) -> Image #extern "C"
+
+// Texture loading functions
+// NOTE: These functions require GPU access
+LoadTexture          :: (fileName: string) -> Texture #extern "C"
+UnloadTexture        :: (texture: Texture) #extern "C"
+LoadTextureFromImage :: (image: Image) -> Texture #extern "C"
+
 // Window-related functions
 InitWindow        :: (width: int, height: int, title: string) #extern "C"
 CloseWindow       :: () #extern "C"
@@ -143,18 +171,21 @@ BeginDrawing      :: () #extern "C"
 EndDrawing        :: () #extern "C"
 ClearBackground   :: (color: Color) #extern "C"
 
-// Text drawing functions
+// Drawing functions
 DrawFPS  :: (posX: int, posY: int) #extern "C"                                                  // Draw current FPS
 DrawText :: (text: string, posX: int, posY: int, fontSize: int, color: Color) #extern "C"       // Draw text (using default font)
 // DrawTextEx :: (Font font, const char *text, Vector2 position, float fontSize, float spacing, Color tint); // Draw text using font and additional parameters
 // DrawTextPro :: (Font font, const char *text, Vector2 position, Vector2 origin, float rotation, float fontSize, float spacing, Color tint); // Draw text using Font and pro parameters (rotation)
 // DrawTextCodepoint :: (Font font, int codepoint, Vector2 position, float fontSize, Color tint); // Draw one character (codepoint)
 // DrawTextCodepoints :: (Font font, const int *codepoints, int count, Vector2 position, float fontSize, float spacing, Color tint); // Draw multiple character (codepoint)
+DrawTexture :: (texture: Texture, posX: int, posY: int, tint: Color) #extern "C"
 
 // Basic shapes drawing functions
-DrawCircle        :: (centerX: int, centerY: int, radius: float, color: Color) #extern "C"
-DrawRectangle     :: (posX: int, posY: int, width: int, height: int, color: Color) #extern "C"
-DrawRectangleRec  :: (rec: Rectangle, color: Color) #extern "C"
+DrawCircle           :: (centerX: int, centerY: int, radius: float, color: Color) #extern "C"
+DrawRectangle        :: (posX: int, posY: int, width: int, height: int, color: Color) #extern "C"
+DrawRectangleRec     :: (rec: Rectangle, color: Color) #extern "C"
+DrawRectangleLines   :: (posX: int, posY: int, width: int, height: int, color: Color) #extern "C"
+DrawRectangleLinesEx :: (rec: Rectangle, lineThick: float, color: Color) #extern "C"
 
 // Basic shapes collision detection functions
 CheckCollisionRecs :: (rec1: Rectangle, rec2: Rectangle) -> bool #extern "C"                                           // Check collision between two rectangles
@@ -172,6 +203,12 @@ IsKeyPressed  :: (key: KeyboardKey) -> bool #extern "C"
 IsKeyDown     :: (key: KeyboardKey) -> bool #extern "C"
 GetKeyPressed :: () -> KeyboardKey #extern "C"
 GetMousePosition :: () -> Vector2 #extern "C"
+
+// Files management functions
+GetWorkingDirectory :: () -> string #extern "C"
+
+// Misc. functions
+GetRandomValue :: (min: int, max: int) -> int #extern "C"
 
 //////////////////////////////////////////////////////////////////////////////////////
 
@@ -197,16 +234,14 @@ sprintf :: (str: *u8, format: *u8, arg0: int) -> int #extern "C"
 //////////////////////////////////////////////////////////////////////////////////////
 
 BALL_SIZE :: 16;
-
 BRICK_WIDTH  :: 80;
 BRICK_HEIGHT :: 20;
 BRICK_PADDING :: 15;
 BRICK_ROWS :: 8;
 BRICK_COLS :: 11;
-
 BAR_START_WIDTH :: 160;
-
 TOP_MARGIN :: 80;
+PICKUP_SPAWN_CHANCE :: 20;
 
 Brick :: struct {
     x:     int;
@@ -229,6 +264,34 @@ Ball :: struct {
     vel_x:  float;
     vel_y:  float;
 }
+
+Player :: struct {
+    score: int;
+    lives: int;
+}
+
+PickupType :: enum {
+    BALL_SPEED_UP,
+    BALL_SLOW_DOWN,
+    FIREBALL,
+    BAR_WIDEN,
+    BAR_SHORTEN,
+    COUNT,
+}
+
+Pickup :: struct {
+    type: PickupType;
+    x: float;
+    y: float;
+    vel_y: float;
+    is_shown: bool;
+}
+
+PickupSpawner :: struct {
+    pickups: [] Pickup;
+    free_index: int;
+}
+
 
 get_ball_rect :: (ball: Ball) -> Rectangle {
     return {
@@ -256,18 +319,21 @@ main :: () {
     window_height := 800;
 
     InitWindow(window_width, window_height, "Super Breakout");
-
     SetTargetFPS(90);
 
     game_title := "Super Breakout";
     game_title_len := MeasureText(game_title, 24);
 
+    heart_texture := LoadTexture("data/textures/heart.png");
+    heart_texture.width  = 24;
+    heart_texture.height = 24;
+    
     ball := Ball{
         x = window_width * 0.5,
         y = window_height * 0.5,
         size = BALL_SIZE,
-        vel_x = 500.0,
-        vel_y = 500.0,
+        vel_x = 550.0,
+        vel_y = 550.0,
     };
 
     bar := Bar{
@@ -277,9 +343,13 @@ main :: () {
         height = 15,
     };
 
+    player := Player{
+        score = 0,
+        lives = 3,
+    };
+
     dead_zone := Rectangle{0, bar.y + bar.height, xx window_width, window_height - bar.y - bar.height};
 
-    score := 0;
     score_text: [16]u8;
 
     brick_colors : [BRICK_ROWS] Color = [
@@ -293,6 +363,9 @@ main :: () {
         {3, 184, 187, 255},
     ];
 
+    // Initiate pickups
+    pickups: [16] Pickup;
+    pickup_spawner := PickupSpawner{pickups = pickups};
     
     // Initiate the bricks
     bricks: [BRICK_ROWS * BRICK_COLS] Brick;
@@ -320,9 +393,8 @@ main :: () {
     }
 
     // Math for bouncing the ball with the bar at a certain angle
-    ANGLE_MIN := degree_to_radians(20.0);
-    ANGLE_MAX := degree_to_radians(160.0);
-
+    ANGLE_MIN := degree_to_radians(15.0);
+    ANGLE_MAX := degree_to_radians(165.0);
 
     while !WindowShouldClose() {
 
@@ -407,7 +479,14 @@ main :: () {
                 if CheckCollisionRecs(next_ball_rect, brick_rect) {
                     bounce_ball(&ball, brick_rect);
                     brick.dead = true;
-                    score     += 100;
+                    player.score += 100;
+
+                    // Maybe spawn a pickup here
+                    r := GetRandomValue(0, 100);
+                    if r > 100 - PICKUP_SPAWN_CHANCE {
+                        spawn_random_pickup(&pickup_spawner, {xx brick.x, xx brick.y});
+                    }
+
                     break;
                 }
             }
@@ -433,7 +512,14 @@ main :: () {
                 continue;
             }
 
-            DrawRectangle(b.x, b.y, BRICK_WIDTH, BRICK_HEIGHT, b.color);
+            BORDER_THICKNESS :: 3;
+            border_color := b.color; 
+            border_color.a = 170;
+
+            border_rect := Rectangle{xx b.x, xx b.y, BRICK_WIDTH, BRICK_HEIGHT};
+
+            DrawRectangle(b.x + BORDER_THICKNESS, b.y + BORDER_THICKNESS, BRICK_WIDTH - 2 * BORDER_THICKNESS, BRICK_HEIGHT - 2 * BORDER_THICKNESS, b.color);
+            DrawRectangleLinesEx(border_rect, BORDER_THICKNESS, border_color);
         }
 
         // Draw the ball
@@ -445,13 +531,20 @@ main :: () {
         DrawFPS(window_width - 100, 16);
 
         // Draw title
-        DrawText(game_title, xx (window_width * 0.5 - game_title_len * 0.5), 24, 24, COLOR_WHITE);
+        // DrawText(game_title, xx (window_width * 0.5 - game_title_len * 0.5), 24, 24, COLOR_WHITE);
         
+        // Draw lives
+        for 0..player.lives {
+            pad_x := 6.0;
+            
+            pos_x := cast(int) (10.0 + (heart_texture.width + pad_x) * it);
+
+            DrawTexture(heart_texture, pos_x, 16, Color{255, 255, 255, 255});
+        }
+
         // Draw score
-        sprintf(score_text.data, xx "Score: %d", score);
-        DrawText(xx score_text.data, 20, 24, 24, COLOR_WHITE);
-
-
+        sprintf(score_text.data, xx "Score: %d", player.score);
+        DrawText(xx score_text.data, 105, 16, 24, COLOR_WHITE);
 
         
         // DrawRectangleRec(dead_zone, {255, 0, 0, 30});
@@ -459,15 +552,39 @@ main :: () {
         EndDrawing();
     }
 
+    UnloadTexture(heart_texture);
+
     CloseWindow();
 }
 
-degree_to_radians :: (deg: f32) -> f32 {
-    return deg * (PI / 180.0);
+update_pickups :: (pickups: []Pickup, delta_time: float) {
+    dt := GetFrameTime();
+
+    for i in 0..pickups.count {
+        p := &pickups[i];
+        if p.is_shown {
+            p.y += p.vel_y * dt;
+        }
+    }
 }
 
-lerp :: (a: f32, b: f32, t: f32) -> f32 {
-    return a + (b - a) * t;
+spawn_random_pickup :: (ps: *PickupSpawner, pos: Vector2) {
+    pickup_type_index := GetRandomValue(0, xx PickupType.COUNT - 1);
+
+    pickup := Pickup{
+        type = cast(PickupType) pickup_type_index,
+        x = pos.x,
+        y = pos.y,
+        vel_y = -30.0,
+        is_shown = true,
+    };
+
+    // There is a @Bug here if we try to do ps.pickups[ps.free_index] @Crash
+    free_slot := ps.free_index;
+    ps.pickups[free_slot] = pickup;
+    ps.free_index += 1;
+
+    print("Spawned pickup [%]: %", ps.free_index, pickup);
 }
 
 bounce_ball :: (ball: *Ball, b: Rectangle) {
@@ -496,4 +613,12 @@ bounce_ball :: (ball: *Ball, b: Rectangle) {
         ball.vel_y = -ball.vel_y;
         ball.y    += overlap.y;
     }
+}
+
+degree_to_radians :: (deg: f32) -> f32 {
+    return deg * (PI / 180.0);
+}
+
+lerp :: (a: f32, b: f32, t: f32) -> f32 {
+    return a + (b - a) * t;
 }
