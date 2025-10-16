@@ -1344,11 +1344,13 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
         return NULL;
     }
 
-    AstExpr *subscript = array_ac->subscript;
-    Type    *subscript_type = check_expression(typer, subscript, type_being_accessed); // @Note - passing down type_being_accessed to allow enum literals to be used
+    TypeArray *array_defn = (TypeArray *) type_being_accessed;
+
+    Type *subscript_type = check_expression(typer, array_ac->subscript, primitive_type(PRIMITIVE_U32));
     if (!subscript_type) return NULL;
+
     if (subscript_type->kind != TYPE_INTEGER && subscript_type->kind != TYPE_ENUM) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(subscript), "Array subscript must be an integer or enum type, got type %s", type_to_str(subscript_type));
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_ac->subscript), "Array subscript must be an integer or enum type, got type %s", type_to_str(subscript_type));
         return NULL;
     }
 
@@ -1358,7 +1360,7 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
         reserve_temporary_storage(typer->enclosing_function, array_ac->accessing->type->size);
     }
 
-    return ((TypeArray *)(type_being_accessed))->elem_type;
+    return array_defn->elem_type;
 }
 
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof) {
