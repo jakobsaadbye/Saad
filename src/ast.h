@@ -81,7 +81,7 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
 typedef enum AstFlags {
     AST_FLAG_COMPILER_GENERATED                    = 1 << 0,
     AST_FLAG_CG_EXPR_ASSIGNED_DIRECTLY_TO_VARIABLE = 1 << 1,
-    AST_FLAG_TYPE_IS_RESOLVED                      = 1 << 2, // Types that have this flag has gone through type checking
+    AST_FLAG_IS_TYPE_CHECKED                       = 1 << 2, // Types that have this flag has gone through type checking
 } AstFlags;
 
 typedef struct Ast {
@@ -220,19 +220,14 @@ typedef struct AstEnum {
 } AstEnum;
 
 typedef struct AstEnumerator {
-    Ast head;
-
+    Ast      head;
     AstEnum *parent;
-
     char    *name;
     AstExpr *expr;  // null if auto-incremented enum
-
     int      value; // Evaluated value set by the typer
     int      index;
-    
-    int label; // Used by print to determine how to branch to this enum value
-
-    bool     is_typechecked;
+    int      label; // Used by print to determine how to branch to this enum value
+    bool     is_typechecked; // @Deprectate!! We have the AST_FLAG_IS_TYPE_CHECKED to tell us this
 } AstEnumerator;
 
 typedef struct AstEnumLiteral {
@@ -537,6 +532,8 @@ typedef struct TypeEnum {
     AstEnum       *node;
     AstIdentifier *identifier;
     Type          *backing_type;
+    int            min_value;
+    int            max_value;
 } TypeEnum;
 
 typedef struct TypeEnumValue {

@@ -239,7 +239,7 @@ BRICK_HEIGHT :: 20;
 BRICK_PADDING :: 15;
 BRICK_ROWS :: 8;
 BRICK_COLS :: 11;
-BAR_START_WIDTH :: 160;
+BAR_START_WIDTH :: 100;
 TOP_MARGIN :: 80;
 PICKUP_SPAWN_CHANCE :: 20;
 
@@ -273,9 +273,9 @@ Player :: struct {
 PickupType :: enum {
     BALL_SPEED_UP,
     BALL_SLOW_DOWN,
-    FIREBALL,
     BAR_WIDEN,
     BAR_SHORTEN,
+    FIREBALL,
     COUNT,
 }
 
@@ -324,10 +324,29 @@ main :: () {
     game_title := "Super Breakout";
     game_title_len := MeasureText(game_title, 24);
 
+    //
+    // Textxures
+    //
     heart_texture := LoadTexture("data/textures/heart.png");
     heart_texture.width  = 24;
     heart_texture.height = 24;
-    
+
+
+    pickup_textures : [PickupType.COUNT]Texture = [
+        LoadTexture("data/textures/pickups/ball_speed_up.png"),
+        LoadTexture("data/textures/pickups/ball_slow_down.png"),
+        LoadTexture("data/textures/pickups/bar_widen.png"),
+        LoadTexture("data/textures/pickups/bar_shorten.png"),
+        LoadTexture("data/textures/pickups/fire_ball.png"),
+    ];
+
+    // Scale each pickup texture
+    for 0..pickup_textures.count {
+        texture := &pickup_textures[it];
+        texture.width  = 48;
+        texture.height = 48;
+    }
+
     ball := Ball{
         x = window_width * 0.5,
         y = window_height * 0.5,
@@ -553,6 +572,10 @@ main :: () {
     }
 
     UnloadTexture(heart_texture);
+
+    for pickup_textures {
+        UnloadTexture(it);
+    }
 
     CloseWindow();
 }

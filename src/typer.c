@@ -146,6 +146,10 @@ Type *resolve_type(Typer *typer, Type *type) {
         TypeArray *array = (TypeArray *)(type);
 
         if (array->capacity_expr) {
+
+            Type *cap_type = check_expression(typer, array->capacity_expr, NULL);
+            if (!cap_type) return NULL;
+
             AstExpr *constexpr = simplify_expression(typer->const_evaluator, typer->current_scope, array->capacity_expr);
             if (constexpr->head.kind != AST_LITERAL && ((AstLiteral *)(constexpr))->kind != LITERAL_INTEGER) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be an integer constant");
@@ -405,7 +409,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     AstFunctionDefn *func_defn = ((TypeFunction *)func_ident->type)->node;
 
     // Make sure that the function definition is fully resolved
-    if (!(func_defn->head.flags & AST_FLAG_TYPE_IS_RESOLVED)) {
+    if (!(func_defn->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
 
         // Save the current state of the typer as local info at this call site is probably overriden within check_function_defn()
         Typer temp = *typer;
@@ -1019,7 +1023,7 @@ bool check_break_or_continue(Typer *typer, AstBreakOrContinue *boc) {
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
     // Function might have already been type checked from an earlier function call
-    if (func_defn->head.flags & AST_FLAG_TYPE_IS_RESOLVED) {
+    if (func_defn->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return func_defn->return_type;
     }
 
@@ -1037,7 +1041,7 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
     // Mark the function as fully typed, when we have typechecked the function signature
     // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again ...
-    func_defn->head.flags |= AST_FLAG_TYPE_IS_RESOLVED;
+    func_defn->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
 
     typer->current_scope = func_defn->body;
 
@@ -1080,9 +1084,12 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
     TypeEnum *enum_defn = (TypeEnum *)(type_lookup(&typer->parser->type_table, ast_enum->identifier->name));
-    assert(enum_defn != NULL); // Was put in during parsing
+    assert(enum_defn != NULL);
 
+    int min_value = 0;
+    int max_value = 0;
     int auto_increment_value = 0;
+
     for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
         if (etor->expr) {
@@ -1105,6 +1112,9 @@ Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
             etor->value = auto_increment_value;
             auto_increment_value++;
         }
+
+        if (etor->value < min_value) min_value = etor->value;
+        if (etor->value > max_value) max_value = etor->value;
         
         AstEnumerator *enumerator_with_same_value = enum_value_is_unique(ast_enum, etor->value);
         if (enumerator_with_same_value) {
@@ -1116,8 +1126,10 @@ Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
         etor->is_typechecked = true;
     }
 
-
     enum_defn->head.size = enum_defn->backing_type->size;
+    enum_defn->min_value = min_value;
+    enum_defn->max_value = max_value;
+
     return (Type *)enum_defn;
 }
 
