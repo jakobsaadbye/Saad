@@ -41,6 +41,20 @@ Texture :: struct {
     format:  int;         // Data format (PixelFormat type)
 }
 
+AudioStream :: struct {
+    buffer: *void;       // Pointer to internal data used by the audio system
+    processor: *void;    // Pointer to internal data processor, useful for audio effects
+
+    sampleRate: uint;    // Frequency (samples per second)
+    sampleSize: uint;    // Bit depth (bits per sample): 8, 16, 32 (24 not supported)
+    channels: uint;      // Number of channels (1-mono, 2-stereo, ...)
+}
+
+Sound :: struct {
+    stream: AudioStream;         // Audio stream
+    frameCount: uint;            // Total number of frames (considering channels)
+}
+
 KeyboardKey :: enum {
     NULL            = 0,        // Key: NULL, used for no key pressed
     // Alphanumeric keys
@@ -153,6 +167,18 @@ KeyboardKey :: enum {
     KP_EQUAL        = 336,      // Key: Keypad =
 }
 
+// Mouse buttons
+MouseButton :: enum {
+    LEFT    = 0,       // Mouse button left
+    RIGHT   = 1,       // Mouse button right
+    MIDDLE  = 2,       // Mouse button middle (pressed wheel)
+    SIDE    = 3,       // Mouse button side (advanced mouse device)
+    EXTRA   = 4,       // Mouse button extra (advanced mouse device)
+    FORWARD = 5,       // Mouse button forward (advanced mouse device)
+    BACK    = 6,       // Mouse button back (advanced mouse device)
+}
+
+
 // Image loading functions
 // NOTE: These functions do not require GPU access
 LoadImage :: (fileName: string) -> Image #extern "C"
@@ -204,11 +230,27 @@ IsKeyDown     :: (key: KeyboardKey) -> bool #extern "C"
 GetKeyPressed :: () -> KeyboardKey #extern "C"
 GetMousePosition :: () -> Vector2 #extern "C"
 
+// Input-related functions: mouse
+IsMouseButtonPressed :: (button: MouseButton) -> bool #extern "C"                  // Check if a mouse button has been pressed once
+
 // Files management functions
 GetWorkingDirectory :: () -> string #extern "C"
 
 // Misc. functions
 GetRandomValue :: (min: int, max: int) -> int #extern "C"
+
+// Wave/Sound management functions
+PlaySound :: (sound: Sound) #extern "C"                                    // Play a sound
+StopSound :: (sound: Sound) #extern "C"                                    // Stop playing a sound
+
+// Audio device management functions
+InitAudioDevice :: () #extern "C"                                     // Initialize audio device and context
+CloseAudioDevice :: () #extern "C"                                    // Close the audio device and context
+IsAudioDeviceReady :: () -> bool #extern "C"                          // Check if audio device has been initialized successfully
+SetMasterVolume :: (volume: float) #extern "C"                        // Set master volume (listener)
+
+LoadSound :: (fileName: string) -> Sound #extern "C"
+UnloadSound :: (sound: Sound) #extern "C"
 
 //////////////////////////////////////////////////////////////////////////////////////
 
@@ -236,14 +278,14 @@ sprintf :: (str: *u8, format: *u8, arg0: int) -> int #extern "C"
 
 
 
-BALL_SIZE :: 16;
-BRICK_WIDTH  :: 80;
-BRICK_HEIGHT :: 20;
-BRICK_PADDING :: 15;
-BRICK_ROWS :: 8;
-BRICK_COLS :: 11;
+BALL_SIZE :: 20;
+BRICK_WIDTH  :: 100;
+BRICK_HEIGHT :: 30;
+BRICK_PADDING :: 20;
+BRICK_ROWS :: 7;
+BRICK_COLS :: 8;
 BAR_START_WIDTH :: 100;
-PICKUP_SPAWN_CHANCE :: 15; // in percentage
+PICKUP_SPAWN_CHANCE :: 25; // in percentage
 PICKUP_SIZE :: 26;
 
 TOP_MARGIN :: 80;
@@ -278,6 +320,9 @@ Ball :: struct {
 Player :: struct {
     score: int;
     lives: int;
+    is_holding_ball: bool;
+    has_fireball_powerup: bool;
+    fireball_powerup_duration: int;
 }
 
 PickupType :: enum {
@@ -311,6 +356,7 @@ main :: () {
     COLOR_WHITE := Color{255, 255, 255, 255};
 
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Super Breakout");
+    InitAudioDevice();
     SetTargetFPS(90);
 
     game_title := "Super Breakout";
@@ -339,9 +385,21 @@ main :: () {
         texture.height = PICKUP_SIZE;
     }
 
+
+    //
+    // Sounds
+    //
+    sound_ball_bounce_1  := LoadSound("data/sounds/ball_bounce_1.mp3");
+    sound_ball_bounce_2  := LoadSound("data/sounds/ball_bounce_2.wav");
+    sound_pickup         := LoadSound("data/sounds/pickup.wav");
+    sound_game_over      := LoadSound("data/sounds/game_over.wav");
+    sound_lost_life      := LoadSound("data/sounds/lost_life.wav");
+    sound_level_complete := LoadSound("data/sounds/level_complete.wav");
+
+    
     ball := Ball{
-        x = WINDOW_WIDTH * 0.5,
-        y = WINDOW_HEIGHT * 0.5,
+        x = 4,
+        y = 4,
         size = BALL_SIZE,
         vel_x = 550.0,
         vel_y = 550.0,
@@ -357,9 +415,10 @@ main :: () {
     player := Player{
         score = 0,
         lives = 3,
+        is_holding_ball = true,
     };
 
-    dead_zone := Rectangle{0, bar.y + bar.height, xx WINDOW_WIDTH, WINDOW_HEIGHT - bar.y - bar.height};
+    dead_zone := Rectangle{0, WINDOW_HEIGHT - 10, WINDOW_WIDTH, 100};
 
     score_text: [16]u8;
 
@@ -371,18 +430,12 @@ main :: () {
         {61, 157, 57, 255},
         {52, 60, 210, 255},
         {116, 65, 209, 255},
-        {3, 184, 187, 255},
+        // {3, 184, 187, 255},
     ];
 
     // Initiate pickups
-    pickups: [16] Pickup;
+    pickups: [16]Pickup;
     pickup_spawner := PickupSpawner{pickups = pickups};
-
-    // @Bug: There is something wrong with booleans initialization in the array currently so we set it explictly to false
-    for i in 0..pickups.count {
-        pickup := &pickups[i];
-        pickup.is_shown = false;
-    }
     
     // Initiate the bricks
     bricks: [BRICK_ROWS * BRICK_COLS] Brick;
@@ -432,6 +485,10 @@ main :: () {
             bar.x = xx WINDOW_WIDTH - bar.width;
         }
 
+        if IsMouseButtonPressed(.LEFT) {
+            player.is_holding_ball = false;
+        }
+
         //
         // Hit detection
         //
@@ -444,17 +501,19 @@ main :: () {
         // Collisions ball and walls
         if next_ball.x < 0 || next_ball.x + next_ball.size > WINDOW_WIDTH {
             ball.vel_x = -ball.vel_x;
+            PlaySound(sound_ball_bounce_2);
         }
 
         if next_ball.y < 0 || next_ball.y + next_ball.size > WINDOW_HEIGHT {
             ball.vel_y = -ball.vel_y;
+            PlaySound(sound_ball_bounce_2);
         }
 
         // Collision ball and bar
         next_ball_rect := get_ball_rect(next_ball);
         bar_rect       := get_bar_rect(bar);
 
-        if CheckCollisionRecs(next_ball_rect, bar_rect) {
+        if !player.is_holding_ball && CheckCollisionRecs(next_ball_rect, bar_rect) {
 
             // The outbound angle of the ball when hitting the bar, follows that of a half circle.
             // If the ball hits the far left of the bar, the out angle is 20 degree
@@ -480,6 +539,8 @@ main :: () {
 
             ball.vel_x = direction_vector.x * speed;
             ball.vel_y = direction_vector.y * speed;
+
+            PlaySound(sound_ball_bounce_2);
         }
 
         // Collision ball and bricks
@@ -498,7 +559,8 @@ main :: () {
                     brick.dead = true;
                     player.score += 100;
 
-                    // Maybe spawn a pickup here
+                    PlaySound(sound_ball_bounce_1);
+
                     maybe_spawn_random_pickup(&pickup_spawner, {xx brick.x, xx brick.y});
 
                     break;
@@ -506,7 +568,7 @@ main :: () {
             }
         }
 
-        // Player pickup
+        // Collision bar and pickups
         {
             bar_rect := get_bar_rect(bar);
 
@@ -517,18 +579,36 @@ main :: () {
                 pickup_rect := Rectangle{pickup.x, pickup.y, PICKUP_SIZE, PICKUP_SIZE};
 
                 if CheckCollisionRecs(bar_rect, pickup_rect) {
-                    pickup.is_shown = false;
+                    handle_on_pickup(pickup, &bar, &ball, sound_pickup);
                 }
             }
         }
         
 
         // Collision ball and dead zone
+        ball_rect := get_ball_rect(ball);
+        if CheckCollisionRecs(ball_rect, dead_zone) {
+            player.is_holding_ball = true;
+            player.lives -= 1;
+
+            PlaySound(sound_lost_life);
+
+            if player.lives <= 0 {
+                PlaySound(sound_game_over);
+                print("You completely lost!");
+            }
+        }
         
 
         // Ball updates
-        ball.x += ball.vel_x * dt;
-        ball.y += ball.vel_y * dt;
+        if player.is_holding_ball {
+            ball.x = bar.x + bar.width * 0.5 - BALL_SIZE * 0.5;
+            ball.y = bar.y - BALL_SIZE - 4;
+        } else {
+            // Follow normal ball behaviour
+            ball.x += ball.vel_x * dt;
+            ball.y += ball.vel_y * dt;
+        }
 
         update_pickups(pickups);
 
@@ -545,9 +625,6 @@ main :: () {
 
             if !(pickup.is_shown) { 
                 continue; 
-            }
-            if !pickup {
-                continue;
             }
 
             texture := pickup_textures[pickup.type];
@@ -608,6 +685,7 @@ main :: () {
         UnloadTexture(it);
     }
 
+    CloseAudioDevice();
     CloseWindow();
 }
 
@@ -627,6 +705,32 @@ get_bar_rect :: (bar: Bar) -> Rectangle {
         bar.width,
         bar.height,
     };
+}
+
+handle_on_pickup :: (pickup: *Pickup, bar: *Bar, ball: *Ball, pickup_sound: Sound) {
+    pickup.is_shown = false;
+
+    if pickup.type == .BALL_SPEED_UP {
+        ball.vel_x *= 1 + 0.2;
+        ball.vel_y *= 1 + 0.2;
+    }
+    else if pickup.type == .BALL_SLOW_DOWN {
+        ball.vel_x *= 1 - 0.2;
+        ball.vel_y *= 1 - 0.2;
+    }
+    else if pickup.type == .BAR_WIDEN {
+        bar.width += 20;
+    }
+    else if pickup.type == .BAR_SHORTEN {
+        bar.width -= 20;
+    }
+    else if pickup.type == .FIREBALL {
+
+    }
+
+    PlaySound(pickup_sound);
+
+    print("Picked up a %", pickup.type);
 }
 
 update_pickups :: (pickups: []Pickup) {
