@@ -64,6 +64,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_PRINT:         return "PRINT";
         case TOKEN_ASSERT:        return "ASSERT";
         case TOKEN_TYPEOF:        return "TYPEOF";
+        case TOKEN_SIZEOF:        return "SIZEOF";
         case TOKEN_RETURN:        return "RETURN";
         case TOKEN_BREAK:         return "BREAK";
         case TOKEN_CONTINUE:      return "CONTINUE";
@@ -333,6 +334,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "return") == 0) token = TOKEN_RETURN;
         if (strcmp(text, "assert") == 0) token = TOKEN_ASSERT;
         if (strcmp(text, "typeof") == 0) token = TOKEN_TYPEOF;
+        if (strcmp(text, "sizeof") == 0) token = TOKEN_SIZEOF;
     }
     if (keyword_len == 8) {
         if (strcmp(text, "continue") == 0) token = TOKEN_CONTINUE;

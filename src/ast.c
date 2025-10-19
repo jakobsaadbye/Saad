@@ -16,6 +16,7 @@ const char *ast_to_str(Ast *ast) {
     case AST_PRINT:              return "AST_PRINT";
     case AST_ASSERT:             return "AST_ASSERT";
     case AST_TYPEOF:             return "AST_TYPEOF";
+    case AST_SIZEOF:             return "AST_SIZEOF";
     case AST_STRUCT:             return "AST_STRUCT";
     case AST_STRUCT_LITERAL:     return "AST_STRUCT_LITERAL";
     case AST_STRUCT_INITIALIZER: return "AST_STRUCT_INITIALIZER";

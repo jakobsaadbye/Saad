@@ -144,7 +144,7 @@ void emit_header(CodeGenerator *cg) {
     sb_append(&cg->data, "   fmt_int   DB \"%s\", 0\n", "%lld");
     sb_append(&cg->data, "   fmt_float DB \"%s\", 0\n", "%lf");
     sb_append(&cg->data, "   fmt_string DB \"%s\", 0\n", "%s");
-    sb_append(&cg->data, "   fmt_address DB \"0x%s\", 0\n", "%p");
+    sb_append(&cg->data, "   fmt_address DB \"0x%s\", 0\n", "%lx");
     sb_append(&cg->data, "   string_false DB \"false\", 0\n");
     sb_append(&cg->data, "   string_true  DB \"true\", 0\n");
     sb_append(&cg->data, "   string_assert_fail  DB \"Assertion failed at line %s\", 10, 0\n", "%d");
@@ -2553,6 +2553,12 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     }
     case AST_TYPEOF: {
         emit_typeof(cg, (AstTypeof *)expr);
+        PUSH(RAX);
+        return;
+    }
+    case AST_SIZEOF: {
+        AstSizeof *ast_sizeof = (AstSizeof *) expr;
+        sb_append(&cg->code, "   mov\t\trax, %d\n", ast_sizeof->type->size);
         PUSH(RAX);
         return;
     }

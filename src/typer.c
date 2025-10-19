@@ -1368,8 +1368,16 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof) {
     Type *expr_type = check_expression(typer, ast_typeof->expr, NULL);
     if (!expr_type) return NULL;
-
     return primitive_type(PRIMITIVE_STRING);
+}
+
+Type *check_sizeof(Typer *typer, AstSizeof *ast_sizeof) {
+    Type *resolved_type = resolve_type(typer, ast_sizeof->type);
+    if (!resolved_type) return NULL;
+
+    ast_sizeof->type = resolved_type;
+
+    return primitive_type(PRIMITIVE_INT);
 }
 
 Type *check_new(Typer *typer, AstNew *ast_new, Type *ctx_type) {
@@ -1413,6 +1421,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr));
     else if (expr->head.kind == AST_ARRAY_ACCESS)   result = check_array_access(typer, (AstArrayAccess *)(expr));
     else if (expr->head.kind == AST_TYPEOF)         result = check_typeof(typer, (AstTypeof *)(expr));
+    else if (expr->head.kind == AST_SIZEOF)         result = check_sizeof(typer, (AstSizeof *)(expr));
     else if (expr->head.kind == AST_NEW)            result = check_new(typer, (AstNew *)(expr), ctx_type);
     else if (expr->head.kind == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_S64); // @Investigate - Shouldn't this be checked for both sides being integers???
     else if (expr->head.kind == AST_SEMICOLON_EXPR) result = primitive_type(PRIMITIVE_VOID);

@@ -1396,6 +1396,31 @@ AstTypeof *parse_typeof(Parser *parser) {
     return ast_typeof;
 }
 
+AstSizeof *parse_sizeof(Parser *parser) {
+    Token start_token = peek_next_token(parser);
+    expect(parser, start_token, TOKEN_SIZEOF);
+    eat_token(parser);
+
+    Token next = peek_next_token(parser);
+    expect(parser, next, '(');
+    eat_token(parser);
+
+    Type *type = parse_type(parser);
+    if (!type) return NULL;
+
+    next = peek_next_token(parser);
+    expect(parser, next, ')');
+    eat_token(parser);
+
+    AstSizeof *ast_sizeof       = (AstSizeof *)(ast_allocate(parser, sizeof(AstSizeof)));
+    ast_sizeof->head.head.kind  = AST_SIZEOF;
+    ast_sizeof->head.head.start = start_token.start;
+    ast_sizeof->head.head.end   = next.end;
+    ast_sizeof->type            = type;
+
+    return ast_sizeof;
+}
+
 AstAssert *parse_assert(Parser *parser) {
     Token start_token = peek_next_token(parser);
     expect(parser, start_token, TOKEN_ASSERT);
@@ -1838,14 +1863,18 @@ AstExpr *parse_leaf(Parser *parser) {
     if (t.type == TOKEN_TYPEOF) {
         AstTypeof *ast_typeof = parse_typeof(parser);
         if (!ast_typeof) return NULL;
-        
         return (AstExpr *)(ast_typeof);
+    }
+
+    if (t.type == TOKEN_SIZEOF) {
+        AstSizeof *ast_sizeof = parse_sizeof(parser);
+        if (!ast_sizeof) return NULL;
+        return (AstExpr *)(ast_sizeof);
     }
 
     if (t.type == TOKEN_NEW) {
         AstNew *ast_new = parse_new(parser);
         if (!ast_new) return NULL;
-        
         return (AstExpr *)(ast_new);
     }
 

@@ -244,6 +244,7 @@ BRICK_ROWS :: 8;
 BRICK_COLS :: 11;
 BAR_START_WIDTH :: 100;
 PICKUP_SPAWN_CHANCE :: 15; // in percentage
+PICKUP_SIZE :: 26;
 
 TOP_MARGIN :: 80;
 WINDOW_WIDTH :: 1200;
@@ -293,11 +294,11 @@ Pickup :: struct {
     x: float;
     y: float;
     vel_y: float;
-    is_active: bool;
+    is_shown: bool;
 }
 
 PickupSpawner :: struct {
-    pickups: [] Pickup;
+    pickups: []Pickup;
     free_index: int;
 }
 
@@ -334,8 +335,8 @@ main :: () {
     // Scale each pickup texture
     for 0..pickup_textures.count {
         texture := &pickup_textures[it];
-        texture.width  = 26;
-        texture.height = 26;
+        texture.width  = PICKUP_SIZE;
+        texture.height = PICKUP_SIZE;
     }
 
     ball := Ball{
@@ -362,7 +363,7 @@ main :: () {
 
     score_text: [16]u8;
 
-    brick_colors : [BRICK_ROWS] Color = [
+    brick_colors: [BRICK_ROWS]Color = [
         {195, 82, 123, 255},
         {207, 68, 69, 255},
         {198, 99, 49, 255},
@@ -380,7 +381,7 @@ main :: () {
     // @Bug: There is something wrong with booleans initialization in the array currently so we set it explictly to false
     for i in 0..pickups.count {
         pickup := &pickups[i];
-        pickup.is_active = false;
+        pickup.is_shown = false;
     }
     
     // Initiate the bricks
@@ -505,6 +506,23 @@ main :: () {
             }
         }
 
+        // Player pickup
+        {
+            bar_rect := get_bar_rect(bar);
+
+            for i in 0..pickups.count {
+                pickup := &pickups[i];
+                if !pickup.is_shown { continue; }
+
+                pickup_rect := Rectangle{pickup.x, pickup.y, PICKUP_SIZE, PICKUP_SIZE};
+
+                if CheckCollisionRecs(bar_rect, pickup_rect) {
+                    pickup.is_shown = false;
+                }
+            }
+        }
+        
+
         // Collision ball and dead zone
         
 
@@ -522,15 +540,20 @@ main :: () {
         ClearBackground({ 30, 30, 30, 30 });
 
         // Draw pickups
-        {
-            for pickup in pickups {
-                if !pickup.is_active { continue; }
+        for i in 0..pickups.count {
+            pickup := &pickups[i];
 
-                texture := pickup_textures[pickup.type];
-
-                DrawRectangle(xx pickup.x, xx pickup.y, texture.width, texture.height, Color{50, 50, 50, 255});
-                DrawTexture(texture, xx pickup.x, xx pickup.y, Color{255, 255, 255, 255});
+            if !(pickup.is_shown) { 
+                continue; 
             }
+            if !pickup {
+                continue;
+            }
+
+            texture := pickup_textures[pickup.type];
+
+            DrawRectangle(xx pickup.x, xx pickup.y, texture.width, texture.height, Color{50, 50, 50, 255});
+            DrawTexture(texture, xx pickup.x, xx pickup.y, Color{255, 255, 255, 255});
         }
         
         // Draw bricks
@@ -612,12 +635,12 @@ update_pickups :: (pickups: []Pickup) {
     for i in 0..pickups.count {
         p := &pickups[i];
 
-        if p.is_active {
+        if p.is_shown {
             p.y += p.vel_y * dt;
         }
 
         if p.y > WINDOW_HEIGHT {
-            p.is_active = false;
+            p.is_shown = false;
         }
     }
 }
@@ -631,13 +654,12 @@ maybe_spawn_random_pickup :: (ps: *PickupSpawner, pos: Vector2) {
 
     pickup_type_index := GetRandomValue(0, xx PickupType.COUNT - 1);
 
-
     pickup := Pickup{
         type = cast(PickupType) pickup_type_index,
         x = pos.x,
         y = pos.y,
-        vel_y = xx GetRandomValue(60, 100),
-        is_active = true,
+        vel_y = xx GetRandomValue(80, 120),
+        is_shown = true,
     };
 
     // There is a @Bug here if we try to do ps.pickups[ps.free_index] @Crash

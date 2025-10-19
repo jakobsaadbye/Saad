@@ -1,19 +1,39 @@
-Ball :: struct {
-    x:      float;
-    y:      float;
-    size:   float;
-    vel_x:  float;
-    vel_y:  float;
+PickupType :: enum {
+    BALL_SPEED_UP,
+    BALL_SLOW_DOWN,
+    BAR_WIDEN,
+    BAR_SHORTEN,
+    FIREBALL,
+    COUNT,
 }
 
-early_return :: (r: int) {
-    if r > 10 {
-        return;
-    }
-
-    print("r is = %", r);
+Pickup :: struct {
+    type: PickupType;
+    x: float;
+    y: float;
+    vel_y: float;
+    is_shown: bool;
 }
 
 main :: () {
-    early_return(10);
+    pickups: [10]Pickup;
+
+    for i in 0..pickups.count {
+        pickup := &pickups[i];
+        if i == 4 {
+            pickup.is_shown = true;
+        }
+    }
+
+    print("%", sizeof(Pickup));
+
+    for i in 0..pickups.count {
+        pickup := &pickups[i];
+        if !pickup.is_shown {
+            print("[%] not showing", i);
+            continue;
+        }
+        print("%", *pickup);
+    }
+
 }
