@@ -70,6 +70,7 @@ Parser parser_init(Lexer *lexer) {
     parser.lexer         = lexer;
     parser.ast_nodes     = arena_init(4096);
     parser.type_table    = type_table_init();
+    parser.enclosing_function = NULL;
     parser.current_scope = NULL;
     parser.inside_statement_header = false;
 
@@ -239,32 +240,38 @@ Ast *parse_statement(Parser *parser) {
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
     }
+
     else if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == '(') {
         stmt = (Ast *)(parse_function_defn(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
+
     else if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_STRUCT) {
         // @Note - Structs should probably be parsed at the top level code instead of as a statement 
         stmt = (Ast *)(parse_struct(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
+
     else if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_ENUM) {
         stmt = (Ast *)(parse_enum(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
+
     else if (starts_declaration(parser, token)) {
         stmt = (Ast *)(parse_declaration(parser, 0));
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
     }
+
     else if (token.type == TOKEN_RETURN) {
         stmt = (Ast *)(parse_return(parser));
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
     }
+
     else if (token.type == TOKEN_BREAK || token.type == TOKEN_CONTINUE) {
         eat_token(parser);
 
@@ -278,40 +285,48 @@ Ast *parse_statement(Parser *parser) {
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
     }
+
     else if (token.type == TOKEN_PRINT) {
         stmt = (Ast *)(parse_print(parser));
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
     }
+
     else if (token.type == TOKEN_ASSERT) {
         stmt = (Ast *)(parse_assert(parser));
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
     }
+
     else if (token.type == TOKEN_IF) {
         stmt = (Ast *)(parse_if(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
+
     else if (token.type == TOKEN_FOR) {
         stmt = (Ast *)(parse_for(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
+
     else if (token.type == TOKEN_WHILE) {
         stmt = (Ast *)(parse_while(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
+
     else if (token.type == '#') {
         stmt = (Ast *) parse_directive(parser);
         matched_a_statement = true;
     }
+
     else if (token.type == '{') {
         stmt = (Ast *)(parse_block(parser, NULL));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     } 
+
     else {
         AstExpr *lhs = parse_expression(parser, MIN_PRECEDENCE);
         if (!lhs) {
@@ -947,6 +962,8 @@ AstExpr *parse_range_or_normal_expression(Parser *parser) {
 }
 
 AstReturn *parse_return(Parser *parser) {
+    assert(parser->enclosing_function);
+
     Token return_token = peek_next_token(parser);
     eat_token(parser);
 
@@ -958,7 +975,7 @@ AstReturn *parse_return(Parser *parser) {
     ast_return->head.start = return_token.start;
     ast_return->head.end   = expr->head.end;
     ast_return->expr       = expr;
-    ast_return->enclosing_function = NULL;
+    ast_return->enclosing_function = parser->enclosing_function;
 
     return ast_return;
 }
@@ -1156,6 +1173,8 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     expect(parser, next, '(');
     eat_token(parser);
 
+    parser->enclosing_function = func_defn;
+
     AstBlock *body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters can be pushed down into the scope of the body
     bool first_parameter_seen = false;
     while (true) {
@@ -1193,37 +1212,6 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         }
 
         eat_token(parser);
-
-
-        // @Cleanup - This should probably use parse_declaration with a flag telling it that its a function parameter
-        // if (first_parameter_seen) {
-        //     if (next.type != ',') {
-        //         report_error_token(parser, LABEL_ERROR, next, "Expected a ',' between parameters");
-        //         exit(1);    
-        //     }
-        //     eat_token(parser);
-        //     next = peek_next_token(parser);
-        // }
-
-        // if (next.type != TOKEN_IDENTIFIER) {
-        //     report_error_token(parser, LABEL_ERROR, next, "Expected an identifier");
-        //     exit(1);
-        // }
-        // Token param_ident = next;
-        // eat_token(parser);
-
-        // next = peek_next_token(parser);
-        // if (next.type != ':') {
-        //     report_error_token(parser, LABEL_ERROR, param_ident, "Expected a : after the parameter name");
-        //     exit(1);
-        // }
-        // eat_token(parser);
-
-        // Type *type = parse_type(parser);
-
-        // AstDeclaration *param = make_declaration(parser, param_ident, NULL, type, DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_FUNCTION_PARAMETER);
-        // da_append(&func_defn->parameters, param);
-        // first_parameter_seen = true;
     }
 
     Type *return_type = primitive_type(PRIMITIVE_VOID);
@@ -1231,8 +1219,15 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     next = peek_next_token(parser);
     if (next.type == TOKEN_RIGHT_ARROW) {
         eat_token(parser);
-        return_type = parse_type(parser);;
+        return_type = parse_type(parser);
+        if (!return_type) {
+            return NULL;
+        }
     }
+
+    // We already set the return type here, so that a return statement within the block knows weather its a void function
+    // and therefore should not have an expression
+    func_defn->return_type = return_type;
 
     CallingConv call_conv = CALLING_CONV_SAAD;
     bool        is_extern = false;
@@ -1258,7 +1253,9 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         body = parse_block(parser, body); // Here we tell parse_block to explicitly not make a new lexical scope, but instead use our existing function header
         if (!body) return NULL;
     }
+
     close_block(parser);
+    parser->enclosing_function = NULL;
 
     AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // The type of the identifier is set to a type representation of this function later down
     ident->flags |= IDENTIFIER_IS_NAME_OF_FUNCTION;
@@ -1747,7 +1744,17 @@ AstExpr *parse_leaf(Parser *parser) {
         return make_literal_node(parser, t);
     }
 
-    if (t.type == '(')  {
+    if (t.type == ';') {
+        // We intentionally don't eat the semicolon, because we want the expression to end right after this
+
+        AstSemicolonExpr *sce = ast_allocate(parser, sizeof(AstSemicolonExpr));
+        sce->head.head.kind = AST_SEMICOLON_EXPR;
+        sce->head.head.start = t.start;
+        sce->head.head.end = t.end;
+        return (AstExpr *) sce;
+    }
+
+    if (t.type == '(') {
         eat_token(parser);
         AstExpr *sub_expr = parse_expression(parser, MIN_PRECEDENCE);
         if (!sub_expr) return NULL;

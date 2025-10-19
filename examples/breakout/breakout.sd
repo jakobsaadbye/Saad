@@ -498,10 +498,7 @@ main :: () {
                     player.score += 100;
 
                     // Maybe spawn a pickup here
-                    r := GetRandomValue(0, 100);
-                    if r > 100 - PICKUP_SPAWN_CHANCE {
-                        spawn_random_pickup(&pickup_spawner, {xx brick.x, xx brick.y});
-                    }
+                    maybe_spawn_random_pickup(&pickup_spawner, {xx brick.x, xx brick.y});
 
                     break;
                 }
@@ -625,8 +622,15 @@ update_pickups :: (pickups: []Pickup) {
     }
 }
 
-spawn_random_pickup :: (ps: *PickupSpawner, pos: Vector2) {
+maybe_spawn_random_pickup :: (ps: *PickupSpawner, pos: Vector2) {
+
+    r := GetRandomValue(0, 100);
+    if !(r > 100 - PICKUP_SPAWN_CHANCE) {
+        return;
+    }
+
     pickup_type_index := GetRandomValue(0, xx PickupType.COUNT - 1);
+
 
     pickup := Pickup{
         type = cast(PickupType) pickup_type_index,

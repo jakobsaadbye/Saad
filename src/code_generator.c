@@ -2518,6 +2518,10 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
         XXX;
     }
+    case AST_SEMICOLON_EXPR: {
+        // No-op
+        return;
+    }
     case AST_CAST: {
         emit_cast(cg, (AstCast *)(expr));
         return;

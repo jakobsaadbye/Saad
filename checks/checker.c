@@ -1,5 +1,4 @@
 #include "dirent.h"
-#include "../src/lib/file.c"
 #include "../src/pipeline.c"
 
 #define TEST_OUTPUT_LEN 60

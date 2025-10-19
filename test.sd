@@ -6,20 +6,14 @@ Ball :: struct {
     vel_y:  float;
 }
 
-main :: () {
-    ball := Ball{
-        x = 600.0,
-        y = 650.0,
-        size = 20,
-        vel_x = 400.0,
-        vel_y = 400.0,
-    };
+early_return :: (r: int) {
+    if r > 10 {
+        return;
+    }
 
-    update_ball(&ball);
-
-    print("ball %", ball);
+    print("r is = %", r);
 }
 
-update_ball :: (ball: *Ball) {
-    ball.vel_y += 30;
+main :: () {
+    early_return(10);
 }

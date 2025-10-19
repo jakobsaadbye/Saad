@@ -8,6 +8,7 @@ typedef struct Parser {
     int current_token_index;
     int current_ast_node_index;
 
+    AstFunctionDefn *enclosing_function;
     AstBlock *current_scope;
     TypeTable type_table;
 

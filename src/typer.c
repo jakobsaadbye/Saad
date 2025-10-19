@@ -361,15 +361,12 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         // and not any integer type. E.g passing a variable declared as an int to a function accepting a float should fail
         //
         // Allow int to float implicit casting
-        return can_cast_implicitly(rhs, lhs);
+        TypePrimitive *lhs_primitive = (TypePrimitive *) lhs;
+        TypePrimitive *rhs_primitive = (TypePrimitive *) rhs;
 
-        // if (lhs->kind == TYPE_FLOAT && rhs->kind == TYPE_INTEGER) return true;
-        // if (lhs->kind == TYPE_FLOAT && rhs->kind == TYPE_FLOAT) {
-        //     // Only say they are equal if we can up-cast from f32 -> f64, not the other way around
-        //     return lhs->size >= rhs->size;  // @Incomplete - We don't want to do this when we are dealing with literals that are untyped. Generally we want to prevent implicit down-cast e,g f64 -> f32  
-        // } else {
-        //     return lhs->kind == rhs->kind;
-        // }
+        if (lhs_primitive->kind == rhs_primitive->kind) return true;
+
+        return can_cast_implicitly(rhs, lhs);
     } 
     if ((lhs->kind == TYPE_STRUCT && rhs->kind == TYPE_STRUCT) || (lhs->kind == TYPE_ENUM && rhs->kind == TYPE_ENUM)) {
         return strcmp(lhs->name, rhs->name) == 0;
@@ -965,6 +962,12 @@ bool check_statement(Typer *typer, Ast *stmt) {
             return false;
         }
 
+        ast_return->enclosing_function = ef;
+
+        if (!ast_return->expr) {
+            return true;
+        }
+
         Type *ok = check_expression(typer, ast_return->expr, ef->return_type);
         if (!ok) return false;
 
@@ -975,8 +978,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
             }
             return false;
         }
-
-        ast_return->enclosing_function = ef;
+        
         return true;
     }
     case AST_BREAK_OR_CONTINUE: return check_break_or_continue(typer, (AstBreakOrContinue *)(stmt));
@@ -1413,6 +1415,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_TYPEOF)         result = check_typeof(typer, (AstTypeof *)(expr));
     else if (expr->head.kind == AST_NEW)            result = check_new(typer, (AstNew *)(expr), ctx_type);
     else if (expr->head.kind == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_S64); // @Investigate - Shouldn't this be checked for both sides being integers???
+    else if (expr->head.kind == AST_SEMICOLON_EXPR) result = primitive_type(PRIMITIVE_VOID);
     else {
         printf("%s:%d: compiler-error: Unhandled cases in 'type_expression'. Expression was of type %s", __FILE__, __LINE__, ast_to_str((Ast *)expr));
         exit(1);

@@ -39,6 +39,7 @@ typedef enum AstKind {
     AST_EXPR,
     AST_TYPE,
     AST_RANGE_EXPR,
+    AST_SEMICOLON_EXPR,
     AST_BINARY,
     AST_UNARY,
     AST_CAST,
@@ -352,6 +353,10 @@ typedef struct AstRangeExpr {
     AstExpr* end;
     bool     inclusive;
 } AstRangeExpr;
+
+typedef struct AstSemicolonExpr {
+    AstExpr  head;
+} AstSemicolonExpr;
 
 typedef struct AstBinary {
     AstExpr    head;
