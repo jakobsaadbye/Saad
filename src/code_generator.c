@@ -2358,7 +2358,11 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
     }
 
     switch (src_type->kind) {
-    case TYPE_BOOL:
+    case TYPE_BOOL: {
+        sb_append(&cg->code, "   movzx\t\teax, BYTE %s\n", src);
+        PUSH(RAX);
+        return;
+    }
     case TYPE_STRING:
     case TYPE_ENUM: {
         sb_append(&cg->code, "   mov\t\t%s, %s %s\n", REG_A(src_type), WIDTH(src_type), src);
