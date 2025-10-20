@@ -1,39 +1,12 @@
-PickupType :: enum {
-    BALL_SPEED_UP,
-    BALL_SLOW_DOWN,
-    BAR_WIDEN,
-    BAR_SHORTEN,
-    FIREBALL,
-    COUNT,
-}
-
-Pickup :: struct {
-    type: PickupType;
-    x: float;
-    y: float;
-    vel_y: float;
-    is_shown: bool;
+Coffee :: enum {
+    ARABICA,
+    SPECIALTY
 }
 
 main :: () {
-    pickups: [10]Pickup;
 
-    for i in 0..pickups.count {
-        pickup := &pickups[i];
-        if i == 4 {
-            pickup.is_shown = true;
-        }
-    }
-
-    print("%", sizeof(Pickup));
-
-    for i in 0..pickups.count {
-        pickup := &pickups[i];
-        if !pickup.is_shown {
-            print("[%] not showing", i);
-            continue;
-        }
-        print("%", *pickup);
+    if Coffee.ARABICA < Coffee.SPECIALTY {
+        print("OK");
     }
 
 }

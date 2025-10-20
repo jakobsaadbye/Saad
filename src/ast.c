@@ -196,7 +196,7 @@ bool is_primitive_type(TypeKind kind) {
 
 
 bool is_signed_integer(Type *type) {
-    assert(type->kind == TYPE_INTEGER);
+    if (type->kind != TYPE_INTEGER) return false;
 
     TypePrimitive *prim = (TypePrimitive *)(type);
     switch (prim->kind) {
@@ -205,6 +205,22 @@ bool is_signed_integer(Type *type) {
     case PRIMITIVE_S16:
     case PRIMITIVE_S32:
     case PRIMITIVE_S64:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool is_unsigned_integer(Type *type) {
+    if (type->kind != TYPE_INTEGER) return false;
+
+    TypePrimitive *prim = (TypePrimitive *)(type);
+    switch (prim->kind) {
+    case PRIMITIVE_UINT:
+    case PRIMITIVE_U8:
+    case PRIMITIVE_U16:
+    case PRIMITIVE_U32:
+    case PRIMITIVE_U64:
         return true;
     default:
         return false;

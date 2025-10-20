@@ -70,7 +70,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma);
 bool has_large_return_type(AstFunctionDefn *func_defn);
 void check_main_exists(CodeGenerator *cg);
 int make_label_number(CodeGenerator *cg);
-const char *comparison_operator_to_set_instruction(TokenType op);
+const char *get_comparison_set_instruction(CodeGenerator *cg, AstBinary *bin);
 const char *boolean_operator_to_instruction(TokenType op);
 char *WIDTH(Type *type);
 
@@ -1965,7 +1965,7 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
     if (l_kind == TYPE_ENUM) l_kind = TYPE_INTEGER;
     if (r_kind == TYPE_ENUM) r_kind = TYPE_INTEGER;
 
-    const char *set_instruction = comparison_operator_to_set_instruction(bin->operator);
+    const char *set_instruction = get_comparison_set_instruction(cg, bin);
     emit_expression(cg, bin->left);
     emit_expression(cg, bin->right);
 
@@ -2069,15 +2069,43 @@ void emit_boolean_operator(CodeGenerator *cg, AstBinary *bin) {
     PUSH(RAX);
 }
 
-const char *comparison_operator_to_set_instruction(TokenType op) {
-    if (op == '<')                 return "setb";
-    if (op == '>')                 return "seta";
-    if (op == TOKEN_GREATER_EQUAL) return "setae";
-    if (op == TOKEN_LESS_EQUAL)    return "setbe";
-    if (op == TOKEN_DOUBLE_EQUAL)  return "sete";
-    if (op == TOKEN_NOT_EQUAL)     return "setne";
+const char *get_comparison_set_instruction(CodeGenerator *cg, AstBinary *bin) {
+    TokenType op   = bin->operator;
 
-    printf("%s:%d: compiler-error: There were unhandled cases in 'comparison_operator_to_instruction'\n", __FILE__, __LINE__);
+    Type *lhs_type = bin->left->type;
+    Type *rhs_type = bin->right->type;
+
+    bool do_signed_comparison = false;
+
+    if      (lhs_type->kind == TYPE_FLOAT   && rhs_type->kind == TYPE_INTEGER) do_signed_comparison = false;
+    else if (lhs_type->kind == TYPE_INTEGER && rhs_type->kind == TYPE_FLOAT)   do_signed_comparison = false;
+    else if (lhs_type->kind == TYPE_FLOAT   && rhs_type->kind == TYPE_FLOAT)   do_signed_comparison = false;
+    else if (is_unsigned_integer(lhs_type)  && is_unsigned_integer(rhs_type))  do_signed_comparison = false;
+    else if (lhs_type->kind == TYPE_ENUM || rhs_type->kind == TYPE_ENUM)       do_signed_comparison = true;
+    else if (is_signed_integer(lhs_type) || is_signed_integer(rhs_type))       do_signed_comparison = true;
+    else {
+        report_error_ast(cg->parser, LABEL_ERROR, (Ast *) bin, "Internal Compiler Error: There were unhandled cases in 'comparison_operator_to_instruction()'. Left type = %s, Right type = %s", type_to_str(lhs_type), type_to_str(rhs_type));
+        exit(1);
+    }
+
+    if (do_signed_comparison) {
+        if (op == '<')                 return "setl";
+        if (op == '>')                 return "setg";
+        if (op == TOKEN_GREATER_EQUAL) return "setge";
+        if (op == TOKEN_LESS_EQUAL)    return "setle";
+        if (op == TOKEN_DOUBLE_EQUAL)  return "sete";
+        if (op == TOKEN_NOT_EQUAL)     return "setne";
+    }
+    else {
+        if (op == '<')                 return "setb";
+        if (op == '>')                 return "seta";
+        if (op == TOKEN_GREATER_EQUAL) return "setae";
+        if (op == TOKEN_LESS_EQUAL)    return "setbe";
+        if (op == TOKEN_DOUBLE_EQUAL)  return "sete";
+        if (op == TOKEN_NOT_EQUAL)     return "setne";
+    }
+
+    report_error_ast(cg->parser, LABEL_ERROR, (Ast *) bin, "Internal Compiler Error: There were unhandled cases in 'comparison_operator_to_instruction()'. Left type = %s, Right type = %s", type_to_str(lhs_type), type_to_str(rhs_type));
     exit(1);
 }
 

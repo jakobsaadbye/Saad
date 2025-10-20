@@ -284,9 +284,11 @@ BRICK_HEIGHT :: 30;
 BRICK_PADDING :: 20;
 BRICK_ROWS :: 7;
 BRICK_COLS :: 8;
-BAR_START_WIDTH :: 100;
 PICKUP_SPAWN_CHANCE :: 25; // in percentage
 PICKUP_SIZE :: 26;
+
+INITIAL_BAR_WIDTH     :: 100;
+INITIAL_BALL_VELOCITY :: 550.0;
 
 TOP_MARGIN :: 80;
 WINDOW_WIDTH :: 1200;
@@ -401,14 +403,14 @@ main :: () {
         x = 4,
         y = 4,
         size = BALL_SIZE,
-        vel_x = 550.0,
-        vel_y = 550.0,
+        vel_x = INITIAL_BALL_VELOCITY,
+        vel_y = INITIAL_BALL_VELOCITY,
     };
 
     bar := Bar{
-        x = WINDOW_WIDTH * 0.5 - BAR_START_WIDTH * 0.5,
+        x = WINDOW_WIDTH * 0.5 - INITIAL_BAR_WIDTH * 0.5,
         y = WINDOW_HEIGHT - 70,
-        width = BAR_START_WIDTH,
+        width = INITIAL_BAR_WIDTH,
         height = 15,
     };
 
@@ -555,7 +557,13 @@ main :: () {
 
                 brick_rect := Rectangle{xx brick.x, xx brick.y, BRICK_WIDTH, BRICK_HEIGHT};
                 if CheckCollisionRecs(next_ball_rect, brick_rect) {
-                    bounce_ball(&ball, brick_rect);
+
+                    if player.has_fireball_powerup {
+                        // Skip the bounce
+                    } else {
+                        bounce_ball(&ball, brick_rect);
+                    }
+
                     brick.dead = true;
                     player.score += 100;
 
@@ -579,7 +587,7 @@ main :: () {
                 pickup_rect := Rectangle{pickup.x, pickup.y, PICKUP_SIZE, PICKUP_SIZE};
 
                 if CheckCollisionRecs(bar_rect, pickup_rect) {
-                    handle_on_pickup(pickup, &bar, &ball, sound_pickup);
+                    handle_on_pickup(pickup, &bar, &ball, &player, sound_pickup);
                 }
             }
         }
@@ -591,11 +599,17 @@ main :: () {
             player.is_holding_ball = true;
             player.lives -= 1;
 
-            PlaySound(sound_lost_life);
-
             if player.lives <= 0 {
                 PlaySound(sound_game_over);
                 print("You completely lost!");
+            } else {
+                PlaySound(sound_lost_life);
+
+                // Reset and remove all powerup effects
+                player.has_fireball_powerup = false;
+                bar.width  = INITIAL_BAR_WIDTH;
+                ball.vel_x = INITIAL_BALL_VELOCITY;
+                ball.vel_y = INITIAL_BALL_VELOCITY;
             }
         }
         
@@ -610,7 +624,8 @@ main :: () {
             ball.y += ball.vel_y * dt;
         }
 
-        update_pickups(pickups);
+        update_player_effects(&player);
+        update_pickup_positions(pickups);
 
 
         //
@@ -650,7 +665,13 @@ main :: () {
         }
 
         // Draw the ball
-        DrawRectangle(xx ball.x, xx ball.y, xx ball.size, xx ball.size, COLOR_WHITE);
+        {
+            ball_color := COLOR_WHITE;
+            if player.has_fireball_powerup {
+                ball_color = {255, 20, 20, 255};
+            }
+            DrawRectangle(xx ball.x, xx ball.y, xx ball.size, xx ball.size, ball_color);
+        }
         
         // Draw the bar
         DrawRectangle(xx bar.x, xx bar.y, xx bar.width, xx bar.height, COLOR_WHITE);
@@ -707,7 +728,7 @@ get_bar_rect :: (bar: Bar) -> Rectangle {
     };
 }
 
-handle_on_pickup :: (pickup: *Pickup, bar: *Bar, ball: *Ball, pickup_sound: Sound) {
+handle_on_pickup :: (pickup: *Pickup, bar: *Bar, ball: *Ball, player: *Player, pickup_sound: Sound) {
     pickup.is_shown = false;
 
     if pickup.type == .BALL_SPEED_UP {
@@ -725,15 +746,14 @@ handle_on_pickup :: (pickup: *Pickup, bar: *Bar, ball: *Ball, pickup_sound: Soun
         bar.width -= 20;
     }
     else if pickup.type == .FIREBALL {
-
+        player.has_fireball_powerup      = true;
+        player.fireball_powerup_duration = 1500;
     }
 
     PlaySound(pickup_sound);
-
-    print("Picked up a %", pickup.type);
 }
 
-update_pickups :: (pickups: []Pickup) {
+update_pickup_positions :: (pickups: []Pickup) {
     dt := GetFrameTime();
 
     for i in 0..pickups.count {
@@ -745,6 +765,19 @@ update_pickups :: (pickups: []Pickup) {
 
         if p.y > WINDOW_HEIGHT {
             p.is_shown = false;
+        }
+    }
+}
+
+update_player_effects :: (player: *Player) {
+    dt_milliseconds := GetFrameTime() * 1000;
+
+    if player.has_fireball_powerup {
+        
+        player.fireball_powerup_duration -= xx dt_milliseconds;
+
+        if player.fireball_powerup_duration <= 0 {
+            player.has_fireball_powerup = false;
         }
     }
 }

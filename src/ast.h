@@ -583,5 +583,6 @@ void     *type_alloc(TypeTable *tt, size_t size);
 char     *type_to_str(Type *type);
 bool is_primitive_type(TypeKind kind);
 bool is_signed_integer(Type *type);
+bool is_unsigned_integer(Type *type);
 
 #endif
