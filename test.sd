@@ -1,24 +1,29 @@
-Vector4 :: struct {
+Vector2 :: struct {
+    x: float;
+    y: float;
+}
+
+Vector3 :: struct {
     x: float;
     y: float;
     z: float;
-    w: float;
 }
 
-Color :: struct {
-    r: u8;
-    g: u8;
-    b: u8;
-    a: u8;
+B :: struct {
+    vec: Vector3;
 }
 
-// to_vector_4 :: method (c: Color, scalar: float) -> Vector4 {
-//     // return Vector4{xx c.r, xx c.g, xx c.b, xx c.a};
-//     return Vector4{};
-// }
+A :: struct {
+    // vec: Vector2;
+    bs: [10]B;
+}
+
+
 
 main :: () {
-    // color := Color{};
-    a := 2 + 5 + 3;
-    // vec4 := color.to_vector_4(5);
+    ns : [10][10]int;
+
+    n := ns[0][0];
+
+    print("%", n);
 }

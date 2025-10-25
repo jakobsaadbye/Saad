@@ -19,6 +19,8 @@ typedef struct Typer {
 
 bool  check_block(Typer *typer, AstBlock *block);
 bool  check_statement(Typer *typer, Ast *stmt);
+bool  check_print(Typer *typer, AstPrint *print);
+bool  check_break_or_continue(Typer *typer, AstBreakOrContinue *boc);
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type);
 Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type);
 Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type);
@@ -28,7 +30,6 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Type 
 Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_type);
 Type *check_member_access(Typer *typer, AstMemberAccess * ma);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
-bool  check_break_or_continue(Typer *typer, AstBreakOrContinue *boc);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn);
 
@@ -868,6 +869,66 @@ int count_nested_sizeable_struct_members(Typer *typer, AstStruct *struct_, int c
     return count;
 }
 
+bool check_print(Typer *typer, AstPrint *print) {
+    if (print->arguments.count < 1) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)print, "Missing first argument to print");
+        return false;
+    }
+
+    for (int i = 0; i < print->arguments.count; i++) {
+        AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
+        Type *arg_type = check_expression(typer, arg, NULL);
+        if (!arg_type) return false;
+        if (i == 0) {
+            if (arg_type->kind != TYPE_STRING) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Print expects the first argument to have type string, but argument is of type %s", type_to_str(arg_type));
+                return false;
+            }
+            if (arg->head.kind != AST_LITERAL && ((AstLiteral *)arg)->kind != LITERAL_STRING) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "First argument to printf must be a constant string");
+                return false;
+            }
+        }
+    }
+
+    //
+    //  Do sizing of the arguments
+    //
+
+    // Since we are pushing all of the arguments on the stack to later pop them,
+    // we need to allocate 8 bytes of space for each one of them.
+    // @NOTE: We reuse the stack space for arguments
+    // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170 
+    int num_c_args = 1;
+    for (int i = 1; i < print->arguments.count; i++) {
+        AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
+        Type    *arg_type = arg->type;
+
+        if (arg_type->kind == TYPE_STRUCT) {
+            AstStruct *struct_ = ((TypeStruct *)arg_type)->node;
+            num_c_args += count_nested_sizeable_struct_members(typer, struct_, 0);
+        } else {
+            num_c_args += 1;
+        }
+    }
+    print->c_args = num_c_args;
+
+    if (num_c_args > 4) {
+        int bytes_args = (num_c_args - 4) * 8;
+        reserve_temporary_storage(typer->enclosing_function, bytes_args);
+    }
+
+    // :PrintSmallStructHack
+    reserve_temporary_storage(typer->enclosing_function, 8);
+
+    char *c_string = generate_c_printf_string(typer, print);
+    if (!c_string) return false;
+
+    print->c_string = c_string;
+
+    return true;
+}
+
 bool check_statement(Typer *typer, Ast *stmt) {
 
     // When doing sizing of a function, we sometimes reserve temporary space for array literals
@@ -882,63 +943,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
     switch (stmt->kind) {
     case AST_DECLARATION: return check_declaration(typer, (AstDeclaration *)(stmt));
     case AST_ASSIGNMENT:  return check_assignment(typer, (AstAssignment *)(stmt));
-    case AST_PRINT: {
-        AstPrint *print = (AstPrint *)(stmt);
-        if (print->arguments.count < 1) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)print, "Missing first argument to print");
-            return false;
-        }
-
-        for (int i = 0; i < print->arguments.count; i++) {
-            AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
-            Type *arg_type = check_expression(typer, arg, NULL);
-            if (!arg_type) return false;
-            if (i == 0) {
-                if (arg_type->kind != TYPE_STRING) {
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Print expects the first argument to have type string, but argument is of type %s", type_to_str(arg_type));
-                    return false;
-                }
-                if (arg->head.kind != AST_LITERAL && ((AstLiteral *)arg)->kind != LITERAL_STRING) {
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "First argument to printf must be a constant string");
-                    return false;
-                }
-            }
-        }
-
-        //
-        //  Do sizing of the arguments
-        //
-
-        // Since we are pushing all of the arguments on the stack to later pop them,
-        // we need to allocate 8 bytes of space for each one of them.
-        // @NOTE: We reuse the stack space for arguments
-        // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170 
-        int num_c_args = 1;
-        for (int i = 1; i < print->arguments.count; i++) {
-            AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
-            Type    *arg_type = arg->type;
-
-            if (arg_type->kind == TYPE_STRUCT) {
-                AstStruct *struct_ = ((TypeStruct *)arg_type)->node;
-                num_c_args += count_nested_sizeable_struct_members(typer, struct_, 0);
-            } else {
-                num_c_args += 1;
-            }
-        }
-        print->c_args = num_c_args;
-
-        if (num_c_args > 4) {
-            int bytes_args = (num_c_args - 4) * 8;
-            reserve_temporary_storage(typer->enclosing_function, bytes_args);
-        }
-
-        char *c_string = generate_c_printf_string(typer, print);
-        if (!c_string) return false;
-
-        print->c_string = c_string;
-
-        return true;
-    }
+    case AST_PRINT:       return check_print(typer, (AstPrint *)(stmt));
     case AST_ASSERT: {
         AstAssert *assertion = (AstAssert *)(stmt);
         Type *expr_type = check_expression(typer, assertion->expr, NULL);
@@ -1410,17 +1415,17 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
     if (!type_being_accessed) return NULL;
 
     if (type_being_accessed->kind != TYPE_ARRAY) {
-        report_error_range(typer->parser, array_ac->accessing->head.start, array_ac->open_bracket.start, "Cannot subscript into expression of type %s", type_to_str(type_being_accessed));
+        report_error_range(typer->parser, array_ac->accessing->head.start, array_ac->open_bracket.start, "Cannot index into expression of type %s", type_to_str(type_being_accessed));
         return NULL;
     }
 
     TypeArray *array_defn = (TypeArray *) type_being_accessed;
 
-    Type *subscript_type = check_expression(typer, array_ac->subscript, primitive_type(PRIMITIVE_U32));
-    if (!subscript_type) return NULL;
+    Type *index_expr_type = check_expression(typer, array_ac->index_expr, primitive_type(PRIMITIVE_U32));
+    if (!index_expr_type) return NULL;
 
-    if (subscript_type->kind != TYPE_INTEGER && subscript_type->kind != TYPE_ENUM) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_ac->subscript), "Array subscript must be an integer or enum type, got type %s", type_to_str(subscript_type));
+    if (index_expr_type->kind != TYPE_INTEGER && index_expr_type->kind != TYPE_ENUM) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_ac->index_expr), "Array index must be an integer or enum type, got type %s", type_to_str(index_expr_type));
         return NULL;
     }
 

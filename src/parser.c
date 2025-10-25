@@ -1110,8 +1110,8 @@ AstArrayLiteral *parse_array_literal(Parser *parser) {
 AstExpr *parse_array_access(Parser *parser, Token open_bracket, AstExpr *left) {
     assert(open_bracket.type == '[');
 
-    AstExpr *subscript = parse_expression(parser, MIN_PRECEDENCE);
-    if (!subscript) return NULL;
+    AstExpr *index_expr = parse_expression(parser, MIN_PRECEDENCE);
+    if (!index_expr) return NULL;
 
     Token next = peek_next_token(parser);
     if (next.type != ']') {
@@ -1126,7 +1126,7 @@ AstExpr *parse_array_access(Parser *parser, Token open_bracket, AstExpr *left) {
     array_ac->head.head.start     = left->head.start;
     array_ac->head.head.end       = next.end;
     array_ac->accessing           = left;
-    array_ac->subscript           = subscript;
+    array_ac->index_expr          = index_expr;
     array_ac->open_bracket        = open_bracket;
     array_ac->close_bracket       = next;
 
@@ -1814,7 +1814,7 @@ AstExpr *parse_leaf(Parser *parser) {
     }
 
     if (t.type == ';') {
-        // We intentionally don't eat the semicolon, because we want the expression to end right after this
+        // We intentionally don't eat the semicolon because we want the expression to end right after this @Bug; "a := ;" currently doesn't produce a parse error
 
         AstSemicolonExpr *sce = ast_allocate(parser, sizeof(AstSemicolonExpr));
         sce->head.head.kind = AST_SEMICOLON_EXPR;

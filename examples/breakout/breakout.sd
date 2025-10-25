@@ -389,7 +389,7 @@ main :: () {
     sound_pickup         := LoadSound("data/sounds/pickup.wav");
     sound_game_over      := LoadSound("data/sounds/game_over.wav");
     sound_lost_life      := LoadSound("data/sounds/lost_life.wav");
-    sound_level_complete := LoadSound("data/sounds/level_complete.wav");
+    sound_level_complete := LoadSound("data/sounds/level_complete.mp3");
 
     //
     // Game state + variables
