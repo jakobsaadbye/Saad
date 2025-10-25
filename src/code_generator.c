@@ -2084,12 +2084,15 @@ const char *get_comparison_set_instruction(CodeGenerator *cg, AstBinary *bin) {
 
     bool do_signed_comparison = false;
 
-    if      (lhs_type->kind == TYPE_FLOAT   && rhs_type->kind == TYPE_INTEGER) do_signed_comparison = false;
+    if      (lhs_type->kind == TYPE_BOOL    && rhs_type->kind == TYPE_BOOL)    do_signed_comparison = false;
+    else if (lhs_type->kind == TYPE_FLOAT   && rhs_type->kind == TYPE_INTEGER) do_signed_comparison = false;
     else if (lhs_type->kind == TYPE_INTEGER && rhs_type->kind == TYPE_FLOAT)   do_signed_comparison = false;
     else if (lhs_type->kind == TYPE_FLOAT   && rhs_type->kind == TYPE_FLOAT)   do_signed_comparison = false;
     else if (is_unsigned_integer(lhs_type)  && is_unsigned_integer(rhs_type))  do_signed_comparison = false;
+    else if (lhs_type->kind == TYPE_POINTER && rhs_type->kind == TYPE_POINTER) do_signed_comparison = false;
     else if (lhs_type->kind == TYPE_ENUM || rhs_type->kind == TYPE_ENUM)       do_signed_comparison = true;
     else if (is_signed_integer(lhs_type) || is_signed_integer(rhs_type))       do_signed_comparison = true;
+    else if (lhs_type->kind == TYPE_INTEGER && rhs_type->kind == TYPE_INTEGER) do_signed_comparison = true;
     else {
         report_error_ast(cg->parser, LABEL_ERROR, (Ast *) bin, "Internal Compiler Error: There were unhandled cases in 'comparison_operator_to_instruction()'. Left type = %s, Right type = %s", type_to_str(lhs_type), type_to_str(rhs_type));
         exit(1);
