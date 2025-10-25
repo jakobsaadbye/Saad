@@ -1,0 +1,17 @@
+Color :: struct {
+    r: u8;
+    g: u8;
+    b: u8;
+    a: u8;
+}
+
+ToVector4 :: method (c: Color) -> Vector4 {
+    return Vector4{xx r, xx g, xx b, xx a};
+}
+
+
+main :: () {
+    color := Color{};
+
+    vec4 := color.ToVector4();
+}

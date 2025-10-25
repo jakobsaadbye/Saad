@@ -350,19 +350,12 @@ PickupSpawner :: struct {
 }
 
 
-
-
-
 main :: () {
-
     COLOR_WHITE := Color{255, 255, 255, 255};
 
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "Super Breakout");
     InitAudioDevice();
     SetTargetFPS(90);
-
-    game_title := "Super Breakout";
-    game_title_len := MeasureText(game_title, 24);
 
     //
     // Textxures
@@ -398,7 +391,9 @@ main :: () {
     sound_lost_life      := LoadSound("data/sounds/lost_life.wav");
     sound_level_complete := LoadSound("data/sounds/level_complete.wav");
 
-    
+    //
+    // Game state + variables
+    //
     ball := Ball{
         x = 4,
         y = 4,
@@ -424,6 +419,9 @@ main :: () {
 
     score_text: [16]u8;
 
+    game_title := "Super Breakout";
+    game_title_len := MeasureText(game_title, 24);
+
     brick_colors: [BRICK_ROWS]Color = [
         {195, 82, 123, 255},
         {207, 68, 69, 255},
@@ -435,7 +433,6 @@ main :: () {
         // {3, 184, 187, 255},
     ];
 
-    // Initiate pickups
     pickups: [16]Pickup;
     pickup_spawner := PickupSpawner{pickups = pickups};
     
@@ -468,6 +465,9 @@ main :: () {
     ANGLE_MIN := degree_to_radians(15.0);
     ANGLE_MAX := degree_to_radians(165.0);
 
+    //
+    // Main game-loop
+    //
     while !WindowShouldClose() {
 
         dt := GetFrameTime();

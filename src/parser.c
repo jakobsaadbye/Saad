@@ -228,6 +228,25 @@ bool starts_declaration(Parser *parser, Token token) {
     return false;
 }
 
+bool starts_function_defn(Parser *parser, Token token) {
+    if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON) {
+        Token next = peek_token(parser, 2);
+
+        if (next.type == TOKEN_METHOD) {
+            next = peek_token(parser, 3);
+            if (next.type == '(') {
+                return true;
+            }
+        }
+        
+        else if (next.type == '(') {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 Ast *parse_statement(Parser *parser) {
     bool matched_a_statement = false;
     bool statement_ends_with_semicolon = false;
@@ -241,7 +260,7 @@ Ast *parse_statement(Parser *parser) {
         matched_a_statement = true;
     }
 
-    else if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == '(') {
+    else if (starts_function_defn(parser, token)) {
         stmt = (Ast *)(parse_function_defn(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
@@ -488,6 +507,10 @@ Type *parse_type(Parser *parser) {
     exit(1);
 }
 
+AstDeclaration *add_member_to_struct(AstStruct *struct_defn, AstDeclaration *member) {
+    return add_declaration_to_scope(struct_defn->scope, member);
+}
+
 TypeStruct *generate_struct_for_static_array(Parser *parser, Type *type_data) {
     TypeStruct *static_array = generate_struct_type_with_data_and_count(parser, type_data, "Array");
 
@@ -505,7 +528,7 @@ TypeStruct *generate_struct_for_dynamic_array(Parser *parser, Type *type_data) {
     capacity->member_index   = 2;
     capacity->member_offset  = 16;
 
-    add_declaration_to_scope(dynamic_array->node->scope, capacity);
+    add_member_to_struct(dynamic_array->node, capacity);
 
     return dynamic_array;
 }
@@ -550,8 +573,8 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     count->member_index  = 1;
     count->member_offset = 8;
 
-    add_declaration_to_scope(struct_defn->node->scope, data);
-    add_declaration_to_scope(struct_defn->node->scope, count);
+    add_member_to_struct(struct_node, data);
+    add_member_to_struct(struct_node, count);
 
     return struct_defn;
 }
@@ -1170,6 +1193,15 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     eat_token(parser);
 
     next = peek_next_token(parser);
+
+    bool func_is_method = false;
+    if (next.type == TOKEN_METHOD) {
+        func_defn->method_token = next;
+        func_is_method = true;
+        eat_token(parser);
+        next = peek_next_token(parser);
+    }
+
     expect(parser, next, '(');
     eat_token(parser);
 
@@ -1214,8 +1246,14 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         eat_token(parser);
     }
 
+    if (func_defn->is_method) {
+        if (func_defn->parameters.count == 0) {
+            report_error_token(parser, LABEL_ERROR, func_defn->method_token, "Method is missing the receiver type");
+            return NULL;
+        }
+    }
+
     Type *return_type = primitive_type(PRIMITIVE_VOID);
-    
     next = peek_next_token(parser);
     if (next.type == TOKEN_RIGHT_ARROW) {
         eat_token(parser);
@@ -1260,11 +1298,16 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // The type of the identifier is set to a type representation of this function later down
     ident->flags |= IDENTIFIER_IS_NAME_OF_FUNCTION;
 
-    AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
-    if (existing) {
-        report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of function %s", ident->name);
-        report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "... Here is the previously defined function");
-        return NULL;
+    if (func_is_method) {
+        // The method will be bound to the receiving struct in typing
+    } else {
+        // Add the function to the current scope
+        AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
+        if (existing) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of function %s", ident->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "... Here is the previously defined function");
+            return NULL;
+        }
     }
 
     func_defn->head.kind   = AST_FUNCTION_DEFN;
@@ -1274,6 +1317,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->body        = body;
     func_defn->return_type = return_type;
     func_defn->is_extern   = is_extern;
+    func_defn->is_method   = func_is_method;
     func_defn->call_conv   = call_conv;
     func_defn->num_bytes_locals       = 0;
     func_defn->num_bytes_temporaries  = 0;

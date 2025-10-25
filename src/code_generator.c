@@ -776,11 +776,18 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     int bytes_temporaries = func_defn->num_bytes_temporaries; // We need twice the amount of space for arguments as we also need temporary space for them while popping arguments in a function call
     int bytes_total       = align_value(32 + bytes_locals + bytes_temporaries, 16);
 
+    // Header
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "; bytes locals   : %d\n", bytes_locals);
     sb_append(&cg->code, "; bytes temp     : %d\n", bytes_temporaries);
     sb_append(&cg->code, "; bytes total    : %d\n", bytes_total);
-    sb_append(&cg->code, "%s:\n", func_defn->identifier->name);
+
+    if (func_defn->is_method) {
+        TypeStruct *receiver_struct = (TypeStruct *)func_defn->receiver_type;
+        sb_append(&cg->code, "%s.%s:\n", receiver_struct->identifier->name, func_defn->identifier->name);
+    } else {
+        sb_append(&cg->code, "%s:\n", func_defn->identifier->name);
+    }
 
     //
     // Prolog
@@ -2575,10 +2582,15 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         if (ma->access_kind == MEMBER_ACCESS_STRUCT) {
             AstDeclaration *member = ma->struct_member;
             emit_move_and_push(cg, result.base_offset, result.is_runtime_computed, member->type, false);
-        } else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
+            return;
+        } 
+        else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
             sb_append(&cg->code, "   push\t\t%d\n", ma->enum_member->value);
             INCR_PUSH_COUNT();
             return;
+        } 
+        else {
+            XXX;
         }
 
         return;

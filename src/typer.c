@@ -78,7 +78,7 @@ bool check_code(Typer *typer, AstCode *code) {
     return true;
 }
 
-void dump_scope(AstBlock *scope) {
+void dump_scope_levels(AstBlock *scope) {
     AstBlock *s = scope;
     while (s) {
         for (int i = 0; i < s->identifiers.count; i++) {
@@ -88,6 +88,17 @@ void dump_scope(AstBlock *scope) {
         s = s->parent;
         printf("\n");
     }
+}
+
+void dump_struct(AstStruct *struct_defn) {
+    printf("%s :: struct {\n", struct_defn->identifier->name);
+
+    DynamicArray members = struct_defn->scope->members;
+    for (int i = 0; i < members.count; i++) {
+        AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+        printf("    %s: %s;\n", member->ident->name, type_to_str(member->type));
+    }
+    printf("}\n");
 }
 
 bool check_block(Typer *typer, AstBlock *block) {
@@ -393,9 +404,26 @@ bool types_are_equal(Type *lhs, Type *rhs) {
 }
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
-    AstIdentifier *func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name); 
+    AstIdentifier *func_ident = NULL;
+
+    if (call->is_member_call) {
+        // Lookup the function within the scope of the struct
+        assert(call->struct_defn);
+
+        AstDeclaration *func_member = get_struct_member(call->struct_defn, call->identifer->name);
+        if (!func_member) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined member function '%s'", call->identifer->name);
+            return NULL;
+        }
+
+        func_ident = func_member->ident;
+    } else {
+        // Look in the current local scope
+        func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name);
+    }
+
     if (func_ident == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Unknown function '%s'", call->identifer->name);
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Undefined function '%s'", call->identifer->name);
         return NULL;
     }
     if (func_ident->type->kind != TYPE_FUNCTION) {
@@ -411,8 +439,8 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         // Save the current state of the typer as local info at this call site is probably overriden within check_function_defn()
         Typer temp = *typer;
 
-        Type *func_return_type = check_function_defn(typer, func_defn);
-        if (!func_return_type) return NULL;
+        Type *func_type = check_function_defn(typer, func_defn);
+        if (!func_type) return NULL;
 
         // Restore the typers state
         typer->array_literal_depth = temp.array_literal_depth;
@@ -570,8 +598,8 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
 }
 
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
-    TypeStruct *type_struct = (TypeStruct *)(type_lookup(&typer->parser->type_table, ast_struct->identifier->name));
-    assert(type_struct != NULL && type_struct->head.kind == TYPE_STRUCT);
+    TypeStruct *struct_type = (TypeStruct *)(type_lookup(&typer->parser->type_table, ast_struct->identifier->name));
+    assert(struct_type != NULL && struct_type->head.kind == TYPE_STRUCT);
 
 
     typer->current_scope = ast_struct->scope;
@@ -612,10 +640,10 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
         if (alignment > largest_alignment) largest_alignment = alignment;
     }
 
-    type_struct->head.size  = align_value(offset, largest_alignment);
-    type_struct->head.flags |= TYPE_IS_FULLY_SIZED;
-    type_struct->alignment  = largest_alignment;
-    type_struct->members    = members;
+    struct_type->head.size  = align_value(offset, largest_alignment);
+    struct_type->head.flags |= TYPE_IS_FULLY_SIZED;
+    struct_type->alignment  = largest_alignment;
+    struct_type->members    = members;
 
     return true;
 }
@@ -1022,37 +1050,7 @@ bool check_break_or_continue(Typer *typer, AstBreakOrContinue *boc) {
     return true;
 }
 
-Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
-
-    // Function might have already been type checked from an earlier function call
-    if (func_defn->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
-        return func_defn->return_type;
-    }
-
-    typer->enclosing_function = func_defn;
-
-    for (int i = 0; i < func_defn->parameters.count; i++) {
-        AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
-        bool ok = check_declaration(typer, param);
-        if (!ok) return NULL;
-    }
-    
-    Type *return_type = resolve_type(typer, func_defn->return_type);
-    if (!return_type) return NULL;
-    func_defn->return_type = return_type;
-
-    // Mark the function as fully typed, when we have typechecked the function signature
-    // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again ...
-    func_defn->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
-
-    typer->current_scope = func_defn->body;
-
-    bool ok = check_block(typer, func_defn->body);
-    if (!ok) return NULL;
-
-    typer->enclosing_function = NULL;
-
-    // Do a narrow scan for a return statement
+bool check_if_function_needs_a_return(Typer *typer, AstFunctionDefn *func_defn) {
     bool has_return = false;
     For (Ast*, func_defn->body->statements, {
         if (it->kind == AST_RETURN) {
@@ -1064,7 +1062,78 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     if (!has_return && func_defn->return_type->kind != TYPE_VOID && !func_defn->is_extern) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)func_defn, "Function is missing a return");
         report_error_ast(typer->parser, LABEL_NOTE, (Ast *)func_defn, "Put an explicit return at the outer scope of the function. In the future we should be able to detect nested returns");
-        return NULL;
+        return false;
+    }
+
+    return true;
+}
+
+Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
+
+    // Function might have already been type checked from an earlier function call, so in that case
+    // just early return
+    if (func_defn->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
+        return func_defn->return_type;
+    }
+
+    // Check the parameters
+    typer->enclosing_function = func_defn;
+    for (int i = 0; i < func_defn->parameters.count; i++) {
+        AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
+        bool ok = check_declaration(typer, param);
+        if (!ok) return NULL;
+    }
+
+    // Check the return type/s
+    Type *return_type = resolve_type(typer, func_defn->return_type);
+    if (!return_type) return NULL;
+    func_defn->return_type = return_type;
+
+    // Mark the function as fully typed, when we have typechecked the function signature
+    // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again ...
+    func_defn->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
+    typer->current_scope = func_defn->body;
+
+    // Check the body
+    bool ok = check_block(typer, func_defn->body);
+    if (!ok) return NULL;
+    typer->enclosing_function = NULL;
+
+    // Do a narrow scan for a return statement
+    ok = check_if_function_needs_a_return(typer, func_defn);
+    if (!ok) return NULL;
+
+    TypeFunction *func_type = ast_allocate(typer->parser, sizeof(TypeFunction));
+    func_type->head.head.kind  = AST_TYPE;
+    func_type->head.head.start = func_defn->head.start;
+    func_type->head.head.end   = func_defn->head.end;
+    func_type->head.kind       = TYPE_FUNCTION;
+    func_type->node            = func_defn;
+
+    // Do method specific stuff
+    if (func_defn->is_method) {
+
+        Type *receiver_type = ((AstDeclaration**)func_defn->parameters.items)[0]->type;
+
+        // Remove the receiver type from the parameter list
+        if (func_defn->parameters.count > 1) {
+            func_defn->parameters.items = (unsigned char *) &(((AstDeclaration**)func_defn->parameters.items)[1]);
+        }
+        func_defn->parameters.count--;
+        
+
+        if (receiver_type->kind != TYPE_STRUCT) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must currently be a struct. In the future we will allow methods on all types");
+            return NULL;
+        }
+
+        // Add the function as a member of the receiver type
+        TypeStruct *receiver_struct = (TypeStruct *) receiver_type;
+
+        AstDeclaration *method_member = generate_declaration(typer->parser, func_defn->identifier->name, NULL, (Type *)func_type, DECLARATION_IS_STRUCT_MEMBER | DECLARATION_IS_STRUCT_METHOD_MEMBER);
+        add_member_to_struct(receiver_struct->node, method_member);
+
+        func_defn->receiver_type = receiver_type;
     }
 
     //
@@ -1072,16 +1141,16 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     //
     for (int i = 0; i < func_defn->parameters.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
-        func_defn->num_bytes_locals += param->type->size;
+        reserve_local_storage(func_defn, param->type->size);
     }
 
     // Do sizing of large return values
     if (func_defn->return_type->size > 8) {
-        func_defn->num_bytes_locals += 8;
+        reserve_local_storage(func_defn, 8);
     }
 
 
-    return return_type;
+    return (Type *)func_type;
 }
 
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
@@ -1272,7 +1341,6 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
             first_element_type = solidify_untyped_type(first_element_type);
         }
 
-
         TypeStruct *struct_defn = generate_struct_type_with_data_and_count(typer->parser, first_element_type, "Array");
 
         array                  = ast_allocate(typer->parser, sizeof(TypeArray));
@@ -1443,9 +1511,9 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     if (!type_lhs) return NULL;
 
     //
-    // 1'st case : Explicit enum value
+    // 1'st case : Member access on enum
     // @Cleanup - I think this bit of code can be better put elsewhere in a unary dot as that is what we are checking for here. e.g .ENUM
-    //            That way, i wouldn't need to have an access kind for the member
+    //            That way, we wouldn't need to have an access kind for the member
     //
     AstExpr *lhs = ma->left;
     if (type_lhs->kind == TYPE_ENUM && lhs->head.kind == AST_LITERAL && ((AstLiteral *)(lhs))->kind == LITERAL_IDENTIFIER) {
@@ -1473,25 +1541,25 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     //
     // 2'nd case : Member access on struct
     //
-    TypeStruct *struct_defn = NULL;
+    TypeStruct *struct_type = NULL;
     bool valid_lhs = false;
 
     if (type_lhs->kind == TYPE_POINTER) {
         Type *points_to = ((TypePointer *)(type_lhs))->pointer_to;
 
         if (points_to->kind == TYPE_STRUCT) {
-            struct_defn = (TypeStruct *)(points_to);
+            struct_type = (TypeStruct *)(points_to);
             valid_lhs = true;
         }
     }
     else if (type_lhs->kind == TYPE_STRUCT) {
-        struct_defn = (TypeStruct *)(type_lhs);
+        struct_type = (TypeStruct *)(type_lhs);
         valid_lhs = true;
     }
     else if (type_lhs->kind == TYPE_ARRAY) {
         TypeArray *array_defn = (TypeArray *)(type_lhs);
 
-        struct_defn = array_defn->struct_defn;
+        struct_type = array_defn->struct_defn;
         valid_lhs = true;
     }
 
@@ -1501,36 +1569,54 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     }
 
 
+    AstDeclaration *member = NULL;
+    char           *member_name = NULL;
     AstExpr *rhs = ma->right;
+    
+    // Get out the member declaration
     if (rhs->head.kind == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
-        char *member_name = ((AstLiteral *)(rhs))->as.value.identifier.name;
-        
-        AstDeclaration *member = get_struct_member(struct_defn->node, member_name);
-        if (!member) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a member of '%s'", member_name, type_to_str((Type *)struct_defn));
+        AstLiteral *ident = (AstLiteral *) rhs;
+        member_name = ident->as.value.identifier.name;
+        member = get_struct_member(struct_type->node, member_name);
+    } 
+    else if (rhs->head.kind == AST_FUNCTION_CALL) {
+        AstFunctionCall *func_call = (AstFunctionCall *) rhs;
 
-            if (type_lhs->kind == TYPE_ARRAY) {
-                TypeArray *array = (TypeArray *) type_lhs;
-                if (array->is_dynamic) {
-                    report_error_ast(typer->parser, LABEL_NOTE, NULL, "Dynamic arrays have the members .data, .count and .capacity");
-                } else {
-                    report_error_ast(typer->parser, LABEL_NOTE, NULL, "Arrays have the members .data and .count");
-                }
-            } else {
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn), "Here is the definition of %s", type_to_str((Type *)struct_defn));
-            }
+        func_call->is_member_call = true;
+        func_call->struct_defn = struct_type->node;
 
-            return NULL;
-        }
+        Type *func_type = check_function_call(typer, func_call);
+        if (!func_type) return NULL;
 
-        ma->access_kind   = MEMBER_ACCESS_STRUCT;
-        ma->struct_member = member;
-        return member->type;
-    } else {
+        member_name = func_call->identifer->name;
+        member = get_struct_member(struct_type->node, member_name);
+    } 
+    else {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "Invalid member expression");
         return NULL;
     }
 
+    if (!member) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a member of '%s'", member_name, type_to_str((Type *)struct_type));
+
+        if (type_lhs->kind == TYPE_ARRAY) {
+            TypeArray *array = (TypeArray *) type_lhs;
+            if (array->is_dynamic) {
+                report_error_ast(typer->parser, LABEL_NOTE, NULL, "Dynamic arrays have the members .data, .count and .capacity");
+            } else {
+                report_error_ast(typer->parser, LABEL_NOTE, NULL, "Arrays have the members .data and .count");
+            }
+        } else {
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_type), "Here is the definition of %s", type_to_str((Type *)struct_type));
+        }
+
+        return NULL;
+    }
+
+    ma->access_kind   = MEMBER_ACCESS_STRUCT;
+    ma->struct_member = member;
+
+    return member->type;
 }
 
 Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_type) {

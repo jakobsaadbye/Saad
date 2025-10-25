@@ -92,6 +92,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_TYPE_VOID:     return "TYPE_VOID";
         case TOKEN_STRUCT:        return "TYPE_STRUCT";
         case TOKEN_ENUM:          return "TYPE_ENUM";
+        case TOKEN_METHOD:        return "METHOD";
         case TOKEN_END:           return "END";
     }
 
@@ -330,6 +331,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
     }
     if (keyword_len == 6) {
         if (strcmp(text, "struct") == 0) token = TOKEN_STRUCT;
+        if (strcmp(text, "method") == 0) token = TOKEN_METHOD;
         if (strcmp(text, "string") == 0) token = TOKEN_TYPE_STRING;
         if (strcmp(text, "return") == 0) token = TOKEN_RETURN;
         if (strcmp(text, "assert") == 0) token = TOKEN_ASSERT;

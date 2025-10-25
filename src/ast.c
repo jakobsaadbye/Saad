@@ -165,6 +165,10 @@ char *type_to_str(Type *type) {
         TypeFunction *func = (TypeFunction *)(type);
         StringBuilder sb = sb_init(32);
 
+        if (func->node->is_method) {
+            sb_append(&sb, "method ");    
+        }
+
         sb_append(&sb, "(");
         for (int i = 0; i < func->node->parameters.count; i++) {
             AstDeclaration *param = ((AstDeclaration **)func->node->parameters.items)[i];

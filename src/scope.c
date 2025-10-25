@@ -34,16 +34,14 @@ AstIdentifier *find_in_scope(AstBlock *scope, char *ident_name) {
 }
 
 AstDeclaration *find_member_in_scope(AstBlock *scope, char *name) {
-    AstDeclaration *found = NULL;
     for (int i = 0; i < scope->members.count; i++) {
         AstDeclaration *member = ((AstDeclaration **)scope->members.items)[i];
         if (strcmp(name, member->ident->name) == 0) {
-            found = member;
-            break;
+            return member;
         }
     }
 
-    return found;
+    return NULL;
 }
 
 bool is_a_before_b (Ast *a, Ast *b) {

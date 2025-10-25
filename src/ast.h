@@ -130,8 +130,9 @@ typedef enum DeclarationFlags {
     DECLARATION_INFER                 = 1 << 2,
     DECLARATION_CONSTANT              = 1 << 3,
     DECLARATION_IS_STRUCT_MEMBER      = 1 << 4,
-    DECLARATION_IS_FUNCTION_PARAMETER = 1 << 5,
-    DECLARATION_IS_COMPILER_GENERATED = 1 << 6,
+    DECLARATION_IS_STRUCT_METHOD_MEMBER = 1 << 5,
+    DECLARATION_IS_FUNCTION_PARAMETER = 1 << 6,
+    DECLARATION_IS_COMPILER_GENERATED = 1 << 7,
 } DeclarationFlags;
 
 typedef struct AstDeclaration {
@@ -255,6 +256,9 @@ typedef struct AstFunctionDefn {
     AstBlock       *body;
     Type           *return_type;
     CallingConv     call_conv;
+    Type           *receiver_type; // set if its a method
+    Token           method_token;  // set if its a method
+    bool            is_method;
     bool            is_extern;
  
     int num_bytes_locals;      // Number of bytes allocated for variables in the function
@@ -270,7 +274,9 @@ typedef struct AstFunctionCall {
     AstExpr          head;
     AstIdentifier   *identifer;
     AstFunctionDefn *func_defn;    // The called function
-    DynamicArray     arguments; // of *AstExpr
+    DynamicArray     arguments;    // of *AstExpr
+    AstStruct       *struct_defn;       // The struct the function definition is defined in
+    bool             is_member_call;    // If the function is defined within the struct or is a method of the struct, this field is true
 } AstFunctionCall;
 
 typedef struct AstPrint {
