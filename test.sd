@@ -1,29 +1,14 @@
-Vector2 :: struct {
-    x: float;
-    y: float;
+Node :: struct {
+    data : int;
+    next : *Node;
 }
-
-Vector3 :: struct {
-    x: float;
-    y: float;
-    z: float;
-}
-
-B :: struct {
-    vec: Vector3;
-}
-
-A :: struct {
-    // vec: Vector2;
-    bs: [10]B;
-}
-
-
 
 main :: () {
-    ns : [10][10]int;
+    n1 : Node;
+    n1.data = 69;
 
-    n := ns[0][0];
-
-    print("%", n);
+    ptr0 := &n1;
+    ptr1 := &ptr0;
+    ptr2 := &ptr1;
+    assert((*(*ptr2)).data == 69);
 }

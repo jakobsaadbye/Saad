@@ -39,7 +39,7 @@ AstIdentifier  *make_identifier_from_string(Parser *parser, const char *name, Ty
 
 AstDeclaration *generate_declaration(Parser *parser, char *ident_name, AstExpr *expr, Type *type, DeclarationFlags flags);
 TypeStruct     *generate_struct_for_dynamic_array(Parser *parser, Type *type_data);
-TypeStruct     *generate_struct_for_static_array(Parser *parser, Type *type_data);
+TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_data, char *struct_name);
 
 bool starts_array_literal(Parser *parser);
@@ -453,15 +453,18 @@ Type *parse_type(Parser *parser) {
         Token open_bracket = next;
 
         AstExpr *capacity_expr = NULL;
-        bool     is_dynamic = false;
+        ArrayKind array_kind;
 
         next = peek_next_token(parser);
         if (next.type == TOKEN_DOUBLE_DOT) {
             eat_token(parser);
-            is_dynamic = true;
+            array_kind = ARRAY_DYNAMIC;
+            capacity_expr = NULL;
         } else if (next.type == ']') {
+            array_kind = ARRAY_SLICE;
             capacity_expr = NULL;
         } else {
+            array_kind = ARRAY_FIXED;
             capacity_expr = parse_expression(parser, MIN_PRECEDENCE);
             if (!capacity_expr) return NULL;
         }
@@ -479,10 +482,10 @@ Type *parse_type(Parser *parser) {
         // Generate a small struct definition for the array
         TypeStruct *struct_defn = NULL;
 
-        if (is_dynamic) {
+        if (array_kind == ARRAY_DYNAMIC) {
             struct_defn = generate_struct_for_dynamic_array(parser, elem_type);
         } else {
-            struct_defn = generate_struct_for_static_array(parser, elem_type);
+            struct_defn = generate_struct_for_slice(parser, elem_type);
         }
 
 
@@ -493,28 +496,27 @@ Type *parse_type(Parser *parser) {
         array->head.head.end   = elem_type->head.end;
         array->head.kind       = TYPE_ARRAY;
         array->head.size       = 0; // Size is set later in resolve_type()
+        array->array_kind      = array_kind;
         array->elem_type       = elem_type;
         array->struct_defn     = struct_defn;
         array->capacity_expr   = capacity_expr;
-        array->capacity        = is_dynamic ? 2 : 0;
-        array->count           = 0;
-        array->is_dynamic      = is_dynamic;
+        array->capacity        = 0; // Set in typer
+        array->count           = 0; // Set in typer
 
         return (Type *)(array);
     }   
 
-    report_error_token(parser, LABEL_ERROR, next, "Expected a type, got token %s", token_type_to_str(next.type));
-    exit(1);
+    report_error_token(parser, LABEL_ERROR, next, "Expected a type");
+    return NULL;
 }
 
 AstDeclaration *add_member_to_struct(AstStruct *struct_defn, AstDeclaration *member) {
     return add_declaration_to_scope(struct_defn->scope, member);
 }
 
-TypeStruct *generate_struct_for_static_array(Parser *parser, Type *type_data) {
-    TypeStruct *static_array = generate_struct_type_with_data_and_count(parser, type_data, "Array");
-
-    return static_array;
+TypeStruct *generate_struct_for_slice(Parser *parser, Type *type_data) {
+    TypeStruct *slice = generate_struct_type_with_data_and_count(parser, type_data, "Array");
+    return slice;
 }
 
 TypeStruct *generate_struct_for_dynamic_array(Parser *parser, Type *type_data) {
@@ -1449,8 +1451,8 @@ AstSizeof *parse_sizeof(Parser *parser) {
     expect(parser, next, '(');
     eat_token(parser);
 
-    Type *type = parse_type(parser);
-    if (!type) return NULL;
+    AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+    if (!expr) return NULL;
 
     next = peek_next_token(parser);
     expect(parser, next, ')');
@@ -1460,7 +1462,7 @@ AstSizeof *parse_sizeof(Parser *parser) {
     ast_sizeof->head.head.kind  = AST_SIZEOF;
     ast_sizeof->head.head.start = start_token.start;
     ast_sizeof->head.head.end   = next.end;
-    ast_sizeof->type            = type;
+    ast_sizeof->expr            = expr;
 
     return ast_sizeof;
 }

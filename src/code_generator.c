@@ -346,49 +346,20 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
         emit_expression(cg, (AstExpr *)&bin);
     }
 
-    //
-    // Get the offset to assign to. If its a runtime offset like an array subscript, then the address
-    // will be in rbx after this block
-    //
-    int base_offset = 0;
-    bool offset_is_runtime_computed = false;
+    // Get the offset to assign to. The offset will be in rbx after emitting the lhs
+    set_flag(cg, CODEGEN_EMIT_EXPRESSION_AS_LVALUE);
+    emit_expression(cg, assign->lhs);
+    POP(RBX);
 
-    if (assign->lhs->head.kind == AST_LITERAL) {
-        AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name);
-        assert(ident);
-
-        if (ident->type->kind == TYPE_POINTER) {
-            if (assign->expr->type->kind != TYPE_POINTER) {
-                // We are updating the value at the address that is pointed to
-                sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", ident->stack_offset);
-                base_offset = 0;
-                offset_is_runtime_computed = true;
-            } else {
-                // We are updating the address value of the pointer
-                base_offset = ident->stack_offset;
-                offset_is_runtime_computed = false;
-            }
-        } else {
-            base_offset = ident->stack_offset;
-            offset_is_runtime_computed = false;
-        }
-    }
-    else if (assign->lhs->head.kind == AST_MEMBER_ACCESS) {
-        AstMemberAccess *ma = (AstMemberAccess *)(assign->lhs);
-        MemberAccessResult result = emit_member_access(cg, ma);
-        base_offset = result.base_offset;
-        offset_is_runtime_computed = result.is_runtime_computed;
-    }
-    else if (assign->lhs->head.kind == AST_ARRAY_ACCESS) {
-        AstArrayAccess *array_ac = (AstArrayAccess *)(assign->lhs);
-        emit_array_access(cg, array_ac, true);
-        offset_is_runtime_computed = true;
-    }
-    else {
-        XXX;
+    // If we assign a pointer to an rvalue, then we derefence the pointer before the assignment. For example:
+    //    a := 5;
+    //    ptr_a := &a;
+    //    ptr_a = 10;      // Derefernce 'ptr_a' and assign 'a' to 10 (like it does in c)
+    if (assign->lhs->type->kind == TYPE_POINTER && assign->expr->type->kind != TYPE_POINTER) {
+        sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
     }
 
-    emit_simple_initialization(cg, base_offset, offset_is_runtime_computed, false, assign->lhs->type, assign->expr->type);
+    emit_simple_initialization(cg, 0, true, false, assign->lhs->type, assign->expr->type);
 }
 
 void emit_for(CodeGenerator *cg, AstFor *ast_for) {
@@ -454,11 +425,15 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         sb_append(&cg->code, "L%d:\n", done_label);
     } 
     else {
+        assert(ast_for->iterable);
+        assert(ast_for->iterable->type->kind == TYPE_ARRAY);
+
         AstIdentifier *iterator = ast_for->iterator;
         AstIdentifier *index    = ast_for->index;
-        AstExpr *iterable       = ast_for->iterable;
+        AstExpr       *iterable = ast_for->iterable;
+        TypeArray     *iterable_type = (TypeArray *)iterable->type;
 
-        // Allocate space for iterator, pointer to head of array, stop condition (count) and index
+        // Allocate space for iterator, pointer to start of array, stop condition (count) and index
         //
         // :WrongForLoopSizing @Investigate - Might have to do with the fact that we are not aligning the stack before allocating space for the iterator!
         int aligned_iterator_size = iterator->type->size;
@@ -468,7 +443,6 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         int offset_index          = offset_iterator - 24;
         cg->enclosing_function->base_ptr -= (24 + aligned_iterator_size);
         
-        assert(iterator);
         iterator->stack_offset = offset_iterator;
         if (index) {
             index->stack_offset = offset_index;
@@ -478,8 +452,26 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         emit_expression(cg, iterable);
 
         POP(RAX);
-        sb_append(&cg->code, "   mov\t\trbx, 0[rax]\n");
-        sb_append(&cg->code, "   mov\t\trcx, 8[rax]\n");
+
+        // Copy .data and .count from the iterable (array) into rbx and rcx respectively
+        switch (iterable_type->array_kind) {
+        case ARRAY_FIXED: {
+            sb_append(&cg->code, "   mov\t\trbx, rax\n");
+            sb_append(&cg->code, "   mov\t\trcx, %d\n", iterable_type->capacity);
+            break;
+        }
+        case ARRAY_SLICE: {
+            sb_append(&cg->code, "   mov\t\trbx, 0[rax]\n");
+            sb_append(&cg->code, "   mov\t\trcx, 8[rax]\n");
+            break;
+        }
+        case ARRAY_DYNAMIC: {
+            sb_append(&cg->code, "   mov\t\trbx, 0[rax]\n");
+            sb_append(&cg->code, "   mov\t\trcx, 8[rax]\n");
+            break;
+        }
+        }
+
         sb_append(&cg->code, "   mov\t\t%d[rbp], rbx     ; data\n", offset_data);
         sb_append(&cg->code, "   mov\t\t%d[rbp], rcx     ; count\n", offset_count);
         sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0 ; index\n", offset_index);
@@ -563,7 +555,7 @@ void emit_return(CodeGenerator *cg, AstReturn *ast_return) {
 }
 
 /* Source address is expected to be in rax. Destination address is expected to be in rbx. The rcx register is used as a temporary during the copy */ 
-void emit_copy_struct(CodeGenerator *cg, TypeStruct *struct_defn, int dst_base_offset, int src_base_offset) {
+void emit_struct_copy(CodeGenerator *cg, TypeStruct *struct_defn, int dst_base_offset, int src_base_offset) {
 
     // Try and move the struct in registers
     if (struct_defn->head.size <= 8) {
@@ -616,7 +608,7 @@ void emit_function_return_value(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
         // Source is already in rax
         sb_append(&cg->code, "   mov\t\trbx, -8[rbp]\n");   // @Improvement -8[rbp] is only because we currently only can have a single return value
-        emit_copy_struct(cg, array->struct_defn, 0, 0);
+        emit_struct_copy(cg, array->struct_defn, 0, 0);
         sb_append(&cg->code, "   mov\t\trax, -8[rbp]\n");
         
         return;
@@ -635,7 +627,7 @@ void emit_function_return_value(CodeGenerator *cg, AstFunctionDefn *func_defn) {
         // Source is already in rax
         sb_append(&cg->code, "   mov\t\trbx, -8[rbp]\n");
 
-        emit_copy_struct(cg, struct_defn, 0, 0);
+        emit_struct_copy(cg, struct_defn, 0, 0);
         
         // Return a pointer to the returned struct
         sb_append(&cg->code, "   mov\t\trax, -8[rbp]\n");
@@ -893,11 +885,11 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
             if (param->type->kind == TYPE_STRUCT) {
                 sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", param_offset);
-                emit_copy_struct(cg, (TypeStruct *)param->type, 0, 0);
+                emit_struct_copy(cg, (TypeStruct *)param->type, 0, 0);
             } else if (param->type->kind == TYPE_ARRAY) {
                 TypeArray *array = (TypeArray *) param->type;
                 sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", param_offset);
-                emit_copy_struct(cg, array->struct_defn, 0, 0);
+                emit_struct_copy(cg, array->struct_defn, 0, 0);
             } else {
                 XXX;
             }
@@ -1312,7 +1304,7 @@ void emit_new(CodeGenerator *cg, AstNew *ast_new) {
         TypeStruct *struct_defn = (TypeStruct *) expr->type;
         POP(RAX);   // Pointer to temporary struct literal
         POP(RBX);   // Pointer to allocated data
-        emit_copy_struct(cg, struct_defn, 0, 0);
+        emit_struct_copy(cg, struct_defn, 0, 0);
     } else if (expr->type->kind == TYPE_ARRAY) {
         XXX;
     } else {
@@ -1594,37 +1586,35 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset) {
     case TYPE_ARRAY : {
         TypeArray *array = (TypeArray *)(type);
 
-        if (array->is_dynamic) {
+        // Zero out the memory if the size of the array is specified. Otherwise
+        // we can skip zero initializing as the size is infered from the array literal
+        // which will populate all the slots anyway
+
+        switch (array->array_kind) {
+        case ARRAY_FIXED: {
+            sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\n", dst_offset);
+            sb_append(&cg->code, "   mov\t\trdx, 0\n");
+            sb_append(&cg->code, "   mov\t\tr8, %d\n", array->head.size);
+            sb_append(&cg->code, "   call\t\tmemset\n");    // void *memset(void *ptr, int x, size_t n);
+            break;
+        }
+        case ARRAY_SLICE: {
+            // The array is fully initialized from the array literal
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset + 0);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset + 8);
+            break;
+        }
+        case ARRAY_DYNAMIC: {
             sb_append(&cg->code, "   mov\t\trdx, %d\n", array->elem_type->size);
             sb_append(&cg->code, "   mov\t\trcx, %d\n", array->capacity);
             sb_append(&cg->code, "   call\t\tcalloc\n");        // void* calloc( size_t num, size_t size );
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n",   dst_offset + 0);
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n" , dst_offset + 8, array->count);
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n" , dst_offset + 16, array->capacity);
-        } else {
 
-            // Zero out the memory if the size of the array is specified. Otherwise
-            // we can skip zero initializing as the size is infered from the array literal
-            // which will populate all the slots anyway
-
-            if (array->capacity_expr) {
-                int elem_0_offset = dst_offset + 16;
-                sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", elem_0_offset);
-                sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n",  dst_offset + 0);
-                sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n", dst_offset + 8, array->count);
-                
-                int bytes_to_zero = array->capacity * array->elem_type->size;
-                sb_append(&cg->code, "   mov\t\trcx, rax\n");
-                sb_append(&cg->code, "   mov\t\trdx, 0\n");
-                sb_append(&cg->code, "   mov\t\tr8, %d\n", bytes_to_zero);
-                sb_append(&cg->code, "   call\t\tmemset\n");    // void *memset(void *ptr, int x, size_t n);
-            } else {
-                // The array is fully initialized from the array literal
-                sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset + 0);
-                sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset + 8);
-            }
-        }
-
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", dst_offset + 0);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n", dst_offset + 8, array->count);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n", dst_offset + 16, array->capacity);
+            break;
+        }}
+            
         return;
     }
     default:
@@ -1635,26 +1625,26 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset) {
 
 void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_runtime_computed, bool dst_is_relative_to_rsp, Type *lhs_type, Type *rhs_type) {
 
-    char address_str[16];
+    char dst[16];
     if (dst_is_runtime_computed) {
-        sprintf(address_str, "[rbx]");
+        sprintf(dst, "[rbx]");
     } else {
         if (dst_is_relative_to_rsp) {
-            sprintf(address_str, "%d[rsp]", dst_offset);
+            sprintf(dst, "%d[rsp]", dst_offset);
         } else {
-            sprintf(address_str, "%d[rbp]", dst_offset);
+            sprintf(dst, "%d[rbp]", dst_offset);
         }
     }
 
     switch (lhs_type->kind) {
     case TYPE_BOOL: {
         POP(RAX);
-        sb_append(&cg->code, "   mov\t\tBYTE %s, al\n", address_str);
+        sb_append(&cg->code, "   mov\t\tBYTE %s, al\n", dst);
         return;
     }
     case TYPE_INTEGER: {
         POP(RAX);
-        sb_append(&cg->code, "   mov\t\t%s %s, %s\n", WIDTH(lhs_type), address_str, REG_A(lhs_type));
+        sb_append(&cg->code, "   mov\t\t%s %s, %s\n", WIDTH(lhs_type), dst, REG_A(lhs_type));
         return;
     }
     case TYPE_FLOAT: {
@@ -1664,21 +1654,21 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
                 // @Note - I feel like this conversion from int to float should be dealt with at the typing level instead of here. 
                 // One idea is to just change it at the check_declarartion level. If we have a float on the left and an integer on the right, just change the right hand side type to be integer
                 sb_append(&cg->code, "   %s\txmm0, rax\n", cvtsi2ss_or_cvtsi2sd(lhs_type));
-                sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(lhs_type), address_str);
+                sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(lhs_type), dst);
             }
             else if (rhs_type->kind == TYPE_FLOAT) {
                 if (lhs_type->size == 8 && rhs_type->size == 4) {
                     sb_append(&cg->code, "   movd\t\txmm0, eax\n");
                     sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
-                    sb_append(&cg->code, "   movsd\t\t%s, xmm0\n", address_str);
+                    sb_append(&cg->code, "   movsd\t\t%s, xmm0\n", dst);
                 }
                 else if (lhs_type->size == 4 && rhs_type->size == 8) {
                     sb_append(&cg->code, "   movq\t\txmm0, rax\n");
                     sb_append(&cg->code, "   cvtsd2ss\txmm0, xmm0\n");
-                    sb_append(&cg->code, "   movss\t\t%s, xmm0\n", address_str);
+                    sb_append(&cg->code, "   movss\t\t%s, xmm0\n", dst);
                 }
                 else {
-                    sb_append(&cg->code, "   mov\t\t%s, %s\n", address_str, REG_A(lhs_type));
+                    sb_append(&cg->code, "   mov\t\t%s, %s\n", dst, REG_A(lhs_type));
                 }
             }
             else XXX;
@@ -1688,52 +1678,50 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
     }
     case TYPE_STRING: {
         POP(RAX);
-        sb_append(&cg->code, "   mov\t\tQWORD %s, rax\n", address_str);
+        sb_append(&cg->code, "   mov\t\tQWORD %s, rax\n", dst);
         return;
     }
     case TYPE_ENUM: {
         POP(RAX);
-        sb_append(&cg->code, "   mov\t\tDWORD %s, eax\n", address_str);
+        sb_append(&cg->code, "   mov\t\tDWORD %s, eax\n", dst);
         return;
     }
     case TYPE_POINTER: {
         if (rhs_type->kind == TYPE_POINTER) {
             POP(RAX);
-            sb_append(&cg->code, "   mov\t\tQWORD %s, rax\n", address_str);
+            sb_append(&cg->code, "   mov\t\tQWORD %s, rax\n", dst);
         } else {
             // Follow the pointer to get the base address
             assert(dst_is_runtime_computed);
             Type *points_to = ((TypePointer *)(lhs_type))->pointer_to;
             if (points_to->kind == TYPE_POINTER) {
-                sb_append(&cg->code, "   mov\t\trbx, %s\n", address_str);
+                sb_append(&cg->code, "   mov\t\trbx, %s\n", dst);
             }
             emit_simple_initialization(cg, 0, true, dst_is_relative_to_rsp, points_to, rhs_type);
         }
         return;
     }
     case TYPE_ARRAY: {
-        POP(RAX); // pointer to array
+        POP(RAX); // pointer to array type
 
         TypeArray *array = (TypeArray *) lhs_type;
 
-        if (dst_is_runtime_computed) {
-            sb_append(&cg->code, "   mov\t\trcx, 0[rax]\n");
-            sb_append(&cg->code, "   mov\t\trdx, 8[rax]\n");
-            sb_append(&cg->code, "   mov\t\t0[rbx], rcx\n");
-            sb_append(&cg->code, "   mov\t\t8[rbx], rdx\n");
-            if (array->is_dynamic) {
-                sb_append(&cg->code, "   mov\t\tr8, 16[rax]\n");
-                sb_append(&cg->code, "   mov\t\t16[rbx], r8\n");
-            }
-        } else {
-            sb_append(&cg->code, "   mov\t\trcx, 0[rax]\n");
-            sb_append(&cg->code, "   mov\t\trdx, 8[rax]\n");
-            sb_append(&cg->code, "   mov\t\t%d[rbp], rcx\n", dst_offset);
-            sb_append(&cg->code, "   mov\t\t%d[rbp], rdx\n", dst_offset + 8);
-            if (array->is_dynamic) {
-                sb_append(&cg->code, "   mov\t\tr8, 16[rax]\n");
-                sb_append(&cg->code, "   mov\t\t%d[rbp], r8\n", dst_offset + 16);
-            }
+        switch (array->array_kind) {
+        case ARRAY_FIXED: {
+            sb_append(&cg->code, "   mov\t\trbx, [rax]\n", dst);
+            sb_append(&cg->code, "   mov\t\t%s, rbx\n", dst);
+            break;
+        }
+        case ARRAY_SLICE: {
+            sb_append(&cg->code, "   lea\t\trbx, %s\n", dst);
+            emit_struct_copy(cg, array->struct_defn, 0, 0);
+            break;
+        }
+        case ARRAY_DYNAMIC: {
+            sb_append(&cg->code, "   lea\t\trbx, %s\n", dst);
+            emit_struct_copy(cg, array->struct_defn, 0, 0);
+            break;
+        }
         }
 
         return;
@@ -1748,13 +1736,13 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
 
         if (struct_defn->head.size <= 8) {
             // Copy the the struct from rax
-            sb_append(&cg->code, "   mov\t\t%s, %s\n", address_str, REG_A((Type *)struct_defn));
+            sb_append(&cg->code, "   mov\t\t%s, %s\n", dst, REG_A((Type *)struct_defn));
         }
         else {
             if (!dst_is_runtime_computed) {
                 sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", dst_offset);
             }
-            emit_copy_struct(cg, struct_defn, 0, 0);
+            emit_struct_copy(cg, struct_defn, 0, 0);
         }
 
         return;
@@ -1764,20 +1752,13 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
     }
 }
 
-// Allocates the array literal relative to base_offset[rbp]
+// Allocates the array literal relative to base_offset[rbp]. Returns nothing
 void emit_array_literal(CodeGenerator *cg, AstArrayLiteral *array_lit, int base_offset) {
     array_lit->base_offset = base_offset;
 
     TypeArray *array = (TypeArray *)(array_lit->head.type);
-
-    int elem_0_offset = base_offset + (array->is_dynamic ? 24 : 16);
-
-    // Array header
-    if (!array->is_dynamic) {
-        sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n",       elem_0_offset);
-        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", base_offset + 0);
-        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n",  base_offset + 8, array->capacity);
-    }
+    
+    int elem_0_offset = base_offset;
         
     for (int i = 0; i < array_lit->expressions.count; i++) {
         AstExpr *elem = ((AstExpr **) array_lit->expressions.items)[i];
@@ -1785,22 +1766,21 @@ void emit_array_literal(CodeGenerator *cg, AstArrayLiteral *array_lit, int base_
         int elem_i_offset = elem_0_offset + (i * elem->type->size);
         
         set_flag(cg, CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE);
-
         cg->variable_address = elem_i_offset;
         emit_expression(cg, elem);
-            
-        if (array->is_dynamic) {
-            elem_i_offset = i * elem->type->size;
-            sb_append(&cg->code, "   mov\t\trax, %d[rbp] ; elem %d\n", base_offset, i);
-            sb_append(&cg->code, "   lea\t\trbx, [rax + %d]\n", elem_i_offset);
-        }
-
-        if (elem->head.kind == AST_ARRAY_LITERAL || elem->head.kind == AST_STRUCT_LITERAL) {
+        
+        if (elem->head.kind == AST_STRUCT_LITERAL) {
             // The expression was directly assigned to the element slot
             continue;
-        } else {
-            emit_simple_initialization(cg, elem_i_offset, array->is_dynamic, false, elem->type, elem->type);
         }
+        
+        if (array->array_kind == ARRAY_DYNAMIC) {
+            elem_i_offset = i * elem->type->size;
+            sb_append(&cg->code, "   mov\t\trax, %d[rbp] ; elem %d\n", base_offset, i);
+            sb_append(&cg->code, "   lea\t\trbx, %d[rax]\n", elem_i_offset);
+        }
+
+        emit_simple_initialization(cg, elem_i_offset, array->array_kind == ARRAY_DYNAMIC, false, elem->type, elem->type);
     }
 }
 
@@ -1831,6 +1811,16 @@ void emit_struct_literal(CodeGenerator *cg, AstStructLiteral *struct_lit, int ba
     }
 }
 
+// Allocates space within local storage by bumping down rbp by 'size' and returns the allocated address
+int allocate_variable(CodeGenerator *cg, int size) {
+    assert(cg->enclosing_function);
+
+    cg->enclosing_function->base_ptr -= size;
+    cg->enclosing_function->base_ptr = align_value(cg->enclosing_function->base_ptr, size > 8 ? 8 : size);
+
+    return cg->enclosing_function->base_ptr;
+}
+
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     if (decl->flags & DECLARATION_CONSTANT) {
         assert(decl->expr->head.kind == AST_LITERAL);
@@ -1848,53 +1838,38 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         return;
     }
 
-    int *base_ptr = &cg->enclosing_function->base_ptr;
-
-    // Bump down the base pointer
-    *base_ptr -= decl->type->size;
-
-    // Align the base ptr
-    *base_ptr = align_value(*base_ptr, decl->type->size > 8 ? 8 : decl->type->size);
-
-    decl->ident->stack_offset = *base_ptr;
+    decl->ident->stack_offset = allocate_variable(cg, decl->type->size);
 
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; Ln %d: $%s : %s = %d\n", decl->ident->head.start.line, decl->ident->name, type_to_str(decl->type), decl->ident->stack_offset);
     
     if (!decl->expr) {
         zero_initialize(cg, decl->type, decl->ident->stack_offset);
+        return;
     }
-    else {
 
-        // Special zero initialization of arrays
-        if (decl->type->kind == TYPE_ARRAY) {
-            TypeArray *array = (TypeArray *) decl->type;
-            if (array->capacity_expr || array->is_dynamic) {
-
-                // Zero initialize a static array as the capacity might differ from the array literal of the expression
-                // and also zero initialize for dynamic arrays for an initial call to calloc
-                zero_initialize(cg, decl->type, decl->ident->stack_offset);
-            }
-        }
-
-        // The following "fast-path" code is here to omit emit_expression()
-        // from first doing a copy of the value of the expression on the stack followed 
-        // by a copy into the variable. emit_expression() will take the fast-path if 
-        // the expression is only 1-level deep. e.g    a := Vector3{1, 2, 3};
-        // In this example, the struct is directly moved into 'a' instead of doing
-        // an extra copy. The same is true for array literals.
-
-        set_flag(cg, CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE);
-        cg->variable_address  = decl->ident->stack_offset;
-        emit_expression(cg, decl->expr);
-
-        if (decl->expr->head.kind == AST_ARRAY_LITERAL || decl->expr->head.kind == AST_STRUCT_LITERAL) {
-            // The value was directly assigned to the variable
-            return;
-        }
-        
-        emit_simple_initialization(cg, decl->ident->stack_offset, false, false, decl->type, decl->expr->type);
+    // Special zero initialization of fixed arrays
+    if (decl->type->kind == TYPE_ARRAY && ((TypeArray *)decl->type)->array_kind == ARRAY_FIXED) {
+        zero_initialize(cg, decl->type, decl->ident->stack_offset);
     }
+
+    // The following "fast-path" code is here to omit emit_expression()
+    // from first doing a copy of the value of the expression on the stack followed 
+    // by a copy into the variable. emit_expression() will take the fast-path if 
+    // the expression is only 1-level deep. e.g    a := Vector3{1, 2, 3};
+    // In this example, the struct is directly moved into 'a' instead of doing
+    // an extra copy. The same is true for array literals.
+
+    set_flag(cg, CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE);
+    cg->variable_address = decl->ident->stack_offset;
+    emit_expression(cg, decl->expr);
+
+    if (decl->expr->head.kind == AST_STRUCT_LITERAL) {
+        // The value was directly assigned to the variable
+        return;
+    }
+    
+    emit_simple_initialization(cg, decl->ident->stack_offset, false, false, decl->type, decl->expr->type);
 }
 
 void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
@@ -2147,58 +2122,7 @@ int make_label_number(CodeGenerator *cg) {
     return cg->labels++;
 }
 
-void emit_unary_inside_member_access(CodeGenerator *cg, AstUnary *unary, AstMemberAccess *ma) {
-    if (unary->operator == OP_POINTER_DEREFERENCE) {
-        assert(unary->expr->type->kind == TYPE_POINTER);
-
-        if (unary->expr->head.kind == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
-            AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name);
-            assert(ident->type->kind == TYPE_POINTER);
-
-            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", ident->stack_offset);
-            sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
-        }
-        else if (unary->expr->head.kind == AST_MEMBER_ACCESS) {
-            MemberAccessResult result = emit_member_access(cg, (AstMemberAccess *)(unary->expr));
-            if (result.is_runtime_computed) {
-                sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
-            } else {
-                sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", result.base_offset);
-            }
-
-            sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
-        } 
-        else if (unary->expr->head.kind == AST_UNARY) {
-            emit_unary_inside_member_access(cg, (AstUnary *)(unary->expr), ma);
-            sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
-        }
-        else {
-            XXX;
-        }
-    } else if (unary->operator == OP_ADDRESS_OF) {
-        XXX;
-    } else {
-        XXX;
-    }
-}
-
-// Example of printing this should be something like the following
-// e[0].pos[0].x
-// Push address of e
-// Emit subscript expr
-// Pop subscript expr
-// Pop address of e
-// Add subscript expr to addr of e
-// Push address of e[0]
-// Add member offset of pos
-// Push addr of pos
-// Emit subscript
-// Pop subscript
-// Pop addr of pos
-// Add subscript to addr
-// Add member offset of x
-
-// Emits a series of relative member offsets added to a given lvalue. The member offset will be in rbx
+// Pushes the member offset on the stack
 MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
     // @Speedup: It would make sense to try to calculate the entire member access offset at compile-time
     // to skip alot of push and pop operations. This was the initial idea about the MemberAccessResult
@@ -2213,6 +2137,24 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
     set_flag(cg, CODEGEN_EMIT_EXPRESSION_AS_LVALUE);
     emit_expression(cg, ma->left);
 
+    // Special case for fixed arrays: Just return the address of the array
+    if (ma->left->type->kind == TYPE_ARRAY && ((TypeArray *)ma->left->type)->array_kind == ARRAY_FIXED) {
+        return result;
+    }
+
+    if (ma->left->type->kind == TYPE_POINTER) {
+        TypePointer *ptr_type = (TypePointer *) ma->left->type;
+        if (ptr_type->has_been_dereferenced) {
+            // Skip
+        } else {
+            // Dereference the pointer
+            POP(RBX);
+            sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
+            PUSH(RBX);
+        }
+    }
+
+    // Don't bother adding to the offset if its the first member (offset = 0)
     if (ma->struct_member->member_offset > 0) {
         POP(RBX);
         sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
@@ -2222,105 +2164,12 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
     return result;
 }
 
-// MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
-
-//     // @Note: We handle each of the different nodes that appears on the left hand side
-//     // of the member access to grab its corresponding address. 
-//     //
-//     // @Improvement: It might be cleaner to have emit_expression have two modes
-//     // for emitting the r-value or as an l-value. In that case, i think we could get rid of most of the below
-//     // code if we knew we always had an l-value.
-
-//     if (ma->left->head.kind == AST_MEMBER_ACCESS) {
-//         AstMemberAccess *left = (AstMemberAccess *)(ma->left);
-
-//         MemberAccessResult result = emit_member_access(cg, left);
-
-//         Type *left_type = left->head.type;
-
-//         if (result.is_runtime_computed) {
-//             if (left_type->kind == TYPE_POINTER) {
-//                 sb_append(&cg->code, "   mov\t\trbx, [rbx]   ; Pointer dereference 1\n");
-//             }
-//             sb_append(&cg->code, "   add\t\trbx, %d ; .%s\n", ma->struct_member->member_offset, ma->struct_member->ident->name);
-//             return (MemberAccessResult){0, true};
-
-//         } else {
-//             if (left_type->kind == TYPE_POINTER) {
-//                 sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", result.base_offset);
-//                 sb_append(&cg->code, "   add\t\trbx, %d; .%s\n", ma->struct_member->member_offset, ma->struct_member->ident->name);
-//                 return (MemberAccessResult){0, true};
-//             }
-
-//             return (MemberAccessResult){
-//                 .base_offset = result.base_offset + ma->struct_member->member_offset,
-//                 .is_runtime_computed = false
-//             };
-//         }
-//     }
-
-//     if (ma->left->head.kind == AST_LITERAL && ((AstLiteral *)(ma->left))->kind == LITERAL_IDENTIFIER) {
-//         AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(ma->left))->as.value.identifier.name);
-
-//         if (ident->type->kind == TYPE_POINTER) {
-//             // Field access through pointer
-//             sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", ident->stack_offset);
-//             sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
-
-//             return (MemberAccessResult){0, true};
-//         } 
-//         else {
-//             int base_offset = ident->stack_offset + ma->struct_member->member_offset;
-
-//             return (MemberAccessResult){
-//                 .base_offset = base_offset,
-//                 .is_runtime_computed = false
-//             };
-//         }
-//     }
-
-//     if (ma->left->head.kind == AST_ARRAY_ACCESS) {
-//         AstArrayAccess *array_ac = (AstArrayAccess *)(ma->left);
-
-//         emit_array_access(cg, array_ac, true);
-
-//         sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
-
-//         return (MemberAccessResult){0, true};
-//     }
-
-//     if (ma->left->head.kind == AST_STRUCT_LITERAL) {
-//         // For cases like: 'Vector2{1, 4}.x'
-//         emit_expression(cg, ma->left);
-//         POP(RAX);
-//         sb_append(&cg->code, "   mov\t\trbx, rax\n");
-//         sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
-
-//         return (MemberAccessResult){0, true};
-//     }
-
-//     if (ma->left->head.kind == AST_FUNCTION_CALL) {
-//         emit_expression(cg, ma->left);
-//         POP(RAX);
-//         sb_append(&cg->code, "   mov\t\trbx, rax\n");
-//         sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
-
-//         return (MemberAccessResult){0, true};
-//     }
-
-//     if (ma->left->head.kind == AST_UNARY) {
-//         emit_unary_inside_member_access(cg, (AstUnary *)(ma->left), ma);
-//         return (MemberAccessResult){0, true};
-//     }
-
-//     XXX;
-// }
 
 // If lvalue is true, the returned result will be the address of the indexed element, returned in rbx, otherwise it will be the value of the indexed value returned in rax
-//
-// @Refactor: The way we handle array access and member accesses i think should be refactored to be more robust. The thing that should change
-//            is to notify emit_expression() to produce an lvalue when being called. That way its easier for us to do math on the addresses.
 void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue) {
+    assert(array_ac->accessing->type->kind == TYPE_ARRAY);
+
+    TypeArray *array_type = (TypeArray *) array_ac->accessing->type;
 
     // Emit the left side as an lvalue
     set_flag(cg, CODEGEN_EMIT_EXPRESSION_AS_LVALUE);
@@ -2333,7 +2182,11 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue)
     POP(RBX); // rbx = address of array
 
     // Set rbx to the address of the 0'th element (.data pointer)
-    sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
+    if (array_type->array_kind == ARRAY_FIXED) {
+        // Skip as the address of the array is already the address of the 0'th element
+    } else {
+        sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
+    }
 
     // Add the integer result of the index expression to the lvalue
     int elem_size = ((TypeArray *)array_ac->accessing->type)->elem_type->size;
@@ -2345,101 +2198,22 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue)
     } else {
         emit_move_and_push(cg, 0, true, array_ac->head.type, false);
     }
-
-    
-    // sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
-
-    // if (lvalue) {
-
-    //     POP(RBX);
-
-    //     sb_append(&cg->code, "   add\t\trbx, %d\n", ma->struct_member->member_offset);
-    //     PUSH(RBX);
-    // }
-
     // @Remember: To check that it also works on quick array access: e.g [1, 2, 3][0]
 }
 
-// void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue) {
-    
-    // Type *type = NULL;
-    // int base_offset = 0;
-    // bool result_is_runtime_computed = false;
-
-    // AstExpr *expr = array_ac->accessing;
-    // while (expr->head.kind == AST_ARRAY_ACCESS) {
-    //     expr = ((AstArrayAccess *)(expr))->accessing;
-    // }
-
-    // if (expr->head.kind == AST_LITERAL && ((AstLiteral *)(expr))->kind == LITERAL_IDENTIFIER) {
-    //     AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(expr))->as.value.identifier.name);
-    //     assert(ident);
-
-    //     type        = ident->type;
-    //     base_offset = ident->stack_offset;
-    // } 
-    // else if (expr->head.kind == AST_MEMBER_ACCESS) {
-    //     AstMemberAccess *ma = (AstMemberAccess *) expr;
-    //     MemberAccessResult result = emit_member_access(cg, ma);
-
-    //     type = ma->head.type;
-    //     if (result.is_runtime_computed) {
-    //         result_is_runtime_computed = true;
-    //         base_offset = -1;
-    //     } else {
-    //         base_offset = result.base_offset;
-    //     }
-    // }
-    // else if (expr->head.kind == AST_ARRAY_LITERAL) {
-    //     AstArrayLiteral *array_lit = (AstArrayLiteral *) expr;
-
-    //     // For cases like: 'a := [1, 2, 3][0]'
-    //     // @Note: We assign a temporary location to the array literal [1, 2, 3] in this case
-
-    //     int temp_loc = push_temporary_value(cg->enclosing_function, array_lit->head.type->size);
-    //     emit_array_literal(cg, array_lit, temp_loc);
-
-    //     type        = array_lit->head.type;
-    //     base_offset = array_lit->base_offset;
-    // }
-    // else {
-    //     XXX;
-    // }
-  
-    // assert(type->kind == TYPE_ARRAY);
-
-    // Type *elem_type = ((TypeArray *)(type))->elem_type;
-    // while (elem_type->kind == TYPE_ARRAY) {
-    //     elem_type = ((TypeArray *)(elem_type))->elem_type;
-    // }
-
-    // Type *innermost_type = elem_type;
-
-    // emit_array_access_offset(cg, array_ac);
-
-    // if (result_is_runtime_computed) {
-    //     // Rbx holds a pointer to pointer of data, so we dereference it once here
-    //     sb_append(&cg->code, "   mov\t\trbx, [rbx]       ; dereference .data pointer\n");
-    // } else {
-    //     sb_append(&cg->code, "   mov\t\trbx, QWORD %d[rbp]   ; load pointer to .data\n", base_offset);
-    // }
-    // sb_append(&cg->code, "   add\t\trbx, rax              ; add element offset\n");
-
-    // if (lvalue) {
-    //     PUSH(RBX);
-    //     return;
-    // }
-    
-    // emit_move_and_push(cg, 0, true, innermost_type, lvalue);
-// }
-
-// If src_is_runtime_computed = true, then the source offset is expected to be in rbx
+// Moves a value in src and pushes it on the stack. If src_is_runtime_computed = true, then the source offset is expected to be in rbx
 void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_computed, Type *src_type, bool lvalue) {
     char src[16];
     if (src_is_runtime_computed) {
         sprintf(src, "[rbx]");
     } else {
         sprintf(src, "%d[rbp]", src_offset);
+    }
+
+    if (lvalue) {
+        sb_append(&cg->code, "   lea\t\trax, %s\n", src);
+        PUSH(RAX);
+        return;
     }
 
     switch (src_type->kind) {
@@ -2468,12 +2242,8 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         return;
     }
     case TYPE_POINTER: {
-        if (lvalue) {
-            PUSH(RAX);
-        } else {
-            sb_append(&cg->code, "   mov\t\trax, %s\n", src);
-            PUSH(RAX);
-        }
+        sb_append(&cg->code, "   mov\t\trax, %s\n", src);
+        PUSH(RAX);
         return;
     }
     case TYPE_ARRAY: {
@@ -2482,14 +2252,10 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         return;
     }
     case TYPE_STRUCT: {
-        if (lvalue) {
-            sb_append(&cg->code, "   lea\t\trax, %s\n", src);
+        if (src_type->size <= 8) {
+            sb_append(&cg->code, "   mov\t\t%s, %s\n", REG_A(src_type), src);
         } else {
-            if (src_type->size <= 8) {
-                sb_append(&cg->code, "   mov\t\t%s, %s\n", REG_A(src_type), src);
-            } else {
-                sb_append(&cg->code, "   lea\t\trax, %s\n", src);
-            }
+            sb_append(&cg->code, "   lea\t\trax, %s\n", src);
         }
 
         PUSH(RAX);
@@ -2568,38 +2334,23 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         if (unary->operator == OP_ADDRESS_OF) {
-            if (unary->expr->head.kind == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
-                AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, ((AstLiteral *)(unary->expr))->as.value.identifier.name);
-                assert(ident);
-
-                sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", ident->stack_offset);
-                PUSH(RAX);
-                return;
-            }
-            else if (unary->expr->head.kind == AST_ARRAY_ACCESS) {
-                emit_array_access(cg, (AstArrayAccess *)(unary->expr), true);
-                return;
-            }
-            else if (unary->expr->head.kind == AST_MEMBER_ACCESS) {
-                MemberAccessResult result = emit_member_access(cg, (AstMemberAccess *)unary->expr);
-                if (result.is_runtime_computed) {
-                    PUSH(RBX);
-                } else {
-                    sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", result.base_offset);
-                    PUSH(RBX);
-                }
-                return;
-            } else {
-                XXX;
-            }
+            // Emit the lvalue of the expression
+            set_flag(cg, CODEGEN_EMIT_EXPRESSION_AS_LVALUE);
+            emit_expression(cg, unary->expr);
+            return;
         }
         if (unary->operator == OP_POINTER_DEREFERENCE) {
             emit_expression(cg, unary->expr);
 
             Type *dereferenced_type = unary->head.type;
             POP(RBX);
-
             emit_move_and_push(cg, 0, true, dereferenced_type, false);
+
+            if (dereferenced_type->kind == TYPE_POINTER) {
+                // Mark the pointer as dereferenced so e.g a member access knows not to dereference the pointer again
+                TypePointer *ptr_type = (TypePointer *) dereferenced_type;
+                ptr_type->has_been_dereferenced = true;
+            }
 
             return;
         }
@@ -2630,18 +2381,35 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         MemberAccessResult result = emit_member_access(cg, ma);
         if (emit_as_lvalue) {
             // Lvalue is already pushed
-        } else {
-            if (ma->access_kind == MEMBER_ACCESS_STRUCT) {
-                AstDeclaration *member = ma->struct_member;
-                POP(RBX);
-                emit_move_and_push(cg, result.base_offset, result.is_runtime_computed, member->type, false);
-            } 
-            else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
-                sb_append(&cg->code, "   push\t\t%d\n", ma->enum_member->value);
-                INCR_PUSH_COUNT();
-            } else {
-                XXX;
+            return;
+        } 
+
+        if (ma->access_kind == MEMBER_ACCESS_STRUCT) {
+
+            // Special case for member access on an fixed array type
+            if (ma->left->type->kind == TYPE_ARRAY && ((TypeArray *)ma->left->type)->array_kind == ARRAY_FIXED) {
+                TypeArray *fixed_array = (TypeArray *)ma->left->type;
+                if (ma->struct_member->member_index == 0) { // .data
+                    // Address of array is already pushed
+                } else if (ma->struct_member->member_index == 1) { // .count
+                    POP(RBX);
+                    sb_append(&cg->code, "   push\t\t%d\n", fixed_array->count);        
+                } else {
+                    XXX;
+                }
+                return;
             }
+
+            AstDeclaration *member = ma->struct_member;
+            POP(RBX);
+            emit_move_and_push(cg, result.base_offset, result.is_runtime_computed, member->type, false);
+            return;
+        } 
+        else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
+            sb_append(&cg->code, "   push\t\t%d\n", ma->enum_member->value);
+            INCR_PUSH_COUNT();
+        } else {
+            XXX;
         }
 
         return;
@@ -2653,7 +2421,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     }
     case AST_SIZEOF: {
         AstSizeof *ast_sizeof = (AstSizeof *) expr;
-        sb_append(&cg->code, "   mov\t\trax, %d\n", ast_sizeof->type->size);
+        sb_append(&cg->code, "   mov\t\trax, %d\n", ast_sizeof->expr->type->size);
         PUSH(RAX);
         return;
     }
@@ -2670,16 +2438,68 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     }
     case AST_ARRAY_LITERAL: {
         AstArrayLiteral *array_lit = (AstArrayLiteral *)(expr);
-
-        int allocation_offset = assigning_to_variable ? cg->variable_address : push_temporary_value(cg->enclosing_function, expr->type->size);
-
-        emit_array_literal(cg, array_lit, allocation_offset);
-
-        if (!assigning_to_variable) {
-            // Return pointer to beginning of array
-            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", allocation_offset);
-            PUSH(RAX);
+        TypeArray *array_type = (TypeArray *) array_lit->head.type;
+        
+        // Get the address that we emit the array literal relative to
+        int offset = -1;
+        switch (array_type->array_kind) {
+        case ARRAY_FIXED: {
+            if (assigning_to_variable) {
+                offset = cg->variable_address;
+            } else {
+                // This is probably a one-off array literal, e.g "foo(5, [1, 2, 3])"
+                //                                                       ^^^^^^^^^------- This is stored only temporarily
+                offset = push_temporary_value(cg->enclosing_function, expr->type->size);
+            }
+            break;
         }
+        case ARRAY_SLICE: {
+            // Allocate the underlying array in local storage and return a slice to it (data + count)
+            offset = allocate_variable(cg, array_type->count * array_type->elem_type->size);
+            break;
+        }
+        case ARRAY_DYNAMIC: {
+            // Allocate the underlying array with malloc
+            sb_append(&cg->code, "   mov\t\trdx, %d\n", array_type->elem_type->size);
+            sb_append(&cg->code, "   mov\t\trcx, %d\n", array_type->capacity);
+            sb_append(&cg->code, "   call\t\tcalloc\n");        // void* calloc( size_t num, size_t size );
+
+            // Allocate a temporary pointer to the malloced array
+            int array_pointer_address = push_temporary_value(cg->enclosing_function, 8);
+            sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", array_pointer_address);
+
+            offset = array_pointer_address;
+            break;
+        }}
+
+        emit_array_literal(cg, array_lit, offset);
+        
+        switch (array_type->array_kind) {
+        case ARRAY_FIXED: {
+            // Return pointer to beginning of array (element 0)
+            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", offset);
+            PUSH(RAX);
+            break;
+        }
+        case ARRAY_SLICE: {
+            int slice_offset = push_temporary_value(cg->enclosing_function, 16);
+            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", offset);
+            sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", slice_offset + 0);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n",  slice_offset + 8, array_type->count);
+            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", slice_offset);
+            PUSH(RAX);
+            break;
+        }
+        case ARRAY_DYNAMIC: {
+            int dyn_array_offset = push_temporary_value(cg->enclosing_function, 24);
+            sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", offset);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n",   dyn_array_offset + 0);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n" , dyn_array_offset + 8, array_type->count);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n" , dyn_array_offset + 16, array_type->capacity);
+            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", dyn_array_offset);
+            PUSH(RAX);
+            break;
+        }}
 
         break;
     }

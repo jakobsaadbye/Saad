@@ -303,7 +303,7 @@ typedef struct AstTypeof {
 
 typedef struct AstSizeof {
     AstExpr  head;
-    Type    *type;
+    AstExpr *expr;
 } AstSizeof;
 
 typedef struct AstReturn {
@@ -434,10 +434,8 @@ typedef struct AstStructInitializer {
 
 typedef struct AstArrayLiteral {
     AstExpr head;
-
     DynamicArray expressions; // of *AstExpression
-
-    int base_offset; // used in CodeGenerator
+    int base_offset;          // used in CodeGenerator
 } AstArrayLiteral;
 
 typedef enum LiteralKind {
@@ -529,19 +527,26 @@ Type *primitive_type(PrimitiveKind kind);              // Defined in ast.c
 typedef struct TypePointer {
     Type head;
     Type *pointer_to;
+    bool has_been_dereferenced;
 } TypePointer;
 
 extern TypePointer *type_null_ptr;
 
+typedef enum ArrayKind {
+    ARRAY_FIXED,
+    ARRAY_SLICE,
+    ARRAY_DYNAMIC,
+} ArrayKind;
+
 typedef struct TypeArray {
     Type             head;
     AstArrayLiteral *node;
+    ArrayKind        array_kind;
     Type            *elem_type;
     TypeStruct      *struct_defn;      // A generated struct to hold the .data and .count members
     AstExpr         *capacity_expr;    // If null, then the size was infered from the array literal
     long long        capacity;         // Will be set in typer
-    long long        count;            // Compile time number of elements in the array. Used for compile-time bounds checking
-    bool             is_dynamic;       // false = static
+    long long        count;            // Compile-time number of elements in the array. Used for compile-time bounds checking
 } TypeArray;
 
 typedef struct TypeEnum {

@@ -9,6 +9,7 @@ Node :: struct {
 }
 
 main:: () {
+    print("Basic pointer stuff");
     {
         a : int = 3;
         b : int = 5;
@@ -35,7 +36,7 @@ main:: () {
         assert(x == 10);
     }
 
-    // Pointers inside arrays
+    print("Pointers inside arrays");
     {
         c0 := 1;
         c1 := 2;
@@ -65,7 +66,7 @@ main:: () {
         }
     }
 
-    // Changing value of struct field through pointer
+    print("Changing value of struct field through pointer");
     {
         v : Vector2;
     
@@ -78,7 +79,7 @@ main:: () {
         assert(v.y == 3.0);
     }
 
-    // Dereference and change of value through pointer on a struct field
+    print("Dereference and change of value through pointer on a struct field");
     {
         n1 : Node;
         n2 : Node;
@@ -92,7 +93,7 @@ main:: () {
         assert(n1.next.next.next == &n1);
     }
     
-    // Multiple pointer dereference to get to inner struct
+    print("Multiple pointer dereference to get to inner struct");
     {
         n1 : Node;
         n1.data = 69;
@@ -103,7 +104,7 @@ main:: () {
         assert((*(*ptr2)).data == 69);
     }
 
-    // Checking that it also works inside for-loops
+    print("Checking that it also works inside for-loops");
     {
         n1 : Node;
         n2 : Node;
@@ -128,7 +129,7 @@ main:: () {
         assert(cursor.data == 1);
     }
 
-    // Iffing on a pointer
+    print("Iffing on a pointer");
     {
         n : Node;
         n1 : Node;

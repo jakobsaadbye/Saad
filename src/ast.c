@@ -145,15 +145,19 @@ char *type_to_str(Type *type) {
         TypeArray *array = (TypeArray *)(type);
         StringBuilder sb = sb_init(32);
 
-        if (array->is_dynamic) {
+        switch (array->array_kind) {
+        case ARRAY_FIXED: {
+            sb_append(&sb, "[%d]%s", array->capacity, type_to_str(array->elem_type));
+            break;
+        }
+        case ARRAY_SLICE: {
+            sb_append(&sb, "[]%s", type_to_str(array->elem_type));
+            break;
+        }
+        case ARRAY_DYNAMIC: {
             sb_append(&sb, "[..]%s", type_to_str(array->elem_type));
-        } else {
-            if (array->capacity == 0) {
-                // Slice
-                sb_append(&sb, "[]%s", type_to_str(array->elem_type));
-            } else {
-                sb_append(&sb, "[%d]%s", array->capacity, type_to_str(array->elem_type));
-            }
+            break;
+        }
         }
 
         return sb_to_string(&sb); // @Leak

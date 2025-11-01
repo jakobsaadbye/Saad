@@ -157,7 +157,14 @@ Type *resolve_type(Typer *typer, Type *type) {
     if (type->kind == TYPE_ARRAY) {
         TypeArray *array = (TypeArray *)(type);
 
-        if (array->capacity_expr) {
+        // Resolve the size of any inner element type
+        Type *elem_type = resolve_type(typer, array->elem_type);
+        if (!elem_type) return NULL;
+        array->elem_type = elem_type;
+
+        switch (array->array_kind) {
+        case ARRAY_FIXED: {
+            assert(array->capacity_expr);
 
             Type *cap_type = check_expression(typer, array->capacity_expr, NULL);
             if (!cap_type) return NULL;
@@ -174,25 +181,23 @@ Type *resolve_type(Typer *typer, Type *type) {
                 return NULL;
             }
 
-            array->capacity = capacity;
-            array->count    = capacity;
-        } else {
-            array->capacity = 0;
-            array->count    = 0;
+            array->capacity  = capacity;
+            array->count     = capacity;
+            array->head.size = capacity * elem_type->size;
+            break;
         }
-
-        // Resolve the size of any inner element type
-        Type *elem_type = resolve_type(typer, array->elem_type);
-        if (!elem_type) return NULL;
-
-        array->elem_type = elem_type;
-
-        if (array->is_dynamic) {
-            // Reserve 24 bytes for .data, .count and .capacity
-            array->head.size = 24;
-        } else {
-            // Reserve 16 bytes for .data, .count + the size of the array
-            array->head.size = 16 + array->capacity * elem_type->size; 
+        case ARRAY_SLICE: {
+            array->capacity  = 0;
+            array->count     = 0;
+            array->head.size = 16; // Reserve 16 bytes for .data, .count
+            break;
+        }
+        case ARRAY_DYNAMIC: {
+            array->capacity  = 2;
+            array->count     = 0;
+            array->head.size = 24; // Reserve 24 bytes for .data, .count and .capacity
+            break;
+        }
         }
 
         return (Type *)(array);
@@ -388,7 +393,7 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         TypeArray *rhs_array = (TypeArray *)rhs;
 
         // Allow dynamic array to "static" array cast but not the other way around
-        if (!lhs_array->is_dynamic && rhs_array->is_dynamic) return false;
+        if (!(lhs_array->array_kind == ARRAY_DYNAMIC) && rhs_array->array_kind == ARRAY_DYNAMIC) return false;
 
         return types_are_equal(lhs_array->elem_type, rhs_array->elem_type);
     } 
@@ -586,11 +591,11 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     if (!ok) return false;
 
     if (assign->expr->head.kind == AST_ARRAY_LITERAL) {
-        TypeArray *array = (TypeArray *) assign->expr->type;
+        TypeArray *lhs_array = (TypeArray *) lhs_type;
 
-        if (!array->is_dynamic) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Cannot reassign a statically declared array to array literal as it does not occupy any space");
-            report_error_ast(typer->parser, LABEL_HINT, NULL, "Assign the array literal to an identifier first before assigning it in the original expression");
+        if (lhs_array->array_kind == ARRAY_FIXED) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot reassign a fixed size array. Only slices and dynamic arrays may be reassigned");
+            // report_error_ast(typer->parser, LABEL_HINT, NULL, "If you really need to reassign the array, make a slice out of the fixed size array");
             return false;
         }
     }
@@ -1249,73 +1254,6 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) 
     return lhs_type;
 }
 
-void queue_array_to_be_sized(DynamicArray *flattened_array, TypeArray *array, int depth) {
-    if (depth >= (int)flattened_array->count) {
-        for (int i = 0; i < depth + 1; i++) {
-            DynamicArray elements = da_init(2, sizeof(TypeArray *));
-            da_append(flattened_array, elements);
-        }
-    }
-
-    DynamicArray *elements = &((DynamicArray *)(flattened_array->items))[depth];
-    da_append(elements, array);
-}
-
-void free_flattened_array(DynamicArray *flattened_array) {
-    for (int i = 0; i < flattened_array->count; i++) {
-        DynamicArray *elements = &((DynamicArray *)(flattened_array->items))[i];
-        free(elements->items);
-    }
-}
-
-void do_sizing_of_entire_array(DynamicArray *flattened_array) {
-    for (int d = (int)flattened_array->count - 1; d >= 0; d--) {
-        DynamicArray elements = ((DynamicArray *)(flattened_array->items))[d];
-
-        if (d == 0) assert(elements.count == 1); // Only one root array
-
-        //
-        // Static specified size
-        //
-        TypeArray *array = ((TypeArray **)(elements.items))[0];
-        if (!array->is_dynamic && array->capacity_expr != NULL) {
-            assert(array->capacity != 0);
-
-            array->head.size = array->capacity * array->elem_type->size;
-            continue;
-        }
-
-        //
-        // Dynamic + inferred array size
-        //
-        int size_of_biggest_array     = 0;
-        int capacity_of_biggest_array = 0;
-
-        // First pass to find the biggest size of array
-        for (int j = 0; j < elements.count; j++) {
-            
-            TypeArray *array = ((TypeArray **)(elements.items))[j];
-            AstArrayLiteral *array_lit = array->node;
-
-            if (d == (int)(flattened_array->count - 1)) assert(array->elem_type->kind != TYPE_ARRAY);
-
-            int capacity   = array_lit->expressions.count;
-            int array_size = capacity * array->elem_type->size; 
-
-            if (capacity   > capacity_of_biggest_array) capacity_of_biggest_array = capacity;
-            if (array_size > size_of_biggest_array)     size_of_biggest_array = array_size;
-        }
-
-        // Second pass to set all the inner arrays size and capacity to be the biggest
-        for (int j = 0; j < elements.count; j++) {
-            TypeArray *array = ((TypeArray **)(elements.items))[j];
-
-            array->capacity  = capacity_of_biggest_array;
-            array->head.size = size_of_biggest_array;
-        }
-    }
-}
-
 Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_type) {
 
     if(ctx_type && ctx_type->kind != TYPE_ARRAY) {
@@ -1328,7 +1266,7 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
         return ctx_type;
     }
 
-    TypeArray *array                   = (TypeArray *) ctx_type;
+    TypeArray *array = (TypeArray *) ctx_type;
     bool infer_type_from_first_element = ctx_type == NULL;
 
     if (infer_type_from_first_element) {
@@ -1348,27 +1286,27 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
 
         TypeStruct *struct_defn = generate_struct_type_with_data_and_count(typer->parser, first_element_type, "Array");
 
-        array                  = ast_allocate(typer->parser, sizeof(TypeArray));
+        array = ast_allocate(typer->parser, sizeof(TypeArray));
         array->head.head.kind  = AST_TYPE;
         array->head.head.start = array_lit->head.head.start;
         array->head.head.end   = array_lit->head.head.end;
         array->head.kind       = TYPE_ARRAY;
+        array->array_kind      = ARRAY_FIXED;
         array->elem_type       = first_element_type;
         array->struct_defn     = struct_defn;
         array->capacity_expr   = NULL;
         array->capacity        = array_lit->expressions.count;
         array->count           = array_lit->expressions.count;
-        array->is_dynamic      = false;
+    } else {
 
-    }
+        // We inherit the array type from the context type
 
-    if (array->capacity_expr) {
-        assert(!array->is_dynamic);
-
-        if (array_lit->expressions.count > array->capacity) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Trying to assign %d elements to array with size %d", array_lit->expressions.count, array->capacity);
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(array->capacity_expr), "Here is the specified size of that array");
-            return NULL;
+        if (array->array_kind == ARRAY_FIXED) {
+            if (array_lit->expressions.count > array->capacity) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Trying to assign %d elements to array with size %d", array_lit->expressions.count, array->capacity);
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(array->capacity_expr), "Here is the specified size of that array");
+                return NULL;
+            }
         }
     }
 
@@ -1390,19 +1328,38 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
         }
     }
 
-    if (array->is_dynamic) {
-        array->head.size = 24;
+    // Size the array literal
+    switch (array->array_kind) {
+    case ARRAY_FIXED: {
+        // array->count     = array_lit->expressions.count;
+        // array->capacity  = array_lit->expressions.count;
+        array->head.size = array->capacity * array->elem_type->size;
+
+        // No space is reserved other than the variable itself
+        break;
+    }
+    case ARRAY_SLICE: {
+        array->count     = array_lit->expressions.count;
+        array->capacity  = 0;
+        array->head.size = 16;
+
+        // Reserve space for the underlying array + slice type
+        reserve_local_storage(typer->enclosing_function, array->count * array->elem_type->size);
+        reserve_temporary_storage(typer->enclosing_function, 16);
+
+        break;
+    }
+    case ARRAY_DYNAMIC: {
         array->count     = array_lit->expressions.count;
         array->capacity  = round_up_to_nearest_power_of_two(array_lit->expressions.count);
-    } else {
-        if (!array->capacity_expr) {
-            array->count    = array_lit->expressions.count;
-            array->capacity = array_lit->expressions.count;
-        } else {
-            // Count and capacity is already be set
-            assert(array->count > 0 && array->capacity > 0);
-        }
-        array->head.size = 16 + array->capacity * array->elem_type->size;
+        array->head.size = 24;
+
+        // Reserve space for the dynamic array type + pointer to malloced array
+        reserve_temporary_storage(typer->enclosing_function, 24);
+        reserve_temporary_storage(typer->enclosing_function, 8);
+
+        break;
+    }
     }
 
     array->node = array_lit;
@@ -1441,14 +1398,13 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof) {
     Type *expr_type = check_expression(typer, ast_typeof->expr, NULL);
     if (!expr_type) return NULL;
+
     return primitive_type(PRIMITIVE_STRING);
 }
 
 Type *check_sizeof(Typer *typer, AstSizeof *ast_sizeof) {
-    Type *resolved_type = resolve_type(typer, ast_sizeof->type);
-    if (!resolved_type) return NULL;
-
-    ast_sizeof->type = resolved_type;
+    Type *expr_type = check_expression(typer, ast_sizeof->expr, NULL);
+    if (!expr_type) return NULL;
 
     return primitive_type(PRIMITIVE_INT);
 }
@@ -1472,7 +1428,7 @@ Type *check_new(Typer *typer, AstNew *ast_new, Type *ctx_type) {
     if (expr_type->kind == TYPE_ARRAY) {
         // Modify the array to be a dynamic array
         TypeArray *array = (TypeArray *)expr_type;
-        array->is_dynamic = true;
+        array->array_kind = ARRAY_DYNAMIC;
 
         return (Type *) array;
     }
@@ -1569,7 +1525,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     }
 
     if (!valid_lhs) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->left), "Cannot field access into expression of type %s", type_to_str(type_lhs));
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->left), "Cannot access into expression of type %s", type_to_str(type_lhs));
         return NULL;
     }
 
@@ -1606,10 +1562,10 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
 
         if (type_lhs->kind == TYPE_ARRAY) {
             TypeArray *array = (TypeArray *) type_lhs;
-            if (array->is_dynamic) {
+            if (array->array_kind == ARRAY_DYNAMIC) {
                 report_error_ast(typer->parser, LABEL_NOTE, NULL, "Dynamic arrays have the members .data, .count and .capacity");
             } else {
-                report_error_ast(typer->parser, LABEL_NOTE, NULL, "Arrays have the members .data and .count");
+                report_error_ast(typer->parser, LABEL_NOTE, NULL, "Slices and fixed size arrays have the members .data and .count");
             }
         } else {
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_type), "Here is the definition of %s", type_to_str((Type *)struct_type));

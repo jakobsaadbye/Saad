@@ -806,7 +806,6 @@ maybe_spawn_random_pickup :: (ps: *PickupSpawner, pos: Vector2) {
 }
 
 bounce_ball :: (ball: *Ball, b: Rectangle) {
-
     overlap := Vector2{};
     a       := get_ball_rect(*ball);
 
