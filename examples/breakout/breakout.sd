@@ -537,7 +537,7 @@ main :: () {
                 y = - xx sin(xx theta),
             };
 
-            speed := cast(f32) sqrt(ball.vel_x*ball.vel_x + ball.vel_y*ball.vel_y);
+            speed := cast(f32) sqrt(xx (ball.vel_x*ball.vel_x + ball.vel_y*ball.vel_y));
 
             ball.vel_x = direction_vector.x * speed;
             ball.vel_y = direction_vector.y * speed;
