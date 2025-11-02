@@ -1130,7 +1130,49 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
                 break;
             }
             case TYPE_ARRAY: {
-                POP(RAX); // Pop the pointer to the start of the array
+                assert(param_type->kind == TYPE_ARRAY);
+
+                TypeArray *array_arg   = (TypeArray *) arg_type;
+                TypeArray *array_param = (TypeArray *) param_type;
+
+                POP(RAX); // Pop the pointer to the array type
+
+                // By default: Pass arrays as slices (data + count)
+                ArrayKind pass_as = ARRAY_SLICE;
+
+                if (array_param->array_kind == ARRAY_DYNAMIC) {
+                    pass_as = ARRAY_DYNAMIC;
+                }
+
+                // @Incomplete: Make sure that its not possible to pass a fixed or slice to a parameter of type dynamic array!!
+                // @Incomplete: Make sure that its not possible to pass a fixed or slice to a parameter of type dynamic array!!
+                // @Incomplete: Make sure that its not possible to pass a fixed or slice to a parameter of type dynamic array!!
+
+                if (pass_as == ARRAY_SLICE) {
+                    int slice_offset = push_temporary_value(cg->enclosing_function, 16);
+
+                    switch (array_arg->array_kind) {
+                    case ARRAY_FIXED: {
+                        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", slice_offset);
+                        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n",  slice_offset + 8, array_arg->count);
+                        sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n",  slice_offset);
+                        break;
+                    }
+                    case ARRAY_SLICE:
+                    case ARRAY_DYNAMIC: {
+                        sb_append(&cg->code, "   mov\t\trbx, 0[rax]\n");
+                        sb_append(&cg->code, "   mov\t\trcx, 8[rax]\n");
+                        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rbx\n", slice_offset);
+                        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rcx\n", slice_offset + 8);
+                        sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n",  slice_offset);
+                        break;
+                    }}
+                } else if (pass_as == ARRAY_DYNAMIC) {
+                    XXX;
+                } else {
+                    XXX;
+                }
+
                 break;
             }
             case TYPE_STRUCT: {
@@ -1704,25 +1746,34 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
     case TYPE_ARRAY: {
         POP(RAX); // pointer to array type
 
-        TypeArray *array = (TypeArray *) lhs_type;
+        assert(lhs_type->kind == TYPE_ARRAY);
+        assert(rhs_type->kind == TYPE_ARRAY);
 
-        switch (array->array_kind) {
+        TypeArray *lhs_array = (TypeArray *) lhs_type;
+        TypeArray *rhs_array = (TypeArray *) rhs_type;
+
+        switch (lhs_array->array_kind) {
         case ARRAY_FIXED: {
             sb_append(&cg->code, "   mov\t\trbx, [rax]\n", dst);
             sb_append(&cg->code, "   mov\t\t%s, rbx\n", dst);
             break;
         }
         case ARRAY_SLICE: {
-            sb_append(&cg->code, "   lea\t\trbx, %s\n", dst);
-            emit_struct_copy(cg, array->struct_defn, 0, 0);
+            if (rhs_array->array_kind == ARRAY_FIXED) {
+                sb_append(&cg->code, "   lea\t\trbx, %s\n", dst);
+                sb_append(&cg->code, "   mov\t\tQWORD 0[rbx], rax\n");
+                sb_append(&cg->code, "   mov\t\tQWORD 8[rbx], %d\n", rhs_array->count);
+            } else {
+                sb_append(&cg->code, "   lea\t\trbx, %s\n", dst);
+                emit_struct_copy(cg, lhs_array->struct_defn, 0, 0);
+            }
             break;
         }
         case ARRAY_DYNAMIC: {
             sb_append(&cg->code, "   lea\t\trbx, %s\n", dst);
-            emit_struct_copy(cg, array->struct_defn, 0, 0);
+            emit_struct_copy(cg, lhs_array->struct_defn, 0, 0);
             break;
-        }
-        }
+        }}
 
         return;
     }

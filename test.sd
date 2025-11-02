@@ -1,14 +1,20 @@
-Node :: struct {
-    data : int;
-    next : *Node;
+Vector2 :: struct {
+    x: float;
+    y: float;
+}
+
+Mesh :: struct {
+    vertices: []Vector2;
+}
+
+print_vertices :: (vs: [..]Vector2) {
+    for v, i in vs {
+        print("[%] = %", i, v);
+    }
 }
 
 main :: () {
-    n1 : Node;
-    n1.data = 69;
+    vertices: [1000]Vector2;
 
-    ptr0 := &n1;
-    ptr1 := &ptr0;
-    ptr2 := &ptr1;
-    assert((*(*ptr2)).data == 69);
+    print_vertices(vertices);
 }

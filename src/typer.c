@@ -290,14 +290,14 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         }
 
         // Special case for array with unknown capacity. We use the type we get from evaluating the expression.
-        if (resolved_type->kind == TYPE_ARRAY) {
-            TypeArray *array = (TypeArray *) resolved_type;
+        // if (resolved_type->kind == TYPE_ARRAY) {
+        //     TypeArray *array = (TypeArray *) resolved_type;
 
-            if (!array->capacity_expr) {
-                decl->ident->type = expr_type;
-                decl->type        = expr_type;
-            }
-        }
+        //     if (!array->capacity_expr) {
+        //         decl->ident->type = expr_type;
+        //         decl->type        = expr_type;
+        //     }
+        // }
 
     }
     else if (decl->flags & DECLARATION_TYPED_NO_EXPR) {
@@ -392,7 +392,7 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         TypeArray *lhs_array = (TypeArray *)lhs;
         TypeArray *rhs_array = (TypeArray *)rhs;
 
-        // Allow dynamic array to "static" array cast but not the other way around
+        // Allow dynamic array to "fixed" array cast but not the other way around
         if (!(lhs_array->array_kind == ARRAY_DYNAMIC) && rhs_array->array_kind == ARRAY_DYNAMIC) return false;
 
         return types_are_equal(lhs_array->elem_type, rhs_array->elem_type);
@@ -432,6 +432,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Undefined function '%s'", call->identifer->name);
         return NULL;
     }
+
     if (func_ident->type->kind != TYPE_FUNCTION) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "%s is not the name of a function. Type of %s is %s", func_ident->name, func_ident->name, type_to_str(func_ident->type));
         return NULL;
@@ -469,7 +470,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         Type *arg_type = check_expression(typer, arg, param->type);
         if (!arg_type) return NULL;
 
-        if (!types_are_equal(param->type, arg->type)) {
+        if (!types_are_equal(arg_type, param->type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", type_to_str(param->type), type_to_str(arg_type));
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param), "Here is the definition of '%s'", param->ident->name);
             return NULL;
@@ -484,27 +485,34 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     // @Note - We try and follow the msvc x86 calling convention ???
     // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170#parameter-passing 
     //
-
     int bytes_arguments = 0;
-    For (AstExpr*, call->arguments, {
-        Type *arg_type = it->type;
-        if (it_index < 4) {
-            if (arg_type->size > 8) {
-                // Argument goes on stack
-                bytes_arguments += arg_type->size;
-            } else {
+
+    for (int i = 0; i < call->arguments.count; i++) {
+        AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
+        Type    *arg_type = arg->type;
+
+        if (i < 4) {
+            if (arg_type->size <= 8) {
                 // Argument fits into a register
+                continue;
             }
-        } else {
-            // Argument goes on stack
-            bytes_arguments += align_value(arg_type->size, 8);
+            // Fallthrogh and allocate the argument on the stack
         }
-    });
+
+        // Reserve space for the argument on the stack
+
+        // Pass fixed size arrays as slices, so allocate 16 bytes for them
+        if (arg_type->kind == TYPE_ARRAY && ((TypeArray *)arg_type)->array_kind == ARRAY_FIXED) {
+            bytes_arguments += 16;
+        } else {
+            bytes_arguments += arg_type->size;
+        }
+    }
 
     reserve_temporary_storage(typer->enclosing_function, bytes_arguments);
     
-    bool big_return_value = func_defn->return_type->size > 8;
-    if (big_return_value) {
+    bool has_big_return_value = func_defn->return_type->size > 8;
+    if (has_big_return_value) {
         reserve_temporary_storage(typer->enclosing_function, func_defn->return_type->size);
     }
 
@@ -1079,9 +1087,6 @@ bool check_if_function_needs_a_return(Typer *typer, AstFunctionDefn *func_defn) 
 }
 
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
-
-    // Function might have already been type checked from an earlier function call, so in that case
-    // just early return
     if (func_defn->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return func_defn->return_type;
     }
@@ -1092,11 +1097,32 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
         bool ok = check_declaration(typer, param);
         if (!ok) return NULL;
+
+        // Special case: We don't allow functions to have fixed size arrays as parameters. These should be made into a slice or a dynamic array!
+        if (param->type->kind == TYPE_ARRAY && ((TypeArray *)param->type)->array_kind == ARRAY_FIXED) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)param, "Use of fixed size array as parameter. Passing a fixed size array is always done by slice (data + count)");
+
+            TypeArray *array_type = (TypeArray *) param->type;
+            array_type->array_kind = ARRAY_SLICE;
+            report_error_ast(typer->parser, LABEL_HINT, (Ast *)array_type, "Make the parameter a slice type: %s", type_to_str((Type *)array_type));
+            return NULL;
+        }
     }
 
     // Check the return type/s
     Type *return_type = resolve_type(typer, func_defn->return_type);
     if (!return_type) return NULL;
+
+    // Special case: We don't allow functions to have fixed size arrays as parameters. These should be made into a slice or a dynamic array!
+    if (return_type->kind == TYPE_ARRAY && ((TypeArray *)return_type)->array_kind == ARRAY_FIXED) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)return_type, "Use of fixed size array as return type. Passing a fixed size array is always done by slice (data + count)");
+
+        TypeArray *array_type = (TypeArray *) return_type;
+        array_type->array_kind = ARRAY_SLICE;
+        report_error_ast(typer->parser, LABEL_HINT, (Ast *)array_type, "Make the return type a slice type: %s", type_to_str((Type *)array_type));
+        return NULL;
+    }
+
     func_defn->return_type = return_type;
 
     // Mark the function as fully typed, when we have typechecked the function signature
