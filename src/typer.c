@@ -118,7 +118,7 @@ bool check_block(Typer *typer, AstBlock *block) {
 }
 
 int round_up_to_nearest_power_of_two(int value) {
-    if (value <= 1) return 1;
+    if (value <= 1) return 2;
     value--;
     value |= value >> 1;
     value |= value >> 2;
@@ -1711,10 +1711,10 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
     //     evaluated_struct = ctx_type;
     // }
 
-    // Reserve space for the struct literal if its bigger than 8 bytes and we are not currently declaring a variable
-    if (!typer->inside_declaration) {
-        reserve_temporary_storage(typer->enclosing_function, struct_defn->head.size);
-    }
+    // Reserve space for the struct literal
+    reserve_temporary_storage(typer->enclosing_function, struct_defn->head.size);
+    // if (!typer->inside_declaration) {
+    // }
 
     return (Type *) struct_defn;
 }

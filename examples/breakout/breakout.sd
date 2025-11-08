@@ -798,10 +798,8 @@ maybe_spawn_random_pickup :: (ps: *PickupSpawner, pos: Vector2) {
         vel_y = xx GetRandomValue(80, 120),
         is_shown = true,
     };
-
-    // There is a @Bug here if we try to do ps.pickups[ps.free_index] @Crash
-    free_slot := ps.free_index;
-    ps.pickups[free_slot] = pickup;
+    
+    ps.pickups[ps.free_index] = pickup;
     ps.free_index += 1;
 }
 

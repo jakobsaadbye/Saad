@@ -1,8 +1,9 @@
 #include "typer.c"
 
 typedef enum CodeGenFlags {
-    CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE = 1 << 0,
-    CODEGEN_EMIT_EXPRESSION_AS_LVALUE         = 1 << 1,
+    CODEGEN_DO_DIRECT_ASSIGNMENT             = 1 << 0,
+    CODEGEN_DIRECT_ASSIGNMENT_IS_RELATIVE_TO_BASE_OFFSET = 1 << 1,
+    CODEGEN_EMIT_EXPRESSION_AS_LVALUE         = 1 << 2,
 } CodeGenFlags;
 
 typedef struct CodeGenerator {
@@ -22,7 +23,8 @@ typedef struct CodeGenerator {
 
     CodeGenFlags flags;
 
-    int variable_address;    // Used in emit_expression() to assign directly to this address instead of a stack push & pop
+    int direct_base_offset;
+    int direct_offset;    // Used in emit_expression() to assign directly to this address instead of a stack push & pop
 
     int enum_scratch_buffers; // Used for printing enum values where an int to string conversion needs to take place
     int num_pushed_arguments;
@@ -37,7 +39,6 @@ typedef struct MemberAccessResult {
 void emit_code(CodeGenerator *cg, AstCode *code);
 void emit_builtin_functions(CodeGenerator *cg);
 void emit_header(CodeGenerator *cg);
-void emit_footer(CodeGenerator *cg);
 
 void emit_code(CodeGenerator *cg, AstCode *code);
 void emit_statement(CodeGenerator *cg, Ast *node);
@@ -53,15 +54,14 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for);
 void emit_while(CodeGenerator *cg, AstWhile *ast_while);
 void emit_break_or_continue(CodeGenerator *cg, AstBreakOrContinue *boc);
 void emit_enum(CodeGenerator *cg, AstEnum *ast_enum);
-void emit_struct(CodeGenerator *cg, AstStruct *ast_struct);
-void emit_array_literal(CodeGenerator *cg, AstArrayLiteral *array_lit, int base_offset);
+void emit_array_literal(CodeGenerator *cg, AstArrayLiteral *array_lit, int base_offset, bool offset_is_runtime_computed);
+void emit_struct_literal(CodeGenerator *cg, AstStructLiteral *struct_lit, int base_offset, bool offset_is_runtime_computed);
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl);
 void emit_assignment(CodeGenerator *cg, AstAssignment *assign);
 void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue);
 void emit_expression(CodeGenerator *cg, AstExpr *expr);
 
 void emit_integer_to_float_conversion(CodeGenerator *cg, Type *l_type, Type *r_type);
-void emit_initialization(CodeGenerator *cg, int dest_offset, AstExpr *expr, Type *lhs_type, Type *rhs_type);
 void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, bool dest_is_relative_to_rsp, Type *lhs_type, Type *rhs_type);
 void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_computed, Type *src_type, bool lvalue);
 
@@ -117,7 +117,8 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.constants      = 0;
     cg.labels         = 0;
     cg.flags          = 0;
-    cg.variable_address    = 0;
+    cg.direct_offset  = 0;
+    cg.direct_base_offset   = 0;
     cg.enum_scratch_buffers = 0;
     cg.num_pushed_arguments = 0;
 
@@ -1168,7 +1169,8 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
                         break;
                     }}
                 } else if (pass_as == ARRAY_DYNAMIC) {
-                    XXX;
+                    assert(array_param->array_kind == ARRAY_DYNAMIC);
+                    // Pass normally by pointer
                 } else {
                     XXX;
                 }
@@ -1602,7 +1604,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
         
 }
 
-void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset) {
+void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset, bool offset_is_runtime_computed) {
     switch (type->kind) {
     case TYPE_INTEGER:
     case TYPE_FLOAT:
@@ -1610,14 +1612,23 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset) {
     case TYPE_STRING:
     case TYPE_ENUM:
     case TYPE_POINTER: {
-        sb_append(&cg->code, "   mov\t\t%s %d[rbp], 0\n", WIDTH(type), dst_offset);
+        if (offset_is_runtime_computed) {
+            sb_append(&cg->code, "   mov\t\t%s [rbx], 0\n", WIDTH(type), dst_offset);
+        } else {
+            sb_append(&cg->code, "   mov\t\t%s %d[rbp], 0\n", WIDTH(type), dst_offset);
+        }
+
         return;
     } 
 
     case TYPE_STRUCT: {
         TypeStruct *struct_defn = (TypeStruct *) type;
 
-        sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\n", dst_offset);
+        if (offset_is_runtime_computed) {
+            sb_append(&cg->code, "   mov\t\trcx, rbx\n", dst_offset);
+        } else {
+            sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\n", dst_offset);
+        }
         sb_append(&cg->code, "   mov\t\trdx, 0\n");
         sb_append(&cg->code, "   mov\t\tr8, %d\n", struct_defn->head.size);
         sb_append(&cg->code, "   call\t\tmemset\n");    // void *memset(void *ptr, int x, size_t n);
@@ -1632,9 +1643,16 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset) {
         // we can skip zero initializing as the size is infered from the array literal
         // which will populate all the slots anyway
 
+        // Get the offset to the beginning of the array
+        if (offset_is_runtime_computed) {
+            // already in rbx
+        } else {
+            sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", dst_offset);
+        }
+
         switch (array->array_kind) {
         case ARRAY_FIXED: {
-            sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\n", dst_offset);
+            sb_append(&cg->code, "   mov\t\trcx, rbx\n");
             sb_append(&cg->code, "   mov\t\trdx, 0\n");
             sb_append(&cg->code, "   mov\t\tr8, %d\n", array->head.size);
             sb_append(&cg->code, "   call\t\tmemset\n");    // void *memset(void *ptr, int x, size_t n);
@@ -1642,18 +1660,19 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset) {
         }
         case ARRAY_SLICE: {
             // The array is fully initialized from the array literal
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset + 0);
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset + 8);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbx], 0\n", dst_offset + 0);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbx], 0\n", dst_offset + 8);
             break;
         }
         case ARRAY_DYNAMIC: {
+            PUSH(RBX);
             sb_append(&cg->code, "   mov\t\trdx, %d\n", array->elem_type->size);
             sb_append(&cg->code, "   mov\t\trcx, %d\n", array->capacity);
             sb_append(&cg->code, "   call\t\tcalloc\n");        // void* calloc( size_t num, size_t size );
-
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", dst_offset + 0);
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n", dst_offset + 8, array->count);
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n", dst_offset + 16, array->capacity);
+            POP(RBX);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbx], rax\n", dst_offset + 0);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbx], %d\n", dst_offset + 8, array->count);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbx], %d\n", dst_offset + 16, array->capacity);
             break;
         }}
             
@@ -1804,61 +1823,87 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
 }
 
 // Allocates the array literal relative to base_offset[rbp]. Returns nothing
-void emit_array_literal(CodeGenerator *cg, AstArrayLiteral *array_lit, int base_offset) {
-    array_lit->base_offset = base_offset;
+// If offset_is_runtime_computed = true, then the base_offset is expected to be in rbx
+void emit_array_literal(CodeGenerator *cg, AstArrayLiteral *array_lit, int base_offset, bool offset_is_runtime_computed) {
+    // TypeArray *array = (TypeArray *)(array_lit->head.type);
 
-    TypeArray *array = (TypeArray *)(array_lit->head.type);
-    
-    int elem_0_offset = base_offset;
-        
+    if (offset_is_runtime_computed) {
+        // Make a temporary stable pointer to the start of the array
+        base_offset = push_temporary_value(cg->enclosing_function, 8);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rbx ; ptr -> elem 0\n", base_offset);
+    }
+
     for (int i = 0; i < array_lit->expressions.count; i++) {
         AstExpr *elem = ((AstExpr **) array_lit->expressions.items)[i];
         
-        int elem_i_offset = elem_0_offset + (i * elem->type->size);
+        int elem_i_offset = base_offset + (i * elem->type->size);
         
-        set_flag(cg, CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE);
-        cg->variable_address = elem_i_offset;
+        if (offset_is_runtime_computed) {
+            elem_i_offset = i * elem->type->size;
+            set_flag(cg, CODEGEN_DIRECT_ASSIGNMENT_IS_RELATIVE_TO_BASE_OFFSET);
+        }
+        set_flag(cg, CODEGEN_DO_DIRECT_ASSIGNMENT);
+
+        cg->direct_base_offset = base_offset;
+        cg->direct_offset      = elem_i_offset;
         emit_expression(cg, elem);
-        
-        if (elem->head.kind == AST_STRUCT_LITERAL) {
-            // The expression was directly assigned to the element slot
+
+        if (elem->head.kind == AST_STRUCT_LITERAL || elem->head.kind == AST_ARRAY_LITERAL) {
+            // The literal was directly assigned
             continue;
         }
-        
-        if (array->array_kind == ARRAY_DYNAMIC) {
-            elem_i_offset = i * elem->type->size;
+
+        if (offset_is_runtime_computed) {
+            // Get the element address we will assign to
             sb_append(&cg->code, "   mov\t\trax, %d[rbp] ; elem %d\n", base_offset, i);
             sb_append(&cg->code, "   lea\t\trbx, %d[rax]\n", elem_i_offset);
         }
 
-        emit_simple_initialization(cg, elem_i_offset, array->array_kind == ARRAY_DYNAMIC, false, elem->type, elem->type);
+        emit_simple_initialization(cg, elem_i_offset, offset_is_runtime_computed, false, elem->type, elem->type);
     }
 }
 
 // Allocates the struct literal relative to base_offset[rbp]
-void emit_struct_literal(CodeGenerator *cg, AstStructLiteral *struct_lit, int base_offset) {
-
-    TypeStruct *struct_defn = (TypeStruct *) struct_lit->head.type;
+// If offset_is_runtime_computed = true, then the base_offset is expected to be in rbx
+void emit_struct_literal(CodeGenerator *cg, AstStructLiteral *struct_lit, int base_offset, bool offset_is_runtime_computed) {
+    
+    if (offset_is_runtime_computed) {
+        // Make a temporary stable pointer to the struct base
+        base_offset = push_temporary_value(cg->enclosing_function, 8);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rbx ; ptr -> struct base\n", base_offset);
+    }
 
     // @Improvement: We should proably be smart about zero initializing just
     //               the members that don't have a designated initializer for
-    zero_initialize(cg, (Type *) struct_defn, base_offset);
+    zero_initialize(cg, struct_lit->head.type, base_offset, offset_is_runtime_computed);
 
     for (int i = 0; i < struct_lit->initializers.count; i++) {
         AstStructInitializer *init = ((AstStructInitializer **)(struct_lit->initializers.items))[i];
 
         int member_offset = base_offset + init->member->member_offset;
 
-        if (init->value->head.kind == AST_STRUCT_LITERAL) {
-            emit_struct_literal(cg, (AstStructLiteral *)init->value, member_offset);
-        } 
-        else if (init->value->head.kind == AST_ARRAY_LITERAL) {
-            emit_array_literal(cg, (AstArrayLiteral *) init->value, member_offset);
-        } 
-        else {
-            emit_expression(cg, init->value);
-            emit_simple_initialization(cg, member_offset, false, false, init->member->type, init->value->type);
+        if (offset_is_runtime_computed) {
+            member_offset = init->member->member_offset;
+            set_flag(cg, CODEGEN_DIRECT_ASSIGNMENT_IS_RELATIVE_TO_BASE_OFFSET);
         }
+        set_flag(cg, CODEGEN_DO_DIRECT_ASSIGNMENT);
+
+        cg->direct_base_offset = base_offset;
+        cg->direct_offset      = member_offset;
+        emit_expression(cg, init->value);
+
+        if (init->value->head.kind == AST_STRUCT_LITERAL || init->value->head.kind == AST_ARRAY_LITERAL) {
+            // The literal was directly assigned
+            continue;
+        }
+
+        if (offset_is_runtime_computed) {
+            // Get the address of the member
+            sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", base_offset);
+            sb_append(&cg->code, "   lea\t\trbx, %d[rax] ; member %d\n", member_offset, init->member->member_index);
+        }
+
+        emit_simple_initialization(cg, member_offset, offset_is_runtime_computed, false, init->member->type, init->value->type);
     }
 }
 
@@ -1895,13 +1940,13 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     sb_append(&cg->code, "   ; Ln %d: $%s : %s = %d\n", decl->ident->head.start.line, decl->ident->name, type_to_str(decl->type), decl->ident->stack_offset);
     
     if (!decl->expr) {
-        zero_initialize(cg, decl->type, decl->ident->stack_offset);
+        zero_initialize(cg, decl->type, decl->ident->stack_offset, false);
         return;
     }
 
     // Special zero initialization of fixed arrays
     if (decl->type->kind == TYPE_ARRAY && ((TypeArray *)decl->type)->array_kind == ARRAY_FIXED) {
-        zero_initialize(cg, decl->type, decl->ident->stack_offset);
+        zero_initialize(cg, decl->type, decl->ident->stack_offset, false);
     }
 
     // The following "fast-path" code is here to omit emit_expression()
@@ -1911,11 +1956,11 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     // In this example, the struct is directly moved into 'a' instead of doing
     // an extra copy. The same is true for array literals.
 
-    set_flag(cg, CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE);
-    cg->variable_address = decl->ident->stack_offset;
+    set_flag(cg, CODEGEN_DO_DIRECT_ASSIGNMENT);
+    cg->direct_offset = decl->ident->stack_offset;
     emit_expression(cg, decl->expr);
 
-    if (decl->expr->head.kind == AST_STRUCT_LITERAL) {
+    if (decl->expr->head.kind == AST_STRUCT_LITERAL || decl->expr->head.kind == AST_ARRAY_LITERAL) {
         // The value was directly assigned to the variable
         return;
     }
@@ -2331,11 +2376,13 @@ bool is_arithmetic_operator(TokenType op) {
 void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
     // Check if we can use a fast-path address to move to
-    bool assigning_to_variable = is_flag_set(cg, CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE);
-    bool emit_as_lvalue        = is_flag_set(cg, CODEGEN_EMIT_EXPRESSION_AS_LVALUE);
+    bool doing_direct_assignment               = is_flag_set(cg, CODEGEN_DO_DIRECT_ASSIGNMENT);
+    bool direct_assignment_is_relative_to_base = is_flag_set(cg, CODEGEN_DIRECT_ASSIGNMENT_IS_RELATIVE_TO_BASE_OFFSET);
+    bool emit_as_lvalue                        = is_flag_set(cg, CODEGEN_EMIT_EXPRESSION_AS_LVALUE);
 
     // Reset any flags with the lifetime of 1 expression
-    reset_flag(cg, CODEGEN_TRY_ASSIGN_EXPRESSION_TO_VARIABLE);
+    reset_flag(cg, CODEGEN_DO_DIRECT_ASSIGNMENT);
+    reset_flag(cg, CODEGEN_DIRECT_ASSIGNMENT_IS_RELATIVE_TO_BASE_OFFSET);
     reset_flag(cg, CODEGEN_EMIT_EXPRESSION_AS_LVALUE);
 
     switch (expr->head.kind) {
@@ -2489,14 +2536,16 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     }
     case AST_ARRAY_LITERAL: {
         AstArrayLiteral *array_lit = (AstArrayLiteral *)(expr);
-        TypeArray *array_type = (TypeArray *) array_lit->head.type;
+        TypeArray       *array_type = (TypeArray *) array_lit->head.type;
         
         // Get the address that we emit the array literal relative to
+        int direct_offset = cg->direct_offset;
         int offset = -1;
+
         switch (array_type->array_kind) {
         case ARRAY_FIXED: {
-            if (assigning_to_variable) {
-                offset = cg->variable_address;
+            if (doing_direct_assignment) {
+                offset = direct_offset;
             } else {
                 // This is probably a one-off array literal, e.g "foo(5, [1, 2, 3])"
                 //                                                       ^^^^^^^^^------- This is stored only temporarily
@@ -2515,40 +2564,52 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             sb_append(&cg->code, "   mov\t\trcx, %d\n", array_type->capacity);
             sb_append(&cg->code, "   call\t\tcalloc\n");        // void* calloc( size_t num, size_t size );
 
-            // Allocate a temporary pointer to the malloced array
-            int array_pointer_address = push_temporary_value(cg->enclosing_function, 8);
-            sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", array_pointer_address);
+            // The array literal should allocate relative to the just malloced array
+            sb_append(&cg->code, "   mov\t\trbx, rax\n");
+            PUSH(RBX);
 
-            offset = array_pointer_address;
+            offset = 0;
             break;
         }}
 
-        emit_array_literal(cg, array_lit, offset);
+        emit_array_literal(cg, array_lit, offset, array_type->array_kind == ARRAY_DYNAMIC);
         
         switch (array_type->array_kind) {
         case ARRAY_FIXED: {
-            // Return pointer to beginning of array (element 0)
-            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", offset);
-            PUSH(RAX);
+            if (doing_direct_assignment) {
+                // already assigned
+            } else {
+                // Return pointer to beginning of array (element 0)
+                sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", offset);
+                PUSH(RAX);
+            }
             break;
         }
         case ARRAY_SLICE: {
-            int slice_offset = push_temporary_value(cg->enclosing_function, 16);
+            int slice_offset = doing_direct_assignment ? direct_offset : push_temporary_value(cg->enclosing_function, 16); 
+
             sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", offset);
-            sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", slice_offset + 0);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", slice_offset + 0);
             sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n",  slice_offset + 8, array_type->count);
-            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", slice_offset);
-            PUSH(RAX);
+            
+            if (!doing_direct_assignment) {
+                sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", slice_offset);
+                PUSH(RAX);
+            }
             break;
         }
         case ARRAY_DYNAMIC: {
-            int dyn_array_offset = push_temporary_value(cg->enclosing_function, 24);
-            sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", offset);
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n",   dyn_array_offset + 0);
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n" , dyn_array_offset + 8, array_type->count);
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n" , dyn_array_offset + 16, array_type->capacity);
-            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", dyn_array_offset);
-            PUSH(RAX);
+            int dyn_array_offset = doing_direct_assignment ? direct_offset : push_temporary_value(cg->enclosing_function, 24);
+
+            POP(RBX); // address to the malloced array
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rbx\n",  dyn_array_offset + 0);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n", dyn_array_offset + 8, array_type->count);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n", dyn_array_offset + 16, array_type->capacity);
+            
+            if (!doing_direct_assignment) {
+                sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", dyn_array_offset);
+                PUSH(RAX);
+            }
             break;
         }}
 
@@ -2558,17 +2619,27 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         AstStructLiteral *struct_literal = (AstStructLiteral *) expr;
         TypeStruct       *struct_defn    = (TypeStruct *) struct_literal->head.type;
 
-        int allocation_offset = assigning_to_variable ? cg->variable_address : push_temporary_value(cg->enclosing_function, expr->type->size);
+        int offset = 0;
+        if (doing_direct_assignment) {
+            offset = cg->direct_offset;
+            if (direct_assignment_is_relative_to_base) {
+                sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", cg->direct_base_offset);
+                sb_append(&cg->code, "   lea\t\trbx, %d[rax]\n", cg->direct_offset);
+                offset = 0;
+            }
+        } else {
+            offset = push_temporary_value(cg->enclosing_function, expr->type->size);
+        }
 
-        emit_struct_literal(cg, struct_literal, allocation_offset);
+        emit_struct_literal(cg, struct_literal, offset, direct_assignment_is_relative_to_base);
 
-        if (!assigning_to_variable) {
+        if (!doing_direct_assignment) {
             if (struct_defn->head.size <= 8) {
                 // Return the struct literal in rax
-                sb_append(&cg->code, "   mov\t\t%s, %d[rbp]\n", REG_A((Type *) struct_defn), allocation_offset);
+                sb_append(&cg->code, "   mov\t\t%s, %d[rbp]\n", REG_A((Type *) struct_defn), offset);
             } else {
                 // Return pointer to struct literal in rax
-                sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", allocation_offset);
+                sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", offset);
             }
             PUSH(RAX);
         }
