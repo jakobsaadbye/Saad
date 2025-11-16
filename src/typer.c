@@ -160,6 +160,13 @@ Type *resolve_type(Typer *typer, Type *type) {
         // Resolve the size of any inner element type
         Type *elem_type = resolve_type(typer, array->elem_type);
         if (!elem_type) return NULL;
+
+        if (elem_type->kind == TYPE_VOID) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(elem_type), "Invalid type. Cannot have %s of type void", text_bold("array"));
+            report_error_ast(typer->parser, LABEL_HINT, (Ast *)(elem_type), "If you wanted the array to accept any type, then make it []any");
+            return NULL;
+        }
+
         array->elem_type = elem_type;
 
         switch (array->array_kind) {
@@ -418,7 +425,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
         AstDeclaration *func_member = get_struct_member(call->struct_defn, call->identifer->name);
         if (!func_member) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined member function '%s'", call->identifer->name);
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined member function '%s'", text_bold(call->identifer->name));
             return NULL;
         }
 
@@ -429,7 +436,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     }
 
     if (func_ident == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Undefined function '%s'", call->identifer->name);
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Undefined function '%s'", text_bold(call->identifer->name));
         return NULL;
     }
 
@@ -457,21 +464,26 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         typer->enclosing_while     = temp.enclosing_while;
     }
     
-    if (call->arguments.count != func_defn->parameters.count) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Mismatch in number of arguments. Function '%s' takes %d %s, but %d were supplied", func_defn->identifier->name, func_defn->parameters.count, func_defn->parameters.count == 1 ? "parameter" : "parameters", call->arguments.count);
+    int real_parameter_count = func_defn->parameters.count - (func_defn->is_method ? 1 : 0);
+    if (call->arguments.count != real_parameter_count) { 
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Mismatch in number of arguments. Function '%s' takes %d %s, but %d were supplied", func_defn->identifier->name, real_parameter_count, real_parameter_count == 1 ? "parameter" : "parameters", call->arguments.count);
         report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
+        if (call->is_member_call && call->arguments.count == func_defn->parameters.count) {
+            report_error_ast(typer->parser, LABEL_HINT, ((Ast **)func_defn->parameters.items)[0], "Method calls takes their first parameter as the receiving type and is thus not part of the argument list");
+        }
         return NULL;
     }
 
     for (int i = 0; i < call->arguments.count; i++) {
-        AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
+        int param_index = i + (func_defn->is_method ? 1 : 0);
+        AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[param_index];
 
         AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
         Type *arg_type = check_expression(typer, arg, param->type);
         if (!arg_type) return NULL;
 
         if (!types_are_equal(arg_type, param->type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", type_to_str(param->type), type_to_str(arg_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg_type)));
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param), "Here is the definition of '%s'", param->ident->name);
             return NULL;
         }
@@ -844,6 +856,9 @@ char *generate_c_format_specifier_for_type(Type *type) {
         sb_append(&builder, "%s{ ", struct_defn->identifier->name);
         for (int i = 0; i < members.count; i++) {
             AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+
+            if (member->flags & DECLARATION_IS_STRUCT_METHOD) continue;
+
             char           *member_name = member->ident->name;
             Type           *member_type = member->type;
 
@@ -851,8 +866,12 @@ char *generate_c_format_specifier_for_type(Type *type) {
 
             sb_append(&builder, "%s = %s", member_name, format_specifier);
 
+            
             if (i != members.count - 1) {
-                sb_append(&builder, ", ");
+                bool next_member_is_method = ((AstDeclaration **)members.items)[i + 1]->flags & DECLARATION_IS_STRUCT_METHOD;
+                if (!next_member_is_method) {
+                    sb_append(&builder, ", ");
+                }
             }
         }
         sb_append(&builder, " }");
@@ -870,6 +889,8 @@ int count_nested_sizeable_struct_members(Typer *typer, AstStruct *struct_, int c
 
     for (int i = 0; i < members.count; i++) {
         AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+
+        if (member->flags & DECLARATION_IS_STRUCT_METHOD) continue;
 
         if (member->type->kind == TYPE_STRUCT) {
             AstStruct *nested_struct = ((TypeStruct *)member->type)->node;
@@ -942,6 +963,14 @@ bool check_print(Typer *typer, AstPrint *print) {
     return true;
 }
 
+bool check_expr_stmt(Typer *typer, AstExprStmt *expr_stmt) {
+    Type *expr_type = check_expression(typer, expr_stmt->expr, NULL);
+    if (expr_type == NULL) {
+        return false;
+    }
+    return true;
+}
+
 bool check_statement(Typer *typer, Ast *stmt) {
 
     // When doing sizing of a function, we sometimes reserve temporary space for array literals
@@ -954,9 +983,17 @@ bool check_statement(Typer *typer, Ast *stmt) {
     reset_temporary_storage(typer->enclosing_function);
 
     switch (stmt->kind) {
-    case AST_DECLARATION: return check_declaration(typer, (AstDeclaration *)(stmt));
-    case AST_ASSIGNMENT:  return check_assignment(typer, (AstAssignment *)(stmt));
-    case AST_PRINT:       return check_print(typer, (AstPrint *)(stmt));
+    case AST_BLOCK:             return check_block(typer, (AstBlock *)(stmt));
+    case AST_DECLARATION:       return check_declaration(typer, (AstDeclaration *)(stmt));
+    case AST_ASSIGNMENT:        return check_assignment(typer, (AstAssignment *)(stmt));
+    case AST_FUNCTION_DEFN:     return check_function_defn(typer, (AstFunctionDefn *)(stmt));
+    case AST_STRUCT:            return check_struct_defn(typer, (AstStruct *)(stmt));
+    case AST_ENUM:              return check_enum_defn(typer, (AstEnum *)stmt);
+    case AST_FOR:               return check_for(typer, (AstFor *)(stmt));
+    case AST_WHILE:             return check_while(typer, (AstWhile *)(stmt));
+    case AST_BREAK_OR_CONTINUE: return check_break_or_continue(typer, (AstBreakOrContinue *)(stmt));
+    case AST_PRINT:             return check_print(typer, (AstPrint *)(stmt));
+    case AST_EXPR_STMT:         return check_expr_stmt(typer, (AstExprStmt *)(stmt));
     case AST_ASSERT: {
         AstAssert *assertion = (AstAssert *)(stmt);
         Type *expr_type = check_expression(typer, assertion->expr, NULL);
@@ -992,14 +1029,6 @@ bool check_statement(Typer *typer, Ast *stmt) {
 
         return true;
     }
-    case AST_BLOCK: {
-        AstBlock *block = (AstBlock *)(stmt);
-        return check_block(typer, block);
-    }
-    case AST_FUNCTION_CALL: {
-        AstFunctionCall *call = (AstFunctionCall *)(stmt);
-        return check_function_call(typer, call);
-    }
     case AST_RETURN: {
         AstReturn *ast_return = (AstReturn *)(stmt);
         AstFunctionDefn *ef = typer->enclosing_function;
@@ -1027,12 +1056,6 @@ bool check_statement(Typer *typer, Ast *stmt) {
         
         return true;
     }
-    case AST_BREAK_OR_CONTINUE: return check_break_or_continue(typer, (AstBreakOrContinue *)(stmt));
-    case AST_FUNCTION_DEFN: return check_function_defn(typer, (AstFunctionDefn *)(stmt));
-    case AST_STRUCT: return check_struct_defn(typer, (AstStruct *)(stmt));
-    case AST_ENUM: return check_enum_defn(typer, (AstEnum *)stmt);
-    case AST_FOR: return check_for(typer, (AstFor *)(stmt));
-    case AST_WHILE: return check_while(typer, (AstWhile *)(stmt));
     default:
         XXX;
     }
@@ -1098,7 +1121,6 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         bool ok = check_declaration(typer, param);
         if (!ok) return NULL;
 
-        // Special case: We don't allow functions to have fixed size arrays as parameters. These should be made into a slice or a dynamic array!
         if (param->type->kind == TYPE_ARRAY && ((TypeArray *)param->type)->array_kind == ARRAY_FIXED) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)param, "Use of fixed size array as parameter. Passing a fixed size array is always done by slice (data + count)");
 
@@ -1109,11 +1131,10 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         }
     }
 
+
     // Check the return type/s
     Type *return_type = resolve_type(typer, func_defn->return_type);
     if (!return_type) return NULL;
-
-    // Special case: We don't allow functions to have fixed size arrays as parameters. These should be made into a slice or a dynamic array!
     if (return_type->kind == TYPE_ARRAY && ((TypeArray *)return_type)->array_kind == ARRAY_FIXED) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)return_type, "Use of fixed size array as return type. Passing a fixed size array is always done by slice (data + count)");
 
@@ -1122,8 +1143,8 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         report_error_ast(typer->parser, LABEL_HINT, (Ast *)array_type, "Make the return type a slice type: %s", type_to_str((Type *)array_type));
         return NULL;
     }
-
     func_defn->return_type = return_type;
+
 
     // Mark the function as fully typed, when we have typechecked the function signature
     // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again ...
@@ -1148,28 +1169,40 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
     // Do method specific stuff
     if (func_defn->is_method) {
-
         Type *receiver_type = ((AstDeclaration**)func_defn->parameters.items)[0]->type;
 
-        // Remove the receiver type from the parameter list
-        if (func_defn->parameters.count > 1) {
-            func_defn->parameters.items = (unsigned char *) &(((AstDeclaration**)func_defn->parameters.items)[1]);
-        }
-        func_defn->parameters.count--;
-        
+        // For now we only allow the receiver type to be a struct or a pointer to a struct!
+        TypeStruct *receiver_struct = NULL;
+        bool        receiver_is_pointer = false;
 
-        if (receiver_type->kind != TYPE_STRUCT) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must currently be a struct. In the future we will allow methods on all types");
+        if (receiver_type->kind == TYPE_POINTER) {
+            TypePointer *pointer_type = (TypePointer *) receiver_type;
+
+            if (pointer_type->pointer_to->kind == TYPE_STRUCT) {
+                receiver_is_pointer = true;
+                receiver_struct = (TypeStruct *) pointer_type->pointer_to;
+            }
+            else {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must be a struct or a pointer to a struct. Got type %s", text_bold(type_to_str(receiver_type)));
+                report_error_ast(typer->parser, LABEL_NOTE, NULL, "Methods on arbitrary types is still unsupported");
+                return NULL;
+            }
+        }
+        else if (receiver_type->kind == TYPE_STRUCT) {
+            receiver_struct = (TypeStruct *) receiver_type;
+        }
+        else {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must be a struct or a pointer to a struct. Got type %s", text_bold(type_to_str(receiver_type)));
+            report_error_ast(typer->parser, LABEL_NOTE, NULL, "Methods on arbitrary types is still unsupported");
             return NULL;
         }
 
-        // Add the function as a member of the receiver type
-        TypeStruct *receiver_struct = (TypeStruct *) receiver_type;
-
-        AstDeclaration *method_member = generate_declaration(typer->parser, func_defn->identifier->name, NULL, (Type *)func_type, DECLARATION_IS_STRUCT_MEMBER | DECLARATION_IS_STRUCT_METHOD_MEMBER);
+        // Add the function as a member of the receiver struct
+        AstDeclaration *method_member = generate_declaration(typer->parser, func_defn->identifier->name, NULL, (Type *)func_type, DECLARATION_IS_STRUCT_MEMBER | DECLARATION_IS_STRUCT_METHOD);
         add_member_to_struct(receiver_struct->node, method_member);
 
-        func_defn->receiver_type = receiver_type;
+        func_defn->receiver_type            = (Type *)receiver_struct;
+        func_defn->receiver_type_is_pointer = receiver_is_pointer;
     }
 
     //
@@ -1538,6 +1571,14 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
             struct_type = (TypeStruct *)(points_to);
             valid_lhs = true;
         }
+
+        if (points_to->kind == TYPE_ARRAY) {
+            TypeArray *array_defn = (TypeArray *)(points_to);
+
+            struct_type = array_defn->struct_defn;
+            valid_lhs = true;
+        }
+
     }
     else if (type_lhs->kind == TYPE_STRUCT) {
         struct_type = (TypeStruct *)(type_lhs);
@@ -1556,10 +1597,11 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     }
 
 
-    AstDeclaration *member = NULL;
-    char           *member_name = NULL;
-    AstExpr *rhs = ma->right;
-    
+    AstFunctionCall *func_call = NULL;
+    AstDeclaration  *member = NULL;
+    char            *member_name = NULL;
+    AstExpr         *rhs = ma->right;
+
     // Get out the member declaration
     if (rhs->head.kind == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
         AstLiteral *ident = (AstLiteral *) rhs;
@@ -1567,7 +1609,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         member = get_struct_member(struct_type->node, member_name);
     } 
     else if (rhs->head.kind == AST_FUNCTION_CALL) {
-        AstFunctionCall *func_call = (AstFunctionCall *) rhs;
+        func_call = (AstFunctionCall *) rhs;
 
         func_call->is_member_call = true;
         func_call->struct_defn = struct_type->node;
@@ -1602,6 +1644,10 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
 
     ma->access_kind   = MEMBER_ACCESS_STRUCT;
     ma->struct_member = member;
+
+    if (func_call) {
+        return func_call->func_defn->return_type;
+    }
 
     return member->type;
 }

@@ -613,6 +613,13 @@ bool is_digit(char c) {
     return c >= '0' && c <= '9';
 }
 
+char *text_bold(char *text) {
+    int text_len = strlen(text);
+    char *result = malloc(text_len + 8);
+    sprintf(result, COLOR_WHITE_BOLD"%s"COLOR_RESET, text);
+    return result;
+}
+
 void report_error_here(Lexer *lexer, const char *message, ...) {
     va_list args;
     va_start(args, message);
@@ -630,12 +637,12 @@ void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, co
     
     if (start.line == -1) {
         // Skip reporting code line of location
-        printf("\n" COLOR_WHITE_BOLD "%s " COLOR_RESET "%s" ": %s\n", lexer->file_path, label, message);
+        printf("\n" "%s " "%s" ": %s\n", lexer->file_path, label, message);
         return;
     }
 
     // Header
-    printf("\n" COLOR_WHITE_BOLD "%s:%d:%d " COLOR_RESET "%s" ": %s\n", lexer->file_path, start.line, start.col, label, message);
+    printf("\n" "%s:%d:%d " "%s" ": %s\n", lexer->file_path, start.line, start.col, label, message);
 
     //
     // Code lines

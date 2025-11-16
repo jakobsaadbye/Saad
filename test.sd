@@ -1,20 +1,57 @@
-Vector2 :: struct {
+Vector4 :: struct {
     x: float;
+    y: float;
+    z: float;
+    w: float;
+}
+
+Color :: struct {
+    r: int;
+    g: int;
+    b: int;
+    a: int;
+}
+
+clutter :: method (c: *Color) {
+    c.r = 69;
+    c.g = 44;
+    c.b = 99;
+    c.a = 127;
+}
+
+
+
+
+Vector2 :: struct {
+	x: float;
     y: float;
 }
 
-Mesh :: struct {
-    vertices: []Vector2;
+Rectangle :: struct {
+	x:      float;
+    y:      float;
+    width:  float;
+    height: float;
 }
 
-print_vertices :: (vs: [..]Vector2) {
-    for v, i in vs {
-        print("[%] = %", i, v);
-    }
-}
+
+
 
 main :: () {
-    vertices: [1000]Vector2;
-
-    print_vertices(vertices);
+    // red  := Color{255, 0, 0, 255};
+    // red.clutter();
+    // print("%", red);
+    result := nightmare_func({200, 400, 20, 10}, {300, 500, 40, 5}, 5, {5, 5}, 2.5, {333, 555, 69, 420});
+    print("%", result);
 }
+
+nightmare_func :: (a: Rectangle, b: Rectangle, c: int, d: Vector2, e: f64, f: Rectangle) -> int {
+    print("%", a);
+    print("%", b);
+    print("%", c);
+    print("%", d);
+    print("%", e);
+    print("%", f);
+    return c;
+}
+

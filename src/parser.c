@@ -248,19 +248,13 @@ bool starts_function_defn(Parser *parser, Token token) {
 }
 
 Ast *parse_statement(Parser *parser) {
-    bool matched_a_statement = false;
-    bool statement_ends_with_semicolon = false;
     Ast *stmt = NULL;
+    bool statement_ends_with_semicolon = false;
+    bool matched_a_statement = false;
     
     Token token = peek_next_token(parser);
 
-    if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '(') {
-        stmt = (Ast *)(parse_function_call(parser));
-        statement_ends_with_semicolon = true;
-        matched_a_statement = true;
-    }
-
-    else if (starts_function_defn(parser, token)) {
+    if (starts_function_defn(parser, token)) {
         stmt = (Ast *)(parse_function_defn(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
@@ -361,6 +355,31 @@ Ast *parse_statement(Parser *parser) {
                 statement_ends_with_semicolon = true;
                 matched_a_statement = true;
             }
+        }
+        else if (next.type == ';') {
+            // Some expression that ends with a semi-colon.
+            // The main reason why we have the AstExprStmt ast node is to allow method calls
+            // to be called as an expression.
+            //
+            // e.g `1: foo.bar();`
+            //
+            // This unfortunately also opens up for other silly statements like this
+            //
+            // e.g `1: 5 + 3 + 2;`
+            // 
+            // The thing is, that there might be a sneaky function call in there
+            // that have important side-effects that needs to be run.
+
+            AstExprStmt *expr_stmt = ast_allocate(parser, sizeof(AstExprStmt));
+            expr_stmt->head.head.kind  = AST_EXPR_STMT;
+            expr_stmt->head.head.start = lhs->head.start;
+            expr_stmt->head.head.end   = next.end;
+            expr_stmt->expr            = lhs;
+
+
+            stmt = (Ast*) expr_stmt;
+            matched_a_statement = true;
+            statement_ends_with_semicolon = true;
         }
     }
 

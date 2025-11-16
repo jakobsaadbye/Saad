@@ -37,6 +37,7 @@ typedef enum AstKind {
     AST_FOR,
     AST_WHILE,
     AST_EXPR,
+    AST_EXPR_STMT,
     AST_TYPE,
     AST_RANGE_EXPR,
     AST_SEMICOLON_EXPR,
@@ -130,7 +131,7 @@ typedef enum DeclarationFlags {
     DECLARATION_INFER                 = 1 << 2,
     DECLARATION_CONSTANT              = 1 << 3,
     DECLARATION_IS_STRUCT_MEMBER      = 1 << 4,
-    DECLARATION_IS_STRUCT_METHOD_MEMBER = 1 << 5,
+    DECLARATION_IS_STRUCT_METHOD = 1 << 5,
     DECLARATION_IS_FUNCTION_PARAMETER = 1 << 6,
     DECLARATION_IS_COMPILER_GENERATED = 1 << 7,
 } DeclarationFlags;
@@ -258,6 +259,7 @@ typedef struct AstFunctionDefn {
     CallingConv     call_conv;
     Type           *receiver_type; // set if its a method
     Token           method_token;  // set if its a method
+    bool            receiver_type_is_pointer;
     bool            is_method;
     bool            is_extern;
  
@@ -285,6 +287,11 @@ typedef struct AstPrint {
     char         *c_string;     // Generated c string in typer
     int           c_args;       // Number of arguments that needs to be supplied to the c_string
 } AstPrint;
+
+typedef struct AstExprStmt {
+    AstExpr  head;
+    AstExpr *expr;
+} AstExprStmt;
 
 typedef struct AstNew {
     AstExpr  head;

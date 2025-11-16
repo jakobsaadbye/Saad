@@ -32,6 +32,7 @@ const char *ast_to_str(Ast *ast) {
     case AST_WHILE:              return "AST_WHILE";
     case AST_BREAK_OR_CONTINUE:  return "AST_BREAK_OR_CONTINUE";
     case AST_EXPR:               return "AST_EXPR";
+    case AST_EXPR_STMT:          return "AST_EXPR_STMT";
     case AST_RANGE_EXPR:         return "AST_RANGE_EXPR";
     case AST_SEMICOLON_EXPR:     return "AST_SEMICOLON_EXPR";
     case AST_BINARY:             return "AST_BINARY";

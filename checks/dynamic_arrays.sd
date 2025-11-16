@@ -1,0 +1,29 @@
+realloc :: (buffer: *void, new_size: int) -> *void #extern "C"
+
+append :: (array: *[..]int, elem: int) {
+
+    if array.count + 1 > array.capacity {
+        new_cap := array.capacity * 2;
+        array.data = realloc(array.data, new_cap);
+        array.capacity = new_cap;
+    }
+
+    // @Improvement: We could make it allowed to index access into pointer
+    // to array, so we don't need to do the dereference here manually
+    arr := *array;
+    arr[array.count] = elem;
+    array.count += 1;
+}
+
+main :: () {
+    numbers: [..]int;
+
+    append(&numbers, 1);
+    append(&numbers, 2);
+    append(&numbers, 3);
+    append(&numbers, 4);
+    append(&numbers, 5);
+
+    assert(numbers.count == 5);
+    assert(numbers.capacity == 8);
+}

@@ -190,6 +190,7 @@ TokenType is_triple_character_token(Lexer *lexer);
 bool is_binary_operator(TokenType op);
 bool is_unary_operator(TokenType op);
 bool is_digit(char c);
+char *text_bold(char *text);
 void report_error_here(Lexer *lexer, const char *message, ...);
 void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, const char *message, va_list args);
 Line get_line(char *input_str, int line_num);
