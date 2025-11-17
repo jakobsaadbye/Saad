@@ -349,6 +349,23 @@ PickupSpawner :: struct {
     free_index: int;
 }
 
+GetRect :: method (ball: Ball) -> Rectangle {
+    return {
+        x = ball.x,
+        y = ball.y,
+        width = ball.size,
+        height = ball.size,
+    };
+}
+
+GetRect :: method (bar: Bar) -> Rectangle {
+    return {
+        bar.x,
+        bar.y,
+        bar.width,
+        bar.height,
+    };
+}
 
 main :: () {
     COLOR_WHITE := Color{255, 255, 255, 255};
@@ -512,8 +529,8 @@ main :: () {
         }
 
         // Collision ball and bar
-        next_ball_rect := get_ball_rect(next_ball);
-        bar_rect       := get_bar_rect(bar);
+        next_ball_rect := next_ball.GetRect();
+        bar_rect       := bar.GetRect();
 
         if !player.is_holding_ball && CheckCollisionRecs(next_ball_rect, bar_rect) {
 
@@ -546,7 +563,7 @@ main :: () {
         }
 
         // Collision ball and bricks
-        next_ball_rect = get_ball_rect(next_ball);
+        next_ball_rect = next_ball.GetRect();
         
         for row in 0..BRICK_ROWS {
             for col in 0..BRICK_COLS {
@@ -578,7 +595,7 @@ main :: () {
 
         // Collision bar and pickups
         {
-            bar_rect := get_bar_rect(bar);
+            bar_rect := bar.GetRect();
 
             for i in 0..pickups.count {
                 pickup := &pickups[i];
@@ -594,7 +611,7 @@ main :: () {
         
 
         // Collision ball and dead zone
-        ball_rect := get_ball_rect(ball);
+        ball_rect := ball.GetRect();
         if CheckCollisionRecs(ball_rect, dead_zone) {
             player.is_holding_ball = true;
             player.lives -= 1;
@@ -710,24 +727,6 @@ main :: () {
     CloseWindow();
 }
 
-get_ball_rect :: (ball: Ball) -> Rectangle {
-    return {
-        x = ball.x,
-        y = ball.y,
-        width = ball.size,
-        height = ball.size,
-    };
-}
-
-get_bar_rect :: (bar: Bar) -> Rectangle {
-    return {
-        bar.x,
-        bar.y,
-        bar.width,
-        bar.height,
-    };
-}
-
 handle_on_pickup :: (pickup: *Pickup, bar: *Bar, ball: *Ball, player: *Player, pickup_sound: Sound) {
     pickup.is_shown = false;
 
@@ -805,7 +804,7 @@ maybe_spawn_random_pickup :: (ps: *PickupSpawner, pos: Vector2) {
 
 bounce_ball :: (ball: *Ball, b: Rectangle) {
     overlap := Vector2{};
-    a       := get_ball_rect(*ball);
+    a       := ball.GetRect();
 
     // Figure out how much we overlap with the rectangle
     if ball.vel_x > 0 {
