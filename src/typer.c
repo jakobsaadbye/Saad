@@ -295,17 +295,6 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", decl->ident->name, type_to_str(decl->type), type_to_str(expr_type));
             return false;
         }
-
-        // Special case for array with unknown capacity. We use the type we get from evaluating the expression.
-        // if (resolved_type->kind == TYPE_ARRAY) {
-        //     TypeArray *array = (TypeArray *) resolved_type;
-
-        //     if (!array->capacity_expr) {
-        //         decl->ident->type = expr_type;
-        //         decl->type        = expr_type;
-        //     }
-        // }
-
     }
     else if (decl->flags & DECLARATION_TYPED_NO_EXPR) {
         Type *resolved_type = resolve_type(typer, decl->type);
@@ -339,6 +328,15 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
 
         decl->ident->type = expr_type;
         decl->type        = expr_type;
+    }
+
+    if (decl->type->kind == TYPE_VOID) {
+        if (decl->expr) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "Cannot assign variable to expression of type void", decl->ident->name);
+        } else {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->type), "Variables are not allowed to have type void");
+        }
+        return false;
     }
 
     if (decl->expr && is_untyped_type(decl->expr->type) && !(decl->flags & DECLARATION_CONSTANT)) {
@@ -421,9 +419,9 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
     if (call->is_member_call) {
         // Lookup the function within the scope of the struct
-        assert(call->struct_defn);
+        assert(call->belongs_to_struct);
 
-        AstDeclaration *func_member = get_struct_member(call->struct_defn, call->identifer->name);
+        AstDeclaration *func_member = get_struct_member(call->belongs_to_struct, call->identifer->name);
         if (!func_member) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined member function '%s'", text_bold(call->identifer->name));
             return NULL;
@@ -1612,7 +1610,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         func_call = (AstFunctionCall *) rhs;
 
         func_call->is_member_call = true;
-        func_call->struct_defn = struct_type->node;
+        func_call->belongs_to_struct = struct_type->node;
 
         Type *func_type = check_function_call(typer, func_call);
         if (!func_type) return NULL;

@@ -1,67 +1,49 @@
-- Test calling a function that is defined after!!1
-
-- Fix hash_table when collisions happen. Currently we crash if defining two structs with the same name !!!!
-
-
-TODO:
-  - Passing arrays to functions (Can we make it interopable with C without any modifications?)
-
-
-BUG FIXES:
+Todo list:
 -------------------
 
-- Doing assignment to array member through a member access causes a crash
+* Function call overhaul:
+  - Multiple return values
+  - Variadic arguments
+  - Default arguments
+  - Named arguments
 
-  Repro:
+* Better string handling
+  - Iterating over strings
+  - Indexing into them
 
-  ps.pickups[ps.free_index]
+* Better struct (default values and constants)
 
-  I think we are overriding rbx when doing the member offset calculation. We should do this differently!
+* Better enums
+  - Get the names of enums
+  - Backing integer types for enums
+
+* Import system
+  - Modules / Packages n' stuff
 
 
+Bug fixes:
+-------------------
+- Fix hash_table when collisions happen. Currently we crash if defining two structs with the same name !!!!
+- Assigning to functions with void type should not be allowed
+- @Investigate - examples/for_loops crashes once in a while. Is it a hisenbug?
 
 
 Later:
--------------
+-------------------
 - Do a fast-path for struct initialization where the expression tree is only 1-level deep to prevent too many asm instructions
-- Asignign to functions with void type should not be allowed!!!!!!!!
 - If, For and While statements should accept a statement instead of a block as their body to do inline style versions
+- Error messages with multiple color highlighting. (For cases where the red underline can be confusing. E.g when doing pointer dereference)
 
-Optimize this
-mov		rax, 1
-push		rax
-mov		rax, 2
-push		rax
-mov		rax, 3
-push		rax
-mov		rax, 4
-push		rax
-lea		rax, -4[rbp]
-
-
-- Function calls
-   - Variadic functions
-   - Default arguments
-   - Named arguments
-- Imports / Modules / Packages n' stuff
-
-Current TODO:
-    - :FloatRefactor
-
-    - WrongForLoopSizing (remove temporary hack of aligning functions to 32 bytes just to fix for-loops wrong size!)
-    - @Investigate - examples/for_loops crashes once in a while. Is it a hisenbug?
-
-    - Backing integer types for enums
-    - Error messages with multiple color highlighting. (For cases where the red underline can be confusing. E.g when doing pointer dereference)
 
 Roadmap:
-    - Array types (Mostly done, multidimensional arrays + heap allocated is still missing)
-    - Constants (Mostly done. Missing as struct member)
-    - Switch statement
-    - Heap allocation + Allocators
-    - Struct default values
-    - Bit operations
-    - Compiling to LLVM
-    - Foreign functions / C bindings
-    - Modules / Packages
-    - Own ARM64 backend
+-------------------
+- Array types (Mostly done, multidimensional arrays + heap allocated is still missing)
+- Constants (Mostly done. Missing as struct member)
+- Switch statement
+- Heap allocation + Allocators
+- Struct default values
+- Bit operations
+- Compiling to LLVM
+- Foreign functions / C bindings
+- Modules / Packages
+- Own ARM64 backend

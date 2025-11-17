@@ -275,9 +275,9 @@ typedef struct AstFunctionDefn {
 typedef struct AstFunctionCall {
     AstExpr          head;
     AstIdentifier   *identifer;
-    AstFunctionDefn *func_defn;    // The called function
-    DynamicArray     arguments;    // of *AstExpr
-    AstStruct       *struct_defn;       // The struct the function definition is defined in
+    AstFunctionDefn *func_defn;         // The called function
+    DynamicArray     arguments;         // of *AstExpr
+    AstStruct       *belongs_to_struct; // The struct the function definition is defined on
     bool             is_member_call;    // If the function is defined within the struct or is a method of the struct, this field is true
 } AstFunctionCall;
 

@@ -1,3 +1,5 @@
+sprintf :: (str: *u8, format: *u8, arg0: int, arg1: int, arg2: int) -> int #extern "C"
+
 Vector4 :: struct {
     x: float;
     y: float;
@@ -6,52 +8,47 @@ Vector4 :: struct {
 }
 
 Color :: struct {
-    r: int;
-    g: int;
-    b: int;
-    a: int;
+    r: u8;
+    g: u8;
+    b: u8;
+    a: u8;
 }
 
-clutter :: method (c: *Color) {
-    c.r = 69;
-    c.g = 44;
-    c.b = 99;
-    c.a = 127;
+to_hex :: method (c: Color) -> string {
+    // @Incomplete: This is no good!
+    buffer: [16]u8;
+
+    sprintf(buffer.data, xx "#%02X%02X%02X", xx c.a, xx c.b, xx c.g);
+    return cast(string)buffer.data;
 }
 
-
-
-
-Vector2 :: struct {
-	x: float;
-    y: float;
+method_test_1 :: method (c: Color) -> Color {
+    return {c.r - 5 , c.g - 5, c.b - 5, c.a - 5};
 }
 
-Rectangle :: struct {
-	x:      float;
-    y:      float;
-    width:  float;
-    height: float;
+method_test_2 :: method (c: *Color) {
+    c.r = 1;
+    c.g = 2;
+    c.b = 3;
+    c.a = 4;
 }
-
 
 
 
 main :: () {
-    // red  := Color{255, 0, 0, 255};
-    // red.clutter();
-    // print("%", red);
-    result := nightmare_func({200, 400, 20, 10}, {300, 500, 40, 5}, 5, {5, 5}, 2.5, {333, 555, 69, 420});
-    print("%", result);
-}
+    white     := Color{255, 255, 255, 255};
+    white_ptr := &white;
 
-nightmare_func :: (a: Rectangle, b: Rectangle, c: int, d: Vector2, e: f64, f: Rectangle) -> int {
-    print("%", a);
-    print("%", b);
-    print("%", c);
-    print("%", d);
-    print("%", e);
-    print("%", f);
-    return c;
-}
 
+
+    white.method_test_2();
+
+    if white.r == 1 {
+        print("Its just 1 bro");
+    }
+    
+    assert(white.r == 1);
+    assert(white.g == 2);
+    assert(white.b == 3);
+    assert(white.a == 4);
+}

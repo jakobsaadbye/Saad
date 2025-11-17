@@ -1107,7 +1107,9 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
         AstExpr *arg      = ((AstExpr **)call->arguments.items)[i];
         Type    *arg_type = arg->type;
 
-        AstDeclaration *param = ((AstDeclaration **)call->func_defn->parameters.items)[i];
+
+        int             param_index = i + (is_method ? 1 : 0);
+        AstDeclaration *param = ((AstDeclaration **)call->func_defn->parameters.items)[param_index];
         Type           *param_type = param->type;
 
         int arg_index = i + num_large_return_values + (is_method ? 1 : 0);
@@ -1199,7 +1201,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     }
 
     if (is_method) {
-        // Pass the implicit `this` pointer as the first argument
+        // Pass the receiver literal as the first argument
         POP(RCX);
     }
 
@@ -2340,7 +2342,11 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         return;
     }
     case TYPE_INTEGER: {
-        sb_append(&cg->code, "   mov\t\t%s, %s %s\n", REG_A(src_type), WIDTH(src_type), src);
+        if (src_type->size <= 4) {
+            sb_append(&cg->code, "   movzx\t\teax, %s %s\n", WIDTH(src_type), src);
+        } else {
+            sb_append(&cg->code, "   mov\t\trax, %s %s\n", WIDTH(src_type), src);
+        }
         if (is_signed_integer(src_type) && src_type->size != 8) {
             sb_append(&cg->code, "   movsx\t\trax, %s\n", REG_A(src_type));
         }
@@ -2509,7 +2515,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                     // Address of array is already pushed
                 } else if (ma->struct_member->member_index == 1) { // .count
                     POP(RBX);
-                    sb_append(&cg->code, "   push\t\t%d\n", fixed_array->count);        
+                    sb_append(&cg->code, "   push\t\t%d\n", fixed_array->count);
                 } else {
                     XXX;
                 }
@@ -2521,6 +2527,49 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 AstFunctionCall *member_call = (AstFunctionCall *) ma->right;
 
                 if (member_call->is_member_call) {
+                    // Pass the receiver literal to match the parameter type of the methods receiver type
+
+                    Type *lhs_type      = ma->left->type;
+
+                    if (lhs_type->kind == TYPE_STRUCT && member_call->func_defn->receiver_type_is_pointer) {
+                        // The reference is already pushed
+                    }
+                    else if (lhs_type->kind == TYPE_STRUCT && !member_call->func_defn->receiver_type_is_pointer) {
+                        if (lhs_type->size <= 8) {
+                            // Pass the struct by value
+                            POP(RAX);
+                            if (lhs_type->size <= 4) {
+                                sb_append(&cg->code, "   movzx\t\teax, %s [rax]\n", WIDTH(lhs_type));
+                            } else {
+                                sb_append(&cg->code, "   mov\t\trax, %s [rax]\n", WIDTH(lhs_type));
+                            }
+                            PUSH(RAX);
+                        }
+                    }
+                    else if (lhs_type->kind == TYPE_POINTER && !member_call->func_defn->receiver_type_is_pointer) {
+                        // Dereference the struct if its small
+                        Type *lhs_pointer_to = ((TypePointer *)lhs_type)->pointer_to;
+                        if (lhs_pointer_to->kind != TYPE_STRUCT) {
+                            XXX;
+                        }
+                        
+                        if (lhs_pointer_to->size <= 8) {
+                            POP(RAX);
+                            if (lhs_type->size <= 4) {
+                                sb_append(&cg->code, "   movzx\t\teax, %s [rax]\n", WIDTH(lhs_type));
+                            } else {
+                                sb_append(&cg->code, "   mov\t\trax, %s [rax]\n", WIDTH(lhs_type));
+                            }
+                            PUSH(RAX);
+                        }
+                    }
+                    else if (lhs_type->kind == TYPE_POINTER && member_call->func_defn->receiver_type_is_pointer) {
+                        // The reference is already pushed
+                    }
+                    else {
+                        XXX;
+                    }
+
                     emit_function_call(cg, member_call);
                     PUSH(RAX);
                 } else {
