@@ -9,8 +9,6 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   CS0 DB "#%02X%02X%02X", 0 
-   CS1 DB `Its just 1 bro`, 10, 0 
 segment .text
    global main
    extern ExitProcess
@@ -21,7 +19,6 @@ segment .text
    extern free
    extern memset
    extern memcpy
-   extern sprintf
 
 
 assert:
@@ -36,166 +33,115 @@ assert_fail:
 
 
 ; bytes locals   : 24
-; bytes temp     : 8
-; bytes total    : 64
-Color.to_hex:
+; bytes temp     : 16
+; bytes total    : 80
+Color.method_receiving_struct:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 64
-   ; Copy c -> -4
-   mov		-4[rbp], ecx
-
-   ; Ln 19: $buffer : [16]u8 = -24
+   sub		rsp, 80
+   mov		-8[rbp], rdx	; Return 0
+   mov		16[rbp], rcx 	; Save arg 0 
+   ; Copy c -> -24
+   mov		rax, 16[rbp]
    lea		rbx, -24[rbp]
-   mov		rcx, rbx
+   mov		r8, 16
+   lea		rdx, 0[rax]
+   lea		rcx, 0[rbx]
+   call		memcpy
+   lea		rcx, -40[rbp]
    mov		rdx, 0
    mov		r8, 16
    call		memset
    lea		rax, -24[rbp]
    push		rax
-   mov		rax, CS0
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
    push		rax
-   lea		rax, -4[rbp]
+   mov		rax, 5
    push		rax
    pop		rbx
-   add		rbx, 3
-   push		rbx
-   pop		rbx
-   movzx		eax, BYTE [rbx]
-   push		rax
-   lea		rax, -4[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 2
-   push		rbx
-   pop		rbx
-   movzx		eax, BYTE [rbx]
-   push		rax
-   lea		rax, -4[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 1
-   push		rbx
-   pop		rbx
-   movzx		eax, BYTE [rbx]
+   pop		rax
+   sub		rax, rbx
    push		rax
    pop		rax
-   mov		-32[rbp], rax
-   pop		rax
-   mov		r9d, eax
-   pop		rax
-   mov		r8d, eax
-   pop		rax
-   mov		rdx, rax
-   pop		rax
-   mov		rcx, rax
-   mov		rax, QWORD -32[rbp]
-   mov		32[rsp], eax
-   call		sprintf
-   push		rax
-   pop		rax
+   mov		DWORD -40[rbp], eax
    lea		rax, -24[rbp]
+   push		rax
+   pop		rbx
+   add		rbx, 4
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 5
+   push		rax
+   pop		rbx
+   pop		rax
+   sub		rax, rbx
+   push		rax
+   pop		rax
+   mov		DWORD -36[rbp], eax
+   lea		rax, -24[rbp]
+   push		rax
+   pop		rbx
+   add		rbx, 8
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 5
+   push		rax
+   pop		rbx
+   pop		rax
+   sub		rax, rbx
+   push		rax
+   pop		rax
+   mov		DWORD -32[rbp], eax
+   lea		rax, -24[rbp]
+   push		rax
+   pop		rbx
+   add		rbx, 12
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 5
+   push		rax
+   pop		rbx
+   pop		rax
+   sub		rax, rbx
+   push		rax
+   pop		rax
+   mov		DWORD -28[rbp], eax
+   lea		rax, -40[rbp]
    push		rax
    jmp		L0
 L0:
    pop		rax
-   add		rsp, 64
-   pop		rbp
-   ret
-
-; bytes locals   : 8
-; bytes temp     : 8
-; bytes total    : 48
-Color.method_test_1:
-   push		rbp
-   mov		rbp, rsp
-   sub		rsp, 48
-   ; Copy c -> -4
-   mov		-4[rbp], ecx
-   lea		rcx, -12[rbp]
-   mov		rdx, 0
-   mov		r8, 4
-   call		memset
-   lea		rax, -4[rbp]
-   push		rax
-   pop		rbx
-   movzx		eax, BYTE [rbx]
-   push		rax
-   mov		rax, 5
-   push		rax
-   pop		rbx
-   pop		rax
-   sub		rax, rbx
-   push		rax
-   pop		rax
-   mov		BYTE -12[rbp], al
-   lea		rax, -4[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 1
-   push		rbx
-   pop		rbx
-   movzx		eax, BYTE [rbx]
-   push		rax
-   mov		rax, 5
-   push		rax
-   pop		rbx
-   pop		rax
-   sub		rax, rbx
-   push		rax
-   pop		rax
-   mov		BYTE -11[rbp], al
-   lea		rax, -4[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 2
-   push		rbx
-   pop		rbx
-   movzx		eax, BYTE [rbx]
-   push		rax
-   mov		rax, 5
-   push		rax
-   pop		rbx
-   pop		rax
-   sub		rax, rbx
-   push		rax
-   pop		rax
-   mov		BYTE -10[rbp], al
-   lea		rax, -4[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 3
-   push		rbx
-   pop		rbx
-   movzx		eax, BYTE [rbx]
-   push		rax
-   mov		rax, 5
-   push		rax
-   pop		rbx
-   pop		rax
-   sub		rax, rbx
-   push		rax
-   pop		rax
-   mov		BYTE -9[rbp], al
-   mov		eax, -12[rbp]
-   push		rax
-   jmp		L1
-L1:
-   pop		rax
-   add		rsp, 48
+   mov		rbx, -8[rbp]
+   mov		r8, 16
+   lea		rdx, 0[rax]
+   lea		rcx, 0[rbx]
+   call		memcpy
+   mov		rax, -8[rbp]
+   add		rsp, 80
    pop		rbp
    ret
 
 ; bytes locals   : 8
 ; bytes temp     : 0
 ; bytes total    : 48
-Color.method_test_2:
+Color.method_receiving_ptr_struct:
    push		rbp
    mov		rbp, rsp
    sub		rsp, 48
    ; Copy c -> -8
    mov		-8[rbp], rcx
-   ; Ln 30: Assignment
+   ; Ln 13: Assignment
    mov		rax, 1
    push		rax
    lea		rax, -8[rbp]
@@ -205,8 +151,8 @@ Color.method_test_2:
    push		rbx
    pop		rbx
    pop		rax
-   mov		BYTE [rbx], al
-   ; Ln 31: Assignment
+   mov		DWORD [rbx], eax
+   ; Ln 14: Assignment
    mov		rax, 2
    push		rax
    lea		rax, -8[rbp]
@@ -215,12 +161,12 @@ Color.method_test_2:
    mov		rbx, [rbx]
    push		rbx
    pop		rbx
-   add		rbx, 1
+   add		rbx, 4
    push		rbx
    pop		rbx
    pop		rax
-   mov		BYTE [rbx], al
-   ; Ln 32: Assignment
+   mov		DWORD [rbx], eax
+   ; Ln 15: Assignment
    mov		rax, 3
    push		rax
    lea		rax, -8[rbp]
@@ -229,12 +175,12 @@ Color.method_test_2:
    mov		rbx, [rbx]
    push		rbx
    pop		rbx
-   add		rbx, 2
+   add		rbx, 8
    push		rbx
    pop		rbx
    pop		rax
-   mov		BYTE [rbx], al
-   ; Ln 33: Assignment
+   mov		DWORD [rbx], eax
+   ; Ln 16: Assignment
    mov		rax, 4
    push		rax
    lea		rax, -8[rbp]
@@ -243,85 +189,90 @@ Color.method_test_2:
    mov		rbx, [rbx]
    push		rbx
    pop		rbx
-   add		rbx, 3
+   add		rbx, 12
    push		rbx
    pop		rbx
    pop		rax
-   mov		BYTE [rbx], al
-L2:
+   mov		DWORD [rbx], eax
+L1:
    mov		rax, 0
    add		rsp, 48
    pop		rbp
    ret
 
-; bytes locals   : 32
-; bytes temp     : 8
-; bytes total    : 80
+; bytes locals   : 96
+; bytes temp     : 16
+; bytes total    : 144
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 80
+   sub		rsp, 144
 
-   ; Ln 37: $white : Color = -4
-   lea		rcx, -4[rbp]
+   ; Ln 20: $white : Color = -16
+   lea		rcx, -16[rbp]
    mov		rdx, 0
-   mov		r8, 4
+   mov		r8, 16
    call		memset
    mov		rax, 255
    push		rax
    pop		rax
-   mov		BYTE -4[rbp], al
-   mov		rax, 256
-   push		rax
-   pop		rax
-   mov		BYTE -3[rbp], al
+   mov		DWORD -16[rbp], eax
    mov		rax, 255
    push		rax
    pop		rax
-   mov		BYTE -2[rbp], al
+   mov		DWORD -12[rbp], eax
    mov		rax, 255
    push		rax
    pop		rax
-   mov		BYTE -1[rbp], al
-
-   ; Ln 38: $white_ptr : *Color = -16
-   lea		rax, -4[rbp]
+   mov		DWORD -8[rbp], eax
+   mov		rax, 255
    push		rax
    pop		rax
-   mov		QWORD -16[rbp], rax
+   mov		DWORD -4[rbp], eax
 
-   ; Ln 40: $out1 : Color = -20
-   lea		rax, -4[rbp]
+   ; Ln 21: $white_ptr : *Color = -24
+   lea		rax, -16[rbp]
    push		rax
    pop		rax
-   mov		eax, DWORD [rax]
+   mov		QWORD -24[rbp], rax
+
+   ; Ln 24: $out1 : Color = -40
+   lea		rax, -16[rbp]
    push		rax
    pop		rcx
-   call		Color.method_test_1
+   lea		rdx, -112[rbp]		; Return value 0
+   call		Color.method_receiving_struct
    push		rax
    pop		rax
    ; Copy struct
-   mov		-20[rbp], eax
+   lea		rbx, -40[rbp]
+   mov		r8, 16
+   lea		rdx, 0[rax]
+   lea		rcx, 0[rbx]
+   call		memcpy
 
-   ; Ln 41: $out2 : Color = -24
-   lea		rax, -16[rbp]
+   ; Ln 25: $out2 : Color = -56
+   lea		rax, -24[rbp]
    push		rax
    pop		rbx
    mov		rbx, [rbx]
    push		rbx
-   pop		rax
-   mov		rax, QWORD [rax]
-   push		rax
    pop		rcx
-   call		Color.method_test_1
+   lea		rdx, -112[rbp]		; Return value 0
+   call		Color.method_receiving_struct
    push		rax
    pop		rax
    ; Copy struct
-   mov		-24[rbp], eax
-   lea		rax, -20[rbp]
+   lea		rbx, -56[rbp]
+   mov		r8, 16
+   lea		rdx, 0[rax]
+   lea		rcx, 0[rbx]
+   call		memcpy
+   lea		rax, -40[rbp]
    push		rax
    pop		rbx
-   movzx		eax, BYTE [rbx]
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
    push		rax
    mov		rax, 250
    push		rax
@@ -331,15 +282,16 @@ main:
    sete		al
    push		rax
    pop		rcx
-   mov		rdx, 43
+   mov		rdx, 27
    call		assert
-   lea		rax, -20[rbp]
+   lea		rax, -40[rbp]
    push		rax
    pop		rbx
-   add		rbx, 1
+   add		rbx, 4
    push		rbx
    pop		rbx
-   movzx		eax, BYTE [rbx]
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
    push		rax
    mov		rax, 250
    push		rax
@@ -349,17 +301,191 @@ main:
    sete		al
    push		rax
    pop		rcx
-   mov		rdx, 44
+   mov		rdx, 28
    call		assert
-   lea		rax, -20[rbp]
+   lea		rax, -40[rbp]
    push		rax
    pop		rbx
-   add		rbx, 2
+   add		rbx, 8
    push		rbx
    pop		rbx
-   movzx		eax, BYTE [rbx]
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
    push		rax
    mov		rax, 250
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 29
+   call		assert
+   lea		rax, -40[rbp]
+   push		rax
+   pop		rbx
+   add		rbx, 12
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 250
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 30
+   call		assert
+   lea		rax, -56[rbp]
+   push		rax
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 250
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 32
+   call		assert
+   lea		rax, -56[rbp]
+   push		rax
+   pop		rbx
+   add		rbx, 4
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 250
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 33
+   call		assert
+   lea		rax, -56[rbp]
+   push		rax
+   pop		rbx
+   add		rbx, 8
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 250
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 34
+   call		assert
+   lea		rax, -56[rbp]
+   push		rax
+   pop		rbx
+   add		rbx, 12
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 250
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 35
+   call		assert
+
+   ; Ln 38: $color1 : Color = -72
+   lea		rcx, -72[rbp]
+   mov		rdx, 0
+   mov		r8, 16
+   call		memset
+   mov		rax, 255
+   push		rax
+   pop		rax
+   mov		DWORD -72[rbp], eax
+   mov		rax, 255
+   push		rax
+   pop		rax
+   mov		DWORD -68[rbp], eax
+   mov		rax, 255
+   push		rax
+   pop		rax
+   mov		DWORD -64[rbp], eax
+   mov		rax, 255
+   push		rax
+   pop		rax
+   mov		DWORD -60[rbp], eax
+
+   ; Ln 39: $color2 : Color = -88
+   lea		rcx, -88[rbp]
+   mov		rdx, 0
+   mov		r8, 16
+   call		memset
+   mov		rax, 255
+   push		rax
+   pop		rax
+   mov		DWORD -88[rbp], eax
+   mov		rax, 255
+   push		rax
+   pop		rax
+   mov		DWORD -84[rbp], eax
+   mov		rax, 255
+   push		rax
+   pop		rax
+   mov		DWORD -80[rbp], eax
+   mov		rax, 255
+   push		rax
+   pop		rax
+   mov		DWORD -76[rbp], eax
+
+   ; Ln 40: $color2ptr : *Color = -96
+   lea		rax, -88[rbp]
+   push		rax
+   pop		rax
+   mov		QWORD -96[rbp], rax
+   lea		rax, -72[rbp]
+   push		rax
+   pop		rcx
+   call		Color.method_receiving_ptr_struct
+   push		rax
+   pop		rax
+   lea		rax, -96[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rcx
+   call		Color.method_receiving_ptr_struct
+   push		rax
+   pop		rax
+   lea		rax, -72[rbp]
+   push		rax
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 1
    push		rax
    pop		rbx
    pop		rax
@@ -369,75 +495,14 @@ main:
    pop		rcx
    mov		rdx, 45
    call		assert
-   lea		rax, -20[rbp]
+   lea		rax, -72[rbp]
    push		rax
    pop		rbx
-   add		rbx, 3
+   add		rbx, 4
    push		rbx
    pop		rbx
-   movzx		eax, BYTE [rbx]
-   push		rax
-   mov		rax, 250
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 46
-   call		assert
-   lea		rax, -4[rbp]
-   push		rax
-   pop		rcx
-   call		Color.method_test_2
-   push		rax
-   pop		rax
-   lea		rax, -4[rbp]
-   push		rax
-   pop		rbx
-   movzx		eax, BYTE [rbx]
-   push		rax
-   mov		rax, 1
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rax
-   cmp		al, 0
-   jz			L4
-   ; block of if
-   ; Ln 52 Print
-   ; Pop print arguments
-   mov		rcx, CS1
-   call		printf
-   jmp L4
-; done
-L4:
-   lea		rax, -4[rbp]
-   push		rax
-   pop		rbx
-   movzx		eax, BYTE [rbx]
-   push		rax
-   mov		rax, 1
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 55
-   call		assert
-   lea		rax, -4[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 1
-   push		rbx
-   pop		rbx
-   movzx		eax, BYTE [rbx]
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
    push		rax
    mov		rax, 2
    push		rax
@@ -447,15 +512,16 @@ L4:
    sete		al
    push		rax
    pop		rcx
-   mov		rdx, 56
+   mov		rdx, 46
    call		assert
-   lea		rax, -4[rbp]
+   lea		rax, -72[rbp]
    push		rax
    pop		rbx
-   add		rbx, 2
+   add		rbx, 8
    push		rbx
    pop		rbx
-   movzx		eax, BYTE [rbx]
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
    push		rax
    mov		rax, 3
    push		rax
@@ -465,15 +531,16 @@ L4:
    sete		al
    push		rax
    pop		rcx
-   mov		rdx, 57
+   mov		rdx, 47
    call		assert
-   lea		rax, -4[rbp]
+   lea		rax, -72[rbp]
    push		rax
    pop		rbx
-   add		rbx, 3
+   add		rbx, 12
    push		rbx
    pop		rbx
-   movzx		eax, BYTE [rbx]
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
    push		rax
    mov		rax, 4
    push		rax
@@ -483,10 +550,95 @@ L4:
    sete		al
    push		rax
    pop		rcx
-   mov		rdx, 58
+   mov		rdx, 48
    call		assert
-L3:
+   lea		rax, -96[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 1
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 50
+   call		assert
+   lea		rax, -96[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   add		rbx, 4
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 2
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 51
+   call		assert
+   lea		rax, -96[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   add		rbx, 8
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 3
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 52
+   call		assert
+   lea		rax, -96[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   add		rbx, 12
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 4
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 53
+   call		assert
+L2:
    mov		rax, 0
-   add		rsp, 80
+   add		rsp, 144
    pop		rbp
    ret

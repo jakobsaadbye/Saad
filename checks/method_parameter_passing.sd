@@ -1,8 +1,8 @@
 Color :: struct {
-    r: int;
-    g: int;
-    b: int;
-    a: int;
+    r: u8;
+    g: u8;
+    b: u8;
+    a: u8;
 }
 
 method_receiving_struct :: method (c: Color) -> Color {

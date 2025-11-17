@@ -50,10 +50,10 @@ void check_entire_directory(const char *dir_name, bool should_fail) {
             ok = compiled;
 
         if (ok) {
-            printf("OK\n");
+            printf(COLOR_GREEN"OK\n"COLOR_RESET);
             succeeded += 1;
         } else {
-            printf("FAILED\n");
+            printf(COLOR_RED"FAILED\n"COLOR_RESET);
             failed += 1;
         }
 
@@ -61,8 +61,8 @@ void check_entire_directory(const char *dir_name, bool should_fail) {
         num_tests += 1;
     }
 
-    printf("\nRan %d tests, %d OK, %d FAILED\n", num_tests, succeeded, failed);
-    printf("------------------------------------\n");
+    // printf("\nRan %d tests, %d OK, %d FAILED\n", num_tests, succeeded, failed);
+    // printf("------------------------------------\n");
 }
 
 int main() {
