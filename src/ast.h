@@ -84,7 +84,7 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
 typedef enum AstFlags {
     AST_FLAG_COMPILER_GENERATED                    = 1 << 0,
     AST_FLAG_CG_EXPR_ASSIGNED_DIRECTLY_TO_VARIABLE = 1 << 1,
-    AST_FLAG_IS_TYPE_CHECKED                       = 1 << 2, // Types that have this flag has gone through type checking
+    AST_FLAG_IS_TYPE_CHECKED                       = 1 << 2, // Ast nodes that have this flag has gone through type checking
 } AstFlags;
 
 typedef struct Ast {

@@ -6,16 +6,20 @@ Todo list:
   - Variadic arguments
   - Default arguments
   - Named arguments
+  - Able to call methods defined later
 
 * Better string handling
   - Iterating over strings
   - Indexing into them
 
-* Better struct (default values and constants)
+* Better structs (default values and constants)
 
 * Better enums
   - Get the names of enums
   - Backing integer types for enums
+
+* Better constants
+  - Structs as constants
 
 * Import system
   - Modules / Packages n' stuff

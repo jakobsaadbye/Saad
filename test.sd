@@ -1,54 +1,24 @@
 Color :: struct {
-    r: int;
-    g: int;
-    b: int;
-    a: int;
+    r: u8;
+    g: u8;
+    b: u8;
+    a: u8;
 }
 
-method_receiving_struct :: method (c: Color) -> Color {
-    return {c.r - 5 , c.g - 5, c.b - 5, c.a - 5};
-}
-
-method_receiving_ptr_struct :: method (c: *Color) {
-    c.r = 1;
-    c.g = 2;
-    c.b = 3;
-    c.a = 4;
+mix :: method (a: Color, b: Color) -> Color {
+    return {
+        r = a.r + b.r,
+        g = a.g + b.g,
+        b = a.b + b.b,
+        a = a.a + b.a,
+    };
 }
 
 main :: () {
-    white     := Color{255, 255, 255, 255};
-    white_ptr := &white;
+    red  := Color{255, 0, 0, 255};
+    blue := Color{0, 0, 255, 255};
 
-    // 1: Pass struct and pointer to struct into receiver of type struct
-    out1 := white.method_receiving_struct();
-    out2 := white_ptr.method_receiving_struct();
+    purple := red.mix(blue);
 
-    assert(out1.r == 250);
-    assert(out1.g == 250);
-    assert(out1.b == 250);
-    assert(out1.a == 250);
-
-    assert(out2.r == 250);
-    assert(out2.g == 250);
-    assert(out2.b == 250);
-    assert(out2.a == 250);
-
-    // 2: Pass struct and pointer to struct into receiver of type pointer to struct
-    color1 := Color{255, 255, 255, 255};
-    color2 := Color{255, 255, 255, 255};
-    color2ptr := &color2;
-
-    color1.method_receiving_ptr_struct();
-    color2ptr.method_receiving_ptr_struct();
-
-    assert(color1.r == 1);
-    assert(color1.g == 2);
-    assert(color1.b == 3);
-    assert(color1.a == 4);
-
-    assert(color2ptr.r == 1);
-    assert(color2ptr.g == 2);
-    assert(color2ptr.b == 3);
-    assert(color2ptr.a == 4);
+    print("%", purple);
 }
