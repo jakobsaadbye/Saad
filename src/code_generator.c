@@ -2255,6 +2255,17 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
         return result;
     }
 
+    if (ma->left->head.kind == AST_FUNCTION_CALL) {
+        if (ma->left->type->kind == TYPE_STRUCT && ma->left->type->size <= 8) {
+            // Allocate space for the returned value so its easier to do member access calculations
+            POP(RAX);
+            int loc = push_temporary_value(cg->enclosing_function, ma->left->type->size);
+            sb_append(&cg->code, "   mov\t\t%d[rbp], %s\n", loc, REG_A(ma->left->type));
+            sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", loc);
+            PUSH(RBX);
+        }
+    }
+
     if (ma->left->type->kind == TYPE_POINTER) {
         TypePointer *ptr_type = (TypePointer *) ma->left->type;
         if (ptr_type->has_been_dereferenced) {
@@ -2499,10 +2510,6 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         AstMemberAccess *ma  = (AstMemberAccess *)(expr);
         
         MemberAccessResult result = emit_member_access(cg, ma);
-        if (emit_as_lvalue) {
-            // Lvalue is already pushed
-            return;
-        } 
 
         if (ma->access_kind == MEMBER_ACCESS_STRUCT) {
 
@@ -2526,61 +2533,74 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             if (ma->right->head.kind == AST_FUNCTION_CALL) {
                 AstFunctionCall *member_call = (AstFunctionCall *) ma->right;
 
-                if (member_call->is_member_call) {
-                    // Pass the receiver literal to match the parameter type of the methods receiver type
-
-                    Type *lhs_type      = ma->left->type;
-
-                    if (lhs_type->kind == TYPE_STRUCT && member_call->func_defn->receiver_type_is_pointer) {
-                        // The reference is already pushed
-                    }
-                    else if (lhs_type->kind == TYPE_STRUCT && !member_call->func_defn->receiver_type_is_pointer) {
-                        if (lhs_type->size <= 8) {
-                            // Pass the struct by value
-                            POP(RAX);
-                            if (lhs_type->size < 4) {
-                                sb_append(&cg->code, "   movzx\t\teax, %s [rax]\n", WIDTH(lhs_type));
-                            } else {
-                                sb_append(&cg->code, "   mov\t\t%s, %s [rax]\n", REG_A(lhs_type), WIDTH(lhs_type));
-                            }
-                            PUSH(RAX);
-                        }
-                    }
-                    else if (lhs_type->kind == TYPE_POINTER && !member_call->func_defn->receiver_type_is_pointer) {
-                        // Dereference the struct if its small
-                        Type *lhs_pointer_to = ((TypePointer *)lhs_type)->pointer_to;
-                        if (lhs_pointer_to->kind != TYPE_STRUCT) {
-                            XXX;
-                        }
-                        
-                        if (lhs_pointer_to->size <= 8) {
-                            POP(RAX);
-                            if (lhs_type->size <= 4) {
-                                sb_append(&cg->code, "   movzx\t\teax, %s [rax]\n", WIDTH(lhs_type));
-                            } else {
-                                sb_append(&cg->code, "   mov\t\trax, %s [rax]\n", WIDTH(lhs_type));
-                            }
-                            PUSH(RAX);
-                        }
-                    }
-                    else if (lhs_type->kind == TYPE_POINTER && member_call->func_defn->receiver_type_is_pointer) {
-                        // The reference is already pushed
-                    }
-                    else {
-                        XXX;
-                    }
-
-                    emit_function_call(cg, member_call);
-                    PUSH(RAX);
-                } else {
+                if (!member_call->is_member_call) {
                     XXX;
                 }
+
+                // Pass the receiver literal to match the parameter type of the methods receiver type
+
+                Type *lhs_type = ma->left->type;
+
+                if (lhs_type->kind == TYPE_STRUCT && member_call->func_defn->receiver_type_is_pointer) {
+                    // The reference is already pushed
+                }
+                else if (lhs_type->kind == TYPE_STRUCT && !member_call->func_defn->receiver_type_is_pointer) {
+                    if (lhs_type->size <= 8) {
+                        // Pass the struct by value
+                        POP(RAX);
+                        if (lhs_type->size < 4) {
+                            sb_append(&cg->code, "   movzx\t\teax, %s [rax]\n", WIDTH(lhs_type));
+                        } else {
+                            sb_append(&cg->code, "   mov\t\t%s, %s [rax]\n", REG_A(lhs_type), WIDTH(lhs_type));
+                        }
+                        PUSH(RAX);
+                    }
+                }
+                else if (lhs_type->kind == TYPE_POINTER && !member_call->func_defn->receiver_type_is_pointer) {
+                    // Dereference the struct if its small
+                    Type *lhs_pointer_to = ((TypePointer *)lhs_type)->pointer_to;
+                    if (lhs_pointer_to->kind != TYPE_STRUCT) {
+                        XXX;
+                    }
+                    
+                    if (lhs_pointer_to->size <= 8) {
+                        POP(RAX);
+                        if (lhs_type->size <= 4) {
+                            sb_append(&cg->code, "   movzx\t\teax, %s [rax]\n", WIDTH(lhs_type));
+                        } else {
+                            sb_append(&cg->code, "   mov\t\trax, %s [rax]\n", WIDTH(lhs_type));
+                        }
+                        PUSH(RAX);
+                    }
+                }
+                else if (lhs_type->kind == TYPE_POINTER && member_call->func_defn->receiver_type_is_pointer) {
+                    // The reference is already pushed
+                }
+                else {
+                    XXX;
+                }
+
+                emit_function_call(cg, member_call);
+
+                if (emit_as_lvalue) {
+
+                    if (member_call->head.type->kind == TYPE_STRUCT && member_call->head.type->size <= 8) {
+                        // Allocate space for the returned value so its easier to do member access calculations
+                        int loc = push_temporary_value(cg->enclosing_function, ma->right->type->size);
+                        sb_append(&cg->code, "   mov\t\t%d[rbp], %s\n", loc, REG_A(ma->right->type));
+                        sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", loc);
+                        PUSH(RBX);
+                        return;
+                    }
+                }
+
+                PUSH(RAX);
                 return;
             } 
     
             // Simple values stored in the member
             POP(RBX);
-            emit_move_and_push(cg, result.base_offset, result.is_runtime_computed, member->type, false);
+            emit_move_and_push(cg, result.base_offset, result.is_runtime_computed, member->type, emit_as_lvalue);
 
             return;
         } 

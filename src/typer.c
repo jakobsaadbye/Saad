@@ -1643,6 +1643,25 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     ma->access_kind   = MEMBER_ACCESS_STRUCT;
     ma->struct_member = member;
 
+    //
+    // Sizing
+    //
+
+    // Reserve 8 bytes for small structure returns to make it easier to do member access calculations on chained function calls
+    if (ma->left->head.kind == AST_FUNCTION_CALL) {
+        AstFunctionCall *call = (AstFunctionCall *) ma->left;
+        if (call->func_defn->return_type->kind == TYPE_STRUCT && call->func_defn->return_type->size <= 8) {
+            reserve_temporary_storage(typer->enclosing_function, 8);
+        }
+    }
+    if (ma->right->head.kind == AST_FUNCTION_CALL) {
+        AstFunctionCall *call = (AstFunctionCall *) ma->right;
+        if (call->func_defn->return_type->kind == TYPE_STRUCT && call->func_defn->return_type->size <= 8) {
+            reserve_temporary_storage(typer->enclosing_function, 8);
+        }
+    }
+    
+
     if (func_call) {
         return func_call->func_defn->return_type;
     }

@@ -309,18 +309,20 @@ Bar :: struct {
     y:      float;
     width:  float;
     height: float;
+    velX:   float;
 }
 
 Ball :: struct {
-    x:      float;
-    y:      float;
-    size:   float;
+    x:     float;
+    y:     float;
+    size:  float;
     velX:  float;
     velY:  float;
 }
 
 Player :: struct {
     score: int;
+    bricksDestroyed: int;
     lives: int;
     isHoldingBall: bool;
     hasFireballPowerup: bool;
@@ -349,6 +351,44 @@ PickupSpawner :: struct {
     freeIndex: int;
 }
 
+Particle :: struct {
+    pos: Vector2;
+    vel: Vector2;
+    color: Color;
+    size: int;
+    lifetime: int;
+}
+
+ParticleEmitter :: struct {
+    particles: [50]Particle;
+    pos: Vector2;
+    vel: Vector2;
+    radius: float;
+    color: Color;
+    particleLifetime: int;
+    isActive: bool;
+}
+
+GameState :: struct {
+    player:    *Player;
+    ball:      *Ball;
+    bar:       *Bar;
+    sounds:   []Sound;
+    textures: []Texture;
+    particleEmitters: []ParticleEmitter;
+    liveEmitterCount: int;
+    pickupSpawner:   *PickupSpawner;
+}
+
+getRect :: method (brick: Brick) -> Rectangle {
+    return {
+        xx brick.x,
+        xx brick.y,
+        BRICK_WIDTH,
+        BRICK_HEIGHT,
+    };
+}
+
 getRect :: method (ball: Ball) -> Rectangle {
     return {
         ball.x,
@@ -365,6 +405,62 @@ getRect :: method (bar: Bar) -> Rectangle {
         bar.width,
         bar.height,
     };
+}
+
+beginEmit :: method (pe: *ParticleEmitter) {
+    for i in 0..pe.particles.count {
+        p := &pe.particles[i];
+
+        p.pos.x = xx GetRandomValue(xx (pe.pos.x - pe.radius), xx (pe.pos.x + pe.radius));
+        p.pos.y = xx GetRandomValue(xx (pe.pos.y - pe.radius), xx (pe.pos.y + pe.radius));
+        
+        spread := 200.0;
+        velX: int = GetRandomValue(xx (pe.vel.x - spread), xx (pe.vel.x + spread));
+        velY: int = GetRandomValue(xx (pe.vel.y - spread), xx (pe.vel.y + spread));
+
+        p.vel.x = xx velX;
+        p.vel.y = xx velY;
+
+        p.size = GetRandomValue(6, 8);
+        p.color = pe.color;
+        p.lifetime = pe.particleLifetime;
+    }
+    pe.isActive = true;
+}
+
+update :: method (pe: *ParticleEmitter) {
+    if !pe.isActive {
+        return;
+    }
+
+    dt := GetFrameTime();
+
+    for i in 0..pe.particles.count {
+        p := &pe.particles[i];
+
+        p.pos.x += p.vel.x * dt;
+        p.pos.y += p.vel.y * dt;
+
+        p.lifetime -= cast(int) (dt * 1000.0);
+        if p.lifetime < 0 {
+            p.lifetime = 0;
+        }
+
+        p.color.a = cast(u8) (255.0 *  p.lifetime / pe.particleLifetime);
+    }
+}
+
+draw :: method (pe: *ParticleEmitter) {
+    if !pe.isActive {
+        return;
+    }
+
+    for i in 0..pe.particles.count {
+        p := &pe.particles[i];
+        if p.lifetime > 0 {
+            DrawRectangle(xx p.pos.x, xx p.pos.y, p.size, p.size, p.color);
+        }
+    }
 }
 
 main :: () {
@@ -411,6 +507,13 @@ main :: () {
     //
     // Game state + variables
     //
+    player := Player{
+        score = 0,
+        bricksDestroyed = 0,
+        lives = 3,
+        isHoldingBall = true,
+    };
+
     ball := Ball{
         x = 4,
         y = 4,
@@ -424,32 +527,43 @@ main :: () {
         y = WINDOW_HEIGHT - 70,
         width = INITIAL_BAR_WIDTH,
         height = 15,
+        velX = 0,
     };
 
-    player := Player{
-        score = 0,
-        lives = 3,
-        isHoldingBall = true,
+    pickups: [16]Pickup;
+    pickupSpawner := PickupSpawner{pickups = pickups};
+
+    game := GameState{
+        player = &player,
+        ball   = &ball,
+        bar    = &bar,
+        sounds = [
+            soundBallBounce1,
+            soundBallBounce2,
+            soundPickup,
+            soundGameOver,
+            soundLostLife,
+            soundLevelComplete,
+        ],
+        textures         = pickupTextures,
+        particleEmitters = [{}],
+        pickupSpawner    = &pickupSpawner
     };
 
-    deadZone := Rectangle{0, WINDOW_HEIGHT - (WINDOW_HEIGHT - (bar.y + bar.height)), WINDOW_WIDTH, 100};
+    deadZone := Rectangle{0, WINDOW_HEIGHT - (WINDOW_HEIGHT - (bar.y + bar.height)), WINDOW_WIDTH, (WINDOW_HEIGHT - (bar.y + bar.height))};
 
     scoreText: [16]u8;
 
     brickColors: [BRICK_ROWS]Color = [
-        {195, 82, 123, 255},
-        {207, 68, 69, 255},
-        {198, 99, 49, 255},
-        {203, 159, 9, 255},
-        {61, 157, 57, 255},
-        {52, 60, 210, 255},
-        {116, 65, 209, 255},
-        // {3, 184, 187, 255},
+        {255,  55, 140, 255}, // vibrant pink/magenta
+        {255,  45,  45, 255}, // bright red
+        {255, 120,  20, 255}, // neon orange
+        {255, 210,   0, 255}, // vivid yellow-gold
+        { 40, 200,  40, 255}, // electric green
+        { 45,  70, 255, 255}, // strong blue
+        {160,  60, 255, 255}, // bright purple
     ];
 
-    pickups: [16]Pickup;
-    pickupSpawner := PickupSpawner{pickups = pickups};
-    
     // Initiate the bricks
     bricks: [BRICK_ROWS * BRICK_COLS] Brick;
 
@@ -489,10 +603,36 @@ main :: () {
         //
         // Input
         //
+        mousePos := GetMousePosition();
 
-        mouse_pos := GetMousePosition();
+        // Move the bar in the direction of the mouse cursor
+        distanceForMaxVelocity := 100.0;
+        maxVelocity            := 1000.0;
 
-        bar.x = mouse_pos.x - bar.width * 0.5;
+        distanceBarMouse := mousePos.x - (bar.x + bar.width*0.5);
+
+        if distanceBarMouse >= distanceForMaxVelocity {
+            bar.velX = maxVelocity;
+        } 
+        else if distanceBarMouse <= -distanceForMaxVelocity {
+            bar.velX = -maxVelocity;
+        } 
+        else {
+            // Interpolate the velocity
+            direction := 1;
+            if distanceBarMouse < 0 {
+                distanceBarMouse *= -1;
+                direction = -1;
+            }
+
+            t := distanceBarMouse / distanceForMaxVelocity;
+
+            speed := lerp(0, maxVelocity, t);
+
+            bar.velX = speed * direction;
+        }
+
+        bar.x += bar.velX * dt;
 
         if bar.x < 0 {
             bar.x = 0;
@@ -569,22 +709,9 @@ main :: () {
 
                 if brick.dead { continue; } // mehhhh
 
-                brick_rect := Rectangle{xx brick.x, xx brick.y, BRICK_WIDTH, BRICK_HEIGHT};
-                if CheckCollisionRecs(nextBallRect, brick_rect) {
-
-                    if player.hasFireballPowerup {
-                        // Skip the bounce
-                    } else {
-                        bounceBall(&ball, brick_rect);
-                    }
-
-                    brick.dead = true;
-                    player.score += 100;
-
-                    PlaySound(soundBallBounce1);
-
-                    maybeSpawnRandomPickup(&pickupSpawner, {xx brick.x, xx brick.y});
-
+                rect := brick.getRect();
+                if CheckCollisionRecs(nextBallRect, rect) {
+                    handleBrickCollision(&game, brick);
                     break;
                 }
             }
@@ -626,7 +753,6 @@ main :: () {
                 ball.velY = INITIAL_BALL_VELOCITY;
             }
         }
-        
 
         // Ball updates
         if player.isHoldingBall {
@@ -641,12 +767,27 @@ main :: () {
         updatePlayerEffects(&player);
         updatePickupPositions(pickups);
 
+        for _, i in game.particleEmitters {
+            pe := &game.particleEmitters[i];
+            pe.update();
+        }
+
+        // Check for winning condition
+        if player.bricksDestroyed == bricks.count {
+            print("You won!");
+            player.bricksDestroyed = 0;
+        }
 
         //
         // Drawing
         //
         BeginDrawing();
         ClearBackground({ 30, 30, 30, 30 });
+
+        for _, i in game.particleEmitters {
+            pe := &game.particleEmitters[i];
+            pe.draw();
+        }
 
         // Draw pickups
         for i in 0..pickups.count {
@@ -705,7 +846,7 @@ main :: () {
         DrawText(xx scoreText.data, 105, 16, 24, COLOR_WHITE);
 
         
-        // DrawRectangleRec(deadZone, {255, 0, 0, 30});
+        DrawRectangleRec(deadZone, {255, 0, 0, 30});
 
         EndDrawing();
     }
@@ -718,6 +859,62 @@ main :: () {
 
     CloseAudioDevice();
     CloseWindow();
+}
+
+handleBrickCollision :: (game: *GameState, brick: *Brick) {
+
+    doBounce := true;
+    if game.player.hasFireballPowerup {
+        doBounce = false;
+    }
+
+    brick.dead = true;
+    game.player.score += 100;
+    game.player.bricksDestroyed += 1;
+
+    PlaySound(game.sounds[0]); // soundBallBounce1
+
+    // Play a particle effect
+    pe := ParticleEmitter{
+        pos    = {xx brick.x, xx brick.y},
+        vel    = {game.ball.velX * 0.5, game.ball.velY * 0.5},
+        radius = 20,
+        color  = brick.color,
+        particleLifetime = 1000,
+        isActive = false,
+    };
+
+    next := game.liveEmitterCount;
+    game.particleEmitters[next] = pe;
+    game.particleEmitters[next].beginEmit();
+
+    // game.liveEmitterCount += 1;
+
+    // Bounce the ball
+    if doBounce {
+        rect := brick.getRect();
+        bounceBall(game.ball, rect);
+    }
+
+    r := GetRandomValue(0, 100);
+    if r <= PICKUP_SPAWN_CHANCE {
+        spawnPickup(game.pickupSpawner, {xx brick.x, xx brick.y});
+    }
+}
+
+spawnPickup :: (ps: *PickupSpawner, pos: Vector2) {
+    index := GetRandomValue(0, xx PickupType.COUNT - 1);
+
+    pickup := Pickup{
+        type = cast(PickupType) index,
+        x = pos.x,
+        y = pos.y,
+        velY = xx GetRandomValue(80, 120),
+        isShown = true,
+    };
+    
+    ps.pickups[ps.freeIndex] = pickup;
+    ps.freeIndex += 1;
 }
 
 handleOnPickup :: (pickup: *Pickup, bar: *Bar, ball: *Ball, player: *Player, pickup_sound: Sound) {
@@ -772,27 +969,6 @@ updatePlayerEffects :: (player: *Player) {
             player.hasFireballPowerup = false;
         }
     }
-}
-
-maybeSpawnRandomPickup :: (ps: *PickupSpawner, pos: Vector2) {
-
-    r := GetRandomValue(0, 100);
-    if !(r > 100 - PICKUP_SPAWN_CHANCE) {
-        return;
-    }
-
-    index := GetRandomValue(0, xx PickupType.COUNT - 1);
-
-    pickup := Pickup{
-        type = cast(PickupType) index,
-        x = pos.x,
-        y = pos.y,
-        velY = xx GetRandomValue(80, 120),
-        isShown = true,
-    };
-    
-    ps.pickups[ps.freeIndex] = pickup;
-    ps.freeIndex += 1;
 }
 
 bounceBall :: (ball: *Ball, b: Rectangle) {
