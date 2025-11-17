@@ -33,12 +33,17 @@ method_test_2 :: method (c: *Color) {
     c.a = 4;
 }
 
-
-
 main :: () {
-    white     := Color{255, 255, 255, 255};
+    white     := Color{255, 256, 255, 255};
     white_ptr := &white;
 
+    out1 := white.method_test_1();
+    out2 := white_ptr.method_test_1();
+
+    assert(out1.r == 250);
+    assert(out1.g == 250);
+    assert(out1.b == 250);
+    assert(out1.a == 250);
 
 
     white.method_test_2();
@@ -46,7 +51,7 @@ main :: () {
     if white.r == 1 {
         print("Its just 1 bro");
     }
-    
+
     assert(white.r == 1);
     assert(white.g == 2);
     assert(white.b == 3);

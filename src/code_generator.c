@@ -2342,10 +2342,10 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         return;
     }
     case TYPE_INTEGER: {
-        if (src_type->size <= 4) {
+        if (src_type->size < 4) {
             sb_append(&cg->code, "   movzx\t\teax, %s %s\n", WIDTH(src_type), src);
         } else {
-            sb_append(&cg->code, "   mov\t\trax, %s %s\n", WIDTH(src_type), src);
+            sb_append(&cg->code, "   mov\t\t%s, %s %s\n", REG_A(src_type), WIDTH(src_type), src);
         }
         if (is_signed_integer(src_type) && src_type->size != 8) {
             sb_append(&cg->code, "   movsx\t\trax, %s\n", REG_A(src_type));
@@ -2538,10 +2538,10 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                         if (lhs_type->size <= 8) {
                             // Pass the struct by value
                             POP(RAX);
-                            if (lhs_type->size <= 4) {
+                            if (lhs_type->size < 4) {
                                 sb_append(&cg->code, "   movzx\t\teax, %s [rax]\n", WIDTH(lhs_type));
                             } else {
-                                sb_append(&cg->code, "   mov\t\trax, %s [rax]\n", WIDTH(lhs_type));
+                                sb_append(&cg->code, "   mov\t\t%s, %s [rax]\n", REG_A(lhs_type), WIDTH(lhs_type));
                             }
                             PUSH(RAX);
                         }

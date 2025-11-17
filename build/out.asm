@@ -254,15 +254,15 @@ L2:
    pop		rbp
    ret
 
-; bytes locals   : 16
+; bytes locals   : 32
 ; bytes temp     : 8
-; bytes total    : 64
+; bytes total    : 80
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 64
+   sub		rsp, 80
 
-   ; Ln 39: $white : Color = -4
+   ; Ln 37: $white : Color = -4
    lea		rcx, -4[rbp]
    mov		rdx, 0
    mov		r8, 4
@@ -271,7 +271,7 @@ main:
    push		rax
    pop		rax
    mov		BYTE -4[rbp], al
-   mov		rax, 255
+   mov		rax, 256
    push		rax
    pop		rax
    mov		BYTE -3[rbp], al
@@ -284,11 +284,109 @@ main:
    pop		rax
    mov		BYTE -1[rbp], al
 
-   ; Ln 40: $white_ptr : *Color = -16
+   ; Ln 38: $white_ptr : *Color = -16
    lea		rax, -4[rbp]
    push		rax
    pop		rax
    mov		QWORD -16[rbp], rax
+
+   ; Ln 40: $out1 : Color = -20
+   lea		rax, -4[rbp]
+   push		rax
+   pop		rax
+   mov		eax, DWORD [rax]
+   push		rax
+   pop		rcx
+   call		Color.method_test_1
+   push		rax
+   pop		rax
+   ; Copy struct
+   mov		-20[rbp], eax
+
+   ; Ln 41: $out2 : Color = -24
+   lea		rax, -16[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rax
+   mov		rax, QWORD [rax]
+   push		rax
+   pop		rcx
+   call		Color.method_test_1
+   push		rax
+   pop		rax
+   ; Copy struct
+   mov		-24[rbp], eax
+   lea		rax, -20[rbp]
+   push		rax
+   pop		rbx
+   movzx		eax, BYTE [rbx]
+   push		rax
+   mov		rax, 250
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 43
+   call		assert
+   lea		rax, -20[rbp]
+   push		rax
+   pop		rbx
+   add		rbx, 1
+   push		rbx
+   pop		rbx
+   movzx		eax, BYTE [rbx]
+   push		rax
+   mov		rax, 250
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 44
+   call		assert
+   lea		rax, -20[rbp]
+   push		rax
+   pop		rbx
+   add		rbx, 2
+   push		rbx
+   pop		rbx
+   movzx		eax, BYTE [rbx]
+   push		rax
+   mov		rax, 250
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 45
+   call		assert
+   lea		rax, -20[rbp]
+   push		rax
+   pop		rbx
+   add		rbx, 3
+   push		rbx
+   pop		rbx
+   movzx		eax, BYTE [rbx]
+   push		rax
+   mov		rax, 250
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rcx
+   mov		rdx, 46
+   call		assert
    lea		rax, -4[rbp]
    push		rax
    pop		rcx
@@ -311,7 +409,7 @@ main:
    cmp		al, 0
    jz			L4
    ; block of if
-   ; Ln 47 Print
+   ; Ln 52 Print
    ; Pop print arguments
    mov		rcx, CS1
    call		printf
@@ -323,7 +421,7 @@ L4:
    pop		rbx
    movzx		eax, BYTE [rbx]
    push		rax
-   mov		rax, 2
+   mov		rax, 1
    push		rax
    pop		rbx
    pop		rax
@@ -331,7 +429,7 @@ L4:
    sete		al
    push		rax
    pop		rcx
-   mov		rdx, 50
+   mov		rdx, 55
    call		assert
    lea		rax, -4[rbp]
    push		rax
@@ -349,7 +447,7 @@ L4:
    sete		al
    push		rax
    pop		rcx
-   mov		rdx, 51
+   mov		rdx, 56
    call		assert
    lea		rax, -4[rbp]
    push		rax
@@ -367,7 +465,7 @@ L4:
    sete		al
    push		rax
    pop		rcx
-   mov		rdx, 52
+   mov		rdx, 57
    call		assert
    lea		rax, -4[rbp]
    push		rax
@@ -385,10 +483,10 @@ L4:
    sete		al
    push		rax
    pop		rcx
-   mov		rdx, 53
+   mov		rdx, 58
    call		assert
 L3:
    mov		rax, 0
-   add		rsp, 64
+   add		rsp, 80
    pop		rbp
    ret

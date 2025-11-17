@@ -1723,6 +1723,9 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
                 return NULL;
             }
 
+            bool ok = leads_to_integer_overflow(typer, member_type, init->value);
+            if (!ok) return false;
+
             init->member = member;
             curr_member_index = member->member_index + 1;
         } else {
@@ -1741,6 +1744,9 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(member), "Here is the member '%s' in %s", member->ident->name, struct_defn->identifier->name);
                 return NULL;
             }
+
+            bool ok = leads_to_integer_overflow(typer, member_type, init->value);
+            if (!ok) return false;
 
             init->member = member;
             curr_member_index += 1;
