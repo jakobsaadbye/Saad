@@ -341,6 +341,8 @@ typedef struct AstFor {
     AstIdentifier *index;
     AstExpr       *iterable;
     AstBlock      *body;
+    Token          asterix;
+    bool           is_by_pointer;
 
     int post_expression_label; // Set in CodeGenerator so break and continue know where to branch to
     int done_label;

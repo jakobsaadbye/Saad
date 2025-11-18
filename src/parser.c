@@ -863,6 +863,8 @@ AstFor *parse_for(Parser *parser) {
     AstIdentifier *index = NULL;
     AstIdentifier *iterator = NULL;
     AstExpr       *iterable = NULL;
+    bool           is_by_pointer = false;
+    Token          asterix = {0};
 
     Token for_token = peek_next_token(parser);
     eat_token(parser);
@@ -870,6 +872,15 @@ AstFor *parse_for(Parser *parser) {
     parser->inside_statement_header = true;
 
     Token next = peek_next_token(parser);
+
+    if (next.type == '*') {
+        is_by_pointer = true;
+        asterix = next;
+        eat_token(parser);
+        next = peek_next_token(parser);
+    }
+
+    // `for x in xs {...}`
     if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_IN) {
         iterator = make_identifier_from_token(parser, next, NULL);
 
@@ -881,6 +892,9 @@ AstFor *parse_for(Parser *parser) {
 
         kind = FOR_WITH_NAMED_ITERATOR;
     }
+
+    // `for x, i in xs {...}`
+    // `for x, i in 10..20 {...}`
     else if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == ',') {
         iterator = make_identifier_from_token(parser, next, NULL);
         eat_token(parser);
@@ -906,11 +920,13 @@ AstFor *parse_for(Parser *parser) {
         
         kind = FOR_WITH_NAMED_ITERATOR_AND_INDEX;
     }
+    // `for {...}`
     else if (next.type == '{') {
         iterator = NULL;
         iterable = NULL;
         kind = FOR_INFINITY_AND_BEYOND;
     }
+    // `for xs {...}` (implicit 'it')
     else {
         iterable = parse_range_or_normal_expression(parser);
         if (!iterable) return NULL;
@@ -952,6 +968,8 @@ AstFor *parse_for(Parser *parser) {
     ast_for->index = index;
     ast_for->iterable = iterable;
     ast_for->body = body;
+    ast_for->is_by_pointer = is_by_pointer;
+    ast_for->asterix = asterix;
 
     return ast_for;
 }

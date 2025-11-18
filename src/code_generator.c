@@ -489,23 +489,31 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         sb_append(&cg->code, "   cmp\t\trax, rbx\n");
         sb_append(&cg->code, "   jge\t\tL%d\n", done_label);
 
-        if (iterator->type->size <= 8) {
+        int real_iterator_size = iterator->type->size;
+        if (iterator->type->kind == TYPE_POINTER) {
+            assert(ast_for->is_by_pointer);
+            real_iterator_size = ((TypePointer *)iterator->type)->pointer_to->size;
+        }
+
+        // Load pointer to element i
+        sb_append(&cg->code, "   mov\t\trbx, QWORD %d[rbp]\n", offset_data);
+        sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", offset_index);
+        sb_append(&cg->code, "   imul\t\trax, %d\n", real_iterator_size);
+        sb_append(&cg->code, "   lea\t\trbx, [rbx + rax]\n");
+
+        if (iterator->type->kind == TYPE_POINTER) {
+            sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", offset_iterator);
+        }
+        else if (iterator->type->size <= 8) {
             // Copy the value into register
-            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", offset_data);
-            sb_append(&cg->code, "   imul\t\trax, %d\n", iterator->type->size);
-            sb_append(&cg->code, "   add\t\trbx, rax\n");
             sb_append(&cg->code, "   mov\t\t%s, %s [rbx]\n", REG_A(iterator->type), WIDTH(iterator->type));
             sb_append(&cg->code, "   mov\t\t%d[rbp], %s \n", offset_iterator, REG_A(iterator->type));
         } else {
-            // Copy the value in chunks of 8 bytes
-            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", offset_data);
-            sb_append(&cg->code, "   imul\t\trax, %d\n", iterator->type->size);
-            sb_append(&cg->code, "   add\t\trbx, rax\n"); // rbx holds offset into beginning of struct
-            int num_copies = aligned_iterator_size / 8;
-            for (int i = 0; i < num_copies; i++) {
-                sb_append(&cg->code, "   mov\t\trax, %d[rbx]\n", i * 8);
-                sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", offset_iterator + (i * 8));
-            }
+            // Do a memcpy of the value
+            sb_append(&cg->code, "   mov\t\tr8, %d\n", iterator->type->size);
+            sb_append(&cg->code, "   mov\t\trdx, rbx\n");
+            sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\n", offset_iterator);
+            sb_append(&cg->code, "   call\t\tmemcpy\n");    // void* memcpy( void* dest, const void* src, std::size_t count );
         }
 
         emit_block(cg, ast_for->body);
@@ -1344,7 +1352,7 @@ void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof) {
 
     int const_number = cg->constants++;
 
-    sb_append(&cg->data, "   CS%d\tDB \"%s\", 10, 0\n", const_number, type_name);
+    sb_append(&cg->data, "   CS%d\tDB \"%s\", 0\n", const_number, type_name);
     sb_append(&cg->code, "   mov\t\trax, CS%d\n", const_number);
 }
 

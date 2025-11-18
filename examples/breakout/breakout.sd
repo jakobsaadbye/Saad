@@ -281,14 +281,14 @@ sprintf :: (str: *u8, format: *u8, arg0: int) -> int #extern "C"
 BALL_SIZE :: 20;
 BRICK_WIDTH  :: 100;
 BRICK_HEIGHT :: 30;
-BRICK_PADDING :: 20;
-BRICK_ROWS :: 7;
+BRICK_PADDING :: 12;
+BRICK_ROWS :: 8;
 BRICK_COLS :: 8;
 PICKUP_SPAWN_CHANCE :: 25; // in percentage
 PICKUP_SIZE :: 26;
 
 INITIAL_BAR_WIDTH     :: 100;
-INITIAL_BALL_VELOCITY :: 550.0;
+INITIAL_BALL_VELOCITY :: 400.0;
 
 TOP_MARGIN :: 80;
 WINDOW_WIDTH :: 1200;
@@ -360,7 +360,7 @@ Particle :: struct {
 }
 
 ParticleEmitter :: struct {
-    particles: [50]Particle;
+    particles: [25]Particle;
     pos: Vector2;
     vel: Vector2;
     radius: float;
@@ -533,6 +533,8 @@ main :: () {
     pickups: [16]Pickup;
     pickupSpawner := PickupSpawner{pickups = pickups};
 
+    particleEmitters: [4]ParticleEmitter;
+
     game := GameState{
         player = &player,
         ball   = &ball,
@@ -546,7 +548,7 @@ main :: () {
             soundLevelComplete,
         ],
         textures         = pickupTextures,
-        particleEmitters = [{}],
+        particleEmitters = particleEmitters,
         pickupSpawner    = &pickupSpawner
     };
 
@@ -562,6 +564,7 @@ main :: () {
         { 40, 200,  40, 255}, // electric green
         { 45,  70, 255, 255}, // strong blue
         {160,  60, 255, 255}, // bright purple
+        {  0, 255, 220, 255 }, // bright aqua / teal-cyan
     ];
 
     // Initiate the bricks
@@ -701,7 +704,7 @@ main :: () {
 
         // Collision ball and bricks
         nextBallRect = nextBall.getRect();
-        
+
         for row in 0..BRICK_ROWS {
             for col in 0..BRICK_COLS {
                 index := row * BRICK_COLS + col;
@@ -876,11 +879,11 @@ handleBrickCollision :: (game: *GameState, brick: *Brick) {
 
     // Play a particle effect
     pe := ParticleEmitter{
-        pos    = {xx brick.x, xx brick.y},
-        vel    = {game.ball.velX * 0.5, game.ball.velY * 0.5},
-        radius = 20,
+        pos    = {xx (brick.x + BRICK_WIDTH*0.5), xx (brick.y + BRICK_HEIGHT*0.5)},
+        vel    = {game.ball.velX * 0.3, game.ball.velY * 0.3},
+        radius = 16,
         color  = brick.color,
-        particleLifetime = 1000,
+        particleLifetime = 500,
         isActive = false,
     };
 
@@ -888,7 +891,10 @@ handleBrickCollision :: (game: *GameState, brick: *Brick) {
     game.particleEmitters[next] = pe;
     game.particleEmitters[next].beginEmit();
 
-    // game.liveEmitterCount += 1;
+    game.liveEmitterCount += 1;
+    if game.liveEmitterCount >= game.particleEmitters.count {
+        game.liveEmitterCount = 0;
+    }
 
     // Bounce the ball
     if doBounce {

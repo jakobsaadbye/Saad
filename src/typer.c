@@ -712,7 +712,8 @@ bool check_for(Typer *typer, AstFor *ast_for) {
             reserve_local_storage(typer->enclosing_function, 8);
         }
     }
-    // for x in xs {...}
+    // for  x in xs {...}
+    // for *x in xs {...}
     else {
         Type *iterable_type = check_expression(typer, (AstExpr *)ast_for->iterable, NULL);
         if (!iterable_type) return NULL;
@@ -721,7 +722,22 @@ bool check_for(Typer *typer, AstFor *ast_for) {
             return NULL;
         }
 
-        ast_for->iterator->type = ((TypeArray *)(iterable_type))->elem_type;
+        Type *iterator_type = ((TypeArray *)iterable_type)->elem_type;
+
+        if (ast_for->is_by_pointer) {
+            // Wrap the iterator in a pointer type
+            TypePointer *ptr = type_alloc(&typer->parser->type_table, sizeof(TypePointer));
+            ptr->head.head.kind  = AST_TYPE;
+            ptr->head.head.start = ast_for->asterix.start;
+            ptr->head.head.end   = ast_for->asterix.end;
+            ptr->head.kind       = TYPE_POINTER;
+            ptr->head.size       = 8;
+            ptr->pointer_to      = ((TypeArray *)iterable_type)->elem_type;
+
+            iterator_type = (Type *) ptr;
+        }
+
+        ast_for->iterator->type = iterator_type;
         ast_for->iterator->flags |= IDENTIFIER_IS_RESOLVED;
 
         if (ast_for->index) {
