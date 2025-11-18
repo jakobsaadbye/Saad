@@ -789,6 +789,8 @@ AstAssignment *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token) {
         valid_lhs = true;
     if (lhs->head.kind == AST_ARRAY_ACCESS) 
         valid_lhs = true;
+    if (lhs->head.kind == AST_UNARY) 
+        valid_lhs = true;
 
     if (!valid_lhs) {
         report_error_ast(parser, LABEL_ERROR, (Ast *)(lhs), "Invalid expression as left-hand side of assignment");

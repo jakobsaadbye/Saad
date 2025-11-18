@@ -29,15 +29,14 @@ ParticleEmitter :: struct {
 }
 
 main :: () {
-    particleEmitters: [8]ParticleEmitter;
+    // particleEmitters: [8]ParticleEmitter;
 
-    for pe, i in particleEmitters {
-        print("%", typeof(pe));
-        pe.color = {xx i, xx i, xx i, xx i};
-        pe.particleLifetime = i;
+    xs := [1, 2, 3, 4, 5];
+    for *x in xs {
+        x *= 2;
     }
 
-    for pe in particleEmitters {
-        print("%", pe);
+    for x in xs {
+        print("%", x);
     }
 }

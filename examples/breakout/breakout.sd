@@ -408,9 +408,7 @@ getRect :: method (bar: Bar) -> Rectangle {
 }
 
 beginEmit :: method (pe: *ParticleEmitter) {
-    for i in 0..pe.particles.count {
-        p := &pe.particles[i];
-
+    for *p in pe.particles {
         p.pos.x = xx GetRandomValue(xx (pe.pos.x - pe.radius), xx (pe.pos.x + pe.radius));
         p.pos.y = xx GetRandomValue(xx (pe.pos.y - pe.radius), xx (pe.pos.y + pe.radius));
         
@@ -435,9 +433,7 @@ update :: method (pe: *ParticleEmitter) {
 
     dt := GetFrameTime();
 
-    for i in 0..pe.particles.count {
-        p := &pe.particles[i];
-
+    for *p in pe.particles {
         p.pos.x += p.vel.x * dt;
         p.pos.y += p.vel.y * dt;
 
@@ -455,8 +451,7 @@ draw :: method (pe: *ParticleEmitter) {
         return;
     }
 
-    for i in 0..pe.particles.count {
-        p := &pe.particles[i];
+    for *p in pe.particles {
         if p.lifetime > 0 {
             DrawRectangle(xx p.pos.x, xx p.pos.y, p.size, p.size, p.color);
         }

@@ -31,6 +31,22 @@ Bug fixes:
 - Assigning to functions with void type should not be allowed
 - @Investigate - examples/for_loops crashes once in a while. Is it a hisenbug?
 
+- This should work: We need to allocate the array as a fixed allocation
+```odin
+for [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
+    print("%", it);
+}
+```
+
+- Doing any kind of arithmatic including pointers should default to doing a pointer dereference followed by the normal arithmatic
+- E.g the below should just multiply each number by 2 instead of offsetting the pointer address
+```odin
+xs := [1, 2, 3, 4, 5];
+for *x in xs {
+    x *= 2;
+}
+```
+
 
 Later:
 -------------------

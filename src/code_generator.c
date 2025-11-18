@@ -490,8 +490,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         sb_append(&cg->code, "   jge\t\tL%d\n", done_label);
 
         int real_iterator_size = iterator->type->size;
-        if (iterator->type->kind == TYPE_POINTER) {
-            assert(ast_for->is_by_pointer);
+        if (ast_for->is_by_pointer) {
             real_iterator_size = ((TypePointer *)iterator->type)->pointer_to->size;
         }
 
@@ -501,7 +500,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         sb_append(&cg->code, "   imul\t\trax, %d\n", real_iterator_size);
         sb_append(&cg->code, "   lea\t\trbx, [rbx + rax]\n");
 
-        if (iterator->type->kind == TYPE_POINTER) {
+        if (ast_for->is_by_pointer) {
             sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", offset_iterator);
         }
         else if (iterator->type->size <= 8) {
