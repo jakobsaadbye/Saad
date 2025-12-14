@@ -40,7 +40,7 @@ void check_entire_directory(CompilerConfig *config, const char *dir_name, bool s
 
         printf("Run %s %s ", file_path, pad_str);
         
-        bool compiled = compile_program(file_path, false);
+        bool compiled = compile_program(config, file_path, false);
         
         bool ok = false;
         if (should_fail)
@@ -67,8 +67,8 @@ int main() {
     CompilerConfig config = get_standard_compiler_config();
 
     check_entire_directory(&config, "examples", false);
-    check_entire_directory(&config, "checks", false);
-    check_entire_directory(&config, "checks/should_fail", true);
+    check_entire_directory(&config, "tests", false);
+    check_entire_directory(&config, "tests/should_fail", true);
 
     return 0;
 }

@@ -1,22 +1,21 @@
 import "io";
 import "math";
 import "raylib";
-import "faker";
 
-BALL_SIZE :: 20;
-BRICK_WIDTH  :: 100;
-BRICK_HEIGHT :: 30;
-BRICK_PADDING :: 12;
-BRICK_ROWS :: 8;
-BRICK_COLS :: 8;
+BALL_SIZE           :: 20;
+BRICK_WIDTH         :: 100;
+BRICK_HEIGHT        :: 30;
+BRICK_PADDING       :: 12;
+BRICK_ROWS          :: 8;
+BRICK_COLS          :: 8;
 PICKUP_SPAWN_CHANCE :: 25; // in percentage
-PICKUP_SIZE :: 26;
+PICKUP_SIZE         :: 26;
 
 INITIAL_BAR_WIDTH     :: 100;
 INITIAL_BALL_VELOCITY :: 400.0;
 
-TOP_MARGIN :: 80;
-WINDOW_WIDTH :: 1200;
+TOP_MARGIN    :: 80;
+WINDOW_WIDTH  :: 1200;
 WINDOW_HEIGHT :: 800;
 
 
@@ -36,19 +35,19 @@ Bar :: struct {
 }
 
 Ball :: struct {
-    x:     float;
-    y:     float;
-    size:  float;
-    velX:  float;
-    velY:  float;
+    x:    float;
+    y:    float;
+    size: float;
+    velX: float;
+    velY: float;
 }
 
 Player :: struct {
-    score: int;
-    bricksDestroyed: int;
-    lives: int;
-    isHoldingBall: bool;
-    hasFireballPowerup: bool;
+    score:                   int;
+    bricksDestroyed:         int;
+    lives:                   int;
+    isHoldingBall:           bool;
+    hasFireballPowerup:      bool;
     fireballPowerupDuration: int;
 }
 
