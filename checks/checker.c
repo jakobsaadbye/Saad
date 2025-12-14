@@ -40,8 +40,7 @@ void check_entire_directory(const char *dir_name, bool should_fail) {
 
         printf("Run %s %s ", file_path, pad_str);
         
-        char *program = read_entire_file(file_path);
-        bool compiled = send_through_pipeline(program, file_path, false);
+        bool compiled = compile_program(file_path, false);
         
         bool ok = false;
         if (should_fail)
@@ -57,7 +56,6 @@ void check_entire_directory(const char *dir_name, bool should_fail) {
             failed += 1;
         }
 
-        free(program);
         num_tests += 1;
     }
 

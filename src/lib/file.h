@@ -1,6 +1,17 @@
+#ifndef FILE_H
+#define FILE_H
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <direct.h>
+
+char *read_entire_file(const char *file_path);
+void change_directory(const char *dir);
+void make_directory(const char *dir);
+
+#endif
+
+#ifdef FILE_IMPLEMENTATION
 
 char *read_entire_file(const char *file_path) {
     FILE *f = fopen(file_path, "r");
@@ -20,7 +31,7 @@ char *read_entire_file(const char *file_path) {
 
     char *buffer = (char *)(malloc(file_size + 1));
     if (buffer == NULL) {
-        printf("error: Buy more ram, LUL");
+        printf("error: Not enough memory for allocation of the file");
         fclose(f);
         exit(1);
     }
@@ -50,3 +61,5 @@ void make_directory(const char *dir) {
         }
     }
 }
+
+#endif

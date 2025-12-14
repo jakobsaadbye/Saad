@@ -1,6 +1,9 @@
 Todo list:
 -------------------
 
+* Import system
+  - Modules / Packages n' stuff
+  
 * Function call overhaul:
   - Multiple return values
   - Variadic arguments
@@ -21,8 +24,7 @@ Todo list:
 * Better constants
   - Structs as constants
 
-* Import system
-  - Modules / Packages n' stuff
+
 
 
 Bug fixes:

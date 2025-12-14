@@ -1,7 +1,6 @@
 #include <time.h>
 #include <stdio.h>
 #include "code_generator.c"
-#include "lib/file.c"
 
 #ifdef __APPLE__
     #include <sys/uio.h>
@@ -59,8 +58,6 @@ void reset_stdout(void) {
     dup2(old_stdout, 1);
 } 
 
-#define return_and_cleanup { reset_stdout(); return false; }
-
 void output_generated_code_to_file(CodeGenerator *cg, const char *output_path) {
     FILE *f = fopen(output_path, "w");
     if (f == NULL) {
@@ -77,7 +74,11 @@ void output_generated_code_to_file(CodeGenerator *cg, const char *output_path) {
     fclose(f);
 }
 
-bool send_through_pipeline(char *program, const char *program_path, bool output_to_console) {
+void cleanup() {
+    reset_stdout();
+}
+
+bool compile_program(const char *main_path, bool output_to_console) {
     CompilerReport report = {0};
 
     old_stdout = dup(1);
@@ -85,49 +86,88 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
         freopen("nul", "w", stdout);
     }
 
-    report.lex_time_start = clock();
-    Lexer lexer = lexer_init(program, program_path);
-    bool ok = lex(&lexer);
-    if (!ok) return_and_cleanup;
-    report.lex_time_end = clock();
+    
+    Lexer lexer           = lexer_init();
+    Parser parser         = parser_init(&lexer);
+    ConstEvaluator ce     = const_evaluator_init(&parser);
+    Typer typer           = typer_init(&parser, &ce);
+    CodeGenerator codegen = code_generator_init(&parser);
 
-    // dump_tokens(&lexer, 0);
+    DynamicArray  parsed_files = da_init(8, sizeof(AstFile *));
+    DynamicArray  file_paths_to_visit = da_init(2, sizeof(char *));
+    int           file_path_cursor = 0;
+    AstFile       *current_file = NULL;
+    char          *current_file_path = NULL;
 
-    report.parse_time_start = clock();
-    Parser parser = parser_init(&lexer);
-    AstCode *code = (AstCode *) parse_top_level_code(&parser);
-    if (code == NULL) {
-        // printf("There were errors during parsing ...\n");
-        return_and_cleanup;
-    } 
-    report.parse_time_end = clock();
+    da_append(&file_paths_to_visit, main_path);
 
+    //
+    // Parse all the files
+    //
+    while (true) {
+        current_file_path = ((char **)file_paths_to_visit.items)[file_path_cursor];
 
-    report.typer_time_start = clock();
-    ConstEvaluater ce = const_evaluator_init(&parser);
-    Typer typer = typer_init(&parser, &ce);
-    ok = check_code(&typer, code);
-    if (!ok) {
-        // printf("There were errors during typing ...\n");
-        return_and_cleanup;
+        // Parse file
+        current_file = (AstFile *) parse_file(&parser, current_file_path);
+        if (current_file == NULL) {
+            cleanup();
+            return false;
+        }
+        da_append(&parsed_files, current_file);
+
+        // Add any file imports as file paths to visit next
+        for (int i = 0; i < current_file->imports.count; i++) {
+            AstImport *ast_import = ((AstImport **)current_file->imports.items)[i];
+            da_append(&file_paths_to_visit, ast_import->resolved_path);
+        }
+
+        file_path_cursor += 1;
+
+        if (file_paths_to_visit.count == file_path_cursor) {
+            break;
+        }
     }
-    report.typer_time_end = clock();
 
+    // Link all the parsed files together via their imports
+    for (int i = 0; i < parsed_files.count; i++) {
+        AstFile *file = ((AstFile **)parsed_files.items)[i];
+        for (int j = 0; j < file->imports.count; j++) {
+            AstImport *import = ((AstImport **)file->imports.items)[j];
+            
+            // Do a linear scan to find the corresponding AstFile *
+            for (int k = 0; k < parsed_files.count; k++) {
+                AstFile *other_file = ((AstFile **)parsed_files.items)[k];
 
-    report.codegen_time_start = clock();
-    CodeGenerator cg = code_generator_init(&parser);
-    begin_emit_code(&cg, code);
+                if (strcmp(import->resolved_path, other_file->absolute_path) == 0) {
+                    import->imported_file = other_file;
+                }
+            }
+        }
+    }
+
+    AstFile *main_file = ((AstFile **)parsed_files.items)[0];
+
+    // Typecheck
+    bool typecheck_ok = check_file(&typer, main_file);
+    if (!typecheck_ok) {
+        cleanup();
+        return false;
+    }
+    
+    begin_emit_code(&codegen, main_file);
 
     make_directory("build");
 
-    output_generated_code_to_file(&cg, "./build/out.asm");
-    report.codegen_time_end = clock();
+    output_generated_code_to_file(&codegen, "./build/out.asm");
 
     report.asm_and_link_time_start = clock();
     system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
     // int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -lkernel32 -lmsvcrt");
     int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -Lpackages/raylib/lib -lraylib -lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid");
-    if (exit_code != 0) return_and_cleanup;
+    if (exit_code != 0) {
+        cleanup();
+        return false;
+    }
     report.asm_and_link_time_end = clock();
 
 
@@ -139,7 +179,8 @@ bool send_through_pipeline(char *program, const char *program_path, bool output_
     }
     
     if (exit_code != 0) {
-        return_and_cleanup;
+        cleanup();
+        return false;
     } 
 
     reset_stdout();

@@ -6,7 +6,7 @@
 #define MIN_PRECEDENCE -99
 
 Parser           parser_init(Lexer *lexer);
-AstCode         *parse_top_level_code(Parser *parser);
+AstFile         *parse_file(Parser *parser, char *file_path);
 Ast             *parse_statement(Parser *parser);
 AstDeclaration  *parse_declaration(Parser *parser, DeclarationFlags flags);
 AstAssignment   *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token);
@@ -56,7 +56,6 @@ bool is_literal(Token token);
 bool is_type_specifier(Token token);
 bool is_primitive_type_token(Token token);
 bool is_assignment_operator(Token token);
-bool starts_struct_literal(Parser *parser);
 int get_precedence(OperatorType op);
 int align_value(int value, int alignment);
 
@@ -72,29 +71,104 @@ Parser parser_init(Lexer *lexer) {
     parser.type_table    = type_table_init();
     parser.enclosing_function = NULL;
     parser.current_scope = NULL;
+    parser.current_file  = NULL;
     parser.inside_statement_header = false;
 
     return parser;
 }
 
-AstCode *parse_top_level_code(Parser *parser) {
-    AstCode *code = (AstCode *)(ast_allocate(parser, sizeof(AstCode)));
-    code->statements = da_init(8, sizeof(Ast *));
+void dump_file_declarations(AstFile *file) {
+    printf("--------- Dump of %s ----------\n", file->absolute_path);
+    for (int i = 0; i < file->scope->identifiers.count; i++) {
+        AstIdentifier *ident = ((AstIdentifier **)file->scope->identifiers.items)[i];
+        printf("%s:%d   %s: %s\n", file->absolute_path, ident->head.start.line, ident->name, type_to_str(ident->type));
+    }
+    printf("\n");
+}
 
-    // Create global scope
-    new_block(parser, BLOCK_IMPERATIVE);
+AstFile *parse_file(Parser *parser, char *file_path) {
+
+    // Read in the file text
+    char *file_text = read_entire_file(file_path);
+    if (file_text == NULL) {
+        return NULL;
+    }
+    
+    // Tokenize the file text
+    parser->lexer->file_path = file_path;
+    parser->lexer->file_text = file_text;
+
+    bool ok = lex_file(parser->lexer);
+    if (!ok) {
+        return NULL;
+    }
+
+    // Parse the tokens
+    AstFile *file       = (AstFile *)(ast_allocate(parser, sizeof(AstFile)));
+    file->head.kind     = AST_FILE;
+    file->text          = file_text;
+    file->absolute_path = file_path;
+    file->statements    = da_init(64, sizeof(Ast *));
+    file->imports       = da_init(8,  sizeof(AstImport *));
+    file->scope         = new_block(parser, BLOCK_IMPERATIVE);
+
+    parser->current_file  = file;
+    parser->current_scope = file->scope;
 
     Token next = peek_next_token(parser);
     while (true) {
         next = peek_next_token(parser);
         if (next.type == TOKEN_END) break;
-        // @Improvement - Need to limit what statements are allowed at top level scope
+
         Ast *stmt = parse_statement(parser);
         if (!stmt) return NULL;
-        da_append(&code->statements, stmt);
+
+        da_append(&file->statements, stmt);
     }
 
-    return code;
+    // Eat the end token
+    eat_token(parser);
+
+    return file;
+}
+
+char *resolve_import_path(Parser *parser, char *path_string) {
+    (void) parser;
+    return path_string;
+}
+
+AstImport *parse_import(Parser *parser) {
+    Token import_token = peek_next_token(parser);
+    expect(parser, import_token, TOKEN_IMPORT);
+    eat_token(parser);
+    
+    Token path_token = peek_next_token(parser);
+
+    if (path_token.type != TOKEN_LITERAL_STRING) {
+        report_error_token(parser, LABEL_ERROR, path_token, "Expected a string for the file or module to be imported");
+        return NULL;
+    }
+    eat_token(parser);
+
+    AstImport *ast_import  = ast_allocate(parser, sizeof(AstImport));
+    ast_import->head.kind  = AST_IMPORT;
+    ast_import->head.file  = parser->current_file;
+    ast_import->head.start = import_token.start;
+    ast_import->head.end   = path_token.end;
+    ast_import->path_token = path_token;
+    ast_import->resolved_path = resolve_import_path(parser, ast_import->path_token.as_value.value.string.data);
+    if (ast_import->resolved_path == NULL) {
+        return NULL;
+    }
+
+    // Create a file object for the imported file
+    // AstFile *imported_file = ast_allocate(parser, sizeof(AstFile));
+    // imported_file->head.kind = AST_FILE;
+    // imported_file. = AST_FILE;
+
+    da_append(&parser->current_file->imports, ast_import);
+
+    return ast_import;
 }
 
 AstDirective *parse_directive(Parser *parser) {
@@ -105,7 +179,7 @@ AstDirective *parse_directive(Parser *parser) {
     Token hash_tag = next;
 
     next = peek_next_token(parser);
-    if (next.type != TOKEN_IDENTIFIER) {
+    if (next.type != TOKEN_LITERAL_IDENTIFIER) {
         report_error_token(parser, LABEL_ERROR, next, "Syntax Error: Expected the name of a directive");
         return NULL;
     }
@@ -124,12 +198,13 @@ AstDirective *parse_directive(Parser *parser) {
 
     AstDirective *dir = ast_allocate(parser, sizeof(AstDirective));
     dir->head.kind   = AST_DIRECTIVE;
+    dir->head.file   = parser->current_file;
     dir->head.start  = hash_tag.start;
     dir->kind        = dir_kind;
 
     if (dir_kind == DIRECTIVE_IMPORT) {
         Token tok = peek_next_token(parser);
-        if (tok.type != TOKEN_STRING) {
+        if (tok.type != TOKEN_LITERAL_STRING) {
             report_error_token(parser, LABEL_ERROR, next, "Syntax Error: Expected an import string");
             return NULL;
         }
@@ -143,7 +218,7 @@ AstDirective *parse_directive(Parser *parser) {
 
     if (dir_kind == DIRECTIVE_EXTERN) {
         Token tok = peek_next_token(parser);
-        if (tok.type != TOKEN_STRING) {
+        if (tok.type != TOKEN_LITERAL_STRING) {
             report_error_token(parser, LABEL_ERROR, next, "Syntax Error: Expected the extern ABI string. Currently only \"C\"");
             return NULL;
         }
@@ -204,6 +279,7 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
     eat_token(parser);
 
     block->head.kind  = AST_BLOCK;  
+    block->head.file  = parser->current_file;
     block->head.start = start_token.start;
     block->head.end   = next.end;
 
@@ -219,7 +295,7 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
 bool starts_declaration(Parser *parser, Token token) {
     Token next = peek_token(parser, 1);
 
-    if (token.type == TOKEN_IDENTIFIER) {
+    if (token.type == TOKEN_LITERAL_IDENTIFIER) {
         if (next.type == ':')                return true;
         if (next.type == TOKEN_COLON_EQUAL)  return true;
         if (next.type == TOKEN_DOUBLE_COLON) return true;
@@ -229,7 +305,7 @@ bool starts_declaration(Parser *parser, Token token) {
 }
 
 bool starts_function_defn(Parser *parser, Token token) {
-    if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON) {
+    if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON) {
         Token next = peek_token(parser, 2);
 
         if (next.type == TOKEN_METHOD) {
@@ -260,14 +336,13 @@ Ast *parse_statement(Parser *parser) {
         matched_a_statement = true;
     }
 
-    else if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_STRUCT) {
-        // @Note - Structs should probably be parsed at the top level code instead of as a statement 
+    else if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_STRUCT) {
         stmt = (Ast *)(parse_struct(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
 
-    else if (token.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_ENUM) {
+    else if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_ENUM) {
         stmt = (Ast *)(parse_enum(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
@@ -275,6 +350,12 @@ Ast *parse_statement(Parser *parser) {
 
     else if (starts_declaration(parser, token)) {
         stmt = (Ast *)(parse_declaration(parser, 0));
+        statement_ends_with_semicolon = true;
+        matched_a_statement = true;
+    }
+
+    else if (token.type == TOKEN_IMPORT) {
+        stmt = (Ast *)(parse_import(parser));
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
     }
@@ -290,6 +371,7 @@ Ast *parse_statement(Parser *parser) {
 
         AstBreakOrContinue *boc = ast_allocate(parser, sizeof(AstBreakOrContinue));
         boc->head.kind          = AST_BREAK_OR_CONTINUE;
+        boc->head.file          = parser->current_file;
         boc->head.start         = token.start;
         boc->head.end           = token.end;
         boc->token              = token;
@@ -329,10 +411,10 @@ Ast *parse_statement(Parser *parser) {
         matched_a_statement = true;
     }
 
-    else if (token.type == '#') {
-        stmt = (Ast *) parse_directive(parser);
-        matched_a_statement = true;
-    }
+    // else if (token.type == '#') {
+    //     stmt = (Ast *) parse_directive(parser);
+    //     matched_a_statement = true;
+    // }
 
     else if (token.type == '{') {
         stmt = (Ast *)(parse_block(parser, NULL));
@@ -372,6 +454,7 @@ Ast *parse_statement(Parser *parser) {
 
             AstExprStmt *expr_stmt = ast_allocate(parser, sizeof(AstExprStmt));
             expr_stmt->head.head.kind  = AST_EXPR_STMT;
+            expr_stmt->head.head.file  = parser->current_file;
             expr_stmt->head.head.start = lhs->head.start;
             expr_stmt->head.head.end   = next.end;
             expr_stmt->expr            = lhs;
@@ -408,7 +491,8 @@ Ast *parse_statement(Parser *parser) {
 AstLiteral *int_literal_from_value(Parser *parser, int value) {
     AstLiteral *lit     = (AstLiteral *)(ast_allocate(parser, sizeof(AstLiteral)));
     lit->head.head.kind = AST_LITERAL;
-    lit->kind           = (LiteralKind)(TOKEN_INTEGER);
+    lit->head.head.file = parser->current_file;
+    lit->kind           = (LiteralKind)(TOKEN_LITERAL_INTEGER);
     lit->as.value.integer = value;
     lit->as.flags         = 0;
     return lit;
@@ -428,17 +512,19 @@ Type *parse_type(Parser *parser) {
         TypePrimitive *primitive = &primitive_types[(next.type - TOKEN_TYPE_UINT) + 1]; // +1 to skip over invalid kind
         memcpy(ti, primitive, sizeof(TypePrimitive));
         ti->head.head.kind  = AST_TYPE;
+        ti->head.head.file  = parser->current_file;
         ti->head.head.start = next.start;
         ti->head.head.end   = next.end;
         return (Type *)(ti);
     }
 
-    if (next.type == TOKEN_IDENTIFIER) {
+    if (next.type == TOKEN_LITERAL_IDENTIFIER) {
         // Struct or enum
         eat_token(parser);
 
         Type *ti   = type_alloc(&parser->type_table, sizeof(Type));
         ti->head.kind  = AST_TYPE;
+        ti->head.file  = parser->current_file;
         ti->head.start = next.start;
         ti->head.end   = next.end;
         ti->kind       = TYPE_NAME;
@@ -457,6 +543,7 @@ Type *parse_type(Parser *parser) {
         if (!points_to) return NULL;
 
         ptr->head.head.kind  = AST_TYPE;
+        ptr->head.head.file  = parser->current_file;
         ptr->head.head.start = asterix.start;
         ptr->head.head.end   = points_to->head.end;
         ptr->head.kind       = TYPE_POINTER;
@@ -511,6 +598,7 @@ Type *parse_type(Parser *parser) {
         // The actual array type
         TypeArray *array       = ast_allocate(parser, sizeof(TypeArray));
         array->head.head.kind  = AST_TYPE;
+        array->head.head.file  = parser->current_file;
         array->head.head.start = open_bracket.start;
         array->head.head.end   = elem_type->head.end;
         array->head.kind       = TYPE_ARRAY;
@@ -557,6 +645,7 @@ TypeStruct *generate_struct_for_dynamic_array(Parser *parser, Type *type_data) {
 TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_data, char *struct_name) {
     AstStruct *struct_node       = ast_allocate(parser, sizeof(AstStruct));
     struct_node->head.kind       = AST_STRUCT;
+    struct_node->head.file       = parser->current_file;
     struct_node->head.flags      = AST_FLAG_COMPILER_GENERATED;
     struct_node->identifier      = NULL;
 
@@ -567,6 +656,7 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
 
     TypeStruct *struct_defn      = ast_allocate(parser, sizeof(TypeStruct));
     struct_defn->head.head.kind  = AST_TYPE;
+    struct_defn->head.head.file  = parser->current_file;
     struct_defn->head.head.flags = AST_FLAG_COMPILER_GENERATED;
     struct_defn->head.head.start = type_data->head.start;
     struct_defn->head.head.end   = type_data->head.end;
@@ -579,6 +669,7 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
 
     TypePointer *type_ptr_data     = ast_allocate(parser, sizeof(TypePointer));
     type_ptr_data->head.head.kind  = AST_TYPE;
+    type_ptr_data->head.head.file  = parser->current_file;
     type_ptr_data->head.head.flags = AST_FLAG_COMPILER_GENERATED;
     type_ptr_data->head.head.start = type_data->head.start;
     type_ptr_data->head.head.end   = type_data->head.end;
@@ -602,7 +693,7 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
 
 AstEnum *parse_enum(Parser *parser) {
     Token ident_token = peek_next_token(parser);
-    expect(parser, ident_token, TOKEN_IDENTIFIER);
+    expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
     eat_token(parser);
     AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // Type of ident is set later down to refer to the enum it self
 
@@ -614,7 +705,7 @@ AstEnum *parse_enum(Parser *parser) {
         if (existing) {
             report_error_ast(parser, LABEL_ERROR, (Ast *)(ident), "Type '%s' already defined", existing->name);
             report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous definition of '%s'", existing->name);
-            exit(1);
+            return NULL;
         }
     }
 
@@ -637,7 +728,7 @@ AstEnum *parse_enum(Parser *parser) {
     next = peek_next_token(parser);
     int enum_index = 0;
     while (next.type != '}' && next.type != TOKEN_END) {
-        if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '=') {
+        if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '=') {
             // Explicit value
             eat_token(parser);
             eat_token(parser);
@@ -647,6 +738,7 @@ AstEnum *parse_enum(Parser *parser) {
 
             AstEnumerator *etor = (AstEnumerator *)(ast_allocate(parser, sizeof(AstEnumerator)));
             etor->head.kind  = AST_ENUMERATOR;
+            etor->head.file  = parser->current_file;
             etor->head.start = next.start;
             etor->head.end   = next.end;
             etor->parent     = ast_enum;
@@ -657,12 +749,13 @@ AstEnum *parse_enum(Parser *parser) {
             da_append(&ast_enum->enumerators, etor);
 
             enum_index++;
-        } else if (next.type == TOKEN_IDENTIFIER) {
+        } else if (next.type == TOKEN_LITERAL_IDENTIFIER) {
             // Auto-increment
             eat_token(parser);
 
             AstEnumerator *etor = (AstEnumerator *)(ast_allocate(parser, sizeof(AstEnumerator)));
             etor->head.kind  = AST_ENUMERATOR;
+            etor->head.file  = parser->current_file;
             etor->head.start = next.start;
             etor->head.end   = next.end;
             etor->parent     = ast_enum;
@@ -699,16 +792,18 @@ AstEnum *parse_enum(Parser *parser) {
     eat_token(parser);
 
     ast_enum->head.kind  = AST_ENUM;
+    ast_enum->head.file  = parser->current_file;
     ast_enum->head.start = ident->head.start;
     ast_enum->head.end   = peek_token(parser, -1).end;
     ast_enum->identifier = ident;
 
     TypeEnum *type_enum        = type_alloc(&parser->type_table, sizeof(TypeEnum));
     type_enum->head.head.kind  = AST_TYPE;
+    type_enum->head.head.file  = parser->current_file;
     type_enum->head.head.start = ast_enum->head.start;
     type_enum->head.head.end   = ast_enum->head.end;
     type_enum->head.kind       = TYPE_ENUM;
-    type_enum->head.name    = ident->name;
+    type_enum->head.name       = ident->name;
     type_enum->node            = ast_enum; // @Improvement - Probably also need to copy over the hashtable of enumerators
     type_enum->identifier      = ast_enum->identifier;
     type_enum->backing_type    = primitive_type(PRIMITIVE_INT); // @Improvement - Support for having a backing integer type
@@ -723,9 +818,16 @@ AstEnum *parse_enum(Parser *parser) {
 
 AstStruct *parse_struct(Parser *parser) {
     Token ident_token = peek_next_token(parser);
-    expect(parser, ident_token, TOKEN_IDENTIFIER);
+    expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
     eat_token(parser);
     AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL);
+
+    AstIdentifier *existing_ident = add_identifier_to_scope(parser, parser->current_scope, ident);
+    if (existing_ident) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)(ident), "Redeclaration of identifier '%s'", existing_ident->name);
+        report_error_ast(parser, LABEL_NOTE, (Ast *)(existing_ident), "Here is the previous declaration of '%s'", existing_ident->name);
+        return NULL;
+    }
 
     Token next = peek_next_token(parser);
     expect(parser, next, TOKEN_DOUBLE_COLON);
@@ -744,6 +846,7 @@ AstStruct *parse_struct(Parser *parser) {
     close_block(parser);
 
     ast_struct->head.kind  = AST_STRUCT;
+    ast_struct->head.file  = parser->current_file;
     ast_struct->head.start = ident_token.start;
     ast_struct->head.end   = scope->head.end;
     ast_struct->identifier = ident;
@@ -751,30 +854,37 @@ AstStruct *parse_struct(Parser *parser) {
 
     if (scope->members.count == 0) {
         report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct), "Structs must have atleast one member");
-        exit(1);
+        return NULL;
     }
 
     TypeStruct *type_struct      = type_alloc(&parser->type_table, sizeof(TypeStruct));
     type_struct->head.head.kind  = AST_TYPE;
+    type_struct->head.head.file  = parser->current_file;
     type_struct->head.head.start = ast_struct->head.start;
     type_struct->head.head.end   = ast_struct->head.end;
     type_struct->head.kind       = TYPE_STRUCT;
     type_struct->head.name       = ident->name;
     type_struct->identifier      = ident;
     type_struct->node            = ast_struct;
-    Type *existing               = type_add_user_defined(&parser->type_table, (Type *)(type_struct));
-    if (existing) {
-        if (existing->kind == TYPE_STRUCT) {
-            TypeStruct *existing_struct = (TypeStruct *)(existing);
-            report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct->identifier), "Struct '%s' is already defined", ast_struct->identifier->name);
-            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing_struct->node), "Here is the previously defined struct");
-            exit(1);
-        } else {
-            TypeStruct *existing_enum = (TypeStruct *)(existing);
-            report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct->identifier), "Struct '%s' is already defined as an enum", ast_struct->identifier->name);
-            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing_enum->node), "Here is the previously defined enum");
-        }
-    }
+
+    type_add_user_defined(&parser->type_table, (Type *)(type_struct));
+
+    ident->type = (Type *)type_struct;
+
+    // if (existing) {
+    //     if (existing->kind == TYPE_STRUCT) {
+    //         TypeStruct *existing_struct = (TypeStruct *)(existing);
+    //         report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct->identifier), "Struct '%s' is already defined", ast_struct->identifier->name);
+    //         report_error_ast(parser, LABEL_NOTE, (Ast *)(existing_struct->node), "Here is the previously defined struct");
+    //         return NULL;
+    //     } else {
+    //         TypeStruct *existing_enum = (TypeStruct *)(existing);
+    //         report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct->identifier), "Struct '%s' is already defined as an enum", ast_struct->identifier->name);
+    //         report_error_ast(parser, LABEL_NOTE, (Ast *)(existing_enum->node), "Here is the previously defined enum");
+    //         return NULL;
+    //     }
+    // }
+    
 
     return ast_struct;
 }
@@ -802,6 +912,7 @@ AstAssignment *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token) {
 
     AstAssignment *assign = (AstAssignment *)(ast_allocate(parser, sizeof(AstAssignment)));
     assign->head.kind     = AST_ASSIGNMENT;
+    assign->head.file     = parser->current_file;
     assign->head.start    = lhs->head.start;
     assign->head.end      = expr->head.end;
     assign->lhs           = lhs;
@@ -825,6 +936,7 @@ AstCast *parse_cast(Parser *parser) {
 
         AstCast *cast         = ast_allocate(parser, sizeof(AstCast));
         cast->head.head.kind  = AST_CAST;
+        cast->head.head.file  = parser->current_file;
         cast->head.head.start = cast_token.start;
         cast->head.head.end   = expr->head.end;
         cast->expr            = expr;
@@ -850,6 +962,7 @@ AstCast *parse_cast(Parser *parser) {
 
         AstCast *cast         = ast_allocate(parser, sizeof(AstCast));
         cast->head.head.kind  = AST_CAST;
+        cast->head.head.file  = parser->current_file;
         cast->head.head.start = cast_token.start;
         cast->head.head.end   = expr->head.end;
         cast->expr            = expr;
@@ -883,7 +996,7 @@ AstFor *parse_for(Parser *parser) {
     }
 
     // `for x in xs {...}`
-    if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == TOKEN_IN) {
+    if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_IN) {
         iterator = make_identifier_from_token(parser, next, NULL);
 
         eat_token(parser);
@@ -897,13 +1010,13 @@ AstFor *parse_for(Parser *parser) {
 
     // `for x, i in xs {...}`
     // `for x, i in 10..20 {...}`
-    else if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == ',') {
+    else if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == ',') {
         iterator = make_identifier_from_token(parser, next, NULL);
         eat_token(parser);
         eat_token(parser);
         
         next = peek_next_token(parser);
-        if (next.type != TOKEN_IDENTIFIER) {
+        if (next.type != TOKEN_LITERAL_IDENTIFIER) {
             report_error_token(parser, LABEL_ERROR, next, "Expected an identifier for the index");
             return NULL;
         }
@@ -963,6 +1076,7 @@ AstFor *parse_for(Parser *parser) {
 
     AstFor *ast_for = (AstFor *)(ast_allocate(parser, sizeof(AstFor)));
     ast_for->head.kind = AST_FOR;
+    ast_for->head.file = parser->current_file;
     ast_for->head.start = for_token.start;
     ast_for->head.end = body->head.end;
     ast_for->kind = kind;
@@ -991,6 +1105,7 @@ AstWhile *parse_while(Parser *parser) {
 
     AstWhile *ast_while = ast_allocate(parser, sizeof(AstWhile));
     ast_while->head.kind = AST_WHILE;
+    ast_while->head.file = parser->current_file;
     ast_while->head.start = while_token.start;
     ast_while->head.end = body->head.end;
     ast_while->condition = condition;
@@ -1013,6 +1128,7 @@ AstExpr *parse_range_or_normal_expression(Parser *parser) {
 
         AstRangeExpr *range_expr = (AstRangeExpr *)(ast_allocate(parser, sizeof(AstRangeExpr)));            
         range_expr->head.head.kind = AST_RANGE_EXPR;
+        range_expr->head.head.file = parser->current_file;
         range_expr->head.head.start = expr->head.start;
         range_expr->head.head.end = end->head.end;
         range_expr->start = expr;
@@ -1036,6 +1152,7 @@ AstReturn *parse_return(Parser *parser) {
 
     AstReturn *ast_return = (AstReturn *)(ast_allocate(parser, sizeof(AstReturn)));
     ast_return->head.kind  = AST_RETURN;
+    ast_return->head.file  = parser->current_file;
     ast_return->head.start = return_token.start;
     ast_return->head.end   = expr->head.end;
     ast_return->expr       = expr;
@@ -1047,7 +1164,7 @@ AstReturn *parse_return(Parser *parser) {
 AstStructLiteral *parse_struct_literal(Parser *parser) {
     Type *explicit_type = NULL;
     Token start_token = peek_next_token(parser);
-    if (start_token.type == TOKEN_IDENTIFIER) {
+    if (start_token.type == TOKEN_LITERAL_IDENTIFIER) {
         explicit_type = parse_type(parser);
     }
 
@@ -1063,7 +1180,7 @@ AstStructLiteral *parse_struct_literal(Parser *parser) {
     AstIdentifier *designator = NULL;
     AstExpr *value            = NULL;
     while (next.type != '}' && next.type != TOKEN_END) {
-        if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '=') {
+        if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '=') {
             eat_token(parser);
             eat_token(parser);
 
@@ -1077,11 +1194,12 @@ AstStructLiteral *parse_struct_literal(Parser *parser) {
         }
 
         AstStructInitializer *init = ast_allocate(parser, sizeof(AstStructInitializer));
-        init->head.kind            = AST_STRUCT_INITIALIZER;
-        init->head.start           = designator != NULL ? designator->head.start : value->head.start;
-        init->head.end             = value->head.end;
-        init->designator           = designator;
-        init->value                = value;
+        init->head.kind  = AST_STRUCT_INITIALIZER;
+        init->head.file  = parser->current_file;
+        init->head.start = designator != NULL ? designator->head.start : value->head.start;
+        init->head.end   = value->head.end;
+        init->designator = designator;
+        init->value      = value;
         da_append(&struct_literal->initializers, init);
 
 
@@ -1102,6 +1220,7 @@ AstStructLiteral *parse_struct_literal(Parser *parser) {
     eat_token(parser);
 
     struct_literal->head.head.kind  = AST_STRUCT_LITERAL;
+    struct_literal->head.head.file  = parser->current_file;
     struct_literal->head.head.start = start_token.start;
     struct_literal->head.head.end   = next.end;
     struct_literal->explicit_type   = explicit_type;
@@ -1142,6 +1261,7 @@ AstArrayLiteral *parse_array_literal(Parser *parser) {
     Token close_bracket = next;
 
     array_lit->head.head.kind  = AST_ARRAY_LITERAL;
+    array_lit->head.head.file  = parser->current_file;
     array_lit->head.head.start = open_bracket.start;
     array_lit->head.head.end   = close_bracket.end;
 
@@ -1164,6 +1284,7 @@ AstExpr *parse_array_access(Parser *parser, Token open_bracket, AstExpr *left) {
 
     AstArrayAccess *array_ac      = ast_allocate(parser, sizeof(AstArrayAccess));
     array_ac->head.head.kind      = AST_ARRAY_ACCESS;
+    array_ac->head.head.file      = parser->current_file;
     array_ac->head.head.start     = left->head.start;
     array_ac->head.head.end       = next.end;
     array_ac->accessing           = left;
@@ -1179,7 +1300,7 @@ AstFunctionCall *parse_function_call(Parser *parser) {
     call->arguments       = da_init(2, sizeof(AstExpr *));
 
     Token ident_token = peek_next_token(parser);
-    expect(parser, ident_token, TOKEN_IDENTIFIER); // Should be impossible to fail
+    expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER); // Should be impossible to fail
     eat_token(parser);
 
     Token next = peek_next_token(parser);
@@ -1214,6 +1335,7 @@ AstFunctionCall *parse_function_call(Parser *parser) {
     }
 
     call->head.head.kind  = AST_FUNCTION_CALL;
+    call->head.head.file  = parser->current_file;
     call->head.head.start = ident_token.start;
     call->head.head.end   = next.end;
     call->identifer       = make_identifier_from_token(parser, ident_token, NULL); // The type of the identifier will be set later in the typer, so here i just specify void
@@ -1226,7 +1348,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->parameters      = da_init(2, sizeof(AstDeclaration *));
 
     Token ident_token = peek_next_token(parser);
-    expect(parser, ident_token, TOKEN_IDENTIFIER);
+    expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
     eat_token(parser);
 
     Token next = peek_next_token(parser);
@@ -1345,13 +1467,14 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         // Add the function to the current scope
         AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
         if (existing) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of function %s", ident->name);
-            report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "... Here is the previously defined function");
+            report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of identifier '%s'", ident->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the previous declaration of '%s'", ident->name);
             return NULL;
         }
     }
 
     func_defn->head.kind   = AST_FUNCTION_DEFN;
+    func_defn->head.file   = parser->current_file;
     func_defn->head.start  = ident_token.start;
     func_defn->head.end    = body->head.start;
     func_defn->identifier  = ident;
@@ -1367,6 +1490,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
 
     TypeFunction *func    = type_alloc(&parser->type_table, sizeof(TypeFunction));
     func->head.head.kind  = AST_TYPE;
+    func->head.head.file  = parser->current_file;
     func->head.head.start = func_defn->head.start;
     func->head.head.end   = func_defn->head.end;
     func->head.kind       = TYPE_FUNCTION;
@@ -1391,13 +1515,14 @@ AstIf *parse_if(Parser *parser) {
     AstBlock *block = parse_block(parser, NULL);
     if (!block) return NULL;
 
-    AstIf *ast_if = (AstIf *)(ast_allocate(parser, sizeof(AstIf)));
-    ast_if->head.kind = AST_IF;
+    AstIf *ast_if      = (AstIf *)(ast_allocate(parser, sizeof(AstIf)));
+    ast_if->head.kind  = AST_IF;
+    ast_if->head.file  = parser->current_file;
     ast_if->head.start = if_token.start;
-    ast_if->head.end = block->head.end;
+    ast_if->head.end   = block->head.end;
     ast_if->then_block = block;
-    ast_if->condition = condition;
-    ast_if->else_ifs = da_init(2, sizeof(AstIf));
+    ast_if->condition  = condition;
+    ast_if->else_ifs   = da_init(2, sizeof(AstIf));
 
     while (true) {
         Token next = peek_next_token(parser);
@@ -1415,12 +1540,13 @@ AstIf *parse_if(Parser *parser) {
                 AstBlock *block = parse_block(parser, NULL);
                 if (!block) return NULL;
 
-                AstIf else_if = {0};
-                else_if.head.kind = AST_IF;
+                AstIf else_if      = {0};
+                else_if.head.kind  = AST_IF;
+                else_if.head.file  = parser->current_file;
                 else_if.head.start = else_token.start;
-                else_if.head.end = block->head.end;
+                else_if.head.end   = block->head.end;
                 else_if.then_block = block;
-                else_if.condition = condition;
+                else_if.condition  = condition;
 
                 da_append(&ast_if->else_ifs, else_if);
 
@@ -1449,6 +1575,7 @@ AstNew *parse_new(Parser *parser) {
 
     AstNew *ast_new          = (AstNew *)(ast_allocate(parser, sizeof(AstNew)));
     ast_new->head.head.kind  = AST_NEW;
+    ast_new->head.head.file  = parser->current_file;
     ast_new->head.head.start = start_token.start;
     ast_new->head.head.end   = expr->head.end;
     ast_new->expr            = expr;
@@ -1474,6 +1601,7 @@ AstTypeof *parse_typeof(Parser *parser) {
 
     AstTypeof *ast_typeof       = (AstTypeof *)(ast_allocate(parser, sizeof(AstTypeof)));
     ast_typeof->head.head.kind  = AST_TYPEOF;
+    ast_typeof->head.head.file  = parser->current_file;
     ast_typeof->head.head.start = start_token.start;
     ast_typeof->head.head.end   = next.end;
     ast_typeof->expr            = expr;
@@ -1499,6 +1627,7 @@ AstSizeof *parse_sizeof(Parser *parser) {
 
     AstSizeof *ast_sizeof       = (AstSizeof *)(ast_allocate(parser, sizeof(AstSizeof)));
     ast_sizeof->head.head.kind  = AST_SIZEOF;
+    ast_sizeof->head.head.file  = parser->current_file;
     ast_sizeof->head.head.start = start_token.start;
     ast_sizeof->head.head.end   = next.end;
     ast_sizeof->expr            = expr;
@@ -1524,6 +1653,7 @@ AstAssert *parse_assert(Parser *parser) {
 
     AstAssert *assertion = (AstAssert *)(ast_allocate(parser, sizeof(AstAssert)));
     assertion->head.kind  = AST_ASSERT;
+    assertion->head.file  = parser->current_file;
     assertion->head.start = start_token.start;
     assertion->head.end   = next.end;
     assertion->expr       = expr;
@@ -1575,6 +1705,7 @@ AstPrint *parse_print(Parser *parser) {
     eat_token(parser);
     
     print->head.kind  = AST_PRINT;
+    print->head.file  = parser->current_file;
     print->head.start = start_token.start;
     print->head.end   = next.end;
 
@@ -1583,7 +1714,7 @@ AstPrint *parse_print(Parser *parser) {
 
 AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
     Token ident = peek_next_token(parser);
-    if (ident.type != TOKEN_IDENTIFIER) {
+    if (ident.type != TOKEN_LITERAL_IDENTIFIER) {
         report_error_token(parser, LABEL_ERROR, ident, "Invalid declaration");
         return NULL;
     }
@@ -1652,14 +1783,15 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *exp
         ident->flags |= IDENTIFIER_IS_CONSTANT;
     }
 
-    AstDeclaration *decl    = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
-    decl->head.kind         = AST_DECLARATION;
-    decl->head.start        = ident_token.start;
-    decl->head.end          = expr != NULL ? expr->head.end : type->head.end;
-    decl->ident             = ident;
-    decl->type              = type;
-    decl->flags             = flags;
-    decl->expr              = expr;
+    AstDeclaration *decl = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
+    decl->head.kind  = AST_DECLARATION;
+    decl->head.file  = parser->current_file;
+    decl->head.start = ident_token.start;
+    decl->head.end   = expr != NULL ? expr->head.end : type->head.end;
+    decl->ident      = ident;
+    decl->type       = type;
+    decl->flags      = flags;
+    decl->expr       = expr;
 
     ident->belongs_to_decl = decl;
 
@@ -1673,14 +1805,14 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *exp
         if (existing != NULL) {
             report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.value.identifier.name);
             report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous declaration ...");
-            exit(1);
+            return NULL;
         }
     } else if (parser->current_scope->kind == BLOCK_DECLARATIVE) {
         AstDeclaration *existing = add_declaration_to_scope(parser->current_scope, decl);
         if (existing != NULL) {
             report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.value.identifier.name);
             report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous declaration ...");
-            exit(1);
+            return NULL;
         }
     } else {
         XXX;
@@ -1692,17 +1824,18 @@ AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *exp
 AstDeclaration *generate_declaration(Parser *parser, char *ident_name, AstExpr *expr, Type *type, DeclarationFlags flags) {
     assert(type);
 
-    AstIdentifier *ident    = make_identifier_from_string(parser, ident_name, type);
+    AstIdentifier *ident = make_identifier_from_string(parser, ident_name, type);
 
-    AstDeclaration *decl    = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
-    decl->head.kind         = AST_DECLARATION;
-    decl->head.flags        = AST_FLAG_COMPILER_GENERATED;
-    decl->head.start        = (Pos){0, 0, 0};
-    decl->head.end          = expr != NULL ? expr->head.end : type->head.end;
-    decl->ident             = ident;
-    decl->type              = type;
-    decl->flags             = flags;
-    decl->expr              = expr;
+    AstDeclaration *decl = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
+    decl->head.kind  = AST_DECLARATION;
+    decl->head.file  = parser->current_file;
+    decl->head.flags = AST_FLAG_COMPILER_GENERATED;
+    decl->head.start = (Pos){0, 0, 0};
+    decl->head.end   = expr != NULL ? expr->head.end : type->head.end;
+    decl->ident      = ident;
+    decl->type       = type;
+    decl->flags      = flags;
+    decl->expr       = expr;
 
     return decl;
 }
@@ -1721,6 +1854,7 @@ int align_value(int value, int alignment) {
 AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, Type *type) {
     AstIdentifier *ident = (AstIdentifier *) ast_allocate(parser, sizeof(AstIdentifier));
     ident->head.kind = AST_IDENTIFIER;
+    ident->head.file = parser->current_file;
     ident->type      = type;
     ident->name      = (char *)(name);
     ident->length    = strlen(name);
@@ -1729,10 +1863,11 @@ AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, Typ
 }
 
 AstIdentifier *make_identifier_from_token(Parser *parser, Token ident_token, Type *type) {
-    assert(ident_token.type == TOKEN_IDENTIFIER);
+    assert(ident_token.type == TOKEN_LITERAL_IDENTIFIER);
 
     AstIdentifier *ident = (AstIdentifier *) ast_allocate(parser, sizeof(AstIdentifier));
     ident->head.kind  = AST_IDENTIFIER;
+    ident->head.file  = parser->current_file;
     ident->head.start = ident_token.start;
     ident->head.end   = ident_token.end;
     ident->type       = type;
@@ -1844,11 +1979,11 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
 
 AstExpr *parse_leaf(Parser *parser) {
     Token t = peek_next_token(parser);
-    if (t.type == TOKEN_BOOLEAN ||
-        t.type == TOKEN_INTEGER ||
-        t.type == TOKEN_FLOAT   ||
-        t.type == TOKEN_NULL    ||
-        t.type == TOKEN_STRING
+    if (t.type == TOKEN_LITERAL_BOOLEAN ||
+        t.type == TOKEN_LITERAL_INTEGER ||
+        t.type == TOKEN_LITERAL_FLOAT   ||
+        t.type == TOKEN_LITERAL_NULL    ||
+        t.type == TOKEN_LITERAL_STRING
     ) {
         eat_token(parser);
         return make_literal_node(parser, t);
@@ -1858,9 +1993,10 @@ AstExpr *parse_leaf(Parser *parser) {
         // We intentionally don't eat the semicolon because we want the expression to end right after this @Bug; "a := ;" currently doesn't produce a parse error
 
         AstSemicolonExpr *sce = ast_allocate(parser, sizeof(AstSemicolonExpr));
-        sce->head.head.kind = AST_SEMICOLON_EXPR;
-        sce->head.head.start = t.start;
-        sce->head.head.end = t.end;
+        sce->head.head.kind   = AST_SEMICOLON_EXPR;
+        sce->head.head.file   = parser->current_file;
+        sce->head.head.start  = t.start;
+        sce->head.head.end    = t.end;
         return (AstExpr *) sce;
     }
 
@@ -1925,7 +2061,7 @@ AstExpr *parse_leaf(Parser *parser) {
         return (AstExpr *)(cast);
     }
 
-    if (t.type == '.' && peek_token(parser, 1).type == TOKEN_IDENTIFIER) {
+    if (t.type == '.' && peek_token(parser, 1).type == TOKEN_LITERAL_IDENTIFIER) {
         Token ident = peek_token(parser, 1);
 
         eat_token(parser);
@@ -1933,6 +2069,7 @@ AstExpr *parse_leaf(Parser *parser) {
 
         AstEnumLiteral *eval  = ast_allocate(parser, sizeof(AstEnumLiteral));
         eval->head.head.kind  = AST_ENUM_LITERAL;
+        eval->head.head.file  = parser->current_file;
         eval->head.head.start = t.start;
         eval->head.head.end   = ident.end;
         eval->identifier      = make_identifier_from_token(parser, ident, NULL);
@@ -1940,7 +2077,7 @@ AstExpr *parse_leaf(Parser *parser) {
         return (AstExpr *)(eval);
     }
 
-    if (t.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '(') {
+    if (t.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '(') {
         AstFunctionCall *call = parse_function_call(parser);
         return (AstExpr *)(call);
     }
@@ -1963,7 +2100,7 @@ AstExpr *parse_leaf(Parser *parser) {
         return (AstExpr *)(ast_new);
     }
 
-    if (t.type == TOKEN_IDENTIFIER) {
+    if (t.type == TOKEN_LITERAL_IDENTIFIER) {
         eat_token(parser);
         return make_literal_node(parser, t);
     }
@@ -1990,7 +2127,7 @@ bool starts_struct_literal(Parser *parser) {
 
     Token next = peek_next_token(parser);
     if (next.type == '{') return true;
-    if (next.type == TOKEN_IDENTIFIER && peek_token(parser, 1).type == '{') return true;
+    if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '{') return true;
 
     return false;
 }
@@ -2004,6 +2141,7 @@ AstExpr *make_member_access(Parser *parser, Token token, AstExpr *lhs, AstExpr *
 
     AstMemberAccess *ma = ast_allocate(parser, sizeof(AstMemberAccess));
     ma->head.head.kind  = AST_MEMBER_ACCESS;
+    ma->head.head.file  = parser->current_file;
     ma->head.head.start = lhs->head.start;
     ma->head.head.end   = rhs->head.end;
     ma->left            = lhs;
@@ -2017,6 +2155,7 @@ AstExpr *make_unary_node(Parser *parser, Token token, AstExpr *expr, OperatorTyp
 
     AstUnary *unary_op = (AstUnary *) ast_allocate(parser, sizeof(AstUnary));
     unary_op->head.head.kind  = AST_UNARY;
+    unary_op->head.head.file  = parser->current_file;
     unary_op->head.head.start = token.start;
     unary_op->head.head.end   = expr->head.end;
     unary_op->operator        = op_type;
@@ -2030,6 +2169,7 @@ AstExpr *make_binary_node(Parser *parser, Token token, AstExpr *lhs, AstExpr *rh
 
     AstBinary *bin_op = (AstBinary *) ast_allocate(parser, sizeof(AstBinary));
     bin_op->head.head.kind  = AST_BINARY;
+    bin_op->head.head.file  = parser->current_file;
     bin_op->head.head.start = lhs->head.start;
     bin_op->head.head.end   = rhs->head.end;
     bin_op->operator        = token.type;
@@ -2044,6 +2184,7 @@ AstExpr *make_literal_node(Parser *parser, Token token) {
 
     AstLiteral *literal = (AstLiteral *)(ast_allocate(parser, sizeof(AstLiteral)));
     literal->head.head.kind  = AST_LITERAL;
+    literal->head.head.file  = parser->current_file;
     literal->head.head.start = token.start;
     literal->head.head.end   = token.end;
     literal->kind            = (LiteralKind)(token.type);
@@ -2069,17 +2210,17 @@ Token peek_next_token(Parser *parser) {
 }
 
 bool is_literal(Token token) {
-    if (token.type == TOKEN_BOOLEAN)    return true;
-    if (token.type == TOKEN_INTEGER)    return true;
-    if (token.type == TOKEN_FLOAT)      return true;
-    if (token.type == TOKEN_STRING)     return true;
-    if (token.type == TOKEN_NULL)       return true;
-    if (token.type == TOKEN_IDENTIFIER) return true;
+    if (token.type == TOKEN_LITERAL_BOOLEAN)    return true;
+    if (token.type == TOKEN_LITERAL_INTEGER)    return true;
+    if (token.type == TOKEN_LITERAL_FLOAT)      return true;
+    if (token.type == TOKEN_LITERAL_STRING)     return true;
+    if (token.type == TOKEN_LITERAL_NULL)       return true;
+    if (token.type == TOKEN_LITERAL_IDENTIFIER) return true;
     return false;
 }
 
 bool is_type_specifier(Token token) {
-    return is_primitive_type_token(token) || token.type == TOKEN_IDENTIFIER;
+    return is_primitive_type_token(token) || token.type == TOKEN_LITERAL_IDENTIFIER;
 }
 
 bool is_primitive_type_token(Token token) {
@@ -2098,8 +2239,9 @@ bool is_assignment_operator(Token token) {
 void report_error_range(Parser *parser, Pos start, Pos end, const char *message, ...) {
     va_list args;
     va_start(args, message);
+    assert(parser->current_file);
 
-    report_error_helper(parser->lexer, LABEL_ERROR, start, end, message, args);
+    report_error_helper(parser->current_file->absolute_path, parser->current_file->text, LABEL_ERROR, start, end, message, args);
 
     va_end(args);
 }
@@ -2108,12 +2250,13 @@ void report_error_range(Parser *parser, Pos start, Pos end, const char *message,
 void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const char *message, ...) {
     va_list args;
     va_start(args, message);
+    assert(parser->current_file);
 
     if (failing_ast) {
-        report_error_helper(parser->lexer, label, failing_ast->start, failing_ast->end, message, args);
+        report_error_helper(failing_ast->file->absolute_path, failing_ast->file->text, label, failing_ast->start, failing_ast->end, message, args);
     } else {
-        Pos no_line_info = (Pos){-1, -1, -1};
-        report_error_helper(parser->lexer, label, no_line_info, no_line_info, message, args);
+        Pos ghost_pos = (Pos){-1, -1, -1};
+        report_error_helper(parser->current_file->absolute_path, parser->current_file->text, label, ghost_pos, ghost_pos, message, args);
     }
 
     va_end(args);
@@ -2122,8 +2265,9 @@ void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...) {
     va_list args;
     va_start(args, message);
+    assert(parser->current_file);
 
-    report_error_helper(parser->lexer, label, failing_token.start, failing_token.end, message, args);
+    report_error_helper(parser->current_file->absolute_path, parser->current_file->text, label, failing_token.start, failing_token.end, message, args);
 
     va_end(args);
 }

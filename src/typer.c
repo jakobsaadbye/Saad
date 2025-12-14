@@ -3,8 +3,9 @@
 
 typedef struct Typer {
     Parser *parser;
-    ConstEvaluater *const_evaluator;
+    ConstEvaluator *const_evaluator;
 
+    AstFile  *current_file;
     AstBlock *current_scope;
 
     AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
@@ -51,28 +52,39 @@ AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name);
 char *generate_c_format_specifier_for_type(Type *type);
 
 
-Typer typer_init(Parser *parser, ConstEvaluater *ce) {
+Typer typer_init(Parser *parser, ConstEvaluator *ce) {
     Typer typer = {0};
     typer.parser = parser;
     typer.const_evaluator = ce;
-    typer.current_scope = parser->current_scope;
+
+    typer.current_file = NULL;
+    typer.current_scope = NULL;
     typer.enclosing_function = NULL;
     typer.enclosing_for = NULL;
     typer.enclosing_while = NULL;
-
     typer.inside_declaration = NULL;
-
     typer.array_literal_depth = 0;
 
     return typer;
 }
 
-bool check_code(Typer *typer, AstCode *code) {
-    bool ok;
+bool check_file(Typer *typer, AstFile *ast_file) {
+    
+    typer->current_file        = ast_file;
+    typer->current_scope       = ast_file->scope;
+    typer->enclosing_function  = NULL;
+    typer->enclosing_for       = NULL;
+    typer->enclosing_while     = NULL;
+    typer->inside_declaration  = NULL;
+    typer->array_literal_depth = 0;
 
-    for (int i = 0; i < code->statements.count; i++) {
-        Ast *stmt = ((Ast **)(code->statements.items))[i];
-        ok = check_statement(typer, stmt);
+    // @Cleanup @CopyPasta :CopyPasteCurrentFile 
+    typer->parser->current_file  = ast_file;
+    typer->parser->current_scope = ast_file->scope;
+
+    for (int i = 0; i < ast_file->statements.count; i++) {
+        Ast *stmt = ((Ast **)(ast_file->statements.items))[i];
+        bool ok = check_statement(typer, stmt);
         if (!ok) return false; // @Improvement - Maybe proceed with typechecking if we can still continue after seing the error
     }
 
@@ -100,6 +112,59 @@ void dump_struct(AstStruct *struct_defn) {
         printf("    %s: %s;\n", member->ident->name, type_to_str(member->type));
     }
     printf("}\n");
+}
+
+void typer_restore_state(Typer *typer, Typer saved_state) {
+    typer->current_file        = saved_state.current_file;
+    typer->current_scope       = saved_state.current_scope;
+    typer->enclosing_function  = saved_state.enclosing_function;
+    typer->enclosing_for       = saved_state.enclosing_for;
+    typer->enclosing_while     = saved_state.enclosing_while;
+    typer->array_literal_depth = saved_state.array_literal_depth;
+
+    // @Cleanup @CopyPasta :CopyPasteCurrentFile 
+    typer->parser->current_file  = saved_state.current_file;
+    typer->parser->current_scope = saved_state.current_scope;
+}
+
+bool import_declarations(Parser *parser, AstImport *import, AstFile *to_file) {
+    AstFile *from_file = import->imported_file;
+
+    for (int i = 0; i < from_file->scope->identifiers.count; i++) {
+        AstIdentifier *src_ident = ((AstIdentifier **)from_file->scope->identifiers.items)[i];
+
+        AstIdentifier *existing = add_identifier_to_scope(parser, to_file->scope, src_ident);
+        if (existing != NULL) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)src_ident, "Import of identifier '%s' conflicts with existing identifier", src_ident->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the existing identifier ...");
+            report_error_ast(parser, LABEL_HINT, (Ast *)import, "Either namespace the import or rename one of the identifiers in the files");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool check_import(Typer *typer, AstImport *import) {
+    assert(import->imported_file != NULL);
+
+    // Go typecheck the imported file
+    Typer current_state = *typer;
+
+    bool ok = check_file(typer, import->imported_file);
+    if (!ok) {
+        return false;
+    }
+
+    typer_restore_state(typer, current_state);
+
+    // Copy all the declarations from the imported file into the current files scope
+    ok = import_declarations(typer->parser, import, typer->current_file);
+    if (!ok) {
+        return false;
+    }
+
+    return true;
 }
 
 bool check_block(Typer *typer, AstBlock *block) {
@@ -454,12 +519,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         Type *func_type = check_function_defn(typer, func_defn);
         if (!func_type) return NULL;
 
-        // Restore the typers state
-        typer->array_literal_depth = temp.array_literal_depth;
-        typer->current_scope       = temp.current_scope;
-        typer->enclosing_function  = temp.enclosing_function;
-        typer->enclosing_for       = temp.enclosing_for;
-        typer->enclosing_while     = temp.enclosing_while;
+        typer_restore_state(typer, temp);
     }
     
     int real_parameter_count = func_defn->parameters.count - (func_defn->is_method ? 1 : 0);
@@ -997,6 +1057,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
     reset_temporary_storage(typer->enclosing_function);
 
     switch (stmt->kind) {
+    case AST_IMPORT:            return check_import(typer, (AstImport *)(stmt));
     case AST_BLOCK:             return check_block(typer, (AstBlock *)(stmt));
     case AST_DECLARATION:       return check_declaration(typer, (AstDeclaration *)(stmt));
     case AST_ASSIGNMENT:        return check_assignment(typer, (AstAssignment *)(stmt));
@@ -1145,7 +1206,6 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         }
     }
 
-
     // Check the return type/s
     Type *return_type = resolve_type(typer, func_defn->return_type);
     if (!return_type) return NULL;
@@ -1161,7 +1221,7 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
 
     // Mark the function as fully typed, when we have typechecked the function signature
-    // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again ...
+    // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again
     func_defn->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
     typer->current_scope = func_defn->body;
 

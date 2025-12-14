@@ -10,16 +10,14 @@ int main(int argc, char const *argv[]) {
         return 1;
     }
 
-    const char *input_file_path = argv[1];
-    char *program = read_entire_file(input_file_path);
+    const char *main_file_path = argv[1];
 
-    bool success = send_through_pipeline(program, input_file_path, true);
+    bool success = compile_program(main_file_path, true);
     if (success) {
         printf("\n\nCompiled successfully.\n\n");
     } else {
         printf("There were errors.\n\n");
     }
 
-    free(program);
     return 0;
 }

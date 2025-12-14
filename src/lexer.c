@@ -2,27 +2,30 @@
 
 #define DYNAMIC_ARRAY_IMPLEMENTATION
 #include "lib/dynamic_array.h"
-
 #define ARENA_IMPLEMENTATION
 #include "lib/arena.h"
+#define FILE_IMPLEMENTATION
+#include "lib/file.h"
 
 #include <stdarg.h>
 
-const char *LABEL_HINT    = COLOR_ICE     "hint"    COLOR_RESET;
-const char *LABEL_NOTE    = COLOR_ICE     "note"    COLOR_RESET;
 const char *LABEL_ERROR   = COLOR_RED     "error"   COLOR_RESET;
 const char *LABEL_WARNING = COLOR_MAGENTA "warning" COLOR_RESET;
+const char *LABEL_HINT    = COLOR_GREEN   "hint"    COLOR_RESET;
+const char *LABEL_NOTE    = COLOR_ICE     "note"    COLOR_RESET;
 
-Lexer lexer_init(char *input_str, const char *file_path) {
+Lexer lexer_init() {
     Lexer lexer = {0};
-    lexer.input_str = input_str;
-    lexer.file_path = file_path;
+
+    // These two fields are set on a per file basis
+    lexer.file_text = NULL;
+    lexer.file_path = NULL;
 
     lexer.tokens = da_init(4096, sizeof(Token));
     lexer.identifier_names = arena_init(4096);
 
-    lexer.char_idx = 0;
-    lexer.col = 1;
+    lexer.char_idx    = 0;
+    lexer.col         = 1;
     lexer.line_number = 1;
 
     return lexer;
@@ -36,14 +39,14 @@ char *token_type_to_str(TokenType token_type) {
     }
     switch (token_type) {
         case TOKEN_NONE:          return "NONE";
-        case TOKEN_INTEGER:       return "INTEGER";
-        case TOKEN_FLOAT:         return "FLOAT";
-        case TOKEN_STRING:        return "STRING";
-        case TOKEN_IDENTIFIER:    return "IDENTIFIER";
-        case TOKEN_BOOLEAN:       return "BOOLEAN";
-        case TOKEN_FALSE:         return "FALSE";
-        case TOKEN_TRUE:          return "TRUE";
-        case TOKEN_NULL:          return "NULL";
+        case TOKEN_LITERAL_INTEGER:       return "INTEGER";
+        case TOKEN_LITERAL_FLOAT:         return "FLOAT";
+        case TOKEN_LITERAL_STRING:        return "STRING";
+        case TOKEN_LITERAL_IDENTIFIER:    return "IDENTIFIER";
+        case TOKEN_LITERAL_BOOLEAN:       return "BOOLEAN";
+        case TOKEN_LITERAL_FALSE:         return "FALSE";
+        case TOKEN_LITERAL_TRUE:          return "TRUE";
+        case TOKEN_LITERAL_NULL:          return "NULL";
         case TOKEN_DOUBLE_COLON:  return "DOUBLE_COLON";
         case TOKEN_COLON_EQUAL:   return "COLON_EQUAL";
         case TOKEN_RIGHT_ARROW:   return "RIGHT_ARROW";
@@ -74,6 +77,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_ELSE:          return "ELSE";
         case TOKEN_CAST:          return "CAST";
         case TOKEN_NEW:           return "NEW";
+        case TOKEN_IMPORT:        return "IMPORT";
         case TOKEN_TYPE_UINT:     return "TYPE_UINT";
         case TOKEN_TYPE_U8:       return "TYPE_U8";
         case TOKEN_TYPE_U16:      return "TYPE_U16";
@@ -100,7 +104,11 @@ char *token_type_to_str(TokenType token_type) {
     return NULL;
 }
 
-bool lex(Lexer *lexer) {
+bool lex_file(Lexer *lexer) {
+    lexer->char_idx    = 0;
+    lexer->col         = 1;
+    lexer->line_number = 1;
+
     while (peek_next_char(lexer) != '\0') {
         
         char c = peek_next_char(lexer);
@@ -144,7 +152,7 @@ bool lex(Lexer *lexer) {
 
             if (next == '.' && peek_char(lexer, 1) == '.') {
                 // Early stop as the next is a range expr
-                make_literal_here(lexer, TOKEN_INTEGER, pos_start);
+                make_literal_here(lexer, TOKEN_LITERAL_INTEGER, pos_start);
                 continue;
             }
 
@@ -157,9 +165,9 @@ bool lex(Lexer *lexer) {
                     next = peek_next_char(lexer);
                 }
 
-                make_literal_here(lexer, TOKEN_FLOAT, pos_start);
+                make_literal_here(lexer, TOKEN_LITERAL_FLOAT, pos_start);
             } else {
-                make_literal_here(lexer, TOKEN_INTEGER, pos_start);
+                make_literal_here(lexer, TOKEN_LITERAL_INTEGER, pos_start);
             }
 
             continue;
@@ -175,18 +183,18 @@ bool lex(Lexer *lexer) {
             }
             eat_character(lexer);
 
-            make_literal_here(lexer, TOKEN_STRING, pos_start);
+            make_literal_here(lexer, TOKEN_LITERAL_STRING, pos_start);
             continue;
         }
 
         {
             // Keywords
             Pos pos_start = get_current_position(lexer);
-            KeywordMatch keyword = is_keyword(lexer);
+            KeywordMatch keyword = match_keyword(lexer);
             if (keyword.matched) {
                 eat_characters(lexer, keyword.length);
 
-                if (keyword.token == TOKEN_TRUE || keyword.token == TOKEN_FALSE) {
+                if (keyword.token == TOKEN_LITERAL_TRUE || keyword.token == TOKEN_LITERAL_FALSE) {
                     make_literal_here(lexer, keyword.token, pos_start);
                 } else {
                     make_keyword(lexer, keyword.token, pos_start);
@@ -264,7 +272,7 @@ void make_keyword(Lexer *lexer, TokenType kw_type, Pos start) {
     push_token(lexer, token);
 }
 
-KeywordMatch is_keyword(Lexer *lexer) {
+KeywordMatch match_keyword(Lexer *lexer) {
     int i = 0;
     while (true) {
         char c = peek_char(lexer, i);
@@ -286,7 +294,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
     int keyword_start = lexer->char_idx;
     int keyword_len   = i;
 
-    char *src   = &lexer->input_str[keyword_start];
+    char *src   = &lexer->file_text[keyword_start];
     char *text  = (char *)(malloc(keyword_len + 1));
     memset(text, '\0', keyword_len + 1);
     memcpy(text, src, keyword_len);
@@ -314,10 +322,10 @@ KeywordMatch is_keyword(Lexer *lexer) {
     }
     if (keyword_len == 4) {
         if (strcmp(text, "uint") == 0) token = TOKEN_TYPE_UINT;
-        if (strcmp(text, "null") == 0) token = TOKEN_NULL;
+        if (strcmp(text, "null") == 0) token = TOKEN_LITERAL_NULL;
         if (strcmp(text, "bool") == 0) token = TOKEN_TYPE_BOOL;
         if (strcmp(text, "void") == 0) token = TOKEN_TYPE_VOID;
-        if (strcmp(text, "true") == 0) token = TOKEN_TRUE;
+        if (strcmp(text, "true") == 0) token = TOKEN_LITERAL_TRUE;
         if (strcmp(text, "else") == 0) token = TOKEN_ELSE;
         if (strcmp(text, "enum") == 0) token = TOKEN_ENUM;
         if (strcmp(text, "cast") == 0) token = TOKEN_CAST;
@@ -325,7 +333,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
     if (keyword_len == 5) {
         if (strcmp(text, "float") == 0) token = TOKEN_TYPE_FLOAT;
         if (strcmp(text, "print") == 0) token = TOKEN_PRINT;
-        if (strcmp(text, "false") == 0) token = TOKEN_FALSE;
+        if (strcmp(text, "false") == 0) token = TOKEN_LITERAL_FALSE;
         if (strcmp(text, "break") == 0) token = TOKEN_BREAK;
         if (strcmp(text, "while") == 0) token = TOKEN_WHILE;
     }
@@ -337,6 +345,7 @@ KeywordMatch is_keyword(Lexer *lexer) {
         if (strcmp(text, "assert") == 0) token = TOKEN_ASSERT;
         if (strcmp(text, "typeof") == 0) token = TOKEN_TYPEOF;
         if (strcmp(text, "sizeof") == 0) token = TOKEN_SIZEOF;
+        if (strcmp(text, "import") == 0) token = TOKEN_IMPORT;
     }
     if (keyword_len == 8) {
         if (strcmp(text, "continue") == 0) token = TOKEN_CONTINUE;
@@ -361,14 +370,14 @@ void make_identifier(Lexer *lexer, Pos pos_start) {
         exit(1);
     }
     memset(temp_buffer, '\0', ident_length + 1);
-    memcpy(temp_buffer, &lexer->input_str[pos_start.input_idx], ident_length);
+    memcpy(temp_buffer, &lexer->file_text[pos_start.input_idx], ident_length);
 
     char *ident_name   = (char *)(arena_allocate(&lexer->identifier_names, ident_length + 1));
     memcpy(ident_name, temp_buffer, ident_length + 1);
     free(temp_buffer);
 
     Token token = {0};
-    token.type  = TOKEN_IDENTIFIER;
+    token.type  = TOKEN_LITERAL_IDENTIFIER;
     token.as_value = (As_value) {
         .flags = 0,
         .value = {
@@ -414,8 +423,8 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
     result.end   = pos_end;
 
     switch(token_type) {
-    case TOKEN_INTEGER: {
-        const char *src = &lexer->input_str[pos_start.input_idx];
+    case TOKEN_LITERAL_INTEGER: {
+        const char *src = &lexer->file_text[pos_start.input_idx];
         char val_str[MAX_DIGITS];
         memset(val_str, '\0', MAX_DIGITS);
 
@@ -431,8 +440,8 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
         
         break;
     }
-    case TOKEN_FLOAT : {
-        const char *src = &lexer->input_str[pos_start.input_idx];
+    case TOKEN_LITERAL_FLOAT : {
+        const char *src = &lexer->file_text[pos_start.input_idx];
         char val_str[MAX_DIGITS];
         memset(val_str, '\0', MAX_DIGITS);
 
@@ -444,10 +453,10 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
 
         break;
     }
-    case TOKEN_STRING: {
+    case TOKEN_LITERAL_STRING: {
         // For the token start and end position we save it including the quotes,
         // but don't include them for the value of the string.
-        const char *src = &lexer->input_str[pos_start.input_idx + 1];
+        const char *src = &lexer->file_text[pos_start.input_idx + 1];
         int str_len = pos_end.input_idx - pos_start.input_idx - 2;
         char *buffer = (char *)(malloc(str_len + 1));
         memset(buffer, '\0', str_len + 1);
@@ -463,10 +472,10 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
 
         break;
     }
-    case TOKEN_TRUE:
-    case TOKEN_FALSE: {
-        result.type = TOKEN_BOOLEAN;
-        result.as_value.value.boolean = token_type == TOKEN_TRUE ? true : false;
+    case TOKEN_LITERAL_TRUE:
+    case TOKEN_LITERAL_FALSE: {
+        result.type = TOKEN_LITERAL_BOOLEAN;
+        result.as_value.value.boolean = token_type == TOKEN_LITERAL_TRUE ? true : false;
 
         break;
     }
@@ -490,7 +499,7 @@ void eat_character(Lexer *lexer) {
 }
 
 char peek_char(Lexer *lexer, int lookahead) {
-    return lexer->input_str[lexer->char_idx + lookahead];
+    return lexer->file_text[lexer->char_idx + lookahead];
 }
 
 char peek_next_char(Lexer *lexer) {
@@ -625,24 +634,24 @@ void report_error_here(Lexer *lexer, const char *message, ...) {
     va_start(args, message);
 
     Pos here = get_current_position(lexer);
-    report_error_helper(lexer, LABEL_ERROR, here, here, message, args);
+    report_error_helper(lexer->file_path, lexer->file_text, LABEL_ERROR, here, here, message, args);
 
     va_end(args);
 }
 
 #define MAX_ERROR_LEN 512
-void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, const char *template, va_list args) {
+void report_error_helper(char *file_path, char *file_text, const char* label, Pos start, Pos end, const char *template, va_list args) {
     char message[MAX_ERROR_LEN];
     vsnprintf(message, MAX_ERROR_LEN, template, args);
     
     if (start.line == -1) {
         // Skip reporting code line of location
-        printf("\n" "%s " "%s" ": %s\n", lexer->file_path, label, message);
+        printf("\n" "%s " "%s" ": %s\n", file_path, label, message);
         return;
     }
 
     // Header
-    printf("\n" "%s:%d:%d " "%s" ": %s\n", lexer->file_path, start.line, start.col, label, message);
+    printf("\n" "%s:%d:%d " "%s" ": %s\n", file_path, start.line, start.col, label, message);
 
     //
     // Code lines
@@ -650,7 +659,7 @@ void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, co
     int num_lines = (end.line - start.line) + 1;
     bool singleline = num_lines == 1;
     if (singleline) {
-        Line line = get_line(lexer->input_str, start.line);
+        Line line = get_line(file_text, start.line);
         char *start_segment = malloc(start.col);
         memset(start_segment, '\0', start.col);
         memcpy(start_segment, line.str, start.col - 1);
@@ -665,7 +674,7 @@ void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, co
         int end_segment_len = line.end_idx - end.input_idx;
         char *end_segment = malloc(end_segment_len + 1);
         memset(end_segment, '\0', end_segment_len + 1);
-        memcpy(end_segment, &lexer->input_str[end.input_idx], end_segment_len);
+        memcpy(end_segment, &file_text[end.input_idx], end_segment_len);
 
         char line_num[10];
         sprintf(line_num, "  %d", start.line);
@@ -684,7 +693,7 @@ void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, co
     } else {
         for (int i = 0; i < num_lines; i++) {
             int line_num = start.line + i;
-            Line line = get_line(lexer->input_str, line_num);
+            Line line = get_line(file_text, line_num);
             if (i == 0) {
                 char *start_segment = malloc(start.col);
                 memset(start_segment, '\0', start.col);
@@ -722,6 +731,7 @@ Line get_line(char *input_str, int line_num) {
     char *c = input_str;
     while (current_line != line_num) {
         if (*c == '\n') current_line++;
+        if (*c == '\0') break;
         c++;
         start_idx++;
     }

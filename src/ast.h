@@ -11,11 +11,13 @@ typedef struct AstDeclaration AstDeclaration;
 typedef struct AstBlock AstBlock;
 typedef struct AstStruct AstStruct;
 typedef struct AstEnum AstEnum;
+typedef struct AstFile AstFile;
 typedef struct Type Type;
 typedef struct TypeTable TypeTable;
 
 typedef enum AstKind {
     AST_ERR,
+    AST_FILE,
     AST_BLOCK,
     AST_STRUCT,
     AST_STRUCT_LITERAL,
@@ -29,6 +31,7 @@ typedef enum AstKind {
     AST_DECLARATION,
     AST_ASSIGNMENT,
     AST_DIRECTIVE,
+    AST_IMPORT,
     AST_PRINT,
     AST_ASSERT,
     AST_RETURN,
@@ -90,6 +93,7 @@ typedef enum AstFlags {
 typedef struct Ast {
     AstKind  kind;
     AstFlags flags;
+    AstFile *file;
     Pos      start;
     Pos      end;
 } Ast;
@@ -99,10 +103,21 @@ typedef struct AstExpr {
     Type *type;
 } AstExpr;
 
-typedef struct AstCode {
+typedef struct AstFile {
     Ast          head;
-    DynamicArray statements;
-} AstCode;
+    char        *text;
+    char        *absolute_path;
+    DynamicArray statements; // of Ast*
+    DynamicArray imports;    // of AstImport*
+    AstBlock    *scope;      // All exported declarations in this file e.g function definitions, struct definitions etc is contained here
+} AstFile;
+
+typedef struct AstImport {
+    Ast      head;
+    Token    path_token;
+    char    *resolved_path;
+    AstFile *imported_file;
+} AstImport;
 
 typedef enum IdentifierFlags {
     IDENTIFIER_IS_NAME_OF_ENUM     = 1 << 0,
@@ -448,12 +463,12 @@ typedef struct AstArrayLiteral {
 } AstArrayLiteral;
 
 typedef enum LiteralKind {
-    LITERAL_BOOLEAN     = TOKEN_BOOLEAN,
-    LITERAL_INTEGER     = TOKEN_INTEGER,
-    LITERAL_FLOAT       = TOKEN_FLOAT,
-    LITERAL_STRING      = TOKEN_STRING,
-    LITERAL_NULL        = TOKEN_NULL,
-    LITERAL_IDENTIFIER  = TOKEN_IDENTIFIER,
+    LITERAL_BOOLEAN     = TOKEN_LITERAL_BOOLEAN,
+    LITERAL_INTEGER     = TOKEN_LITERAL_INTEGER,
+    LITERAL_FLOAT       = TOKEN_LITERAL_FLOAT,
+    LITERAL_STRING      = TOKEN_LITERAL_STRING,
+    LITERAL_NULL        = TOKEN_LITERAL_NULL,
+    LITERAL_IDENTIFIER  = TOKEN_LITERAL_IDENTIFIER,
 } LiteralKind;
 
 typedef struct AstLiteral {

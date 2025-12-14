@@ -1,4 +1,5 @@
 #include "ast.h"
+#include "lib/file.h"
 
 typedef struct Parser {
     Lexer *lexer;
@@ -10,13 +11,14 @@ typedef struct Parser {
 
     AstFunctionDefn *enclosing_function;
     AstBlock *current_scope;
+    AstFile  *current_file;
     TypeTable type_table;
 
     bool inside_statement_header;
 } Parser;
 
 Parser   parser_init(Lexer *lexer);
-AstCode *parse_top_level_code(Parser *parser);
+AstFile *parse_file(Parser *parser, char *file_path);
 
 AstDeclaration *generate_declaration(Parser *parser, char *ident_name, AstExpr *expr, Type *type, DeclarationFlags flags);
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_pointed_to_by_data, char *struct_name);

@@ -16,6 +16,8 @@ typedef struct DynamicArray {
 
 DynamicArray da_init(unsigned int init_cap, unsigned int item_size);
 void _da_append(DynamicArray *da, void *item);
+void da_free(DynamicArray *da);
+void da_remove(DynamicArray *da, int index);
 
 #endif 
 
@@ -50,6 +52,36 @@ void _da_append(DynamicArray *da, void *item) {
     void *dst = da->items + (da->count * da->item_size);
     memcpy(dst, item, da->item_size);
     da->count += 1;
+}
+
+void da_remove(DynamicArray *da, int index) {
+    if (index == -1) index = da->count - 1; // Special case to get last element
+    if (index >= da->count || index < 0) return;
+
+
+    // Shift over all the bytes by one item size
+    unsigned char *ptr   = da->items + (index * da->item_size);
+
+    if (index == da->count - 1) {
+        // Removing the last element, we can simply NULL it without doing any shifting on the rest of the array
+        memset(ptr, 0, da->item_size);
+        da->count -= 1;
+    } else {
+        int after_index = index + 1;
+        unsigned char *after = da->items + (after_index * da->item_size);
+        memcpy(ptr, after, (da->count - after_index) * da->item_size);
+        unsigned char *last_item = da->items + ((da->count - 1) * da->item_size);
+        memset(last_item, 0, da->item_size);
+        da->count -= 1;
+    }
+}
+
+void da_free(DynamicArray *da) {
+    free(da->items);
+    da->count = 0;
+    da->capacity = 0;
+    da->item_size = 0;
+    da->items = NULL;
 }
 
 #endif

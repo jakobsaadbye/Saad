@@ -42,14 +42,14 @@ typedef enum TokenType {
 
     // Mentally insert ASCII values here ...
 
-    TOKEN_INTEGER    = 128,
-    TOKEN_FLOAT      = 129,
-    TOKEN_STRING     = 130,
-    TOKEN_IDENTIFIER = 131,
-    TOKEN_BOOLEAN    = 132,
-    TOKEN_FALSE      = 133,
-    TOKEN_TRUE       = 134,
-    TOKEN_NULL       = 135,
+    TOKEN_LITERAL_INTEGER    = 128,
+    TOKEN_LITERAL_FLOAT      = 129,
+    TOKEN_LITERAL_STRING     = 130,
+    TOKEN_LITERAL_IDENTIFIER = 131,
+    TOKEN_LITERAL_BOOLEAN    = 132,
+    TOKEN_LITERAL_FALSE      = 133,
+    TOKEN_LITERAL_TRUE       = 134,
+    TOKEN_LITERAL_NULL       = 135,
 
     TOKEN_LOGICAL_OR    = 140,
     TOKEN_LOGICAL_AND   = 141,
@@ -84,6 +84,7 @@ typedef enum TokenType {
     TOKEN_SIZEOF       = 170,
     TOKEN_CAST         = 171,
     TOKEN_NEW          = 172,
+    TOKEN_IMPORT       = 173,
 
     TOKEN_STRUCT  = 180,
     TOKEN_ENUM    = 181,
@@ -147,8 +148,8 @@ typedef struct Token {
 } Token;
 
 typedef struct Lexer {
-    char *input_str;
-    const char *file_path;
+    char *file_text;
+    char *file_path;
 
     DynamicArray tokens; // of Token
 
@@ -166,8 +167,8 @@ typedef struct KeywordMatch {
 } KeywordMatch;
 
 
-Lexer lexer_init(char *input_str, const char *file_path);
-bool lex(Lexer *lexer);
+Lexer lexer_init();
+bool lex_file(Lexer *lexer);
 void eat_character(Lexer *lexer);
 void eat_characters(Lexer *lexer, int chars_to_eat);
 char peek_char(Lexer *lexer, int lookahead);
@@ -181,7 +182,7 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
 void make_identifier(Lexer *lexer, Pos start);
 void make_single_character_token(Lexer *lexer, TokenType token_type);
 void make_token(Lexer *lexer, TokenType token_type, Pos start);
-KeywordMatch is_keyword(Lexer *lexer);
+KeywordMatch match_keyword(Lexer *lexer);
 bool ends_literal(char c);
 bool starts_identifier(char c);
 bool proceeds_identifier(char c);
@@ -193,7 +194,7 @@ bool is_unary_operator(TokenType op);
 bool is_digit(char c);
 char *text_bold(char *text);
 void report_error_here(Lexer *lexer, const char *message, ...);
-void report_error_helper(Lexer *lexer, const char* label, Pos start, Pos end, const char *message, va_list args);
+void report_error_helper(char *file_path, char *file_text, const char* label, Pos start, Pos end, const char *template, va_list args);
 Line get_line(char *input_str, int line_num);
 void free_line(Line line);
 const char *label_color(const char *label);

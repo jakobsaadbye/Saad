@@ -1,48 +1,51 @@
 #include "scope.h"
 
-typedef struct ConstEvaluater {
+typedef struct ConstEvaluator {
     Parser *parser;
-} ConstEvaluater;
+} ConstEvaluator;
 
 
-ConstEvaluater const_evaluator_init(Parser *parser) {
-    ConstEvaluater ce = {0};
+ConstEvaluator const_evaluator_init(Parser *parser) {
+    ConstEvaluator ce = {0};
     ce.parser  = parser;
     return ce;
 }
 
 
-AstExpr *simplify_expression(ConstEvaluater *ce, AstBlock *scope, AstExpr *expr);
+AstExpr *simplify_expression(ConstEvaluator *ce, AstBlock *scope, AstExpr *expr);
 
 
-AstExpr *make_literal_integer(ConstEvaluater *ce, long long value) {
+AstExpr *make_literal_integer(ConstEvaluator *ce, long long value) {
     AstLiteral *lit          = ast_allocate(ce->parser, sizeof(AstLiteral));
     lit->head.head.kind      = AST_LITERAL;
-    lit->head.type = primitive_type(PRIMITIVE_INT);
+    lit->head.head.file      = ce->parser->current_file;
+    lit->head.type            = primitive_type(PRIMITIVE_INT);
     lit->kind                = LITERAL_INTEGER;
     lit->as.value.integer    = value;
     return (AstExpr *)(lit);
 }
 
-AstExpr *make_literal_float(ConstEvaluater *ce, double value) {
+AstExpr *make_literal_float(ConstEvaluator *ce, double value) {
     AstLiteral *lit          = ast_allocate(ce->parser, sizeof(AstLiteral));
     lit->head.head.kind      = AST_LITERAL;
-    lit->head.type = primitive_type(PRIMITIVE_FLOAT);
+    lit->head.head.file      = ce->parser->current_file;
+    lit->head.type           = primitive_type(PRIMITIVE_FLOAT);
     lit->kind                = LITERAL_FLOAT;
     lit->as.value.floating   = value;
     return (AstExpr *)(lit);
 }
 
-AstExpr *make_literal_boolean(ConstEvaluater *ce, bool value) {
+AstExpr *make_literal_boolean(ConstEvaluator *ce, bool value) {
     AstLiteral *lit          = ast_allocate(ce->parser, sizeof(AstLiteral));
     lit->head.head.kind      = AST_LITERAL;
-    lit->head.type = primitive_type(PRIMITIVE_BOOL);
+    lit->head.head.file      = ce->parser->current_file;
+    lit->head.type           = primitive_type(PRIMITIVE_BOOL);
     lit->kind                = LITERAL_BOOLEAN;
     lit->as.value.boolean    = value;
     return (AstExpr *)(lit);
 }
 
-AstExpr *simplify_binary(ConstEvaluater *ce, AstBlock *scope, AstBinary *bin) {
+AstExpr *simplify_binary(ConstEvaluator *ce, AstBlock *scope, AstBinary *bin) {
     AstExpr *left_expr  = simplify_expression(ce, scope, bin->left);
     AstExpr *right_expr = simplify_expression(ce, scope, bin->right);
 
@@ -86,7 +89,7 @@ AstExpr *simplify_binary(ConstEvaluater *ce, AstBlock *scope, AstBinary *bin) {
     XXX;
 }
 
-AstExpr *simplify_unary(ConstEvaluater *ce, AstBlock *scope, AstUnary *unary) {
+AstExpr *simplify_unary(ConstEvaluator *ce, AstBlock *scope, AstUnary *unary) {
     AstExpr *sub_expr = simplify_expression(ce, scope, unary->expr);
 
     if (sub_expr->head.kind != AST_LITERAL) return (AstExpr *)(sub_expr);
@@ -119,7 +122,7 @@ AstExpr *simplify_unary(ConstEvaluater *ce, AstBlock *scope, AstUnary *unary) {
     exit(1);
 }
 
-AstExpr *simplify_expression(ConstEvaluater *ce, AstBlock *scope, AstExpr *expr) {
+AstExpr *simplify_expression(ConstEvaluator *ce, AstBlock *scope, AstExpr *expr) {
     switch (expr->head.kind) {
         case AST_FUNCTION_CALL: return expr; // don't evaluate
         case AST_BINARY:        return simplify_binary(ce, scope, (AstBinary *)(expr));

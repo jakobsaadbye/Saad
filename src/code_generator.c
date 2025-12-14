@@ -14,9 +14,9 @@ typedef struct CodeGenerator {
 
     Parser *parser;
 
+    AstFile         *current_file;
     AstBlock        *current_scope;
     AstFunctionDefn *enclosing_function;  // Current enclosing function
-    TypeTable        type_table;
 
     size_t constants;   // For float and string literals
     size_t labels;      // For coditional jumps
@@ -36,11 +36,11 @@ typedef struct MemberAccessResult {
     bool is_runtime_computed;
 } MemberAccessResult;
 
-void emit_code(CodeGenerator *cg, AstCode *code);
+void emit_file(CodeGenerator *cg, AstFile *code);
 void emit_builtin_functions(CodeGenerator *cg);
 void emit_header(CodeGenerator *cg);
 
-void emit_code(CodeGenerator *cg, AstCode *code);
+void emit_file(CodeGenerator *cg, AstFile *code);
 void emit_statement(CodeGenerator *cg, Ast *node);
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn);
 void emit_function_call(CodeGenerator *cg, AstFunctionCall *call);
@@ -69,7 +69,7 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma);
 
 bool has_large_return_type(AstFunctionDefn *func_defn);
 int allocate_variable(CodeGenerator *cg, int size);
-void check_main_exists(CodeGenerator *cg);
+void check_main_exists(CodeGenerator *cg, AstFile *file);
 int make_label_number(CodeGenerator *cg);
 const char *get_comparison_set_instruction(CodeGenerator *cg, AstBinary *bin);
 const char *boolean_operator_to_instruction(TokenType op);
@@ -112,8 +112,7 @@ CodeGenerator code_generator_init(Parser *parser) {
     cg.code_header = sb_init(1024);
 
     cg.parser         = parser;
-    cg.type_table     = parser->type_table;
-    cg.current_scope  = parser->current_scope;
+    cg.current_scope  = NULL;
     cg.enclosing_function           = NULL;
     cg.constants      = 0;
     cg.labels         = 0;
@@ -126,14 +125,14 @@ CodeGenerator code_generator_init(Parser *parser) {
     return cg;
 }
 
-void begin_emit_code(CodeGenerator *cg, AstCode *code) {
-    check_main_exists(cg);
+void begin_emit_code(CodeGenerator *cg, AstFile *file) {
+    check_main_exists(cg, file);
     emit_header(cg);
-    emit_code(cg, code);
+    emit_file(cg, file);
 }
 
-void check_main_exists(CodeGenerator *cg) {
-    AstIdentifier *main = lookup_from_scope(cg->parser, cg->current_scope, "main");
+void check_main_exists(CodeGenerator *cg, AstFile *file) {
+    AstIdentifier *main = lookup_from_scope(cg->parser, file->scope, "main");
     if (main == NULL) {
         printf("Error: Missing function 'main' as entry-point to the program\n");
         exit(1);
@@ -184,11 +183,37 @@ void emit_builtin_functions(CodeGenerator *cg) {
     sb_append(&cg->code, "   call\t\tExitProcess\n\n");
 }
 
-void emit_code(CodeGenerator *cg, AstCode *code) {
-    for (int i = 0; i < code->statements.count; i++) {
-        Ast *stmt = ((Ast **)(code->statements.items))[i];
+void emit_file(CodeGenerator *cg, AstFile *file) {
+    cg->current_file  = file;
+    cg->current_scope = file->scope;
+
+    // @Cleanup @CopyPasta :CopyPasteCurrentFile 
+    cg->parser->current_file = file;
+    cg->parser->current_scope = file->scope;
+
+    for (int i = 0; i < file->statements.count; i++) {
+        Ast *stmt = ((Ast **)(file->statements.items))[i];
         emit_statement(cg, stmt);
     }
+}
+
+void restore_codegen_state(CodeGenerator *cg, CodeGenerator saved_state) {
+    cg->current_file  = saved_state.current_file;
+    cg->current_scope = saved_state.current_scope;
+
+    // @Cleanup @CopyPasta :CopyPasteCurrentFile 
+    cg->parser->current_file  = saved_state.current_file;
+    cg->parser->current_scope = saved_state.current_scope;
+}
+
+void emit_import(CodeGenerator *cg, AstImport *import) {
+    assert(import->imported_file);
+
+    CodeGenerator current_state = *cg;
+
+    emit_file(cg, import->imported_file);
+
+    restore_codegen_state(cg, current_state);
 }
 
 void emit_block(CodeGenerator *cg, AstBlock *block) {
@@ -210,6 +235,7 @@ void emit_statement(CodeGenerator *cg, Ast *node) {
     reset_temporary_storage(cg->enclosing_function);
 
     switch (node->kind) {
+    case AST_IMPORT:            emit_import(cg, (AstImport *)(node)); break;
     case AST_BLOCK:             emit_block(cg, (AstBlock *)(node)); break;
     case AST_DECLARATION:       emit_declaration(cg, (AstDeclaration *)(node)); break;
     case AST_ASSIGNMENT:        emit_assignment(cg, (AstAssignment *)(node)); break;
@@ -478,7 +504,6 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
             break;
         }
         }
-
         sb_append(&cg->code, "   mov\t\t%d[rbp], rbx     ; data\n", offset_data);
         sb_append(&cg->code, "   mov\t\t%d[rbp], rcx     ; count\n", offset_count);
         sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0 ; index\n", offset_index);
@@ -489,17 +514,17 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         sb_append(&cg->code, "   cmp\t\trax, rbx\n");
         sb_append(&cg->code, "   jge\t\tL%d\n", done_label);
 
+
+        // Copy element i into the iterator offset
         int real_iterator_size = iterator->type->size;
         if (ast_for->is_by_pointer) {
             real_iterator_size = ((TypePointer *)iterator->type)->pointer_to->size;
         }
-
-        // Load pointer to element i
         sb_append(&cg->code, "   mov\t\trbx, QWORD %d[rbp]\n", offset_data);
         sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", offset_index);
         sb_append(&cg->code, "   imul\t\trax, %d\n", real_iterator_size);
         sb_append(&cg->code, "   lea\t\trbx, [rbx + rax]\n");
-
+        
         if (ast_for->is_by_pointer) {
             sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", offset_iterator);
         }
