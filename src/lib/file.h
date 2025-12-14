@@ -6,7 +6,9 @@
 #include <direct.h>
 
 char *read_entire_file(const char *file_path);
+bool check_file_exists(const char *file_path);
 void change_directory(const char *dir);
+char *get_current_directory();
 void make_directory(const char *dir);
 
 #endif
@@ -43,11 +45,29 @@ char *read_entire_file(const char *file_path) {
     return buffer;
 }
 
+bool check_file_exists(const char *file_path) {
+    FILE *f = fopen(file_path, "r");
+    if (f == NULL) {
+        return false;
+    }
+    fclose(f);
+    return true;
+}
+
 void change_directory(const char *dir) {
     if (_chdir(dir) != 0) {
         printf("%s:%d: error: Failed to change directory to '%s'\n", __FILE__, __LINE__, dir);
         exit(1);
     }
+}
+
+char *get_current_directory() {
+    char *buffer = _getcwd(NULL, 0);
+    if (buffer == NULL) {
+        printf("%s:%d: error: Failed to get current directory\n", __FILE__, __LINE__);
+        exit(1);
+    }
+    return buffer;
 }
 
 void make_directory(const char *dir) {

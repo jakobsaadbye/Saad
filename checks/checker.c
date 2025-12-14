@@ -1,9 +1,9 @@
 #include "dirent.h"
-#include "../src/pipeline.c"
+#include "../src/compiler.c"
 
 #define TEST_OUTPUT_LEN 60
 
-void check_entire_directory(const char *dir_name, bool should_fail) {
+void check_entire_directory(CompilerConfig *config, const char *dir_name, bool should_fail) {
     DIR *dir = opendir(dir_name);
     if (dir == NULL) {
         printf("error: Failed to open directory '%s'", dir_name);
@@ -64,9 +64,11 @@ void check_entire_directory(const char *dir_name, bool should_fail) {
 }
 
 int main() {
-    check_entire_directory("examples", false);
-    check_entire_directory("checks", false);
-    check_entire_directory("checks/should_fail", true);
+    CompilerConfig config = get_standard_compiler_config();
+
+    check_entire_directory(&config, "examples", false);
+    check_entire_directory(&config, "checks", false);
+    check_entire_directory(&config, "checks/should_fail", true);
 
     return 0;
 }

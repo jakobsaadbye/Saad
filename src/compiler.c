@@ -10,14 +10,14 @@
     #include <io.h>
 #endif
 
-void dump_tokens(Lexer *lexer, int start_token_idx) {
-    printf("\nTokens: \n");
-    for (int i = start_token_idx; i < lexer->tokens.count; i++) {
-        Token token = ((Token *)lexer->tokens.items)[i];
-        printf("%s ", token_type_to_str(token.type));
-    }
-    printf("\n\n");
-}
+#define MAX_RESOLVED_IMPORT_PATH_LENGTH 256
+
+typedef struct CompilerConfig {
+    char *compiler_path;
+    char *stdlib_path;
+    char *working_directory;
+    char *file_extension;
+} CompilerConfig;
 
 typedef struct CompilerReport {
     clock_t lex_time_start;
@@ -31,6 +31,26 @@ typedef struct CompilerReport {
     clock_t asm_and_link_time_start;
     clock_t asm_and_link_time_end;
 } CompilerReport;
+
+
+CompilerConfig get_standard_compiler_config() {
+    CompilerConfig config = {0};
+    config.compiler_path  = "C:\\Saad";      // @Hardcoded
+    config.stdlib_path    = "C:\\Saad\\std"; // @Hardcoded
+    config.working_directory = get_current_directory();
+    config.file_extension = "sd";
+
+    return config;
+}
+
+void dump_tokens(Lexer *lexer, int start_token_idx) {
+    printf("\nTokens: \n");
+    for (int i = start_token_idx; i < lexer->tokens.count; i++) {
+        Token token = ((Token *)lexer->tokens.items)[i];
+        printf("%s ", token_type_to_str(token.type));
+    }
+    printf("\n\n");
+}
 
 void print_compiler_report(CompilerReport cr) {
     double dt_lex      = (double)(cr.lex_time_end - cr.lex_time_start) / CLOCKS_PER_SEC;
@@ -78,7 +98,38 @@ void cleanup() {
     reset_stdout();
 }
 
-bool compile_program(const char *main_path, bool output_to_console) {
+bool resolve_import(CompilerConfig *config, Parser *parser, AstImport *import, AstFile *current_file) {
+
+    char *import_path = malloc(strlen(import->string) + 8);
+    sprintf(import_path, "%s.%s", import->string, config->file_extension);
+
+    if (strcmp(import_path, current_file->absolute_path) == 0) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)import, "Recursive import of '%s'", import->string);
+        return false;
+    }
+
+    if (check_file_exists(import_path)) {
+        import->resolved_path = import_path;
+    } else {
+        // Check in the stdlib folder
+        change_directory(config->stdlib_path);
+        if (check_file_exists(import_path)) {
+            import->resolved_path = malloc(MAX_RESOLVED_IMPORT_PATH_LENGTH);
+            sprintf(import->resolved_path, "%s\\%s", config->stdlib_path, import_path);
+        }
+        change_directory(config->working_directory);
+    }
+
+    if (import->resolved_path == NULL) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)import, "Unable to resolve import '%s'", import->string);
+        report_error_ast(parser, LABEL_NOTE, NULL, "Current working directory is: %s", config->working_directory);
+        return false;
+    }
+
+    return true;
+}
+
+bool compile_program(CompilerConfig *config, const char *main_path, bool output_to_console) {
     CompilerReport report = {0};
 
     old_stdout = dup(1);
@@ -117,8 +168,13 @@ bool compile_program(const char *main_path, bool output_to_console) {
 
         // Add any file imports as file paths to visit next
         for (int i = 0; i < current_file->imports.count; i++) {
-            AstImport *ast_import = ((AstImport **)current_file->imports.items)[i];
-            da_append(&file_paths_to_visit, ast_import->resolved_path);
+            AstImport *import = ((AstImport **)current_file->imports.items)[i];
+
+            // @Improve: These error messages when we get a proper module system
+            bool resolved = resolve_import(config, &parser, import, current_file);
+            if (!resolved) return false;
+
+            da_append(&file_paths_to_visit, import->resolved_path);
         }
 
         file_path_cursor += 1;
@@ -135,12 +191,19 @@ bool compile_program(const char *main_path, bool output_to_console) {
             AstImport *import = ((AstImport **)file->imports.items)[j];
             
             // Do a linear scan to find the corresponding AstFile *
+            bool found = false;
             for (int k = 0; k < parsed_files.count; k++) {
                 AstFile *other_file = ((AstFile **)parsed_files.items)[k];
 
                 if (strcmp(import->resolved_path, other_file->absolute_path) == 0) {
                     import->imported_file = other_file;
+                    found = true;
                 }
+            }
+
+            if (!found) {
+                report_error_ast(&parser, LABEL_ERROR, (Ast *)import, "Compiler Error: Failed to link the following import");
+                return false;
             }
         }
     }

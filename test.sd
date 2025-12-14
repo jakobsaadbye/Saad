@@ -1,18 +1,5 @@
-import "test2.sd";
-
-Vector2 :: struct {
-    x: float;
-    y: float;
-}
-
-add :: (a: Vector2, b: Vector2) -> Vector2 {
-    return {
-        x = a.x + b.x,
-        y = a.y + b.y,
-    };
-}
+import "raylib";
 
 main :: () {
-    c := add({1, 3}, {4, 9});
-    print("Hello World! %", c);
+    InitWindow(1280, 1080, "Test");
 }

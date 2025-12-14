@@ -115,6 +115,7 @@ typedef struct AstFile {
 typedef struct AstImport {
     Ast      head;
     Token    path_token;
+    char    *string;
     char    *resolved_path;
     AstFile *imported_file;
 } AstImport;

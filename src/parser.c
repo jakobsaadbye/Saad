@@ -156,8 +156,8 @@ AstImport *parse_import(Parser *parser) {
     ast_import->head.start = import_token.start;
     ast_import->head.end   = path_token.end;
     ast_import->path_token = path_token;
-    ast_import->resolved_path = resolve_import_path(parser, ast_import->path_token.as_value.value.string.data);
-    if (ast_import->resolved_path == NULL) {
+    ast_import->string = resolve_import_path(parser, ast_import->path_token.as_value.value.string.data);
+    if (ast_import->string == NULL) {
         return NULL;
     }
 

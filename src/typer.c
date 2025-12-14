@@ -499,12 +499,12 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     }
 
     if (func_ident == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Undefined function '%s'", text_bold(call->identifer->name));
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined function '%s'", text_bold(call->identifer->name));
         return NULL;
     }
 
     if (func_ident->type->kind != TYPE_FUNCTION) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "%s is not the name of a function. Type of %s is %s", func_ident->name, func_ident->name, type_to_str(func_ident->type));
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "%s is not the name of a function. Type of %s is %s", func_ident->name, func_ident->name, type_to_str(func_ident->type));
         return NULL;
     }
 

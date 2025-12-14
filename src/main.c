@@ -1,6 +1,6 @@
 #define DEBUG
 
-#include "pipeline.c"
+#include "compiler.c"
 
 int main(int argc, char const *argv[]) {
     if (argc < 2) { 
@@ -12,7 +12,9 @@ int main(int argc, char const *argv[]) {
 
     const char *main_file_path = argv[1];
 
-    bool success = compile_program(main_file_path, true);
+    CompilerConfig config = get_standard_compiler_config();
+
+    bool success = compile_program(&config, main_file_path, true);
     if (success) {
         printf("\n\nCompiled successfully.\n\n");
     } else {
