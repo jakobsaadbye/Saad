@@ -136,7 +136,6 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     if (!output_to_console) {
         freopen("nul", "w", stdout);
     }
-
     
     Lexer lexer           = lexer_init();
     Parser parser         = parser_init(&lexer);

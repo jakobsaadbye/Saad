@@ -1,4 +1,0 @@
-Vector2 :: struct {
-    x: float;
-    y: float;
-}

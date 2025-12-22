@@ -67,7 +67,6 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
 
 MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma);
 
-bool has_large_return_type(AstFunctionDefn *func_defn);
 int allocate_variable(CodeGenerator *cg, int size);
 void check_main_exists(CodeGenerator *cg, AstFile *file);
 int make_label_number(CodeGenerator *cg);
@@ -574,20 +573,22 @@ void emit_while(CodeGenerator *cg, AstWhile *ast_while) {
 }
 
 void emit_return(CodeGenerator *cg, AstReturn *ast_return) {
+    // @Fix
+    for (int i = 0; i < ast_return->values.count; i++) {
+        AstExpr *return_value = ((AstExpr **)ast_return->values.items)[i];
+        emit_expression(cg, return_value);
 
-    emit_expression(cg, ast_return->expr);
+        Type *return_type = ((Type **)ast_return->enclosing_function->return_types.items)[i];
 
-    Type *expr_type   = ast_return->expr->type;
-    Type *return_type = ast_return->enclosing_function->return_type;
-
-    if (is_untyped_type(expr_type) && return_type->kind == TYPE_FLOAT) {
-
-        // Here we just convert the integer to a float
-        assert(expr_type->kind == TYPE_INTEGER);
-        POP(RAX);
-        sb_append(&cg->code, "   %s\txmm0, %s\n", cvtsi2ss_or_cvtsi2sd(return_type), REG_A(expr_type));
-        sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(return_type), REG_A(expr_type));
-        PUSH(RAX);
+        if (is_untyped_type(return_value->type) && return_type->kind == TYPE_FLOAT) {
+    
+            // Here we just convert the integer to a float
+            assert(return_value->type->kind == TYPE_INTEGER);
+            POP(RAX);
+            sb_append(&cg->code, "   %s\txmm0, %s\n", cvtsi2ss_or_cvtsi2sd(return_type), REG_A(return_value->type));
+            sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(return_type), REG_A(return_value->type));
+            PUSH(RAX);
+        }
     }
 
     sb_append(&cg->code, "   jmp\t\tL%d\n", ast_return->enclosing_function->return_label);
@@ -614,7 +615,7 @@ void emit_struct_copy(CodeGenerator *cg, TypeStruct *struct_defn, int dst_base_o
 // correct register or stack location expected by the caller
 void emit_function_return_value(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
-    Type *return_type = func_defn->return_type;
+    Type *return_type = ((Type **)func_defn->return_types.items)[0];
 
     switch (return_type->kind) {
     case TYPE_VOID: {
@@ -834,8 +835,12 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "   sub\t\trsp, %d\n", bytes_total);
 
     // Move hidden struct return pointers (if any) to the first parts of the stack
-    int num_large_return_values = func_defn->return_type->size > 8 ? 1 : 0;
-    if (num_large_return_values > 0) {
+    int num_large_return_values = 0;
+    for (int i = 0; i < func_defn->return_types.count; i++) {
+        Type *return_type = ((Type **)func_defn->return_types.items)[i];
+        if (return_type->size <= 8) continue;
+
+        num_large_return_values += 1;
         allocate_variable(cg, 8);
         if (func_defn->is_method) {
             sb_append(&cg->code, "   mov\t\t-8[rbp], rdx\t; Return 0\n");
@@ -1113,29 +1118,27 @@ void move_func_argument_to_register_or_temp(CodeGenerator *cg, int arg_index, Ty
     }
 }
 
-inline bool has_large_return_type(AstFunctionDefn *func_defn) {
-    return func_defn->return_type->size > 8;
-}
-
 void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     
     AstFunctionDefn *func_defn = call->func_defn;
     bool is_method = func_defn->is_method;
-    int arg_count = call->arguments.count;
-    int num_large_return_values = 0;
 
-    if (call->func_defn->return_type->size > 8) {
-        num_large_return_values = 1;
+    int num_large_return_values = 0;
+    for (int i = 0; i < call->func_defn->return_types.count; i++) {
+        Type *return_type = ((Type **)call->func_defn->return_types.items)[0];
+        if (return_type->size > 8) {
+            num_large_return_values += 1;
+        }
     }
 
     // Push all the arguments
-    for (int i = 0; i < arg_count; i++) {
+    for (int i = 0; i < call->arguments.count; i++) {
         AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
         emit_expression(cg, arg);
     }
 
     // Pop the arguments
-    for (int i = arg_count - 1; i >= 0; i--) {
+    for (int i = call->arguments.count - 1; i >= 0; i--) {
         AstExpr *arg      = ((AstExpr **)call->arguments.items)[i];
         Type    *arg_type = arg->type;
 
@@ -1266,15 +1269,16 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     }
 
     // Put large return values into the hidden slots allocated by the caller
-    if (num_large_return_values > 0) {
-        // @Hardcoded @Future - Right now we only deal with 1 large return value which we have reserved space for
-        // in the function. Here we give the function a hidden pointer to that return value that the function knows it should write to
-        int temp_loc = push_temporary_value(cg->enclosing_function, call->func_defn->return_type->size);
+    for (int i = 0; i < func_defn->return_types.count; i++) {
+        Type *return_type = ((Type **)func_defn->return_types.items)[i];
+        if (return_type->size <= 8) continue;
 
+        int temp_loc = push_temporary_value(cg->enclosing_function, return_type->size);
         if (is_method) {
-            sb_append(&cg->code, "   lea\t\trdx, %d[rbp]\t\t; Return value 0\n", temp_loc);
+            sb_append(&cg->code, "   lea\t\trdx, %d[rbp]\t\t; Return value %d\n", temp_loc, i);
         } else {
-            sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\t\t; Return value 0\n", temp_loc);
+            char *reg = get_argument_register_from_index(i);
+            sb_append(&cg->code, "   lea\t\t%s, %d[rbp]\t\t; Return value %d\n", reg, temp_loc, i);
         }
     }
 
@@ -1968,8 +1972,8 @@ int allocate_variable(CodeGenerator *cg, int size) {
 
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     if (decl->flags & DECLARATION_CONSTANT) {
-        assert(decl->expr->head.kind == AST_LITERAL);
-        AstLiteral *lit = (AstLiteral *)(decl->expr);
+        assert(decl->value->head.kind == AST_LITERAL);
+        AstLiteral *lit = (AstLiteral *)(decl->value);
 
         switch (lit->kind) {
         case LITERAL_BOOLEAN: break; // Immediate value is used
@@ -1988,7 +1992,7 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     sb_append(&cg->code, "\n");
     sb_append(&cg->code, "   ; Ln %d: $%s : %s = %d\n", decl->ident->head.start.line, decl->ident->name, type_to_str(decl->type), decl->ident->stack_offset);
     
-    if (!decl->expr) {
+    if (!decl->value) {
         zero_initialize(cg, decl->type, decl->ident->stack_offset, false);
         return;
     }
@@ -2007,14 +2011,14 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
 
     set_flag(cg, CODEGEN_DO_DIRECT_ASSIGNMENT);
     cg->direct_offset = decl->ident->stack_offset;
-    emit_expression(cg, decl->expr);
+    emit_expression(cg, decl->value);
 
-    if (decl->expr->head.kind == AST_STRUCT_LITERAL || decl->expr->head.kind == AST_ARRAY_LITERAL) {
+    if (decl->value->head.kind == AST_STRUCT_LITERAL || decl->value->head.kind == AST_ARRAY_LITERAL) {
         // The value was directly assigned to the variable
         return;
     }
     
-    emit_simple_initialization(cg, decl->ident->stack_offset, false, false, decl->type, decl->expr->type);
+    emit_simple_initialization(cg, decl->ident->stack_offset, false, false, decl->type, decl->value->type);
 }
 
 void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
@@ -2824,8 +2828,8 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             assert(ident);
 
             if (ident->belongs_to_decl && ident->belongs_to_decl->flags & DECLARATION_CONSTANT) {
-                assert(ident->belongs_to_decl->expr->head.kind == AST_LITERAL);
-                AstLiteral *lit = (AstLiteral *)(ident->belongs_to_decl->expr);
+                assert(ident->belongs_to_decl->value->head.kind == AST_LITERAL);
+                AstLiteral *lit = (AstLiteral *)(ident->belongs_to_decl->value);
                 switch (lit->kind) {
                     case LITERAL_BOOLEAN: {
                         sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);

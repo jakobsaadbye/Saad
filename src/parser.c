@@ -293,12 +293,29 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
 }
 
 bool starts_declaration(Parser *parser, Token token) {
-    Token next = peek_token(parser, 1);
+    Token next = token;
+    int cursor = 0;
 
-    if (token.type == TOKEN_LITERAL_IDENTIFIER) {
-        if (next.type == ':')                return true;
-        if (next.type == TOKEN_COLON_EQUAL)  return true;
-        if (next.type == TOKEN_DOUBLE_COLON) return true;
+    while (true) {
+        if (next.type == TOKEN_LITERAL_IDENTIFIER) {
+            cursor += 1;
+            next = peek_token(parser, cursor);
+
+            if (next.type == ',') {
+                cursor += 1;
+                next = peek_token(parser, cursor);
+                continue;
+            }
+
+            if (next.type == ':')                return true;
+            if (next.type == TOKEN_COLON_EQUAL)  return true;
+            if (next.type == TOKEN_DOUBLE_COLON) return true;
+
+            // Check for multi declaration
+            break;
+        }
+
+        break;
     }
 
     return false;
@@ -1144,18 +1161,31 @@ AstExpr *parse_range_or_normal_expression(Parser *parser) {
 AstReturn *parse_return(Parser *parser) {
     assert(parser->enclosing_function);
 
+    AstReturn *ast_return = (AstReturn *)(ast_allocate(parser, sizeof(AstReturn)));
+    ast_return->values = da_init(2, sizeof(AstExpr *));
+
     Token return_token = peek_next_token(parser);
     eat_token(parser);
 
-    AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-    if (!expr) return NULL;
+    while (true) {
+        AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+        if (!expr) return NULL;
 
-    AstReturn *ast_return = (AstReturn *)(ast_allocate(parser, sizeof(AstReturn)));
+        da_append(&ast_return->values, expr);
+
+        Token next = peek_next_token(parser);
+        if (next.type == ',') {
+            eat_token(parser);
+            continue;
+        } else {
+            break;
+        }
+    }
+    
     ast_return->head.kind  = AST_RETURN;
     ast_return->head.file  = parser->current_file;
     ast_return->head.start = return_token.start;
-    ast_return->head.end   = expr->head.end;
-    ast_return->expr       = expr;
+    ast_return->head.end   = ((AstExpr **)ast_return->values.items)[ast_return->values.count - 1]->head.end; // last return value
     ast_return->enclosing_function = parser->enclosing_function;
 
     return ast_return;
@@ -1345,7 +1375,8 @@ AstFunctionCall *parse_function_call(Parser *parser) {
 
 AstFunctionDefn *parse_function_defn(Parser *parser) {
     AstFunctionDefn *func_defn = (AstFunctionDefn *)(ast_allocate(parser, sizeof(AstFunctionDefn)));
-    func_defn->parameters      = da_init(2, sizeof(AstDeclaration *));
+    func_defn->parameters   = da_init(2, sizeof(AstDeclaration *));
+    func_defn->return_types = da_init(2, sizeof(Type *));
 
     Token ident_token = peek_next_token(parser);
     expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
@@ -1383,7 +1414,6 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
 
         AstDeclaration *param = parse_declaration(parser, DECLARATION_IS_FUNCTION_PARAMETER);
         if (!param) {
-            // @Todo: Error
             return NULL;
         }
 
@@ -1416,20 +1446,36 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         }
     }
 
-    Type *return_type = primitive_type(PRIMITIVE_VOID);
+    // Parse return type(s)
     next = peek_next_token(parser);
+
     if (next.type == TOKEN_RIGHT_ARROW) {
         eat_token(parser);
-        return_type = parse_type(parser);
-        if (!return_type) {
-            return NULL;
+
+        while (true) {
+            Type *return_type = parse_type(parser);
+            if (!return_type) {
+                return NULL;
+            }
+            da_append(&func_defn->return_types, return_type);
+
+            next = peek_next_token(parser);
+
+            if (next.type == ',') {
+                eat_token(parser);
+                continue;
+            } else {
+                break;
+            }
+
         }
+    } else {
+        // Make void the return type
+        Type *void_type = primitive_type(PRIMITIVE_VOID);
+        da_append(&func_defn->return_types, void_type);
     }
 
-    // We already set the return type here, so that a return statement within the block knows weather its a void function
-    // and therefore should not have an expression
-    func_defn->return_type = return_type;
-
+    // Parse extern directive @Deprecate
     CallingConv call_conv = CALLING_CONV_SAAD;
     bool        is_extern = false;
 
@@ -1479,7 +1525,6 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->head.end    = body->head.start;
     func_defn->identifier  = ident;
     func_defn->body        = body;
-    func_defn->return_type = return_type;
     func_defn->is_extern   = is_extern;
     func_defn->is_method   = func_is_method;
     func_defn->call_conv   = call_conv;
@@ -1712,110 +1757,146 @@ AstPrint *parse_print(Parser *parser) {
     return print;
 }
 
-AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
-    Token ident = peek_next_token(parser);
-    if (ident.type != TOKEN_LITERAL_IDENTIFIER) {
-        report_error_token(parser, LABEL_ERROR, ident, "Invalid declaration");
-        return NULL;
-    }
-    eat_token(parser);
+bool parse_expression_list(Parser *parser, DynamicArray *exprs) {
+    Token next = {0};
+    while (true) {
+        AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+        if (!expr) return false;
 
-    Token next = peek_next_token(parser);
+        da_append(exprs, expr);
+        next = peek_next_token(parser);
+        if (next.type == ',') {
+            eat_token(parser);
+            continue;
+        }
+        break;
+    }
+
+    return true;
+}
+
+AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
+    AstDeclaration *decl = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
+    decl->head.kind  = AST_DECLARATION;
+    decl->head.file  = parser->current_file;
+
+    decl->idents = da_init(2, sizeof(AstIdentifier *));
+    decl->values = da_init(2, sizeof(AstExpr *));
+
+    // Parse the identifiers
+    Token next = {0};
+
+    while (true) {
+        next = peek_next_token(parser);
+        assert(next.type == TOKEN_LITERAL_IDENTIFIER);
+
+        AstIdentifier *ident = make_identifier_from_token(parser, next, NULL);
+        ident->belongs_to_decl = decl;
+        da_append(&decl->idents, ident);
+
+        eat_token(parser);
+        next = peek_next_token(parser);
+        if (next.type == ',') {
+            eat_token(parser);
+            continue;
+        }
+
+        break;
+    }
+
+    // Parse the values
+    next = peek_next_token(parser);
 
     // Infer. e.g. a := b
     if (next.type == TOKEN_COLON_EQUAL) {
+        decl->flags |= DECLARATION_INFER;
+
         if (parser->current_scope->belongs_to_struct) {
-            report_error_token(parser, LABEL_ERROR, ident, "Default struct values are not yet supported");
+            report_error_token(parser, LABEL_ERROR, next, "Default struct values are not yet supported");
             return NULL;
         }
         eat_token(parser);
-        AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-        if (!expr) return NULL;
-        return make_declaration(parser, ident, expr, NULL, flags | DECLARATION_INFER);
-    }
 
-    // Typed. 'a : int = b' or 'a : int'
-    if (next.type == ':') {
+        bool ok = parse_expression_list(parser, &decl->values);
+        if (!ok) return NULL;
+    }
+    // Typed. 'a: int = b' or 'a: int'
+    else if (next.type == ':') {
         eat_token(parser);
 
         Type *type = parse_type(parser);
         if (type == NULL) return NULL;
+        decl->type = type;
 
         next = peek_next_token(parser);
 
         if (next.type == '=') {
+            decl->flags |= DECLARATION_TYPED;
             if (parser->current_scope->belongs_to_struct) {
-                report_error_token(parser, LABEL_ERROR, ident, "Default struct values are not yet implemented!");
+                report_error_token(parser, LABEL_ERROR, next, "Default struct values are not yet implemented!");
                 return NULL;
             }
             if (flags & DECLARATION_IS_FUNCTION_PARAMETER) {
-                report_error_token(parser, LABEL_ERROR, ident,"Default function arguments not implemented yet");
+                report_error_token(parser, LABEL_ERROR, next, "Default function arguments not implemented yet");
                 return NULL;
             };
             
             eat_token(parser);
-            AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-            if (!expr) return NULL;
-            return make_declaration(parser, ident, expr, type, flags | DECLARATION_TYPED);
-        } else {
-            return make_declaration(parser, ident, NULL, type, flags | DECLARATION_TYPED_NO_EXPR);
+
+            bool ok = parse_expression_list(parser, &decl->values);
+            if (!ok) return NULL;
+
+        } 
+        else {
+            decl->flags |= DECLARATION_TYPED_NO_EXPR;
+        }
+
+        // Add the type to all of the identifiers
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+            ident->type = type;
         }
     }
 
     // Constant. e.g. A :: 5;
-    if (next.type == TOKEN_DOUBLE_COLON) {
+    else if (next.type == TOKEN_DOUBLE_COLON) {
+        decl->flags |= DECLARATION_CONSTANT;
+
         eat_token(parser);
+        bool ok = parse_expression_list(parser, &decl->values);
+        if (!ok) return NULL;
 
-        AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-        if (!expr) return NULL;
-
-        return make_declaration(parser, ident, expr, NULL, flags | DECLARATION_CONSTANT);
-    }   
-
-    report_error_token(parser, LABEL_ERROR, next, "Invalid declaration");
-    exit(1);
-}
-
-AstDeclaration *make_declaration(Parser *parser, Token ident_token, AstExpr *expr, Type *type, DeclarationFlags flags) {
-    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, type);
-
-    if (flags & DECLARATION_CONSTANT) {
-        ident->flags |= IDENTIFIER_IS_CONSTANT;
+        // Mark all the identifiers as constant
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+            ident->flags |= IDENTIFIER_IS_CONSTANT;
+        }
+    }
+    else {
+        report_error_token(parser, LABEL_ERROR, next, "Invalid declaration");
+        return NULL;
     }
 
-    AstDeclaration *decl = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
-    decl->head.kind  = AST_DECLARATION;
-    decl->head.file  = parser->current_file;
-    decl->head.start = ident_token.start;
-    decl->head.end   = expr != NULL ? expr->head.end : type->head.end;
-    decl->ident      = ident;
-    decl->type       = type;
-    decl->flags      = flags;
-    decl->expr       = expr;
-
-    ident->belongs_to_decl = decl;
+    // Add decl position info
+    decl->head.start = ((AstIdentifier **)decl->idents.items)[0]->head.start;                                                        // Pos of first ident
+    decl->head.end   = decl->values.count > 0 ? ((AstExpr **)decl->values.items)[decl->values.count - 1]->head.end : decl->head.end; // Pos of last value or the type
 
     if (parser->current_scope->belongs_to_struct) {
         decl->flags |= DECLARATION_IS_STRUCT_MEMBER;
     }
 
-    // @ScopeRefactoring - We want to get rid of the use of identifiers and just have them as declarations at some point
-    if (parser->current_scope->kind == BLOCK_IMPERATIVE) {
+    // Add the identifiers to the current scope
+    assert(parser->current_scope != NULL);
+
+    for (int i = 0; i < decl->idents.count; i++) {
+        AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+
         AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
         if (existing != NULL) {
-            report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.value.identifier.name);
-            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous declaration ...");
+            report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of variable '%s'", ident->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the previous declaration ...");
             return NULL;
         }
-    } else if (parser->current_scope->kind == BLOCK_DECLARATIVE) {
-        AstDeclaration *existing = add_declaration_to_scope(parser->current_scope, decl);
-        if (existing != NULL) {
-            report_error_token(parser, LABEL_ERROR, ident_token, "Redeclaration of variable '%s'", ident_token.as_value.value.identifier.name);
-            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous declaration ...");
-            return NULL;
-        }
-    } else {
-        XXX;
     }
 
     return decl;
@@ -1835,7 +1916,7 @@ AstDeclaration *generate_declaration(Parser *parser, char *ident_name, AstExpr *
     decl->ident      = ident;
     decl->type       = type;
     decl->flags      = flags;
-    decl->expr       = expr;
+    decl->value       = expr;
 
     return decl;
 }

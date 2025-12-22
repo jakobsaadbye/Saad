@@ -72,7 +72,7 @@ TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.kind = PRIMITIVE_STRING,  .name = "string",    .head = {.kind = TYPE_STRING,  .size = 8}},
     {.kind = PRIMITIVE_BOOL,    .name = "bool",      .head = {.kind = TYPE_BOOL,    .size = 1}},
     {.kind = PRIMITIVE_VOID,    .name = "void",      .head = {.kind = TYPE_VOID,    .size = 0}},
-    {.kind = PRIMITIVE_UNTYPED_INT,   .name = "untyped(int)", .head = {.kind = TYPE_INTEGER, .size = 4}},
+    {.kind = PRIMITIVE_UNTYPED_INT,   .name = "number", .head = {.kind = TYPE_INTEGER, .size = 4}},
     {.kind = PRIMITIVE_UNTYPED_FLOAT, .name = "untyped(float)", .head = {.kind = TYPE_FLOAT, .size = 4}},
 };
 
@@ -186,7 +186,36 @@ char *type_to_str(Type *type) {
         }
         sb_append(&sb, ")");
 
-        sb_append(&sb, " -> %s", type_to_str(func->node->return_type));
+        if (func->node->return_types.count == 1) {
+            Type *return_type = ((Type **)func->node->return_types.items)[0];
+            sb_append(&sb, " -> %s", type_to_str(return_type));
+        } else {
+            sb_append(&sb, " -> (");
+            for (int i = 0; i < func->node->return_types.count; i++) {
+                Type *return_type = ((Type **)func->node->return_types.items)[i];
+                sb_append(&sb, "%s", type_to_str(return_type));
+            }
+            sb_append(&sb, ")");
+        }
+        return sb_to_string(&sb); // @Leak
+    }
+    case TYPE_TUPLE: {
+        TypeTuple *tuple = (TypeTuple *)type;
+        StringBuilder sb = sb_init(32);
+
+        sb_append(&sb, "(");
+        for (int i = 0; i < tuple->types.count; i++) {
+            Type *t = ((Type **)tuple->types.items)[i];
+
+            char *type_str = type_to_str(t);
+            sb_append(&sb, "%s", type_str);
+            
+            if (i != tuple->types.count - 1) {
+                sb_append(&sb, ", ");
+            }
+
+        }
+        sb_append(&sb, ")");
         return sb_to_string(&sb); // @Leak
     }
     }

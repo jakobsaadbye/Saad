@@ -17,8 +17,10 @@ int main(int argc, char const *argv[]) {
     bool success = compile_program(&config, main_file_path, true);
     if (success) {
         printf("\n\nCompiled successfully.\n\n");
+        return 0;
     } else {
         printf("There were errors.\n\n");
+        return -1;
     }
 
     return 0;

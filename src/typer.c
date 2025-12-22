@@ -32,7 +32,7 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_t
 Type *check_member_access(Typer *typer, AstMemberAccess * ma);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
-Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn);
+bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn);
 
 char *type_to_str(Type *type);
 bool types_are_equal(Type *lhs, Type *rhs);
@@ -343,79 +343,228 @@ Type *solidify_untyped_type(Type *untyped_type) {
     return untyped_type;
 }
 
-bool check_declaration(Typer *typer, AstDeclaration *decl) {
+TypeTuple *make_tuple_type_from_expression_list(Typer *typer, DynamicArray exprs) {
+    TypeTuple *tuple      = ast_allocate(typer->parser, sizeof(TypeTuple));
+    tuple->head.head.kind = AST_TYPE;
+    tuple->head.kind      = TYPE_TUPLE;
+    tuple->types          = da_init(exprs.count, sizeof(Type *));
 
+    int size = 0;
+    for (int i = 0; i < exprs.count; i++) {
+        Type *expr_type = ((AstExpr **)exprs.items)[i]->type;
+
+        // Flatten out inner tuple types
+        if (expr_type->kind == TYPE_TUPLE) {
+            TypeTuple *inner_tuple = (TypeTuple *) expr_type;
+            for (int j = 0; j < inner_tuple->types.count; j++) {
+                Type *inner_type = ((Type **)inner_tuple->types.items)[j];
+                da_append(&tuple->types, inner_type);
+            }
+        } else {
+            da_append(&tuple->types, expr_type);
+        }
+
+        size += expr_type->size;
+    }
+    tuple->head.size = size;
+
+    return tuple;
+}
+
+TypeTuple *make_tuple_type_from_type_list(Typer *typer, DynamicArray types) {
+    TypeTuple *tuple       = ast_allocate(typer->parser, sizeof(TypeTuple));
+    tuple->head.head.kind  = AST_TYPE;
+    tuple->head.head.file  = ((Type **)types.items)[0]->head.file;
+    tuple->head.head.start = ((Type **)types.items)[0]->head.start;
+    tuple->head.head.end   = ((Type **)types.items)[types.count - 1]->head.end;
+    tuple->head.kind       = TYPE_TUPLE;
+    tuple->types           = da_init(types.count, sizeof(Type *));
+
+    int size = 0;
+    for (int i = 0; i < types.count; i++) {
+        Type *type = ((Type **)types.items)[i];
+        da_append(&tuple->types, type);
+        size += type->size;
+    }
+    tuple->head.size = size;
+
+    return tuple;
+}
+
+bool check_declaration(Typer *typer, AstDeclaration *decl) {
     typer->inside_declaration = decl;
 
     if (decl->flags & DECLARATION_TYPED) {
         Type *resolved_type = resolve_type(typer, decl->type);
         if (!resolved_type) return false;
 
-        decl->ident->type = resolved_type;
-        decl->type        = resolved_type;
-        
-        Type *expr_type = check_expression(typer, decl->expr, decl->type);
-        if (!expr_type) return false;
-        if (!types_are_equal(decl->type, expr_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", decl->ident->name, type_to_str(decl->type), type_to_str(expr_type));
-            return false;
+        decl->type = resolved_type;
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+            ident->type = resolved_type;
         }
+        
+        for (int i = 0; i < decl->values.count; i++) {
+            AstExpr *value = ((AstExpr **)decl->values.items)[i];
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+
+            Type *value_type = check_expression(typer, value, decl->type);
+            if (!value_type) return false;
+            if (!types_are_equal(decl->type, value_type)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", ident->name, type_to_str(decl->type), type_to_str(value_type));
+                return false;
+            }
+        }
+
     }
     else if (decl->flags & DECLARATION_TYPED_NO_EXPR) {
         Type *resolved_type = resolve_type(typer, decl->type);
         if (!resolved_type) return false;
 
-        decl->ident->type = resolved_type;
-        decl->type        = resolved_type;
+        decl->type = resolved_type;
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+            ident->type = resolved_type;
+        }
     }
     else if (decl->flags & DECLARATION_INFER) {
-        Type *expr_type = check_expression(typer, decl->expr, NULL);
-        if (!expr_type) return false;
+        int ident_index = 0;
+        for (int i = 0; i < decl->values.count; i++) {
+            AstExpr *value = ((AstExpr **)decl->values.items)[i];
+            Type *expr_type = check_expression(typer, value, NULL);
+            if (!expr_type) return false;
 
-        decl->ident->type = expr_type;
-        decl->type        = expr_type;
-    }
-    else if (decl->flags & DECLARATION_CONSTANT) {
-        Type *expr_type  = check_expression(typer, decl->expr, NULL);
-        if (!expr_type) return false;
+            if (expr_type->kind == TYPE_TUPLE) {
+                TypeTuple *tuple_type = (TypeTuple *) expr_type;
+                for (int j = 0; j < tuple_type->types.count; j++) {
+                    Type *type = ((Type **)tuple_type->types.items)[j];
 
-        AstExpr *const_expr = simplify_expression(typer->const_evaluator, typer->current_scope, decl->expr);
-        if (const_expr->head.kind == AST_LITERAL) {
-            // Swap out the current expression for the simplified expression
-            // @Speed? @Note - We might in the future cleanup the already allocated expression tree as its no longer needed after this swap.
-            //                 We might be taking many cache misses if we leave big gaps in the allocated ast nodes, so something like packing the ast nodes could be
-            //                 a thing?
-            decl->expr = const_expr;
-        } else {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "Constant declaration with a non-constant expression");
-            return false;
+                    ident_index = i + j;
+                    if (ident_index > decl->idents.count - 1) {
+                        goto check_identifiers_vs_values;
+                    }
+
+                    AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[ident_index];
+                    ident->type = type;
+                }
+
+                // Skip the next identifiers as we've already checked them
+                ident_index += tuple_type->types.count - 1;
+            } else {
+                AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[ident_index];
+                ident->type = expr_type;
+                ident_index += 1;
+            }
         }
 
-        decl->ident->type = expr_type;
-        decl->type        = expr_type;
+        if (decl->values.count > 1) {
+            decl->type = (Type *) make_tuple_type_from_expression_list(typer, decl->values);
+        } else {
+            decl->type = ((AstExpr **)decl->values.items)[0]->type;
+        }
+    }
+    else if (decl->flags & DECLARATION_CONSTANT) {
+        for (int i = 0; i < decl->values.count; i++) {
+            AstExpr **value_ptr = &((AstExpr **)decl->values.items)[i];
+            AstExpr *value = *value_ptr;
+            Type *expr_type = check_expression(typer, value, NULL);
+            if (!expr_type) return false;
+
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+            ident->type = expr_type;
+
+            AstExpr *const_expr = simplify_expression(typer->const_evaluator, typer->current_scope, value);
+            if (const_expr->head.kind == AST_LITERAL) {
+                // Swap out the current expression for the simplified expression
+                // @Speed? @Note - We might in the future cleanup the already allocated expression tree as its no longer needed after this swap.
+                //                 We might be taking many cache misses if we leave big gaps in the allocated ast nodes, so something like packing the ast nodes could be
+                //                 a thing?
+                *value_ptr = const_expr;
+            } else {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Constant declaration with a non-constant expression");
+                if (value->head.kind == AST_FUNCTION_CALL) {
+                    report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(value), "Function calls are not yet allowed to act as a constant expression");
+                }
+                return false;
+            }
+        }
+
+        if (decl->values.count > 1) {
+            decl->type = (Type *) make_tuple_type_from_expression_list(typer, decl->values);
+        } else {
+            decl->type = ((AstExpr **)decl->values.items)[0]->type;
+        }
     }
 
     if (decl->type->kind == TYPE_VOID) {
-        if (decl->expr) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->expr), "Cannot assign variable to expression of type void", decl->ident->name);
+        if (decl->value) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->value), "Cannot assign variable to expression of type void", decl->ident->name);
         } else {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->type), "Variables are not allowed to have type void");
         }
         return false;
     }
 
-    if (decl->expr && is_untyped_type(decl->expr->type) && !(decl->flags & DECLARATION_CONSTANT)) {
-        Type *solidified_type = solidify_untyped_type(decl->expr->type);
+    // Solidify any literals
+    
+    for (int i = 0, ident_index = 0; i < decl->values.count; i++, ident_index++) {
+        AstExpr *value = ((AstExpr **)decl->values.items)[i];
 
-        decl->ident->type = solidified_type;
-        decl->type        = solidified_type;
+        if (value->type->kind == TYPE_TUPLE) {
+            // Value stems from a function call or something else, so nothing to solidify
+            TypeTuple *tuple_type = (TypeTuple *) value->type;
+            ident_index += tuple_type->types.count - 1;
+            continue;
+        }
+
+        AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[ident_index];
+
+        if (is_untyped_type(value->type) && !(decl->flags & DECLARATION_CONSTANT)) {
+            Type *solidified_type = solidify_untyped_type(value->type);
+            ident->type = solidified_type;
+        }
     }
 
-    bool ok = leads_to_integer_overflow(typer, decl->type, decl->expr);
-    if (!ok) return false;
+    // Check for value type overflow
+    for (int i = 0; i < decl->values.count; i++) {
+        AstExpr *value = ((AstExpr **)decl->values.items)[i];
+        bool ok = leads_to_integer_overflow(typer, decl->type, value);
+        if (!ok) return false;
+    }
+
+    // Check for 1-1 match between identifiers and values
+check_identifiers_vs_values:
+    if (!(decl->flags & DECLARATION_TYPED_NO_EXPR)) {
+        int num_values = 0;
+        AstFunctionCall *func_call_with_multiple_return_values = NULL;
+        for (int i = 0; i < decl->values.count; i++) {
+            AstExpr *value = ((AstExpr **)decl->values.items)[i];
     
-    // Mark the identifier as fully resolved
-    decl->ident->flags |= IDENTIFIER_IS_RESOLVED;
+            if (value->head.kind == AST_FUNCTION_CALL) {
+                AstFunctionCall *func_call = (AstFunctionCall *) value;
+                if (func_call->func_defn->return_types.count > 1) {
+                    func_call_with_multiple_return_values = func_call;
+                    num_values += func_call->func_defn->return_types.count;
+                    continue;
+                }
+            }
+    
+            num_values += 1;
+        }
+        if (decl->idents.count != num_values) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl), "Assignment mismatch. Have %d %s and %d %s", decl->idents.count, decl->idents.count == 1 ? "identifier" : "identifiers", num_values, num_values == 1 ? "value" : "values");
+            if (func_call_with_multiple_return_values) {
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_call_with_multiple_return_values), "This function call returns %s", type_to_str(func_call_with_multiple_return_values->head.type));
+            }
+            return NULL;
+        }
+    }
+    
+    // Mark the identifiers as fully resolved
+    for (int i = 0; i < decl->idents.count; i++) {
+        AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+        ident->flags |= IDENTIFIER_IS_RESOLVED;
+    }
 
     //
     // Do sizing of the declaration
@@ -425,13 +574,14 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         return true;
     }
 
+     if (decl->flags & DECLARATION_CONSTANT) {
+        // Constants are not sized
+        return true;
+     }
+
     if (typer->enclosing_function != NULL) {
         reserve_local_storage(typer->enclosing_function, decl->type->size);
         return true;
-    } 
-
-    if (decl->flags & DECLARATION_CONSTANT) {
-        // Constants don't need to be sized
     } else {
         // @TODO: Non-constant declarations in global scope should also be sized. Variables that live in global scope, should probably have some defined stack address of where they live, so they can be referenced locally. Still an open question on how i would do this.
         XXX;
@@ -516,8 +666,8 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         // Save the current state of the typer as local info at this call site is probably overriden within check_function_defn()
         Typer temp = *typer;
 
-        Type *func_type = check_function_defn(typer, func_defn);
-        if (!func_type) return NULL;
+        bool ok = check_function_defn(typer, func_defn);
+        if (!ok) return NULL;
 
         typer_restore_state(typer, temp);
     }
@@ -547,7 +697,11 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         }
     }
 
-    call->head.type = func_defn->return_type;
+    if (func_defn->return_types.count > 1) {
+        call->head.type = (Type *) make_tuple_type_from_type_list(typer, func_defn->return_types);
+    } else {
+        call->head.type = ((Type **)func_defn->return_types.items)[0];
+    }
     call->func_defn = func_defn;
 
     //
@@ -580,13 +734,15 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     }
 
     reserve_temporary_storage(typer->enclosing_function, bytes_arguments);
-    
-    bool has_big_return_value = func_defn->return_type->size > 8;
-    if (has_big_return_value) {
-        reserve_temporary_storage(typer->enclosing_function, func_defn->return_type->size);
+
+    for (int i = 0; i < func_defn->return_types.count; i++) {
+        Type *return_type = ((Type **)func_defn->return_types.items)[i];
+        if (return_type->size > 8) {
+            reserve_temporary_storage(typer->enclosing_function, return_type->size);
+        }
     }
 
-    return func_defn->return_type;
+    return call->head.type;
 }
 
 bool check_assignment(Typer *typer, AstAssignment *assign) {
@@ -1045,6 +1201,79 @@ bool check_expr_stmt(Typer *typer, AstExprStmt *expr_stmt) {
     return true;
 }
 
+bool check_return(Typer *typer, AstReturn *ast_return) {
+    AstFunctionDefn *ef = typer->enclosing_function;
+    if (ef == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_return), "Attempting to return outside of a function");
+        return false;
+    }
+
+    ast_return->enclosing_function = ef;
+
+    // Cross-match the types evaluated from the return values against the defined return types of the function
+    for (int i = 0; i < ast_return->values.count; i++) {
+        AstExpr *return_value = ((AstExpr **)ast_return->values.items)[i];
+        Type    *wanted_type  = ((Type **)ef->return_types.items)[i];
+
+        Type *ok = check_expression(typer, return_value, wanted_type);
+        if (!ok) return false;
+    }
+
+    TypeTuple *returning_tuple   = make_tuple_type_from_expression_list(typer, ast_return->values);
+    TypeTuple *func_return_types = make_tuple_type_from_type_list(typer, ef->return_types);
+
+    if (returning_tuple->types.count > func_return_types->types.count) {
+        AstExpr *last_return_value = ((AstExpr **)ast_return->values.items)[ast_return->values.count - 1];
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_return_value), "Too many return values. Want type %s, got type %s", text_bold(type_to_str((Type *)func_return_types)), text_bold(type_to_str((Type *)returning_tuple)));
+        return false;
+    }
+
+    if (returning_tuple->types.count < func_return_types->types.count) {
+        AstExpr *last_return_value = ((AstExpr **)ast_return->values.items)[ast_return->values.count - 1];
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_return_value), "Not enough return values. Want type %s, got type %s", text_bold(type_to_str((Type *)func_return_types)), text_bold(type_to_str((Type *)returning_tuple)));
+        return false;
+    }
+
+    for (int i = 0; i < returning_tuple->types.count; i++) {
+        Type *given  = ((Type **)returning_tuple->types.items)[i];
+        Type *wanted = ((Type **)ef->return_types.items)[i];
+
+        if (!types_are_equal(given, wanted)) {
+            // Seek to find the corresponding return value that causes the type mismatch
+            int      type_index = -1;
+            AstExpr *failing_return_value = NULL;
+            for (int j = 0; j < ast_return->values.count; j++) {
+                AstExpr *return_value = ((AstExpr **)ast_return->values.items)[j];
+
+                if (return_value->type->kind == TYPE_TUPLE) {
+                    TypeTuple *tuple = (TypeTuple *) return_value->type;
+                    type_index += tuple->types.count;
+                } else {
+                    type_index += 1;
+                }
+
+                if (type_index == i) {
+                    failing_return_value = return_value;
+                    break;
+                }
+            }
+
+            if (failing_return_value == NULL) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(given), "Compiler Error: Failed to find the mismatching return value that is causing a type mismatch");
+                return false;    
+            }
+
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(failing_return_value), "Return type mismatch. Wanted type %s, got type %s", text_bold(type_to_str((Type *)func_return_types)), text_bold(type_to_str((Type *)returning_tuple)));
+            if (wanted->kind != TYPE_VOID) {
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_return_types), "Here is the return types of function '%s'", ef->identifier->name);
+            }
+            return false;
+        }
+    }
+    
+    return true;
+}
+
 bool check_statement(Typer *typer, Ast *stmt) {
 
     // When doing sizing of a function, we sometimes reserve temporary space for array literals
@@ -1069,6 +1298,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_BREAK_OR_CONTINUE: return check_break_or_continue(typer, (AstBreakOrContinue *)(stmt));
     case AST_PRINT:             return check_print(typer, (AstPrint *)(stmt));
     case AST_EXPR_STMT:         return check_expr_stmt(typer, (AstExprStmt *)(stmt));
+    case AST_RETURN:            return check_return(typer, (AstReturn *)(stmt));
     case AST_ASSERT: {
         AstAssert *assertion = (AstAssert *)(stmt);
         Type *expr_type = check_expression(typer, assertion->expr, NULL);
@@ -1102,33 +1332,6 @@ bool check_statement(Typer *typer, Ast *stmt) {
             if (!ok) return false;
         }
 
-        return true;
-    }
-    case AST_RETURN: {
-        AstReturn *ast_return = (AstReturn *)(stmt);
-        AstFunctionDefn *ef = typer->enclosing_function;
-        if (ef == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_return), "Attempting to return outside of a function");
-            return false;
-        }
-
-        ast_return->enclosing_function = ef;
-
-        if (!ast_return->expr) {
-            return true;
-        }
-
-        Type *ok = check_expression(typer, ast_return->expr, ef->return_type);
-        if (!ok) return false;
-
-        if (!types_are_equal(ast_return->expr->type, ef->return_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_return->expr), "Type mismatch. Returning type %s from function '%s' with return type %s", type_to_str(ast_return->expr->type), ef->identifier->name, type_to_str(ef->return_type));
-            if (ef->return_type->kind != TYPE_VOID) {
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(ef->return_type), "... Here is the return type of '%s'", ef->identifier->name);
-            }
-            return false;
-        }
-        
         return true;
     }
     default:
@@ -1175,7 +1378,8 @@ bool check_if_function_needs_a_return(Typer *typer, AstFunctionDefn *func_defn) 
         }
     });
 
-    if (!has_return && func_defn->return_type->kind != TYPE_VOID && !func_defn->is_extern) {
+    Type *return_type_0 = ((Type **)func_defn->return_types.items)[0];
+    if (!has_return && return_type_0->kind != TYPE_VOID && !func_defn->is_extern) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)func_defn, "Function is missing a return");
         report_error_ast(typer->parser, LABEL_NOTE, (Ast *)func_defn, "Put an explicit return at the outer scope of the function. In the future we should be able to detect nested returns");
         return false;
@@ -1184,9 +1388,9 @@ bool check_if_function_needs_a_return(Typer *typer, AstFunctionDefn *func_defn) 
     return true;
 }
 
-Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
+bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     if (func_defn->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
-        return func_defn->return_type;
+        return true;
     }
 
     // Check the parameters
@@ -1194,7 +1398,7 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     for (int i = 0; i < func_defn->parameters.count; i++) {
         AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
         bool ok = check_declaration(typer, param);
-        if (!ok) return NULL;
+        if (!ok) return false;
 
         if (param->type->kind == TYPE_ARRAY && ((TypeArray *)param->type)->array_kind == ARRAY_FIXED) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)param, "Use of fixed size array as parameter. Passing a fixed size array is always done by slice (data + count)");
@@ -1202,22 +1406,30 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
             TypeArray *array_type = (TypeArray *) param->type;
             array_type->array_kind = ARRAY_SLICE;
             report_error_ast(typer->parser, LABEL_HINT, (Ast *)array_type, "Make the parameter a slice type: %s", type_to_str((Type *)array_type));
-            return NULL;
+            return false;
         }
     }
 
     // Check the return type/s
-    Type *return_type = resolve_type(typer, func_defn->return_type);
-    if (!return_type) return NULL;
-    if (return_type->kind == TYPE_ARRAY && ((TypeArray *)return_type)->array_kind == ARRAY_FIXED) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)return_type, "Use of fixed size array as return type. Passing a fixed size array is always done by slice (data + count)");
+    for (int i = 0; i < func_defn->return_types.count; i++) {
+        Type **return_type_ptr = &((Type **)func_defn->return_types.items)[i];
+        Type *resolved_type = resolve_type(typer, *return_type_ptr);
+        if (!resolved_type) return false;
+        *return_type_ptr = resolved_type;
 
-        TypeArray *array_type = (TypeArray *) return_type;
-        array_type->array_kind = ARRAY_SLICE;
-        report_error_ast(typer->parser, LABEL_HINT, (Ast *)array_type, "Make the return type a slice type: %s", type_to_str((Type *)array_type));
-        return NULL;
+        if (func_defn->return_types.count > 1 && resolved_type->kind == TYPE_VOID) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)resolved_type, "Function with multiple return values are not allowed to return type void");
+            return NULL;
+        }
+
+        if (resolved_type->kind == TYPE_ARRAY && ((TypeArray *)resolved_type)->array_kind == ARRAY_FIXED) {
+            TypeArray *array_type = (TypeArray *) resolved_type;
+            array_type->array_kind = ARRAY_SLICE;
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)resolved_type, "Use of fixed size array as return type. Passing a fixed size array is always done by slice (data + count)");
+            report_error_ast(typer->parser, LABEL_HINT, (Ast *)array_type, "Make the return type a slice type: %s", type_to_str((Type *)array_type));
+            return false;
+        }
     }
-    func_defn->return_type = return_type;
 
 
     // Mark the function as fully typed, when we have typechecked the function signature
@@ -1227,12 +1439,12 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
     // Check the body
     bool ok = check_block(typer, func_defn->body);
-    if (!ok) return NULL;
-    typer->enclosing_function = NULL;
+    if (!ok) return false;
+    typer->enclosing_function = false;
 
     // Do a narrow scan for a return statement
     ok = check_if_function_needs_a_return(typer, func_defn);
-    if (!ok) return NULL;
+    if (!ok) return false;
 
     TypeFunction *func_type = ast_allocate(typer->parser, sizeof(TypeFunction));
     func_type->head.head.kind  = AST_TYPE;
@@ -1259,7 +1471,7 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
             else {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must be a struct or a pointer to a struct. Got type %s", text_bold(type_to_str(receiver_type)));
                 report_error_ast(typer->parser, LABEL_NOTE, NULL, "Methods on arbitrary types is still unsupported");
-                return NULL;
+                return false;
             }
         }
         else if (receiver_type->kind == TYPE_STRUCT) {
@@ -1288,12 +1500,14 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     }
 
     // Do sizing of large return values
-    if (func_defn->return_type->size > 8) {
-        reserve_local_storage(func_defn, 8);
+    for (int i = 0; i < func_defn->return_types.count; i++) {
+        Type *return_type = ((Type **)func_defn->return_types.items)[i];
+        if (return_type->size > 8) {
+            reserve_local_storage(func_defn, 8);
+        }
     }
 
-
-    return (Type *)func_type;
+    return true;
 }
 
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
@@ -1726,20 +1940,22 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     // Reserve 8 bytes for small structure returns to make it easier to do member access calculations on chained function calls
     if (ma->left->head.kind == AST_FUNCTION_CALL) {
         AstFunctionCall *call = (AstFunctionCall *) ma->left;
-        if (call->func_defn->return_type->kind == TYPE_STRUCT && call->func_defn->return_type->size <= 8) {
+        Type *return_type_0 = ((Type **)call->func_defn->return_types.items)[0];
+        if (return_type_0->kind == TYPE_STRUCT && return_type_0->size <= 8) {
             reserve_temporary_storage(typer->enclosing_function, 8);
         }
     }
     if (ma->right->head.kind == AST_FUNCTION_CALL) {
         AstFunctionCall *call = (AstFunctionCall *) ma->right;
-        if (call->func_defn->return_type->kind == TYPE_STRUCT && call->func_defn->return_type->size <= 8) {
+        Type *return_type_0 = ((Type **)call->func_defn->return_types.items)[0];
+        if (return_type_0->kind == TYPE_STRUCT && return_type_0->size <= 8) {
             reserve_temporary_storage(typer->enclosing_function, 8);
         }
     }
-    
 
     if (func_call) {
-        return func_call->func_defn->return_type;
+        Type *return_type_0 = ((Type **)func_call->func_defn->return_types.items)[0];
+        return return_type_0;
     }
 
     return member->type;

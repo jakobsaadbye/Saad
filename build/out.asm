@@ -9,7 +9,9 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   CF0 DD 3.1415927
+   CS0 DB "entire file", 0 
+   CS1 DB "test.sd", 0 
+   CS2 DB `%s`, 10, 0 
 segment .text
    global main
    extern ExitProcess
@@ -33,66 +35,76 @@ assert_fail:
    call		ExitProcess
 
 
-; bytes locals   : 24
+; bytes locals   : 8
 ; bytes temp     : 0
-; bytes total    : 64
+; bytes total    : 48
+readEntireFile:
+   push		rbp
+   mov		rbp, rsp
+   sub		rsp, 48
+   ; Copy filepath -> -8
+   mov		-8[rbp], rcx
+   push		1
+   mov		rax, CS0
+   push		rax
+   jmp		L0
+L0:
+   pop		rax
+   add		rsp, 48
+   pop		rbp
+   ret
+
+; bytes locals   : 8
+; bytes temp     : 8
+; bytes total    : 48
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 64
+   sub		rsp, 48
 
-   ; Ln 2: $pi : float = -4
-   movss		xmm0, [CF0]
-   movd		eax, xmm0
+   ; Ln 6: $ok : bool = -1
+   mov		rax, CS1
    push		rax
    pop		rax
-   mov		-4[rbp], eax
-
-   ; Ln 3: $tau : float = -8
-   mov		eax, -4[rbp]
-   push		rax
-   mov		rax, 2
-   push		rax
-   pop		rbx
-   cvtsi2ss	xmm1, ebx
-   pop		rax
-   movd		xmm0, eax
-   mulss		xmm0, xmm1
-   movd		eax, xmm0
+   mov		rcx, rax
+   call		readEntireFile
    push		rax
    pop		rax
-   mov		-8[rbp], eax
-
-   ; Ln 4: $pi_again : float = -12
-   mov		eax, -8[rbp]
-   push		rax
-   mov		rax, 2
-   push		rax
-   pop		rbx
-   cvtsi2ss	xmm1, ebx
-   pop		rax
-   movd		xmm0, eax
-   divss		xmm0, xmm1
-   movd		eax, xmm0
+   mov		BYTE -1[rbp], al
+   movzx		eax, BYTE -1[rbp]
    push		rax
    pop		rax
-   mov		-12[rbp], eax
-   mov		eax, -12[rbp]
-   push		rax
-   mov		eax, -4[rbp]
-   push		rax
-   pop		rbx
-   pop		rax
-   movd		xmm1, ebx
-   movd		xmm0, eax
-   comiss	xmm0, xmm1
+   test		rax, rax
    sete		al
+   movzx		rax, al
    push		rax
-   pop		rcx
-   mov		rdx, 6
-   call		assert
-L0:
+   pop		rax
+   cmp		al, 0
+   jz			L2
+   ; block of if
+   jmp		L1
+   jmp L2
+; done
+L2:
+   ; Ln 11 Print
+   movzx		eax, BYTE -1[rbp]
+   push		rax
+   pop		rax
+   cmp		al, 0
+   jnz		L3
+   mov		rax, string_false
+   jmp		L4
+L3:
+   mov		rax, string_true
+L4:
+   push		rax
+   ; Pop print arguments
+   pop		rax
+   mov		rdx, rax
+   mov		rcx, CS2
+   call		printf
+L1:
    mov		rax, 0
-   add		rsp, 64
+   add		rsp, 48
    pop		rbp
    ret

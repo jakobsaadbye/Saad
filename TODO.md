@@ -1,8 +1,5 @@
 Todo list:
 -------------------
-
-* Import system
-  - Modules / Packages n' stuff
   
 * Function call overhaul:
   - Multiple return values
@@ -14,6 +11,9 @@ Todo list:
 * Better string handling
   - Iterating over strings
   - Indexing into them
+
+* Import system
+  - Modules / Packages n' stuff
 
 * Better structs (default values and constants)
 

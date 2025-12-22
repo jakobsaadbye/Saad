@@ -1,5 +1,20 @@
-import "raylib";
+foo :: () -> bool, string, string {
+   return true, "true", "hello"; 
+}
+
+readEntireFile :: (filepath: string) -> bool, string, string, string {
+    return foo(), "hellope";
+}
 
 main :: () {
-    InitWindow(1280, 1080, "Test");
+    // text, ok, error: u8 = readEntireFile("file"), 255;
+    text, ok, some := 1, 2, readEntireFile("text.txt");
+
+    print("%, %", text, ok);
+    // text, ok := readEntireFile("test.sd");
+    // if !ok {
+    //     return;
+    // }
+
+    // print("%", ok);
 }

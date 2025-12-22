@@ -147,7 +147,7 @@ typedef enum DeclarationFlags {
     DECLARATION_INFER                 = 1 << 2,
     DECLARATION_CONSTANT              = 1 << 3,
     DECLARATION_IS_STRUCT_MEMBER      = 1 << 4,
-    DECLARATION_IS_STRUCT_METHOD = 1 << 5,
+    DECLARATION_IS_STRUCT_METHOD      = 1 << 5,
     DECLARATION_IS_FUNCTION_PARAMETER = 1 << 6,
     DECLARATION_IS_COMPILER_GENERATED = 1 << 7,
 } DeclarationFlags;
@@ -155,9 +155,11 @@ typedef enum DeclarationFlags {
 typedef struct AstDeclaration {
     Ast head;
 
-    AstIdentifier   *ident;
-    Type            *type;
-    AstExpr         *expr;
+    AstIdentifier   *ident;  // @Deprecate
+    DynamicArray     idents; // of *AstIdentifier
+    Type            *type;   // type is *TypeTuple if doing a multi declaration
+    AstExpr         *value;  // @Deprecate
+    DynamicArray     values; // of *AstExpr
     DeclarationFlags flags;
 
     int member_index;   // Used to know the insertion order of a struct member
@@ -173,8 +175,7 @@ typedef enum AssignOp {
 } AssignOp;
 
 typedef struct AstAssignment {
-    Ast head;
-
+    Ast       head;
     AstExpr  *lhs;
     AssignOp  op;
     AstExpr  *expr;
@@ -271,7 +272,7 @@ typedef struct AstFunctionDefn {
     AstIdentifier  *identifier;
     DynamicArray    parameters; // of *AstDeclaration
     AstBlock       *body;
-    Type           *return_type;
+    DynamicArray    return_types; // of *Type
     CallingConv     call_conv;
     Type           *receiver_type; // set if its a method
     Token           method_token;  // set if its a method
@@ -331,7 +332,7 @@ typedef struct AstSizeof {
 
 typedef struct AstReturn {
     Ast              head;
-    AstExpr         *expr;
+    DynamicArray     values; // of *AstExpr
     AstFunctionDefn *enclosing_function;
 } AstReturn;
 
@@ -497,6 +498,7 @@ typedef enum TypeKind {
     TYPE_STRUCT,
     TYPE_ENUM,
     TYPE_FUNCTION,
+    TYPE_TUPLE,
 } TypeKind;
 
 typedef enum TypeFlags {
@@ -603,6 +605,11 @@ typedef struct TypeFunction {
     Type head;
     AstFunctionDefn *node;
 } TypeFunction;
+
+typedef struct TypeTuple {
+    Type         head;
+    DynamicArray types; // of *Type
+} TypeTuple;
 
 typedef struct TypeTable {
     HashTable user_types;
