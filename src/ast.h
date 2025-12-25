@@ -124,8 +124,9 @@ typedef enum IdentifierFlags {
     IDENTIFIER_IS_NAME_OF_ENUM     = 1 << 0,
     IDENTIFIER_IS_NAME_OF_STRUCT   = 1 << 1,
     IDENTIFIER_IS_NAME_OF_FUNCTION = 1 << 2,
-    IDENTIFIER_IS_CONSTANT         = 1 << 3,
-    IDENTIFIER_IS_RESOLVED         = 1 << 4,
+    IDENTIFIER_IS_STRUCT_MEMBER    = 1 << 3,
+    IDENTIFIER_IS_CONSTANT         = 1 << 4,
+    IDENTIFIER_IS_RESOLVED         = 1 << 5,
 } IdentifierFlags;
 
 typedef struct AstIdentifier {

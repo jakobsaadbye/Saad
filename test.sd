@@ -1,25 +1,9 @@
-A, B :: 3;
-
 readEntireFile :: (filepath: string) -> string, bool {
     return "hellope", false;
 }
 
-foo :: () -> void {
-    return;
-}
-
 main :: () {
-    // text, ok, error: u8 = readEntireFile("file"), 255;
-    a, b : void = 3;
-
-    // a: void;
     text, ok := readEntireFile("text.txt");
 
     print("%, %", text, ok);
-    // text, ok := readEntireFile("test.sd");
-    // if !ok {
-    //     return;
-    // }
-
-    // print("%", ok);
 }

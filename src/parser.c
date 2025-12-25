@@ -37,7 +37,7 @@ AstExpr        *make_literal_node(Parser *parser, Token token);
 AstIdentifier  *make_identifier_from_token(Parser *parser, Token ident_token, Type *type);
 AstIdentifier  *make_identifier_from_string(Parser *parser, const char *name, Type *type);
 
-AstDeclaration *generate_declaration(Parser *parser, char *ident_name, AstExpr *expr, Type *type, DeclarationFlags flags);
+AstIdentifier  *generate_identifier(Parser *parser, char *ident_name, Type *type, IdentifierFlags flags);
 TypeStruct     *generate_struct_for_dynamic_array(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_data, char *struct_name);
@@ -634,8 +634,8 @@ Type *parse_type(Parser *parser) {
     return NULL;
 }
 
-AstIdentifier *add_member_to_struct(Parser *parser, AstStruct *struct_defn, AstDeclaration *member) {
-    return add_declaration_to_scope(parser, struct_defn->scope, member);
+AstIdentifier *add_member_to_struct(Parser *parser, AstStruct *struct_defn, AstIdentifier *member) {
+    return add_identifier_to_scope(parser, struct_defn->scope, member);
 }
 
 TypeStruct *generate_struct_for_slice(Parser *parser, Type *type_data) {
@@ -649,7 +649,7 @@ TypeStruct *generate_struct_for_dynamic_array(Parser *parser, Type *type_data) {
     dynamic_array->head.size = 24;
 
     // Add .capacity for the runtime capacity of the array
-    AstDeclaration *capacity = generate_declaration(parser, "capacity", NULL, primitive_type(PRIMITIVE_S64), DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_STRUCT_MEMBER);
+    AstIdentifier *capacity = generate_identifier(parser, "capacity", primitive_type(PRIMITIVE_S64), IDENTIFIER_IS_STRUCT_MEMBER);
 
     capacity->member_index   = 2;
     capacity->member_offset  = 16;
@@ -693,8 +693,8 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     type_ptr_data->head.size       = 8;
     type_ptr_data->pointer_to      = type_data;
 
-    AstDeclaration *data  = generate_declaration(parser, "data", NULL, (Type *) type_ptr_data, DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_STRUCT_MEMBER);
-    AstDeclaration *count = generate_declaration(parser, "count", NULL, primitive_type(PRIMITIVE_S64), DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_STRUCT_MEMBER);
+    AstIdentifier *data  = generate_identifier(parser, "data", (Type *) type_ptr_data,         IDENTIFIER_IS_STRUCT_MEMBER);
+    AstIdentifier *count = generate_identifier(parser, "count", primitive_type(PRIMITIVE_S64), IDENTIFIER_IS_STRUCT_MEMBER);
 
     data->member_index   = 0;
     data->member_offset  = 0;
@@ -1906,28 +1906,13 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
     return decl;
 }
 
-AstDeclaration *generate_declaration(Parser *parser, char *ident_name, AstExpr *expr, Type *type, DeclarationFlags flags) {
+AstIdentifier *generate_identifier(Parser *parser, char *ident_name, Type *type, IdentifierFlags flags) {
     assert(type);
-
+    
     AstIdentifier *ident = make_identifier_from_string(parser, ident_name, type);
+    ident->head.flags |= flags | AST_FLAG_COMPILER_GENERATED | AST_FLAG_IS_TYPE_CHECKED;
 
-    AstDeclaration *decl = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
-    decl->head.kind  = AST_DECLARATION;
-    decl->head.file  = parser->current_file;
-    decl->head.flags = AST_FLAG_COMPILER_GENERATED;
-    decl->head.start = (Pos){0, 0, 0};
-    decl->head.end   = expr != NULL ? expr->head.end : type->head.end;
-    decl->idents     = da_init(1, sizeof(AstIdentifier *));
-    decl->values     = da_init(1, sizeof(AstExpr *));
-    decl->type       = type;
-    decl->flags      = flags;
-
-    ident->decl = decl;
-
-    da_append(&decl->idents, ident);
-    da_append(&decl->values, expr);
-
-    return decl;
+    return ident;
 }
 
 int align_value(int value, int alignment) {

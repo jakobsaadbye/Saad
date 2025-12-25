@@ -1514,7 +1514,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         }
 
         // Add the function as a member of the receiver struct
-        AstDeclaration *method_member = generate_declaration(typer->parser, func_defn->identifier->name, NULL, (Type *)func_type, DECLARATION_IS_STRUCT_MEMBER | DECLARATION_IS_STRUCT_METHOD);
+        AstIdentifier *method_member = generate_identifier(typer->parser, func_defn->identifier->name, (Type *)func_type, IDENTIFIER_IS_STRUCT_MEMBER);
         add_member_to_struct(typer->parser, receiver_struct->node, method_member);
 
         func_defn->receiver_type            = (Type *)receiver_struct;
