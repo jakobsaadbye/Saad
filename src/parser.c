@@ -634,8 +634,8 @@ Type *parse_type(Parser *parser) {
     return NULL;
 }
 
-AstDeclaration *add_member_to_struct(AstStruct *struct_defn, AstDeclaration *member) {
-    return add_declaration_to_scope(struct_defn->scope, member);
+AstIdentifier *add_member_to_struct(Parser *parser, AstStruct *struct_defn, AstDeclaration *member) {
+    return add_declaration_to_scope(parser, struct_defn->scope, member);
 }
 
 TypeStruct *generate_struct_for_slice(Parser *parser, Type *type_data) {
@@ -654,7 +654,7 @@ TypeStruct *generate_struct_for_dynamic_array(Parser *parser, Type *type_data) {
     capacity->member_index   = 2;
     capacity->member_offset  = 16;
 
-    add_member_to_struct(dynamic_array->node, capacity);
+    add_member_to_struct(parser, dynamic_array->node, capacity);
 
     return dynamic_array;
 }
@@ -669,7 +669,7 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     struct_node->scope           = ast_allocate(parser, sizeof(AstBlock));
     struct_node->scope->belongs_to_struct = struct_node;
     struct_node->scope->kind     = BLOCK_DECLARATIVE;
-    struct_node->scope->members  = da_init(2, sizeof(AstDeclaration *));
+    struct_node->scope->identifiers = da_init(2, sizeof(AstIdentifier *));
 
     TypeStruct *struct_defn      = ast_allocate(parser, sizeof(TypeStruct));
     struct_defn->head.head.kind  = AST_TYPE;
@@ -681,7 +681,6 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     struct_defn->head.name       = struct_name;
     struct_defn->head.size       = 16;
     struct_defn->alignment       = 8;
-    struct_defn->members         = da_init(2, sizeof(AstDeclaration *));
     struct_defn->node            = struct_node;
 
     TypePointer *type_ptr_data     = ast_allocate(parser, sizeof(TypePointer));
@@ -702,8 +701,8 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     count->member_index  = 1;
     count->member_offset = 8;
 
-    add_member_to_struct(struct_node, data);
-    add_member_to_struct(struct_node, count);
+    add_member_to_struct(parser, struct_node, data);
+    add_member_to_struct(parser, struct_node, count);
 
     return struct_defn;
 }
@@ -869,7 +868,7 @@ AstStruct *parse_struct(Parser *parser) {
     ast_struct->identifier = ident;
     ast_struct->scope      = scope;
 
-    if (scope->members.count == 0) {
+    if (scope->identifiers.count == 0) {
         report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct), "Structs must have atleast one member");
         return NULL;
     }
@@ -1791,7 +1790,7 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
         assert(next.type == TOKEN_LITERAL_IDENTIFIER);
 
         AstIdentifier *ident = make_identifier_from_token(parser, next, NULL);
-        ident->belongs_to_decl = decl;
+        ident->decl = decl;
         da_append(&decl->idents, ident);
 
         eat_token(parser);
@@ -1885,18 +1884,23 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
         decl->flags |= DECLARATION_IS_STRUCT_MEMBER;
     }
 
-    // Add the identifiers to the current scope
-    assert(parser->current_scope != NULL);
-
+    // Parent each identifier to this declaration
     for (int i = 0; i < decl->idents.count; i++) {
         AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+        ident->decl = decl;
+    }
 
-        AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
+    // Add the identifiers to the current scope
+    if (parser->current_scope) {
+    
+        AstIdentifier *existing = add_declaration_to_scope(parser, parser->current_scope, decl);
         if (existing != NULL) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of variable '%s'", ident->name);
-            report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the previous declaration ...");
             return NULL;
         }
+    
+    } else {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)decl, "Compiler Error: No scope is present while parsing the following declaration");
+        return NULL;
     }
 
     return decl;
@@ -1913,10 +1917,15 @@ AstDeclaration *generate_declaration(Parser *parser, char *ident_name, AstExpr *
     decl->head.flags = AST_FLAG_COMPILER_GENERATED;
     decl->head.start = (Pos){0, 0, 0};
     decl->head.end   = expr != NULL ? expr->head.end : type->head.end;
-    decl->ident      = ident;
+    decl->idents     = da_init(1, sizeof(AstIdentifier *));
+    decl->values     = da_init(1, sizeof(AstExpr *));
     decl->type       = type;
     decl->flags      = flags;
-    decl->value       = expr;
+
+    ident->decl = decl;
+
+    da_append(&decl->idents, ident);
+    da_append(&decl->values, expr);
 
     return decl;
 }

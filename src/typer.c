@@ -48,7 +48,7 @@ void reserve_temporary_storage(AstFunctionDefn *func_defn, int size);
 int push_temporary_value(AstFunctionDefn *func_defn, int size);
 int pop_temporary_value(AstFunctionDefn *func_defn);
 void reset_temporary_storage();
-AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name);
+AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name);
 char *generate_c_format_specifier_for_type(Type *type);
 
 
@@ -106,10 +106,10 @@ void dump_scope_levels(AstBlock *scope) {
 void dump_struct(AstStruct *struct_defn) {
     printf("%s :: struct {\n", struct_defn->identifier->name);
 
-    DynamicArray members = struct_defn->scope->members;
+    DynamicArray members = struct_defn->scope->identifiers;
     for (int i = 0; i < members.count; i++) {
-        AstDeclaration *member = ((AstDeclaration **)members.items)[i];
-        printf("    %s: %s;\n", member->ident->name, type_to_str(member->type));
+        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+        printf("    %s: %s;\n", member->name, type_to_str(member->type));
     }
     printf("}\n");
 }
@@ -392,6 +392,10 @@ TypeTuple *make_tuple_type_from_type_list(Typer *typer, DynamicArray types) {
 }
 
 bool check_declaration(Typer *typer, AstDeclaration *decl) {
+    if (decl->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
+        return true;
+    }
+
     typer->inside_declaration = decl;
 
     if (decl->flags & DECLARATION_TYPED) {
@@ -496,17 +500,36 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         }
     }
 
-    if (decl->type->kind == TYPE_VOID) {
-        if (decl->value) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->value), "Cannot assign variable to expression of type void", decl->ident->name);
-        } else {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl->type), "Variables are not allowed to have type void");
+    // Check for any void assignments
+    if (decl->values.count > 0) {
+        for (int i = 0, ident_index = 0; i < decl->values.count; i++, ident_index++) {
+            AstExpr *value = ((AstExpr **)decl->values.items)[i];
+    
+            if (value->type->kind == TYPE_TUPLE) {
+                TypeTuple *tuple_type = (TypeTuple *) value->type;
+                ident_index += tuple_type->types.count - 1;
+                continue;
+            }
+    
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[ident_index];
+    
+            if (ident->type->kind == TYPE_VOID) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Cannot assign variable to expression of type void", ident->name);
+                return false;
+            }
         }
-        return false;
+    } else {
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+
+            if (ident->type->kind == TYPE_VOID) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ident->type), "Variables are not allowed to have type void");
+                return false;
+            }
+        }
     }
 
     // Solidify any literals
-    
     for (int i = 0, ident_index = 0; i < decl->values.count; i++, ident_index++) {
         AstExpr *value = ((AstExpr **)decl->values.items)[i];
 
@@ -551,8 +574,17 @@ check_identifiers_vs_values:
     
             num_values += 1;
         }
-        if (decl->idents.count != num_values) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(decl), "Assignment mismatch. Have %d %s and %d %s", decl->idents.count, decl->idents.count == 1 ? "identifier" : "identifiers", num_values, num_values == 1 ? "value" : "values");
+        if (decl->idents.count > num_values) {
+            AstIdentifier *extra_ident = ((AstIdentifier **)decl->idents.items)[decl->idents.count - 1];
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(extra_ident), "Assignment mismatch. Have %d %s and %d %s", decl->idents.count, decl->idents.count == 1 ? "identifier" : "identifiers", num_values, num_values == 1 ? "value" : "values");
+            if (func_call_with_multiple_return_values) {
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_call_with_multiple_return_values), "This function call returns %s", type_to_str(func_call_with_multiple_return_values->head.type));
+            }
+            return NULL;
+        }
+        if (decl->idents.count < num_values) {
+            AstExpr *extra_expr = ((AstExpr **)decl->values.items)[decl->values.count - 1];
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(extra_expr), "Assignment mismatch. Have %d %s and %d %s", decl->idents.count, decl->idents.count == 1 ? "identifier" : "identifiers", num_values, num_values == 1 ? "value" : "values");
             if (func_call_with_multiple_return_values) {
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_call_with_multiple_return_values), "This function call returns %s", type_to_str(func_call_with_multiple_return_values->head.type));
             }
@@ -560,10 +592,12 @@ check_identifiers_vs_values:
         }
     }
     
-    // Mark the identifiers as fully resolved
+    // Mark the identifiers and declaration as fully typechecked
+    decl->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
     for (int i = 0; i < decl->idents.count; i++) {
         AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
         ident->flags |= IDENTIFIER_IS_RESOLVED;
+        ident->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
     }
 
     //
@@ -636,13 +670,13 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         // Lookup the function within the scope of the struct
         assert(call->belongs_to_struct);
 
-        AstDeclaration *func_member = get_struct_member(call->belongs_to_struct, call->identifer->name);
+        AstIdentifier *func_member = get_struct_member(call->belongs_to_struct, call->identifer->name);
         if (!func_member) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined member function '%s'", text_bold(call->identifer->name));
             return NULL;
         }
 
-        func_ident = func_member->ident;
+        func_ident = func_member;
     } else {
         // Look in the current local scope
         func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name);
@@ -692,7 +726,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
         if (!types_are_equal(arg_type, param->type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg_type)));
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param), "Here is the definition of '%s'", param->ident->name);
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param), "Here is the definition of '%s'", param->ident_OLD->name);
             return NULL;
         }
     }
@@ -755,7 +789,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     bool is_array_ac   = assign->lhs->head.kind == AST_ARRAY_ACCESS;
     bool is_identifier = assign->lhs->head.kind == AST_LITERAL && ((AstLiteral *)(assign->lhs))->kind == LITERAL_IDENTIFIER;
 
-    AstDeclaration *member = NULL;
+    AstIdentifier  *member = NULL;
     AstIdentifier  *ident  = NULL;
 
     bool lhs_is_constant = false;
@@ -775,7 +809,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     }
 
     if (lhs_is_constant) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign new value to constant '%s'", is_member ? member->ident->name : ident->name);
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign new value to constant '%s'", is_member ? member->name : ident->name);
         return false;
     }
 
@@ -808,7 +842,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
 
     if (!types_are_equal(lhs_type, expr_type)) {
         if (is_member) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to member '%s' of type '%s'", type_to_str(expr_type), member->ident->name, type_to_str(lhs_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to member '%s' of type '%s'", type_to_str(expr_type), member->name, type_to_str(lhs_type));
         } else if (is_identifier) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to variable '%s' of type '%s'", type_to_str(expr_type), ident->name, type_to_str(lhs_type));
         } else if (is_array_ac) {
@@ -843,11 +877,11 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
 
 
     typer->current_scope = ast_struct->scope;
-    DynamicArray members = ast_struct->scope->members;
+    DynamicArray members = ast_struct->scope->identifiers;
     bool ok;
     for (int i = 0; i < members.count; i++) {
-        AstDeclaration *member = ((AstDeclaration **)members.items)[i];
-        ok = check_declaration(typer, member);
+        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+        ok = check_declaration(typer, member->decl);
         if (!ok) return false;
     }
     typer->current_scope = ast_struct->scope->parent;
@@ -857,7 +891,7 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     int largest_alignment = 0;
     int offset  = 0;
     for (int i = 0; i < members.count; i++) {
-        AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
         
         int member_size = member->type->size;
         if (member->type->kind == TYPE_STRUCT) {
@@ -883,7 +917,6 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     struct_type->head.size  = align_value(offset, largest_alignment);
     struct_type->head.flags |= TYPE_IS_FULLY_SIZED;
     struct_type->alignment  = largest_alignment;
-    struct_type->members    = members;
 
     return true;
 }
@@ -1081,24 +1114,21 @@ char *generate_c_format_specifier_for_type(Type *type) {
 
         TypeStruct *struct_defn = (TypeStruct *) type;
 
-        DynamicArray members = struct_defn->node->scope->members;
+        DynamicArray members = struct_defn->node->scope->identifiers;
 
         sb_append(&builder, "%s{ ", struct_defn->identifier->name);
         for (int i = 0; i < members.count; i++) {
-            AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+            AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
             if (member->flags & DECLARATION_IS_STRUCT_METHOD) continue;
 
-            char           *member_name = member->ident->name;
-            Type           *member_type = member->type;
+            char *format_specifier = generate_c_format_specifier_for_type(member->type);
 
-            char *format_specifier = generate_c_format_specifier_for_type(member_type);
-
-            sb_append(&builder, "%s = %s", member_name, format_specifier);
+            sb_append(&builder, "%s = %s", member->name, format_specifier);
 
             
             if (i != members.count - 1) {
-                bool next_member_is_method = ((AstDeclaration **)members.items)[i + 1]->flags & DECLARATION_IS_STRUCT_METHOD;
+                bool next_member_is_method = ((AstIdentifier **)members.items)[i + 1]->decl->flags & DECLARATION_IS_STRUCT_METHOD;
                 if (!next_member_is_method) {
                     sb_append(&builder, ", ");
                 }
@@ -1115,12 +1145,12 @@ char *generate_c_format_specifier_for_type(Type *type) {
 }
 
 int count_nested_sizeable_struct_members(Typer *typer, AstStruct *struct_, int count) {
-    DynamicArray members = struct_->scope->members;
+    DynamicArray members = struct_->scope->identifiers;
 
     for (int i = 0; i < members.count; i++) {
-        AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-        if (member->flags & DECLARATION_IS_STRUCT_METHOD) continue;
+        if (member->decl->flags & DECLARATION_IS_STRUCT_METHOD) continue;
 
         if (member->type->kind == TYPE_STRUCT) {
             AstStruct *nested_struct = ((TypeStruct *)member->type)->node;
@@ -1485,7 +1515,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
         // Add the function as a member of the receiver struct
         AstDeclaration *method_member = generate_declaration(typer->parser, func_defn->identifier->name, NULL, (Type *)func_type, DECLARATION_IS_STRUCT_MEMBER | DECLARATION_IS_STRUCT_METHOD);
-        add_member_to_struct(receiver_struct->node, method_member);
+        add_member_to_struct(typer->parser, receiver_struct->node, method_member);
 
         func_defn->receiver_type            = (Type *)receiver_struct;
         func_defn->receiver_type_is_pointer = receiver_is_pointer;
@@ -1886,11 +1916,11 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
 
 
     AstFunctionCall *func_call = NULL;
-    AstDeclaration  *member = NULL;
+    AstIdentifier   *member = NULL;
     char            *member_name = NULL;
     AstExpr         *rhs = ma->right;
 
-    // Get out the member declaration
+    // Get out the member
     if (rhs->head.kind == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
         AstLiteral *ident = (AstLiteral *) rhs;
         member_name = ident->as.value.identifier.name;
@@ -2011,13 +2041,13 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         struct_defn = (TypeStruct *)(ctx_type);
     }
 
-    DynamicArray members = struct_defn->node->scope->members;
+    DynamicArray members = struct_defn->node->scope->identifiers;
     int curr_member_index = 0;
     for (int i = 0; i < literal->initializers.count; i++) {
         AstStructInitializer *init = ((AstStructInitializer **)(literal->initializers.items))[i];
 
         if (init->designator != NULL) {
-            AstDeclaration *member = get_struct_member(struct_defn->node, init->designator->name);
+            AstIdentifier *member = get_struct_member(struct_defn->node, init->designator->name);
             if (member == NULL) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->designator), "'%s' is not a member of '%s'", init->designator->name, struct_defn->identifier->name);
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
@@ -2029,7 +2059,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
             if (!value_type) return NULL;
 
             if (!types_are_equal(member_type, value_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", member->ident->name, type_to_str(member_type), type_to_str(value_type));
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", member->name, type_to_str(member_type), type_to_str(value_type));
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
                 return NULL;
             }
@@ -2045,14 +2075,14 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
                 return NULL;
             }
             
-            AstDeclaration *member = ((AstDeclaration **)(members.items))[i];
+            AstIdentifier *member = ((AstIdentifier **)(members.items))[i];
             Type *member_type = member->type;
             Type *value_type  = check_expression(typer, init->value, member_type);
             if (!value_type) return NULL;
 
             if (!types_are_equal(member_type, value_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->ident->name, type_to_str(member_type), type_to_str(value_type));
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(member), "Here is the member '%s' in %s", member->ident->name, struct_defn->identifier->name);
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->name, type_to_str(member_type), type_to_str(value_type));
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(member), "Here is the member '%s' in %s", member->name, struct_defn->identifier->name);
                 return NULL;
             }
 
@@ -2472,9 +2502,8 @@ void reset_temporary_storage(AstFunctionDefn *func_defn) {
     func_defn->temp_ptr = 0;
 }
 
-// @Cleanup - Still kinda handy until we don't use AstIdentifier as the primary lookup in scopes
-AstDeclaration *get_struct_member(AstStruct *struct_defn, char *name) {
-    return find_member_in_scope(struct_defn->scope, name);
+AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name) {
+    return find_identifier_in_scope(struct_defn->scope, name);
 }
 
 bool is_untyped_literal(AstExpr *expr) {

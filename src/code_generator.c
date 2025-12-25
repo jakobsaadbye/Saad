@@ -888,7 +888,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
         Type           *param_type = param->type;
         
         int param_offset = allocate_variable(cg, param_type->size);
-        param->ident->stack_offset = param_offset;
+        param->ident_OLD->stack_offset = param_offset;
         
         int arg_index = i + num_large_return_values;
 
@@ -896,7 +896,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
             arg_index = 0;
         }
 
-        sb_append(&cg->code, "   ; Copy %s -> %d\n", param->ident->name, param_offset);
+        sb_append(&cg->code, "   ; Copy %s -> %d\n", param->ident_OLD->name, param_offset);
 
         Register arg_reg = 0;
         if (arg_index < 4) {
@@ -1521,11 +1521,11 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
             }
         }
         
-        DynamicArray members = struct_node->scope->members;
+        DynamicArray members = struct_node->scope->identifiers;
         for (int i = 0; i < members.count; i++) {
-            AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+            AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-            if (member->flags & DECLARATION_IS_STRUCT_METHOD) {
+            if (member->decl->flags & DECLARATION_IS_STRUCT_METHOD) {
                 continue;
             }
 
@@ -1552,11 +1552,11 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
 }
 
 void pop_struct_members_from_print(CodeGenerator *cg, AstStruct *struct_, int *c_arg_index) {
-    DynamicArray members = struct_->scope->members;
-    for (int i = struct_->scope->members.count - 1; i >= 0; i--) {
-        AstDeclaration *member = ((AstDeclaration **)members.items)[i];
+    DynamicArray members = struct_->scope->identifiers;
+    for (int i = members.count - 1; i >= 0; i--) {
+        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-        if (member->flags & DECLARATION_IS_STRUCT_METHOD) {
+        if (member->decl->flags & DECLARATION_IS_STRUCT_METHOD) {
             continue;
         }
 
@@ -1972,14 +1972,14 @@ int allocate_variable(CodeGenerator *cg, int size) {
 
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     if (decl->flags & DECLARATION_CONSTANT) {
-        assert(decl->value->head.kind == AST_LITERAL);
-        AstLiteral *lit = (AstLiteral *)(decl->value);
+        assert(decl->value_OLD->head.kind == AST_LITERAL);
+        AstLiteral *lit = (AstLiteral *)(decl->value_OLD);
 
         switch (lit->kind) {
         case LITERAL_BOOLEAN: break; // Immediate value is used
         case LITERAL_INTEGER: break; // Immediate value is used 
-        case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", decl->ident->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
-        case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", decl->ident->name, lit->as.value.string.data); break; // :IdentifierNameAsConstant @Cleanup
+        case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", decl->ident_OLD->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
+        case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", decl->ident_OLD->name, lit->as.value.string.data); break; // :IdentifierNameAsConstant @Cleanup
         case LITERAL_NULL:    XXX; // @TODO
         case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
         }
@@ -1987,19 +1987,19 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         return;
     }
 
-    decl->ident->stack_offset = allocate_variable(cg, decl->type->size);
+    decl->ident_OLD->stack_offset = allocate_variable(cg, decl->type->size);
 
     sb_append(&cg->code, "\n");
-    sb_append(&cg->code, "   ; Ln %d: $%s : %s = %d\n", decl->ident->head.start.line, decl->ident->name, type_to_str(decl->type), decl->ident->stack_offset);
+    sb_append(&cg->code, "   ; Ln %d: $%s : %s = %d\n", decl->ident_OLD->head.start.line, decl->ident_OLD->name, type_to_str(decl->type), decl->ident_OLD->stack_offset);
     
-    if (!decl->value) {
-        zero_initialize(cg, decl->type, decl->ident->stack_offset, false);
+    if (!decl->value_OLD) {
+        zero_initialize(cg, decl->type, decl->ident_OLD->stack_offset, false);
         return;
     }
 
     // Special zero initialization of fixed arrays
     if (decl->type->kind == TYPE_ARRAY && ((TypeArray *)decl->type)->array_kind == ARRAY_FIXED) {
-        zero_initialize(cg, decl->type, decl->ident->stack_offset, false);
+        zero_initialize(cg, decl->type, decl->ident_OLD->stack_offset, false);
     }
 
     // The following "fast-path" code is here to omit emit_expression()
@@ -2010,15 +2010,15 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     // an extra copy. The same is true for array literals.
 
     set_flag(cg, CODEGEN_DO_DIRECT_ASSIGNMENT);
-    cg->direct_offset = decl->ident->stack_offset;
-    emit_expression(cg, decl->value);
+    cg->direct_offset = decl->ident_OLD->stack_offset;
+    emit_expression(cg, decl->value_OLD);
 
-    if (decl->value->head.kind == AST_STRUCT_LITERAL || decl->value->head.kind == AST_ARRAY_LITERAL) {
+    if (decl->value_OLD->head.kind == AST_STRUCT_LITERAL || decl->value_OLD->head.kind == AST_ARRAY_LITERAL) {
         // The value was directly assigned to the variable
         return;
     }
     
-    emit_simple_initialization(cg, decl->ident->stack_offset, false, false, decl->type, decl->value->type);
+    emit_simple_initialization(cg, decl->ident_OLD->stack_offset, false, false, decl->type, decl->value_OLD->type);
 }
 
 void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
@@ -2549,14 +2549,14 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
         if (ma->access_kind == MEMBER_ACCESS_STRUCT) {
 
-            AstDeclaration *member = ma->struct_member;
+            AstIdentifier *member = ma->struct_member;
 
             // Case for member access on an fixed array type
             if (ma->left->type->kind == TYPE_ARRAY && ((TypeArray *)ma->left->type)->array_kind == ARRAY_FIXED) {
                 TypeArray *fixed_array = (TypeArray *)ma->left->type;
-                if (ma->struct_member->member_index == 0) { // .data
+                if (member->member_index == 0) { // .data
                     // Address of array is already pushed
-                } else if (ma->struct_member->member_index == 1) { // .count
+                } else if (member->member_index == 1) { // .count
                     POP(RBX);
                     sb_append(&cg->code, "   push\t\t%d\n", fixed_array->count);
                 } else {
@@ -2827,9 +2827,9 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, lit->as.value.identifier.name);
             assert(ident);
 
-            if (ident->belongs_to_decl && ident->belongs_to_decl->flags & DECLARATION_CONSTANT) {
-                assert(ident->belongs_to_decl->value->head.kind == AST_LITERAL);
-                AstLiteral *lit = (AstLiteral *)(ident->belongs_to_decl->value);
+            if (ident->decl && ident->decl->flags & DECLARATION_CONSTANT) {
+                assert(ident->decl->value_OLD->head.kind == AST_LITERAL);
+                AstLiteral *lit = (AstLiteral *)(ident->decl->value_OLD);
                 switch (lit->kind) {
                     case LITERAL_BOOLEAN: {
                         sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);

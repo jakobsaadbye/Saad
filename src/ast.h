@@ -136,9 +136,11 @@ typedef struct AstIdentifier {
     char  *name;
     int    length;
 
-    AstDeclaration *belongs_to_decl;
+    AstDeclaration *decl;
 
-    int    stack_offset;
+    int member_index;   // Used to know the insertion order of a struct member
+    int member_offset;  // Relative positive offset of the member within the struct
+    int stack_offset;
 } AstIdentifier;
 
 typedef enum DeclarationFlags {
@@ -155,15 +157,15 @@ typedef enum DeclarationFlags {
 typedef struct AstDeclaration {
     Ast head;
 
-    AstIdentifier   *ident;  // @Deprecate
+    AstIdentifier   *ident_OLD;  // @Deprecate
     DynamicArray     idents; // of *AstIdentifier
     Type            *type;   // type is *TypeTuple if doing a multi declaration
-    AstExpr         *value;  // @Deprecate
+    AstExpr         *value_OLD;  // @Deprecate
     DynamicArray     values; // of *AstExpr
     DeclarationFlags flags;
 
-    int member_index;   // Used to know the insertion order of a struct member
-    int member_offset;  // Relative positive offset of the member within the struct
+    int member_index;   // @Deprecate: Used to know the insertion order of a struct member
+    int member_offset;  // @Deprecate: Relative positive offset of the member within the struct
 } AstDeclaration;
 
 typedef enum AssignOp {
@@ -219,7 +221,6 @@ typedef struct AstBlock {
     DynamicArray statements;
 
     DynamicArray identifiers; // of *AstIdentifier
-    DynamicArray members;     // of *AstDeclaration. Used in structs
 
     AstStruct *belongs_to_struct;
 
@@ -424,7 +425,7 @@ typedef struct AstMemberAccess {
     
     AccessorKind access_kind;
     union {
-        AstDeclaration *struct_member;
+        AstIdentifier  *struct_member;
         AstEnumerator  *enum_member;
     };
 } AstMemberAccess;
@@ -450,12 +451,10 @@ typedef struct AstStructLiteral {
 } AstStructLiteral;
 
 typedef struct AstStructInitializer {
-    Ast head;
-
+    Ast            head;
     AstIdentifier *designator;  // null if no explicit member name is used
     AstExpr       *value;
-
-    AstDeclaration *member;     // member that this initializer is initializing
+    AstIdentifier *member;      // member that this initializer is initializing
 } AstStructInitializer;
 
 typedef struct AstArrayLiteral {
@@ -597,7 +596,6 @@ typedef struct TypeStruct {
     Type           head;
     AstStruct     *node;
     AstIdentifier *identifier;
-    DynamicArray   members; // of *AstDeclaration @Note - Copy into the node's the scope members
     unsigned int   alignment;
 } TypeStruct;
 

@@ -133,7 +133,7 @@ AstExpr *simplify_expression(ConstEvaluator *ce, AstBlock *scope, AstExpr *expr)
             if (lit->kind == LITERAL_IDENTIFIER) {
                 AstIdentifier *ident = lookup_from_scope(ce->parser, scope, lit->as.value.identifier.name);
                 if (ident->flags & IDENTIFIER_IS_CONSTANT) {
-                    return simplify_expression(ce, scope, ident->belongs_to_decl->value);
+                    return simplify_expression(ce, scope, ident->decl->value_OLD);
                 }
             }
 

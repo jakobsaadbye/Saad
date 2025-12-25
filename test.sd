@@ -1,14 +1,19 @@
-foo :: () -> bool, string, string {
-   return true, "true", "hello"; 
+A, B :: 3;
+
+readEntireFile :: (filepath: string) -> string, bool {
+    return "hellope", false;
 }
 
-readEntireFile :: (filepath: string) -> bool, string, string, string {
-    return foo(), "hellope";
+foo :: () -> void {
+    return;
 }
 
 main :: () {
     // text, ok, error: u8 = readEntireFile("file"), 255;
-    text, ok, some := 1, 2, readEntireFile("text.txt");
+    a, b : void = 3;
+
+    // a: void;
+    text, ok := readEntireFile("text.txt");
 
     print("%, %", text, ok);
     // text, ok := readEntireFile("test.sd");
