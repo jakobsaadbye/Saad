@@ -1,9 +1,14 @@
-readEntireFile :: (filepath: string) -> string, bool {
-    return "hellope", false;
+// readEntireFile :: () -> string, bool {
+//     return "hellope", false;
+// }
+
+Vector2 :: struct {
+    x, y: int;
 }
 
 main :: () {
-    text, ok := readEntireFile("text.txt");
-
-    print("%, %", text, ok);
+    // text, ok, silly := readEntireFile(), 5;
+    v, ok := Vector2{3, 4}, false;
+    // text, ok := Vector2{3, 4}, "World";
+    print("% %", v.x, ok);
 }

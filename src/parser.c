@@ -8,7 +8,7 @@
 Parser           parser_init(Lexer *lexer);
 AstFile         *parse_file(Parser *parser, char *file_path);
 Ast             *parse_statement(Parser *parser);
-AstDeclaration  *parse_declaration(Parser *parser, DeclarationFlags flags);
+AstDeclaration  *parse_declaration(Parser *parser);
 AstAssignment   *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token);
 AstDirective    *parse_directive(Parser *parser);
 AstFunctionDefn *parse_function_defn(Parser *parser);
@@ -73,6 +73,7 @@ Parser parser_init(Lexer *lexer) {
     parser.current_scope = NULL;
     parser.current_file  = NULL;
     parser.inside_statement_header = false;
+    parser.inside_parameter_list   = false;
 
     return parser;
 }
@@ -366,7 +367,7 @@ Ast *parse_statement(Parser *parser) {
     }
 
     else if (starts_declaration(parser, token)) {
-        stmt = (Ast *)(parse_declaration(parser, 0));
+        stmt = (Ast *)(parse_declaration(parser));
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
     }
@@ -1374,7 +1375,7 @@ AstFunctionCall *parse_function_call(Parser *parser) {
 
 AstFunctionDefn *parse_function_defn(Parser *parser) {
     AstFunctionDefn *func_defn = (AstFunctionDefn *)(ast_allocate(parser, sizeof(AstFunctionDefn)));
-    func_defn->parameters   = da_init(2, sizeof(AstDeclaration *));
+    func_defn->parameters   = da_init(2, sizeof(AstIdentifier *));
     func_defn->return_types = da_init(2, sizeof(Type *));
 
     Token ident_token = peek_next_token(parser);
@@ -1399,6 +1400,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     eat_token(parser);
 
     parser->enclosing_function = func_defn;
+    parser->inside_parameter_list = true;
 
     AstBlock *body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters can be pushed down into the scope of the body
     bool first_parameter_seen = false;
@@ -1411,18 +1413,32 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
             }
         }
 
-        AstDeclaration *param = parse_declaration(parser, DECLARATION_IS_FUNCTION_PARAMETER);
-        if (!param) {
+        AstDeclaration *decl = parse_declaration(parser);
+        if (!decl) {
             return NULL;
         }
 
-        if (!(param->flags & DECLARATION_TYPED_NO_EXPR)) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *) param, "Default arguments are currently not supported");
+        if (decl->flags & (DECLARATION_INFER | DECLARATION_TYPED)) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *) decl, "Default function arguments are currently not supported");
             return NULL;
+        }
+
+        if (decl->flags & (DECLARATION_CONSTANT)) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *) decl, "Constants are not allowed as function arguments");
+            return NULL;
+        }
+
+        if (decl->idents.count > 1) {
+            // @TODO:
+            XXX;
         }
 
         first_parameter_seen = true;
-        da_append(&func_defn->parameters, param);
+
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *param = ((AstIdentifier **)decl->idents.items)[i];
+            da_append(&func_defn->parameters, param);
+        }
 
         next = peek_next_token(parser);
         if (next.type == ')') {
@@ -1437,6 +1453,8 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
 
         eat_token(parser);
     }
+
+    parser->inside_parameter_list = false;
 
     if (func_defn->is_method) {
         if (func_defn->parameters.count == 0) {
@@ -1763,6 +1781,18 @@ bool parse_expression_list(Parser *parser, DynamicArray *exprs) {
         if (!expr) return false;
 
         da_append(exprs, expr);
+
+        if (parser->inside_parameter_list) {
+            // Prevent parsing the expressions of a function parameter list
+            // as being multiple expressions.
+            // e.g
+            //
+            // foo :: (a := 3, b: int) {...}
+            //         ^------------- Here we are inside a parameter list and we want the comma to seperate the parameters and not the two expressions 3, b
+            //
+            break;
+        }
+
         next = peek_next_token(parser);
         if (next.type == ',') {
             eat_token(parser);
@@ -1774,10 +1804,10 @@ bool parse_expression_list(Parser *parser, DynamicArray *exprs) {
     return true;
 }
 
-AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
+AstDeclaration *parse_declaration(Parser *parser) {
     AstDeclaration *decl = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
-    decl->head.kind  = AST_DECLARATION;
-    decl->head.file  = parser->current_file;
+    decl->head.kind = AST_DECLARATION;
+    decl->head.file = parser->current_file;
 
     decl->idents = da_init(2, sizeof(AstIdentifier *));
     decl->values = da_init(2, sizeof(AstExpr *));
@@ -1835,10 +1865,6 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
                 report_error_token(parser, LABEL_ERROR, next, "Default struct values are not yet implemented!");
                 return NULL;
             }
-            if (flags & DECLARATION_IS_FUNCTION_PARAMETER) {
-                report_error_token(parser, LABEL_ERROR, next, "Default function arguments not implemented yet");
-                return NULL;
-            };
             
             eat_token(parser);
 
@@ -1878,7 +1904,7 @@ AstDeclaration *parse_declaration(Parser *parser, DeclarationFlags flags) {
 
     // Add decl position info
     decl->head.start = ((AstIdentifier **)decl->idents.items)[0]->head.start;                                                        // Pos of first ident
-    decl->head.end   = decl->values.count > 0 ? ((AstExpr **)decl->values.items)[decl->values.count - 1]->head.end : decl->head.end; // Pos of last value or the type
+    decl->head.end   = decl->values.count > 0 ? ((AstExpr **)decl->values.items)[decl->values.count - 1]->head.end : decl->type->head.end; // Pos of last value or the type
 
     if (parser->current_scope->belongs_to_struct) {
         decl->flags |= DECLARATION_IS_STRUCT_MEMBER;
@@ -1932,7 +1958,6 @@ AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, Typ
     ident->head.file = parser->current_file;
     ident->type      = type;
     ident->name      = (char *)(name);
-    ident->length    = strlen(name);
 
     return ident;
 }
@@ -1947,7 +1972,6 @@ AstIdentifier *make_identifier_from_token(Parser *parser, Token ident_token, Typ
     ident->head.end   = ident_token.end;
     ident->type       = type;
     ident->name       = ident_token.as_value.value.identifier.name;
-    ident->length     = ident_token.as_value.value.identifier.length;
     ident->stack_offset = 0;
 
     return ident;

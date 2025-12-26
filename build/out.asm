@@ -9,9 +9,7 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   CS0 DB "entire file", 0 
-   CS1 DB "test.sd", 0 
-   CS2 DB `%s`, 10, 0 
+   CS0 DB `%d %s`, 10, 0 
 segment .text
    global main
    extern ExitProcess
@@ -35,76 +33,54 @@ assert_fail:
    call		ExitProcess
 
 
-; bytes locals   : 8
-; bytes temp     : 0
-; bytes total    : 48
-readEntireFile:
-   push		rbp
-   mov		rbp, rsp
-   sub		rsp, 48
-   ; Copy filepath -> -8
-   mov		-8[rbp], rcx
-   push		1
-   mov		rax, CS0
-   push		rax
-   jmp		L0
-L0:
-   pop		rax
-   add		rsp, 48
-   pop		rbp
-   ret
-
-; bytes locals   : 8
+; bytes locals   : 16
 ; bytes temp     : 8
-; bytes total    : 48
+; bytes total    : 64
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 48
+   sub		rsp, 64
 
-   ; Ln 6: $ok : bool = -1
-   mov		rax, CS1
+   ; Ln 11: $v : Vector2 = -8
+   lea		rcx, -8[rbp]
+   mov		rdx, 0
+   mov		r8, 8
+   call		memset
+   mov		rax, 3
    push		rax
    pop		rax
-   mov		rcx, rax
-   call		readEntireFile
+   mov		DWORD -8[rbp], eax
+   mov		rax, 4
    push		rax
    pop		rax
-   mov		BYTE -1[rbp], al
-   movzx		eax, BYTE -1[rbp]
+   mov		DWORD -4[rbp], eax
+   ; Ln 13 Print
+   lea		rax, -8[rbp]
    push		rax
-   pop		rax
-   test		rax, rax
-   sete		al
-   movzx		rax, al
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   movsx		rax, eax
    push		rax
-   pop		rax
-   cmp		al, 0
-   jz			L2
-   ; block of if
-   jmp		L1
-   jmp L2
-; done
-L2:
-   ; Ln 11 Print
-   movzx		eax, BYTE -1[rbp]
+   movzx		eax, BYTE 0[rbp]
    push		rax
    pop		rax
    cmp		al, 0
-   jnz		L3
+   jnz		L1
    mov		rax, string_false
-   jmp		L4
-L3:
+   jmp		L2
+L1:
    mov		rax, string_true
-L4:
+L2:
    push		rax
    ; Pop print arguments
    pop		rax
+   mov		r8, rax
+   pop		rax
    mov		rdx, rax
-   mov		rcx, CS2
+   mov		rcx, CS0
    call		printf
-L1:
+L0:
    mov		rax, 0
-   add		rsp, 48
+   add		rsp, 64
    pop		rbp
    ret

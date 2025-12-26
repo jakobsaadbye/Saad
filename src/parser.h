@@ -15,6 +15,7 @@ typedef struct Parser {
     TypeTable type_table;
 
     bool inside_statement_header;
+    bool inside_parameter_list;
 } Parser;
 
 Parser   parser_init(Lexer *lexer);

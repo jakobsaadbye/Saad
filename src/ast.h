@@ -130,14 +130,13 @@ typedef enum IdentifierFlags {
 } IdentifierFlags;
 
 typedef struct AstIdentifier {
-    Ast head;
-
-    Type  *type;
+    Ast      head;
+    char    *name;
+    Type    *type;
+    AstExpr *value;     // The value the identifier is set to in a declaration. @Note: Only available after typechecking
     IdentifierFlags flags;
-    char  *name;
-    int    length;
 
-    AstDeclaration *decl;
+    AstDeclaration *decl; // The declaration it belongs to
 
     int member_index;   // Used to know the insertion order of a struct member
     int member_offset;  // Relative positive offset of the member within the struct
@@ -156,17 +155,11 @@ typedef enum DeclarationFlags {
 } DeclarationFlags;
 
 typedef struct AstDeclaration {
-    Ast head;
-
-    AstIdentifier   *ident_OLD;  // @Deprecate
+    Ast              head;
     DynamicArray     idents; // of *AstIdentifier
     Type            *type;   // type is *TypeTuple if doing a multi declaration
-    AstExpr         *value_OLD;  // @Deprecate
     DynamicArray     values; // of *AstExpr
     DeclarationFlags flags;
-
-    int member_index;   // @Deprecate: Used to know the insertion order of a struct member
-    int member_offset;  // @Deprecate: Relative positive offset of the member within the struct
 } AstDeclaration;
 
 typedef enum AssignOp {
@@ -200,7 +193,6 @@ typedef enum Abi {
 typedef struct AstDirective {
     Ast           head;
     DirectiveKind kind;
-
     union {
         char      *import_name;
         Abi        extern_abi;
@@ -214,18 +206,13 @@ typedef enum BlockKind {
 } BlockKind;
 
 typedef struct AstBlock {
-    Ast head;
-
-    BlockKind kind;
-    AstBlock *parent;
-
-    DynamicArray statements;
-
-    DynamicArray identifiers; // of *AstIdentifier
-
-    AstStruct *belongs_to_struct;
-
-    int scope_number; // Only for debug purposes
+    Ast           head;
+    BlockKind     kind;
+    AstBlock     *parent;
+    DynamicArray  statements;
+    DynamicArray  identifiers; // of *AstIdentifier
+    AstStruct    *belongs_to_struct;
+    int           scope_number; // Only for debug purposes
 } AstBlock;
 
 typedef struct AstStruct {
@@ -272,7 +259,7 @@ typedef enum CallingConv {
 typedef struct AstFunctionDefn {
     Ast             head;
     AstIdentifier  *identifier;
-    DynamicArray    parameters; // of *AstDeclaration
+    DynamicArray    parameters; // of *AstIdentifier
     AstBlock       *body;
     DynamicArray    return_types; // of *Type
     CallingConv     call_conv;

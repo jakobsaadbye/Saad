@@ -854,7 +854,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
     // Search for a big argument
     for (int i = 0; i < func_defn->parameters.count; i++) {
-        AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
+        AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
         
         if (i == 5) break; // None of the arguments were big
 
@@ -884,11 +884,11 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
     // Move arguments to this function into their home addresses
     for (int i = 0; i < func_defn->parameters.count; i++) {
-        AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[i];
+        AstIdentifier  *param = ((AstIdentifier **)(func_defn->parameters.items))[i];
         Type           *param_type = param->type;
         
         int param_offset = allocate_variable(cg, param_type->size);
-        param->ident_OLD->stack_offset = param_offset;
+        param->stack_offset = param_offset;
         
         int arg_index = i + num_large_return_values;
 
@@ -896,7 +896,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
             arg_index = 0;
         }
 
-        sb_append(&cg->code, "   ; Copy %s -> %d\n", param->ident_OLD->name, param_offset);
+        sb_append(&cg->code, "   ; Copy %s -> %d\n", param->name, param_offset);
 
         Register arg_reg = 0;
         if (arg_index < 4) {
@@ -1144,7 +1144,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
 
 
         int             param_index = i + (is_method ? 1 : 0);
-        AstDeclaration *param = ((AstDeclaration **)call->func_defn->parameters.items)[param_index];
+        AstIdentifier  *param = ((AstIdentifier **)call->func_defn->parameters.items)[param_index];
         Type           *param_type = param->type;
 
         int arg_index = i + num_large_return_values + (is_method ? 1 : 0);
@@ -1972,53 +1972,61 @@ int allocate_variable(CodeGenerator *cg, int size) {
 
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     if (decl->flags & DECLARATION_CONSTANT) {
-        assert(decl->value_OLD->head.kind == AST_LITERAL);
-        AstLiteral *lit = (AstLiteral *)(decl->value_OLD);
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+            assert(ident->head.kind == AST_LITERAL);
 
-        switch (lit->kind) {
-        case LITERAL_BOOLEAN: break; // Immediate value is used
-        case LITERAL_INTEGER: break; // Immediate value is used 
-        case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", decl->ident_OLD->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
-        case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", decl->ident_OLD->name, lit->as.value.string.data); break; // :IdentifierNameAsConstant @Cleanup
-        case LITERAL_NULL:    XXX; // @TODO
-        case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
+            AstLiteral *lit = (AstLiteral *)(ident->value);
+            switch (lit->kind) {
+            case LITERAL_BOOLEAN: break; // Immediate value is used
+            case LITERAL_INTEGER: break; // Immediate value is used 
+            case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", ident->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
+            case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", ident->name, lit->as.value.string.data); break; // :IdentifierNameAsConstant @Cleanup
+            case LITERAL_NULL:    XXX; // @TODO
+            case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
+            }
         }
 
         return;
     }
 
-    decl->ident_OLD->stack_offset = allocate_variable(cg, decl->type->size);
+    for (int i = 0; i < decl->idents.count; i++) {
+        AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
 
-    sb_append(&cg->code, "\n");
-    sb_append(&cg->code, "   ; Ln %d: $%s : %s = %d\n", decl->ident_OLD->head.start.line, decl->ident_OLD->name, type_to_str(decl->type), decl->ident_OLD->stack_offset);
+        ident->stack_offset = allocate_variable(cg, ident->type->size);
     
-    if (!decl->value_OLD) {
-        zero_initialize(cg, decl->type, decl->ident_OLD->stack_offset, false);
-        return;
-    }
-
-    // Special zero initialization of fixed arrays
-    if (decl->type->kind == TYPE_ARRAY && ((TypeArray *)decl->type)->array_kind == ARRAY_FIXED) {
-        zero_initialize(cg, decl->type, decl->ident_OLD->stack_offset, false);
-    }
-
-    // The following "fast-path" code is here to omit emit_expression()
-    // from first doing a copy of the value of the expression on the stack followed 
-    // by a copy into the variable. emit_expression() will take the fast-path if 
-    // the expression is only 1-level deep. e.g    a := Vector3{1, 2, 3};
-    // In this example, the struct is directly moved into 'a' instead of doing
-    // an extra copy. The same is true for array literals.
-
-    set_flag(cg, CODEGEN_DO_DIRECT_ASSIGNMENT);
-    cg->direct_offset = decl->ident_OLD->stack_offset;
-    emit_expression(cg, decl->value_OLD);
-
-    if (decl->value_OLD->head.kind == AST_STRUCT_LITERAL || decl->value_OLD->head.kind == AST_ARRAY_LITERAL) {
-        // The value was directly assigned to the variable
-        return;
-    }
+        sb_append(&cg->code, "\n");
+        sb_append(&cg->code, "   ; Ln %d: $%s : %s = %d\n", ident->head.start.line, ident->name, type_to_str(ident->type), ident->stack_offset);
+        
+        if (!ident->value) {
+            zero_initialize(cg, ident->type, ident->stack_offset, false);
+            return;
+        }
     
-    emit_simple_initialization(cg, decl->ident_OLD->stack_offset, false, false, decl->type, decl->value_OLD->type);
+        // Special zero initialization of fixed arrays
+        if (ident->type->kind == TYPE_ARRAY && ((TypeArray *)ident->type)->array_kind == ARRAY_FIXED) {
+            zero_initialize(cg, ident->type, ident->stack_offset, false);
+        }
+    
+        // The following "fast-path" code is here to omit emit_expression()
+        // from first doing a copy of the value of the expression on the stack followed 
+        // by a copy into the variable. emit_expression() will take the fast-path if 
+        // the expression is only 1-level deep. e.g    a := Vector3{1, 2, 3};
+        // In this example, the struct is directly moved into 'a' instead of doing
+        // an extra copy. The same is true for array literals.
+    
+        set_flag(cg, CODEGEN_DO_DIRECT_ASSIGNMENT);
+        cg->direct_offset = ident->stack_offset;
+        emit_expression(cg, ident->value);
+    
+        if (ident->value->head.kind == AST_STRUCT_LITERAL || ident->value->head.kind == AST_ARRAY_LITERAL) {
+            // The value was directly assigned to the variable
+            return;
+        }
+        
+        emit_simple_initialization(cg, ident->stack_offset, false, false, ident->type, ident->value->type);
+    }
+
 }
 
 void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
@@ -2828,8 +2836,8 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             assert(ident);
 
             if (ident->decl && ident->decl->flags & DECLARATION_CONSTANT) {
-                assert(ident->decl->value_OLD->head.kind == AST_LITERAL);
-                AstLiteral *lit = (AstLiteral *)(ident->decl->value_OLD);
+                assert(ident->value->head.kind == AST_LITERAL);
+                AstLiteral *lit = (AstLiteral *)(ident->value);
                 switch (lit->kind) {
                     case LITERAL_BOOLEAN: {
                         sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);

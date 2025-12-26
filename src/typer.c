@@ -591,6 +591,26 @@ check_identifiers_vs_values:
             return NULL;
         }
     }
+
+    // Set the value that each identifier corresponds to in the declaration
+    for (int i = 0, ident_index = 0; i < decl->values.count; i++, ident_index++) {
+        AstExpr *value = ((AstExpr **)decl->values.items)[i];
+
+        if (value->type->kind == TYPE_TUPLE) {
+            TypeTuple *tuple_type = (TypeTuple *) value->type;
+            for (int j = 0; j < tuple_type->types.count; j++) {
+                ident_index += j;
+                AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[ident_index];
+
+                ident->value = value;
+            }
+        }
+        else {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[ident_index];
+            ident->value = value;
+        }
+    }
+
     
     // Mark the identifiers and declaration as fully typechecked
     decl->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
@@ -614,7 +634,10 @@ check_identifiers_vs_values:
      }
 
     if (typer->enclosing_function != NULL) {
-        reserve_local_storage(typer->enclosing_function, decl->type->size);
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+            reserve_local_storage(typer->enclosing_function, ident->type->size);
+        }
         return true;
     } else {
         // @TODO: Non-constant declarations in global scope should also be sized. Variables that live in global scope, should probably have some defined stack address of where they live, so they can be referenced locally. Still an open question on how i would do this.
@@ -718,15 +741,15 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
     for (int i = 0; i < call->arguments.count; i++) {
         int param_index = i + (func_defn->is_method ? 1 : 0);
-        AstDeclaration *param = ((AstDeclaration **)(func_defn->parameters.items))[param_index];
+        AstIdentifier *param = ((AstIdentifier **)(func_defn->parameters.items))[param_index];
 
         AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
         Type *arg_type = check_expression(typer, arg, param->type);
         if (!arg_type) return NULL;
 
         if (!types_are_equal(arg_type, param->type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Expected argument to be of type '%s', but argument is of type '%s'", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg_type)));
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param), "Here is the definition of '%s'", param->ident_OLD->name);
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg_type)));
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param->decl), "Here is the definition of '%s'", param->name);
             return NULL;
         }
     }
@@ -765,6 +788,11 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         } else {
             bytes_arguments += arg_type->size;
         }
+    }
+
+    if (typer->enclosing_function == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Function calls are not allowed at top-level yet");
+        return NULL;
     }
 
     reserve_temporary_storage(typer->enclosing_function, bytes_arguments);
@@ -1120,7 +1148,7 @@ char *generate_c_format_specifier_for_type(Type *type) {
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-            if (member->flags & DECLARATION_IS_STRUCT_METHOD) continue;
+            if (member->decl->flags & DECLARATION_IS_STRUCT_METHOD) continue;
 
             char *format_specifier = generate_c_format_specifier_for_type(member->type);
 
@@ -1426,8 +1454,8 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     // Check the parameters
     typer->enclosing_function = func_defn;
     for (int i = 0; i < func_defn->parameters.count; i++) {
-        AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
-        bool ok = check_declaration(typer, param);
+        AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
+        bool ok = check_declaration(typer, param->decl);
         if (!ok) return false;
 
         if (param->type->kind == TYPE_ARRAY && ((TypeArray *)param->type)->array_kind == ARRAY_FIXED) {
@@ -1485,7 +1513,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
     // Do method specific stuff
     if (func_defn->is_method) {
-        Type *receiver_type = ((AstDeclaration**)func_defn->parameters.items)[0]->type;
+        Type *receiver_type = ((AstIdentifier**)func_defn->parameters.items)[0]->type;
 
         // For now we only allow the receiver type to be a struct or a pointer to a struct!
         TypeStruct *receiver_struct = NULL;
@@ -1525,7 +1553,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     // Do sizing for parameters
     //
     for (int i = 0; i < func_defn->parameters.count; i++) {
-        AstDeclaration *param = ((AstDeclaration **)func_defn->parameters.items)[i];
+        AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
         reserve_local_storage(func_defn, param->type->size);
     }
 
