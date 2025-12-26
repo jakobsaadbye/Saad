@@ -1,14 +1,10 @@
-// readEntireFile :: () -> string, bool {
-//     return "hellope", false;
-// }
-
-Vector2 :: struct {
-    x, y: int;
+EngineType :: enum {
+    V8,
+    V6,
 }
 
+DEFAULT_ENGINE_TYPE :: EngineType.V6;
+
 main :: () {
-    // text, ok, silly := readEntireFile(), 5;
-    v, ok := Vector2{3, 4}, false;
-    // text, ok := Vector2{3, 4}, "World";
-    print("% %", v.x, ok);
+    print("%", DEFAULT_ENGINE_TYPE);
 }

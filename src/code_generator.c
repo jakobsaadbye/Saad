@@ -1974,7 +1974,7 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     if (decl->flags & DECLARATION_CONSTANT) {
         for (int i = 0; i < decl->idents.count; i++) {
             AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
-            assert(ident->head.kind == AST_LITERAL);
+            assert(ident->value && ident->value->head.kind == AST_LITERAL);
 
             AstLiteral *lit = (AstLiteral *)(ident->value);
             switch (lit->kind) {
