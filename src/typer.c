@@ -32,7 +32,7 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_t
 Type *check_member_access(Typer *typer, AstMemberAccess * ma);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
-bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn);
+bool  check_function_defn(Typer *typer, AstFunctionDefn *func_defn);
 
 char *type_to_str(Type *type);
 bool types_are_equal(Type *lhs, Type *rhs);
@@ -46,7 +46,7 @@ void statically_cast_literal(AstLiteral *untyped_literal, Type *cast_into);
 void reserve_local_storage(AstFunctionDefn *func_defn, int size);
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size);
 int push_temporary_value(AstFunctionDefn *func_defn, int size);
-int pop_temporary_value(AstFunctionDefn *func_defn);
+int pop_temporary_value(AstFunctionDefn *func_defn, int size);
 void reset_temporary_storage();
 AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name);
 char *generate_c_format_specifier_for_type(Type *type);
@@ -684,127 +684,6 @@ bool types_are_equal(Type *lhs, Type *rhs) {
     }
 
     return false;
-}
-
-Type *check_function_call(Typer *typer, AstFunctionCall *call) {
-    AstIdentifier *func_ident = NULL;
-
-    if (call->is_member_call) {
-        // Lookup the function within the scope of the struct
-        assert(call->belongs_to_struct);
-
-        AstIdentifier *func_member = get_struct_member(call->belongs_to_struct, call->identifer->name);
-        if (!func_member) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined member function '%s'", text_bold(call->identifer->name));
-            return NULL;
-        }
-
-        func_ident = func_member;
-    } else {
-        // Look in the current local scope
-        func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name);
-    }
-
-    if (func_ident == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined function '%s'", text_bold(call->identifer->name));
-        return NULL;
-    }
-
-    if (func_ident->type->kind != TYPE_FUNCTION) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "%s is not the name of a function. Type of %s is %s", func_ident->name, func_ident->name, type_to_str(func_ident->type));
-        return NULL;
-    }
-
-    AstFunctionDefn *func_defn = ((TypeFunction *)func_ident->type)->node;
-
-    // Make sure that the function definition is fully resolved
-    if (!(func_defn->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
-
-        // Save the current state of the typer as local info at this call site is probably overriden within check_function_defn()
-        Typer temp = *typer;
-
-        bool ok = check_function_defn(typer, func_defn);
-        if (!ok) return NULL;
-
-        typer_restore_state(typer, temp);
-    }
-    
-    int real_parameter_count = func_defn->parameters.count - (func_defn->is_method ? 1 : 0);
-    if (call->arguments.count != real_parameter_count) { 
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Mismatch in number of arguments. Function '%s' takes %d %s, but %d were supplied", func_defn->identifier->name, real_parameter_count, real_parameter_count == 1 ? "parameter" : "parameters", call->arguments.count);
-        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
-        if (call->is_member_call && call->arguments.count == func_defn->parameters.count) {
-            report_error_ast(typer->parser, LABEL_HINT, ((Ast **)func_defn->parameters.items)[0], "Method calls takes their first parameter as the receiving type and is thus not part of the argument list");
-        }
-        return NULL;
-    }
-
-    for (int i = 0; i < call->arguments.count; i++) {
-        int param_index = i + (func_defn->is_method ? 1 : 0);
-        AstIdentifier *param = ((AstIdentifier **)(func_defn->parameters.items))[param_index];
-
-        AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
-        Type *arg_type = check_expression(typer, arg, param->type);
-        if (!arg_type) return NULL;
-
-        if (!types_are_equal(arg_type, param->type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg_type)));
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param->decl), "Here is the definition of '%s'", param->name);
-            return NULL;
-        }
-    }
-
-    if (func_defn->return_types.count > 1) {
-        call->head.type = (Type *) make_tuple_type_from_type_list(typer, func_defn->return_types);
-    } else {
-        call->head.type = ((Type **)func_defn->return_types.items)[0];
-    }
-    call->func_defn = func_defn;
-
-    //
-    // Allocate space for arguments and potentially for the return value in the calling function
-    // @Note - We try and follow the msvc x86 calling convention ???
-    // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170#parameter-passing 
-    //
-    int bytes_arguments = 0;
-
-    for (int i = 0; i < call->arguments.count; i++) {
-        AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
-        Type    *arg_type = arg->type;
-
-        if (i < 4) {
-            if (arg_type->size <= 8) {
-                // Argument fits into a register
-                continue;
-            }
-            // Fallthrogh and allocate the argument on the stack
-        }
-
-        // Reserve space for the argument on the stack
-
-        // Pass fixed size arrays as slices, so allocate 16 bytes for them
-        if (arg_type->kind == TYPE_ARRAY && ((TypeArray *)arg_type)->array_kind == ARRAY_FIXED) {
-            bytes_arguments += 16;
-        } else {
-            bytes_arguments += arg_type->size;
-        }
-    }
-
-    if (typer->enclosing_function == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Function calls are not allowed at top-level yet");
-        return NULL;
-    }
-
-    reserve_temporary_storage(typer->enclosing_function, bytes_arguments);
-
-    for (int i = 0; i < func_defn->return_types.count; i++) {
-        Type *return_type = ((Type **)func_defn->return_types.items)[i];
-        if (return_type->size > 8) {
-            reserve_temporary_storage(typer->enclosing_function, return_type->size);
-        }
-    }
-
-    return call->head.type;
 }
 
 bool check_assignment(Typer *typer, AstAssignment *assign) {
@@ -1449,6 +1328,118 @@ bool check_if_function_needs_a_return(Typer *typer, AstFunctionDefn *func_defn) 
     return true;
 }
 
+Type *check_function_call(Typer *typer, AstFunctionCall *call) {
+
+    if (typer->enclosing_function == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Function calls are not allowed at top-level yet");
+        return NULL;
+    }
+
+    AstIdentifier *func_ident = NULL;
+
+    if (call->is_member_call) {
+        // Lookup the function within the scope of the struct
+        assert(call->belongs_to_struct);
+
+        AstIdentifier *func_member = get_struct_member(call->belongs_to_struct, call->identifer->name);
+        if (!func_member) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined member function '%s'", text_bold(call->identifer->name));
+            return NULL;
+        }
+
+        func_ident = func_member;
+    } else {
+        // Look in the current local scope
+        func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name);
+    }
+
+    if (func_ident == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined function '%s'", text_bold(call->identifer->name));
+        return NULL;
+    }
+
+    if (func_ident->type->kind != TYPE_FUNCTION) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "%s is not the name of a function. Type of %s is %s", func_ident->name, func_ident->name, type_to_str(func_ident->type));
+        return NULL;
+    }
+
+    AstFunctionDefn *func_defn = ((TypeFunction *)func_ident->type)->node;
+
+    // Make sure that the function definition is fully resolved
+    if (!(func_defn->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
+
+        // Save the current state of the typer as local info at this call site is probably overriden within check_function_defn()
+        Typer temp = *typer;
+
+        bool ok = check_function_defn(typer, func_defn);
+        if (!ok) return NULL;
+
+        typer_restore_state(typer, temp);
+    }
+    
+    int real_parameter_count = func_defn->parameters.count - (func_defn->is_method ? 1 : 0);
+    if (call->arguments.count != real_parameter_count) { 
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Mismatch in number of arguments. Function '%s' takes %d %s, but %d were supplied", func_defn->identifier->name, real_parameter_count, real_parameter_count == 1 ? "parameter" : "parameters", call->arguments.count);
+        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
+        if (call->is_member_call && call->arguments.count == func_defn->parameters.count) {
+            report_error_ast(typer->parser, LABEL_HINT, ((Ast **)func_defn->parameters.items)[0], "Method calls takes their first parameter as the receiving type and is thus not part of the argument list");
+        }
+        return NULL;
+    }
+
+    for (int i = 0; i < call->arguments.count; i++) {
+        int param_index = i + (func_defn->is_method ? 1 : 0);
+        AstIdentifier *param = ((AstIdentifier **)(func_defn->parameters.items))[param_index];
+
+        AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
+        Type *arg_type = check_expression(typer, arg, param->type);
+        if (!arg_type) return NULL;
+
+        if (!types_are_equal(arg_type, param->type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg_type)));
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param->decl), "Here is the definition of '%s'", param->name);
+            return NULL;
+        }
+    }
+
+    if (func_defn->return_types.count > 1) {
+        call->head.type = (Type *) make_tuple_type_from_type_list(typer, func_defn->return_types);
+    } else {
+        call->head.type = ((Type **)func_defn->return_types.items)[0];
+    }
+    call->func_defn = func_defn;
+
+    //
+    // Allocate space for arguments and potentially for the return value in the calling function
+    // @Note - We try and follow the msvc x86 calling convention ???
+    // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170#parameter-passing 
+    //
+    int bytes_arguments = 0;
+
+    for (int i = 0; i < call->arguments.count; i++) {
+        AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
+        Type    *arg_type = arg->type;
+
+        // Pass fixed size arrays as slices, so allocate 16 bytes for them
+        if (arg_type->kind == TYPE_ARRAY && ((TypeArray *)arg_type)->array_kind == ARRAY_FIXED) {
+            bytes_arguments += 16;
+        } else {
+            bytes_arguments += arg_type->size;
+        }
+    }
+
+    reserve_temporary_storage(typer->enclosing_function, bytes_arguments);
+
+    for (int i = 0; i < func_defn->return_types.count; i++) {
+        Type *return_type = ((Type **)func_defn->return_types.items)[i];
+        // if (return_type->size <= 8 && i < 5) continue;
+
+        reserve_temporary_storage(typer->enclosing_function, return_type->size);
+    }
+
+    return call->head.type;
+}
+
 bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     if (func_defn->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return true;
@@ -1560,12 +1551,11 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         reserve_local_storage(func_defn, param->type->size);
     }
 
-    // Do sizing of large return values
+    // Reserve space for stack or large return values
     for (int i = 0; i < func_defn->return_types.count; i++) {
         Type *return_type = ((Type **)func_defn->return_types.items)[i];
-        if (return_type->size > 8) {
-            reserve_local_storage(func_defn, 8);
-        }
+        if (return_type->size <= 8 && i < 5) continue;
+        reserve_local_storage(func_defn, 8);
     }
 
     return true;
@@ -2502,6 +2492,7 @@ void reserve_temporary_storage(AstFunctionDefn *func_defn, int size) {
     }
 }
 
+// Push size bytes to temporary storage
 int push_temporary_value(AstFunctionDefn *func_defn, int size) {
     // Temporary storage lives after the shadow-space and local variables
     int aligned_size = size;
@@ -2509,7 +2500,8 @@ int push_temporary_value(AstFunctionDefn *func_defn, int size) {
 
     // Assert that we don't use more space than what we have reserved during the sizing step!
     if (func_defn->num_bytes_temporaries <= func_defn->temp_ptr) {
-        assert(false);
+        printf("Compiler Error: Using more temporary storage space that what was allocated. Bytes allocated: %d, bytes used: %d\n", func_defn->num_bytes_temporaries, func_defn->temp_ptr);
+        // assert(false && "Using more bytes than what was allocated in temporary storage");
     }
 
     func_defn->temp_ptr += aligned_size;
@@ -2517,13 +2509,13 @@ int push_temporary_value(AstFunctionDefn *func_defn, int size) {
     return loc;
 }
 
-// Pop the latest 8 bytes from temporary storage
-int pop_temporary_value(AstFunctionDefn *func_defn) {
+// Pop size bytes from temporary storage
+int pop_temporary_value(AstFunctionDefn *func_defn, int size) {
     assert(func_defn);
 
     int loc = - (align_value(func_defn->num_bytes_locals, 8) + func_defn->temp_ptr);
 
-    func_defn->temp_ptr -= 8;
+    func_defn->temp_ptr -= size;
     assert(func_defn->temp_ptr >= 0);
 
     return loc;

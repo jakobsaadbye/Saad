@@ -496,7 +496,7 @@ typedef struct Type {
     Ast       head;
     TypeKind  kind;
     TypeFlags flags;
-    int       size;
+    int       size; // Size in bytes
     char     *name; // A name to a struct or enum
 } Type;
 

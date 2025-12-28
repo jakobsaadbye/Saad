@@ -42,8 +42,8 @@ void emit_header(CodeGenerator *cg);
 
 void emit_file(CodeGenerator *cg, AstFile *code);
 void emit_statement(CodeGenerator *cg, Ast *node);
-void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn);
 void emit_function_call(CodeGenerator *cg, AstFunctionCall *call);
+void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn);
 void emit_function_return_values(CodeGenerator *cg, AstFunctionDefn *func_defn);
 void emit_return(CodeGenerator *cg, AstReturn *ast_return);
 void emit_print(CodeGenerator *cg, AstPrint *print_stmt);
@@ -691,19 +691,42 @@ char *get_return_value_register(Type *return_type, int index) {
 // Moves the pushed value of the return expression into the 
 // correct register or stack location expected by the caller
 void emit_function_return_values(CodeGenerator *cg, AstFunctionDefn *func_defn) {
-    if (func_defn->return_types.count > 5) {
-        // @Todo: Handle return values on the stack
-        XXX;
+    
+    // Count number of stack allocated return values
+    int return_slots = 0;
+    for (int i = func_defn->return_types.count - 1; i >= 0; i--) {
+        Type *return_type = ((Type **)func_defn->return_types.items)[i];
+        if (return_type->size > 8 || i > 4) {
+            return_slots += 1;
+        }
     }
+
+    int current_return_slot = return_slots;
 
     for (int i = func_defn->return_types.count - 1; i >= 0; i--) {
         Type *return_type = ((Type **)func_defn->return_types.items)[i];
 
-        char *reg = get_return_value_register(return_type, i);
+        bool  output_as_register = i < 5;
+        char *out_register = NULL;
+        int   out_offset   = current_return_slot * 8;
+
+        if (return_type->size > 8 || i > 4) {
+            // Use up a return slot
+            current_return_slot -= 1;
+        }
+
+        if (output_as_register) {
+            out_register = get_return_value_register(return_type, i);
+        }
 
         switch (return_type->kind) {
         case TYPE_VOID: {
-            sb_append(&cg->code, "   mov\t\t%s, 0\n", reg);
+            if (output_as_register) {
+                sb_append(&cg->code, "   mov\t\t%s, 0\n", out_register);
+            } else {
+                // Shouldn't happen as multiple return values with void is not allowed
+                assert(false && "Void in multiple return values");
+            }
             continue;
         }
         case TYPE_BOOL:
@@ -711,12 +734,21 @@ void emit_function_return_values(CodeGenerator *cg, AstFunctionDefn *func_defn) 
         case TYPE_ENUM:
         case TYPE_STRING:
         case TYPE_POINTER: {
-            POP(reg);
+            if (output_as_register) {
+                POP(out_register);
+            } else {
+                sb_append(&cg->code, "   mov\t\trbx, -%d[rbp]\n", out_offset);
+                emit_simple_initialization(cg, 0, true, false, return_type, return_type);
+            }
             continue;
         }
         case TYPE_FLOAT: {
             POP(RBX);
-            sb_append(&cg->code, "   movq\t\t%s, rbx\n", reg);
+            if (output_as_register) {
+                sb_append(&cg->code, "   movq\t\t%s, rbx\n", out_register);
+            } else {
+                sb_append(&cg->code, "   mov\t\t-%d[rbp], rbx\n", out_offset);
+            }
             // if (return_type->size == 8) {
             //     sb_append(&cg->code, "   movq\t\txmm0, rax\n");
             // } else {
@@ -725,49 +757,38 @@ void emit_function_return_values(CodeGenerator *cg, AstFunctionDefn *func_defn) 
             continue;
         }
         case TYPE_ARRAY: {
-            POP(reg); // address of array
-            
             TypeArray *array = (TypeArray *) return_type;
             
-            // Get the offset of the allocated return slot since an array counts as a big return value
-            int return_slot_offset = 0;
-            for (int j = 0; j < func_defn->return_types.count; j++) {
-                Type *next_return_type = ((Type **)func_defn->return_types.items)[j];
-                if (next_return_type->size <= 8) continue;
-                return_slot_offset += 8;
-                if (j == i) break;
-            }
-
-            sb_append(&cg->code, "   mov\t\trax, %s\n", reg);
-            sb_append(&cg->code, "   mov\t\trbx, -%d[rbp]\n", return_slot_offset);
+            POP(RAX);
+            sb_append(&cg->code, "   mov\t\trbx, -%d[rbp]\n", out_offset);
             emit_struct_copy(cg, array->struct_defn, 0, 0);
-            sb_append(&cg->code, "   mov\t\t%s, -%d[rbp]\n", reg, return_slot_offset);
+            if (output_as_register) {
+                sb_append(&cg->code, "   mov\t\t%s, -%d[rbp]\n", out_register, out_offset);
+            }
 
             continue;
         }
         case TYPE_STRUCT: {
             if (return_type->size <= 8) {
-                // Struct fits in a register, so the struct is just returned in register
-                POP(reg);
+                // Struct fits in a register, so the struct is just returned as a value
+                if (output_as_register) {
+                    POP(out_register);
+                } else {
+                    POP(RBX);
+                    sb_append(&cg->code, "   mov\t\t-%d[rbp], rbx\n", out_offset);
+                }
                 continue;
             }
 
-            // Get the offset of the allocated return slot @CopyPasta: Of the above code
-            int return_slot_offset = 0;
-            for (int j = 0; j < func_defn->return_types.count; j++) {
-                Type *next_return_type = ((Type **)func_defn->return_types.items)[j];
-                if (next_return_type->size <= 8) continue;
-                return_slot_offset += 8;
-                if (j == i) break;
-            }
-    
             // Copy the struct to the allocated return value
             TypeStruct *struct_defn = (TypeStruct *)return_type;
             
             POP(RAX);
-            sb_append(&cg->code, "   mov\t\trbx, -%d[rbp]\n", return_slot_offset);
+            sb_append(&cg->code, "   mov\t\trbx, -%d[rbp]\n", out_offset);
             emit_struct_copy(cg, struct_defn, 0, 0);
-            sb_append(&cg->code, "   mov\t\t%s, -%d[rbp]\n", reg, return_slot_offset);
+            if (output_as_register) {
+                sb_append(&cg->code, "   mov\t\t%s, -%d[rbp]\n", out_register, out_offset);
+            }
 
             continue;
         }
@@ -872,9 +893,13 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
     // Parameters are passed in the following order
     //
-    // [Big_Ret_0, Big_Ret_1, Big_Ret_N, This_Ptr, Param_0, Param_1, Param_N]
+    // [Ret_0, Ret_1, Ret_N, This_Ptr, Param_0, Param_1, Param_N]
     //
-    // The input parameters can be found at
+    // Big return values or the 6'th and beyound return values are passed in as c-like out parameters to the function
+    //
+    // The parameters (be it return value or input parameter) are passed in the following registers / locations
+    //
+    //      0    1   2   3     4       5        n
     //     rcx, rdx, r8, r9, 16[rbp], 24[rbp], etc...
     //
 
@@ -886,10 +911,10 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     // This variable tells how much they are shifted
     int parameter_shift = 0;
 
-    // Move any return pointers passed from big return values into the first home slots
+    // Move any return pointers passed from big or stack allocated return values into the first home slots
     for (int i = 0; i < func_defn->return_types.count; i++) {
         Type *return_type = ((Type **)func_defn->return_types.items)[i];
-        if (return_type->size <= 8) continue;
+        if (return_type->size <= 8 && i < 5) continue;
         
         int home_offset = (parameter_shift + 1) * 8;
 
@@ -899,8 +924,8 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
         } else {
             // Pull the return pointer from the stack
             // Input stack arguments starts at +16, then +24 etc...
-            int input_offset = 16 + ((parameter_shift - 4) * 8);
-            sb_append(&cg->code, "   mov\t\trax, -%d[rbp]\t; Return (%d, %s)\n", input_offset, i, type_to_str(return_type));
+            int input_offset = 16 + (parameter_shift * 8);
+            sb_append(&cg->code, "   mov\t\trax, %d[rbp]\t; Return (%d, %s)\n", input_offset, i, type_to_str(return_type));
             sb_append(&cg->code, "   mov\t\t-%d[rbp], rax\t\n", home_offset);
         }
 
@@ -1156,14 +1181,19 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     int parameter_shift = 0;
     for (int i = 0; i < call->func_defn->return_types.count; i++) {
         Type *return_type = ((Type **)call->func_defn->return_types.items)[i];
-        if (return_type->size > 8) {
-            parameter_shift += 1;
-        }
+        if (return_type->size <= 8 && i < 5) continue;
+
+        parameter_shift += 1;
     }
 
     if (func_defn->is_method) {
         parameter_shift += 1;
     }
+
+    // Arguments that needs to go on the stack follows this order
+    // 
+    //    stack_arg_0, stack_arg_1, stack_arg_n,
+    //       32[rsp]      40[rsp]   (48...)[rsp]
 
     // Push all the arguments
     for (int i = 0; i < call->arguments.count; i++) {
@@ -1269,8 +1299,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
         // Pass the receiver literal after the large return values
         if (parameter_shift <= 3) {
             char *reg = get_argument_register_from_index(parameter_shift);
-            sb_append(&cg->code, "   pop\t\t%s\n", reg);
-            cg->num_pushed_arguments -= 1;
+            POP(reg);
         } else {
             int temp_loc = push_temporary_value(cg->enclosing_function, 8);
             POP(RAX);
@@ -1291,7 +1320,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
         bool arg_is_in_register = i < 4 - parameter_shift;
         if (arg_is_in_register) continue;
         
-        int temp_loc = pop_temporary_value(cg->enclosing_function);
+        int temp_loc = pop_temporary_value(cg->enclosing_function, 8);
 
         sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", temp_loc);
 
@@ -1308,11 +1337,11 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
         stack_arg_offset += 8;
     }
 
-    // Put large return values into the hidden slots allocated by the caller
+    // Push all return value out parameters
     int return_slot = 0;
     for (int i = 0; i < func_defn->return_types.count; i++) {
         Type *return_type = ((Type **)func_defn->return_types.items)[i];
-        if (return_type->size <= 8) continue;
+        if (return_type->size <= 8 && i < 5) continue;
         
         int temp_loc = push_temporary_value(cg->enclosing_function, return_type->size);
         
@@ -1321,7 +1350,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
             sb_append(&cg->code, "   lea\t\t%s, %d[rbp]\t\t; Return value (%d, %s)\n", reg, temp_loc, i, type_to_str(return_type));
         } else {
             // Pass on the stack
-            sb_append(&cg->code, "   mov\t\trax, %d[rbp]\t\t; Return value (%d, %s)\n", temp_loc, i, type_to_str(return_type));
+            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\t\t; Return value (%d, %s)\n", temp_loc, i, type_to_str(return_type));
             sb_append(&cg->code, "   mov\t\t%d[rsp], rax\n", stack_arg_offset);
             stack_arg_offset += 8;
         }
@@ -1349,16 +1378,25 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     for (int i = func_defn->return_types.count - 1; i >= 0; i--) {
         Type *return_type = ((Type **)func_defn->return_types.items)[i];
 
-        if (i < 5) {
-            char *reg = get_return_value_register(return_type, i);
+        bool  output_as_register = i < 5;
+        char *out_register = NULL;
+
+        if (output_as_register) {
+            out_register = get_return_value_register(return_type, i);
+        }
+
+        if (output_as_register) {
             if (return_type->kind == TYPE_FLOAT) {
-                sb_append(&cg->code, "   movq\t\trbx, %s\n", reg);
+                sb_append(&cg->code, "   movq\t\trbx, %s\n", out_register);
                 PUSH(RBX);
             } else {
-                PUSH(reg);
+                PUSH(out_register);
             }
         } else {
-            XXX;
+            // Push the stack values
+            int out_offset = pop_temporary_value(cg->enclosing_function, return_type->size);
+            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", out_offset);
+            PUSH(RBX);
         }
     }
 }
@@ -1700,7 +1738,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
         // We need to put all the fixed placed stack allocated arguments relative to the stack pointer
         int stack_offset = 32; // + (c_args - 5) * 8;
         for (int i = 0; i < c_args - 4; i++) {
-            int temp_offset   = pop_temporary_value(cg->enclosing_function);
+            int temp_offset = pop_temporary_value(cg->enclosing_function, 8);
             
             sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", temp_offset);
             sb_append(&cg->code, "   mov\t\tQWORD %d[rsp], rax\n", stack_offset);

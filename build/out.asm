@@ -9,10 +9,7 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   CF0 DD 7.0000000
-   CF1 DD 8.0000000
-   CF2 DD 9.0000000
-   CS3 DB `%d %d %d %d Vector3{ x = %f, y = %f, z = %f }`, 10, 0 
+   CS0 DB `%d %d %d %d %d %d %d %d`, 10, 0 
 segment .text
    global main
    extern ExitProcess
@@ -36,81 +33,91 @@ assert_fail:
    call		ExitProcess
 
 
-; bytes locals   : 136
+; bytes locals   : 152
 ; bytes temp     : 0
-; bytes total    : 176
+; bytes total    : 192
 add:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 176
-   mov		-8[rbp], rcx	; Return (4, Vector3)
-   mov		24[rbp], rdx 	; Save arg 0 
-   mov		32[rbp], r8 	; Save arg 1 
-   mov		40[rbp], r9 	; Save arg 2 
-   ; Copy a -> -12
-   mov		rax, 24[rbp]
-   mov		-12[rbp], eax
-   ; Copy b -> -16
-   mov		rax, 32[rbp]
-   mov		-16[rbp], eax
-   ; Copy c -> -20
-   mov		rax, 40[rbp]
-   mov		-20[rbp], eax
-   ; Copy d -> -24
+   sub		rsp, 192
+   mov		-8[rbp], rcx	; Return (5, int)
+   mov		-16[rbp], rdx	; Return (6, int)
+   mov		-24[rbp], r8	; Return (7, int)
+   ; Copy a -> -28
+   mov		-28[rbp], r9d
+   ; Copy b -> -32
    mov		rax, 48[rbp]
-   mov		-24[rbp], eax
-   ; Copy e -> -28
-   mov		rax, 56[rbp]
-   mov		-28[rbp], eax
-   ; Copy f -> -32
-   mov		rax, 64[rbp]
    mov		-32[rbp], eax
-   ; Copy g -> -48
+   ; Copy c -> -36
+   mov		rax, 56[rbp]
+   mov		-36[rbp], eax
+   ; Copy d -> -40
+   mov		rax, 64[rbp]
+   mov		-40[rbp], eax
+   ; Copy e -> -44
    mov		rax, 72[rbp]
-   lea		rbx, -48[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 12
-   call		memcpy
-   mov		eax, DWORD -12[rbp]
+   mov		-44[rbp], eax
+   ; Copy f -> -48
+   mov		rax, 80[rbp]
+   mov		-48[rbp], eax
+   ; Copy g -> -52
+   mov		rax, 88[rbp]
+   mov		-52[rbp], eax
+   ; Copy h -> -56
+   mov		rax, 96[rbp]
+   mov		-56[rbp], eax
+   mov		eax, DWORD -28[rbp]
    movsx		rax, eax
    push		rax
-   mov		eax, DWORD -16[rbp]
+   mov		eax, DWORD -32[rbp]
    movsx		rax, eax
    push		rax
-   mov		eax, DWORD -20[rbp]
+   mov		eax, DWORD -36[rbp]
    movsx		rax, eax
    push		rax
-   mov		eax, DWORD -24[rbp]
+   mov		eax, DWORD -40[rbp]
    movsx		rax, eax
    push		rax
-   lea		rax, -48[rbp]
+   mov		eax, DWORD -44[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		eax, DWORD -48[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		eax, DWORD -52[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		eax, DWORD -56[rbp]
+   movsx		rax, eax
    push		rax
    jmp		L0
 L0:
+   mov		rbx, -24[rbp]
    pop		rax
+   mov		DWORD [rbx], eax
+   mov		rbx, -16[rbp]
+   pop		rax
+   mov		DWORD [rbx], eax
    mov		rbx, -8[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 12
-   call		memcpy
-   mov		r9, -8[rbp]
+   pop		rax
+   mov		DWORD [rbx], eax
+   pop		r9
    pop		r8
    pop		rdx
    pop		rcx
    pop		rax
-   add		rsp, 176
+   add		rsp, 192
    pop		rbp
    ret
 
-; bytes locals   : 48
-; bytes temp     : 48
-; bytes total    : 128
+; bytes locals   : 64
+; bytes temp     : 64
+; bytes total    : 160
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 128
-   ; Ln 18: $a : int = -4[rbp]
+   sub		rsp, 160
+   ; Ln 21: $a : int = -4[rbp]
    mov		rax, 1
    push		rax
    mov		rax, 2
@@ -123,51 +130,50 @@ main:
    push		rax
    mov		rax, 6
    push		rax
-   lea		rcx, -60[rbp]
-   mov		rdx, 0
-   mov		r8, 12
-   call		memset
-   movss		xmm0, [CF0]
-   movd		eax, xmm0
+   mov		rax, 7
+   push		rax
+   mov		rax, 8
    push		rax
    pop		rax
-   mov		-60[rbp], eax
-   movss		xmm0, [CF1]
-   movd		eax, xmm0
-   push		rax
+   mov		-72[rbp], rax
    pop		rax
-   mov		-56[rbp], eax
-   movss		xmm0, [CF2]
-   movd		eax, xmm0
-   push		rax
+   mov		-80[rbp], rax
    pop		rax
-   mov		-52[rbp], eax
-   lea		rax, -60[rbp]
-   push		rax
+   mov		-88[rbp], rax
    pop		rax
-   mov		-68[rbp], rax
+   mov		-96[rbp], rax
    pop		rax
-   mov		-76[rbp], rax
+   mov		-104[rbp], rax
    pop		rax
-   mov		-84[rbp], rax
+   mov		-112[rbp], rax
    pop		rax
-   mov		-92[rbp], rax
+   mov		-120[rbp], rax
    pop		rax
    mov		r9d, eax
-   pop		rax
-   mov		r8d, eax
-   pop		rax
-   mov		edx, eax
-   mov		rax, QWORD -92[rbp]
+   mov		rax, QWORD -120[rbp]
    mov		32[rsp], eax
-   mov		rax, QWORD -84[rbp]
+   mov		rax, QWORD -112[rbp]
    mov		40[rsp], eax
-   mov		rax, QWORD -76[rbp]
+   mov		rax, QWORD -104[rbp]
    mov		48[rsp], eax
-   mov		rax, QWORD -68[rbp]
-   mov		56[rsp], rax
-   lea		rcx, -72[rbp]		; Return value (4, Vector3)
+   mov		rax, QWORD -96[rbp]
+   mov		56[rsp], eax
+   mov		rax, QWORD -88[rbp]
+   mov		64[rsp], eax
+   mov		rax, QWORD -80[rbp]
+   mov		72[rsp], eax
+   mov		rax, QWORD -72[rbp]
+   mov		80[rsp], eax
+   lea		rcx, -68[rbp]		; Return value (5, int)
+   lea		rdx, -72[rbp]		; Return value (6, int)
+   lea		r8, -76[rbp]		; Return value (7, int)
    call		add
+   mov		rbx, -76[rbp]
+   push		rbx
+   mov		rbx, -72[rbp]
+   push		rbx
+   mov		rbx, -68[rbp]
+   push		rbx
    push		r9
    push		r8
    push		rdx
@@ -175,23 +181,28 @@ main:
    push		rax
    pop		rax
    mov		DWORD -4[rbp], eax
-   ; Ln 18: $b : int = -8[rbp]
+   ; Ln 21: $b : int = -8[rbp]
    pop		rax
    mov		DWORD -8[rbp], eax
-   ; Ln 18: $c : int = -12[rbp]
+   ; Ln 21: $c : int = -12[rbp]
    pop		rax
    mov		DWORD -12[rbp], eax
-   ; Ln 18: $d : int = -16[rbp]
+   ; Ln 21: $d : int = -16[rbp]
    pop		rax
    mov		DWORD -16[rbp], eax
-   ; Ln 18: $e : Vector3 = -32[rbp]
+   ; Ln 21: $e : int = -20[rbp]
    pop		rax
-   lea		rbx, -32[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 12
-   call		memcpy
-   ; Ln 21 Print
+   mov		DWORD -20[rbp], eax
+   ; Ln 21: $f : int = -24[rbp]
+   pop		rax
+   mov		DWORD -24[rbp], eax
+   ; Ln 21: $g : int = -28[rbp]
+   pop		rax
+   mov		DWORD -28[rbp], eax
+   ; Ln 21: $h : int = -32[rbp]
+   pop		rax
+   mov		DWORD -32[rbp], eax
+   ; Ln 28 Print
    mov		eax, DWORD -4[rbp]
    movsx		rax, eax
    push		rax
@@ -204,60 +215,49 @@ main:
    mov		eax, DWORD -16[rbp]
    movsx		rax, eax
    push		rax
-   lea		rax, -32[rbp]
+   mov		eax, DWORD -20[rbp]
+   movsx		rax, eax
    push		rax
-   pop		r9
-   lea		rbx, 0[r9]
-   mov		eax, [rbx]
+   mov		eax, DWORD -24[rbp]
+   movsx		rax, eax
    push		rax
-   pop		rax
-   movd		xmm0, eax
-   cvtss2sd	xmm0, xmm0
-   movq		rax, xmm0
+   mov		eax, DWORD -28[rbp]
+   movsx		rax, eax
    push		rax
-   lea		rbx, 4[r9]
-   mov		eax, [rbx]
-   push		rax
-   pop		rax
-   movd		xmm0, eax
-   cvtss2sd	xmm0, xmm0
-   movq		rax, xmm0
-   push		rax
-   lea		rbx, 8[r9]
-   mov		eax, [rbx]
-   push		rax
-   pop		rax
-   movd		xmm0, eax
-   cvtss2sd	xmm0, xmm0
-   movq		rax, xmm0
+   mov		eax, DWORD -32[rbp]
+   movsx		rax, eax
    push		rax
    ; Pop print arguments
-   pop		rax
-   mov		QWORD -56[rbp], rax
-   pop		rax
-   mov		QWORD -64[rbp], rax
    pop		rax
    mov		QWORD -72[rbp], rax
    pop		rax
    mov		QWORD -80[rbp], rax
+   pop		rax
+   mov		QWORD -88[rbp], rax
+   pop		rax
+   mov		QWORD -96[rbp], rax
+   pop		rax
+   mov		QWORD -104[rbp], rax
    pop		rax
    mov		r9, rax
    pop		rax
    mov		r8, rax
    pop		rax
    mov		rdx, rax
-   mov		rcx, CS3
-   mov		rax, -80[rbp]
+   mov		rcx, CS0
+   mov		rax, -104[rbp]
    mov		QWORD 32[rsp], rax
-   mov		rax, -72[rbp]
+   mov		rax, -96[rbp]
    mov		QWORD 40[rsp], rax
-   mov		rax, -64[rbp]
+   mov		rax, -88[rbp]
    mov		QWORD 48[rsp], rax
-   mov		rax, -56[rbp]
+   mov		rax, -80[rbp]
    mov		QWORD 56[rsp], rax
+   mov		rax, -72[rbp]
+   mov		QWORD 64[rsp], rax
    call		printf
 L1:
    mov		rax, 0
-   add		rsp, 128
+   add		rsp, 160
    pop		rbp
    ret
