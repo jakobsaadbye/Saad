@@ -856,6 +856,277 @@ char *get_argument_register_from_index(int index) {
     XXX;
 }
 
+void move_func_argument_to_register_or_temp(CodeGenerator *cg, int arg_index, Type *arg_type, Type *param_type) {
+
+    // Arguments gets put in either registers or known temporary stack locations.
+    // We shift over the argument slot by the amount of large return types. So the layout is like this:
+    //
+    // (Large_Return_0, Large_Return_1, This_Ptr, Arg_0, Arg_1, Arg_2...)
+    //      rcx              rdx          r8        r9  16[rbp]   24[rbp]
+    //
+    
+    if (arg_index < 4) {
+        // Pass the argument in a register
+        Register reg = 0;
+
+        if (arg_type->kind == TYPE_FLOAT || (param_type->kind == TYPE_FLOAT && is_untyped_type(arg_type) && ((TypePrimitive *)arg_type)->kind == PRIMITIVE_UNTYPED_INT) ) {
+            if (arg_index == 0) reg = REG_XMM0;
+            if (arg_index == 1) reg = REG_XMM1;
+            if (arg_index == 2) reg = REG_XMM2;
+            if (arg_index == 3) reg = REG_XMM3;
+            assert(reg != 0);
+
+            char *xmm_reg = register_to_str(reg, 0);
+
+            sb_append(&cg->code, "   %s\t\t%s, %s\n", movd_or_movq(param_type), xmm_reg, REG_A(param_type));
+        } 
+        else {
+            if (arg_index == 0) reg = REG_RCX;
+            if (arg_index == 1) reg = REG_RDX;
+            if (arg_index == 2) reg = REG_R8;
+            if (arg_index == 3) reg = REG_R9;
+            
+            if (arg_type->size <= 8) {
+                // <= 8 bytes: Pass the entire value in the register
+                char *sized_reg = register_to_str(reg, arg_type->size);
+                sb_append(&cg->code, "   mov\t\t%s, %s\n", sized_reg, REG_A(arg_type));
+            } else {
+                // > 8 bytes: Pass a pointer to the value
+                char *reg8 = register_to_str(reg, 8);
+                sb_append(&cg->code, "   mov\t\t%s, rax\n", reg8);
+            }
+        }
+    } else {
+        // Put the argument into temporary storage
+        int temp_loc = push_temporary_value(cg->enclosing_function, 8);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", temp_loc);
+    }
+}
+
+void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
+    AstFunctionDefn *func_defn = call->func_defn;
+
+    int parameter_shift = 0;
+    for (int i = 0; i < call->func_defn->return_types.count; i++) {
+        Type *return_type = ((Type **)call->func_defn->return_types.items)[i];
+        if (return_type->size <= 8 && i < 5) continue;
+
+        parameter_shift += 1;
+    }
+
+    if (func_defn->is_method) {
+        parameter_shift += 1;
+    }
+
+    // Arguments that needs to be passed on the stack goes in the following order
+    // 
+    //    stack_arg_0, stack_arg_1, stack_arg_n,
+    //       32[rsp]      40[rsp]   (48...)[rsp]
+
+    // Push all the arguments
+    for (int i = 0; i < call->arguments.count; i++) {
+        AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
+        emit_expression(cg, arg);
+    }
+
+    // Pop the arguments
+    for (int i = call->arguments.count - 1; i >= 0; i--) {
+        AstExpr *arg  = ((AstExpr **)call->arguments.items)[i];
+        int arg_index = i + parameter_shift;
+
+        int            param_index = i + (func_defn->is_method ? 1 : 0);
+        AstIdentifier *param = ((AstIdentifier **)call->func_defn->parameters.items)[param_index];
+
+        switch (arg->type->kind) {
+            case TYPE_INTEGER: {
+                POP(RAX);
+                
+                if (param->type->kind == TYPE_FLOAT && is_untyped_type(arg->type) && ((TypePrimitive *)arg->type)->kind == PRIMITIVE_UNTYPED_INT) {
+                    // Convert the untyped int to be a float
+                    sb_append(&cg->code, "   %s\txmm0, rax\n", cvtsi2ss_or_cvtsi2sd(param->type));
+                    sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(param->type), REG_A(param->type));
+                }
+
+                break;
+            }
+            case TYPE_BOOL:
+            case TYPE_STRING:
+            case TYPE_ENUM:
+            case TYPE_POINTER: {
+                POP(RAX);
+                break;
+            }
+            case TYPE_FLOAT: {
+                POP(RAX);
+
+                if (arg->type->size == 4 && param->type->size == 8) {
+                    sb_append(&cg->code, "   movd\t\txmm0, eax\n");
+                    sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
+                    sb_append(&cg->code, "   movq\t\trax, xmm0\n");
+                } else {
+                    // We don't go from f64 -> f32 without it needing to have a cast, so we should not hit the following assert!
+                    assert(arg->type->size == param->type->size);
+                }
+
+                break;
+            }
+            case TYPE_ARRAY: {
+                assert(param->type->kind == TYPE_ARRAY);
+
+                TypeArray *array_arg   = (TypeArray *) arg->type;
+                TypeArray *array_param = (TypeArray *) param->type;
+
+                POP(RAX); // Pop the pointer to the array type
+
+                // By default: Pass arrays as slices (data + count)
+                ArrayKind pass_as = ARRAY_SLICE;
+
+                if (array_param->array_kind == ARRAY_DYNAMIC) {
+                    pass_as = ARRAY_DYNAMIC;
+                }
+
+                if (pass_as == ARRAY_SLICE) {
+                    int slice_offset = push_temporary_value(cg->enclosing_function, 16);
+
+                    switch (array_arg->array_kind) {
+                    case ARRAY_FIXED: {
+                        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", slice_offset);
+                        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n",  slice_offset + 8, array_arg->count);
+                        sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n",  slice_offset);
+                        break;
+                    }
+                    case ARRAY_SLICE:
+                    case ARRAY_DYNAMIC: {
+                        sb_append(&cg->code, "   mov\t\trbx, 0[rax]\n");
+                        sb_append(&cg->code, "   mov\t\trcx, 8[rax]\n");
+                        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rbx\n", slice_offset);
+                        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rcx\n", slice_offset + 8);
+                        sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n",  slice_offset);
+                        break;
+                    }}
+                } else if (pass_as == ARRAY_DYNAMIC) {
+                    assert(array_param->array_kind == ARRAY_DYNAMIC);
+                    // Pass normally by pointer
+                } else {
+                    XXX;
+                }
+
+                break;
+            }
+            case TYPE_STRUCT: {
+                POP(RAX); // Here we just pop the pointer to the struct. We will copy the struct by value
+                break;
+            }
+            default: XXX;
+        }
+
+        move_func_argument_to_register_or_temp(cg, arg_index, arg->type, param->type);
+    }
+
+    if (func_defn->is_method) {
+        // Pass the receiver literal after return parameters
+        if (parameter_shift <= 3) {
+            char *reg = get_argument_register_from_index(parameter_shift);
+            POP(reg);
+        } else {
+            int temp_loc = push_temporary_value(cg->enclosing_function, 8);
+            POP(RAX);
+            sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", temp_loc);
+        }
+    }
+
+    //
+    // Move stack arguments relative to rsp
+    //
+    int stack_arg_offset = 32;
+    
+    // Put any arguments that needs to go on the stack, relative to rsp
+    for (int i = 0; i < call->arguments.count; i++) {
+        AstExpr *arg      = ((AstExpr **)call->arguments.items)[i];
+        Type    *arg_type = arg->type;
+
+        bool arg_is_in_register = i < 4 - parameter_shift;
+        if (arg_is_in_register) continue;
+        
+        int temp_loc = pop_temporary_value(cg->enclosing_function, 8);
+
+        sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", temp_loc);
+
+        if (arg_type->kind == TYPE_STRUCT && arg_type->size <= 8) {
+            // Struct needs to be passed by value. Copy the struct referenced in rax
+            sb_append(&cg->code, "   mov\t\t%d[rsp], %s\n", stack_arg_offset, REG_A(arg_type));
+        } else if (arg_type->kind == TYPE_ARRAY) {
+            // @Incomplete
+            XXX;
+        } else {
+            MOV_ADDR_REG(cg, stack_arg_offset, RSP, REG_RAX, arg_type);
+        }
+
+        stack_arg_offset += 8;
+    }
+
+    // Push all return value out parameters
+    int return_slot = 0;
+    for (int i = 0; i < func_defn->return_types.count; i++) {
+        Type *return_type = ((Type **)func_defn->return_types.items)[i];
+        if (return_type->size <= 8 && i < 5) continue;
+        
+        int temp_loc = push_temporary_value(cg->enclosing_function, return_type->size);
+        
+        if (return_slot < 4) {
+            char *reg = get_argument_register_from_index(return_slot);
+            sb_append(&cg->code, "   lea\t\t%s, %d[rbp]\t\t; Return value (%d, %s)\n", reg, temp_loc, i, type_to_str(return_type));
+        } else {
+            // Pass on the stack
+            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\t\t; Return value (%d, %s)\n", temp_loc, i, type_to_str(return_type));
+            sb_append(&cg->code, "   mov\t\t%d[rsp], rax\n", stack_arg_offset);
+            stack_arg_offset += 8;
+        }
+
+        return_slot += 1;
+    }
+
+    // Do the actual call
+    if (func_defn->is_method) {
+        if (func_defn->receiver_type->kind != TYPE_STRUCT) {
+            XXX;
+        }
+
+        TypeStruct *receiver_type = (TypeStruct *) func_defn->receiver_type;
+
+        sb_append(&cg->code, "   call\t\t%s.%s\n", receiver_type->identifier->name, call->identifer->name);
+    }
+    else {
+        sb_append(&cg->code, "   call\t\t%s\n", call->identifer->name);
+    }
+
+    // Push all the return values
+    for (int i = func_defn->return_types.count - 1; i >= 0; i--) {
+        Type *return_type = ((Type **)func_defn->return_types.items)[i];
+
+        bool  output_as_register = i < 5;
+        char *out_register = NULL;
+
+        if (output_as_register) {
+            out_register = get_return_value_register(return_type, i);
+        }
+
+        if (output_as_register) {
+            if (return_type->kind == TYPE_FLOAT) {
+                sb_append(&cg->code, "   movq\t\trbx, %s\n", out_register);
+                PUSH(RBX);
+            } else {
+                PUSH(out_register);
+            }
+        } else {
+            // Push the stack values
+            int out_offset = pop_temporary_value(cg->enclosing_function, return_type->size);
+            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", out_offset);
+            PUSH(RBX);
+        }
+    }
+}
+
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     cg->enclosing_function = func_defn;
 
@@ -907,29 +1178,39 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "   mov\t\trbp, rsp\n");
     sb_append(&cg->code, "   sub\t\trsp, %d\n", bytes_total);
 
-    // Large return values, shifts the parameters to the right
+    // Large return values and any return value after the 5'th, shifts all the "normal" parameters to the right
     // This variable tells how much they are shifted
     int parameter_shift = 0;
 
+    for (int i = 0; i < func_defn->return_types.count; i++) {
+        Type *return_type = ((Type **)func_defn->return_types.items)[i];
+        if (return_type->size <= 8 && i < 5) continue;
+        parameter_shift += 1;
+    }
+
     // Move any return pointers passed from big or stack allocated return values into the first home slots
+    int return_arg_index = 0;
     for (int i = 0; i < func_defn->return_types.count; i++) {
         Type *return_type = ((Type **)func_defn->return_types.items)[i];
         if (return_type->size <= 8 && i < 5) continue;
         
-        int home_offset = (parameter_shift + 1) * 8;
+        int home_offset = (return_arg_index + 1) * 8;
 
-        if (parameter_shift <= 3) {
-            char *input_reg = get_argument_register_from_index(parameter_shift);
+        if (return_arg_index < 4) {
+            char *input_reg = get_argument_register_from_index(return_arg_index);
             sb_append(&cg->code, "   mov\t\t-%d[rbp], %s\t; Return (%d, %s)\n", home_offset, input_reg, i, type_to_str(return_type));
         } else {
-            // Pull the return pointer from the stack
-            // Input stack arguments starts at +16, then +24 etc...
-            int input_offset = 16 + (parameter_shift * 8);
-            sb_append(&cg->code, "   mov\t\trax, %d[rbp]\t; Return (%d, %s)\n", input_offset, i, type_to_str(return_type));
+            // Return parameter was passed on the stack after all the "normal" arguments
+            int normal_stack_arguments = (func_defn->parameters.count + parameter_shift - 4);
+            int normal_stack_offset = normal_stack_arguments * 8;
+
+            int return_stack_offset = normal_stack_offset + ((return_arg_index + 1) * 8);
+
+            sb_append(&cg->code, "   mov\t\trax, %d[rbp]\t; Return (%d, %s)\n", return_stack_offset, i, type_to_str(return_type));
             sb_append(&cg->code, "   mov\t\t-%d[rbp], rax\t\n", home_offset);
         }
 
-        parameter_shift += 1;
+        return_arg_index += 1;
         allocate_variable(cg, 8);
     }
 
@@ -969,8 +1250,10 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
         sb_append(&cg->code, "   ; Copy %s -> %d\n", param->name, param_offset);
 
-        Register arg_reg = 0;
-        if (arg_index < 4) {
+        bool arg_is_in_register = arg_index < 4 && !save_arguments_in_shadow_space;
+
+        if (arg_is_in_register) {
+            Register arg_reg = 0;
             if (param_type->kind == TYPE_FLOAT) {
                 if (arg_index == 0) arg_reg = REG_XMM0;
                 if (arg_index == 1) arg_reg = REG_XMM1;
@@ -982,29 +1265,62 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
                 if (arg_index == 2) arg_reg = REG_R8;
                 if (arg_index == 3) arg_reg = REG_R9;
             }
-            assert(arg_reg != 0);
-        } 
+            assert(arg_reg != 0 && "Arg register was not set");
 
-        int arg_address = 16 + (arg_index * 8);
-
-        if (param->type->size <= 8) {
-            if (save_arguments_in_shadow_space || arg_index >= 4) {
-                sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", arg_address);
-                MOV_ADDR_REG(cg, param_offset, RBP, REG_RAX, param_type);
-            } else {
+            if (param->type->size <= 8) {
                 MOV_ADDR_REG(cg, param_offset, RBP, arg_reg, param_type);
-            }
-        } else {
-            // Argument was passed by reference and stored in the shadow space.
-            if (save_arguments_in_shadow_space || arg_index >= 4) {
-                sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", arg_address);
             } else {
                 sb_append(&cg->code, "   mov\t\trax, %s\n", register_to_str(arg_reg, 8));
+                sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", param_offset);
+                emit_memcpy(cg, 0, 0, param->type->size);
+            }
+        } else {
+            bool arg_is_in_shadow_space = arg_index < 4;
+            
+            // Get the argument from shadow space or from the stack
+            if (arg_is_in_shadow_space) {
+                int shadow_offset = (arg_index + 1) * 8;
+                sb_append(&cg->code, "   mov\t\trax, -%d[rbp]\n", shadow_offset);
+            } else {
+                // Argument was passed on the stack after the 4'th argument
+                int stack_offset = 40 + (i + 1) * 8;
+                sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", stack_offset);
             }
 
-            sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", param_offset);
-            emit_memcpy(cg, 0, 0, param->type->size);
+            if (param->type->size <= 8) {
+                MOV_ADDR_REG(cg, param_offset, RBP, REG_RAX, param_type);
+            } else {
+                // Argument was passed by reference and is in rax
+                sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", param_offset);
+                emit_memcpy(cg, 0, 0, param->type->size);
+            }
         }
+
+        // All arguments after the 4'th are stack allocated and can be found at
+        //
+        //    stack_arg_0, stack_arg_1, stack_arg_n,
+        //       32[rbp]      40[rbp]   (48...)[rsp]
+        // int current_stack_index = arg_index - 4;
+        // int arg_address = 32 + ((current_stack_index + 1) * 8);
+
+        // if (param->type->size <= 8) {
+        //     if (save_arguments_in_shadow_space || arg_index >= 4) {
+        //         sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", arg_address);
+        //         MOV_ADDR_REG(cg, param_offset, RBP, REG_RAX, param_type);
+        //     } else {
+        //         MOV_ADDR_REG(cg, param_offset, RBP, arg_reg, param_type);
+        //     }
+        // } else {
+        //     // Argument was passed by reference and stored in the shadow space.
+        //     if (save_arguments_in_shadow_space || arg_index >= 4) {
+        //         sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", arg_address);
+        //     } else {
+        //         sb_append(&cg->code, "   mov\t\trax, %s\n", register_to_str(arg_reg, 8));
+        //     }
+
+        //     sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", param_offset);
+        //     emit_memcpy(cg, 0, 0, param->type->size);
+        // }
     }
 
     // Make a label for the return statements to jump to
@@ -1126,279 +1442,6 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
 
     printf("%s:%d: Compiler Error: There were unhandled cases in 'emit_cast'. Casting from '%s' -> '%s' \n", __FILE__, __LINE__, type_to_str(from), type_to_str(to));
     return;
-}
-
-void move_func_argument_to_register_or_temp(CodeGenerator *cg, int arg_index, Type *arg_type, Type *param_type) {
-
-    // Arguments gets put in either registers or known temporary stack locations.
-    // We shift over the argument slot by the amount of large return types. So the layout is like this:
-    //
-    // (Large_Return_0, Large_Return_1, This_Ptr, Arg_0, Arg_1, Arg_2...)
-    //      rcx              rdx          r8        r9  16[rbp]   24[rbp]
-    //
-    
-    if (arg_index < 4) {
-        // Pass the argument in a register
-        Register reg = 0;
-
-        if (arg_type->kind == TYPE_FLOAT || (param_type->kind == TYPE_FLOAT && is_untyped_type(arg_type) && ((TypePrimitive *)arg_type)->kind == PRIMITIVE_UNTYPED_INT) ) {
-            if (arg_index == 0) reg = REG_XMM0;
-            if (arg_index == 1) reg = REG_XMM1;
-            if (arg_index == 2) reg = REG_XMM2;
-            if (arg_index == 3) reg = REG_XMM3;
-            assert(reg != 0);
-
-            char *xmm_reg = register_to_str(reg, 0);
-
-            sb_append(&cg->code, "   %s\t\t%s, %s\n", movd_or_movq(param_type), xmm_reg, REG_A(param_type));
-        } 
-        else {
-            if (arg_index == 0) reg = REG_RCX;
-            if (arg_index == 1) reg = REG_RDX;
-            if (arg_index == 2) reg = REG_R8;
-            if (arg_index == 3) reg = REG_R9;
-            
-            if (arg_type->size <= 8) {
-                // <= 8 bytes: Pass the entire value in the register
-                char *sized_reg = register_to_str(reg, arg_type->size);
-                sb_append(&cg->code, "   mov\t\t%s, %s\n", sized_reg, REG_A(arg_type));
-            } else {
-                // > 8 bytes: Pass a pointer to the value
-                char *reg8 = register_to_str(reg, 8);
-                sb_append(&cg->code, "   mov\t\t%s, rax\n", reg8);
-            }
-        }
-    } else {
-        // Put the argument into temporary storage
-        int temp_loc = push_temporary_value(cg->enclosing_function, 8);
-        sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", temp_loc);
-    }
-}
-
-void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
-    AstFunctionDefn *func_defn = call->func_defn;
-
-    int parameter_shift = 0;
-    for (int i = 0; i < call->func_defn->return_types.count; i++) {
-        Type *return_type = ((Type **)call->func_defn->return_types.items)[i];
-        if (return_type->size <= 8 && i < 5) continue;
-
-        parameter_shift += 1;
-    }
-
-    if (func_defn->is_method) {
-        parameter_shift += 1;
-    }
-
-    // Arguments that needs to go on the stack follows this order
-    // 
-    //    stack_arg_0, stack_arg_1, stack_arg_n,
-    //       32[rsp]      40[rsp]   (48...)[rsp]
-
-    // Push all the arguments
-    for (int i = 0; i < call->arguments.count; i++) {
-        AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
-        emit_expression(cg, arg);
-    }
-
-    // Pop the arguments
-    for (int i = call->arguments.count - 1; i >= 0; i--) {
-        AstExpr *arg  = ((AstExpr **)call->arguments.items)[i];
-        int arg_index = i + parameter_shift;
-
-        int            param_index = i + (func_defn->is_method ? 1 : 0);
-        AstIdentifier *param = ((AstIdentifier **)call->func_defn->parameters.items)[param_index];
-
-        switch (arg->type->kind) {
-            case TYPE_INTEGER: {
-                POP(RAX);
-                
-                if (param->type->kind == TYPE_FLOAT && is_untyped_type(arg->type) && ((TypePrimitive *)arg->type)->kind == PRIMITIVE_UNTYPED_INT) {
-                    // Convert the untyped int to be a float
-                    sb_append(&cg->code, "   %s\txmm0, rax\n", cvtsi2ss_or_cvtsi2sd(param->type));
-                    sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(param->type), REG_A(param->type));
-                }
-
-                break;
-            }
-            case TYPE_BOOL:
-            case TYPE_STRING:
-            case TYPE_ENUM:
-            case TYPE_POINTER: {
-                POP(RAX);
-                break;
-            }
-            case TYPE_FLOAT: {
-                POP(RAX);
-
-                if (arg->type->size == 4 && param->type->size == 8) {
-                    sb_append(&cg->code, "   movd\t\txmm0, eax\n");
-                    sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
-                    sb_append(&cg->code, "   movq\t\trax, xmm0\n");
-                } else {
-                    // We don't go from f64 -> f32 without it needing to have a cast, so we should not hit the following assert!
-                    assert(arg->type->size == param->type->size);
-                }
-
-                break;
-            }
-            case TYPE_ARRAY: {
-                assert(param->type->kind == TYPE_ARRAY);
-
-                TypeArray *array_arg   = (TypeArray *) arg->type;
-                TypeArray *array_param = (TypeArray *) param->type;
-
-                POP(RAX); // Pop the pointer to the array type
-
-                // By default: Pass arrays as slices (data + count)
-                ArrayKind pass_as = ARRAY_SLICE;
-
-                if (array_param->array_kind == ARRAY_DYNAMIC) {
-                    pass_as = ARRAY_DYNAMIC;
-                }
-
-                if (pass_as == ARRAY_SLICE) {
-                    int slice_offset = push_temporary_value(cg->enclosing_function, 16);
-
-                    switch (array_arg->array_kind) {
-                    case ARRAY_FIXED: {
-                        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", slice_offset);
-                        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n",  slice_offset + 8, array_arg->count);
-                        sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n",  slice_offset);
-                        break;
-                    }
-                    case ARRAY_SLICE:
-                    case ARRAY_DYNAMIC: {
-                        sb_append(&cg->code, "   mov\t\trbx, 0[rax]\n");
-                        sb_append(&cg->code, "   mov\t\trcx, 8[rax]\n");
-                        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rbx\n", slice_offset);
-                        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rcx\n", slice_offset + 8);
-                        sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n",  slice_offset);
-                        break;
-                    }}
-                } else if (pass_as == ARRAY_DYNAMIC) {
-                    assert(array_param->array_kind == ARRAY_DYNAMIC);
-                    // Pass normally by pointer
-                } else {
-                    XXX;
-                }
-
-                break;
-            }
-            case TYPE_STRUCT: {
-                POP(RAX); // Here we just pop the pointer to the struct. We will copy the struct by value
-                break;
-            }
-            default: XXX;
-        }
-
-        move_func_argument_to_register_or_temp(cg, arg_index, arg->type, param->type);
-    }
-
-    if (func_defn->is_method) {
-        // Pass the receiver literal after the large return values
-        if (parameter_shift <= 3) {
-            char *reg = get_argument_register_from_index(parameter_shift);
-            POP(reg);
-        } else {
-            int temp_loc = push_temporary_value(cg->enclosing_function, 8);
-            POP(RAX);
-            sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", temp_loc);
-        }
-    }
-
-    //
-    // Move stack arguments relative to rsp
-    //
-    int stack_arg_offset = 32;
-    
-    // Put any arguments that needs to go on the stack, relative to rsp
-    for (int i = 0; i < call->arguments.count; i++) {
-        AstExpr *arg      = ((AstExpr **)call->arguments.items)[i];
-        Type    *arg_type = arg->type;
-
-        bool arg_is_in_register = i < 4 - parameter_shift;
-        if (arg_is_in_register) continue;
-        
-        int temp_loc = pop_temporary_value(cg->enclosing_function, 8);
-
-        sb_append(&cg->code, "   mov\t\trax, QWORD %d[rbp]\n", temp_loc);
-
-        if (arg_type->kind == TYPE_STRUCT && arg_type->size <= 8) {
-            // Struct needs to be passed by value. Copy the struct referenced in rax
-            sb_append(&cg->code, "   mov\t\t%d[rsp], %s\n", stack_arg_offset, REG_A(arg_type));
-        } else if (arg_type->kind == TYPE_ARRAY) {
-            // @Incomplete
-            XXX;
-        } else {
-            MOV_ADDR_REG(cg, stack_arg_offset, RSP, REG_RAX, arg_type);
-        }
-
-        stack_arg_offset += 8;
-    }
-
-    // Push all return value out parameters
-    int return_slot = 0;
-    for (int i = 0; i < func_defn->return_types.count; i++) {
-        Type *return_type = ((Type **)func_defn->return_types.items)[i];
-        if (return_type->size <= 8 && i < 5) continue;
-        
-        int temp_loc = push_temporary_value(cg->enclosing_function, return_type->size);
-        
-        if (return_slot < 4) {
-            char *reg = get_argument_register_from_index(return_slot);
-            sb_append(&cg->code, "   lea\t\t%s, %d[rbp]\t\t; Return value (%d, %s)\n", reg, temp_loc, i, type_to_str(return_type));
-        } else {
-            // Pass on the stack
-            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\t\t; Return value (%d, %s)\n", temp_loc, i, type_to_str(return_type));
-            sb_append(&cg->code, "   mov\t\t%d[rsp], rax\n", stack_arg_offset);
-            stack_arg_offset += 8;
-        }
-
-        return_slot += 1;
-    }
-
-    // Do the actual call
-    if (func_defn->is_method) {
-        if (func_defn->receiver_type->kind != TYPE_STRUCT) {
-            XXX;
-        }
-
-        TypeStruct *receiver_type = (TypeStruct *) func_defn->receiver_type;
-
-        sb_append(&cg->code, "   call\t\t%s.%s\n", receiver_type->identifier->name, call->identifer->name);
-    }
-    else {
-        sb_append(&cg->code, "   call\t\t%s\n", call->identifer->name);
-    }
-
-    // Push all the return values
-    // @Note: We push all the return values in the reverse order so that declarations can do simple pops
-    // to get out the value
-    for (int i = func_defn->return_types.count - 1; i >= 0; i--) {
-        Type *return_type = ((Type **)func_defn->return_types.items)[i];
-
-        bool  output_as_register = i < 5;
-        char *out_register = NULL;
-
-        if (output_as_register) {
-            out_register = get_return_value_register(return_type, i);
-        }
-
-        if (output_as_register) {
-            if (return_type->kind == TYPE_FLOAT) {
-                sb_append(&cg->code, "   movq\t\trbx, %s\n", out_register);
-                PUSH(RBX);
-            } else {
-                PUSH(out_register);
-            }
-        } else {
-            // Push the stack values
-            int out_offset = pop_temporary_value(cg->enclosing_function, return_type->size);
-            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", out_offset);
-            PUSH(RBX);
-        }
-    }
 }
 
 void emit_if(CodeGenerator *cg, AstIf *ast_if) {

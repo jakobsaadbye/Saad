@@ -10,20 +10,29 @@ Vector3 :: struct {
 //     return a;
 // }
 
-add :: (a, b, c, d, e, f, g, h: int) -> int, int, int, int, int, int, int, int {
-    return a, b, c, d, e, f, g, h;
+
+//--------------
+//         10 stack args
+// void add :: (*int, *int, *int, *int, *int, a, b, c, d, e, f, g, h, i, j: int) -> (int, int, int, int, int)
+//
+// parameter shift = 3
+
+add :: (a, b, c, d, e, f, g, h, i, j: int) -> int, int, int, int, int, int, int, int, int, int {
+    print("% % % % % % % % % %", a, b, c, d, e, f, g, h, i, j);
+    return a, b, c, d, e, f, g, h, i, j;
 }
+
 
 main :: () {
     // a := add2({1, 2, 3});
     // print("%", a);
 
-    a, b, c, d, e, f, g, h := add(1, 2, 3, 4, 5, 6, 7, 8);
+    a, b, c, d, e, f, g, h, i, j := add(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
     // print("%", e);
     // print("% % % %", a, b, c, d);
     // print("% % % % %", a, b, c, d, e);
     // print("% % % % % %", a, b, c, d, e, f);
     // print("% % % % % % %", a, b, c, d, e, f, g);
-    // print("% % % % % % % %", a, b, c, d, e, f, g, h);
-    print("% % % % % % % %", a, b, c, d, e, f, g, h);
+    // print("% % % % % % % %", a, b, c, d, e, f, g, h, i);
+    print("% % % % % % % % % %", a, b, c, d, e, f, g, h, i, j);
 }
