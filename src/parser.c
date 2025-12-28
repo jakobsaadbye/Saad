@@ -1428,11 +1428,6 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
             return NULL;
         }
 
-        if (decl->idents.count > 1) {
-            // @TODO:
-            XXX;
-        }
-
         first_parameter_seen = true;
 
         for (int i = 0; i < decl->idents.count; i++) {

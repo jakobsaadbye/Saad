@@ -1,10 +1,23 @@
-EngineType :: enum {
-    V8,
-    V6,
+Vector2 :: struct {
+    x, y: float;
 }
 
-DEFAULT_ENGINE_TYPE :: EngineType.V6;
+Vector3 :: struct {
+    x, y, z: float;
+}
+
+// add2 :: (a: int, b: Vector3) -> int, Vector3 {
+//     return a, b;
+// }
+
+add :: (a, b, c, d, e, f: int, g: Vector3) -> int, int, int, int, Vector3 {
+    return a, b, c, d, g;
+}
 
 main :: () {
-    print("%", DEFAULT_ENGINE_TYPE);
+    a, b, c, d, e := add(1, 2, 3, 4, 5, 6, {7, 8, 9});
+    // print("%", e);
+    // print("% % % %", a, b, c, d);
+    print("% % % % %", a, b, c, d, e);
+    // print("% % % % % %", a, b, c, d, e, f);
 }

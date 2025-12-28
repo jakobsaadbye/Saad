@@ -201,6 +201,12 @@ char *type_to_str(Type *type) {
     }
     case TYPE_TUPLE: {
         TypeTuple *tuple = (TypeTuple *)type;
+
+        if (tuple->types.count == 1) {
+            Type *t = ((Type **)tuple->types.items)[0];
+            return type_to_str(t);
+        }
+
         StringBuilder sb = sb_init(32);
 
         sb_append(&sb, "(");

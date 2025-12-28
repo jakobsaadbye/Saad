@@ -599,7 +599,7 @@ check_identifiers_vs_values:
         if (value->type->kind == TYPE_TUPLE) {
             TypeTuple *tuple_type = (TypeTuple *) value->type;
             for (int j = 0; j < tuple_type->types.count; j++) {
-                ident_index += j;
+                ident_index = i + j;
                 AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[ident_index];
 
                 ident->value = value;
@@ -1236,7 +1236,7 @@ bool check_print(Typer *typer, AstPrint *print) {
     print->c_args = num_c_args;
 
     if (num_c_args > 4) {
-        int bytes_args = (num_c_args - 4) * 8;
+        int bytes_args = (num_c_args - 3) * 8;
         reserve_temporary_storage(typer->enclosing_function, bytes_args);
     }
 
@@ -1325,10 +1325,46 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
             if (wanted->kind != TYPE_VOID) {
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_return_types), "Here is the return types of function '%s'", ef->identifier->name);
             }
+            
             return false;
         }
     }
     
+    return true;
+}
+
+bool check_assert(Typer *typer, AstAssert *ast_assert) {
+    Type *expr_type = check_expression(typer, ast_assert->expr, NULL);
+    if (expr_type->kind != TYPE_BOOL && expr_type->kind != TYPE_POINTER) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_assert), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(expr_type));
+        return false;
+    }
+
+    return true;
+}
+
+bool check_if(Typer *typer, AstIf *ast_if) {
+    Type *condition_type = check_expression(typer, ast_if->condition, NULL);
+    if (!condition_type) return NULL;
+
+    if (condition_type->kind != TYPE_BOOL && condition_type->kind != TYPE_POINTER) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_if->condition), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(condition_type));
+        return false;
+    }
+
+    bool ok = check_block(typer, ast_if->then_block);
+    if (!ok) return false;
+
+    for (int i = 0; i < ast_if->else_ifs.count; i++) {
+        AstIf *else_if = &(((AstIf *)(ast_if->else_ifs.items))[i]);
+        ok = check_statement(typer, (Ast *)(else_if));
+        if (!ok) return false;
+    }
+    if (ast_if->else_block) {
+        ok = check_block(typer, ast_if->else_block);
+        if (!ok) return false;
+    }
+
     return true;
 }
 
@@ -1354,44 +1390,11 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_FOR:               return check_for(typer, (AstFor *)(stmt));
     case AST_WHILE:             return check_while(typer, (AstWhile *)(stmt));
     case AST_BREAK_OR_CONTINUE: return check_break_or_continue(typer, (AstBreakOrContinue *)(stmt));
-    case AST_PRINT:             return check_print(typer, (AstPrint *)(stmt));
     case AST_EXPR_STMT:         return check_expr_stmt(typer, (AstExprStmt *)(stmt));
     case AST_RETURN:            return check_return(typer, (AstReturn *)(stmt));
-    case AST_ASSERT: {
-        AstAssert *assertion = (AstAssert *)(stmt);
-        Type *expr_type = check_expression(typer, assertion->expr, NULL);
-        if (expr_type->kind != TYPE_BOOL && expr_type->kind != TYPE_POINTER) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assertion), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(expr_type));
-            return false;
-        }
-
-        return true;
-    }
-    case AST_IF: {
-        AstIf *ast_if = (AstIf *)(stmt);
-        Type *condition_type = check_expression(typer, ast_if->condition, NULL);
-        if (!condition_type) return NULL;
-
-        if (condition_type->kind != TYPE_BOOL && condition_type->kind != TYPE_POINTER) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_if->condition), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(condition_type));
-            return false;
-        }
-
-        bool ok = check_block(typer, ast_if->then_block);
-        if (!ok) return false;
-
-        for (int i = 0; i < ast_if->else_ifs.count; i++) {
-            AstIf *else_if = &(((AstIf *)(ast_if->else_ifs.items))[i]);
-            ok = check_statement(typer, (Ast *)(else_if));
-            if (!ok) return false;
-        }
-        if (ast_if->else_block) {
-            ok = check_block(typer, ast_if->else_block);
-            if (!ok) return false;
-        }
-
-        return true;
-    }
+    case AST_PRINT:             return check_print(typer, (AstPrint *)(stmt));
+    case AST_ASSERT:            return check_assert(typer, (AstAssert *)(stmt));
+    case AST_IF:                return check_if(typer, (AstIf *)(stmt));
     default:
         XXX;
     }
@@ -2505,7 +2508,9 @@ int push_temporary_value(AstFunctionDefn *func_defn, int size) {
     int loc = - (align_value(func_defn->num_bytes_locals, 8) + func_defn->temp_ptr + aligned_size);
 
     // Assert that we don't use more space than what we have reserved during the sizing step!
-    assert(func_defn->num_bytes_temporaries > func_defn->temp_ptr);
+    if (func_defn->num_bytes_temporaries <= func_defn->temp_ptr) {
+        assert(false);
+    }
 
     func_defn->temp_ptr += aligned_size;
 

@@ -624,7 +624,9 @@ bool is_digit(char c) {
 
 char *text_bold(char *text) {
     int text_len = strlen(text);
-    char *result = malloc(text_len + 8);
+    char *result = malloc(text_len + 16);
+    assert(result);
+
     sprintf(result, COLOR_WHITE_BOLD"%s"COLOR_RESET, text);
     return result;
 }
