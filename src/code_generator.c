@@ -1201,10 +1201,12 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
             sb_append(&cg->code, "   mov\t\t-%d[rbp], %s\t; Return (%d, %s)\n", home_offset, input_reg, i, type_to_str(return_type));
         } else {
             // Return parameter was passed on the stack after all the "normal" arguments
-            int normal_stack_arguments = (func_defn->parameters.count + parameter_shift - 4);
-            int normal_stack_offset = normal_stack_arguments * 8;
+            int return_stack_shift = parameter_shift > 4 ? 4 : parameter_shift;
+            int normal_stack_arguments = (func_defn->parameters.count - 4 + return_stack_shift);
+            int normal_stack_offset = 32 + (normal_stack_arguments - 1) * 8;
 
-            int return_stack_offset = normal_stack_offset + ((return_arg_index + 1) * 8);
+            int stack_return_arg_index = return_arg_index - 4;
+            int return_stack_offset = 16 + normal_stack_offset + (stack_return_arg_index + 1) * 8; // 16 from rbp + ret
 
             sb_append(&cg->code, "   mov\t\trax, %d[rbp]\t; Return (%d, %s)\n", return_stack_offset, i, type_to_str(return_type));
             sb_append(&cg->code, "   mov\t\t-%d[rbp], rax\t\n", home_offset);
