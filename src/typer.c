@@ -1378,11 +1378,17 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     }
     
     int real_parameter_count = func_defn->parameters.count - (func_defn->is_method ? 1 : 0);
-    if (call->arguments.count != real_parameter_count) { 
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Mismatch in number of arguments. Function '%s' takes %d %s, but %d were supplied", func_defn->identifier->name, real_parameter_count, real_parameter_count == 1 ? "parameter" : "parameters", call->arguments.count);
+    if (call->arguments.count != real_parameter_count) {
+        if (call->arguments.count < real_parameter_count) {
+            AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted %d, got %d", real_parameter_count, call->arguments.count);
+        } else {
+            AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too many arguments: Wanted %d, got %d", real_parameter_count, call->arguments.count);
+        }
         report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
         if (call->is_member_call && call->arguments.count == func_defn->parameters.count) {
-            report_error_ast(typer->parser, LABEL_HINT, ((Ast **)func_defn->parameters.items)[0], "Method calls takes their first parameter as the receiving type and is thus not part of the argument list");
+            report_error_ast(typer->parser, LABEL_HINT, ((Ast **)func_defn->parameters.items)[0], "Method calls takes their first parameter as the receiving type and should therefore not be passed as an argument");
         }
         return NULL;
     }
@@ -1414,27 +1420,25 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     // @Note - We try and follow the msvc x86 calling convention ???
     // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170#parameter-passing 
     //
-    int bytes_arguments = 0;
-
     for (int i = 0; i < call->arguments.count; i++) {
         AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
         Type    *arg_type = arg->type;
 
         // Pass fixed size arrays as slices, so allocate 16 bytes for them
         if (arg_type->kind == TYPE_ARRAY && ((TypeArray *)arg_type)->array_kind == ARRAY_FIXED) {
-            bytes_arguments += 16;
+            reserve_temporary_storage(typer->enclosing_function, 16);
         } else {
-            bytes_arguments += arg_type->size;
+            reserve_temporary_storage(typer->enclosing_function, arg_type->size);
         }
+
+        // Reserve for putting arguments into temporary locations
+        reserve_temporary_storage(typer->enclosing_function, 8);
     }
 
-    reserve_temporary_storage(typer->enclosing_function, bytes_arguments);
-
+    // Reserve space in the calling function for hidden return parameters and for storing them in temporary locations
     for (int i = 0; i < func_defn->return_types.count; i++) {
         Type *return_type = ((Type **)func_defn->return_types.items)[i];
-        // if (return_type->size <= 8 && i < 5) continue;
-
-        reserve_temporary_storage(typer->enclosing_function, return_type->size);
+        reserve_temporary_storage(typer->enclosing_function, return_type->size + 8);
     }
 
     return call->head.type;
@@ -1543,20 +1547,60 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         func_defn->receiver_type_is_pointer = receiver_is_pointer;
     }
 
+    // Build up the lowered representation of the parameter list for the function (to simplify codegen)
+    func_defn->lowered_params = da_init(func_defn->return_types.count + (func_defn->is_method ? 1 : 0) + func_defn->parameters.count, sizeof(AstIdentifier *));
+
+    // Return types gets to be hidden out parameters in the lowered representation
+    for (int i = 0; i < func_defn->return_types.count; i++) {
+        Type *return_type = ((Type **)func_defn->return_types.items)[i];
+
+        if (return_type->kind == TYPE_VOID) {
+            // Skip
+            continue;
+        }
+
+        Type *ptr_return_type = (Type *) generate_pointer_to_type(typer->parser, return_type);
+
+        char *param_name = malloc(16);
+        sprintf(param_name, "ret_%d", i);
+        AstIdentifier *param = generate_identifier(typer->parser, param_name, ptr_return_type, 0);
+
+        da_append(&func_defn->lowered_params, param);
+    }
+
+    if (func_defn->is_method) {
+        AstIdentifier *param = generate_identifier(typer->parser, "recv", func_defn->receiver_type, 0);
+        da_append(&func_defn->lowered_params, param);
+    }
+
+    for (int i = 0; i < func_defn->parameters.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
+        da_append(&func_defn->lowered_params, param);
+    }
+
     //
     // Do sizing for parameters
     //
-    for (int i = 0; i < func_defn->parameters.count; i++) {
-        AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
+    for (int i = 0; i < func_defn->lowered_params.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)func_defn->lowered_params.items)[i];
         reserve_local_storage(func_defn, param->type->size);
     }
 
-    // Reserve space for stack or large return values
-    for (int i = 0; i < func_defn->return_types.count; i++) {
-        Type *return_type = ((Type **)func_defn->return_types.items)[i];
-        if (return_type->size <= 8 && i < 5) continue;
-        reserve_local_storage(func_defn, 8);
-    }
+
+    // for (int i = 0; i < func_defn->parameters.count; i++) {
+    //     AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
+    //     reserve_local_storage(func_defn, param->type->size);
+    // }
+
+    // // Reserve space for stack or large return values
+    // for (int i = 0; i < func_defn->return_types.count; i++) {
+    //     Type *return_type = ((Type **)func_defn->return_types.items)[i];
+    //     if (return_type->size <= 8 && i < 5) continue;
+    //     reserve_local_storage(func_defn, 8);
+
+    //     // We also need temporary storage when doing a 2-pass return
+    //     reserve_temporary_storage(func_defn, 8);
+    // }
 
     return true;
 }
@@ -1812,14 +1856,7 @@ Type *check_new(Typer *typer, AstNew *ast_new, Type *ctx_type) {
     if (!expr_type) return NULL;
 
     if (expr_type->kind == TYPE_STRUCT) {
-        TypePointer *ptr_to_struct     = ast_allocate(typer->parser, sizeof(TypePointer));
-        ptr_to_struct->head.head.kind  = AST_TYPE;
-        ptr_to_struct->head.head.start = expr_type->head.start;
-        ptr_to_struct->head.head.end   = expr_type->head.end;
-        ptr_to_struct->head.kind       = TYPE_POINTER;
-        ptr_to_struct->head.size       = 8;
-        ptr_to_struct->pointer_to      = expr_type;    
-
+        TypePointer *ptr_to_struct = generate_pointer_to_type(typer->parser, expr_type);
         return (Type *) ptr_to_struct;
     }
 
@@ -2516,7 +2553,10 @@ int pop_temporary_value(AstFunctionDefn *func_defn, int size) {
     int loc = - (align_value(func_defn->num_bytes_locals, 8) + func_defn->temp_ptr);
 
     func_defn->temp_ptr -= size;
-    assert(func_defn->temp_ptr >= 0);
+    if (func_defn->temp_ptr < 0) {
+        printf("Compiler Error: Push/Pop mismatch\n");
+        // assert(false && "Popping more values than what was pushed");
+    }
 
     return loc;
 }

@@ -2,22 +2,60 @@ Vector2 :: struct {
     x, y: float;
 }
 
-Vector3 :: struct {
-    x, y, z: float;
+Vector4 :: struct {
+    x, y, z, w: int;
 }
 
-// add13 :: (a, b, c, d, e, f, g, h, i, j, k, l, m: int) -> int, int, int, int, int, int, int, int, int, int, int, int, int {
-//     return a, b, c, d, e, f, g, h, i, j, k, l, m;
-// }
+many_small_parameters :: (a, b, c, d, e, f, g, h, i, j, k, l, m: int) -> int, int, int, int, int, int, int, int, int, int, int, int, int {
+    // print("% % % % % % % % % % % % %", a, b, c, d, e, f, g, h, i, j, k, l, m);
+    return a, b, c, d, e, f, g, h, i, j, k, l, m;
+}
 
-add :: (a, b, c, d, e, f, g, h, i, j, k, l: int) -> int, int, int, int, int, int, int, int, int, int, int, int {
-    return a, b, c, d, e, f, g, h, i, j, k, l;
+many_large_parameters :: (a, b, c, d, e: Vector4) -> Vector4, Vector4, Vector4, Vector4, Vector4 {
+    return a, b, c, d, e;
+}
+
+many_mixed_parameters :: (a: u8, b: f32, c: Vector4, d: f64, e: bool, f: Vector2, g: string, h: *Vector4, i: s64) -> u8, f32, Vector4, f64, bool, Vector2, string, *Vector4, s64 {
+    print("%\n%\n%\n%\n%\n%\n%\n%\n%\n", a, b, c, d, e, f, g, h, i);
+    return a, b, c, d, e, f, g, h, i;
+}
+
+float_parameters :: (a, b: float) -> float, float {
+    print("% %", a, b);
+    return a, b;
 }
 
 main :: () {
-    a, b, c, d, e, f, g, h, i, j, k, l := add(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
-    print("% % % % % % % % % % % %", a, b, c, d, e, f, g, h, i, j, k, l);
-    
-    // a, b, c, d, e, f, g, h, i, j, k, l, m := add13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
-    // print("% % % % % % % % % % % % %", a, b, c, d, e, f, g, h, i, j, k, l, m);
+    {
+        a, b, c, d, e, f, g, h, i, j, k, l, m := many_small_parameters(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+        print("% % % % % % % % % % % % %", a, b, c, d, e, f, g, h, i, j, k, l, m);
+    }
+    print("-------------------------------");
+    {
+        a, b, c, d, e := many_large_parameters({1, 2, 3, 4}, {5, 6, 7, 8}, {9, 10, 11, 12}, {13, 14, 15, 16}, {17, 18, 19, 20});
+        print("%\n%\n%\n%\n%", a, b, c, d, e);
+    }
+    print("-------------------------------");
+    {
+        a: u8 = 254; 
+        b: f32 = 7.5; 
+        c: Vector4 = {1, 2, 3, 4}; 
+        d: f64 = 3.14; 
+        e: bool = true; 
+        f: Vector2 = {420, 69};
+        g: string = "This feels like a good mix";
+        hv := Vector4{1337, 7, 9, 13};
+        h: *Vector4 = &hv;
+        i: s64 = -5;
+
+        a_0, b_0, c_0, d_0, e_0, f_0, g_0, h_0, i_0 := many_mixed_parameters(a, b, c, d, e, f, g, h, i);
+
+        print("%\n%\n%\n%\n%\n%\n%\n%\n%\n", a_0, b_0, c_0, d_0, e_0, f_0, g_0, h_0, i_0);
+    }
+    print("-------------------------------");
+    {
+        a, b := float_parameters(3.14, 6.28);
+        print("% %", a, b);
+    }
+
 }

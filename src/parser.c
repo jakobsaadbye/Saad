@@ -639,6 +639,17 @@ AstIdentifier *add_member_to_struct(Parser *parser, AstStruct *struct_defn, AstI
     return add_identifier_to_scope(parser, struct_defn->scope, member);
 }
 
+TypePointer *generate_pointer_to_type(Parser *parser, Type *type) {
+    TypePointer *ptr     = ast_allocate(parser, sizeof(TypePointer));
+    ptr->head.head.kind  = AST_TYPE;
+    ptr->head.head.start = type->head.start;
+    ptr->head.head.end   = type->head.end;
+    ptr->head.kind       = TYPE_POINTER;
+    ptr->head.size       = 8;
+    ptr->pointer_to      = type;    
+    return ptr;
+}
+
 TypeStruct *generate_struct_for_slice(Parser *parser, Type *type_data) {
     TypeStruct *slice = generate_struct_type_with_data_and_count(parser, type_data, "Array");
     return slice;

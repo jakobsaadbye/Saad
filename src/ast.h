@@ -273,9 +273,9 @@ typedef struct AstFunctionDefn {
     int num_bytes_temporaries; // Number of bytes allocated for temporaries in the function
     int base_ptr;              // Where rbp is currently at in codegen
     int temp_ptr;              // Offset to allocate temporary stack locations (used for function calls and function arguments). The lifetime of the temporary storage is as long as a statement, to allow expressions to be fully evaluated
-
     int return_label;
 
+    DynamicArray    lowered_params; // of *AstIdentifier. A lowered representation of the parameter list with hidden return parameters / methods and all
 } AstFunctionDefn;
 
 typedef struct AstFunctionCall {
