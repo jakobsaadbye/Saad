@@ -212,7 +212,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     // Typecheck
     bool typecheck_ok = check_file(&typer, main_file);
     if (!typecheck_ok) {
-        // cleanup();
+        cleanup();
         return false;
     }
 

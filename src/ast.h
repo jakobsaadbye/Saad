@@ -125,8 +125,9 @@ typedef enum IdentifierFlags {
     IDENTIFIER_IS_NAME_OF_STRUCT   = 1 << 1,
     IDENTIFIER_IS_NAME_OF_FUNCTION = 1 << 2,
     IDENTIFIER_IS_STRUCT_MEMBER    = 1 << 3,
-    IDENTIFIER_IS_CONSTANT         = 1 << 4,
-    IDENTIFIER_IS_RESOLVED         = 1 << 5,
+    IDENTIFIER_IS_STRUCT_METHOD    = 1 << 4,
+    IDENTIFIER_IS_CONSTANT         = 1 << 5,
+    IDENTIFIER_IS_RESOLVED         = 1 << 6,
 } IdentifierFlags;
 
 typedef struct AstIdentifier {
@@ -149,7 +150,6 @@ typedef enum DeclarationFlags {
     DECLARATION_INFER                 = 1 << 2,
     DECLARATION_CONSTANT              = 1 << 3,
     DECLARATION_IS_STRUCT_MEMBER      = 1 << 4,
-    DECLARATION_IS_STRUCT_METHOD      = 1 << 5,
     DECLARATION_IS_FUNCTION_PARAMETER = 1 << 6,
     DECLARATION_IS_COMPILER_GENERATED = 1 << 7,
 } DeclarationFlags;
@@ -248,12 +248,12 @@ typedef struct AstEnumLiteral {
 } AstEnumLiteral;
 
 typedef enum CallingConv {
-    CALLING_CONV_SAAD,  // @Note - Currently this is just the same as MSVC but we might differ in the future?
+    CALLING_CONV_SAAD,  // See the ABI in emit_function_defn or emit_function_call for the "spec" on this
     CALLING_CONV_MSVC,
-    CALLING_CONV_SYSTEM_V,
-    CALLING_CONV_C_DECL,
-    CALLING_CONV_STD_CALL,
-    CALLING_CONV_FAST_CALL,
+    // CALLING_CONV_SYSTEM_V,
+    // CALLING_CONV_C_DECL,
+    // CALLING_CONV_STD_CALL,
+    // CALLING_CONV_FAST_CALL,
 } CallingConv;
 
 typedef struct AstFunctionDefn {
@@ -261,21 +261,22 @@ typedef struct AstFunctionDefn {
     AstIdentifier  *identifier;
     DynamicArray    parameters; // of *AstIdentifier
     AstBlock       *body;
-    DynamicArray    return_types; // of *Type
-    CallingConv     call_conv;
-    Type           *receiver_type; // set if its a method
+    DynamicArray    return_types;  // of *Type
+    AstIdentifier  *receiver;      // set if its a method and is just a short-hand for the 0'th parameter
     Token           method_token;  // set if its a method
-    bool            receiver_type_is_pointer;
+    CallingConv     calling_convention;
     bool            is_method;
     bool            is_extern;
- 
-    int num_bytes_locals;      // Number of bytes allocated for variables in the function
-    int num_bytes_temporaries; // Number of bytes allocated for temporaries in the function
-    int base_ptr;              // Where rbp is currently at in codegen
-    int temp_ptr;              // Offset to allocate temporary stack locations (used for function calls and function arguments). The lifetime of the temporary storage is as long as a statement, to allow expressions to be fully evaluated
-    int return_label;
-
-    DynamicArray    lowered_params; // of *AstIdentifier. A lowered representation of the parameter list with hidden return parameters / methods and all
+    
+    int   num_bytes_locals;      // Number of bytes allocated for variables in the function
+    int   num_bytes_temporaries; // Number of bytes allocated for temporaries in the function
+    int   base_ptr;              // Where rbp is currently at in codegen
+    int   temp_ptr;              // Offset to allocate temporary stack locations (used for function calls and function arguments). The lifetime of the temporary storage is as long as a statement, to allow expressions to be fully evaluated
+    int   return_label;
+    char *symbol_call_prefix;    // Methods gets a prefix symbolname in the outputted asm to be namespaced to their receiver. E.g `foo :: method (bar: Bar)` would get an asm function name: `Bar.foo:`
+    
+    DynamicArray    lowered_return_params;  // of *AstIdentifier
+    DynamicArray    lowered_params;         // of *AstIdentifier. A lowered representation of the parameter list with hidden return parameters / methods and all
 } AstFunctionDefn;
 
 typedef struct AstFunctionCall {
@@ -284,7 +285,7 @@ typedef struct AstFunctionCall {
     AstFunctionDefn *func_defn;         // The called function
     DynamicArray     arguments;         // of *AstExpr
     AstStruct       *belongs_to_struct; // The struct the function definition is defined on
-    bool             is_member_call;    // If the function is defined within the struct or is a method of the struct, this field is true
+    bool             is_method_call;    // If the function is defined within the struct or is a method of the struct, this field is true
 } AstFunctionCall;
 
 typedef struct AstPrint {
@@ -403,6 +404,7 @@ typedef struct AstArrayAccess {
 typedef enum MemberAccessKind {
     MEMBER_ACCESS_STRUCT,
     MEMBER_ACCESS_ENUM,
+    MEMBER_ACCESS_METHOD_CALL,
 } AccessorKind;
 
 typedef struct AstMemberAccess {
@@ -413,8 +415,9 @@ typedef struct AstMemberAccess {
     
     AccessorKind access_kind;
     union {
-        AstIdentifier  *struct_member;
-        AstEnumerator  *enum_member;
+        AstIdentifier   *struct_member;
+        AstEnumerator   *enum_member;
+        AstFunctionCall *method_call;
     };
 } AstMemberAccess;
 

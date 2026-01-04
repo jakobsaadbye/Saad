@@ -64,8 +64,6 @@ void emit_integer_to_float_conversion(CodeGenerator *cg, Type *l_type, Type *r_t
 void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, bool dest_is_relative_to_rsp, Type *lhs_type, Type *rhs_type);
 void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_computed, Type *src_type, bool lvalue);
 
-MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma);
-
 int allocate_variable(CodeGenerator *cg, int size);
 void check_main_exists(CodeGenerator *cg, AstFile *file);
 int make_label_number(CodeGenerator *cg);
@@ -285,7 +283,9 @@ void emit_block(CodeGenerator *cg, AstBlock *block) {
 
 void emit_expr_stmt(CodeGenerator *cg, AstExprStmt *expr_stmt) {
     emit_expression(cg, expr_stmt->expr);
-    POP(RAX);
+    if (expr_stmt->expr->type->kind != TYPE_VOID) {
+        POP(RAX);
+    }
 }
 
 void emit_statement(CodeGenerator *cg, Ast *node) {
@@ -657,6 +657,12 @@ void emit_return(CodeGenerator *cg, AstReturn *ast_return) {
     sb_append(&cg->code, "   ; Return\n");
     for (int i = 0; i < ast_return->values.count; i++) {
         AstExpr *return_value = ((AstExpr **)ast_return->values.items)[i];
+
+        if (return_value->type->kind == TYPE_VOID) {
+            // Skip, as its just an empty return statement. E.g `return;`
+            continue;
+        }
+
         emit_expression(cg, return_value);
 
         Type *return_type = ((Type **)ast_return->enclosing_function->return_types.items)[i];
@@ -857,10 +863,12 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     //       32[rsp]      40[rsp]    (48)[rsp]
 
     // 1. Push pointers to hidden return slots
-    DynamicArray return_slots = da_init(func_defn->return_types.count, sizeof(int));
-    for (int i = 0; i < func_defn->return_types.count; i++) {
-        Type *return_type = ((Type **)func_defn->return_types.items)[i];
-        int slot = push_temporary_value(cg->enclosing_function, return_type->size);
+    DynamicArray return_slots = da_init(func_defn->lowered_return_params.count, sizeof(int));
+    for (int i = 0; i < func_defn->lowered_return_params.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)func_defn->lowered_return_params.items)[i];
+        assert(param->type->kind == TYPE_POINTER);
+
+        int slot = push_temporary_value(cg->enclosing_function, ((TypePointer *)param->type)->pointer_to->size);
         da_append(&return_slots, slot);
         sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", slot);
         PUSH(RAX);
@@ -871,8 +879,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
         AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
         emit_expression(cg, arg);
 
-        int param_index = i + (func_defn->is_method ? 1 : 0);
-        AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[param_index];
+        AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
         adapt_function_argument_to_parameter(cg, arg, param);
     }
 
@@ -909,40 +916,39 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
         }
     }
 
-    // if (func_defn->is_method) {
-    //     // Pass the receiver literal after return parameters
-    //     if (parameter_shift <= 3) {
-    //         Register reg = get_argument_register_from_index(parameter_shift);
-    //         POP(register_to_str(reg, 8));
-    //     } else {
-    //         int temp_loc = push_temporary_value(cg->enclosing_function, 8);
-    //         POP(RAX);
-    //         sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", temp_loc);
-    //     }
-    // }
-
     // Do the actual call
     if (func_defn->is_method) {
-        if (func_defn->receiver_type->kind != TYPE_STRUCT) {
-            XXX;
-        }
-        TypeStruct *receiver_type = (TypeStruct *) func_defn->receiver_type;
-        sb_append(&cg->code, "   call\t\t%s.%s\n", receiver_type->identifier->name, call->identifer->name);
+        sb_append(&cg->code, "   call\t\t%s.%s\n", func_defn->symbol_call_prefix, call->identifer->name);
     } else {
         sb_append(&cg->code, "   call\t\t%s\n", call->identifer->name);
     }
 
+    //
     // Push all the return values
-    for (int i = func_defn->return_types.count - 1; i >= 0; i--) {
-        Type *return_type = ((Type **)func_defn->return_types.items)[i];
-        int return_offset = ((int *)return_slots.items)[i];
+    //
+    if (func_defn->is_extern) {
+        // Handle C's return convention
+        //
+        // Result is either returned in rax or xmm0
+        Type *return_type = ((Type **)func_defn->return_types.items)[0];
 
-        if (return_type->size <= 8) {
-            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", return_offset);
+        if (return_type->kind == TYPE_VOID) {
+            // Do nothing
+        } else if (return_type->kind == TYPE_FLOAT) {
+            sb_append(&cg->code, "   %s\t\t%s, xmm0\n", movd_or_movq(return_type), REG_A(return_type));
+            PUSH(RAX);
         } else {
-            sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", return_offset);
+            PUSH(RAX);
         }
-        PUSH(RBX);
+    } else {
+        for (int i = func_defn->lowered_return_params.count - 1; i >= 0; i--) {
+            AstIdentifier *param = ((AstIdentifier **)func_defn->lowered_return_params.items)[i];
+    
+            int return_offset = ((int *)return_slots.items)[i];
+            Type *return_type = ((TypePointer *)param->type)->pointer_to;
+    
+            emit_move_and_push(cg, return_offset, false, return_type, false);
+        }
     }
 }
 
@@ -953,8 +959,6 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
         sb_append(&cg->code_header, "   extern %s\n", func_defn->identifier->name);
         return;
     }
-
-    bool is_method = func_defn->is_method;
 
     // Align local and temporary storage to 8 bytes
     func_defn->num_bytes_locals      = align_value(func_defn->num_bytes_locals, 8);
@@ -970,9 +974,8 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "; bytes temp     : %d\n", bytes_temporaries);
     sb_append(&cg->code, "; bytes total    : %d\n", bytes_total);
 
-    if (is_method) {
-        TypeStruct *receiver_struct = (TypeStruct *)func_defn->receiver_type;
-        sb_append(&cg->code, "%s.%s:\n", receiver_struct->identifier->name, func_defn->identifier->name);
+    if (func_defn->is_method) {
+        sb_append(&cg->code, "%s.%s:\n", func_defn->symbol_call_prefix, func_defn->identifier->name);
     } else {
         sb_append(&cg->code, "%s:\n", func_defn->identifier->name);
     }
@@ -1012,6 +1015,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
     if (save_arguments_in_shadow_space) {
         for (int i = 0; i < 4; i++) {
+            if (i >= func_defn->lowered_params.count) break;
             AstIdentifier *param = ((AstIdentifier **)func_defn->lowered_params.items)[i];
             Register reg = get_argument_register_from_index(i, param->type);
             int save_address = 16 + i * 8;
@@ -1388,7 +1392,7 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-            if (member->decl->flags & DECLARATION_IS_STRUCT_METHOD) {
+            if (member->flags & IDENTIFIER_IS_STRUCT_METHOD) {
                 continue;
             }
 
@@ -1419,7 +1423,7 @@ void pop_struct_members_from_print(CodeGenerator *cg, AstStruct *struct_, int *c
     for (int i = members.count - 1; i >= 0; i--) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-        if (member->decl->flags & DECLARATION_IS_STRUCT_METHOD) {
+        if (member->flags & IDENTIFIER_IS_STRUCT_METHOD) {
             continue;
         }
 
@@ -2171,6 +2175,10 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
         // We don't push the address of an enum value
         return result;
     }
+    if (ma->access_kind == MEMBER_ACCESS_METHOD_CALL) {
+        // We don't push the address of a method call. We let the desugered function call handle it
+        return result;
+    }
 
     // Emit the left side as an lvalue
     set_flag(cg, CODEGEN_EMIT_EXPRESSION_AS_LVALUE);
@@ -2437,10 +2445,9 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         MemberAccessResult result = emit_member_access(cg, ma);
 
         if (ma->access_kind == MEMBER_ACCESS_STRUCT) {
-
             AstIdentifier *member = ma->struct_member;
 
-            // Case for member access on an fixed array type
+            // Special case for member access on an fixed array type
             if (ma->left->type->kind == TYPE_ARRAY && ((TypeArray *)ma->left->type)->array_kind == ARRAY_FIXED) {
                 TypeArray *fixed_array = (TypeArray *)ma->left->type;
                 if (member->member_index == 0) { // .data
@@ -2454,80 +2461,16 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 return;
             }
 
-            // Case for member calls
-            if (ma->right->head.kind == AST_FUNCTION_CALL) {
-                AstFunctionCall *member_call = (AstFunctionCall *) ma->right;
-
-                if (!member_call->is_member_call) {
-                    XXX;
-                }
-
-                // Pass the receiver literal to match the parameter type of the methods receiver type
-
-                Type *lhs_type = ma->left->type;
-
-                if (lhs_type->kind == TYPE_STRUCT && member_call->func_defn->receiver_type_is_pointer) {
-                    // The reference is already pushed
-                }
-                else if (lhs_type->kind == TYPE_STRUCT && !member_call->func_defn->receiver_type_is_pointer) {
-                    if (lhs_type->size <= 8) {
-                        // Pass the struct by value
-                        POP(RAX);
-                        if (lhs_type->size < 4) {
-                            sb_append(&cg->code, "   movzx\t\teax, %s [rax]\n", word_size(lhs_type));
-                        } else {
-                            sb_append(&cg->code, "   mov\t\t%s, %s [rax]\n", REG_A(lhs_type), word_size(lhs_type));
-                        }
-                        PUSH(RAX);
-                    }
-                }
-                else if (lhs_type->kind == TYPE_POINTER && !member_call->func_defn->receiver_type_is_pointer) {
-                    // Dereference the struct if its small
-                    Type *lhs_pointer_to = ((TypePointer *)lhs_type)->pointer_to;
-                    if (lhs_pointer_to->kind != TYPE_STRUCT) {
-                        XXX;
-                    }
-                    
-                    if (lhs_pointer_to->size <= 8) {
-                        POP(RAX);
-                        if (lhs_type->size <= 4) {
-                            sb_append(&cg->code, "   movzx\t\teax, %s [rax]\n", word_size(lhs_type));
-                        } else {
-                            sb_append(&cg->code, "   mov\t\trax, %s [rax]\n", word_size(lhs_type));
-                        }
-                        PUSH(RAX);
-                    }
-                }
-                else if (lhs_type->kind == TYPE_POINTER && member_call->func_defn->receiver_type_is_pointer) {
-                    // The reference is already pushed
-                }
-                else {
-                    XXX;
-                }
-
-                emit_function_call(cg, member_call);
-
-                if (emit_as_lvalue) {
-
-                    if (member_call->head.type->kind == TYPE_STRUCT && member_call->head.type->size <= 8) {
-                        // Allocate space for the returned value so its easier to do member access calculations
-                        int loc = push_temporary_value(cg->enclosing_function, ma->right->type->size);
-                        sb_append(&cg->code, "   mov\t\t%d[rbp], %s\n", loc, REG_A(ma->right->type));
-                        sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", loc);
-                        PUSH(RBX);
-                        return;
-                    }
-                }
-
-                return;
-            } 
-    
             // Simple values stored in the member
             POP(RBX);
             emit_move_and_push(cg, result.base_offset, result.is_runtime_computed, member->type, emit_as_lvalue);
 
             return;
-        } 
+        }
+        else if (ma->access_kind == MEMBER_ACCESS_METHOD_CALL) {
+            assert(ma->method_call);
+            emit_function_call(cg, ma->method_call);
+        }
         else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
             sb_append(&cg->code, "   push\t\t%d\n", ma->enum_member->value);
             INCR_PUSH_COUNT();

@@ -559,35 +559,24 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
 check_identifiers_vs_values:
     if (!(decl->flags & DECLARATION_TYPED_NO_EXPR)) {
         int num_values = 0;
-        AstFunctionCall *func_call_with_multiple_return_values = NULL;
         for (int i = 0; i < decl->values.count; i++) {
             AstExpr *value = ((AstExpr **)decl->values.items)[i];
-    
-            if (value->head.kind == AST_FUNCTION_CALL) {
-                AstFunctionCall *func_call = (AstFunctionCall *) value;
-                if (func_call->func_defn->return_types.count > 1) {
-                    func_call_with_multiple_return_values = func_call;
-                    num_values += func_call->func_defn->return_types.count;
-                    continue;
-                }
+            
+            if (value->type->kind == TYPE_TUPLE) {
+                TypeTuple *tuple = (TypeTuple *) value->type;
+                num_values += tuple->types.count;
+            } else {
+                num_values += 1;
             }
-    
-            num_values += 1;
         }
         if (decl->idents.count > num_values) {
             AstIdentifier *extra_ident = ((AstIdentifier **)decl->idents.items)[decl->idents.count - 1];
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(extra_ident), "Assignment mismatch. Have %d %s and %d %s", decl->idents.count, decl->idents.count == 1 ? "identifier" : "identifiers", num_values, num_values == 1 ? "value" : "values");
-            if (func_call_with_multiple_return_values) {
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_call_with_multiple_return_values), "This function call returns %s", type_to_str(func_call_with_multiple_return_values->head.type));
-            }
             return NULL;
         }
         if (decl->idents.count < num_values) {
             AstExpr *extra_expr = ((AstExpr **)decl->values.items)[decl->values.count - 1];
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(extra_expr), "Assignment mismatch. Have %d %s and %d %s", decl->idents.count, decl->idents.count == 1 ? "identifier" : "identifiers", num_values, num_values == 1 ? "value" : "values");
-            if (func_call_with_multiple_return_values) {
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_call_with_multiple_return_values), "This function call returns %s", type_to_str(func_call_with_multiple_return_values->head.type));
-            }
             return NULL;
         }
     }
@@ -702,7 +691,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     bool lhs_is_constant = false;
     if (is_member) {
         member = ((AstMemberAccess *)(assign->lhs))->struct_member;
-        lhs_is_constant = member->flags & DECLARATION_CONSTANT;
+        lhs_is_constant = member->flags & IDENTIFIER_IS_CONSTANT;
     } 
     else if (is_array_ac) {
         lhs_is_constant = false;
@@ -1027,15 +1016,14 @@ char *generate_c_format_specifier_for_type(Type *type) {
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-            if (member->decl->flags & DECLARATION_IS_STRUCT_METHOD) continue;
+            if (member->flags & IDENTIFIER_IS_STRUCT_METHOD) continue;
 
             char *format_specifier = generate_c_format_specifier_for_type(member->type);
 
             sb_append(&builder, "%s = %s", member->name, format_specifier);
-
             
             if (i != members.count - 1) {
-                bool next_member_is_method = ((AstIdentifier **)members.items)[i + 1]->decl->flags & DECLARATION_IS_STRUCT_METHOD;
+                bool next_member_is_method = ((AstIdentifier **)members.items)[i + 1]->flags & IDENTIFIER_IS_STRUCT_METHOD;
                 if (!next_member_is_method) {
                     sb_append(&builder, ", ");
                 }
@@ -1057,7 +1045,7 @@ int count_nested_sizeable_struct_members(Typer *typer, AstStruct *struct_, int c
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-        if (member->decl->flags & DECLARATION_IS_STRUCT_METHOD) continue;
+        if (member->flags & IDENTIFIER_IS_STRUCT_METHOD) continue;
 
         if (member->type->kind == TYPE_STRUCT) {
             AstStruct *nested_struct = ((TypeStruct *)member->type)->node;
@@ -1337,7 +1325,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
     AstIdentifier *func_ident = NULL;
 
-    if (call->is_member_call) {
+    if (call->is_method_call) {
         // Lookup the function within the scope of the struct
         assert(call->belongs_to_struct);
 
@@ -1377,25 +1365,23 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         typer_restore_state(typer, temp);
     }
     
-    int real_parameter_count = func_defn->parameters.count - (func_defn->is_method ? 1 : 0);
-    if (call->arguments.count != real_parameter_count) {
-        if (call->arguments.count < real_parameter_count) {
+    if (call->arguments.count != func_defn->parameters.count) {
+        if (call->arguments.count < func_defn->parameters.count) {
             AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted %d, got %d", real_parameter_count, call->arguments.count);
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
         } else {
             AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too many arguments: Wanted %d, got %d", real_parameter_count, call->arguments.count);
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too many arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
         }
         report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
-        if (call->is_member_call && call->arguments.count == func_defn->parameters.count) {
-            report_error_ast(typer->parser, LABEL_HINT, ((Ast **)func_defn->parameters.items)[0], "Method calls takes their first parameter as the receiving type and should therefore not be passed as an argument");
+        if (call->is_method_call && call->arguments.count == func_defn->parameters.count + 1) {
+            report_error_ast(typer->parser, LABEL_NOTE, ((Ast **)func_defn->parameters.items)[0], "Methods takes their first parameter as the receiver and should therefore not be passed as an explicit argument");
         }
         return NULL;
     }
 
     for (int i = 0; i < call->arguments.count; i++) {
-        int param_index = i + (func_defn->is_method ? 1 : 0);
-        AstIdentifier *param = ((AstIdentifier **)(func_defn->parameters.items))[param_index];
+        AstIdentifier *param = ((AstIdentifier **)(func_defn->parameters.items))[i];
 
         AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
         Type *arg_type = check_expression(typer, arg, param->type);
@@ -1487,6 +1473,19 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         }
     }
 
+    if (func_defn->is_extern) {
+        // Limit what C calls can have as a function signature
+        if (func_defn->return_types.count > 1) {
+            Type *last_return_type = ((Type **)func_defn->return_types.items)[func_defn->return_types.count - 1];
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)last_return_type, "Only 1 return type is allowed for external C functions");
+            return false;
+        }
+        if (func_defn->is_method) {
+            AstIdentifier *receiver = ((AstIdentifier **)func_defn->parameters.items)[0];
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver, "Methods are not allowed for external C functions");
+            return false;
+        }
+    }
 
     // Mark the function as fully typed, when we have typechecked the function signature
     // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again
@@ -1511,17 +1510,16 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
     // Do method specific stuff
     if (func_defn->is_method) {
-        Type *receiver_type = ((AstIdentifier**)func_defn->parameters.items)[0]->type;
+        func_defn->receiver = ((AstIdentifier**)func_defn->parameters.items)[0];
+        Type *receiver_type = func_defn->receiver->type;
 
         // For now we only allow the receiver type to be a struct or a pointer to a struct!
         TypeStruct *receiver_struct = NULL;
-        bool        receiver_is_pointer = false;
 
         if (receiver_type->kind == TYPE_POINTER) {
             TypePointer *pointer_type = (TypePointer *) receiver_type;
 
             if (pointer_type->pointer_to->kind == TYPE_STRUCT) {
-                receiver_is_pointer = true;
                 receiver_struct = (TypeStruct *) pointer_type->pointer_to;
             }
             else {
@@ -1540,42 +1538,60 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         }
 
         // Add the function as a member of the receiver struct
-        AstIdentifier *method_member = generate_identifier(typer->parser, func_defn->identifier->name, (Type *)func_type, IDENTIFIER_IS_STRUCT_MEMBER);
+        AstIdentifier *method_member = generate_identifier(typer->parser, func_defn->identifier->name, (Type *)func_type, IDENTIFIER_IS_STRUCT_MEMBER | IDENTIFIER_IS_STRUCT_METHOD);
         add_member_to_struct(typer->parser, receiver_struct->node, method_member);
 
-        func_defn->receiver_type            = (Type *)receiver_struct;
-        func_defn->receiver_type_is_pointer = receiver_is_pointer;
+        func_defn->symbol_call_prefix = receiver_struct->identifier->name;
     }
 
     // Build up the lowered representation of the parameter list for the function (to simplify codegen)
-    func_defn->lowered_params = da_init(func_defn->return_types.count + (func_defn->is_method ? 1 : 0) + func_defn->parameters.count, sizeof(AstIdentifier *));
+    func_defn->lowered_return_params  = da_init(func_defn->return_types.count, sizeof(AstIdentifier *));
+    func_defn->lowered_params = da_init(func_defn->return_types.count + func_defn->parameters.count, sizeof(AstIdentifier *));
 
-    // Return types gets to be hidden out parameters in the lowered representation
-    for (int i = 0; i < func_defn->return_types.count; i++) {
-        Type *return_type = ((Type **)func_defn->return_types.items)[i];
+    switch (func_defn->calling_convention) {
+    case CALLING_CONV_SAAD:
+        // Return types gets to be hidden out parameters in the lowered representation
+        for (int i = 0; i < func_defn->return_types.count; i++) {
+            Type *return_type = ((Type **)func_defn->return_types.items)[i];
+    
+            if (return_type->kind == TYPE_VOID) {
+                // Skip
+                continue;
+            }
+    
+            Type *ptr_return_type = (Type *) generate_pointer_to_type(typer->parser, return_type);
+            char *param_name = malloc(16);
+            sprintf(param_name, "ret_%d", i);
+            AstIdentifier *param = generate_identifier(typer->parser, param_name, ptr_return_type, 0);
+            da_append(&func_defn->lowered_params, param);
+            da_append(&func_defn->lowered_return_params, param);
+        }
+    
+        for (int i = 0; i < func_defn->parameters.count; i++) {
+            AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
+            da_append(&func_defn->lowered_params, param);
+        }
+    break;
+    case CALLING_CONV_MSVC:
+        // Link to the ABI
+        // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170
+        assert(func_defn->return_types.count <= 1);
+        assert(!func_defn->is_method);
 
-        if (return_type->kind == TYPE_VOID) {
-            // Skip
-            continue;
+        // A large return value (> 8 bytes) needs to be allocated by the caller and the pointer to it is passed as a hidden return parameter
+        Type *return_type = ((Type **)func_defn->return_types.items)[0];
+        if (return_type->size > 8) {
+            Type *ptr_return_type = (Type *) generate_pointer_to_type(typer->parser, return_type);
+            AstIdentifier *param = generate_identifier(typer->parser, "ret0", ptr_return_type, 0);
+            da_append(&func_defn->lowered_params, param);
+            da_append(&func_defn->lowered_return_params, param);
         }
 
-        Type *ptr_return_type = (Type *) generate_pointer_to_type(typer->parser, return_type);
-
-        char *param_name = malloc(16);
-        sprintf(param_name, "ret_%d", i);
-        AstIdentifier *param = generate_identifier(typer->parser, param_name, ptr_return_type, 0);
-
-        da_append(&func_defn->lowered_params, param);
-    }
-
-    if (func_defn->is_method) {
-        AstIdentifier *param = generate_identifier(typer->parser, "recv", func_defn->receiver_type, 0);
-        da_append(&func_defn->lowered_params, param);
-    }
-
-    for (int i = 0; i < func_defn->parameters.count; i++) {
-        AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
-        da_append(&func_defn->lowered_params, param);
+        for (int i = 0; i < func_defn->parameters.count; i++) {
+            AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
+            da_append(&func_defn->lowered_params, param);
+        }
+    break;
     }
 
     //
@@ -1585,22 +1601,6 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         AstIdentifier *param = ((AstIdentifier **)func_defn->lowered_params.items)[i];
         reserve_local_storage(func_defn, param->type->size);
     }
-
-
-    // for (int i = 0; i < func_defn->parameters.count; i++) {
-    //     AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
-    //     reserve_local_storage(func_defn, param->type->size);
-    // }
-
-    // // Reserve space for stack or large return values
-    // for (int i = 0; i < func_defn->return_types.count; i++) {
-    //     Type *return_type = ((Type **)func_defn->return_types.items)[i];
-    //     if (return_type->size <= 8 && i < 5) continue;
-    //     reserve_local_storage(func_defn, 8);
-
-    //     // We also need temporary storage when doing a 2-pass return
-    //     reserve_temporary_storage(func_defn, 8);
-    // }
 
     return true;
 }
@@ -1902,6 +1902,55 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     return result;
 }
 
+bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberAccess *ma) {
+    AstExpr       *recv_arg = ma->left;
+    AstIdentifier *recv_param = func_call->func_defn->receiver;
+
+    // @Note: In this block, we don't have full type information on the parameters, so we can only check shallowly if the receiver arg and param matches.
+
+    if ((recv_arg->type->kind == TYPE_POINTER && recv_param->type->kind == TYPE_POINTER) || (recv_arg->type->kind != TYPE_POINTER && recv_param->type->kind != TYPE_POINTER)) {
+        // Pointer vs Pointer
+        // Value   vs Value
+        da_insert(&func_call->arguments, ma->left, 0);
+        return true;
+    }
+
+    if (recv_arg->type->kind == TYPE_POINTER && recv_param->type->kind != TYPE_POINTER) {
+        // Insert a dereference to match
+        AstUnary *deref        = ast_allocate(typer->parser, sizeof(AstUnary));
+        deref->head.head       = recv_arg->head;
+        deref->head.head.kind  = AST_UNARY;
+        deref->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+        deref->operator        = OP_POINTER_DEREFERENCE;
+        deref->expr            = recv_arg;
+
+        Type *type = check_unary(typer, deref, recv_param->type);
+        if (!type) return false;
+
+        da_insert(&func_call->arguments, deref, 0);
+        return true;
+    }
+
+    if (recv_arg->type->kind != TYPE_POINTER && recv_param->type->kind == TYPE_POINTER) {
+        // Insert an address-of to match
+        AstUnary *addr_of        = ast_allocate(typer->parser, sizeof(AstUnary));
+        addr_of->head.head       = recv_arg->head;
+        addr_of->head.head.kind  = AST_UNARY;
+        addr_of->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+        addr_of->operator        = OP_ADDRESS_OF;
+        addr_of->expr            = recv_arg;
+
+        Type *type = check_unary(typer, addr_of, recv_param->type);
+        if (!type) return false;
+
+        da_insert(&func_call->arguments, addr_of, 0);
+        return true;
+    }
+
+    // Let the check_function_call deal with the actual type mismatch
+    return true;
+}
+
 Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     Type *type_lhs = check_expression(typer, ma->left, NULL);
     if (!type_lhs) return NULL;
@@ -1983,18 +2032,44 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         AstLiteral *ident = (AstLiteral *) rhs;
         member_name = ident->as.value.identifier.name;
         member = get_struct_member(struct_type->node, member_name);
+
+        ma->access_kind   = MEMBER_ACCESS_STRUCT;
+        ma->struct_member = member;
     } 
     else if (rhs->head.kind == AST_FUNCTION_CALL) {
         func_call = (AstFunctionCall *) rhs;
 
-        func_call->is_member_call = true;
-        func_call->belongs_to_struct = struct_type->node;
-
-        Type *func_type = check_function_call(typer, func_call);
-        if (!func_type) return NULL;
-
         member_name = func_call->identifer->name;
         member = get_struct_member(struct_type->node, member_name);
+
+        if (member) {
+
+            if (member->type->kind != TYPE_FUNCTION) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *) rhs, "Member %s is not a callable function", member->name);
+                return NULL;
+            }
+
+            AstFunctionDefn *func_defn = ((TypeFunction *)member->type)->node;
+            func_call->func_defn = func_defn;
+
+            // @Todo: This assumes that "static" functions on structs are also methods
+            func_call->is_method_call = true;
+            func_call->belongs_to_struct = struct_type->node;
+    
+            // Rewrite the method call into a plain function call, with the 0'th
+            // argument being the left-hand side of the member access
+            // e.g
+            // `foo.bar(x)` -> `bar(foo, x)`
+            bool ok = rewrite_as_method_call(typer, func_call, ma);
+            if (!ok) return NULL;
+    
+            Type *func_type = check_function_call(typer, func_call);
+            if (!func_type) return NULL;
+    
+            ma->access_kind = MEMBER_ACCESS_METHOD_CALL;
+            ma->method_call = func_call;
+        }
+
     } 
     else {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "Invalid member expression");
@@ -2018,32 +2093,28 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         return NULL;
     }
 
-    ma->access_kind   = MEMBER_ACCESS_STRUCT;
-    ma->struct_member = member;
-
     //
     // Sizing
     //
 
     // Reserve 8 bytes for small structure returns to make it easier to do member access calculations on chained function calls
-    if (ma->left->head.kind == AST_FUNCTION_CALL) {
-        AstFunctionCall *call = (AstFunctionCall *) ma->left;
-        Type *return_type_0 = ((Type **)call->func_defn->return_types.items)[0];
-        if (return_type_0->kind == TYPE_STRUCT && return_type_0->size <= 8) {
-            reserve_temporary_storage(typer->enclosing_function, 8);
-        }
-    }
-    if (ma->right->head.kind == AST_FUNCTION_CALL) {
-        AstFunctionCall *call = (AstFunctionCall *) ma->right;
-        Type *return_type_0 = ((Type **)call->func_defn->return_types.items)[0];
-        if (return_type_0->kind == TYPE_STRUCT && return_type_0->size <= 8) {
-            reserve_temporary_storage(typer->enclosing_function, 8);
-        }
-    }
+    // if (ma->left->head.kind == AST_FUNCTION_CALL) {
+    //     AstFunctionCall *call = (AstFunctionCall *) ma->left;
+    //     Type *return_type_0 = ((Type **)call->func_defn->return_types.items)[0];
+    //     if (return_type_0->kind == TYPE_STRUCT && return_type_0->size <= 8) {
+    //         reserve_temporary_storage(typer->enclosing_function, 8);
+    //     }
+    // }
+    // if (ma->right->head.kind == AST_FUNCTION_CALL) {
+    //     AstFunctionCall *call = (AstFunctionCall *) ma->right;
+    //     Type *return_type_0 = ((Type **)call->func_defn->return_types.items)[0];
+    //     if (return_type_0->kind == TYPE_STRUCT && return_type_0->size <= 8) {
+    //         reserve_temporary_storage(typer->enclosing_function, 8);
+    //     }
+    // }
 
     if (func_call) {
-        Type *return_type_0 = ((Type **)func_call->func_defn->return_types.items)[0];
-        return return_type_0;
+        return func_call->head.type;
     }
 
     return member->type;

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #define da_append(da, item) _da_append(da, &item);
+#define da_insert(da, item, index) _da_insert(da, &item, index);
 
 typedef struct DynamicArray {
     int item_size;
@@ -16,6 +17,7 @@ typedef struct DynamicArray {
 
 DynamicArray da_init(unsigned int init_cap, unsigned int item_size);
 void _da_append(DynamicArray *da, void *item);
+void _da_insert(DynamicArray *da, void *item, int index);
 void da_free(DynamicArray *da);
 void da_remove(DynamicArray *da, int index);
 
@@ -50,6 +52,37 @@ void _da_append(DynamicArray *da, void *item) {
     }
 
     void *dst = da->items + (da->count * da->item_size);
+    memcpy(dst, item, da->item_size);
+    da->count += 1;
+}
+
+void _da_insert(DynamicArray *da, void *item, int index) {
+    // Clamp index to valid range
+    if (index < 0) index = 0;
+    if (index > da->count) index = da->count;
+
+    // Ensure capacity
+    if (da->count + 1 > da->capacity) {
+        da->items = realloc(da->items, da->capacity * 2 * da->item_size);
+        if (da->items == NULL) {
+            printf("Buy more ram!\n");
+            exit(1);
+        }
+        da->capacity *= 2;
+    }
+
+    unsigned char *dst = da->items + (index * da->item_size);
+
+    // Shift elements to the right (use memmove because ranges overlap)
+    if (index < da->count) {
+        memmove(
+            dst + da->item_size,
+            dst,
+            (da->count - index) * da->item_size
+        );
+    }
+
+    // Insert new item
     memcpy(dst, item, da->item_size);
     da->count += 1;
 }

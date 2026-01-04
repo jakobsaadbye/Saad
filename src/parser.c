@@ -13,8 +13,8 @@ AstAssignment   *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token);
 AstDirective    *parse_directive(Parser *parser);
 AstFunctionDefn *parse_function_defn(Parser *parser);
 AstFunctionCall *parse_function_call(Parser *parser);
-AstStruct       *parse_struct(Parser *parser);
-AstEnum         *parse_enum(Parser *parser);
+AstStruct       *parse_struct_defn(Parser *parser);
+AstEnum         *parse_enum_defn(Parser *parser);
 AstIf           *parse_if(Parser *parser);
 AstFor          *parse_for(Parser *parser);
 AstWhile        *parse_while(Parser *parser);
@@ -355,13 +355,13 @@ Ast *parse_statement(Parser *parser) {
     }
 
     else if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_STRUCT) {
-        stmt = (Ast *)(parse_struct(parser));
+        stmt = (Ast *)(parse_struct_defn(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
 
     else if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_ENUM) {
-        stmt = (Ast *)(parse_enum(parser));
+        stmt = (Ast *)(parse_enum_defn(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
@@ -719,7 +719,7 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     return struct_defn;
 }
 
-AstEnum *parse_enum(Parser *parser) {
+AstEnum *parse_enum_defn(Parser *parser) {
     Token ident_token = peek_next_token(parser);
     expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
     eat_token(parser);
@@ -844,7 +844,7 @@ AstEnum *parse_enum(Parser *parser) {
     return ast_enum;
 }
 
-AstStruct *parse_struct(Parser *parser) {
+AstStruct *parse_struct_defn(Parser *parser) {
     Token ident_token = peek_next_token(parser);
     expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
     eat_token(parser);
@@ -1499,8 +1499,8 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     }
 
     // Parse extern directive @Deprecate
-    CallingConv call_conv = CALLING_CONV_SAAD;
-    bool        is_extern = false;
+    func_defn->calling_convention = CALLING_CONV_SAAD;
+    bool is_extern = false;
 
     next = peek_next_token(parser);
     if (next.type == '#') {
@@ -1515,7 +1515,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         is_extern = true;
 
         if (dir->extern_abi == ABI_C) {
-            call_conv = CALLING_CONV_MSVC;
+            func_defn->calling_convention = CALLING_CONV_MSVC;
         }
     }
 
@@ -1550,7 +1550,6 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->body        = body;
     func_defn->is_extern   = is_extern;
     func_defn->is_method   = func_is_method;
-    func_defn->call_conv   = call_conv;
     func_defn->num_bytes_locals       = 0;
     func_defn->num_bytes_temporaries  = 0;
     func_defn->base_ptr               = 0;
@@ -1942,7 +1941,8 @@ AstIdentifier *generate_identifier(Parser *parser, char *ident_name, Type *type,
     assert(type);
     
     AstIdentifier *ident = make_identifier_from_string(parser, ident_name, type);
-    ident->head.flags |= flags | AST_FLAG_COMPILER_GENERATED | AST_FLAG_IS_TYPE_CHECKED;
+    ident->flags |= flags;
+    ident->head.flags |= AST_FLAG_COMPILER_GENERATED | AST_FLAG_IS_TYPE_CHECKED;
 
     return ident;
 }
