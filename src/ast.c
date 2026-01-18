@@ -80,7 +80,6 @@ Type *primitive_type(PrimitiveKind kind) {
     return (Type *)(&primitive_types[kind]);
 }
 
-
 const char *directive_names[] = {
     "invalid",
     "import",
@@ -223,6 +222,19 @@ char *type_to_str(Type *type) {
         }
         sb_append(&sb, ")");
         return sb_to_string(&sb); // @Leak
+    }
+    case TYPE_VARIADIC: {
+        TypeVariadic *variadic = (TypeVariadic *)type;
+
+        StringBuilder sb = sb_init(32);
+        sb_append(&sb, "...");
+        char *type_str = type_to_str(variadic->type);
+        sb_append(&sb, "%s", type_str);
+        
+        return sb_to_string(&sb); // @Leak
+    }
+    case TYPE_ANY: {
+        return "any";
     }
     }
 

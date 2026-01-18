@@ -222,6 +222,26 @@ void emit_header(CodeGenerator *cg) {
     sb_append(&cg->code_header, "   extern memset\n");
     sb_append(&cg->code_header, "   extern memcpy\n");
 
+    // Runtime_Support types
+    sb_append(&cg->code_header, "   extern Type_uint\n");
+    sb_append(&cg->code_header, "   extern Type_u8\n");
+    sb_append(&cg->code_header, "   extern Type_u16\n");
+    sb_append(&cg->code_header, "   extern Type_u32\n");
+    sb_append(&cg->code_header, "   extern Type_u64\n");
+    sb_append(&cg->code_header, "   extern Type_int\n");
+    sb_append(&cg->code_header, "   extern Type_s8\n");
+    sb_append(&cg->code_header, "   extern Type_s16\n");
+    sb_append(&cg->code_header, "   extern Type_s32\n");
+    sb_append(&cg->code_header, "   extern Type_s64\n");
+    sb_append(&cg->code_header, "   extern Type_float\n");
+    sb_append(&cg->code_header, "   extern Type_f32\n");
+    sb_append(&cg->code_header, "   extern Type_f64\n");
+    sb_append(&cg->code_header, "   extern Type_string\n");
+    sb_append(&cg->code_header, "   extern Type_bool\n");
+    sb_append(&cg->code_header, "   extern Type_void\n");
+    sb_append(&cg->code_header, "   extern Type_untyped_int\n");
+    sb_append(&cg->code_header, "   extern Type_untyped_float\n");
+
     emit_builtin_functions(cg);
 }
 
@@ -539,12 +559,12 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
     } 
     else {
         assert(ast_for->iterable);
-        assert(ast_for->iterable->type->kind == TYPE_ARRAY);
+        assert(ast_for->iterable->type->kind == TYPE_ARRAY || ast_for->iterable->type->kind == TYPE_VARIADIC);
 
         AstIdentifier *iterator = ast_for->iterator;
         AstIdentifier *index    = ast_for->index;
         AstExpr       *iterable = ast_for->iterable;
-        TypeArray     *iterable_type = (TypeArray *)iterable->type;
+        TypeArray     *iterable_type = iterable->type->kind == TYPE_ARRAY ? (TypeArray *)iterable->type : ((TypeVariadic *)iterable->type)->slice;
 
         // Allocate space for iterator, pointer to start of array, stop condition (count) and index
         //
@@ -803,7 +823,7 @@ void adapt_function_argument_to_parameter(CodeGenerator *cg, AstExpr *arg, AstId
         break;
     }
     case TYPE_ARRAY: {
-        assert(param->type->kind == TYPE_ARRAY);
+        assert(param->type->kind == TYPE_ARRAY || param->type->kind == TYPE_VARIADIC);
 
         TypeArray *array_arg   = (TypeArray *) arg->type;
         TypeArray *array_param = (TypeArray *) param->type;
@@ -875,8 +895,8 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     }
 
     // 2. Push all the user-arguments (and adapt them if necessary)
-    for (int i = 0; i < call->arguments.count; i++) {
-        AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
+    for (int i = 0; i < call->lowered_arguments.count; i++) {
+        AstExpr *arg = ((AstExpr **)call->lowered_arguments.items)[i];
         emit_expression(cg, arg);
 
         AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
@@ -1506,7 +1526,7 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
 
     if (c_args > 4) {
         // We need to put all the fixed placed stack allocated arguments relative to the stack pointer
-        int stack_offset = 32; // + (c_args - 5) * 8;
+        int stack_offset = 32;
         for (int i = 0; i < c_args - 4; i++) {
             int temp_offset = pop_temporary_value(cg->enclosing_function, 8);
             
@@ -1602,6 +1622,21 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset, bool offset_
         printf("%s:%d: compiler-error: There were unhandled cases in 'zero_initialize'\n", __FILE__, __LINE__);
         exit(1);
     }
+}
+
+// Puts a pointer to the type descriptor of "type" in rax
+void emit_type_descriptor(CodeGenerator *cg, Type *type, Register dst_register) {
+    if (is_primitive_type(type->kind)) {
+        TypePrimitive *primitive = (TypePrimitive *) type;
+
+        char runtime_type_name[32];
+        sprintf(runtime_type_name, "Type_%s", primitive->name);
+
+        sb_append(&cg->code, "   mov\t\t%s, %s\n", register_to_str(dst_register, 8),  runtime_type_name);
+        return;
+    }
+
+    XXX;
 }
 
 // Pops a value on the stack and moves it to dst_offset
@@ -1731,7 +1766,22 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
             }
             emit_struct_copy(cg, struct_defn, 0, 0);
         }
+        
+        return;
+    }
+    case TYPE_ANY: {
+        // Box the value (copy the value on the stack)
+        
+        // Get a pointer to the boxed value
+        
+        // Get a pointer to the type descriptor
+        emit_type_descriptor(cg, rhs_type, REG_RCX);
 
+        sb_append(&cg->code, "   lea\t\trbx, %s\n", dst);
+        sb_append(&cg->code, "   mov\t\tQWORD 0[rbx], rax\n");
+        sb_append(&cg->code, "   mov\t\tQWORD 8[rbx], rcx\n");
+
+        
         return;
     }
     default:
@@ -2308,6 +2358,7 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         PUSH(RAX);
         return;
     }
+    case TYPE_VARIADIC:
     case TYPE_ARRAY: {
         sb_append(&cg->code, "   lea\t\trax, %s\n", src);
         PUSH(RAX);
@@ -2487,7 +2538,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     }
     case AST_SIZEOF: {
         AstSizeof *ast_sizeof = (AstSizeof *) expr;
-        sb_append(&cg->code, "   mov\t\trax, %d\n", ast_sizeof->expr->type->size);
+        sb_append(&cg->code, "   mov\t\trax, %d\n", ast_sizeof->type->size);
         PUSH(RAX);
         return;
     }

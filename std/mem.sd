@@ -1,0 +1,79 @@
+import "c_stdlib";
+
+Kilobyte :: 1024;
+Megabyte :: 1048576;
+
+Arena :: struct  {
+    currentChunk: *Chunk;
+};
+
+Chunk :: struct {
+    data:    *u8;
+    cursor:   int;
+    capacity: int;
+    prev:    *Chunk;
+};
+
+/////////////////////////////////////////////////
+// Arena
+/////////////////////////////////////////////////
+
+NewArena :: (capacity: int) -> Arena {
+    arena := Arena{};
+    arena.currentChunk = NewChunk(null, capacity);
+    return arena;
+}
+
+allocate :: method (arena: *Arena, size: int) -> *void {
+    chunk := arena.currentChunk;
+
+    if chunk.cursor + size < chunk.capacity {
+        ptr := &chunk.data[chunk.cursor];
+        chunk.cursor += size;
+        memset(ptr, 0, size);
+        return ptr;
+    }
+
+    newCap := chunk.capacity * 2;
+    while newCap < chunk.cursor + size {
+        newCap *= 2;
+    }
+
+    newChunk := NewChunk(chunk, newCap);
+    arena.currentChunk = newChunk;
+
+    return arena.allocate(size);
+}
+
+free :: method (arena: *Arena) {
+    chunk := arena.currentChunk;
+    while chunk != null {
+        free(chunk.data);
+        temp := chunk;
+        chunk = chunk.prev;
+        free(temp);
+    }
+}
+
+clear :: method (arena: *Arena) {
+    chunk := arena.currentChunk;
+    while chunk != null {
+        memset(chunk.data, 0, chunk.capacity);
+        chunk = chunk.prev;
+    }
+}
+
+NewChunk :: (oldChunk: *Chunk, capacity: int) -> *Chunk {
+    newChunk: *Chunk = malloc(sizeof(Chunk));
+    if (newChunk == null) {
+        print("Failed to allocate a new chunk of memory for the arena");
+        exit(1);
+    }
+
+    newChunk.data = malloc(capacity);
+    newChunk.cursor = 0;
+    newChunk.capacity = capacity;
+    newChunk.prev = oldChunk;
+
+    return newChunk;
+}

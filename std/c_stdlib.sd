@@ -1,0 +1,5 @@
+memset  :: (dest: *void, value: int, size: int) -> *void #extern "C"
+malloc  :: (size: int) -> *void #extern "C"
+realloc :: (buffer: *void, new_size: int) -> *void #extern "C"
+free    :: (ptr: *void) #extern "C";
+exit    :: (code: int) #extern "C"

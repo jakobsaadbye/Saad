@@ -157,7 +157,7 @@ AstImport *parse_import(Parser *parser) {
     ast_import->head.start = import_token.start;
     ast_import->head.end   = path_token.end;
     ast_import->path_token = path_token;
-    ast_import->string = resolve_import_path(parser, ast_import->path_token.as_value.value.string.data);
+    ast_import->string     = resolve_import_path(parser, ast_import->path_token.as_value.value.string.data);
     if (ast_import->string == NULL) {
         return NULL;
     }
@@ -521,6 +521,95 @@ bool compare_enumerator(const void *key, const void *item) {
     return strcmp(key, etor->name) == 0;
 }
 
+TypeStruct *generate_empty_struct_type(Parser *parser, char *name) {
+    AstStruct *struct_node       = ast_allocate(parser, sizeof(AstStruct));
+    struct_node->head.kind       = AST_STRUCT;
+    struct_node->head.file       = parser->current_file;
+    struct_node->head.flags      = AST_FLAG_COMPILER_GENERATED;
+
+    struct_node->scope           = ast_allocate(parser, sizeof(AstBlock));
+    struct_node->scope->belongs_to_struct = struct_node;
+    struct_node->scope->kind     = BLOCK_DECLARATIVE;
+    struct_node->scope->identifiers = da_init(2, sizeof(AstIdentifier *));
+
+    TypeStruct *struct_defn      = ast_allocate(parser, sizeof(TypeStruct));
+    struct_defn->head.head.kind  = AST_TYPE;
+    struct_defn->head.head.file  = parser->current_file;
+    struct_defn->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    struct_defn->head.head.start = (Pos){0, 0, 0};
+    struct_defn->head.head.end   = (Pos){0, 0, 0};
+    struct_defn->head.kind       = TYPE_STRUCT;
+    struct_defn->head.flags      = TYPE_IS_FULLY_SIZED;
+    struct_defn->head.name       = name;
+    struct_defn->head.size       = 0; // This will be calculated when adding new members
+    struct_defn->alignment       = 0; // This will be calculated when adding new members
+    struct_defn->node            = struct_node;
+
+    struct_node->identifier      = generate_identifier(parser, name, (Type *)struct_defn, IDENTIFIER_IS_NAME_OF_STRUCT);
+
+    return struct_defn;
+}
+
+void add_struct_member(Parser *parser, TypeStruct *struct_defn, char *name, Type *type) {
+    AstIdentifier *member = generate_identifier(parser, name, type, IDENTIFIER_IS_STRUCT_MEMBER);
+
+    DynamicArray members = struct_defn->node->scope->identifiers;
+
+    if (members.count == 0) {
+        member->member_index  = 0;
+        member->member_offset = 0;
+    } else {
+        AstIdentifier *prev_member = ((AstIdentifier **)members.items)[members.count - 1];
+        member->member_index  = prev_member->member_index + 1;
+        member->member_offset = prev_member->member_offset + member->type->size;
+    }
+
+    add_identifier_to_scope(parser, struct_defn->node->scope, member);
+
+    // Alignment + C-style sizing
+    struct_defn->head.size += member->type->size;
+    if (member->type->size >= 8) {
+        struct_defn->alignment = 8;
+    } else {
+        if (member->type->size > (int)struct_defn->alignment) {
+            struct_defn->alignment = member->type->size;
+        }
+    }
+    struct_defn->head.size = align_value(struct_defn->head.size, struct_defn->alignment);
+
+}
+
+TypeStruct *generate_struct_for_any_type(Parser *parser) {
+
+    // We generate the following two structs for the any type
+    //
+    // Type :: struct {
+    //     kind:  TypeKind;
+    //     size:  int;
+    //     flags: int;
+    // }
+
+    // TypeAny :: struct {
+    //     value: *void;
+    //     type:  *Type;
+    // }
+
+    // Generate a type for Type
+    TypeStruct *type_defn = generate_empty_struct_type(parser, "Type");
+    add_struct_member(parser, type_defn, "kind", primitive_type(PRIMITIVE_INT)); // @Todo: Change this type to an enum
+    add_struct_member(parser, type_defn, "size", primitive_type(PRIMITIVE_INT));
+    add_struct_member(parser, type_defn, "flags", primitive_type(PRIMITIVE_INT));
+
+    TypePointer *ptr_type_defn = generate_pointer_to_type(parser, (Type *) type_defn);
+
+    // Generate the TypeAny type
+    TypeStruct *any_defn = generate_empty_struct_type(parser, "any");
+    add_struct_member(parser, any_defn, "data", (Type *) type_null_ptr);
+    add_struct_member(parser, any_defn, "type", (Type *) ptr_type_defn);
+
+    return any_defn;
+}
+
 Type *parse_type(Parser *parser) {
     Token next = peek_next_token(parser);
 
@@ -536,6 +625,22 @@ Type *parse_type(Parser *parser) {
         return (Type *)(ti);
     }
 
+    if (next.type == TOKEN_ANY) {
+        eat_token(parser);
+        Token any_token = next;
+
+        TypeAny *any = ast_allocate(parser, sizeof(TypeAny));
+        any->head.head.kind  = AST_TYPE;
+        any->head.head.file  = parser->current_file;
+        any->head.head.start = any_token.start;
+        any->head.head.end   = any_token.end;
+        any->head.kind       = TYPE_ANY;
+        any->head.size       = 16;
+        any->struct_defn     = generate_struct_for_any_type(parser);
+
+        return (Type *)(any);
+    }
+
     if (next.type == TOKEN_LITERAL_IDENTIFIER) {
         // Struct or enum
         eat_token(parser);
@@ -546,8 +651,34 @@ Type *parse_type(Parser *parser) {
         ti->head.start = next.start;
         ti->head.end   = next.end;
         ti->kind       = TYPE_NAME;
-        ti->name    = next.as_value.value.identifier.name;
+        ti->name       = next.as_value.value.identifier.name;
         return ti;
+    }
+
+    if (next.type == TOKEN_TRIPLE_DOT) {
+        // Variadic parameter
+        eat_token(parser);
+        Token dots = next;
+
+        Type *type = parse_type(parser);
+        if (!type) return NULL;
+
+        TypeVariadic *variadic = type_alloc(&parser->type_table, sizeof(TypeVariadic));
+        variadic->head.head.kind  = AST_TYPE;
+        variadic->head.head.file  = parser->current_file;
+        variadic->head.head.start = dots.start;
+        variadic->head.head.end   = type->head.end;
+        variadic->head.kind       = TYPE_VARIADIC;
+        variadic->head.size       = 16;
+        variadic->type            = type;
+        variadic->slice           = generate_slice_of(parser, type);
+
+        if (!parser->inside_parameter_list) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)variadic, "Variadic types are only allowed inside a functions parameter list");
+            return NULL;
+        }
+
+        return (Type *)variadic;
     }
 
     if (next.type == '*') {
@@ -565,6 +696,7 @@ Type *parse_type(Parser *parser) {
         ptr->head.head.start = asterix.start;
         ptr->head.head.end   = points_to->head.end;
         ptr->head.kind       = TYPE_POINTER;
+        ptr->head.size       = 8;
         ptr->pointer_to      = points_to;
 
         return (Type *)(ptr);
@@ -635,7 +767,7 @@ Type *parse_type(Parser *parser) {
     return NULL;
 }
 
-AstIdentifier *add_member_to_struct(Parser *parser, AstStruct *struct_defn, AstIdentifier *member) {
+AstIdentifier *add_member_to_struct_scope(Parser *parser, AstStruct *struct_defn, AstIdentifier *member) {
     return add_identifier_to_scope(parser, struct_defn->scope, member);
 }
 
@@ -650,13 +782,30 @@ TypePointer *generate_pointer_to_type(Parser *parser, Type *type) {
     return ptr;
 }
 
+TypeArray *generate_slice_of(Parser *parser, Type *type) {
+    TypeArray *slice = ast_allocate(parser, sizeof(TypeArray));
+    slice->head.head.kind  = AST_TYPE;
+    slice->head.head.file  = type->head.file;
+    slice->head.head.start = type->head.start;
+    slice->head.head.end   = type->head.end;
+    slice->head.head.flags = AST_FLAG_COMPILER_GENERATED | AST_FLAG_IS_TYPE_CHECKED;
+    slice->head.size       = 16;
+    slice->head.kind       = TYPE_ARRAY;
+    slice->array_kind      = ARRAY_SLICE;
+    slice->elem_type       = type;
+    slice->node            = NULL;
+    slice->struct_defn     = generate_struct_for_slice(parser, type);
+
+    return slice;
+}
+
 TypeStruct *generate_struct_for_slice(Parser *parser, Type *type_data) {
-    TypeStruct *slice = generate_struct_type_with_data_and_count(parser, type_data, "Array");
+    TypeStruct *slice = generate_struct_type_with_data_and_count(parser, type_data, "slice");
     return slice;
 }
 
 TypeStruct *generate_struct_for_dynamic_array(Parser *parser, Type *type_data) {
-    TypeStruct *dynamic_array = generate_struct_type_with_data_and_count(parser, type_data, "Array");
+    TypeStruct *dynamic_array = generate_struct_type_with_data_and_count(parser, type_data, "dynamic array");
 
     dynamic_array->head.size = 24;
 
@@ -666,7 +815,7 @@ TypeStruct *generate_struct_for_dynamic_array(Parser *parser, Type *type_data) {
     capacity->member_index   = 2;
     capacity->member_offset  = 16;
 
-    add_member_to_struct(parser, dynamic_array->node, capacity);
+    add_member_to_struct_scope(parser, dynamic_array->node, capacity);
 
     return dynamic_array;
 }
@@ -713,8 +862,8 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     count->member_index  = 1;
     count->member_offset = 8;
 
-    add_member_to_struct(parser, struct_node, data);
-    add_member_to_struct(parser, struct_node, count);
+    add_member_to_struct_scope(parser, struct_node, data);
+    add_member_to_struct_scope(parser, struct_node, count);
 
     return struct_defn;
 }
@@ -1346,6 +1495,7 @@ AstFunctionCall *parse_function_call(Parser *parser) {
 
     Token next = peek_next_token(parser);
     expect(parser, next, '('); // Should also be impossible to fail
+    call->paren_start_token = next;
     eat_token(parser);
 
     bool first_argument_seen = false;
@@ -1408,6 +1558,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     }
 
     expect(parser, next, '(');
+    func_defn->paren_start_token = next;
     eat_token(parser);
 
     parser->enclosing_function = func_defn;
@@ -1685,8 +1836,8 @@ AstSizeof *parse_sizeof(Parser *parser) {
     expect(parser, next, '(');
     eat_token(parser);
 
-    AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
-    if (!expr) return NULL;
+    Type *type = parse_type(parser);
+    if (!type) return NULL;
 
     next = peek_next_token(parser);
     expect(parser, next, ')');
@@ -1697,7 +1848,7 @@ AstSizeof *parse_sizeof(Parser *parser) {
     ast_sizeof->head.head.file  = parser->current_file;
     ast_sizeof->head.head.start = start_token.start;
     ast_sizeof->head.head.end   = next.end;
-    ast_sizeof->expr            = expr;
+    ast_sizeof->type            = type;
 
     return ast_sizeof;
 }
@@ -1822,7 +1973,10 @@ AstDeclaration *parse_declaration(Parser *parser) {
 
     while (true) {
         next = peek_next_token(parser);
-        assert(next.type == TOKEN_LITERAL_IDENTIFIER);
+        if (next.type != TOKEN_LITERAL_IDENTIFIER) {
+            report_error_token(parser, LABEL_ERROR, next, "Expected an identifier here");
+            return NULL;
+        }
 
         AstIdentifier *ident = make_identifier_from_token(parser, next, NULL);
         ident->decl = decl;
@@ -1939,11 +2093,9 @@ AstDeclaration *parse_declaration(Parser *parser) {
 
 AstIdentifier *generate_identifier(Parser *parser, char *ident_name, Type *type, IdentifierFlags flags) {
     assert(type);
-    
     AstIdentifier *ident = make_identifier_from_string(parser, ident_name, type);
     ident->flags |= flags;
     ident->head.flags |= AST_FLAG_COMPILER_GENERATED | AST_FLAG_IS_TYPE_CHECKED;
-
     return ident;
 }
 

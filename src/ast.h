@@ -259,14 +259,17 @@ typedef enum CallingConv {
 typedef struct AstFunctionDefn {
     Ast             head;
     AstIdentifier  *identifier;
+    Token           method_token;  // set if its a method
+    Token           paren_start_token;
+    AstIdentifier  *receiver;   // set if its a method and is just a short-hand for the 0'th parameter
     DynamicArray    parameters; // of *AstIdentifier
+    int             variadic_parameter_index; // set to the index of a variadic parameter in the parameter list
     AstBlock       *body;
     DynamicArray    return_types;  // of *Type
-    AstIdentifier  *receiver;      // set if its a method and is just a short-hand for the 0'th parameter
-    Token           method_token;  // set if its a method
     CallingConv     calling_convention;
     bool            is_method;
     bool            is_extern;
+    bool            is_variadic;
     
     int   num_bytes_locals;      // Number of bytes allocated for variables in the function
     int   num_bytes_temporaries; // Number of bytes allocated for temporaries in the function
@@ -282,10 +285,13 @@ typedef struct AstFunctionDefn {
 typedef struct AstFunctionCall {
     AstExpr          head;
     AstIdentifier   *identifer;
+    Token            paren_start_token;
     AstFunctionDefn *func_defn;         // The called function
     DynamicArray     arguments;         // of *AstExpr
     AstStruct       *belongs_to_struct; // The struct the function definition is defined on
     bool             is_method_call;    // If the function is defined within the struct or is a method of the struct, this field is true
+
+    DynamicArray     lowered_arguments; // of *AstExpr. A lowered representation of the argument list that the code generator is expected to work with
 } AstFunctionCall;
 
 typedef struct AstPrint {
@@ -317,7 +323,7 @@ typedef struct AstTypeof {
 
 typedef struct AstSizeof {
     AstExpr  head;
-    AstExpr *expr;
+    Type    *type;
 } AstSizeof;
 
 typedef struct AstReturn {
@@ -473,6 +479,10 @@ typedef struct AstLiteral {
 const char *ast_to_str(Ast *ast); // Defined in ast.c
 
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+//   Types
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 typedef struct TypeStruct TypeStruct;
 
 typedef enum TypeKind {
@@ -489,6 +499,8 @@ typedef enum TypeKind {
     TYPE_ENUM,
     TYPE_FUNCTION,
     TYPE_TUPLE,
+    TYPE_VARIADIC,
+    TYPE_ANY,
 } TypeKind;
 
 typedef enum TypeFlags {
@@ -576,9 +588,8 @@ typedef struct TypeEnum {
 } TypeEnum;
 
 typedef struct TypeEnumValue {
-    Type head;
+    Type     head;
     AstEnum *node;
-    
     char    *name;
     As_value value;
 } TypeEnumValue;
@@ -599,6 +610,17 @@ typedef struct TypeTuple {
     Type         head;
     DynamicArray types; // of *Type
 } TypeTuple;
+
+typedef struct TypeVariadic {
+    Type       head;
+    Type      *type;  // of *Type
+    TypeArray *slice;
+} TypeVariadic;
+
+typedef struct TypeAny {
+    Type        head;
+    TypeStruct *struct_defn;
+} TypeAny;
 
 typedef struct TypeTable {
     HashTable user_types;

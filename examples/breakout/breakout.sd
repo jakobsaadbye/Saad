@@ -361,7 +361,7 @@ main :: () {
             bar.x = xx WINDOW_WIDTH - bar.width;
         }
 
-        if IsMouseButtonPressed(.LEFT) {
+        if IsMouseButtonPressed(.left) {
             player.isHoldingBall = false;
         }
 
@@ -562,7 +562,7 @@ main :: () {
         }
 
         // Draw score
-        sprintf(scoreText.data, xx "Score: %d", player.score);
+        sprintf(scoreText.data, "Score: %d", player.score);
         DrawText(xx scoreText.data, 105, 16, 24, COLOR_WHITE);
 
         // Draw the dead zone        

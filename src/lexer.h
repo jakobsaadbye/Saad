@@ -88,8 +88,10 @@ typedef enum TokenType {
 
     TOKEN_STRUCT  = 180,
     TOKEN_ENUM    = 181,
-    TOKEN_METHOD  = 182,
+    TOKEN_ANY     = 182,
+    TOKEN_METHOD  = 183,
 
+    // Primitive kinds
     // @Important!!! - Order should follow PrimitiveKind order
     TOKEN_TYPE_UINT = 185,
     TOKEN_TYPE_U8,

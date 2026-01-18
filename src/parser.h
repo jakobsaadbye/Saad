@@ -23,8 +23,11 @@ AstFile *parse_file(Parser *parser, char *file_path);
 
 AstIdentifier  *generate_identifier(Parser *parser, char *ident_name, Type *type, IdentifierFlags flags);
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_pointed_to_by_data, char *struct_name);
+TypeStruct     *generate_struct_for_dynamic_array(Parser *parser, Type *type_data);
+TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
 TypePointer    *generate_pointer_to_type(Parser *parser, Type *type);
-AstIdentifier  *add_member_to_struct(Parser *parser, AstStruct *struct_defn, AstIdentifier *member);
+TypeArray      *generate_slice_of(Parser *parser, Type *type);
+AstIdentifier  *add_member_to_struct_scope(Parser *parser, AstStruct *struct_defn, AstIdentifier *member);
 void *ast_allocate(Parser *parser, size_t size);
 int   align_value(int value, int alignment);
 

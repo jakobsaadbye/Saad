@@ -1,18 +1,27 @@
-Rectangle :: struct {
-    x: float;
-    y: float;
-    width: float;
-    height: float;
-}
+// printNumbers :: (numbers: ...any) {
+//     for n in numbers {
+//         print("%", n);
+//     }
+// }
 
-foo :: (r: *Rectangle) {
-    if (r.x == 50) {
-        return;
-    }
-    r.x += 100;
-}
+// sprint :: (buffer: *u8, format: string, args: ...any) {
+//     sprintf(buffer, format, ...args);
+// }
 
 main :: () {
-    r := Rectangle{50, 75, 100, 200};
-    foo(&r);
+
+    // Push 3
+    // Pop
+    // Copy the value on the stack
+    // Allocate 16 bytes for the any type
+    // Make a pointer to the stacked value
+    // Allocate ?? bytes for the runtime TypeInfo struct
+    // 
+    a := 3;
+    b: any = a;
+    // print("typeof(a) = %", a);
+
+
+
+    // printNumbers(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
 }

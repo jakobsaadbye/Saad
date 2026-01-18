@@ -93,6 +93,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_TYPE_F64:      return "TYPE_F64";
         case TOKEN_TYPE_STRING:   return "TYPE_STRING";
         case TOKEN_TYPE_BOOL:     return "TYPE_BOOL";
+        case TOKEN_ANY:      return "TYPE_ANY";
         case TOKEN_TYPE_VOID:     return "TYPE_VOID";
         case TOKEN_STRUCT:        return "TYPE_STRUCT";
         case TOKEN_ENUM:          return "TYPE_ENUM";
@@ -319,6 +320,7 @@ KeywordMatch match_keyword(Lexer *lexer) {
         if (strcmp(text, "s64") == 0) token = TOKEN_TYPE_S64;
         if (strcmp(text, "f32") == 0) token = TOKEN_TYPE_F32;
         if (strcmp(text, "f64") == 0) token = TOKEN_TYPE_F64;
+        if (strcmp(text, "any") == 0) token = TOKEN_ANY;
     }
     if (keyword_len == 4) {
         if (strcmp(text, "uint") == 0) token = TOKEN_TYPE_UINT;

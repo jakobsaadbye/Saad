@@ -129,6 +129,36 @@ bool resolve_import(CompilerConfig *config, Parser *parser, AstImport *import, A
     return true;
 }
 
+bool replace_identifiers_with_lowered(Typer *typer) {
+    if (typer->scope_rewrites.count > 0) {
+        if (typer->scope_rewrites.count % 2 != 0) {
+            report_error_ast(typer->parser, LABEL_ERROR, NULL, "Compiler Error: Got uneven number of scope rewrite items");
+            return false;
+        }
+    }
+
+    for (int i = 0; i < typer->scope_rewrites.count; i += 2) {
+        AstBlock *scope =           ((AstBlock **)typer->scope_rewrites.items)[i];
+        AstIdentifier *identifier = ((AstIdentifier **)typer->scope_rewrites.items)[i + 1];
+
+        bool replaced = false;
+        for (int j = 0; j < scope->identifiers.count; j++) {
+            AstIdentifier **ident_ptr = &((AstIdentifier **)scope->identifiers.items)[j];
+            if (strcmp((*ident_ptr)->name, identifier->name) == 0) {
+                *ident_ptr = identifier;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)identifier, "Compiler Error: Failed to replace %s with lowered representation", identifier->name);
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool compile_program(CompilerConfig *config, const char *main_path, bool output_to_console) {
     CompilerReport report = {0};
 
@@ -154,6 +184,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     //
     // Parse all the files
     //
+    report.parse_time_start = clock();
     while (true) {
         current_file_path = ((char **)file_paths_to_visit.items)[file_path_cursor];
 
@@ -206,27 +237,39 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
             }
         }
     }
+    report.parse_time_end = clock();
+
+    // dump_tokens(&lexer, 0);
 
     AstFile *main_file = ((AstFile **)parsed_files.items)[0];
 
     // Typecheck
+    report.typer_time_start = clock();
     bool typecheck_ok = check_file(&typer, main_file);
     if (!typecheck_ok) {
         cleanup();
         return false;
     }
+    report.typer_time_end = clock();
 
+    // Rewrite any identifiers within scopes for codegen
+    bool replace_ok = replace_identifiers_with_lowered(&typer);
+    if (!replace_ok) {
+        cleanup();
+        return false;
+    }
     
+    
+    report.codegen_time_start = clock();
     begin_emit_code(&codegen, main_file);
-
     make_directory("build");
-
     output_generated_code_to_file(&codegen, "./build/out.asm");
+    report.codegen_time_end = clock();
 
     report.asm_and_link_time_start = clock();
     system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
     // int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -lkernel32 -lmsvcrt");
-    int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -Lpackages/raylib/lib -lraylib -lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid");
+    int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -Lpackages/runtime/lib -Lpackages/raylib/lib -lruntime_support -lraylib -lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid");
     if (exit_code != 0) {
         cleanup();
         return false;

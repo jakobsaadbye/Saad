@@ -28,7 +28,7 @@ main :: () {
         print("%", it);
     }
     
-    // print("");
+    print("");
 
     
     // // Looping over arrays has the same syntax
@@ -37,27 +37,29 @@ main :: () {
         print("%", it);
     }
 
-    // print("");
+    print("");
     
     // // If no expression is given, its an infinite loop like in Go
-    // for {
-    //     print("To infinity and beyond!");
-    //     break;
-    // }
+    for {
+        print("To infinity and beyond!");
+        break;
+    }
 
-    // print("");
+    print("");
 
-    // // Its also possible to include the index
-    // fibonacci_numbers := [1, 1, 2, 3, 5, 8, 11, 19];
-    // for n, i in fibonacci_numbers {
-    //     print("(%, %)", i, n);
-    // }
+    // Its also possible to include an index
+    fibonacci_numbers := [1, 1, 2, 3, 5, 8, 11, 19];
+    for n, i in fibonacci_numbers {
+        print("(%, %)", i, n);
+    }
 
-    // // And it also works with ranges ()
-    // for n, i in 10...20 {
-    //     print("(%, %)", i, n);
-    // }
+    print("");
     
-    // print("");
+    // And it also works with ranges ()
+    for n, i in 10...20 {
+        print("(%, %)", i, n);
+    }
+    
+    print("");
 
 }

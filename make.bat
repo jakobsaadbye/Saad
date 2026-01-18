@@ -19,3 +19,7 @@ gcc %CFLAGS% -o ./bin/saad.exe ^
     build/parser.o ^
     build/scope.o ^
     src/main.c
+
+:: Compile the runtime library
+gcc %CFLAGS% -c src/runtime_support.c -o build/runtime_support.o
+ar rcs packages/runtime/lib/libruntime_support.a build/runtime_support.o

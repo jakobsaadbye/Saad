@@ -2,27 +2,38 @@ Todo list:
 -------------------
   
 * Function call overhaul:
-  - Multiple return values
-  - Variadic arguments
-  - Default arguments
-  - Named arguments
-  - Able to call methods defined later
+  [x] Multiple return values
+  [] Default arguments
+  [] Named arguments
+  [] Variadic arguments
+  [] Able to call methods defined later
 
 * Better string handling
-  - Iterating over strings
-  - Indexing into them
+  [] Iterating over strings
+  [] Indexing into them
 
 * Import system
-  - Modules / Packages n' stuff
+  [x] Simple import system
+  [] Modules / Packages n' stuff
 
-* Better structs (default values and constants)
+* Better structs
+  [] Constant members
+  [] Default values
+
+* Better struct literals
+  [] Able to take pointer to struct literal (struct literal should in that case be allocated as a local)
 
 * Better enums
-  - Get the names of enums
-  - Backing integer types for enums
+  [] Get the names of enums
+  [] Backing integer types for enums
 
 * Better constants
-  - Structs as constants
+  [] Structs as constants
+
+* Bit operators
+  [] Shift left/right
+  [] Bitwise And
+  [] Bitwise Or
 
 
 
@@ -30,7 +41,6 @@ Todo list:
 Bug fixes:
 -------------------
 - Fix hash_table when collisions happen. Currently we crash if defining two structs with the same name !!!!
-- Assigning to functions with void type should not be allowed
 - @Investigate - examples/for_loops crashes once in a while. Is it a hisenbug?
 
 - This should work: We need to allocate the array as a fixed allocation
