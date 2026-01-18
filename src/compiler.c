@@ -239,8 +239,6 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     }
     report.parse_time_end = clock();
 
-    // dump_tokens(&lexer, 0);
-
     AstFile *main_file = ((AstFile **)parsed_files.items)[0];
 
     // Typecheck
@@ -269,7 +267,14 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     report.asm_and_link_time_start = clock();
     system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
     // int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -lkernel32 -lmsvcrt");
-    int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -Lpackages/runtime/lib -Lpackages/raylib/lib -lruntime_support -lraylib -lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid");
+    // int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -Lpackages/runtime/lib -Lpackages/raylib/lib -lruntime_support -lraylib -lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid");
+    int exit_code = system(
+        "gcc -o ./build/out.exe ./build/out.obj "
+        "-LC:/Saad/packages/runtime/lib "
+        "-LC:/Saad/packages/raylib/lib "
+        "-lruntime_support -lraylib "
+        "-lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid"
+    );
     if (exit_code != 0) {
         cleanup();
         return false;

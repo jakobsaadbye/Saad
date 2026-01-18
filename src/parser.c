@@ -2149,33 +2149,43 @@ int get_precedence(OperatorType op) {
             return 1;
         case OP_LOGICAL_AND: 
             return 2;
+        case OP_BITWISE_OR: 
+            return 3;
+        case OP_BITWISE_XOR: 
+            return 4;
+        case OP_BITWISE_AND: 
+            return 5;
         case OP_DOUBLE_EQUAL:
         case OP_NOT_EQUAL: 
-            return 3;
+            return 6;
         case OP_GREATER_THAN: 
         case OP_LESS_THAN:
         case OP_GREATER_THAN_EQUAL:
         case OP_LESS_THAN_EQUAL:
-            return 5;
+            return 7;
+        case OP_BITWISE_SHIFT_LEFT:
+        case OP_BITWISE_SHIFT_RIGHT:
+            return 8;
         case OP_MINUS:
         case OP_PLUS:
-            return 6;
+            return 9;
         case OP_TIMES:
         case OP_DIVIDE:
         case OP_MODULO:
-            return 7;
+            return 10;
         case OP_POWER:
-            return 8;
+            return 11;
         case OP_NOT:
-            return 9;
+        case OP_BITWISE_NOT:
+            return 12;
         case OP_UNARY_MINUS:
         case OP_ADDRESS_OF:
         case OP_POINTER_DEREFERENCE:
         case OP_CAST:
-            return 10;
+            return 13;
         case OP_DOT:
         case OP_SUBSCRIPT:
-            return 11;
+            return 14;
         default:
             printf("%s:%d: compiler-error: Unexpected token type '%s'. Expected token to be an operator\n", __FILE__, __LINE__, token_type_to_str((TokenType)(op)));
             exit(1);

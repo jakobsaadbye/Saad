@@ -39,6 +39,7 @@ char *type_to_str(Type *type);
 bool types_are_equal(Type *lhs, Type *rhs);
 bool can_cast_implicitly(Type *from, Type *to);
 bool can_cast_explicitly(Type *from, Type *to);
+bool is_bitwise_operator(TokenType op);
 bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
 bool is_untyped_type(Type *type);
@@ -302,7 +303,8 @@ Type *resolve_type(Typer *typer, Type *type) {
 
 unsigned long long max_integer_value(TypePrimitive *type) {
     switch (type->kind) {
-    case PRIMITIVE_INT: return S32_MAX;
+    case PRIMITIVE_UINT: return U32_MAX;
+    case PRIMITIVE_INT:  return S32_MAX;
     case PRIMITIVE_U8:  return U8_MAX;
     case PRIMITIVE_U16: return U16_MAX;
     case PRIMITIVE_U32: return U32_MAX;
@@ -2520,7 +2522,7 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         return NULL;
     }
 
-    if (strchr("+-*/^", binary->operator)) {
+    if (strchr("+-*/", binary->operator)) {
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
         if (lhs == TYPE_FLOAT   && rhs == TYPE_FLOAT)   return biggest_type(ti_lhs, ti_rhs);
         if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return ti_lhs;
@@ -2530,6 +2532,24 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
             return NULL;
         }
     }
+    
+    if (is_bitwise_operator(binary->operator)) {
+        if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
+        XXX;
+    }
+
+    if (strchr("&|", binary->operator)) {
+        if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
+        if (lhs == TYPE_FLOAT   && rhs == TYPE_FLOAT)   return biggest_type(ti_lhs, ti_rhs);
+        if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return ti_lhs;
+        if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return ti_rhs;
+        if ((lhs == TYPE_INTEGER && rhs == TYPE_ENUM) || (lhs == TYPE_ENUM && rhs == TYPE_INTEGER)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)binary, "Enums must be explicitly casted to integers before applying arithmetic on them");
+            return NULL;
+        }
+    }
+
+
     if (binary->operator == '%') {
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
     }
@@ -2716,6 +2736,16 @@ bool is_comparison_operator(TokenType op) {
     if (op == TOKEN_LESS_EQUAL)    return true;
     if (op == TOKEN_DOUBLE_EQUAL)  return true;
     if (op == TOKEN_NOT_EQUAL)     return true;
+    return false;
+}
+
+bool is_bitwise_operator(TokenType op) {
+    if (op == '&') return true;
+    if (op == '^') return true;
+    if (op == '|') return true;
+    if (op == '~') return true;
+    if (op == TOKEN_BITWISE_SHIFT_LEFT)  return true;
+    if (op == TOKEN_BITWISE_SHIFT_RIGHT) return true;
     return false;
 }
 

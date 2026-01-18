@@ -47,6 +47,8 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_LITERAL_FALSE:         return "FALSE";
         case TOKEN_LITERAL_TRUE:          return "TRUE";
         case TOKEN_LITERAL_NULL:          return "NULL";
+        case TOKEN_BITWISE_SHIFT_LEFT:    return "<<";
+        case TOKEN_BITWISE_SHIFT_RIGHT:   return ">>";
         case TOKEN_DOUBLE_COLON:  return "DOUBLE_COLON";
         case TOKEN_COLON_EQUAL:   return "COLON_EQUAL";
         case TOKEN_RIGHT_ARROW:   return "RIGHT_ARROW";
@@ -538,6 +540,7 @@ bool is_unary_operator(TokenType op) {
     if (op == '-') return true;
     if (op == '&') return true;
     if (op == '*') return true;
+    if (op == '~') return true;
     return false;
 }
 
@@ -547,7 +550,12 @@ bool is_binary_operator(TokenType op) {
     if (op == '*') return true;
     if (op == '/') return true;
     if (op == '%') return true;
+    
+    if (op == '&') return true;
+    if (op == '|') return true;
     if (op == '^') return true;
+    if (op == TOKEN_BITWISE_SHIFT_LEFT)  return true;
+    if (op == TOKEN_BITWISE_SHIFT_RIGHT) return true;
 
     if (op == '<')                 return true;
     if (op == '>')                 return true;
@@ -576,6 +584,9 @@ TokenType is_triple_character_token(Lexer *lexer) {
 TokenType is_double_character_token(Lexer *lexer) {
     char c    = peek_next_char(lexer);
     char next = peek_char(lexer, 1);
+    if (c == '<' && next == '<') return TOKEN_BITWISE_SHIFT_LEFT;
+    if (c == '>' && next == '>') return TOKEN_BITWISE_SHIFT_RIGHT;
+    if (c == '&' && next == '&') return TOKEN_LOGICAL_AND;
     if (c == '&' && next == '&') return TOKEN_LOGICAL_AND;
     if (c == '|' && next == '|') return TOKEN_LOGICAL_OR;
     if (c == '<' && next == '=') return TOKEN_LESS_EQUAL;
@@ -613,6 +624,7 @@ bool is_single_character_token(char c) {
     if (c == '(') return true;
     if (c == ')') return true;
     if (c == '&') return true;
+    if (c == '|') return true;
     if (c == ',') return true;
     if (c == ':') return true;
     if (c == '.') return true;

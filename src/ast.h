@@ -74,13 +74,20 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
     OP_TIMES        = '*',
     OP_DIVIDE       = '/',
     OP_MODULO       = '%',
-    OP_POWER        = '^',
-    OP_UNARY_MINUS  = 1, // Picked arbitrarily. Should just not conflict with the others
+    OP_POWER        = 1,
+    OP_UNARY_MINUS  = 2, // Picked arbitrarily. Should just not conflict with the others
+
+    OP_BITWISE_AND = '&',
+    OP_BITWISE_OR  = '|',
+    OP_BITWISE_XOR = '^',
+    OP_BITWISE_NOT = '~',
+    OP_BITWISE_SHIFT_LEFT  = TOKEN_BITWISE_SHIFT_LEFT,
+    OP_BITWISE_SHIFT_RIGHT = TOKEN_BITWISE_SHIFT_RIGHT,
     
     OP_DOT          = '.',
     OP_SUBSCRIPT    = '[',
-    OP_ADDRESS_OF   = '&',
-    OP_POINTER_DEREFERENCE = 2, // Picked arbitrarily. Should just not conflict with the others
+    OP_ADDRESS_OF   = 3,
+    OP_POINTER_DEREFERENCE = 4, // Picked arbitrarily. Should just not conflict with the others
     OP_CAST         = TOKEN_CAST,
 } OperatorType;
 

@@ -1965,6 +1965,35 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
 
 }
 
+void emit_bitwise_operator(CodeGenerator *cg, AstBinary *bin) {
+    emit_expression(cg, bin->left);
+    emit_expression(cg, bin->right);
+
+    POP(RCX);
+    POP(RAX);
+
+    if (bin->operator == '&') {
+        sb_append(&cg->code, "   and\t\trax, rcx\n");
+    }
+    if (bin->operator == '|') {
+        sb_append(&cg->code, "   or\t\trax, rcx\n");
+    }
+    if (bin->operator == '^') {
+        sb_append(&cg->code, "   xor\t\trax, rcx\n");
+    }
+    // if (bin->operator == '~') {
+    //     sb_append(&cg->code, "   not\t\trax\n");
+    // }
+    if (bin->operator == TOKEN_BITWISE_SHIFT_LEFT) {
+        sb_append(&cg->code, "   shl\t\trax, cl\n");
+    }
+    if (bin->operator == TOKEN_BITWISE_SHIFT_RIGHT) {
+        sb_append(&cg->code, "   shr\t\trax, cl\n");
+    }
+
+    PUSH(RAX);
+}
+
 void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
     Type *l_type = bin->left->type;
     Type *r_type = bin->right->type;
@@ -2407,7 +2436,8 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
     case AST_BINARY: {
         AstBinary *bin = (AstBinary *)(expr);
         TokenType op = bin->operator;
-        if      (is_arithmetic_operator(op)) emit_arithmetic_operator(cg, bin);
+        if      (is_bitwise_operator(op))    emit_bitwise_operator(cg, bin);
+        else if (is_arithmetic_operator(op)) emit_arithmetic_operator(cg, bin);
         else if (is_comparison_operator(op)) emit_comparison_operator(cg, bin);
         else if (is_boolean_operator(op))    emit_boolean_operator(cg, bin); 
         else XXX;
