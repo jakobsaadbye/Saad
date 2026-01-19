@@ -2455,6 +2455,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             PUSH(RAX);
             return;
         }
+        if (unary->operator == OP_BITWISE_NOT) {
+            emit_expression(cg, unary->expr);
+            POP(RAX);
+            sb_append(&cg->code, "   not\t\trax\n");
+            PUSH(RAX);
+            return;
+        }
         if (unary->operator == OP_UNARY_MINUS) {
             emit_expression(cg, unary->expr);
             POP(RAX);

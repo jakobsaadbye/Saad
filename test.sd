@@ -4,6 +4,10 @@ main :: () {
     a: uint = 5;
     b: uint = 9;
 
+    largestU64: u64 = 9223372036854775808;
+
+    print("Largest U64 with first bit 1: ", largestU64);
+
     // The result is 00000001 = 1
     print("a&b = %\n", a & b);
 
@@ -14,10 +18,12 @@ main :: () {
     print("a^b = %\n", a ^ b);
 
     // The result is 11111111111111111111111111111010 (assuming 32-bit unsigned int)
-    // print("~a = %\n", a = ~a);
+    c: uint = ~a;
+    print("~a = %\n", c * -1);
 
     // The result is 00010010 = 18
-    print("b<<1 = %\n", b << 1);
+    d: uint = 1;
+    print("d<<31 = %\n", d << 31);
 
     // The result is 00000100 = 8
     print("b>>1 = %\n", b >> 1);

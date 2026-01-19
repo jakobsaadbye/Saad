@@ -72,7 +72,7 @@ TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.kind = PRIMITIVE_STRING,  .name = "string",    .head = {.kind = TYPE_STRING,  .size = 8}},
     {.kind = PRIMITIVE_BOOL,    .name = "bool",      .head = {.kind = TYPE_BOOL,    .size = 1}},
     {.kind = PRIMITIVE_VOID,    .name = "void",      .head = {.kind = TYPE_VOID,    .size = 0}},
-    {.kind = PRIMITIVE_UNTYPED_INT,   .name = "number", .head = {.kind = TYPE_INTEGER, .size = 4}},
+    {.kind = PRIMITIVE_UNTYPED_INT,   .name = "number", .head = {.kind = TYPE_INTEGER, .size = 4}}, // Should probably match input - Alexander
     {.kind = PRIMITIVE_UNTYPED_FLOAT, .name = "untyped(float)", .head = {.kind = TYPE_FLOAT, .size = 4}},
 };
 

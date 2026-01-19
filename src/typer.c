@@ -2590,13 +2590,21 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
 
     if (unary->operator == OP_NOT) {
         if (type_kind != TYPE_BOOL && type_kind != TYPE_POINTER) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Operator ! expects expression to be type bool or pointer. Got type %s\n", type_to_str(expr_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Operator '!' expects expression to be type bool or pointer. Got type %s\n", type_to_str(expr_type));
             return NULL;
         }
 
         // @Note - If applied to a pointer, we will do a pointer to bool conversion
         return primitive_type(PRIMITIVE_BOOL);
     }
+    else if (unary->operator == OP_BITWISE_NOT) {
+        if (type_kind != TYPE_INTEGER) { // Maybe give a warning when not applying bitwise not to an integer?
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Operator '~' expects expression to be an integer type. Got type %s\n", type_to_str(expr_type));
+            return NULL;
+        };
+
+        return expr_type;
+    } 
     else if (unary->operator == OP_UNARY_MINUS) {
         if (type_kind != TYPE_INTEGER && type_kind != TYPE_FLOAT && type_kind != TYPE_ENUM) { // Maybe give a warning when applying unary minus to an enum??? Seems kinda strange
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Type mismatch. Operator '-' is not applicative on expression of type '%s'\n", type_to_str(expr_type));
@@ -2743,7 +2751,6 @@ bool is_bitwise_operator(TokenType op) {
     if (op == '&') return true;
     if (op == '^') return true;
     if (op == '|') return true;
-    if (op == '~') return true;
     if (op == TOKEN_BITWISE_SHIFT_LEFT)  return true;
     if (op == TOKEN_BITWISE_SHIFT_RIGHT) return true;
     return false;

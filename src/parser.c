@@ -2289,6 +2289,14 @@ AstExpr *parse_leaf(Parser *parser) {
         return make_unary_node(parser, t, sub_expr, OP_NOT);
     }
 
+    if (t.type == '~') {
+        eat_token(parser);
+        int prec = get_precedence(OP_BITWISE_NOT);
+        AstExpr *sub_expr = parse_expression(parser, prec); 
+        if (!sub_expr) return NULL;
+        return make_unary_node(parser, t, sub_expr, OP_BITWISE_NOT);
+    }
+
     if (t.type == '-') {
         eat_token(parser);
         int prec = get_precedence(OP_UNARY_MINUS);
