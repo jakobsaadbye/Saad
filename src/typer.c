@@ -304,6 +304,7 @@ Type *resolve_type(Typer *typer, Type *type) {
 unsigned long long max_integer_value(TypePrimitive *type) {
     switch (type->kind) {
     case PRIMITIVE_UINT: return U32_MAX;
+    case PRIMITIVE_UINT: return U32_MAX;
     case PRIMITIVE_INT:  return S32_MAX;
     case PRIMITIVE_U8:  return U8_MAX;
     case PRIMITIVE_U16: return U16_MAX;
@@ -335,7 +336,7 @@ bool leads_to_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
 
         if (lit->kind == LITERAL_INTEGER) {
             assert(is_primitive_type(lhs_type->kind));
-            assert(lit->as.value.integer >= 0);
+            // assert(lit->as.value.integer >= 0);
 
             TypePrimitive *prim_type = (TypePrimitive *)(lhs_type);
             unsigned long long lit_value = (unsigned long long) lit->as.value.integer;
@@ -1037,13 +1038,19 @@ char *generate_c_printf_string(Typer *typer, AstPrint *print) {
 char *generate_c_format_specifier_for_type(Type *type) {
     switch (type->kind) {
     case TYPE_BOOL:    return "%s";
-    case TYPE_INTEGER: return type->size == 4 ? "%d" : "%lld";
     case TYPE_FLOAT:   return type->size == 4 ? "%f" : "%lf";
     case TYPE_STRING:  return "%s";
     case TYPE_ENUM:    return "%s";
     case TYPE_POINTER: return "0x%p";
     case TYPE_ARRAY:   return "0x%p";
     case TYPE_ANY:     return "%s";
+    case TYPE_INTEGER: {
+        if (is_unsigned_integer(type)) {
+            return type->size == 4 ? "%u" : "%llu";
+        } else {
+            return type->size == 4 ? "%d" : "%lld";
+        }
+    }
     case TYPE_STRUCT: {
         StringBuilder builder = sb_init(8);
 
