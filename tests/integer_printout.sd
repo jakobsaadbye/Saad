@@ -1,0 +1,19 @@
+main :: () {
+    maxU32: u32 = 4294967295;
+    print("maxU32 = %", maxU32);
+
+    maxU64: u64 = 18446744073709551615;
+    print("maxU64 = %", maxU64);
+
+    maxS32: s32 = 2147483647;
+    print("maxS32 = %", maxS32);
+
+    minS32: s32 = -2147483648;
+    print("minS32 = %", minS32);
+
+    maxS64: s64 = 9223372036854775807;
+    print("maxS64 = %", maxS64);
+    
+    minS64: s64 = -9223372036854775808;
+    print("minS64 = %", minS64);
+}
