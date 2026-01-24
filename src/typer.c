@@ -304,7 +304,6 @@ Type *resolve_type(Typer *typer, Type *type) {
 unsigned long long max_integer_value(TypePrimitive *type) {
     switch (type->kind) {
     case PRIMITIVE_UINT: return U32_MAX;
-    case PRIMITIVE_UINT: return U32_MAX;
     case PRIMITIVE_INT:  return S32_MAX;
     case PRIMITIVE_U8:  return U8_MAX;
     case PRIMITIVE_U16: return U16_MAX;
