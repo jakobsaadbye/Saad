@@ -1,0 +1,30 @@
+main :: () {
+    // a = 5 (00000101 in 8-bit binary)
+    // b = 9 (00001001 in 8-bit binary)
+    a: uint = 5;
+    b: uint = 9;
+
+    // The result is 00000001 = 1
+    print("a&b = %\n", a & b);
+    assert((a & b) == 1);
+
+    // The result is 00001101 = 13
+    print("a|b = %\n", a | b);
+    assert((a | b) == 13);
+
+    // The result is 00001100 = 12
+    print("a^b = %\n", a ^ b);
+    assert((a ^ b) == 12);
+
+    // The result is 11111111111111111111111111111010 (assuming 32-bit unsigned int)
+    print("~a = %\n", ~a);
+    // assert(~a == 4294967290);
+
+    // The result is 00010010 = 18
+    print("b<<1 = %\n", b << 1);
+    assert(b << 1 == 18);
+
+    // The result is 00000100 = 4
+    print("b>>1 = %\n", b >> 1);
+    assert(b >> 1 == 4);
+}
