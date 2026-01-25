@@ -609,6 +609,151 @@ bool generate_and_add_import(Parser *parser, char *path) {
     return true;
 }
 
+TypeFunction *parse_function_signature(Parser *parser) {
+    AstFunctionDefn *func_defn = (AstFunctionDefn *)(ast_allocate(parser, sizeof(AstFunctionDefn)));
+    func_defn->parameters   = da_init(2, sizeof(AstIdentifier *));
+    func_defn->return_types = da_init(2, sizeof(Type *));
+
+    Token next = peek_next_token(parser);
+    expect(parser, next, '(');
+    func_defn->paren_start_token = next;
+    eat_token(parser);
+
+    // parser->enclosing_function = func_defn;
+    parser->inside_parameter_list = true;
+
+    AstBlock *body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters can be pushed down into the scope of the body
+    bool first_parameter_seen = false;
+    while (true) {
+        if (!first_parameter_seen) {
+            next = peek_next_token(parser);
+            if (next.type == ')') {
+                eat_token(parser); 
+                break;
+            }
+        }
+
+        AstDeclaration *decl = parse_declaration(parser);
+        if (!decl) {
+            return NULL;
+        }
+
+        if (decl->flags & (DECLARATION_INFER | DECLARATION_TYPED)) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *) decl, "Default function arguments are currently not supported");
+            return NULL;
+        }
+
+        if (decl->flags & (DECLARATION_CONSTANT)) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *) decl, "Constants are not allowed as function arguments");
+            return NULL;
+        }
+
+        first_parameter_seen = true;
+
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *param = ((AstIdentifier **)decl->idents.items)[i];
+            da_append(&func_defn->parameters, param);
+        }
+
+        next = peek_next_token(parser);
+        if (next.type == ')') {
+            eat_token(parser); 
+            break;
+        }
+
+        if (next.type != ',') {
+            report_error_token(parser, LABEL_ERROR, next, "Expected a ',' between parameters");
+            return NULL;
+        }
+
+        eat_token(parser);
+    }
+
+    parser->inside_parameter_list = false;
+
+    // Parse return type(s)
+    next = peek_next_token(parser);
+
+    if (next.type == TOKEN_RIGHT_ARROW) {
+        eat_token(parser);
+
+        while (true) {
+            Type *return_type = parse_type(parser);
+            if (!return_type) {
+                return NULL;
+            }
+            da_append(&func_defn->return_types, return_type);
+
+            next = peek_next_token(parser);
+
+            if (next.type == ',') {
+                eat_token(parser);
+                continue;
+            } else {
+                break;
+            }
+
+        }
+    } else {
+        // Make void the return type
+        Type *void_type = primitive_type(PRIMITIVE_VOID);
+        da_append(&func_defn->return_types, void_type);
+    }
+
+    close_block(parser);
+
+    // Parse extern directive @Deprecate
+    func_defn->calling_convention = CALLING_CONV_SAAD;
+    bool is_extern = false;
+
+    next = peek_next_token(parser);
+    if (next.type == '#') {
+        AstDirective *dir = parse_directive(parser);
+        if (!dir) return NULL;
+
+        if (dir->kind != DIRECTIVE_EXTERN) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)dir, "The #%s directive is not valid in this context", directive_names[dir->kind]);
+            return NULL;
+        }
+
+        is_extern = true;
+
+        if (dir->extern_abi == ABI_C) {
+            func_defn->calling_convention = CALLING_CONV_MSVC;
+        }
+    }
+
+    // @Incomplete: We need to generate a unique name for the function
+    
+
+    func_defn->head.kind   = AST_FUNCTION_DEFN;
+    func_defn->head.file   = parser->current_file;
+    func_defn->head.start  = func_defn->paren_start_token.start;
+    func_defn->head.end    = next.end;
+    func_defn->body        = body; // An empty body
+    func_defn->is_extern   = is_extern;
+    func_defn->is_method   = false;
+    func_defn->is_lambda   = true;
+    func_defn->num_bytes_locals       = 0;
+    func_defn->num_bytes_temporaries  = 0;
+    func_defn->base_ptr               = 0;
+    func_defn->temp_ptr               = 0;
+
+    TypeFunction *func_type    = ast_allocate(parser, sizeof(TypeFunction));
+    func_type->head.head.kind  = AST_TYPE;
+    func_type->head.head.file  = parser->current_file;
+    func_type->head.head.start = func_defn->head.start;
+    func_type->head.head.end   = func_defn->head.end;
+    func_type->head.kind       = TYPE_FUNCTION;
+    func_type->head.size       = 8;
+    func_type->node            = func_defn;
+
+    AstIdentifier *ident = generate_identifier(parser, "lambda", (Type *) func_type, IDENTIFIER_IS_NAME_OF_FUNCTION);
+    func_defn->identifier = ident;
+
+    return func_type;
+}
+
 Type *parse_type(Parser *parser) {
     Token next = peek_next_token(parser);
 
@@ -656,6 +801,14 @@ Type *parse_type(Parser *parser) {
         ti->kind       = TYPE_NAME;
         ti->name       = next.as_value.value.identifier.name;
         return ti;
+    }
+
+    if (next.type == '(') {
+        // Function
+        TypeFunction *func_type = parse_function_signature(parser);
+        if (func_type == NULL) return NULL;
+
+        return (Type *)func_type;
     }
 
     if (next.type == TOKEN_TRIPLE_DOT) {

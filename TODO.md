@@ -7,8 +7,10 @@ Todo list:
   [] Named arguments
   [] Variadic arguments
   [] Able to call methods defined later
+  [] Higher order functions (passing functions as values)
 
 * Better string handling
+  [] Changing them to be a data + count
   [] Iterating over strings
   [] Indexing into them
 
@@ -19,6 +21,8 @@ Todo list:
 * Better structs
   [] Constant members
   [] Default values
+  [] Defining inner structs
+  [] Struct embedding (inheritence)
 
 * Better struct literals
   [] Able to take pointer to struct literal (struct literal should in that case be allocated as a local)
@@ -27,13 +31,15 @@ Todo list:
   [] Get the names of enums
   [] Backing integer types for enums
 
-* Better constants
+* Better constants / literals
   [] Structs as constants
+  [] Hex values
+  [] Binary values
 
 * Bit operators
-  [] Shift left/right
-  [] Bitwise And
-  [] Bitwise Or
+  [x] Shift left/right
+  [x] Bitwise And
+  [x] Bitwise Or
 
 
 

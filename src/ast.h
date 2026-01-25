@@ -275,6 +275,7 @@ typedef struct AstFunctionDefn {
     DynamicArray    return_types;  // of *Type
     CallingConv     calling_convention;
     bool            is_method;
+    bool            is_lambda;
     bool            is_extern;
     bool            is_variadic;
     
@@ -283,7 +284,7 @@ typedef struct AstFunctionDefn {
     int   base_ptr;              // Where rbp is currently at in codegen
     int   temp_ptr;              // Offset to allocate temporary stack locations (used for function calls and function arguments). The lifetime of the temporary storage is as long as a statement, to allow expressions to be fully evaluated
     int   return_label;
-    char *symbol_call_prefix;    // Methods gets a prefix symbolname in the outputted asm to be namespaced to their receiver. E.g `foo :: method (bar: Bar)` would get an asm function name: `Bar.foo:`
+    char *symbol_name;           // The assembly symbol name for the function call. Methods gets a prefix symbolname in the outputted asm to be namespaced to their receiver. E.g `foo :: method (bar: Bar)` would get an asm function name: `Bar.foo:`
     
     DynamicArray    lowered_return_params;  // of *AstIdentifier
     DynamicArray    lowered_params;         // of *AstIdentifier. A lowered representation of the parameter list with hidden return parameters / methods and all

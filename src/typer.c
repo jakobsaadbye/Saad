@@ -314,6 +314,26 @@ Type *resolve_type(Typer *typer, Type *type) {
         return (Type *)(array);
     }
 
+    if (type->kind == TYPE_FUNCTION) {
+        TypeFunction *func_type = (TypeFunction *) type;
+
+        for (int i = 0; i < func_type->node->parameters.count; i++) {
+            AstIdentifier *param = ((AstIdentifier **)func_type->node->parameters.items)[i];
+            Type *resolved_type = resolve_type(typer, param->type);
+            if (!resolved_type) return NULL;
+            param->type = resolved_type;
+        }
+
+        for (int i = 0; i < func_type->node->return_types.count; i++) {
+            Type **return_type_ptr = &((Type **)func_type->node->return_types.items)[i];
+            Type *resolved_type = resolve_type(typer, *return_type_ptr);
+            if (!resolved_type) return NULL;
+            *return_type_ptr = resolved_type;
+        }
+
+        return (Type *)func_type;
+    }
+
     report_error_ast(typer->parser, LABEL_ERROR, (Ast *) type, "Compiler Error: Failed to resolve type %s", type_to_str(type));
 
     return NULL;
@@ -741,6 +761,38 @@ bool types_are_equal(Type *lhs, Type *rhs) {
             return true;
         }
         return types_are_equal(left_pointer_to, right_pointer_to);
+    }
+
+    if (lhs->kind == TYPE_FUNCTION && rhs->kind == TYPE_FUNCTION) {
+        TypeFunction *left_func = (TypeFunction *) lhs;
+        TypeFunction *right_func = (TypeFunction *) rhs;
+
+        if (left_func->node->parameters.count != right_func->node->parameters.count) {
+            return false;
+        }
+        if (left_func->node->return_types.count != right_func->node->return_types.count) {
+            return false;
+        }
+
+        // Compare parameter types
+        for (int i = 0; i < left_func->node->parameters.count; i++) {
+            AstIdentifier *left_param = ((AstIdentifier **)left_func->node->parameters.items)[i];
+            AstIdentifier *right_param = ((AstIdentifier **)right_func->node->parameters.items)[i];
+
+            bool match = types_are_equal(left_param->type, right_param->type);
+            if (!match) return false;
+        }
+
+        // Compare return types
+        for (int i = 0; i < left_func->node->return_types.count; i++) {
+            Type *left_return_type = ((Type **)left_func->node->return_types.items)[i];
+            Type *right_return_type = ((Type **)right_func->node->return_types.items)[i];
+
+            bool match = types_are_equal(left_return_type, right_return_type);
+            if (!match) return false;
+        }
+
+        return true;
     }
 
     if (lhs->kind == TYPE_ANY) {
@@ -1399,7 +1451,7 @@ bool check_if_function_needs_a_return(Typer *typer, AstFunctionDefn *func_defn) 
     });
 
     Type *return_type_0 = ((Type **)func_defn->return_types.items)[0];
-    if (!has_return && return_type_0->kind != TYPE_VOID && !func_defn->is_extern) {
+    if (!has_return && return_type_0->kind != TYPE_VOID && !func_defn->is_extern && !func_defn->is_lambda) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)func_defn, "Function is missing a return");
         report_error_ast(typer->parser, LABEL_NOTE, (Ast *)func_defn, "Put an explicit return at the outer scope of the function. In the future we should be able to detect nested returns");
         return false;
@@ -1544,8 +1596,12 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     } else {
         if (call->arguments.count != func_defn->parameters.count) {
             if (call->arguments.count < func_defn->parameters.count) {
-                AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
+                if (call->arguments.count > 0) {
+                    AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
+                } else {
+                    report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
+                }
             } else {
                 AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too many arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
@@ -1728,7 +1784,13 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         AstIdentifier *method_member = generate_identifier(typer->parser, func_defn->identifier->name, (Type *)func_type, IDENTIFIER_IS_STRUCT_MEMBER | IDENTIFIER_IS_STRUCT_METHOD);
         add_member_to_struct_scope(typer->parser, receiver_struct->node, method_member);
 
-        func_defn->symbol_call_prefix = receiver_struct->identifier->name;
+        char *symbol_name = malloc(strlen(receiver_struct->identifier->name) + 8 + strlen(func_defn->identifier->name));
+        sprintf(symbol_name, "%s.%s", receiver_struct->identifier->name, func_defn->identifier->name);
+
+        func_defn->symbol_name = symbol_name;
+    }
+    else {
+        func_defn->symbol_name = func_defn->identifier->name;
     }
 
     // Mark the function as fully typed, when we have typechecked the function signature
@@ -1747,7 +1809,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
 
     // Build up the lowered representation of the parameter list for the function (to simplify codegen)
-    func_defn->lowered_return_params  = da_init(func_defn->return_types.count, sizeof(AstIdentifier *));
+    func_defn->lowered_return_params = da_init(func_defn->return_types.count, sizeof(AstIdentifier *));
     func_defn->lowered_params = da_init(func_defn->return_types.count + func_defn->parameters.count, sizeof(AstIdentifier *));
 
     switch (func_defn->calling_convention) {

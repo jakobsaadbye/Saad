@@ -740,7 +740,9 @@ char *register_to_str(Register reg, int width) {
         if (width == 4) i = 1;
         if (width == 2) i = 2;
         if (width == 1) i = 3;
-        assert(i != -1);
+        if (i == -1) {
+            assert(false && "Got unexpected register width");
+        }
 
         return gpr_register_names[reg][i];
     } 
@@ -875,6 +877,9 @@ void adapt_function_argument_to_parameter(CodeGenerator *cg, AstExpr *arg, AstId
     case TYPE_STRUCT: {
         break;
     }
+    case TYPE_FUNCTION: {
+        break;
+    }
     default: XXX;
     }
 }
@@ -942,10 +947,13 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     }
 
     // Do the actual call
-    if (func_defn->is_method) {
-        sb_append(&cg->code, "   call\t\t%s.%s\n", func_defn->symbol_call_prefix, call->identifer->name);
+    if (func_defn->is_lambda) {
+        AstIdentifier *param = lookup_from_scope(cg->parser, cg->current_scope, call->identifer->name);
+        assert(param);
+        sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", param->stack_offset);
+        sb_append(&cg->code, "   call\t\trax\n");
     } else {
-        sb_append(&cg->code, "   call\t\t%s\n", call->identifer->name);
+        sb_append(&cg->code, "   call\t\t%s\n", func_defn->symbol_name);
     }
 
     //
@@ -999,11 +1007,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "; bytes temp     : %d\n", bytes_temporaries);
     sb_append(&cg->code, "; bytes total    : %d\n", bytes_total);
 
-    if (func_defn->is_method) {
-        sb_append(&cg->code, "%s.%s:\n", func_defn->symbol_call_prefix, func_defn->identifier->name);
-    } else {
-        sb_append(&cg->code, "%s:\n", func_defn->identifier->name);
-    }
+    sb_append(&cg->code, "%s:\n", func_defn->symbol_name);
 
     //
     // Prolog
@@ -1842,6 +1846,11 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
         }
         return;
     }
+    case TYPE_FUNCTION: {
+        POP(RAX);
+        sb_append(&cg->code, "   mov\t\tQWORD %s, rax\n", dst);
+        return;
+    }
     case TYPE_ARRAY: {
         POP(RAX); // pointer to array type
 
@@ -2547,7 +2556,12 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         PUSH(RAX);
         return;
     }
-    case TYPE_FUNCTION:
+    case TYPE_FUNCTION: {
+        TypeFunction *func_type = (TypeFunction *) src_type;
+        sb_append(&cg->code, "   lea\t\trax, %s\n", func_type->node->symbol_name);
+        PUSH(RAX);
+        return;
+    }
     default:
         printf("internal-compiler-error: Unhandled case %s in emit_move_and_push()", type_to_str(src_type));
         XXX;
