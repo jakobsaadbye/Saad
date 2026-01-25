@@ -3,6 +3,7 @@
 //////////////////////////////////
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 // @Important: This has to match the TypeKind in ast.h
 typedef enum TypeKind {
@@ -88,11 +89,18 @@ typedef struct StructMember {
     int   offset;
 } StructMember;
 
+typedef struct Slice {
+    void   *data;
+    size_t  count;
+} Slice;
+
 typedef struct TypeStruct {
-    Type          head;
-    StructMember *members;
-    int           members_count;
-    int           alignment;
+    Type       head;        // offset 0, size 24
+    uint8_t   _pad0[8];     // pad head → 32 (16-byte alignment)
+    Slice      members;     // offset 32, size 16
+    int32_t    alignment;   // offset 48, size 4
+    int32_t   _pad1;        // pad to 8
+    uint64_t  _pad2;        // tail padding → 64
 } TypeStruct;
 
 TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
@@ -166,8 +174,8 @@ TypeStruct *runtime_get_type_struct(char *name, StructMember *members, int membe
     type_struct->head.name     = name;
     type_struct->head.size     = size;
     type_struct->head.flags    = 0;
-    type_struct->members       = members;
-    type_struct->members_count = members_count;
+    type_struct->members.data  = members;
+    type_struct->members.count = (size_t) members_count;
     type_struct->alignment     = alignment;
     return type_struct;
 }

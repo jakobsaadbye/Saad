@@ -81,10 +81,9 @@ StructMember :: struct {
 }
 
 TypeStruct :: struct {
-    head:         Type;
-    members:      *StructMember;
-    membersCount: int;
-    alignment:    int;
+    head:      Type;
+    members:   []StructMember;
+    alignment: int;
 };
 
 TypeAny :: struct {

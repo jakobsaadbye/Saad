@@ -91,8 +91,7 @@ main :: () {
 
 printStructType :: (structType: *TypeStruct) {
     print("% :: struct {\n", structType.head.name);
-    for i in 0..structType.membersCount {
-        member := structType.members[i];
+    for member in structType.members {
         print("\t%: %;\n", member.name, member.type.name);
     }
     print("}\n");
