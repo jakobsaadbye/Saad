@@ -66,10 +66,26 @@ main :: () {
         };
 
         assert(x.type.kind == .Struct);
+        printStructType(cast(*TypeStruct) x.type);
+    }
+    print("\n-------------------- Changing types at runtime ----------------\n");
+    {
+        x: any = 5;
+        print("%\n", *x.type);
+        assert(x.type.kind == .Int);
 
-        type := cast(*TypeStruct) x.type;
+        x = Vector3{1, 4, 9};
+        assert(x.type.kind == .Struct);
+        printStructType(cast(*TypeStruct) x.type);
 
-        printStructType(type);
+        x = Entity{
+            kind     = .Human,
+            position = Vector3{3, 3, 3},
+            rotation = Vector3{0, 0.5, 0},
+            dead     = false,
+        };
+        assert(x.type.kind == .Struct);
+        printStructType(cast(*TypeStruct) x.type);
     }
 }
 

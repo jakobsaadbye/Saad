@@ -1895,16 +1895,29 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
         return;
     }
     case TYPE_ANY: {
+        // Save the destination address
+        int dest_offset = push_temporary_value(cg->enclosing_function, 8);
+        if (dst_is_runtime_computed) {
+            sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", dest_offset);
+        }
+        
         // Box the value (copy the value on the stack)
+        // @Incomplete
         
         // Get a pointer to the type descriptor
         emit_type_descriptor(cg, rhs_type);
         POP(RCX);
+        
+        // Get the destination address
+        if (dst_is_runtime_computed) {
+            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", dest_offset);
+        } else {
+            sb_append(&cg->code, "   lea\t\trbx, %s\n", dst);
+        }
 
         // Get pointer to boxed value
         POP(RAX);
 
-        sb_append(&cg->code, "   lea\t\trbx, %s\n", dst);
         sb_append(&cg->code, "   mov\t\tQWORD 0[rbx], rax\n");
         sb_append(&cg->code, "   mov\t\tQWORD 8[rbx], rcx\n");
         

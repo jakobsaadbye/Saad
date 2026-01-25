@@ -434,6 +434,7 @@ TypeTuple *make_tuple_type_from_type_list(Typer *typer, DynamicArray types) {
 }
 
 void reserve_space_for_runtime_any_value(Typer *typer, Type *value_type) {
+    reserve_temporary_storage(typer->enclosing_function, 8); // 8 bytes for preserving the destination address across a function call
     if (value_type->kind == TYPE_STRUCT) {
         reserve_temporary_storage(typer->enclosing_function, 16); // 16 bytes is needed to keep a stable base_offset and cursor for types that needs arrays
 
