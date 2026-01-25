@@ -1,0 +1,97 @@
+//////////////////////////////////
+// Runtime reflection package
+//
+// @Note: This MUST match the datastructures laid out in runtime_support.c
+//////////////////////////////////
+
+TypeKind :: enum {
+    Void,
+    Bool, 
+    Int,
+    Float,
+    String,
+    Array,
+    Pointer,
+    Struct,
+    Enum,
+    Function,
+    Tuple,
+    Variadic,
+    Any,
+};
+
+TypePrimitiveKind :: enum {
+    Uint, // alias for u32
+    U8,
+    U16,
+    U32,
+    U64,
+    Int, // alias for s32
+    S8,
+    S16,
+    S32,
+    S64,
+    Float, // alias for f32
+    F32,
+    F64,
+    String,
+    Bool,
+    Void,
+    UntypedInt,
+    UntypedFloat,
+};
+
+TypeArrayKind :: enum {
+    Fixed,
+    Slice,
+    Dynamic,
+}
+
+Type :: struct {
+    kind:  TypeKind;
+    name:  string;
+    size:  int;
+    flags: int;
+};
+
+TypePrimitive :: struct  {
+    head: Type;
+    kind: TypePrimitiveKind;
+};
+
+TypeArray :: struct {
+    head:      Type;
+    kind:      TypeArrayKind;
+    elemType: *Type;
+    count:     int;
+}
+
+TypeEnum :: struct {
+    head:         Type;
+    backingType: *Type;
+    minValue:     int;
+    maxValue:     int;
+};
+
+StructMember :: struct {
+    name:  string;
+    type:  *Type;
+    index:  int;
+    offset: int;
+}
+
+TypeStruct :: struct {
+    head:         Type;
+    members:      *StructMember;
+    membersCount: int;
+    alignment:    int;
+};
+
+TypeAny :: struct {
+    data: *void;
+    type: *Type;
+}
+
+runtime_get_type_array  :: (name: string, kind: TypeArrayKind, elem_type: *Type, count: int) -> *TypeArray #extern "C"
+runtime_get_type_enum   :: (name: string, backingType: *Type, minValue: int, maxValue: int) -> *TypeEnum #extern "C"
+runtime_get_type_struct :: (name: string, members: *StructMember, members_count: int, size: int, alignment: int) -> *TypeStruct #extern "C"

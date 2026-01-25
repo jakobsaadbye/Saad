@@ -201,11 +201,29 @@ Type *resolve_type(Typer *typer, Type *type) {
     }
 
     if (type->kind == TYPE_ANY) {
-        // TypeAny *any = (TypeAny *)type;
+        TypeAny *any = (TypeAny *)type;
+
+        // Look for the Type :: struct {...} in the "reflect" package
+        AstIdentifier *type_any_identifier = lookup_from_scope(typer->parser, typer->current_scope, "TypeAny");
+        if (!type_any_identifier) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)any, "Compiler Error: Failed to find the 'TypeAny' struct in reflect.sd");
+            return NULL;
+        }
+        // if (!type_identifier->type || type_identifier->type->kind == TYPE_STRUCT) {
+        //     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)type_identifier, "Compiler Error: Found a different identifier for Type than the one declared in 'reflect.sd'");
+        //     return NULL;
+        // }
+
+        any->struct_defn = (TypeStruct *)type_any_identifier->type;
+
         // dump_struct(any->struct_defn->node);
         // AstIdentifier *type_info = ((AstIdentifier **)any->struct_defn->node->scope->identifiers.items)[1];
         // TypeStruct *type_info_struct = (TypeStruct *)(((TypePointer *)type_info->type)->pointer_to);
         // dump_struct(type_info_struct->node);
+
+        // Add the struct definition for the any type
+
+
         return type;
     }
 
@@ -413,6 +431,20 @@ TypeTuple *make_tuple_type_from_type_list(Typer *typer, DynamicArray types) {
     tuple->head.size = size;
 
     return tuple;
+}
+
+void reserve_space_for_runtime_any_value(Typer *typer, Type *value_type) {
+    if (value_type->kind == TYPE_STRUCT) {
+        reserve_temporary_storage(typer->enclosing_function, 16); // 16 bytes is needed to keep a stable base_offset and cursor for types that needs arrays
+
+        TypeStruct *type_struct = (TypeStruct *) value_type;
+
+        DynamicArray members = type_struct->node->scope->identifiers;
+        for (int i = 0; i < members.count; i++) {
+            AstIdentifier *member = ((AstIdentifier **) members.items)[i];
+            reserve_space_for_runtime_any_value(typer, member->type);
+        }
+    }
 }
 
 bool check_declaration(Typer *typer, AstDeclaration *decl) {
@@ -651,7 +683,15 @@ check_identifiers_vs_values:
         for (int i = 0; i < decl->idents.count; i++) {
             AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
             reserve_local_storage(typer->enclosing_function, ident->type->size);
+
+            // Reserve temporary space for doing runtime type reflection on an any value initialization
+            if (ident->type->kind == TYPE_ANY && ident->value) {
+                Type *value_type = ident->value->type;
+
+                reserve_space_for_runtime_any_value(typer, value_type);
+            }
         }
+
         return true;
     } else {
         // @TODO: Non-constant declarations in global scope should also be sized. Variables that live in global scope, should probably have some defined stack address of where they live, so they can be referenced locally. Still an open question on how i would do this.
@@ -797,6 +837,11 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
             // report_error_ast(typer->parser, LABEL_HINT, NULL, "If you really need to reassign the array, make a slice out of the fixed size array");
             return false;
         }
+    }
+
+    // Reserve space for an any runtime instantiation
+    if (lhs_type->kind == TYPE_ANY) {
+        reserve_space_for_runtime_any_value(typer, expr_type);
     }
 
     return true;
@@ -1042,7 +1087,7 @@ char *generate_c_format_specifier_for_type(Type *type) {
     case TYPE_ENUM:    return "%s";
     case TYPE_POINTER: return "0x%p";
     case TYPE_ARRAY:   return "0x%p";
-    case TYPE_ANY:     return "%s";
+    case TYPE_ANY:     return "0x%p";
     case TYPE_INTEGER: {
         if (is_unsigned_integer(type)) {
             return type->size == 4 ? "%u" : "%llu";
@@ -1247,6 +1292,7 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
 
 bool check_assert(Typer *typer, AstAssert *ast_assert) {
     Type *expr_type = check_expression(typer, ast_assert->expr, NULL);
+    if (!expr_type) return false;
     if (expr_type->kind != TYPE_BOOL && expr_type->kind != TYPE_POINTER) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_assert), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(expr_type));
         return false;
@@ -1870,6 +1916,10 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) 
 }
 
 Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_type) {
+    if (ctx_type && ctx_type->kind == TYPE_ANY) {
+        // Strip the context type
+        ctx_type = NULL;
+    }
 
     if(ctx_type && ctx_type->kind != TYPE_ARRAY) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array_lit), "Expected expression to have type %s", type_to_str(ctx_type));
@@ -2292,11 +2342,6 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
                 report_error_ast(typer->parser, LABEL_NOTE, NULL, "Slices and fixed size arrays have the members .data and .count");
             }
         }
-        else if (type_lhs->kind == TYPE_ANY) {
-            TypeAny *any = (TypeAny *) type_lhs;
-            report_error_ast(typer->parser, LABEL_NOTE, NULL, "Here is the definition of any");
-            dump_struct(any->struct_defn->node);
-        }
         else {
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_type), "Here is the definition of %s", type_to_str((Type *)struct_type));
         }
@@ -2712,6 +2757,23 @@ bool can_cast_explicitly(Type *from, Type *to) {
         }
     }
 
+    if (from->kind == TYPE_POINTER && to->kind == TYPE_POINTER) {
+        // Allow any pointers to cast to any other pointer
+        return true;
+    }
+
+    if (from->kind == TYPE_STRUCT && to->kind == TYPE_STRUCT) {
+        // Allow C-like downcasts of one struct to another for c-like inheritence
+        // @Improvement: We probably want to limit this or have a different mechanism that would be more type-safe.
+        //               e.g only allowing a downcast if the target struct is embedding the source struct
+        return true;
+    }
+
+    if (from->kind == TYPE_ANY || to->kind == TYPE_ANY) {
+        // Allow the "any" type to be casted to whatever
+        return true;
+    }
+
     return false;
 }
 
@@ -2784,6 +2846,11 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
                 literal->head.type         = ctx_type;
 
                 return ctx_type;
+            }
+
+            if (ctx_type->kind == TYPE_ANY) {
+                // @Todo: It should probably return the biggest integer type based on the literal value
+                return primitive_type(PRIMITIVE_INT);
             }
 
             if (ctx_type->kind == TYPE_INTEGER) {

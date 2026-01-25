@@ -430,6 +430,11 @@ void emit_memcpy(CodeGenerator *cg, int dst_offset, int src_offset, int num_byte
     sb_append(&cg->code, "   call\t\tmemcpy\n");    // void* memcpy( void* dest, const void* src, std::size_t count );
 }
 
+void emit_malloc(CodeGenerator *cg, int size) {
+    sb_append(&cg->code, "   mov\t\trcx, %d\n", size);
+    sb_append(&cg->code, "   call\t\tmalloc\n"); 
+}
+
 /* Source address is expected to be in rax. Destination address is expected to be in rbx. The rcx register is used as a temporary during the copy */
 void emit_struct_copy(CodeGenerator *cg, TypeStruct *struct_defn, int dst_base_offset, int src_base_offset) {
 
@@ -1190,6 +1195,18 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
         }
     }
 
+    if (from->kind == TYPE_POINTER && to->kind == TYPE_POINTER) {
+        return; // handled
+    }
+
+    if (from->kind == TYPE_STRUCT && to->kind == TYPE_STRUCT) {
+        return; // handled
+    }
+
+    if (from->kind == TYPE_ANY || to->kind == TYPE_ANY) {
+        return; // handled
+    }
+
 
     printf("%s:%d: Compiler Error: There were unhandled cases in 'emit_cast'. Casting from '%s' -> '%s' \n", __FILE__, __LINE__, type_to_str(from), type_to_str(to));
     return;
@@ -1516,12 +1533,21 @@ void emit_print(CodeGenerator *cg, AstPrint *print) {
                 pop_struct_members_from_print(cg, struct_node, &c_arg_index);
                 break;
             }
-            default: XXX;
+            case TYPE_ANY: {
+                // TypeAny *type_any = (TypeAny *)arg_type;
+                POP(RAX);
+                move_print_argument_to_register_or_temporary(cg, arg_type, c_arg_index);
+                break;
+            }
+            default: {
+                report_error_ast(cg->parser, LABEL_ERROR, (Ast *)arg, "Compiler Error: Failed to construct print call for argument type '%s'", type_to_str(arg_type));
+                XXX;
+            };
         }
     }
 
     int const_number = cg->constants++;
-    sb_append(&cg->data, "   CS%d DB `%s`, 10, 0 \n", const_number, print->c_string);
+    sb_append(&cg->data, "   CS%d DB `%s`, 0 \n", const_number, print->c_string);
     sb_append(&cg->code, "   mov\t\trcx, CS%d\n", const_number);
 
     if (c_args > 4) {
@@ -1624,19 +1650,118 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset, bool offset_
     }
 }
 
-// Puts a pointer to the type descriptor of "type" in rax
-void emit_type_descriptor(CodeGenerator *cg, Type *type, Register dst_register) {
-    if (is_primitive_type(type->kind)) {
+// Adds the string 'string' to global data and moves it into 'reg'
+void emit_add_constant_string(CodeGenerator *cg, char *string, Register reg) {
+    sb_append(&cg->data, "   CS%d DB \"%s\", 0 \n", cg->constants, string);
+    sb_append(&cg->code, "   mov\t\t%s, CS%d\n", register_to_str(reg, 8), cg->constants);
+    cg->constants++;
+}
+
+// Puts a pointer to the type descriptor in rax
+// @See runtime_support.c for the type descriptor functions
+void emit_type_descriptor(CodeGenerator *cg, Type *type) {
+    switch (type->kind) {
+    case TYPE_VOID:
+    case TYPE_BOOL:
+    case TYPE_INTEGER:
+    case TYPE_FLOAT:
+    case TYPE_STRING: {
         TypePrimitive *primitive = (TypePrimitive *) type;
-
-        char runtime_type_name[32];
-        sprintf(runtime_type_name, "Type_%s", primitive->name);
-
-        sb_append(&cg->code, "   mov\t\t%s, %s\n", register_to_str(dst_register, 8),  runtime_type_name);
+        char type_name[32];
+        sprintf(type_name, "Type_%s", primitive->name);
+        sb_append(&cg->code, "   mov\t\trax, QWORD [%s]\n", type_name);
+        PUSH(RAX);
         return;
     }
+    case TYPE_ARRAY: {
+        TypeArray *type_array = (TypeArray *)type;
 
-    XXX;
+        if (type_array->array_kind != ARRAY_FIXED) XXX;
+
+        emit_type_descriptor(cg, type_array->elem_type);
+        
+        emit_add_constant_string(cg, type_to_str(type), REG_RCX);
+        sb_append(&cg->code, "   mov\t\tedx, %d\n", type_array->array_kind);
+        POP(R8);
+        sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_array->count);
+        sb_append(&cg->code, "   call\t\truntime_get_type_array\n");
+        PUSH(RAX);
+        return;
+    }
+    case TYPE_POINTER: {
+        XXX;
+    }
+    case TYPE_STRUCT: {
+        TypeStruct *type_struct = (TypeStruct *)type;
+
+        DynamicArray members = type_struct->node->scope->identifiers;
+
+        int size_struct_member = 24; // sizeof(StructMember) in reflect.sd
+
+        // Generate type descriptors for the struct members
+        emit_malloc(cg, members.count * size_struct_member);
+        int base_offset = push_temporary_value(cg->enclosing_function, 8);
+        int cursor_offset = push_temporary_value(cg->enclosing_function, 8);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", base_offset);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", cursor_offset);
+        
+        // Rbx is our array cursor that we increment in the loop and stuff struct members into
+        for (int i = 0; i < members.count; i++) {
+            AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+
+            emit_type_descriptor(cg, member->type);
+            POP(RCX);
+
+            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", cursor_offset);
+            emit_add_constant_string(cg, member->name, REG_RAX);
+            sb_append(&cg->code, "   mov\t\t0[rbx], rax\n");
+            sb_append(&cg->code, "   mov\t\t8[rbx], rcx\n");
+            sb_append(&cg->code, "   mov\t\tDWORD 16[rbx], %d\n", member->member_index);
+            sb_append(&cg->code, "   mov\t\tDWORD 20[rbx], %d\n", member->member_offset);
+            sb_append(&cg->code, "   add\t\trbx, %d\n", size_struct_member);
+            sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", cursor_offset);
+        }
+        
+        emit_add_constant_string(cg, type_struct->identifier->name, REG_RCX);
+        sb_append(&cg->code, "   mov\t\trdx, %d[rbp]\n", base_offset);
+        sb_append(&cg->code, "   mov\t\tr8d, %d\n", members.count);
+        sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_struct->head.size);
+        sb_append(&cg->code, "   mov\t\tDWORD 32[rsp], %d\n", type_struct->alignment);
+        sb_append(&cg->code, "   call\t\truntime_get_type_struct\n");
+        PUSH(RAX);
+        return;
+    }
+    case TYPE_ENUM: {
+        TypeEnum *type_enum = (TypeEnum *)type;
+
+        emit_type_descriptor(cg, type_enum->backing_type);
+        
+        emit_add_constant_string(cg, type_enum->identifier->name, REG_RCX);
+        POP(RDX);
+        sb_append(&cg->code, "   mov\t\tr8d, %d\n", type_enum->min_value);
+        sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_enum->max_value);
+        sb_append(&cg->code, "   call\t\truntime_get_type_enum\n");
+        PUSH(RAX);
+        return;
+    }
+    case TYPE_FUNCTION: {
+        XXX;
+    }
+    case TYPE_TUPLE: {
+        XXX;
+    }
+    case TYPE_VARIADIC: {
+        XXX;
+    }
+    case TYPE_ANY: {
+        XXX;
+    }
+    default:
+        report_error_ast(cg->parser, LABEL_ERROR, NULL, "Compiler Error: Unknown type descriptor name for type %s", type_to_str(type));
+        XXX;
+    }
+
+    
 }
 
 // Pops a value on the stack and moves it to dst_offset
@@ -1772,15 +1897,16 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
     case TYPE_ANY: {
         // Box the value (copy the value on the stack)
         
-        // Get a pointer to the boxed value
-        
         // Get a pointer to the type descriptor
-        emit_type_descriptor(cg, rhs_type, REG_RCX);
+        emit_type_descriptor(cg, rhs_type);
+        POP(RCX);
+
+        // Get pointer to boxed value
+        POP(RAX);
 
         sb_append(&cg->code, "   lea\t\trbx, %s\n", dst);
         sb_append(&cg->code, "   mov\t\tQWORD 0[rbx], rax\n");
         sb_append(&cg->code, "   mov\t\tQWORD 8[rbx], rcx\n");
-
         
         return;
     }
@@ -1950,13 +2076,17 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
         // the expression is only 1-level deep. e.g    a := Vector3{1, 2, 3};
         // In this example, the struct is directly moved into 'a' instead of doing
         // an extra copy. The same is true for array literals.
-    
-        set_flag(cg, CODEGEN_DO_DIRECT_ASSIGNMENT);
+        
+        bool do_direct_assignment = ident->type->kind != TYPE_ANY && (ident->value->head.kind == AST_STRUCT_LITERAL || ident->value->head.kind == AST_ARRAY_LITERAL);
+        if (do_direct_assignment) {
+            set_flag(cg, CODEGEN_DO_DIRECT_ASSIGNMENT);
+        }
+
         cg->direct_offset = ident->stack_offset;
         emit_expression(cg, ident->value);
     
-        if (ident->value->head.kind == AST_STRUCT_LITERAL || ident->value->head.kind == AST_ARRAY_LITERAL) {
-            // The value was directly assigned to the variable
+        if (do_direct_assignment) {
+            // Skip the "normal" initialization step
             return;
         }
         
@@ -2387,6 +2517,7 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         PUSH(RAX);
         return;
     }
+    case TYPE_ANY:
     case TYPE_VARIADIC:
     case TYPE_ARRAY: {
         sb_append(&cg->code, "   lea\t\trax, %s\n", src);

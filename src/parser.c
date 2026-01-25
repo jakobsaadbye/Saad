@@ -546,6 +546,7 @@ TypeStruct *generate_empty_struct_type(Parser *parser, char *name) {
     struct_defn->node            = struct_node;
 
     struct_node->identifier      = generate_identifier(parser, name, (Type *)struct_defn, IDENTIFIER_IS_NAME_OF_STRUCT);
+    struct_defn->identifier      = struct_node->identifier;
 
     return struct_defn;
 }
@@ -579,35 +580,33 @@ void add_struct_member(Parser *parser, TypeStruct *struct_defn, char *name, Type
 
 }
 
-TypeStruct *generate_struct_for_any_type(Parser *parser) {
+bool generate_and_add_import(Parser *parser, char *path) {
 
-    // We generate the following two structs for the any type
-    //
-    // Type :: struct {
-    //     kind:  TypeKind;
-    //     size:  int;
-    //     flags: int;
-    // }
+    // Check if we already have the import
+    for (int i = 0; i < parser->current_file->imports.count; i++) {
+        AstImport *existing = ((AstImport **)parser->current_file->imports.items)[i];
+        if (strcmp(existing->string, path) == 0) {
+            // Import already exists
+            return true;
+        }
+    }
 
-    // TypeAny :: struct {
-    //     value: *void;
-    //     type:  *Type;
-    // }
+    AstImport *ast_import  = ast_allocate(parser, sizeof(AstImport));
+    ast_import->head.kind  = AST_IMPORT;
+    ast_import->head.file  = parser->current_file;
+    ast_import->head.start = (Pos){0, 0, 0};
+    ast_import->head.end   = (Pos){0, 0, 0};
+    ast_import->head.flags = AST_FLAG_COMPILER_GENERATED;
+    ast_import->path_token = (Token){0};
+    ast_import->string     = resolve_import_path(parser, path);
+    if (ast_import->string == NULL) {
+        report_error_ast(parser, LABEL_ERROR, NULL, "Compiler Error: Failed to resolve import '%s'", path);
+        return false;
+    }
 
-    // Generate a type for Type
-    TypeStruct *type_defn = generate_empty_struct_type(parser, "Type");
-    add_struct_member(parser, type_defn, "kind", primitive_type(PRIMITIVE_INT)); // @Todo: Change this type to an enum
-    add_struct_member(parser, type_defn, "size", primitive_type(PRIMITIVE_INT));
-    add_struct_member(parser, type_defn, "flags", primitive_type(PRIMITIVE_INT));
+    da_append(&parser->current_file->imports, ast_import);
 
-    TypePointer *ptr_type_defn = generate_pointer_to_type(parser, (Type *) type_defn);
-
-    // Generate the TypeAny type
-    TypeStruct *any_defn = generate_empty_struct_type(parser, "any");
-    add_struct_member(parser, any_defn, "data", (Type *) type_null_ptr);
-    add_struct_member(parser, any_defn, "type", (Type *) ptr_type_defn);
-
-    return any_defn;
+    return true;
 }
 
 Type *parse_type(Parser *parser) {
@@ -636,7 +635,11 @@ Type *parse_type(Parser *parser) {
         any->head.head.end   = any_token.end;
         any->head.kind       = TYPE_ANY;
         any->head.size       = 16;
-        any->struct_defn     = generate_struct_for_any_type(parser);
+        any->struct_defn     = NULL; // generate_struct_for_any_type(parser);
+
+        // Add an import to the "reflect" package
+        bool ok = generate_and_add_import(parser, "reflect");
+        if (!ok) return NULL;
 
         return (Type *)(any);
     }
