@@ -32,6 +32,7 @@ typedef enum AstKind {
     AST_ASSIGNMENT,
     AST_DIRECTIVE,
     AST_IMPORT,
+    AST_EXTERN,
     AST_PRINT,
     AST_ASSERT,
     AST_RETURN,
@@ -88,6 +89,7 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
     OP_SUBSCRIPT    = '[',
     OP_ADDRESS_OF   = 3,
     OP_POINTER_DEREFERENCE = 4, // Picked arbitrarily. Should just not conflict with the others
+    OP_SPREAD       = TOKEN_TRIPLE_DOT, // Spread operator e.g `foo(...args)`
     OP_CAST         = TOKEN_CAST,
 } OperatorType;
 
@@ -95,6 +97,7 @@ typedef enum AstFlags {
     AST_FLAG_COMPILER_GENERATED                    = 1 << 0,
     AST_FLAG_CG_EXPR_ASSIGNED_DIRECTLY_TO_VARIABLE = 1 << 1,
     AST_FLAG_IS_TYPE_CHECKED                       = 1 << 2, // Ast nodes that have this flag has gone through type checking
+    AST_FLAG_IS_C_VARARG                           = 1 << 3, // Set if the argument is a variadic c argument
 } AstFlags;
 
 typedef struct Ast {
@@ -117,6 +120,7 @@ typedef struct AstFile {
     DynamicArray statements; // of Ast*
     DynamicArray imports;    // of AstImport*
     AstBlock    *scope;      // All exported declarations in this file e.g function definitions, struct definitions etc is contained here
+    bool         is_parsed;
 } AstFile;
 
 typedef struct AstImport {
@@ -126,6 +130,13 @@ typedef struct AstImport {
     char    *resolved_path;
     AstFile *imported_file;
 } AstImport;
+
+typedef struct AstExtern {
+    Ast       head;
+    Token     extern_token;
+    char     *extern_string;
+    AstBlock *block;
+} AstExtern;
 
 typedef enum IdentifierFlags {
     IDENTIFIER_IS_NAME_OF_ENUM     = 1 << 0,
@@ -299,7 +310,7 @@ typedef struct AstFunctionCall {
     AstStruct       *belongs_to_struct; // The struct the function definition is defined on
     bool             is_method_call;    // If the function is defined within the struct or is a method of the struct, this field is true
 
-    DynamicArray     lowered_arguments; // of *AstExpr. A lowered representation of the argument list that the code generator is expected to work with
+    DynamicArray     lowered_arguments;      // of *AstExpr. A lowered representation of the argument list including hidden return arguments
 } AstFunctionCall;
 
 typedef struct AstPrint {

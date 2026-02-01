@@ -188,6 +188,21 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     while (true) {
         current_file_path = ((char **)file_paths_to_visit.items)[file_path_cursor];
 
+        // Check if we've already parsed this file
+        // @Speed: Optimize this O(N2) to a lookup
+        bool is_visited = false;
+        for (int i = 0; i < parsed_files.count; i++) {
+            AstFile *file = ((AstFile **)parsed_files.items)[i];
+
+            if (strcmp(current_file_path, file->absolute_path) == 0) {
+                is_visited = true;
+                break;
+            }
+        }
+        if (is_visited) {
+            break;
+        }
+
         // Parse file
         current_file = (AstFile *) parse_file(&parser, current_file_path);
         if (current_file == NULL) {

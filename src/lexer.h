@@ -88,6 +88,7 @@ typedef enum TokenType {
     TOKEN_CAST         = 171,
     TOKEN_NEW          = 172,
     TOKEN_IMPORT       = 173,
+    TOKEN_EXTERN       = 174,
 
     TOKEN_STRUCT  = 180,
     TOKEN_ENUM    = 181,

@@ -91,6 +91,8 @@ TypeAny :: struct {
     type: *Type;
 }
 
-runtime_get_type_array  :: (name: string, kind: TypeArrayKind, elem_type: *Type, count: int) -> *TypeArray #extern "C"
-runtime_get_type_enum   :: (name: string, backingType: *Type, minValue: int, maxValue: int) -> *TypeEnum #extern "C"
-runtime_get_type_struct :: (name: string, members: *StructMember, members_count: int, size: int, alignment: int) -> *TypeStruct #extern "C"
+extern "C" {
+    runtime_get_type_array  :: (name: string, kind: TypeArrayKind, elem_type: *Type, count: int) -> *TypeArray;
+    runtime_get_type_enum   :: (name: string, backingType: *Type, minValue: int, maxValue: int) -> *TypeEnum;
+    runtime_get_type_struct :: (name: string, members: *StructMember, members_count: int, size: int, alignment: int) -> *TypeStruct;
+}

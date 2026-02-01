@@ -8,6 +8,7 @@
 Parser           parser_init(Lexer *lexer);
 AstFile         *parse_file(Parser *parser, char *file_path);
 Ast             *parse_statement(Parser *parser);
+AstBlock        *parse_block(Parser *parser, AstBlock *inject_into_scope);
 AstDeclaration  *parse_declaration(Parser *parser);
 AstAssignment   *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token);
 AstDirective    *parse_directive(Parser *parser);
@@ -56,7 +57,7 @@ bool is_literal(Token token);
 bool is_type_specifier(Token token);
 bool is_primitive_type_token(Token token);
 bool is_assignment_operator(Token token);
-int get_precedence(OperatorType op);
+int get_operator_precedence(OperatorType op);
 int align_value(int value, int alignment);
 
 void report_error_range(Parser *parser, Pos start, Pos end, const char *message, ...);
@@ -89,6 +90,8 @@ void dump_file_declarations(AstFile *file) {
 
 AstFile *parse_file(Parser *parser, char *file_path) {
 
+    // printf("Parsing '%s' ...\n", file_path);
+
     // Read in the file text
     char *file_text = read_entire_file(file_path);
     if (file_text == NULL) {
@@ -112,6 +115,7 @@ AstFile *parse_file(Parser *parser, char *file_path) {
     file->statements    = da_init(64, sizeof(Ast *));
     file->imports       = da_init(8,  sizeof(AstImport *));
     file->scope         = new_block(parser, BLOCK_IMPERATIVE);
+    file->is_parsed     = false;
 
     parser->current_file  = file;
     parser->current_scope = file->scope;
@@ -129,6 +133,8 @@ AstFile *parse_file(Parser *parser, char *file_path) {
 
     // Eat the end token
     eat_token(parser);
+
+    file->is_parsed = true;
 
     return file;
 }
@@ -170,6 +176,44 @@ AstImport *parse_import(Parser *parser) {
     da_append(&parser->current_file->imports, ast_import);
 
     return ast_import;
+}
+
+AstExtern *parse_extern(Parser *parser) {
+    Token extern_token = peek_next_token(parser);
+    expect(parser, extern_token, TOKEN_EXTERN);
+    eat_token(parser);
+    
+    Token extern_string_token = peek_next_token(parser);
+    if (extern_string_token.type != TOKEN_LITERAL_STRING) {
+        report_error_token(parser, LABEL_ERROR, extern_string_token, "Expected an extern string");
+        report_error_ast(parser, LABEL_HINT, NULL, "If you want to bind to external C functions, write extern \"C\" {<Function signatures>} with all the C function signatures inside the block");
+        return NULL;
+    }
+    
+    char *extern_string = extern_string_token.as_value.value.string.data;
+    
+    if (strcmp(extern_string, "C") != 0) {
+        report_error_token(parser, LABEL_ERROR, extern_string_token, "Only extern \"C\" is supported as external functions");
+        return NULL;
+    }
+    eat_token(parser);
+
+    // Let all function definitions inside the extern block be visible in the outer scope
+    parser->inside_extern_block = true;
+    AstBlock *block = parse_block(parser, parser->current_scope);
+    if (block == NULL) return NULL;
+    parser->inside_extern_block = false;
+
+    AstExtern *ast_extern     = ast_allocate(parser, sizeof(AstExtern));
+    ast_extern->head.kind     = AST_EXTERN;
+    ast_extern->head.file     = parser->current_file;
+    ast_extern->head.start    = extern_token.start;
+    ast_extern->head.end      = block->head.end;
+    ast_extern->extern_token  = extern_token;
+    ast_extern->extern_string = extern_string;
+    ast_extern->block         = block;
+
+    return ast_extern;
 }
 
 AstDirective *parse_directive(Parser *parser) {
@@ -265,11 +309,15 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
         if (!stmt) return NULL;
 
         if (block->kind == BLOCK_DECLARATIVE) {
-            bool valid = false;
-            if (stmt->kind == AST_DECLARATION) valid = true;
+            if (stmt->kind != AST_DECLARATION) {
+                report_error_ast(parser, LABEL_ERROR, (Ast *)stmt, "Invalid statement. Only declarations are allowed inside a struct or enum definition");
+                return NULL;
+            }
+        }
 
-            if (!valid) {
-                report_error_ast(parser, LABEL_ERROR, (Ast *)stmt, "Invalid statement inside of a struct or enum. Only declarations are allowed");
+        if (parser->inside_extern_block) {
+            if (stmt->kind != AST_FUNCTION_DEFN) {
+                report_error_ast(parser, LABEL_ERROR, (Ast *)stmt, "Invalid statement. Only function definitions are allowed inside an extern block");
                 return NULL;
             }
         }
@@ -350,7 +398,7 @@ Ast *parse_statement(Parser *parser) {
 
     if (starts_function_defn(parser, token)) {
         stmt = (Ast *)(parse_function_defn(parser));
-        statement_ends_with_semicolon = false;
+        statement_ends_with_semicolon = parser->inside_extern_block;
         matched_a_statement = true;
     }
 
@@ -375,6 +423,12 @@ Ast *parse_statement(Parser *parser) {
     else if (token.type == TOKEN_IMPORT) {
         stmt = (Ast *)(parse_import(parser));
         statement_ends_with_semicolon = true;
+        matched_a_statement = true;
+    }
+
+    else if (token.type == TOKEN_EXTERN) {
+        stmt = (Ast *)(parse_extern(parser));
+        statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
 
@@ -598,11 +652,15 @@ bool generate_and_add_import(Parser *parser, char *path) {
     ast_import->head.end   = (Pos){0, 0, 0};
     ast_import->head.flags = AST_FLAG_COMPILER_GENERATED;
     ast_import->path_token = (Token){0};
-    ast_import->string     = resolve_import_path(parser, path);
+    ast_import->string     = path;
+    ast_import->resolved_path = resolve_import_path(parser, path);
     if (ast_import->string == NULL) {
         report_error_ast(parser, LABEL_ERROR, NULL, "Compiler Error: Failed to resolve import '%s'", path);
         return false;
     }
+
+    // Insert the import at the top of the file
+    da_insert(&parser->current_file->statements, ast_import, 0);
 
     da_append(&parser->current_file->imports, ast_import);
 
@@ -780,11 +838,13 @@ Type *parse_type(Parser *parser) {
         any->head.head.end   = any_token.end;
         any->head.kind       = TYPE_ANY;
         any->head.size       = 16;
-        any->struct_defn     = NULL; // generate_struct_for_any_type(parser);
+        any->struct_defn     = NULL; // Is added in typechecking
 
         // Add an import to the "reflect" package
-        bool ok = generate_and_add_import(parser, "reflect");
-        if (!ok) return NULL;
+        if (!parser->inside_extern_block) {     // Don't include the reflect package if this is an 'any' inside the signature of a C function
+            bool ok = generate_and_add_import(parser, "reflect");
+            if (!ok) return NULL;
+        }
 
         return (Type *)(any);
     }
@@ -1142,7 +1202,10 @@ AstEnum *parse_enum_defn(Parser *parser) {
     type_enum->backing_type    = primitive_type(PRIMITIVE_INT); // @Improvement - Support for having a backing integer type
 
     Type *exists = type_add_user_defined(&parser->type_table, (Type *)(type_enum));
-    assert(!exists);
+    if (exists) {
+        report_error_ast(parser, LABEL_ERROR, NULL, "Compiler Error: Found an existing enum definition for %s", ident->name);
+        return NULL;
+    }
 
     ident->type = (Type *)(type_enum);
 
@@ -1263,7 +1326,7 @@ AstCast *parse_cast(Parser *parser) {
     Token cast_token = next;
 
     if (cast_token.type == TOKEN_XX) {
-        int precedence = get_precedence((OperatorType) TOKEN_CAST);
+        int precedence = get_operator_precedence((OperatorType) TOKEN_CAST);
         AstExpr *expr = parse_expression(parser, precedence);
         if (!expr) return NULL;
 
@@ -1289,7 +1352,7 @@ AstCast *parse_cast(Parser *parser) {
         expect(parser, next, ')');
         eat_token(parser);
 
-        int precedence = get_precedence((OperatorType) TOKEN_CAST);
+        int precedence = get_operator_precedence((OperatorType) TOKEN_CAST);
         AstExpr *expr = parse_expression(parser, precedence);
         if (!expr) return NULL;
 
@@ -1805,28 +1868,13 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         da_append(&func_defn->return_types, void_type);
     }
 
-    // Parse extern directive @Deprecate
     func_defn->calling_convention = CALLING_CONV_SAAD;
-    bool is_extern = false;
-
-    next = peek_next_token(parser);
-    if (next.type == '#') {
-        AstDirective *dir = parse_directive(parser);
-        if (!dir) return NULL;
-
-        if (dir->kind != DIRECTIVE_EXTERN) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *)dir, "The #%s directive is not valid in this context", directive_names[dir->kind]);
-            return NULL;
-        }
-
-        is_extern = true;
-
-        if (dir->extern_abi == ABI_C) {
-            func_defn->calling_convention = CALLING_CONV_MSVC;
-        }
+    if (parser->inside_extern_block) {
+        func_defn->calling_convention = CALLING_CONV_MSVC;
+        func_defn->is_extern = parser->inside_extern_block;
     }
 
-    if (!is_extern) {
+    if (!func_defn->is_extern) {
         body = parse_block(parser, body); // Here we tell parse_block to explicitly not make a new lexical scope, but instead use our existing function header
         if (!body) return NULL;
     }
@@ -1855,7 +1903,6 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->head.end    = body->head.start;
     func_defn->identifier  = ident;
     func_defn->body        = body;
-    func_defn->is_extern   = is_extern;
     func_defn->is_method   = func_is_method;
     func_defn->num_bytes_locals       = 0;
     func_defn->num_bytes_temporaries  = 0;
@@ -2293,13 +2340,13 @@ AstIdentifier *make_identifier_from_token(Parser *parser, Token ident_token, Typ
 
 void expect(Parser *parser, Token given, TokenType expected_type) {
     if (given.type != expected_type) {
-        report_error_token(parser, LABEL_ERROR, given, "Expected '%s', but got '%s'", token_type_to_str(expected_type), token_type_to_str(given.type));
+        report_error_token(parser, LABEL_ERROR, given, "Unexpected token '%s'. Expected '%s'", token_type_to_str(given.type), token_type_to_str(expected_type));
         exit(1);
     }
     // Everything's cool dude
 }
 
-int get_precedence(OperatorType op) {
+int get_operator_precedence(OperatorType op) {
     switch (op) {
         case OP_LOGICAL_OR: 
             return 1;
@@ -2337,6 +2384,7 @@ int get_precedence(OperatorType op) {
         case OP_UNARY_MINUS:
         case OP_ADDRESS_OF:
         case OP_POINTER_DEREFERENCE:
+        case OP_SPREAD:
         case OP_CAST:
             return 13;
         case OP_DOT:
@@ -2376,7 +2424,7 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
         if (ends_expression(next))          break;
         if (!is_binary_operator(next.type)) break;
 
-        int next_prec = get_precedence((OperatorType)(next.type));
+        int next_prec = get_operator_precedence((OperatorType)(next.type));
         if (next_prec <= min_prec) {
             break;
         } else {
@@ -2439,7 +2487,7 @@ AstExpr *parse_leaf(Parser *parser) {
 
     if (t.type == '!') {
         eat_token(parser);
-        int prec = get_precedence(OP_NOT);
+        int prec = get_operator_precedence(OP_NOT);
         AstExpr *sub_expr = parse_expression(parser, prec); 
         if (!sub_expr) return NULL;
         return make_unary_node(parser, t, sub_expr, OP_NOT);
@@ -2447,7 +2495,7 @@ AstExpr *parse_leaf(Parser *parser) {
 
     if (t.type == '~') {
         eat_token(parser);
-        int prec = get_precedence(OP_BITWISE_NOT);
+        int prec = get_operator_precedence(OP_BITWISE_NOT);
         AstExpr *sub_expr = parse_expression(parser, prec); 
         if (!sub_expr) return NULL;
         return make_unary_node(parser, t, sub_expr, OP_BITWISE_NOT);
@@ -2455,7 +2503,7 @@ AstExpr *parse_leaf(Parser *parser) {
 
     if (t.type == '-') {
         eat_token(parser);
-        int prec = get_precedence(OP_UNARY_MINUS);
+        int prec = get_operator_precedence(OP_UNARY_MINUS);
         AstExpr *sub_expr = parse_expression(parser, prec); 
         if (!sub_expr) return NULL;
         return make_unary_node(parser, t, sub_expr, OP_UNARY_MINUS);
@@ -2463,7 +2511,7 @@ AstExpr *parse_leaf(Parser *parser) {
 
     if (t.type == '&') {
         eat_token(parser);
-        int prec = get_precedence(OP_ADDRESS_OF);
+        int prec = get_operator_precedence(OP_ADDRESS_OF);
         AstExpr *sub_expr = parse_expression(parser, prec); 
         if (!sub_expr) return NULL;
         return make_unary_node(parser, t, sub_expr, OP_ADDRESS_OF);
@@ -2471,10 +2519,18 @@ AstExpr *parse_leaf(Parser *parser) {
 
     if (t.type == '*') {
         eat_token(parser);
-        int prec = get_precedence(OP_POINTER_DEREFERENCE);
+        int prec = get_operator_precedence(OP_POINTER_DEREFERENCE);
         AstExpr *sub_expr = parse_expression(parser, prec); 
         if (!sub_expr) return NULL;
         return make_unary_node(parser, t, sub_expr, OP_POINTER_DEREFERENCE);
+    }
+
+    if (t.type == TOKEN_TRIPLE_DOT) {
+        eat_token(parser);
+        int prec = get_operator_precedence(OP_SPREAD);
+        AstExpr *sub_expr = parse_expression(parser, prec); 
+        if (!sub_expr) return NULL;
+        return make_unary_node(parser, t, sub_expr, OP_SPREAD);
     }
 
     if (starts_struct_literal(parser)) {

@@ -3,11 +3,11 @@ Todo list:
   
 * Function call overhaul:
   [x] Multiple return values
+  [] Variadic arguments
+  [] Higher order functions (passing functions as values)
   [] Default arguments
   [] Named arguments
-  [] Variadic arguments
   [] Able to call methods defined later
-  [] Higher order functions (passing functions as values)
 
 * Better string handling
   [] Changing them to be a data + count

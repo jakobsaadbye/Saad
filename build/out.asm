@@ -9,12 +9,12 @@ segment .data
    string_false DB "false", 0
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
-   __DogKind.samoid DB ".samoid", 0
-   __DogKind.chiwawa DB ".chiwawa", 0
-   __DogKind.bulldog DB ".bulldog", 0
-   CF0 DD 20.0000000
-   CF1 DD 0.5000000
-   CF2 DD 80.0000000
+   CS0 DB `v = %f\n`, 0 
+   CF1 DD 3.1500000
+   CF2 DD 1.5000000
+   CF3 DD 3.1400000
+   CF4 DD 4.1500000
+   CS5 DB `%f`, 0 
 segment .text
    global main
    extern ExitProcess
@@ -55,144 +55,136 @@ assert_fail:
    mov		rcx, 1
    call		ExitProcess
 
-get_enum_string_DogKind:
-   mov		r8, 0
-   cmp		rdx, r8
-   jz			enum_case_0
-   mov		r8, 1
-   cmp		rdx, r8
-   jz			enum_case_1
-   mov		r8, 2
-   cmp		rdx, r8
-   jz			enum_case_2
-   push		rcx
-   mov		r8, rdx
-   mov		rdx, fmt_int
-   push		r8
-   push		rdx
-   push		rcx
-   call		sprintf
-   pop		rax
-   pop		rbx
-   pop		rbx
-   pop		rbx
-   ret
-enum_case_0:
-   mov		rax, __DogKind.samoid
-   ret
-enum_case_1:
-   mov		rax, __DogKind.chiwawa
-   ret
-enum_case_2:
-   mov		rax, __DogKind.bulldog
-   ret
 
-; bytes locals   : 24
-; bytes temp     : 16
-; bytes total    : 80
-main:
+; bytes locals   : 72
+; bytes temp     : 8
+; bytes total    : 112
+foo:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 80
-   ; Ln 15: $samoid : Dog = -16[rbp]
-   lea		rcx, -16[rbp]
-   mov		rdx, 0
+   sub		rsp, 112
+   mov		16[rbp], rcx
+   mov		24[rbp], rdx
+   ; Param ret_0
+   mov		rax, 16[rbp]
+   mov		-8[rbp], rax
+   ; Param floats
+   mov		rax, 24[rbp]
+   lea		rbx, -24[rbp]
+   lea		rcx, 0[rbx]
+   lea		rdx, 0[rax]
    mov		r8, 16
-   call		memset
-   push		0
-   pop		rax
-   mov		DWORD -16[rbp], eax
-   mov		rax, 4
+   call		memcpy
+   ; Ln 9: For-loop
+   lea		rax, -24[rbp]
    push		rax
    pop		rax
-   mov		DWORD -12[rbp], eax
-   movss		xmm0, [CF0]
-   movd		eax, xmm0
+   mov		rbx, 0[rax]
+   mov		rcx, 8[rax]
+   mov		-36[rbp], rbx     ; data
+   mov		-44[rbp], rcx     ; count
+   mov		QWORD -52[rbp], 0 ; index
+L1:
+   mov		rbx, -44[rbp]
+   mov		rax, -52[rbp]
+   cmp		rax, rbx
+   jge		L3
+   mov		rbx, QWORD -36[rbp]
+   mov		rax, QWORD -52[rbp]
+   imul		rax, 4
+   lea		rbx, [rbx + rax]
+   mov		eax, DWORD [rbx]
+   mov		-28[rbp], eax 
+   ; Ln 10 Print
+   mov		eax, -28[rbp]
    push		rax
    pop		rax
-   mov		-8[rbp], eax
+   movd		xmm0, eax
+   cvtss2sd	xmm0, xmm0
+   movq		rax, xmm0
+   push		rax
+   ; Pop print arguments
+   pop		rax
+   mov		rdx, rax
+   mov		rcx, CS0
+   call		printf
+L2:
+   inc		QWORD -52[rbp]
+   jmp		L1
+L3:
+   ; Return
    movss		xmm0, [CF1]
    movd		eax, xmm0
    push		rax
    pop		rax
-   mov		-4[rbp], eax
-   ; Ln 22: $bmi : float = -20[rbp]
-   lea		rax, -16[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 8
-   push		rbx
-   pop		rbx
-   mov		eax, [rbx]
-   push		rax
-   lea		rax, -16[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 12
-   push		rbx
-   pop		rbx
-   mov		eax, [rbx]
-   push		rax
-   lea		rax, -16[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 12
-   push		rbx
-   pop		rbx
-   mov		eax, [rbx]
-   push		rax
-   pop		rbx
-   pop		rax
-   movd		xmm1, ebx
-   movd		xmm0, eax
-   mulss		xmm0, xmm1
-   movd		eax, xmm0
-   push		rax
-   pop		rbx
-   pop		rax
-   movd		xmm1, ebx
-   movd		xmm0, eax
-   divss		xmm0, xmm1
-   movd		eax, xmm0
-   push		rax
-   pop		rax
-   mov		-20[rbp], eax
-   mov		eax, -20[rbp]
+   mov		rbx, -8[rbp]
+   mov		DWORD [rbx], eax
+   jmp		L0
+L0:
+   mov		rax, 0
+   add		rsp, 112
+   pop		rbp
+   ret
+
+; bytes locals   : 24
+; bytes temp     : 40
+; bytes total    : 96
+main:
+   push		rbp
+   mov		rbp, rsp
+   sub		rsp, 96
+   ; Ln 16: $a : float = -4[rbp]
+   lea		rax, -28[rbp]
    push		rax
    movss		xmm0, [CF2]
    movd		eax, xmm0
    push		rax
-   pop		rbx
    pop		rax
-   movd		xmm1, ebx
-   movd		xmm0, eax
-   comiss	xmm0, xmm1
-   sete		al
+   mov		-16[rbp], eax
+   movss		xmm0, [CF3]
+   movd		eax, xmm0
    push		rax
-   pop		rcx
-   mov		rdx, 23
-   call		assert
+   pop		rax
+   mov		-12[rbp], eax
+   movss		xmm0, [CF4]
+   movd		eax, xmm0
+   push		rax
+   pop		rax
+   mov		-8[rbp], eax
    lea		rax, -16[rbp]
+   mov		QWORD -44[rbp], rax
+   mov		QWORD -36[rbp], 3
+   lea		rax, -44[rbp]
    push		rax
-   pop		rbx
-   add		rbx, 4
-   push		rbx
-   pop		rbx
-   mov		eax, DWORD [rbx]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 4
-   push		rax
-   pop		rbx
    pop		rax
-   cmp		rax, rbx
-   sete		al
+   mov		rbx, 0[rax]
+   mov		rcx, 8[rax]
+   mov		QWORD -60[rbp], rbx
+   mov		QWORD -52[rbp], rcx
+   lea		rax, -60[rbp]
    push		rax
+   pop		rdx
    pop		rcx
-   mov		rdx, 24
-   call		assert
+   call		foo
+   mov		eax, -28[rbp]
+   push		rax
+   pop		rax
+   mov		-4[rbp], eax
+   ; Ln 17 Print
+   mov		eax, -4[rbp]
+   push		rax
+   pop		rax
+   movd		xmm0, eax
+   cvtss2sd	xmm0, xmm0
+   movq		rax, xmm0
+   push		rax
+   ; Pop print arguments
+   pop		rax
+   mov		rdx, rax
+   mov		rcx, CS5
+   call		printf
 L4:
    mov		rax, 0
-   add		rsp, 80
+   add		rsp, 96
    pop		rbp
    ret

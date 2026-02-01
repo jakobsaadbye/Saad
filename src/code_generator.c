@@ -301,6 +301,10 @@ void emit_block(CodeGenerator *cg, AstBlock *block) {
     cg->current_scope = block->parent;
 }
 
+void emit_extern(CodeGenerator *cg, AstExtern *ast_extern) {
+    emit_block(cg, ast_extern->block);
+}
+
 void emit_expr_stmt(CodeGenerator *cg, AstExprStmt *expr_stmt) {
     emit_expression(cg, expr_stmt->expr);
     if (expr_stmt->expr->type->kind != TYPE_VOID) {
@@ -308,28 +312,29 @@ void emit_expr_stmt(CodeGenerator *cg, AstExprStmt *expr_stmt) {
     }
 }
 
-void emit_statement(CodeGenerator *cg, Ast *node) {
+void emit_statement(CodeGenerator *cg, Ast *stmt) {
 
     reset_temporary_storage(cg->enclosing_function);
 
-    switch (node->kind) {
-    case AST_IMPORT:            emit_import(cg, (AstImport *)(node)); break;
-    case AST_BLOCK:             emit_block(cg, (AstBlock *)(node)); break;
-    case AST_DECLARATION:       emit_declaration(cg, (AstDeclaration *)(node)); break;
-    case AST_ASSIGNMENT:        emit_assignment(cg, (AstAssignment *)(node)); break;
-    case AST_FUNCTION_DEFN:     emit_function_defn(cg, (AstFunctionDefn *)(node)); break;
-    case AST_RETURN:            emit_return(cg, (AstReturn *)(node)); break;
-    case AST_IF:                emit_if(cg, (AstIf *)(node)); break;
-    case AST_FOR:               emit_for(cg, (AstFor *)(node)); break;
-    case AST_WHILE:             emit_while(cg, (AstWhile *)(node)); break;
-    case AST_BREAK_OR_CONTINUE: emit_break_or_continue(cg, (AstBreakOrContinue *)(node)); break;
-    case AST_ENUM:              emit_enum(cg, (AstEnum *)(node)); break;
+    switch (stmt->kind) {
+    case AST_IMPORT:            emit_import(cg, (AstImport *)(stmt)); break;
+    case AST_EXTERN:            emit_extern(cg, (AstExtern *)(stmt)); break;
+    case AST_BLOCK:             emit_block(cg, (AstBlock *)(stmt)); break;
+    case AST_DECLARATION:       emit_declaration(cg, (AstDeclaration *)(stmt)); break;
+    case AST_ASSIGNMENT:        emit_assignment(cg, (AstAssignment *)(stmt)); break;
+    case AST_FUNCTION_DEFN:     emit_function_defn(cg, (AstFunctionDefn *)(stmt)); break;
+    case AST_RETURN:            emit_return(cg, (AstReturn *)(stmt)); break;
+    case AST_IF:                emit_if(cg, (AstIf *)(stmt)); break;
+    case AST_FOR:               emit_for(cg, (AstFor *)(stmt)); break;
+    case AST_WHILE:             emit_while(cg, (AstWhile *)(stmt)); break;
+    case AST_BREAK_OR_CONTINUE: emit_break_or_continue(cg, (AstBreakOrContinue *)(stmt)); break;
+    case AST_ENUM:              emit_enum(cg, (AstEnum *)(stmt)); break;
     case AST_STRUCT:            break;
-    case AST_EXPR_STMT:         emit_expr_stmt(cg, (AstExprStmt *)(node)); break;
-    case AST_PRINT:             emit_print(cg, (AstPrint *)(node)); break;
-    case AST_ASSERT:            emit_assert(cg, (AstAssert *)(node)); break;
+    case AST_EXPR_STMT:         emit_expr_stmt(cg, (AstExprStmt *)(stmt)); break;
+    case AST_PRINT:             emit_print(cg, (AstPrint *)(stmt)); break;
+    case AST_ASSERT:            emit_assert(cg, (AstAssert *)(stmt)); break;
     default:
-        printf("compiler-error: emit_statement not implemented for %s\n", ast_to_str(node));
+        printf("compiler-error: emit_statement not implemented for %s\n", ast_to_str(stmt));
         XXX;
     }
 }
@@ -783,7 +788,7 @@ void MOV_ADDR_ADDR(CodeGenerator *cg, int dst_addr, Type *dst_type, int src_addr
 }
 
 Register get_argument_register_from_index(int index, Type *type) {
-    if (type->kind == TYPE_FLOAT) {
+    if (type && type->kind == TYPE_FLOAT) {
         if (index == 0) return REG_XMM0;
         if (index == 1) return REG_XMM1;
         if (index == 2) return REG_XMM2;
@@ -799,9 +804,48 @@ Register get_argument_register_from_index(int index, Type *type) {
 }
 
 void adapt_function_argument_to_parameter(CodeGenerator *cg, AstExpr *arg, AstIdentifier *param) {
+    bool is_c_vararg = arg->head.flags & AST_FLAG_IS_C_VARARG;
+
+    if (is_c_vararg) {
+        switch (arg->type->kind) {
+        case TYPE_BOOL:
+        case TYPE_ENUM:
+        case TYPE_INTEGER: {
+            if (arg->type->size < 4) {
+                POP(RAX);
+                if (is_unsigned_integer(arg->type)) {
+                    // Zero extension
+                    sb_append(&cg->code, "   mov\t\teax, eax\n");
+                } else {
+                    sb_append(&cg->code, "   movsx\t\teax, %s\n", register_to_str(REG_RAX, arg->type->size));
+                }
+                PUSH(RAX);
+            }
+            break;
+        }
+        case TYPE_FLOAT: {
+            if (arg->type->size == 4) {
+                // Promote float to a double
+                POP(RAX);
+                sb_append(&cg->code, "   movd\t\txmm0, eax\n");
+                sb_append(&cg->code, "   cvtss2sd\txmm0, xmm0\n");
+                sb_append(&cg->code, "   movq\t\trax, xmm0\n");
+                PUSH(RAX);
+            }
+            break;
+        }
+        default: break;
+        }
+
+        return;
+    }
+
     switch (arg->type->kind) {
     case TYPE_INTEGER: {
-        if (param->type->kind == TYPE_FLOAT && is_untyped_type(arg->type) && ((TypePrimitive *)arg->type)->kind == PRIMITIVE_UNTYPED_INT) {
+        if (is_c_vararg) {
+            
+        }
+        else if (param->type->kind == TYPE_FLOAT && is_untyped_type(arg->type) && ((TypePrimitive *)arg->type)->kind == PRIMITIVE_UNTYPED_INT) {
             // Convert the untyped int to be a float
             POP(RAX);
             sb_append(&cg->code, "   %s\txmm0, rax\n", cvtsi2ss_or_cvtsi2sd(param->type));
@@ -825,7 +869,7 @@ void adapt_function_argument_to_parameter(CodeGenerator *cg, AstExpr *arg, AstId
             PUSH(RAX);
         } else {
             // We don't go from f64 -> f32 without it needing to have a cast, so we should not hit the following assert!
-            assert(arg->type->size == param->type->size);
+            assert(arg->type->size == param->type->size && "Unexpected f64 argument to f32 parameter adaptation");
         }
         break;
     }
@@ -913,18 +957,40 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
         adapt_function_argument_to_parameter(cg, arg, param);
     }
 
+    int all_arguments_count = func_defn->lowered_return_params.count + call->lowered_arguments.count;
+
     // 3. Pop the arguments into registers or stable temporary locations
-    for (int i = func_defn->lowered_params.count - 1; i >= 0; i--) {
-        AstIdentifier *param = ((AstIdentifier **)func_defn->lowered_params.items)[i];
+    for (int i = all_arguments_count - 1; i >= 0; i--) {
+        bool is_c_vararg = false;
+
+        Type *arg_type = NULL;
+        if (i < func_defn->lowered_return_params.count) {
+            AstIdentifier *param = ((AstIdentifier **)func_defn->lowered_return_params.items)[i];
+            assert(param->type->kind == TYPE_POINTER);
+
+            arg_type = param->type;
+        } else {
+            int user_arg_index = i - func_defn->lowered_return_params.count;
+            AstExpr *arg = ((AstExpr **)call->lowered_arguments.items)[user_arg_index];
+
+            arg_type = arg->type;
+            is_c_vararg = arg->head.flags & AST_FLAG_IS_C_VARARG;
+        }
 
         if (i < 4) {
-            Register reg = get_argument_register_from_index(i, param->type);
-            if (param->type->kind == TYPE_FLOAT) {
-                POP(RAX);
-                sb_append(&cg->code, "   %s\t\t%s, %s\n", movd_or_movq(param->type), register_to_str(reg, 0), REG_A(param->type));
-            } else {
+            if (is_c_vararg) {
+                Register reg = get_argument_register_from_index(i, NULL); // Only get general purpose registers (gpr)
                 POP(register_to_str(reg, 8));
+            } else {
+                Register reg = get_argument_register_from_index(i, arg_type);
+                if (arg_type->kind == TYPE_FLOAT) {
+                    POP(RAX);
+                    sb_append(&cg->code, "   %s\t\t%s, %s\n", movd_or_movq(arg_type), register_to_str(reg, 0), REG_A(arg_type));
+                } else {
+                    POP(register_to_str(reg, 8));
+                }
             }
+
         } else {
             int temp_offset = push_temporary_value(cg->enclosing_function, 8);
             POP(RAX);
@@ -933,9 +999,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     }
 
     // 4. Move arguments to the stack
-    for (int i = 0; i < func_defn->lowered_params.count; i++) {
-        // AstIdentifier *param = ((AstIdentifier **)func_defn->lowered_params.items)[i];
-
+    for (int i = 0; i < all_arguments_count; i++) {
         if (i < 4) {
             // Already in registers
         } else {
@@ -948,6 +1012,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
 
     // Do the actual call
     if (func_defn->is_lambda) {
+        // @Cleanup: This shouldn't be this way!!!
         AstIdentifier *param = lookup_from_scope(cg->parser, cg->current_scope, call->identifer->name);
         assert(param);
         sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", param->stack_offset);
@@ -1656,7 +1721,7 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset, bool offset_
 
 // Adds the string 'string' to global data and moves it into 'reg'
 void emit_add_constant_string(CodeGenerator *cg, char *string, Register reg) {
-    sb_append(&cg->data, "   CS%d DB \"%s\", 0 \n", cg->constants, string);
+    sb_append(&cg->data, "   CS%d DB `%s`, 0 \n", cg->constants, string);
     sb_append(&cg->code, "   mov\t\t%s, CS%d\n", register_to_str(reg, 8), cg->constants);
     cg->constants++;
 }
@@ -2885,7 +2950,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_STRING: {
-            sb_append(&cg->data, "   CS%d DB \"%s\", 0 \n", cg->constants, lit->as.value.string.data);
+            sb_append(&cg->data, "   CS%d DB `%s`, 0 \n", cg->constants, lit->as.value.string.data);
             sb_append(&cg->code, "   mov\t\trax, CS%d\n", cg->constants);
             PUSH(RAX);
             cg->constants++;

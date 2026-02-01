@@ -1,1 +1,3 @@
-sprintf :: (str: *u8, format: string, arg0: int) -> int #extern "C"
+extern "C" {
+    sprintf :: (str: *u8, format: string, arg0: int) -> int;
+}

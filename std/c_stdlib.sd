@@ -1,5 +1,7 @@
-memset  :: (dest: *void, value: int, size: int) -> *void #extern "C"
-malloc  :: (size: int) -> *void #extern "C"
-realloc :: (buffer: *void, new_size: int) -> *void #extern "C"
-free    :: (ptr: *void) #extern "C";
-exit    :: (code: int) #extern "C"
+extern "C" {
+    memset  :: (dest: *void, value: int, size: int) -> *void;
+    malloc  :: (size: int) -> *void;
+    realloc :: (buffer: *void, new_size: int) -> *void;
+    free    :: (ptr: *void);;
+    exit    :: (code: int);
+}

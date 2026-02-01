@@ -1,1 +1,3 @@
-strlen :: (str: string) -> int #extern "C"
+extern "C" {
+    strlen :: (str: string) -> int;
+}

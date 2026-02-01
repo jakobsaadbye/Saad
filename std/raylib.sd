@@ -755,262 +755,264 @@ NPatchLayout :: enum {
 // MAGENTA    :: Color{ 255, 0, 255, 255 };
 // RAYWHITE   :: Color{ 245, 245, 245, 255 };
 
+extern "C" {
+
 //------------------------------------------------------------------------------------
 // Window and Graphics Device Functions (Module: core)
 //------------------------------------------------------------------------------------
 
 // Window-related functions
-InitWindow               :: (width: int, height: int, title: string) #extern "C" // Initialize window and OpenGL context
-CloseWindow              :: () #extern "C" // Close window and unload OpenGL context
-WindowShouldClose        :: () -> bool #extern "C" // Check if application should close (KEY_ESCAPE pressed or windows close icon clicked)
-IsWindowReady            :: () -> bool #extern "C" // Check if window has been initialized successfully
-IsWindowFullscreen       :: () -> bool #extern "C" // Check if window is currently fullscreen
-IsWindowHidden           :: () -> bool #extern "C" // Check if window is currently hidden
-IsWindowMinimized        :: () -> bool #extern "C" // Check if window is currently minimized
-IsWindowMaximized        :: () -> bool #extern "C" // Check if window is currently maximized
-IsWindowFocused          :: () -> bool #extern "C" // Check if window is currently focused
-IsWindowResized          :: () -> bool #extern "C" // Check if window has been resized last frame
-IsWindowState            :: (flag: uint) -> bool #extern "C" // Check if one specific window flag is enabled
-SetWindowState           :: (flags: uint) #extern "C" // Set window configuration state using flags
-ClearWindowState         :: (flags: uint) #extern "C" // Clear window configuration state flags
-ToggleFullscreen         :: () #extern "C" // Toggle window state: fullscreen/windowed, resizes monitor to match window resolution
-ToggleBorderlessWindowed :: () #extern "C" // Toggle window state: borderless windowed, resizes window to match monitor resolution
-MaximizeWindow           :: () #extern "C" // Set window state: maximized, if resizable
-MinimizeWindow           :: () #extern "C" // Set window state: minimized, if resizable
-RestoreWindow            :: () #extern "C" // Set window state: not minimized/maximized
-SetWindowIcon            :: (image: Image) #extern "C" // Set icon for window (single image, RGBA 32bit)
-SetWindowIcons           :: (images: *Image, count: int) #extern "C" // Set icon for window (multiple images, RGBA 32bit)
-SetWindowTitle           :: (title: string) #extern "C" // Set title for window
-SetWindowPosition        :: (x: int, y: int) #extern "C" // Set window position on screen
-SetWindowMonitor         :: (monitor: int) #extern "C" // Set monitor for the current window
-SetWindowMinSize         :: (width: int, height: int) #extern "C" // Set window minimum dimensions (for FLAG_WINDOW_RESIZABLE)
-SetWindowMaxSize         :: (width: int, height: int) #extern "C" // Set window maximum dimensions (for FLAG_WINDOW_RESIZABLE)
-SetWindowSize            :: (width: int, height: int) #extern "C" // Set window dimensions
-SetWindowOpacity         :: (opacity: float) #extern "C" // Set window opacity [0.0f..1.0f]
-SetWindowFocused         :: () #extern "C" // Set window focused
-GetWindowHandle          :: () -> *void #extern "C" // Get native window handle
-GetScreenWidth           :: () -> int #extern "C" // Get current screen width
-GetScreenHeight          :: () -> int #extern "C" // Get current screen height
-GetRenderWidth           :: () -> int #extern "C" // Get current render width (it considers HiDPI)
-GetRenderHeight          :: () -> int #extern "C" // Get current render height (it considers HiDPI)
-GetMonitorCount          :: () -> int #extern "C" // Get number of connected monitors
-GetCurrentMonitor        :: () -> int #extern "C" // Get current monitor where window is placed
-GetMonitorPosition       :: (monitor: int) -> Vector2 #extern "C" // Get specified monitor position
-GetMonitorWidth          :: (monitor: int) -> int #extern "C" // Get specified monitor width (current video mode used by monitor)
-GetMonitorHeight         :: (monitor: int) -> int #extern "C" // Get specified monitor height (current video mode used by monitor)
-GetMonitorPhysicalWidth  :: (monitor: int) -> int #extern "C" // Get specified monitor physical width in millimetres
-GetMonitorPhysicalHeight :: (monitor: int) -> int #extern "C" // Get specified monitor physical height in millimetres
-GetMonitorRefreshRate    :: (monitor: int) -> int #extern "C" // Get specified monitor refresh rate
-GetWindowPosition        :: () -> Vector2 #extern "C" // Get window position XY on monitor
-GetWindowScaleDPI        :: () -> Vector2 #extern "C" // Get window scale DPI factor
-GetMonitorName           :: (monitor: int) -> string #extern "C" // Get the human-readable, UTF-8 encoded name of the specified monitor
-SetClipboardText         :: (text: string) #extern "C" // Set clipboard text content
-GetClipboardText         :: () -> string #extern "C" // Get clipboard text content
-GetClipboardImage        :: () -> Image #extern "C" // Get clipboard image content
-EnableEventWaiting       :: () #extern "C" // Enable waiting for events on EndDrawing(), no automatic event polling
-DisableEventWaiting      :: () #extern "C" // Disable waiting for events on EndDrawing(), automatic events polling
+InitWindow               :: (width: int, height: int, title: string); // Initialize window and OpenGL context
+CloseWindow              :: (); // Close window and unload OpenGL context
+WindowShouldClose        :: () -> bool; // Check if application should close (KEY_ESCAPE pressed or windows close icon clicked)
+IsWindowReady            :: () -> bool; // Check if window has been initialized successfully
+IsWindowFullscreen       :: () -> bool; // Check if window is currently fullscreen
+IsWindowHidden           :: () -> bool; // Check if window is currently hidden
+IsWindowMinimized        :: () -> bool; // Check if window is currently minimized
+IsWindowMaximized        :: () -> bool; // Check if window is currently maximized
+IsWindowFocused          :: () -> bool; // Check if window is currently focused
+IsWindowResized          :: () -> bool; // Check if window has been resized last frame
+IsWindowState            :: (flag: uint) -> bool; // Check if one specific window flag is enabled
+SetWindowState           :: (flags: uint); // Set window configuration state using flags
+ClearWindowState         :: (flags: uint); // Clear window configuration state flags
+ToggleFullscreen         :: (); // Toggle window state: fullscreen/windowed, resizes monitor to match window resolution
+ToggleBorderlessWindowed :: (); // Toggle window state: borderless windowed, resizes window to match monitor resolution
+MaximizeWindow           :: (); // Set window state: maximized, if resizable
+MinimizeWindow           :: (); // Set window state: minimized, if resizable
+RestoreWindow            :: (); // Set window state: not minimized/maximized
+SetWindowIcon            :: (image: Image); // Set icon for window (single image, RGBA 32bit)
+SetWindowIcons           :: (images: *Image, count: int); // Set icon for window (multiple images, RGBA 32bit)
+SetWindowTitle           :: (title: string); // Set title for window
+SetWindowPosition        :: (x: int, y: int); // Set window position on screen
+SetWindowMonitor         :: (monitor: int); // Set monitor for the current window
+SetWindowMinSize         :: (width: int, height: int); // Set window minimum dimensions (for FLAG_WINDOW_RESIZABLE)
+SetWindowMaxSize         :: (width: int, height: int); // Set window maximum dimensions (for FLAG_WINDOW_RESIZABLE)
+SetWindowSize            :: (width: int, height: int); // Set window dimensions
+SetWindowOpacity         :: (opacity: float); // Set window opacity [0.0f..1.0f]
+SetWindowFocused         :: (); // Set window focused
+GetWindowHandle          :: () -> *void; // Get native window handle
+GetScreenWidth           :: () -> int; // Get current screen width
+GetScreenHeight          :: () -> int; // Get current screen height
+GetRenderWidth           :: () -> int; // Get current render width (it considers HiDPI)
+GetRenderHeight          :: () -> int; // Get current render height (it considers HiDPI)
+GetMonitorCount          :: () -> int; // Get number of connected monitors
+GetCurrentMonitor        :: () -> int; // Get current monitor where window is placed
+GetMonitorPosition       :: (monitor: int) -> Vector2; // Get specified monitor position
+GetMonitorWidth          :: (monitor: int) -> int; // Get specified monitor width (current video mode used by monitor)
+GetMonitorHeight         :: (monitor: int) -> int; // Get specified monitor height (current video mode used by monitor)
+GetMonitorPhysicalWidth  :: (monitor: int) -> int; // Get specified monitor physical width in millimetres
+GetMonitorPhysicalHeight :: (monitor: int) -> int; // Get specified monitor physical height in millimetres
+GetMonitorRefreshRate    :: (monitor: int) -> int; // Get specified monitor refresh rate
+GetWindowPosition        :: () -> Vector2; // Get window position XY on monitor
+GetWindowScaleDPI        :: () -> Vector2; // Get window scale DPI factor
+GetMonitorName           :: (monitor: int) -> string; // Get the human-readable, UTF-8 encoded name of the specified monitor
+SetClipboardText         :: (text: string); // Set clipboard text content
+GetClipboardText         :: () -> string; // Get clipboard text content
+GetClipboardImage        :: () -> Image; // Get clipboard image content
+EnableEventWaiting       :: (); // Enable waiting for events on EndDrawing(), no automatic event polling
+DisableEventWaiting      :: (); // Disable waiting for events on EndDrawing(), automatic events polling
 
 // Cursor-related functions
-ShowCursor       :: () #extern "C" // Shows cursor
-HideCursor       :: () #extern "C" // Hides cursor
-IsCursorHidden   :: () -> bool #extern "C" // Check if cursor is not visible
-EnableCursor     :: () #extern "C" // Enables cursor (unlock cursor)
-DisableCursor    :: () #extern "C" // Disables cursor (lock cursor)
-IsCursorOnScreen :: () -> bool #extern "C" // Check if cursor is on the screen
+ShowCursor       :: (); // Shows cursor
+HideCursor       :: (); // Hides cursor
+IsCursorHidden   :: () -> bool; // Check if cursor is not visible
+EnableCursor     :: (); // Enables cursor (unlock cursor)
+DisableCursor    :: (); // Disables cursor (lock cursor)
+IsCursorOnScreen :: () -> bool; // Check if cursor is on the screen
 
 // Drawing-related functions
-ClearBackground   :: (color: Color) #extern "C" // Set background color (framebuffer clear color)
-BeginDrawing      :: () #extern "C" // Setup canvas (framebuffer) to start drawing
-EndDrawing        :: () #extern "C" // End canvas drawing and swap buffers (double buffering)
-BeginMode2D       :: (camera: Camera2D) #extern "C" // Begin 2D mode with custom camera (2D)
-EndMode2D         :: () #extern "C" // Ends 2D mode with custom camera
-BeginMode3D       :: (camera: Camera3D) #extern "C" // Begin 3D mode with custom camera (3D)
-EndMode3D         :: () #extern "C" // Ends 3D mode and returns to default 2D orthographic mode
-BeginTextureMode  :: (target: Texture) #extern "C" // Begin drawing to render texture
-EndTextureMode    :: () #extern "C" // Ends drawing to render texture
-BeginShaderMode   :: (shader: Shader) #extern "C" // Begin custom shader drawing
-EndShaderMode     :: () #extern "C" // End custom shader drawing (use default shader)
-BeginBlendMode    :: (mode: int) #extern "C" // Begin blending mode (alpha, additive, multiplied, subtract, custom)
-EndBlendMode      :: () #extern "C" // End blending mode (reset to default: alpha blending)
-BeginScissorMode  :: (x: int, y: int, width: int, height: int) #extern "C" // Begin scissor mode (define screen area for following drawing)
-EndScissorMode    :: () #extern "C" // End scissor mode
-BeginVrStereoMode :: (config: VrStereoConfig) #extern "C" // Begin stereo rendering (requires VR simulator)
-EndVrStereoMode   :: () #extern "C" // End stereo rendering (requires VR simulator)
+ClearBackground   :: (color: Color); // Set background color (framebuffer clear color)
+BeginDrawing      :: (); // Setup canvas (framebuffer) to start drawing
+EndDrawing        :: (); // End canvas drawing and swap buffers (double buffering)
+BeginMode2D       :: (camera: Camera2D); // Begin 2D mode with custom camera (2D)
+EndMode2D         :: (); // Ends 2D mode with custom camera
+BeginMode3D       :: (camera: Camera3D); // Begin 3D mode with custom camera (3D)
+EndMode3D         :: (); // Ends 3D mode and returns to default 2D orthographic mode
+BeginTextureMode  :: (target: Texture); // Begin drawing to render texture
+EndTextureMode    :: (); // Ends drawing to render texture
+BeginShaderMode   :: (shader: Shader); // Begin custom shader drawing
+EndShaderMode     :: (); // End custom shader drawing (use default shader)
+BeginBlendMode    :: (mode: int); // Begin blending mode (alpha, additive, multiplied, subtract, custom)
+EndBlendMode      :: (); // End blending mode (reset to default: alpha blending)
+BeginScissorMode  :: (x: int, y: int, width: int, height: int); // Begin scissor mode (define screen area for following drawing)
+EndScissorMode    :: (); // End scissor mode
+BeginVrStereoMode :: (config: VrStereoConfig); // Begin stereo rendering (requires VR simulator)
+EndVrStereoMode   :: (); // End stereo rendering (requires VR simulator)
 
 // VR stereo config functions for VR simulator
-LoadVrStereoConfig   :: (device: VrDeviceInfo) -> VrStereoConfig #extern "C" // Load VR stereo config for VR simulator device parameters
-UnloadVrStereoConfig :: (config: VrStereoConfig) #extern "C" // Unload VR stereo config
+LoadVrStereoConfig   :: (device: VrDeviceInfo) -> VrStereoConfig; // Load VR stereo config for VR simulator device parameters
+UnloadVrStereoConfig :: (config: VrStereoConfig); // Unload VR stereo config
 
 // Shader management functions
-LoadShader              :: (vsFileName: string, fsFileName: string) -> Shader #extern "C" // Load shader from files and bind default locations
-LoadShaderFromMemory    :: (vsCode: string, fsCode: string) -> Shader #extern "C" // Load shader from code strings and bind default locations
-IsShaderValid           :: (shader: Shader) -> bool #extern "C" // Check if a shader is valid (loaded on GPU)
-GetShaderLocation       :: (shader: Shader, uniformName: string) -> int #extern "C" // Get shader uniform location
-GetShaderLocationAttrib :: (shader: Shader, attribName: string) -> int #extern "C" // Get shader attribute location
-SetShaderValue          :: (shader: Shader, locIndex: int, value: *void, uniformType: int) #extern "C" // Set shader uniform value
-SetShaderValueV         :: (shader: Shader, locIndex: int, value: *void, uniformType: int, count: int) #extern "C" // Set shader uniform value vector
-SetShaderValueMatrix    :: (shader: Shader, locIndex: int, mat: Matrix) #extern "C" // Set shader uniform value (matrix 4x4)
-SetShaderValueTexture   :: (shader: Shader, locIndex: int, texture: Texture) #extern "C" // Set shader uniform value for texture (sampler2d)
-UnloadShader            :: (shader: Shader) #extern "C" // Unload shader from GPU memory (VRAM)
+LoadShader              :: (vsFileName: string, fsFileName: string) -> Shader; // Load shader from files and bind default locations
+LoadShaderFromMemory    :: (vsCode: string, fsCode: string) -> Shader; // Load shader from code strings and bind default locations
+IsShaderValid           :: (shader: Shader) -> bool; // Check if a shader is valid (loaded on GPU)
+GetShaderLocation       :: (shader: Shader, uniformName: string) -> int; // Get shader uniform location
+GetShaderLocationAttrib :: (shader: Shader, attribName: string) -> int; // Get shader attribute location
+SetShaderValue          :: (shader: Shader, locIndex: int, value: *void, uniformType: int); // Set shader uniform value
+SetShaderValueV         :: (shader: Shader, locIndex: int, value: *void, uniformType: int, count: int); // Set shader uniform value vector
+SetShaderValueMatrix    :: (shader: Shader, locIndex: int, mat: Matrix); // Set shader uniform value (matrix 4x4)
+SetShaderValueTexture   :: (shader: Shader, locIndex: int, texture: Texture); // Set shader uniform value for texture (sampler2d)
+UnloadShader            :: (shader: Shader); // Unload shader from GPU memory (VRAM)
 
 // Screen-space-related functions
-GetScreenToWorldRay   :: (position: Vector2, camera: Camera3D) -> Ray #extern "C" // Get a ray trace from screen position (i.e mouse)
-GetScreenToWorldRayEx :: (position: Vector2, camera: Camera3D, width: int, height: int) -> Ray #extern "C" // Get a ray trace from screen position (i.e mouse) in a viewport
-GetWorldToScreen      :: (position: Vector3, camera: Camera3D) -> Vector2 #extern "C" // Get the screen space position for a 3d world space position
-GetWorldToScreenEx    :: (position: Vector3, camera: Camera3D, width: int, height: int) -> Vector2 #extern "C" // Get size position for a 3d world space position
-GetWorldToScreen2D    :: (position: Vector2, camera: Camera2D) -> Vector2 #extern "C" // Get the screen space position for a 2d camera world space position
-GetScreenToWorld2D    :: (position: Vector2, camera: Camera2D) -> Vector2 #extern "C" // Get the world space position for a 2d camera screen space position
-GetCameraMatrix       :: (camera: Camera3D) -> Matrix #extern "C" // Get camera transform matrix (view matrix)
-GetCameraMatrix2D     :: (camera: Camera2D) -> Matrix #extern "C" // Get camera 2d transform matrix
+GetScreenToWorldRay   :: (position: Vector2, camera: Camera3D) -> Ray; // Get a ray trace from screen position (i.e mouse)
+GetScreenToWorldRayEx :: (position: Vector2, camera: Camera3D, width: int, height: int) -> Ray; // Get a ray trace from screen position (i.e mouse) in a viewport
+GetWorldToScreen      :: (position: Vector3, camera: Camera3D) -> Vector2; // Get the screen space position for a 3d world space position
+GetWorldToScreenEx    :: (position: Vector3, camera: Camera3D, width: int, height: int) -> Vector2; // Get size position for a 3d world space position
+GetWorldToScreen2D    :: (position: Vector2, camera: Camera2D) -> Vector2; // Get the screen space position for a 2d camera world space position
+GetScreenToWorld2D    :: (position: Vector2, camera: Camera2D) -> Vector2; // Get the world space position for a 2d camera screen space position
+GetCameraMatrix       :: (camera: Camera3D) -> Matrix; // Get camera transform matrix (view matrix)
+GetCameraMatrix2D     :: (camera: Camera2D) -> Matrix; // Get camera 2d transform matrix
 
 // Timing-related functions
-SetTargetFPS :: (fps: int) #extern "C" // Set target FPS (maximum)
-GetFrameTime :: () -> float #extern "C" // Get time in seconds for last frame drawn (delta time)
-GetTime      :: () -> f64 #extern "C" // Get elapsed time in seconds since InitWindow()
-GetFPS       :: () -> int #extern "C" // Get current FPS
+SetTargetFPS :: (fps: int); // Set target FPS (maximum)
+GetFrameTime :: () -> float; // Get time in seconds for last frame drawn (delta time)
+GetTime      :: () -> f64; // Get elapsed time in seconds since InitWindow()
+GetFPS       :: () -> int; // Get current FPS
 
 // Custom frame control functions
-SwapScreenBuffer :: () #extern "C" // Swap back buffer with front buffer (screen drawing)
-PollInputEvents  :: () #extern "C" // Register all input events
-WaitTime         :: (seconds: f64) #extern "C" // Wait for some time (halt program execution)
+SwapScreenBuffer :: (); // Swap back buffer with front buffer (screen drawing)
+PollInputEvents  :: (); // Register all input events
+WaitTime         :: (seconds: f64); // Wait for some time (halt program execution)
 
 // Random values generation functions
-SetRandomSeed        :: (seed: uint) #extern "C" // Set the seed for the random number generator
-GetRandomValue       :: (min: int, max: int) -> int #extern "C" // Get a random value between min and max (both included)
-LoadRandomSequence   :: (count: uint, min: int, max: int) -> *int #extern "C" // Load random values sequence, no values repeated
-UnloadRandomSequence :: (sequence: *int) #extern "C" // Unload random values sequence
+SetRandomSeed        :: (seed: uint); // Set the seed for the random number generator
+GetRandomValue       :: (min: int, max: int) -> int; // Get a random value between min and max (both included)
+LoadRandomSequence   :: (count: uint, min: int, max: int) -> *int; // Load random values sequence, no values repeated
+UnloadRandomSequence :: (sequence: *int); // Unload random values sequence
 
 // Misc. functions
-TakeScreenshot :: (fileName: string) #extern "C" // Takes a screenshot of current screen (filename extension defines format)
-SetConfigFlags :: (flags: uint) #extern "C" // Setup init configuration flags (view FLAGS)
-OpenURL        :: (url: string) #extern "C" // Open URL with default system browser (if available)
+TakeScreenshot :: (fileName: string); // Takes a screenshot of current screen (filename extension defines format)
+SetConfigFlags :: (flags: uint); // Setup init configuration flags (view FLAGS)
+OpenURL        :: (url: string); // Open URL with default system browser (if available)
 
 // Utils
-SetTraceLogLevel :: (logLevel: int) #extern "C" // Set the current threshold (minimum) log level
-MemAlloc         :: (size: uint) -> *void #extern "C" // Internal memory allocator
-MemRealloc       :: (ptr: *void, size: uint) -> *void #extern "C" // Internal memory reallocator
-MemFree          :: (ptr: *void) #extern "C" // Internal memory free
+SetTraceLogLevel :: (logLevel: int); // Set the current threshold (minimum) log level
+MemAlloc         :: (size: uint) -> *void; // Internal memory allocator
+MemRealloc       :: (ptr: *void, size: uint) -> *void; // Internal memory reallocator
+MemFree          :: (ptr: *void); // Internal memory free
 
 // Files management functions
-LoadFileData     :: (fileName: string, dataSize: *int) -> *u8 #extern "C" // Load file data as byte array (read)
-UnloadFileData   :: (data: *u8) #extern "C" // Unload file data allocated by LoadFileData()
-SaveFileData     :: (fileName: string, data: *void, dataSize: int) -> bool #extern "C" // Save data to file from byte array (write), returns true on success
-ExportDataAsCode :: (data: *u8, dataSize: int, fileName: string) -> bool #extern "C" // Export data to code (.h), returns true on success
-LoadFileText     :: (fileName: string) -> string #extern "C" // Load text data from file (read), returns a '\0' terminated string
-UnloadFileText   :: (text: string) #extern "C" // Unload file text data allocated by LoadFileText()
-SaveFileText     :: (fileName: string, text: string) -> bool #extern "C" // Save text data to file (write), string must be '\0' terminated, returns true on success
+LoadFileData     :: (fileName: string, dataSize: *int) -> *u8; // Load file data as byte array (read)
+UnloadFileData   :: (data: *u8); // Unload file data allocated by LoadFileData()
+SaveFileData     :: (fileName: string, data: *void, dataSize: int) -> bool; // Save data to file from byte array (write), returns true on success
+ExportDataAsCode :: (data: *u8, dataSize: int, fileName: string) -> bool; // Export data to code (.h), returns true on success
+LoadFileText     :: (fileName: string) -> string; // Load text data from file (read), returns a '\0' terminated string
+UnloadFileText   :: (text: string); // Unload file text data allocated by LoadFileText()
+SaveFileText     :: (fileName: string, text: string) -> bool; // Save text data to file (write), string must be '\0' terminated, returns true on success
 
 // File system functions
-FileExists              :: (fileName: string) -> bool #extern "C" // Check if file exists
-DirectoryExists         :: (dirPath: string) -> bool #extern "C" // Check if a directory path exists
-IsFileExtension         :: (fileName: string, ext: string) -> bool #extern "C" // Check file extension (including point: .png, .wav)
-GetFileLength           :: (fileName: string) -> int #extern "C" // Get file length in bytes (NOTE: GetFileSize() conflicts with windows.h)
-GetFileExtension        :: (fileName: string) -> string #extern "C" // Get pointer to extension for a filename string (includes dot: '.png')
-GetFileName             :: (filePath: string) -> string #extern "C" // Get pointer to filename for a path string
-GetFileNameWithoutExt   :: (filePath: string) -> string #extern "C" // Get filename string without extension (uses static string)
-GetDirectoryPath        :: (filePath: string) -> string #extern "C" // Get full path for a given fileName with path (uses static string)
-GetPrevDirectoryPath    :: (dirPath: string) -> string #extern "C" // Get previous directory path for a given path (uses static string)
-GetWorkingDirectory     :: () -> string #extern "C" // Get current working directory (uses static string)
-GetApplicationDirectory :: () -> string #extern "C" // Get the directory of the running application (uses static string)
-MakeDirectory           :: (dirPath: string) -> int #extern "C" // Create directories (including full path requested), returns 0 on success
-ChangeDirectory         :: (dir: string) -> bool #extern "C" // Change working directory, return true on success
-IsPathFile              :: (path: string) -> bool #extern "C" // Check if a given path is a file or a directory
-IsFileNameValid         :: (fileName: string) -> bool #extern "C" // Check if fileName is valid for the platform/OS
-LoadDirectoryFiles      :: (dirPath: string) -> FilePathList #extern "C" // Load directory filepaths
-LoadDirectoryFilesEx    :: (basePath: string, filter: string, scanSubdirs: bool) -> FilePathList #extern "C" // Load directory filepaths with extension filtering and recursive directory scan
-UnloadDirectoryFiles    :: (files: FilePathList) #extern "C" // Unload filepaths
-IsFileDropped           :: () -> bool #extern "C" // Check if a file has been dropped into window
-LoadDroppedFiles        :: () -> FilePathList #extern "C" // Load dropped filepaths
-UnloadDroppedFiles      :: (files: FilePathList) #extern "C" // Unload dropped filepaths
-GetFileModTime          :: (fileName: string) -> s64 #extern "C" // Get file modification time (last write time)
+FileExists              :: (fileName: string) -> bool; // Check if file exists
+DirectoryExists         :: (dirPath: string) -> bool; // Check if a directory path exists
+IsFileExtension         :: (fileName: string, ext: string) -> bool; // Check file extension (including point: .png, .wav)
+GetFileLength           :: (fileName: string) -> int; // Get file length in bytes (NOTE: GetFileSize() conflicts with windows.h)
+GetFileExtension        :: (fileName: string) -> string; // Get pointer to extension for a filename string (includes dot: '.png')
+GetFileName             :: (filePath: string) -> string; // Get pointer to filename for a path string
+GetFileNameWithoutExt   :: (filePath: string) -> string; // Get filename string without extension (uses static string)
+GetDirectoryPath        :: (filePath: string) -> string; // Get full path for a given fileName with path (uses static string)
+GetPrevDirectoryPath    :: (dirPath: string) -> string; // Get previous directory path for a given path (uses static string)
+GetWorkingDirectory     :: () -> string; // Get current working directory (uses static string)
+GetApplicationDirectory :: () -> string; // Get the directory of the running application (uses static string)
+MakeDirectory           :: (dirPath: string) -> int; // Create directories (including full path requested), returns 0 on success
+ChangeDirectory         :: (dir: string) -> bool; // Change working directory, return true on success
+IsPathFile              :: (path: string) -> bool; // Check if a given path is a file or a directory
+IsFileNameValid         :: (fileName: string) -> bool; // Check if fileName is valid for the platform/OS
+LoadDirectoryFiles      :: (dirPath: string) -> FilePathList; // Load directory filepaths
+LoadDirectoryFilesEx    :: (basePath: string, filter: string, scanSubdirs: bool) -> FilePathList; // Load directory filepaths with extension filtering and recursive directory scan
+UnloadDirectoryFiles    :: (files: FilePathList); // Unload filepaths
+IsFileDropped           :: () -> bool; // Check if a file has been dropped into window
+LoadDroppedFiles        :: () -> FilePathList; // Load dropped filepaths
+UnloadDroppedFiles      :: (files: FilePathList); // Unload dropped filepaths
+GetFileModTime          :: (fileName: string) -> s64; // Get file modification time (last write time)
 
 // Compression/Encoding functionality
-CompressData                  :: (data: *u8, dataSize: int, compDataSize: *int) -> *u8 #extern "C" // Compress data (DEFLATE algorithm), memory must be MemFree()
-DecompressData                :: (compData: *u8, compDataSize: int, dataSize: *int) -> *u8 #extern "C" // Decompress data (DEFLATE algorithm), memory must be MemFree()
-EncodeDataBase64              :: (data: *u8, dataSize: int, outputSize: *int) -> string #extern "C" // Encode data to Base64 string, memory must be MemFree()
-DecodeDataBase64              :: (data: *u8, outputSize: *int) -> *u8 #extern "C" // Decode Base64 string data, memory must be MemFree()
-ComputeCRC32                  :: (data: *u8, dataSize: int) -> uint #extern "C" // Compute CRC32 hash code
-ComputeMD5                    :: (data: *u8, dataSize: int) -> *uint #extern "C" // Compute MD5 hash code, returns static int[4] (16 bytes)
-ComputeSHA1                   :: (data: *u8, dataSize: int) -> *uint #extern "C" // Compute SHA1 hash code, returns static int[5] (20 bytes)
+CompressData                  :: (data: *u8, dataSize: int, compDataSize: *int) -> *u8; // Compress data (DEFLATE algorithm), memory must be MemFree()
+DecompressData                :: (compData: *u8, compDataSize: int, dataSize: *int) -> *u8; // Decompress data (DEFLATE algorithm), memory must be MemFree()
+EncodeDataBase64              :: (data: *u8, dataSize: int, outputSize: *int) -> string; // Encode data to Base64 string, memory must be MemFree()
+DecodeDataBase64              :: (data: *u8, outputSize: *int) -> *u8; // Decode Base64 string data, memory must be MemFree()
+ComputeCRC32                  :: (data: *u8, dataSize: int) -> uint; // Compute CRC32 hash code
+ComputeMD5                    :: (data: *u8, dataSize: int) -> *uint; // Compute MD5 hash code, returns static int[4] (16 bytes)
+ComputeSHA1                   :: (data: *u8, dataSize: int) -> *uint; // Compute SHA1 hash code, returns static int[5] (20 bytes)
 
 // Automation events functionality
-LoadAutomationEventList       :: (fileName: string) -> AutomationEventList #extern "C" // Load automation events list from file, NULL for empty list, capacity = MAX_AUTOMATION_EVENTS
-UnloadAutomationEventList     :: (list: AutomationEventList) #extern "C" // Unload automation events list from file
-ExportAutomationEventList     :: (list: AutomationEventList, fileName: string) -> bool #extern "C" // Export automation events list as text file
-SetAutomationEventList        :: (list: *AutomationEventList) #extern "C" // Set automation event list to record to
-SetAutomationEventBaseFrame   :: (frame: int) #extern "C" // Set automation event internal base frame to start recording
-StartAutomationEventRecording :: () #extern "C" // Start recording
+LoadAutomationEventList       :: (fileName: string) -> AutomationEventList; // Load automation events list from file, NULL for empty list, capacity = MAX_AUTOMATION_EVENTS
+UnloadAutomationEventList     :: (list: AutomationEventList); // Unload automation events list from file
+ExportAutomationEventList     :: (list: AutomationEventList, fileName: string) -> bool; // Export automation events list as text file
+SetAutomationEventList        :: (list: *AutomationEventList); // Set automation event list to record to
+SetAutomationEventBaseFrame   :: (frame: int); // Set automation event internal base frame to start recording
+StartAutomationEventRecording :: (); // Start recording
 // Automation events functionality (Module: core)
-StopAutomationEventRecording :: () #extern "C" // Stop recording automation events
-PlayAutomationEvent          :: (event: AutomationEvent) #extern "C" // Play a recorded automation event
+StopAutomationEventRecording :: (); // Stop recording automation events
+PlayAutomationEvent          :: (event: AutomationEvent); // Play a recorded automation event
 
 //------------------------------------------------------------------------------------
 // Input Handling Functions (Module: core)
 //------------------------------------------------------------------------------------
 
 // Input-related functions: keyboard
-IsKeyPressed       :: (key: KeyboardKey) -> bool #extern "C" // Check if a key has been pressed once
-IsKeyPressedRepeat :: (key: KeyboardKey) -> bool #extern "C" // Check if a key has been pressed again
-IsKeyDown          :: (key: KeyboardKey) -> bool #extern "C" // Check if a key is being pressed
-IsKeyReleased      :: (key: KeyboardKey) -> bool #extern "C" // Check if a key has been released once
-IsKeyUp            :: (key: KeyboardKey) -> bool #extern "C" // Check if a key is NOT being pressed
-GetKeyPressed      :: () -> KeyboardKey #extern "C" // Get key pressed (keycode), call it multiple times for keys queued, returns 0 when the queue is empty
-GetCharPressed     :: () -> KeyboardKey #extern "C" // Get char pressed (unicode), call it multiple times for chars queued, returns 0 when the queue is empty
-SetExitKey         :: (key: KeyboardKey) #extern "C" // Set a custom key to exit program (default is ESC)
+IsKeyPressed       :: (key: KeyboardKey) -> bool; // Check if a key has been pressed once
+IsKeyPressedRepeat :: (key: KeyboardKey) -> bool; // Check if a key has been pressed again
+IsKeyDown          :: (key: KeyboardKey) -> bool; // Check if a key is being pressed
+IsKeyReleased      :: (key: KeyboardKey) -> bool; // Check if a key has been released once
+IsKeyUp            :: (key: KeyboardKey) -> bool; // Check if a key is NOT being pressed
+GetKeyPressed      :: () -> KeyboardKey; // Get key pressed (keycode), call it multiple times for keys queued, returns 0 when the queue is empty
+GetCharPressed     :: () -> KeyboardKey; // Get char pressed (unicode), call it multiple times for chars queued, returns 0 when the queue is empty
+SetExitKey         :: (key: KeyboardKey); // Set a custom key to exit program (default is ESC)
 
 // Input-related functions: gamepads
-IsGamepadAvailable      :: (gamepad: int) -> bool #extern "C" // Check if a gamepad is available
-GetGamepadName          :: (gamepad: int) -> string #extern "C" // Get gamepad internal name id
-IsGamepadButtonPressed  :: (gamepad: int, button: int) -> bool #extern "C" // Check if a gamepad button has been pressed once
-IsGamepadButtonDown     :: (gamepad: int, button: int) -> bool #extern "C" // Check if a gamepad button is being pressed
-IsGamepadButtonReleased :: (gamepad: int, button: int) -> bool #extern "C" // Check if a gamepad button has been released once
-IsGamepadButtonUp       :: (gamepad: int, button: int) -> bool #extern "C" // Check if a gamepad button is NOT being pressed
-GetGamepadButtonPressed :: () -> int #extern "C" // Get the last gamepad button pressed
-GetGamepadAxisCount     :: (gamepad: int) -> int #extern "C" // Get gamepad axis count for a gamepad
-GetGamepadAxisMovement  :: (gamepad: int, axis: int) -> float #extern "C" // Get axis movement value for a gamepad axis
-SetGamepadMappings      :: (mappings: string) -> int #extern "C" // Set internal gamepad mappings (SDL_GameControllerDB)
-SetGamepadVibration     :: (gamepad: int, leftMotor: float, rightMotor: float, duration: float) #extern "C" // Set gamepad vibration for both motors (duration in seconds)
+IsGamepadAvailable      :: (gamepad: int) -> bool; // Check if a gamepad is available
+GetGamepadName          :: (gamepad: int) -> string; // Get gamepad internal name id
+IsGamepadButtonPressed  :: (gamepad: int, button: int) -> bool; // Check if a gamepad button has been pressed once
+IsGamepadButtonDown     :: (gamepad: int, button: int) -> bool; // Check if a gamepad button is being pressed
+IsGamepadButtonReleased :: (gamepad: int, button: int) -> bool; // Check if a gamepad button has been released once
+IsGamepadButtonUp       :: (gamepad: int, button: int) -> bool; // Check if a gamepad button is NOT being pressed
+GetGamepadButtonPressed :: () -> int; // Get the last gamepad button pressed
+GetGamepadAxisCount     :: (gamepad: int) -> int; // Get gamepad axis count for a gamepad
+GetGamepadAxisMovement  :: (gamepad: int, axis: int) -> float; // Get axis movement value for a gamepad axis
+SetGamepadMappings      :: (mappings: string) -> int; // Set internal gamepad mappings (SDL_GameControllerDB)
+SetGamepadVibration     :: (gamepad: int, leftMotor: float, rightMotor: float, duration: float); // Set gamepad vibration for both motors (duration in seconds)
 
 // Input-related functions: mouse
-IsMouseButtonPressed  :: (button: MouseButton) -> bool #extern "C" // Check if a mouse button has been pressed once
-IsMouseButtonDown     :: (button: MouseButton) -> bool #extern "C" // Check if a mouse button is being pressed
-IsMouseButtonReleased :: (button: MouseButton) -> bool #extern "C" // Check if a mouse button has been released once
-IsMouseButtonUp       :: (button: MouseButton) -> bool #extern "C" // Check if a mouse button is NOT being pressed
-GetMouseX             :: () -> int #extern "C" // Get mouse position X
-GetMouseY             :: () -> int #extern "C" // Get mouse position Y
-GetMousePosition      :: () -> Vector2 #extern "C" // Get mouse position XY
-GetMouseDelta         :: () -> Vector2 #extern "C" // Get mouse delta between frames
-SetMousePosition      :: (x: int, y: int) #extern "C" // Set mouse position XY
-SetMouseOffset        :: (offsetX: int, offsetY: int) #extern "C" // Set mouse offset
-SetMouseScale         :: (scaleX: float, scaleY: float) #extern "C" // Set mouse scaling
-GetMouseWheelMove     :: () -> float #extern "C" // Get mouse wheel movement for X or Y, whichever is larger
-GetMouseWheelMoveV    :: () -> Vector2 #extern "C" // Get mouse wheel movement for both X and Y
-SetMouseCursor        :: (cursor: int) #extern "C" // Set mouse cursor
+IsMouseButtonPressed  :: (button: MouseButton) -> bool; // Check if a mouse button has been pressed once
+IsMouseButtonDown     :: (button: MouseButton) -> bool; // Check if a mouse button is being pressed
+IsMouseButtonReleased :: (button: MouseButton) -> bool; // Check if a mouse button has been released once
+IsMouseButtonUp       :: (button: MouseButton) -> bool; // Check if a mouse button is NOT being pressed
+GetMouseX             :: () -> int; // Get mouse position X
+GetMouseY             :: () -> int; // Get mouse position Y
+GetMousePosition      :: () -> Vector2; // Get mouse position XY
+GetMouseDelta         :: () -> Vector2; // Get mouse delta between frames
+SetMousePosition      :: (x: int, y: int); // Set mouse position XY
+SetMouseOffset        :: (offsetX: int, offsetY: int); // Set mouse offset
+SetMouseScale         :: (scaleX: float, scaleY: float); // Set mouse scaling
+GetMouseWheelMove     :: () -> float; // Get mouse wheel movement for X or Y, whichever is larger
+GetMouseWheelMoveV    :: () -> Vector2; // Get mouse wheel movement for both X and Y
+SetMouseCursor        :: (cursor: int); // Set mouse cursor
 
 // Input-related functions: touch
-GetTouchX          :: () -> int #extern "C" // Get touch position X for touch point 0 (relative to screen size)
-GetTouchY          :: () -> int #extern "C" // Get touch position Y for touch point 0 (relative to screen size)
-GetTouchPosition   :: (index: int) -> Vector2 #extern "C" // Get touch position XY for a touch point index (relative to screen size)
-GetTouchPointId    :: (index: int) -> int #extern "C" // Get touch point identifier for given index
-GetTouchPointCount :: () -> int #extern "C" // Get number of touch points
+GetTouchX          :: () -> int; // Get touch position X for touch point 0 (relative to screen size)
+GetTouchY          :: () -> int; // Get touch position Y for touch point 0 (relative to screen size)
+GetTouchPosition   :: (index: int) -> Vector2; // Get touch position XY for a touch point index (relative to screen size)
+GetTouchPointId    :: (index: int) -> int; // Get touch point identifier for given index
+GetTouchPointCount :: () -> int; // Get number of touch points
 
 //------------------------------------------------------------------------------------
 // Gestures and Touch Handling Functions (Module: rgestures)
 //------------------------------------------------------------------------------------
-SetGesturesEnabled     :: (flags: uint) #extern "C" // Enable a set of gestures using flags
-IsGestureDetected      :: (gesture: uint) -> bool #extern "C" // Check if a gesture have been detected
-GetGestureDetected     :: () -> int #extern "C" // Get latest detected gesture
-GetGestureHoldDuration :: () -> float #extern "C" // Get gesture hold time in seconds
-GetGestureDragVector   :: () -> Vector2 #extern "C" // Get gesture drag vector
-GetGestureDragAngle    :: () -> float #extern "C" // Get gesture drag angle
-GetGesturePinchVector  :: () -> Vector2 #extern "C" // Get gesture pinch delta
-GetGesturePinchAngle   :: () -> float #extern "C" // Get gesture pinch angle
+SetGesturesEnabled     :: (flags: uint); // Enable a set of gestures using flags
+IsGestureDetected      :: (gesture: uint) -> bool; // Check if a gesture have been detected
+GetGestureDetected     :: () -> int; // Get latest detected gesture
+GetGestureHoldDuration :: () -> float; // Get gesture hold time in seconds
+GetGestureDragVector   :: () -> Vector2; // Get gesture drag vector
+GetGestureDragAngle    :: () -> float; // Get gesture drag angle
+GetGesturePinchVector  :: () -> Vector2; // Get gesture pinch delta
+GetGesturePinchAngle   :: () -> float; // Get gesture pinch angle
 
 //------------------------------------------------------------------------------------
 // Camera System Functions (Module: rcamera)
 //------------------------------------------------------------------------------------
-UpdateCamera    :: (camera: *Camera3D, mode: CameraMode) #extern "C" // Update camera position for selected mode
-UpdateCameraPro :: (camera: *Camera3D, movement: Vector3, rotation: Vector3, zoom: float) #extern "C" // Update camera movement/rotation
+UpdateCamera    :: (camera: *Camera3D, mode: CameraMode); // Update camera position for selected mode
+UpdateCameraPro :: (camera: *Camera3D, movement: Vector3, rotation: Vector3, zoom: float); // Update camera movement/rotation
 
 //------------------------------------------------------------------------------------
 // Basic Shapes Drawing Functions (Module: shapes)
@@ -1018,80 +1020,80 @@ UpdateCameraPro :: (camera: *Camera3D, movement: Vector3, rotation: Vector3, zoo
 // Set texture and rectangle to be used on shapes drawing
 // NOTE: It can be useful when using basic shapes and one single font,
 // defining a font char white rectangle would allow drawing everything in a single draw call
-SetShapesTexture          :: (texture: Texture, source: Rectangle) #extern "C" // Set texture and rectangle to be used on shapes drawing
-GetShapesTexture          :: () -> Texture #extern "C" // Get texture that is used for shapes drawing
-GetShapesTextureRectangle :: () -> Rectangle #extern "C" // Get texture source rectangle that is used for shapes drawing
+SetShapesTexture          :: (texture: Texture, source: Rectangle); // Set texture and rectangle to be used on shapes drawing
+GetShapesTexture          :: () -> Texture; // Get texture that is used for shapes drawing
+GetShapesTextureRectangle :: () -> Rectangle; // Get texture source rectangle that is used for shapes drawing
 
 // Basic shapes drawing functions
-DrawPixel                   :: (posX: int, posY: int, color: Color) #extern "C" // Draw a pixel using geometry [Can be slow, use with care]
-DrawPixelV                  :: (position: Vector2, color: Color) #extern "C" // Draw a pixel using geometry (Vector version) [Can be slow, use with care]
-DrawLine                    :: (startPosX: int, startPosY: int, endPosX: int, endPosY: int, color: Color) #extern "C" // Draw a line
-DrawLineV                   :: (startPos: Vector2, endPos: Vector2, color: Color) #extern "C" // Draw a line (using gl lines)
-DrawLineEx                  :: (startPos: Vector2, endPos: Vector2, thick: float, color: Color) #extern "C" // Draw a line (using triangles/quads)
-DrawLineStrip               :: (points: *Vector2, pointCount: int, color: Color) #extern "C" // Draw lines sequence (using gl lines)
-DrawLineBezier              :: (startPos: Vector2, endPos: Vector2, thick: float, color: Color) #extern "C" // Draw line segment cubic-bezier in-out interpolation
-DrawCircle                  :: (centerX: int, centerY: int, radius: float, color: Color) #extern "C" // Draw a color-filled circle
-DrawCircleSector            :: (center: Vector2, radius: float, startAngle: float, endAngle: float, segments: int, color: Color) #extern "C" // Draw a piece of a circle
-DrawCircleSectorLines       :: (center: Vector2, radius: float, startAngle: float, endAngle: float, segments: int, color: Color) #extern "C" // Draw circle sector outline
-DrawCircleGradient          :: (centerX: int, centerY: int, radius: float, inner: Color, outer: Color) #extern "C" // Draw a gradient-filled circle
-DrawCircleV                 :: (center: Vector2, radius: float, color: Color) #extern "C" // Draw a color-filled circle (Vector version)
-DrawCircleLines             :: (centerX: int, centerY: int, radius: float, color: Color) #extern "C" // Draw circle outline
-DrawCircleLinesV            :: (center: Vector2, radius: float, color: Color) #extern "C" // Draw circle outline (Vector version)
-DrawEllipse                 :: (centerX: int, centerY: int, radiusH: float, radiusV: float, color: Color) #extern "C" // Draw ellipse
-DrawEllipseLines            :: (centerX: int, centerY: int, radiusH: float, radiusV: float, color: Color) #extern "C" // Draw ellipse outline
-DrawRing                    :: (center: Vector2, innerRadius: float, outerRadius: float, startAngle: float, endAngle: float, segments: int, color: Color) #extern "C" // Draw ring
-DrawRingLines               :: (center: Vector2, innerRadius: float, outerRadius: float, startAngle: float, endAngle: float, segments: int, color: Color) #extern "C" // Draw ring outline
-DrawRectangle               :: (posX: int, posY: int, width: int, height: int, color: Color) #extern "C" // Draw a color-filled rectangle
-DrawRectangleV              :: (position: Vector2, size: Vector2, color: Color) #extern "C" // Draw a color-filled rectangle (Vector version)
-DrawRectangleRec            :: (rec: Rectangle, color: Color) #extern "C" // Draw a color-filled rectangle
-DrawRectanglePro            :: (rec: Rectangle, origin: Vector2, rotation: float, color: Color) #extern "C" // Draw a color-filled rectangle with pro parameters
-DrawRectangleGradientV      :: (posX: int, posY: int, width: int, height: int, top: Color, bottom: Color) #extern "C" // Draw a vertical-gradient-filled rectangle
-DrawRectangleGradientH      :: (posX: int, posY: int, width: int, height: int, left: Color, right: Color) #extern "C" // Draw a horizontal-gradient-filled rectangle
-DrawRectangleGradientEx     :: (rec: Rectangle, topLeft: Color, bottomLeft: Color, topRight: Color, bottomRight: Color) #extern "C" // Draw a gradient-filled rectangle with custom vertex colors
-DrawRectangleLines          :: (posX: int, posY: int, width: int, height: int, color: Color) #extern "C" // Draw rectangle outline
-DrawRectangleLinesEx        :: (rec: Rectangle, lineThick: float, color: Color) #extern "C" // Draw rectangle outline with extended parameters
-DrawRectangleRounded        :: (rec: Rectangle, roundness: float, segments: int, color: Color) #extern "C" // Draw rectangle with rounded edges
-DrawRectangleRoundedLines   :: (rec: Rectangle, roundness: float, segments: int, color: Color) #extern "C" // Draw rectangle lines with rounded edges
-DrawRectangleRoundedLinesEx :: (rec: Rectangle, roundness: float, segments: int, lineThick: float, color: Color) #extern "C" // Draw rectangle with rounded edges outline
-DrawTriangle                :: (v1: Vector2, v2: Vector2, v3: Vector2, color: Color) #extern "C" // Draw a color-filled triangle (vertex in counter-clockwise order!)
-DrawTriangleLines           :: (v1: Vector2, v2: Vector2, v3: Vector2, color: Color) #extern "C" // Draw triangle outline (vertex in counter-clockwise order!)
-DrawTriangleFan             :: (points: *Vector2, pointCount: int, color: Color) #extern "C" // Draw a triangle fan defined by points (first vertex is the center)
-DrawTriangleStrip           :: (points: *Vector2, pointCount: int, color: Color) #extern "C" // Draw a triangle strip defined by points
-DrawPoly                    :: (center: Vector2, sides: int, radius: float, rotation: float, color: Color) #extern "C" // Draw a regular polygon (Vector version)
-DrawPolyLines               :: (center: Vector2, sides: int, radius: float, rotation: float, color: Color) #extern "C" // Draw a polygon outline of n sides
-DrawPolyLinesEx             :: (center: Vector2, sides: int, radius: float, rotation: float, lineThick: float, color: Color) #extern "C" // Draw a polygon outline of n sides with extended parameters
+DrawPixel                   :: (posX: int, posY: int, color: Color); // Draw a pixel using geometry [Can be slow, use with care]
+DrawPixelV                  :: (position: Vector2, color: Color); // Draw a pixel using geometry (Vector version) [Can be slow, use with care]
+DrawLine                    :: (startPosX: int, startPosY: int, endPosX: int, endPosY: int, color: Color); // Draw a line
+DrawLineV                   :: (startPos: Vector2, endPos: Vector2, color: Color); // Draw a line (using gl lines)
+DrawLineEx                  :: (startPos: Vector2, endPos: Vector2, thick: float, color: Color); // Draw a line (using triangles/quads)
+DrawLineStrip               :: (points: *Vector2, pointCount: int, color: Color); // Draw lines sequence (using gl lines)
+DrawLineBezier              :: (startPos: Vector2, endPos: Vector2, thick: float, color: Color); // Draw line segment cubic-bezier in-out interpolation
+DrawCircle                  :: (centerX: int, centerY: int, radius: float, color: Color); // Draw a color-filled circle
+DrawCircleSector            :: (center: Vector2, radius: float, startAngle: float, endAngle: float, segments: int, color: Color); // Draw a piece of a circle
+DrawCircleSectorLines       :: (center: Vector2, radius: float, startAngle: float, endAngle: float, segments: int, color: Color); // Draw circle sector outline
+DrawCircleGradient          :: (centerX: int, centerY: int, radius: float, inner: Color, outer: Color); // Draw a gradient-filled circle
+DrawCircleV                 :: (center: Vector2, radius: float, color: Color); // Draw a color-filled circle (Vector version)
+DrawCircleLines             :: (centerX: int, centerY: int, radius: float, color: Color); // Draw circle outline
+DrawCircleLinesV            :: (center: Vector2, radius: float, color: Color); // Draw circle outline (Vector version)
+DrawEllipse                 :: (centerX: int, centerY: int, radiusH: float, radiusV: float, color: Color); // Draw ellipse
+DrawEllipseLines            :: (centerX: int, centerY: int, radiusH: float, radiusV: float, color: Color); // Draw ellipse outline
+DrawRing                    :: (center: Vector2, innerRadius: float, outerRadius: float, startAngle: float, endAngle: float, segments: int, color: Color); // Draw ring
+DrawRingLines               :: (center: Vector2, innerRadius: float, outerRadius: float, startAngle: float, endAngle: float, segments: int, color: Color); // Draw ring outline
+DrawRectangle               :: (posX: int, posY: int, width: int, height: int, color: Color); // Draw a color-filled rectangle
+DrawRectangleV              :: (position: Vector2, size: Vector2, color: Color); // Draw a color-filled rectangle (Vector version)
+DrawRectangleRec            :: (rec: Rectangle, color: Color); // Draw a color-filled rectangle
+DrawRectanglePro            :: (rec: Rectangle, origin: Vector2, rotation: float, color: Color); // Draw a color-filled rectangle with pro parameters
+DrawRectangleGradientV      :: (posX: int, posY: int, width: int, height: int, top: Color, bottom: Color); // Draw a vertical-gradient-filled rectangle
+DrawRectangleGradientH      :: (posX: int, posY: int, width: int, height: int, left: Color, right: Color); // Draw a horizontal-gradient-filled rectangle
+DrawRectangleGradientEx     :: (rec: Rectangle, topLeft: Color, bottomLeft: Color, topRight: Color, bottomRight: Color); // Draw a gradient-filled rectangle with custom vertex colors
+DrawRectangleLines          :: (posX: int, posY: int, width: int, height: int, color: Color); // Draw rectangle outline
+DrawRectangleLinesEx        :: (rec: Rectangle, lineThick: float, color: Color); // Draw rectangle outline with extended parameters
+DrawRectangleRounded        :: (rec: Rectangle, roundness: float, segments: int, color: Color); // Draw rectangle with rounded edges
+DrawRectangleRoundedLines   :: (rec: Rectangle, roundness: float, segments: int, color: Color); // Draw rectangle lines with rounded edges
+DrawRectangleRoundedLinesEx :: (rec: Rectangle, roundness: float, segments: int, lineThick: float, color: Color); // Draw rectangle with rounded edges outline
+DrawTriangle                :: (v1: Vector2, v2: Vector2, v3: Vector2, color: Color); // Draw a color-filled triangle (vertex in counter-clockwise order!)
+DrawTriangleLines           :: (v1: Vector2, v2: Vector2, v3: Vector2, color: Color); // Draw triangle outline (vertex in counter-clockwise order!)
+DrawTriangleFan             :: (points: *Vector2, pointCount: int, color: Color); // Draw a triangle fan defined by points (first vertex is the center)
+DrawTriangleStrip           :: (points: *Vector2, pointCount: int, color: Color); // Draw a triangle strip defined by points
+DrawPoly                    :: (center: Vector2, sides: int, radius: float, rotation: float, color: Color); // Draw a regular polygon (Vector version)
+DrawPolyLines               :: (center: Vector2, sides: int, radius: float, rotation: float, color: Color); // Draw a polygon outline of n sides
+DrawPolyLinesEx             :: (center: Vector2, sides: int, radius: float, rotation: float, lineThick: float, color: Color); // Draw a polygon outline of n sides with extended parameters
 
 // Splines drawing functions
-DrawSplineLinear             :: (points: *Vector2, pointCount: int, thick: float, color: Color) #extern "C" // Draw spline: Linear, minimum 2 points
-DrawSplineBasis              :: (points: *Vector2, pointCount: int, thick: float, color: Color) #extern "C" // Draw spline: B-Spline, minimum 4 points
-DrawSplineCatmullRom         :: (points: *Vector2, pointCount: int, thick: float, color: Color) #extern "C" // Draw spline: Catmull-Rom, minimum 4 points
-DrawSplineBezierQuadratic    :: (points: *Vector2, pointCount: int, thick: float, color: Color) #extern "C" // Draw spline: Quadratic Bezier, minimum 3 points (1 control point): [p1, c2, p3, c4...]
-DrawSplineBezierCubic        :: (points: *Vector2, pointCount: int, thick: float, color: Color) #extern "C" // Draw spline: Cubic Bezier, minimum 4 points (2 control points): [p1, c2, c3, p4, c5, c6...]
-DrawSplineSegmentLinear      :: (p1: Vector2, p2: Vector2, thick: float, color: Color) #extern "C" // Draw spline segment: Linear, 2 points
-DrawSplineSegmentBasis       :: (p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2, thick: float, color: Color) #extern "C" // Draw spline segment: B-Spline, 4 points
-DrawSplineSegmentCatmullRom  :: (p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2, thick: float, color: Color) #extern "C" // Draw spline segment: Catmull-Rom, 4 points
-DrawSplineSegmentBezierQuadratic :: (p1: Vector2, c2: Vector2, p3: Vector2, thick: float, color: Color) #extern "C" // Draw spline segment: Quadratic Bezier, 2 points, 1 control point
-DrawSplineSegmentBezierCubic :: (p1: Vector2, c2: Vector2, c3: Vector2, p4: Vector2, thick: float, color: Color) #extern "C" // Draw spline segment: Cubic Bezier, 2 points, 2 control points
+DrawSplineLinear             :: (points: *Vector2, pointCount: int, thick: float, color: Color); // Draw spline: Linear, minimum 2 points
+DrawSplineBasis              :: (points: *Vector2, pointCount: int, thick: float, color: Color); // Draw spline: B-Spline, minimum 4 points
+DrawSplineCatmullRom         :: (points: *Vector2, pointCount: int, thick: float, color: Color); // Draw spline: Catmull-Rom, minimum 4 points
+DrawSplineBezierQuadratic    :: (points: *Vector2, pointCount: int, thick: float, color: Color); // Draw spline: Quadratic Bezier, minimum 3 points (1 control point): [p1, c2, p3, c4...]
+DrawSplineBezierCubic        :: (points: *Vector2, pointCount: int, thick: float, color: Color); // Draw spline: Cubic Bezier, minimum 4 points (2 control points): [p1, c2, c3, p4, c5, c6...]
+DrawSplineSegmentLinear      :: (p1: Vector2, p2: Vector2, thick: float, color: Color); // Draw spline segment: Linear, 2 points
+DrawSplineSegmentBasis       :: (p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2, thick: float, color: Color); // Draw spline segment: B-Spline, 4 points
+DrawSplineSegmentCatmullRom  :: (p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2, thick: float, color: Color); // Draw spline segment: Catmull-Rom, 4 points
+DrawSplineSegmentBezierQuadratic :: (p1: Vector2, c2: Vector2, p3: Vector2, thick: float, color: Color); // Draw spline segment: Quadratic Bezier, 2 points, 1 control point
+DrawSplineSegmentBezierCubic :: (p1: Vector2, c2: Vector2, c3: Vector2, p4: Vector2, thick: float, color: Color); // Draw spline segment: Cubic Bezier, 2 points, 2 control points
 
 // Spline segment point evaluation functions, for a given t [0.0f .. 1.0f]
-GetSplinePointLinear      :: (startPos: Vector2, endPos: Vector2, t: float) -> Vector2 #extern "C" // Get (evaluate) spline point: Linear
-GetSplinePointBasis       :: (p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2, t: float) -> Vector2 #extern "C" // Get (evaluate) spline point: B-Spline
-GetSplinePointCatmullRom  :: (p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2, t: float) -> Vector2 #extern "C" // Get (evaluate) spline point: Catmull-Rom
-GetSplinePointBezierQuad  :: (p1: Vector2, c2: Vector2, p3: Vector2, t: float) -> Vector2 #extern "C" // Get (evaluate) spline point: Quadratic Bezier
-GetSplinePointBezierCubic :: (p1: Vector2, c2: Vector2, c3: Vector2, p4: Vector2, t: float) -> Vector2 #extern "C" // Get (evaluate) spline point: Cubic Bezier
+GetSplinePointLinear      :: (startPos: Vector2, endPos: Vector2, t: float) -> Vector2; // Get (evaluate) spline point: Linear
+GetSplinePointBasis       :: (p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2, t: float) -> Vector2; // Get (evaluate) spline point: B-Spline
+GetSplinePointCatmullRom  :: (p1: Vector2, p2: Vector2, p3: Vector2, p4: Vector2, t: float) -> Vector2; // Get (evaluate) spline point: Catmull-Rom
+GetSplinePointBezierQuad  :: (p1: Vector2, c2: Vector2, p3: Vector2, t: float) -> Vector2; // Get (evaluate) spline point: Quadratic Bezier
+GetSplinePointBezierCubic :: (p1: Vector2, c2: Vector2, c3: Vector2, p4: Vector2, t: float) -> Vector2; // Get (evaluate) spline point: Cubic Bezier
 
 // Basic shapes collision detection functions
-CheckCollisionRecs        :: (rec1: Rectangle, rec2: Rectangle) -> bool #extern "C" // Check collision between two rectangles
-CheckCollisionCircles     :: (center1: Vector2, radius1: float, center2: Vector2, radius2: float) -> bool #extern "C" // Check collision between two circles
-CheckCollisionCircleRec   :: (center: Vector2, radius: float, rec: Rectangle) -> bool #extern "C" // Check collision between circle and rectangle
-CheckCollisionCircleLine  :: (center: Vector2, radius: float, p1: Vector2, p2: Vector2) -> bool #extern "C" // Check if circle collides with a line created betweeen two points [p1] and [p2]
-CheckCollisionPointRec    :: (point: Vector2, rec: Rectangle) -> bool #extern "C" // Check if point is inside rectangle
-CheckCollisionPointCircle :: (point: Vector2, center: Vector2, radius: float) -> bool #extern "C" // Check if point is inside circle
-CheckCollisionPointTriangle :: (point: Vector2, p1: Vector2, p2: Vector2, p3: Vector2) -> bool #extern "C" // Check if point is inside a triangle
-CheckCollisionPointLine   :: (point: Vector2, p1: Vector2, p2: Vector2, threshold: int) -> bool #extern "C" // Check if point belongs to line created between two points [p1] and [p2] with defined margin in pixels [threshold]
-CheckCollisionPointPoly   :: (point: Vector2, points: *Vector2, pointCount: int) -> bool #extern "C" // Check if point is within a polygon described by array of vertices
-CheckCollisionLines       :: (startPos1: Vector2, endPos1: Vector2, startPos2: Vector2, endPos2: Vector2, collisionPoint: *Vector2) -> bool #extern "C" // Check the collision between two lines defined by two points each, returns collision point by reference
-GetCollisionRec           :: (rec1: Rectangle, rec2: Rectangle) -> Rectangle #extern "C" // Get collision rectangle for two rectangles collision
+CheckCollisionRecs        :: (rec1: Rectangle, rec2: Rectangle) -> bool; // Check collision between two rectangles
+CheckCollisionCircles     :: (center1: Vector2, radius1: float, center2: Vector2, radius2: float) -> bool; // Check collision between two circles
+CheckCollisionCircleRec   :: (center: Vector2, radius: float, rec: Rectangle) -> bool; // Check collision between circle and rectangle
+CheckCollisionCircleLine  :: (center: Vector2, radius: float, p1: Vector2, p2: Vector2) -> bool; // Check if circle collides with a line created betweeen two points [p1] and [p2]
+CheckCollisionPointRec    :: (point: Vector2, rec: Rectangle) -> bool; // Check if point is inside rectangle
+CheckCollisionPointCircle :: (point: Vector2, center: Vector2, radius: float) -> bool; // Check if point is inside circle
+CheckCollisionPointTriangle :: (point: Vector2, p1: Vector2, p2: Vector2, p3: Vector2) -> bool; // Check if point is inside a triangle
+CheckCollisionPointLine   :: (point: Vector2, p1: Vector2, p2: Vector2, threshold: int) -> bool; // Check if point belongs to line created between two points [p1] and [p2] with defined margin in pixels [threshold]
+CheckCollisionPointPoly   :: (point: Vector2, points: *Vector2, pointCount: int) -> bool; // Check if point is within a polygon described by array of vertices
+CheckCollisionLines       :: (startPos1: Vector2, endPos1: Vector2, startPos2: Vector2, endPos2: Vector2, collisionPoint: *Vector2) -> bool; // Check the collision between two lines defined by two points each, returns collision point by reference
+GetCollisionRec           :: (rec1: Rectangle, rec2: Rectangle) -> Rectangle; // Get collision rectangle for two rectangles collision
 
 //------------------------------------------------------------------------------------
 // Texture Loading and Drawing Functions (Module: textures)
@@ -1099,302 +1101,302 @@ GetCollisionRec           :: (rec1: Rectangle, rec2: Rectangle) -> Rectangle #ex
 
 // Image loading functions
 // NOTE: These functions do not require GPU access
-LoadImage               :: (fileName: string) -> Image #extern "C" // Load image from file into CPU memory (RAM)
-LoadImageRaw            :: (fileName: string, width: int, height: int, format: int, headerSize: int) -> Image #extern "C" // Load image from RAW file data
-LoadImageAnim           :: (fileName: string, frames: *int) -> Image #extern "C" // Load image sequence from file (frames appended to image.data)
-LoadImageAnimFromMemory :: (fileType: string, fileData: *u8, dataSize: int, frames: *int) -> Image #extern "C" // Load image sequence from memory buffer
-LoadImageFromMemory     :: (fileType: string, fileData: *u8, dataSize: int) -> Image #extern "C" // Load image from memory buffer, fileType refers to extension: i.e. '.png'
-LoadImageFromTexture    :: (texture: Texture) -> Image #extern "C" // Load image from GPU texture data
-LoadImageFromScreen     :: () -> Image #extern "C" // Load image from screen buffer and (screenshot)
-IsImageValid            :: (image: Image) -> bool #extern "C" // Check if an image is valid (data and parameters)
-UnloadImage             :: (image: Image) #extern "C" // Unload image from CPU memory (RAM)
-ExportImage             :: (image: Image, fileName: string) -> bool #extern "C" // Export image data to file, returns true on success
-ExportImageToMemory     :: (image: Image, fileType: string, fileSize: *int) -> *u8 #extern "C" // Export image to memory buffer
-ExportImageAsCode       :: (image: Image, fileName: string) -> bool #extern "C" // Export image as code file defining an array of bytes, returns true on success
+LoadImage               :: (fileName: string) -> Image; // Load image from file into CPU memory (RAM)
+LoadImageRaw            :: (fileName: string, width: int, height: int, format: int, headerSize: int) -> Image; // Load image from RAW file data
+LoadImageAnim           :: (fileName: string, frames: *int) -> Image; // Load image sequence from file (frames appended to image.data)
+LoadImageAnimFromMemory :: (fileType: string, fileData: *u8, dataSize: int, frames: *int) -> Image; // Load image sequence from memory buffer
+LoadImageFromMemory     :: (fileType: string, fileData: *u8, dataSize: int) -> Image; // Load image from memory buffer, fileType refers to extension: i.e. '.png'
+LoadImageFromTexture    :: (texture: Texture) -> Image; // Load image from GPU texture data
+LoadImageFromScreen     :: () -> Image; // Load image from screen buffer and (screenshot)
+IsImageValid            :: (image: Image) -> bool; // Check if an image is valid (data and parameters)
+UnloadImage             :: (image: Image); // Unload image from CPU memory (RAM)
+ExportImage             :: (image: Image, fileName: string) -> bool; // Export image data to file, returns true on success
+ExportImageToMemory     :: (image: Image, fileType: string, fileSize: *int) -> *u8; // Export image to memory buffer
+ExportImageAsCode       :: (image: Image, fileName: string) -> bool; // Export image as code file defining an array of bytes, returns true on success
 
 // Image generation functions
-GenImageColor           :: (width: int, height: int, color: Color) -> Image #extern "C" // Generate image: plain color
-GenImageGradientLinear  :: (width: int, height: int, direction: int, start: Color, end: Color) -> Image #extern "C" // Generate image: linear gradient, direction in degrees [0..360], 0=Vertical gradient
-GenImageGradientRadial  :: (width: int, height: int, density: float, inner: Color, outer: Color) -> Image #extern "C" // Generate image: radial gradient
-GenImageGradientSquare  :: (width: int, height: int, density: float, inner: Color, outer: Color) -> Image #extern "C" // Generate image: square gradient
-GenImageChecked         :: (width: int, height: int, checksX: int, checksY: int, col1: Color, col2: Color) -> Image #extern "C" // Generate image: checked
-GenImageWhiteNoise      :: (width: int, height: int, factor: float) -> Image #extern "C" // Generate image: white noise
-GenImagePerlinNoise     :: (width: int, height: int, offsetX: int, offsetY: int, scale: float) -> Image #extern "C" // Generate image: perlin noise
-GenImageCellular        :: (width: int, height: int, tileSize: int) -> Image #extern "C" // Generate image: cellular algorithm, bigger tileSize means bigger cells
-GenImageText            :: (width: int, height: int, text: string) -> Image #extern "C" // Generate image: grayscale image from text data
+GenImageColor           :: (width: int, height: int, color: Color) -> Image; // Generate image: plain color
+GenImageGradientLinear  :: (width: int, height: int, direction: int, start: Color, end: Color) -> Image; // Generate image: linear gradient, direction in degrees [0..360], 0=Vertical gradient
+GenImageGradientRadial  :: (width: int, height: int, density: float, inner: Color, outer: Color) -> Image; // Generate image: radial gradient
+GenImageGradientSquare  :: (width: int, height: int, density: float, inner: Color, outer: Color) -> Image; // Generate image: square gradient
+GenImageChecked         :: (width: int, height: int, checksX: int, checksY: int, col1: Color, col2: Color) -> Image; // Generate image: checked
+GenImageWhiteNoise      :: (width: int, height: int, factor: float) -> Image; // Generate image: white noise
+GenImagePerlinNoise     :: (width: int, height: int, offsetX: int, offsetY: int, scale: float) -> Image; // Generate image: perlin noise
+GenImageCellular        :: (width: int, height: int, tileSize: int) -> Image; // Generate image: cellular algorithm, bigger tileSize means bigger cells
+GenImageText            :: (width: int, height: int, text: string) -> Image; // Generate image: grayscale image from text data
 
 // Image manipulation functions
-ImageCopy              :: (image: Image) -> Image #extern "C" // Create an image duplicate (useful for transformations)
-ImageFromImage         :: (image: Image, rec: Rectangle) -> Image #extern "C" // Create an image from another image piece
-ImageFromChannel       :: (image: Image, selectedChannel: int) -> Image #extern "C" // Create an image from a selected channel of another image (GRAYSCALE)
-ImageText              :: (text: string, fontSize: int, color: Color) -> Image #extern "C" // Create an image from text (default font)
-ImageTextEx            :: (font: Font, text: string, fontSize: float, spacing: float, tint: Color) -> Image #extern "C" // Create an image from text (custom sprite font)
-ImageFormat            :: (image: *Image, newFormat: int) #extern "C" // Convert image data to desired format
-ImageToPOT             :: (image: *Image, fill: Color) #extern "C" // Convert image to POT (power-of-two)
-ImageCrop              :: (image: *Image, crop: Rectangle) #extern "C" // Crop an image to a defined rectangle
-ImageAlphaCrop         :: (image: *Image, threshold: float) #extern "C" // Crop image depending on alpha value
-ImageAlphaClear        :: (image: *Image, color: Color, threshold: float) #extern "C" // Clear alpha channel to desired color
-ImageAlphaMask         :: (image: *Image, alphaMask: Image) #extern "C" // Apply alpha mask to image
-ImageAlphaPremultiply  :: (image: *Image) #extern "C" // Premultiply alpha channel
-ImageBlurGaussian      :: (image: *Image, blurSize: int) #extern "C" // Apply Gaussian blur using a box blur approximation
-ImageKernelConvolution :: (image: *Image, kernel: *float, kernelSize: int) #extern "C" // Apply custom square convolution kernel to image
-ImageResize            :: (image: *Image, newWidth: int, newHeight: int) #extern "C" // Resize image (Bicubic scaling algorithm)
-ImageResizeNN          :: (image: *Image, newWidth: int, newHeight: int) #extern "C" // Resize image (Nearest-Neighbor scaling algorithm)
-ImageResizeCanvas      :: (image: *Image, newWidth: int, newHeight: int, offsetX: int, offsetY: int, fill: Color) #extern "C" // Resize canvas and fill with color
-ImageMipmaps           :: (image: *Image) #extern "C" // Compute all mipmap levels for a provided image
-ImageDither            :: (image: *Image, rBpp: int, gBpp: int, bBpp: int, aBpp: int) #extern "C" // Dither image data to 16bpp or lower (Floyd-Steinberg dithering)
-ImageFlipVertical      :: (image: *Image) #extern "C" // Flip image vertically
-ImageFlipHorizontal    :: (image: *Image) #extern "C" // Flip image horizontally
-ImageRotate            :: (image: *Image, degrees: int) #extern "C" // Rotate image by input angle in degrees (-359 to 359)
-ImageRotateCW          :: (image: *Image) #extern "C" // Rotate image clockwise 90deg
-ImageRotateCCW         :: (image: *Image) #extern "C" // Rotate image counter-clockwise 90deg
-ImageColorTint         :: (image: *Image, color: Color) #extern "C" // Modify image color: tint
-ImageColorInvert       :: (image: *Image) #extern "C" // Modify image color: invert
-ImageColorGrayscale    :: (image: *Image) #extern "C" // Modify image color: grayscale
-ImageColorContrast     :: (image: *Image, contrast: float) #extern "C" // Modify image color: contrast (-100 to 100)
-ImageColorBrightness   :: (image: *Image, brightness: int) #extern "C" // Modify image color: brightness (-255 to 255)
-ImageColorReplace      :: (image: *Image, color: Color, replace: Color) #extern "C" // Modify image color: replace color
-LoadImageColors        :: (image: Image) -> *Color #extern "C" // Load color data from image as a Color array (RGBA - 32bit)
-LoadImagePalette       :: (image: Image, maxPaletteSize: int, colorCount: *int) -> *Color #extern "C" // Load colors palette from image as a Color array (RGBA - 32bit)
-UnloadImageColors      :: (colors: *Color) #extern "C" // Unload color data loaded with LoadImageColors()
-UnloadImagePalette     :: (colors: *Color) #extern "C" // Unload colors palette loaded with LoadImagePalette()
-GetImageAlphaBorder    :: (image: Image, threshold: float) -> Rectangle #extern "C" // Get image alpha border rectangle
-GetImageColor          :: (image: Image, x: int, y: int) -> Color #extern "C" // Get image pixel color at (x, y) position
+ImageCopy              :: (image: Image) -> Image; // Create an image duplicate (useful for transformations)
+ImageFromImage         :: (image: Image, rec: Rectangle) -> Image; // Create an image from another image piece
+ImageFromChannel       :: (image: Image, selectedChannel: int) -> Image; // Create an image from a selected channel of another image (GRAYSCALE)
+ImageText              :: (text: string, fontSize: int, color: Color) -> Image; // Create an image from text (default font)
+ImageTextEx            :: (font: Font, text: string, fontSize: float, spacing: float, tint: Color) -> Image; // Create an image from text (custom sprite font)
+ImageFormat            :: (image: *Image, newFormat: int); // Convert image data to desired format
+ImageToPOT             :: (image: *Image, fill: Color); // Convert image to POT (power-of-two)
+ImageCrop              :: (image: *Image, crop: Rectangle); // Crop an image to a defined rectangle
+ImageAlphaCrop         :: (image: *Image, threshold: float); // Crop image depending on alpha value
+ImageAlphaClear        :: (image: *Image, color: Color, threshold: float); // Clear alpha channel to desired color
+ImageAlphaMask         :: (image: *Image, alphaMask: Image); // Apply alpha mask to image
+ImageAlphaPremultiply  :: (image: *Image); // Premultiply alpha channel
+ImageBlurGaussian      :: (image: *Image, blurSize: int); // Apply Gaussian blur using a box blur approximation
+ImageKernelConvolution :: (image: *Image, kernel: *float, kernelSize: int); // Apply custom square convolution kernel to image
+ImageResize            :: (image: *Image, newWidth: int, newHeight: int); // Resize image (Bicubic scaling algorithm)
+ImageResizeNN          :: (image: *Image, newWidth: int, newHeight: int); // Resize image (Nearest-Neighbor scaling algorithm)
+ImageResizeCanvas      :: (image: *Image, newWidth: int, newHeight: int, offsetX: int, offsetY: int, fill: Color); // Resize canvas and fill with color
+ImageMipmaps           :: (image: *Image); // Compute all mipmap levels for a provided image
+ImageDither            :: (image: *Image, rBpp: int, gBpp: int, bBpp: int, aBpp: int); // Dither image data to 16bpp or lower (Floyd-Steinberg dithering)
+ImageFlipVertical      :: (image: *Image); // Flip image vertically
+ImageFlipHorizontal    :: (image: *Image); // Flip image horizontally
+ImageRotate            :: (image: *Image, degrees: int); // Rotate image by input angle in degrees (-359 to 359)
+ImageRotateCW          :: (image: *Image); // Rotate image clockwise 90deg
+ImageRotateCCW         :: (image: *Image); // Rotate image counter-clockwise 90deg
+ImageColorTint         :: (image: *Image, color: Color); // Modify image color: tint
+ImageColorInvert       :: (image: *Image); // Modify image color: invert
+ImageColorGrayscale    :: (image: *Image); // Modify image color: grayscale
+ImageColorContrast     :: (image: *Image, contrast: float); // Modify image color: contrast (-100 to 100)
+ImageColorBrightness   :: (image: *Image, brightness: int); // Modify image color: brightness (-255 to 255)
+ImageColorReplace      :: (image: *Image, color: Color, replace: Color); // Modify image color: replace color
+LoadImageColors        :: (image: Image) -> *Color; // Load color data from image as a Color array (RGBA - 32bit)
+LoadImagePalette       :: (image: Image, maxPaletteSize: int, colorCount: *int) -> *Color; // Load colors palette from image as a Color array (RGBA - 32bit)
+UnloadImageColors      :: (colors: *Color); // Unload color data loaded with LoadImageColors()
+UnloadImagePalette     :: (colors: *Color); // Unload colors palette loaded with LoadImagePalette()
+GetImageAlphaBorder    :: (image: Image, threshold: float) -> Rectangle; // Get image alpha border rectangle
+GetImageColor          :: (image: Image, x: int, y: int) -> Color; // Get image pixel color at (x, y) position
 
 // Image drawing functions
 // NOTE: Image software-rendering functions (CPU)
-ImageClearBackground   :: (dst: *Image, color: Color) #extern "C" // Clear image background with given color
-ImageDrawPixel         :: (dst: *Image, posX: int, posY: int, color: Color) #extern "C" // Draw pixel within an image
-ImageDrawPixelV        :: (dst: *Image, position: Vector2, color: Color) #extern "C" // Draw pixel within an image (Vector version)
-ImageDrawLine          :: (dst: *Image, startPosX: int, startPosY: int, endPosX: int, endPosY: int, color: Color) #extern "C" // Draw line within an image
-ImageDrawLineV         :: (dst: *Image, start: Vector2, end: Vector2, color: Color) #extern "C" // Draw line within an image (Vector version)
-ImageDrawLineEx        :: (dst: *Image, start: Vector2, end: Vector2, thick: int, color: Color) #extern "C" // Draw a line defining thickness within an image
-ImageDrawCircle        :: (dst: *Image, centerX: int, centerY: int, radius: int, color: Color) #extern "C" // Draw a filled circle within an image
-ImageDrawCircleV       :: (dst: *Image, center: Vector2, radius: int, color: Color) #extern "C" // Draw a filled circle within an image (Vector version)
-ImageDrawCircleLines   :: (dst: *Image, centerX: int, centerY: int, radius: int, color: Color) #extern "C" // Draw circle outline within an image
-ImageDrawCircleLinesV  :: (dst: *Image, center: Vector2, radius: int, color: Color) #extern "C" // Draw circle outline within an image (Vector version)
-ImageDrawRectangle     :: (dst: *Image, posX: int, posY: int, width: int, height: int, color: Color) #extern "C" // Draw rectangle within an image
-ImageDrawRectangleV    :: (dst: *Image, position: Vector2, size: Vector2, color: Color) #extern "C" // Draw rectangle within an image (Vector version)
-ImageDrawRectangleRec  :: (dst: *Image, rec: Rectangle, color: Color) #extern "C" // Draw rectangle within an image
-ImageDrawRectangleLines :: (dst: *Image, rec: Rectangle, thick: int, color: Color) #extern "C" // Draw rectangle lines within an image
-ImageDrawTriangle      :: (dst: *Image, v1: Vector2, v2: Vector2, v3: Vector2, color: Color) #extern "C" // Draw triangle within an image
-ImageDrawTriangleEx    :: (dst: *Image, v1: Vector2, v2: Vector2, v3: Vector2, c1: Color, c2: Color, c3: Color) #extern "C" // Draw triangle with interpolated colors within an image
-ImageDrawTriangleLines :: (dst: *Image, v1: Vector2, v2: Vector2, v3: Vector2, color: Color) #extern "C" // Draw triangle outline within an image
-ImageDrawTriangleFan   :: (dst: *Image, points: *Vector2, pointCount: int, color: Color) #extern "C" // Draw a triangle fan defined by points within an image (first vertex is the center)
-ImageDrawTriangleStrip :: (dst: *Image, points: *Vector2, pointCount: int, color: Color) #extern "C" // Draw a triangle strip defined by points within an image
-ImageDraw              :: (dst: *Image, src: Image, srcRec: Rectangle, dstRec: Rectangle, tint: Color) #extern "C" // Draw a source image within a destination image (tint applied to source)
-ImageDrawText          :: (dst: *Image, text: string, posX: int, posY: int, fontSize: int, color: Color) #extern "C" // Draw text (using default font) within an image (destination)
-ImageDrawTextEx        :: (dst: *Image, font: Font, text: string, position: Vector2, fontSize: float, spacing: float, tint: Color) #extern "C" // Draw text (custom sprite font) within an image (destination)
+ImageClearBackground   :: (dst: *Image, color: Color); // Clear image background with given color
+ImageDrawPixel         :: (dst: *Image, posX: int, posY: int, color: Color); // Draw pixel within an image
+ImageDrawPixelV        :: (dst: *Image, position: Vector2, color: Color); // Draw pixel within an image (Vector version)
+ImageDrawLine          :: (dst: *Image, startPosX: int, startPosY: int, endPosX: int, endPosY: int, color: Color); // Draw line within an image
+ImageDrawLineV         :: (dst: *Image, start: Vector2, end: Vector2, color: Color); // Draw line within an image (Vector version)
+ImageDrawLineEx        :: (dst: *Image, start: Vector2, end: Vector2, thick: int, color: Color); // Draw a line defining thickness within an image
+ImageDrawCircle        :: (dst: *Image, centerX: int, centerY: int, radius: int, color: Color); // Draw a filled circle within an image
+ImageDrawCircleV       :: (dst: *Image, center: Vector2, radius: int, color: Color); // Draw a filled circle within an image (Vector version)
+ImageDrawCircleLines   :: (dst: *Image, centerX: int, centerY: int, radius: int, color: Color); // Draw circle outline within an image
+ImageDrawCircleLinesV  :: (dst: *Image, center: Vector2, radius: int, color: Color); // Draw circle outline within an image (Vector version)
+ImageDrawRectangle     :: (dst: *Image, posX: int, posY: int, width: int, height: int, color: Color); // Draw rectangle within an image
+ImageDrawRectangleV    :: (dst: *Image, position: Vector2, size: Vector2, color: Color); // Draw rectangle within an image (Vector version)
+ImageDrawRectangleRec  :: (dst: *Image, rec: Rectangle, color: Color); // Draw rectangle within an image
+ImageDrawRectangleLines :: (dst: *Image, rec: Rectangle, thick: int, color: Color); // Draw rectangle lines within an image
+ImageDrawTriangle      :: (dst: *Image, v1: Vector2, v2: Vector2, v3: Vector2, color: Color); // Draw triangle within an image
+ImageDrawTriangleEx    :: (dst: *Image, v1: Vector2, v2: Vector2, v3: Vector2, c1: Color, c2: Color, c3: Color); // Draw triangle with interpolated colors within an image
+ImageDrawTriangleLines :: (dst: *Image, v1: Vector2, v2: Vector2, v3: Vector2, color: Color); // Draw triangle outline within an image
+ImageDrawTriangleFan   :: (dst: *Image, points: *Vector2, pointCount: int, color: Color); // Draw a triangle fan defined by points within an image (first vertex is the center)
+ImageDrawTriangleStrip :: (dst: *Image, points: *Vector2, pointCount: int, color: Color); // Draw a triangle strip defined by points within an image
+ImageDraw              :: (dst: *Image, src: Image, srcRec: Rectangle, dstRec: Rectangle, tint: Color); // Draw a source image within a destination image (tint applied to source)
+ImageDrawText          :: (dst: *Image, text: string, posX: int, posY: int, fontSize: int, color: Color); // Draw text (using default font) within an image (destination)
+ImageDrawTextEx        :: (dst: *Image, font: Font, text: string, position: Vector2, fontSize: float, spacing: float, tint: Color); // Draw text (custom sprite font) within an image (destination)
 
 // Texture loading functions
 // NOTE: These functions require GPU access
-LoadTexture             :: (fileName: string) -> Texture #extern "C" // Load texture from file into GPU memory (VRAM)
-LoadTextureFromImage    :: (image: Image) -> Texture #extern "C" // Load texture from image data
-LoadTextureCubemap      :: (image: Image, layout: int) -> Texture #extern "C" // Load cubemap from image, multiple image cubemap layouts supported
-LoadRenderTexture       :: (width: int, height: int) -> RenderTexture #extern "C" // Load texture for rendering (framebuffer)
-IsTextureValid          :: (texture: Texture) -> bool #extern "C" // Check if a texture is valid (loaded in GPU)
-UnloadTexture           :: (texture: Texture) #extern "C" // Unload texture from GPU memory (VRAM)
-IsRenderTextureValid    :: (target: RenderTexture) -> bool #extern "C" // Check if a render texture is valid (loaded in GPU)
-UnloadRenderTexture     :: (target: RenderTexture) #extern "C" // Unload render texture from GPU memory (VRAM)
-UpdateTexture           :: (texture: Texture, pixels: *void) #extern "C" // Update GPU texture with new data
-UpdateTextureRec        :: (texture: Texture, rec: Rectangle, pixels: *void) #extern "C" // Update GPU texture rectangle with new data
+LoadTexture             :: (fileName: string) -> Texture; // Load texture from file into GPU memory (VRAM)
+LoadTextureFromImage    :: (image: Image) -> Texture; // Load texture from image data
+LoadTextureCubemap      :: (image: Image, layout: int) -> Texture; // Load cubemap from image, multiple image cubemap layouts supported
+LoadRenderTexture       :: (width: int, height: int) -> RenderTexture; // Load texture for rendering (framebuffer)
+IsTextureValid          :: (texture: Texture) -> bool; // Check if a texture is valid (loaded in GPU)
+UnloadTexture           :: (texture: Texture); // Unload texture from GPU memory (VRAM)
+IsRenderTextureValid    :: (target: RenderTexture) -> bool; // Check if a render texture is valid (loaded in GPU)
+UnloadRenderTexture     :: (target: RenderTexture); // Unload render texture from GPU memory (VRAM)
+UpdateTexture           :: (texture: Texture, pixels: *void); // Update GPU texture with new data
+UpdateTextureRec        :: (texture: Texture, rec: Rectangle, pixels: *void); // Update GPU texture rectangle with new data
 
 // Texture configuration functions
-GenTextureMipmaps       :: (texture: *Texture) #extern "C" // Generate GPU mipmaps for a texture
-SetTextureFilter        :: (texture: Texture, filter: int) #extern "C" // Set texture scaling filter mode
-SetTextureWrap          :: (texture: Texture, wrap: int) #extern "C" // Set texture wrapping mode
+GenTextureMipmaps       :: (texture: *Texture); // Generate GPU mipmaps for a texture
+SetTextureFilter        :: (texture: Texture, filter: int); // Set texture scaling filter mode
+SetTextureWrap          :: (texture: Texture, wrap: int); // Set texture wrapping mode
 
 // Texture drawing functions
-DrawTexture             :: (texture: Texture, posX: int, posY: int, tint: Color) #extern "C" // Draw a Texture
-DrawTextureV            :: (texture: Texture, position: Vector2, tint: Color) #extern "C" // Draw a Texture with position defined as Vector2
-DrawTextureEx           :: (texture: Texture, position: Vector2, rotation: float, scale: float, tint: Color) #extern "C" // Draw a Texture with extended parameters
-DrawTextureRec          :: (texture: Texture, source: Rectangle, position: Vector2, tint: Color) #extern "C" // Draw a part of a texture defined by a rectangle
-DrawTexturePro          :: (texture: Texture, source: Rectangle, dest: Rectangle, origin: Vector2, rotation: float, tint: Color) #extern "C" // Draw a part of a texture defined by a rectangle with 'pro' parameters
-DrawTextureNPatch       :: (texture: Texture, nPatchInfo: NPatchInfo, dest: Rectangle, origin: Vector2, rotation: float, tint: Color) #extern "C" // Draws a texture (or part of it) that stretches or shrinks nicely
+DrawTexture             :: (texture: Texture, posX: int, posY: int, tint: Color); // Draw a Texture
+DrawTextureV            :: (texture: Texture, position: Vector2, tint: Color); // Draw a Texture with position defined as Vector2
+DrawTextureEx           :: (texture: Texture, position: Vector2, rotation: float, scale: float, tint: Color); // Draw a Texture with extended parameters
+DrawTextureRec          :: (texture: Texture, source: Rectangle, position: Vector2, tint: Color); // Draw a part of a texture defined by a rectangle
+DrawTexturePro          :: (texture: Texture, source: Rectangle, dest: Rectangle, origin: Vector2, rotation: float, tint: Color); // Draw a part of a texture defined by a rectangle with 'pro' parameters
+DrawTextureNPatch       :: (texture: Texture, nPatchInfo: NPatchInfo, dest: Rectangle, origin: Vector2, rotation: float, tint: Color); // Draws a texture (or part of it) that stretches or shrinks nicely
 
 // Color/pixel related functions
-ColorIsEqual            :: (col1: Color, col2: Color) -> bool #extern "C" // Check if two colors are equal
-Fade                    :: (color: Color, alpha: float) -> Color #extern "C" // Get color with alpha applied, alpha goes from 0.0f to 1.0f
-ColorToInt              :: (color: Color) -> int #extern "C" // Get hexadecimal value for a Color (0xRRGGBBAA)
-ColorNormalize          :: (color: Color) -> Vector4 #extern "C" // Get Color normalized as float [0..1]
-ColorFromNormalized     :: (normalized: Vector4) -> Color #extern "C" // Get Color from normalized values [0..1]
-ColorToHSV              :: (color: Color) -> Vector3 #extern "C" // Get HSV values for a Color, hue [0..360], saturation/value [0..1]
-ColorFromHSV            :: (hue: float, saturation: float, value: float) -> Color #extern "C" // Get a Color from HSV values, hue [0..360], saturation/value [0..1]
-ColorTint               :: (color: Color, tint: Color) -> Color #extern "C" // Get color multiplied with another color
-ColorBrightness         :: (color: Color, factor: float) -> Color #extern "C" // Get color with brightness correction, brightness factor goes from -1.0f to 1.0f
-ColorContrast           :: (color: Color, contrast: float) -> Color #extern "C" // Get color with contrast correction, contrast values between -1.0f and 1.0f
-ColorAlpha              :: (color: Color, alpha: float) -> Color #extern "C" // Get color with alpha applied, alpha goes from 0.0f to 1.0f
-ColorAlphaBlend         :: (dst: Color, src: Color, tint: Color) -> Color #extern "C" // Get src alpha-blended into dst color with tint
-ColorLerp               :: (color1: Color, color2: Color, factor: float) -> Color #extern "C" // Get color lerp interpolation between two colors, factor [0.0f..1.0f]
-GetColor                :: (hexValue: uint) -> Color #extern "C" // Get Color structure from hexadecimal value
-GetPixelColor           :: (srcPtr: *void, format: int) -> Color #extern "C" // Get Color from a source pixel pointer of certain format
-SetPixelColor           :: (dstPtr: *void, color: Color, format: int) #extern "C" // Set color formatted into destination pixel pointer
-GetPixelDataSize        :: (width: int, height: int, format: int) -> int #extern "C" // Get pixel data size in bytes for certain format
+ColorIsEqual            :: (col1: Color, col2: Color) -> bool; // Check if two colors are equal
+Fade                    :: (color: Color, alpha: float) -> Color; // Get color with alpha applied, alpha goes from 0.0f to 1.0f
+ColorToInt              :: (color: Color) -> int; // Get hexadecimal value for a Color (0xRRGGBBAA)
+ColorNormalize          :: (color: Color) -> Vector4; // Get Color normalized as float [0..1]
+ColorFromNormalized     :: (normalized: Vector4) -> Color; // Get Color from normalized values [0..1]
+ColorToHSV              :: (color: Color) -> Vector3; // Get HSV values for a Color, hue [0..360], saturation/value [0..1]
+ColorFromHSV            :: (hue: float, saturation: float, value: float) -> Color; // Get a Color from HSV values, hue [0..360], saturation/value [0..1]
+ColorTint               :: (color: Color, tint: Color) -> Color; // Get color multiplied with another color
+ColorBrightness         :: (color: Color, factor: float) -> Color; // Get color with brightness correction, brightness factor goes from -1.0f to 1.0f
+ColorContrast           :: (color: Color, contrast: float) -> Color; // Get color with contrast correction, contrast values between -1.0f and 1.0f
+ColorAlpha              :: (color: Color, alpha: float) -> Color; // Get color with alpha applied, alpha goes from 0.0f to 1.0f
+ColorAlphaBlend         :: (dst: Color, src: Color, tint: Color) -> Color; // Get src alpha-blended into dst color with tint
+ColorLerp               :: (color1: Color, color2: Color, factor: float) -> Color; // Get color lerp interpolation between two colors, factor [0.0f..1.0f]
+GetColor                :: (hexValue: uint) -> Color; // Get Color structure from hexadecimal value
+GetPixelColor           :: (srcPtr: *void, format: int) -> Color; // Get Color from a source pixel pointer of certain format
+SetPixelColor           :: (dstPtr: *void, color: Color, format: int); // Set color formatted into destination pixel pointer
+GetPixelDataSize        :: (width: int, height: int, format: int) -> int; // Get pixel data size in bytes for certain format
 
 //------------------------------------------------------------------------------------
 // Font Loading and Text Drawing Functions (Module: text)
 //------------------------------------------------------------------------------------
 
 // Font loading/unloading functions
-GetFontDefault       :: () -> Font #extern "C" // Get the default Font
-LoadFont             :: (fileName: string) -> Font #extern "C" // Load font from file into GPU memory (VRAM)
-LoadFontEx           :: (fileName: string, fontSize: int, codepoints: *int, codepointCount: int) -> Font #extern "C" // Load font from file with extended parameters, use NULL for codepoints and 0 for codepointCount to load the default character set, font size is provided in pixels height
-LoadFontFromImage    :: (image: Image, key: Color, firstChar: int) -> Font #extern "C" // Load font from Image (XNA style)
-LoadFontFromMemory   :: (fileType: string, fileData: *u8, dataSize: int, fontSize: int, codepoints: *int, codepointCount: int) -> Font #extern "C" // Load font from memory buffer, fileType refers to extension: i.e. '.ttf'
-IsFontValid          :: (font: Font) -> bool #extern "C" // Check if a font is valid (font data loaded, WARNING: GPU texture not checked)
-LoadFontData         :: (fileData: *u8, dataSize: int, fontSize: int, codepoints: *int, codepointCount: int, type: int) -> *GlyphInfo #extern "C" // Load font data for further use
-GenImageFontAtlas    :: (glyphs: *GlyphInfo, glyphRecs: **Rectangle, glyphCount: int, fontSize: int, padding: int, packMethod: int) -> Image #extern "C" // Generate image font atlas using chars info
-UnloadFontData       :: (glyphs: *GlyphInfo, glyphCount: int) #extern "C" // Unload font chars info data (RAM)
-UnloadFont           :: (font: Font) #extern "C" // Unload font from GPU memory (VRAM)
-ExportFontAsCode     :: (font: Font, fileName: string) -> bool #extern "C" // Export font as code file, returns true on success
+GetFontDefault       :: () -> Font; // Get the default Font
+LoadFont             :: (fileName: string) -> Font; // Load font from file into GPU memory (VRAM)
+LoadFontEx           :: (fileName: string, fontSize: int, codepoints: *int, codepointCount: int) -> Font; // Load font from file with extended parameters, use NULL for codepoints and 0 for codepointCount to load the default character set, font size is provided in pixels height
+LoadFontFromImage    :: (image: Image, key: Color, firstChar: int) -> Font; // Load font from Image (XNA style)
+LoadFontFromMemory   :: (fileType: string, fileData: *u8, dataSize: int, fontSize: int, codepoints: *int, codepointCount: int) -> Font; // Load font from memory buffer, fileType refers to extension: i.e. '.ttf'
+IsFontValid          :: (font: Font) -> bool; // Check if a font is valid (font data loaded, WARNING: GPU texture not checked)
+LoadFontData         :: (fileData: *u8, dataSize: int, fontSize: int, codepoints: *int, codepointCount: int, type: int) -> *GlyphInfo; // Load font data for further use
+GenImageFontAtlas    :: (glyphs: *GlyphInfo, glyphRecs: **Rectangle, glyphCount: int, fontSize: int, padding: int, packMethod: int) -> Image; // Generate image font atlas using chars info
+UnloadFontData       :: (glyphs: *GlyphInfo, glyphCount: int); // Unload font chars info data (RAM)
+UnloadFont           :: (font: Font); // Unload font from GPU memory (VRAM)
+ExportFontAsCode     :: (font: Font, fileName: string) -> bool; // Export font as code file, returns true on success
 
 // Text drawing functions
-DrawFPS             :: (posX: int, posY: int) #extern "C" // Draw current FPS
-DrawText            :: (text: string, posX: int, posY: int, fontSize: int, color: Color) #extern "C" // Draw text (using default font)
-DrawTextEx          :: (font: Font, text: string, position: Vector2, fontSize: float, spacing: float, tint: Color) #extern "C" // Draw text using font and additional parameters
-DrawTextPro         :: (font: Font, text: string, position: Vector2, origin: Vector2, rotation: float, fontSize: float, spacing: float, tint: Color) #extern "C" // Draw text using Font and pro parameters (rotation)
-DrawTextCodepoint   :: (font: Font, codepoint: int, position: Vector2, fontSize: float, tint: Color) #extern "C" // Draw one character (codepoint)
-DrawTextCodepoints  :: (font: Font, codepoints: *int, codepointCount: int, position: Vector2, fontSize: float, spacing: float, tint: Color) #extern "C" // Draw multiple character (codepoint)
+DrawFPS             :: (posX: int, posY: int); // Draw current FPS
+DrawText            :: (text: string, posX: int, posY: int, fontSize: int, color: Color); // Draw text (using default font)
+DrawTextEx          :: (font: Font, text: string, position: Vector2, fontSize: float, spacing: float, tint: Color); // Draw text using font and additional parameters
+DrawTextPro         :: (font: Font, text: string, position: Vector2, origin: Vector2, rotation: float, fontSize: float, spacing: float, tint: Color); // Draw text using Font and pro parameters (rotation)
+DrawTextCodepoint   :: (font: Font, codepoint: int, position: Vector2, fontSize: float, tint: Color); // Draw one character (codepoint)
+DrawTextCodepoints  :: (font: Font, codepoints: *int, codepointCount: int, position: Vector2, fontSize: float, spacing: float, tint: Color); // Draw multiple character (codepoint)
 
 // Text font info functions
-SetTextLineSpacing  :: (spacing: int) #extern "C" // Set vertical line spacing when drawing with line-breaks
-MeasureText         :: (text: string, fontSize: int) -> int #extern "C" // Measure string width for default font
-MeasureTextEx       :: (font: Font, text: string, fontSize: float, spacing: float) -> Vector2 #extern "C" // Measure string size for Font
-GetGlyphIndex       :: (font: Font, codepoint: int) -> int #extern "C" // Get glyph index position in font for a codepoint (unicode character), fallback to '?' if not found
-GetGlyphInfo        :: (font: Font, codepoint: int) -> GlyphInfo #extern "C" // Get glyph font info data for a codepoint (unicode character), fallback to '?' if not found
-GetGlyphAtlasRec    :: (font: Font, codepoint: int) -> Rectangle #extern "C" // Get glyph rectangle in font atlas for a codepoint (unicode character), fallback to '?' if not found
+SetTextLineSpacing  :: (spacing: int); // Set vertical line spacing when drawing with line-breaks
+MeasureText         :: (text: string, fontSize: int) -> int; // Measure string width for default font
+MeasureTextEx       :: (font: Font, text: string, fontSize: float, spacing: float) -> Vector2; // Measure string size for Font
+GetGlyphIndex       :: (font: Font, codepoint: int) -> int; // Get glyph index position in font for a codepoint (unicode character), fallback to '?' if not found
+GetGlyphInfo        :: (font: Font, codepoint: int) -> GlyphInfo; // Get glyph font info data for a codepoint (unicode character), fallback to '?' if not found
+GetGlyphAtlasRec    :: (font: Font, codepoint: int) -> Rectangle; // Get glyph rectangle in font atlas for a codepoint (unicode character), fallback to '?' if not found
 
 // Text codepoints management functions (unicode characters)
-LoadUTF8            :: (codepoints: *int, length: int) -> string #extern "C" // Load UTF-8 text encoded from codepoints array
-UnloadUTF8          :: (text: string) #extern "C" // Unload UTF-8 text encoded from codepoints array
-LoadCodepoints      :: (text: string, count: *int) -> *int #extern "C" // Load all codepoints from a UTF-8 text string, codepoints count returned by parameter
-UnloadCodepoints    :: (codepoints: *int) #extern "C" // Unload codepoints data from memory
-GetCodepointCount   :: (text: string) -> int #extern "C" // Get total number of codepoints in a UTF-8 encoded string
-GetCodepoint        :: (text: string, codepointSize: *int) -> int #extern "C" // Get next codepoint in a UTF-8 encoded string, 0x3f('?') is returned on failure
-GetCodepointNext    :: (text: string, codepointSize: *int) -> int #extern "C" // Get next codepoint in a UTF-8 encoded string, 0x3f('?') is returned on failure
-GetCodepointPrevious :: (text: string, codepointSize: *int) -> int #extern "C" // Get previous codepoint in a UTF-8 encoded string, 0x3f('?') is returned on failure
-CodepointToUTF8     :: (codepoint: int, utf8Size: *int) -> string #extern "C" // Encode one codepoint into UTF-8 byte array (array length returned as parameter)
+LoadUTF8            :: (codepoints: *int, length: int) -> string; // Load UTF-8 text encoded from codepoints array
+UnloadUTF8          :: (text: string); // Unload UTF-8 text encoded from codepoints array
+LoadCodepoints      :: (text: string, count: *int) -> *int; // Load all codepoints from a UTF-8 text string, codepoints count returned by parameter
+UnloadCodepoints    :: (codepoints: *int); // Unload codepoints data from memory
+GetCodepointCount   :: (text: string) -> int; // Get total number of codepoints in a UTF-8 encoded string
+GetCodepoint        :: (text: string, codepointSize: *int) -> int; // Get next codepoint in a UTF-8 encoded string, 0x3f('?') is returned on failure
+GetCodepointNext    :: (text: string, codepointSize: *int) -> int; // Get next codepoint in a UTF-8 encoded string, 0x3f('?') is returned on failure
+GetCodepointPrevious :: (text: string, codepointSize: *int) -> int; // Get previous codepoint in a UTF-8 encoded string, 0x3f('?') is returned on failure
+CodepointToUTF8     :: (codepoint: int, utf8Size: *int) -> string; // Encode one codepoint into UTF-8 byte array (array length returned as parameter)
 
 // Text strings management functions (no UTF-8 strings, only byte chars)
 // NOTE: Some strings allocate memory internally for returned strings, just be careful!
-TextCopy            :: (dst: string, src: string) -> int #extern "C" // Copy one string to another, returns bytes copied
-TextIsEqual         :: (text1: string, text2: string) -> bool #extern "C" // Check if two text string are equal
-TextLength          :: (text: string) -> uint #extern "C" // Get text length, checks for '\0' ending
-// TextFormat          :: (text: string, ...) -> string #extern "C" // Text formatting with variables (sprintf() style)
-TextSubtext         :: (text: string, position: int, length: int) -> string #extern "C" // Get a piece of a text string
-TextReplace         :: (text: string, replace: string, by: string) -> string #extern "C" // Replace text string (WARNING: memory must be freed!)
-TextInsert          :: (text: string, insert: string, position: int) -> string #extern "C" // Insert text in a position (WARNING: memory must be freed!)
-TextJoin            :: (textList: **u8, count: int, delimiter: string) -> string #extern "C" // Join text strings with delimiter
-TextSplit           :: (text: string, delimiter: u8, count: *int) -> **u8 #extern "C" // Split text into multiple strings
-TextAppend          :: (text: string, append: string, position: *int) #extern "C" // Append text at specific position and move cursor!
-TextFindIndex       :: (text: string, find: string) -> int #extern "C" // Find first text occurrence within a string
-TextToUpper         :: (text: string) -> string #extern "C" // Get upper case version of provided string
-TextToLower         :: (text: string) -> string #extern "C" // Get lower case version of provided string
-TextToPascal        :: (text: string) -> string #extern "C" // Get Pascal case notation version of provided string
-TextToSnake         :: (text: string) -> string #extern "C" // Get Snake case notation version of provided string
-TextToCamel         :: (text: string) -> string #extern "C" // Get Camel case notation version of provided string
-TextToInteger       :: (text: string) -> int #extern "C" // Get integer value from text (negative values not supported)
-TextToFloat         :: (text: string) -> float #extern "C" // Get float value from text (negative values not supported)
+TextCopy            :: (dst: string, src: string) -> int; // Copy one string to another, returns bytes copied
+TextIsEqual         :: (text1: string, text2: string) -> bool; // Check if two text string are equal
+TextLength          :: (text: string) -> uint; // Get text length, checks for '\0' ending
+// TextFormat          :: (text: string, ...) -> string; // Text formatting with variables (sprintf() style)
+TextSubtext         :: (text: string, position: int, length: int) -> string; // Get a piece of a text string
+TextReplace         :: (text: string, replace: string, by: string) -> string; // Replace text string (WARNING: memory must be freed!)
+TextInsert          :: (text: string, insert: string, position: int) -> string; // Insert text in a position (WARNING: memory must be freed!)
+TextJoin            :: (textList: **u8, count: int, delimiter: string) -> string; // Join text strings with delimiter
+TextSplit           :: (text: string, delimiter: u8, count: *int) -> **u8; // Split text into multiple strings
+TextAppend          :: (text: string, append: string, position: *int); // Append text at specific position and move cursor!
+TextFindIndex       :: (text: string, find: string) -> int; // Find first text occurrence within a string
+TextToUpper         :: (text: string) -> string; // Get upper case version of provided string
+TextToLower         :: (text: string) -> string; // Get lower case version of provided string
+TextToPascal        :: (text: string) -> string; // Get Pascal case notation version of provided string
+TextToSnake         :: (text: string) -> string; // Get Snake case notation version of provided string
+TextToCamel         :: (text: string) -> string; // Get Camel case notation version of provided string
+TextToInteger       :: (text: string) -> int; // Get integer value from text (negative values not supported)
+TextToFloat         :: (text: string) -> float; // Get float value from text (negative values not supported)
 
 //------------------------------------------------------------------------------------
 // Basic 3d Shapes Drawing Functions (Module: models)
 //------------------------------------------------------------------------------------
 
 // Basic geometric 3D shapes drawing functions
-DrawLine3D          :: (startPos: Vector3, endPos: Vector3, color: Color) #extern "C" // Draw a line in 3D world space
-DrawPoint3D         :: (position: Vector3, color: Color) #extern "C" // Draw a point in 3D space, actually a small line
-DrawCircle3D        :: (center: Vector3, radius: float, rotationAxis: Vector3, rotationAngle: float, color: Color) #extern "C" // Draw a circle in 3D world space
-DrawTriangle3D      :: (v1: Vector3, v2: Vector3, v3: Vector3, color: Color) #extern "C" // Draw a color-filled triangle (vertex in counter-clockwise order!)
-DrawTriangleStrip3D :: (points: *Vector3, pointCount: int, color: Color) #extern "C" // Draw a triangle strip defined by points
-DrawCube            :: (position: Vector3, width: float, height: float, length: float, color: Color) #extern "C" // Draw cube
-DrawCubeV           :: (position: Vector3, size: Vector3, color: Color) #extern "C" // Draw cube (Vector version)
-DrawCubeWires       :: (position: Vector3, width: float, height: float, length: float, color: Color) #extern "C" // Draw cube wires
-DrawCubeWiresV      :: (position: Vector3, size: Vector3, color: Color) #extern "C" // Draw cube wires (Vector version)
-DrawSphere          :: (centerPos: Vector3, radius: float, color: Color) #extern "C" // Draw sphere
-DrawSphereEx        :: (centerPos: Vector3, radius: float, rings: int, slices: int, color: Color) #extern "C" // Draw sphere with extended parameters
-DrawSphereWires     :: (centerPos: Vector3, radius: float, rings: int, slices: int, color: Color) #extern "C" // Draw sphere wires
-DrawCylinder        :: (position: Vector3, radiusTop: float, radiusBottom: float, height: float, slices: int, color: Color) #extern "C" // Draw a cylinder/cone
-DrawCylinderEx      :: (startPos: Vector3, endPos: Vector3, startRadius: float, endRadius: float, sides: int, color: Color) #extern "C" // Draw a cylinder with base at startPos and top at endPos
-DrawCylinderWires   :: (position: Vector3, radiusTop: float, radiusBottom: float, height: float, slices: int, color: Color) #extern "C" // Draw a cylinder/cone wires
-DrawCylinderWiresEx :: (startPos: Vector3, endPos: Vector3, startRadius: float, endRadius: float, sides: int, color: Color) #extern "C" // Draw a cylinder wires with base at startPos and top at endPos
-DrawCapsule         :: (startPos: Vector3, endPos: Vector3, radius: float, slices: int, rings: int, color: Color) #extern "C" // Draw a capsule with the center of its sphere caps at startPos and endPos
-DrawCapsuleWires    :: (startPos: Vector3, endPos: Vector3, radius: float, slices: int, rings: int, color: Color) #extern "C" // Draw capsule wireframe with the center of its sphere caps at startPos and endPos
-DrawPlane           :: (centerPos: Vector3, size: Vector2, color: Color) #extern "C" // Draw a plane XZ
-DrawRay             :: (ray: Ray, color: Color) #extern "C" // Draw a ray line
-DrawGrid            :: (slices: int, spacing: float) #extern "C" // Draw a grid (centered at (0, 0, 0))
+DrawLine3D          :: (startPos: Vector3, endPos: Vector3, color: Color); // Draw a line in 3D world space
+DrawPoint3D         :: (position: Vector3, color: Color); // Draw a point in 3D space, actually a small line
+DrawCircle3D        :: (center: Vector3, radius: float, rotationAxis: Vector3, rotationAngle: float, color: Color); // Draw a circle in 3D world space
+DrawTriangle3D      :: (v1: Vector3, v2: Vector3, v3: Vector3, color: Color); // Draw a color-filled triangle (vertex in counter-clockwise order!)
+DrawTriangleStrip3D :: (points: *Vector3, pointCount: int, color: Color); // Draw a triangle strip defined by points
+DrawCube            :: (position: Vector3, width: float, height: float, length: float, color: Color); // Draw cube
+DrawCubeV           :: (position: Vector3, size: Vector3, color: Color); // Draw cube (Vector version)
+DrawCubeWires       :: (position: Vector3, width: float, height: float, length: float, color: Color); // Draw cube wires
+DrawCubeWiresV      :: (position: Vector3, size: Vector3, color: Color); // Draw cube wires (Vector version)
+DrawSphere          :: (centerPos: Vector3, radius: float, color: Color); // Draw sphere
+DrawSphereEx        :: (centerPos: Vector3, radius: float, rings: int, slices: int, color: Color); // Draw sphere with extended parameters
+DrawSphereWires     :: (centerPos: Vector3, radius: float, rings: int, slices: int, color: Color); // Draw sphere wires
+DrawCylinder        :: (position: Vector3, radiusTop: float, radiusBottom: float, height: float, slices: int, color: Color); // Draw a cylinder/cone
+DrawCylinderEx      :: (startPos: Vector3, endPos: Vector3, startRadius: float, endRadius: float, sides: int, color: Color); // Draw a cylinder with base at startPos and top at endPos
+DrawCylinderWires   :: (position: Vector3, radiusTop: float, radiusBottom: float, height: float, slices: int, color: Color); // Draw a cylinder/cone wires
+DrawCylinderWiresEx :: (startPos: Vector3, endPos: Vector3, startRadius: float, endRadius: float, sides: int, color: Color); // Draw a cylinder wires with base at startPos and top at endPos
+DrawCapsule         :: (startPos: Vector3, endPos: Vector3, radius: float, slices: int, rings: int, color: Color); // Draw a capsule with the center of its sphere caps at startPos and endPos
+DrawCapsuleWires    :: (startPos: Vector3, endPos: Vector3, radius: float, slices: int, rings: int, color: Color); // Draw capsule wireframe with the center of its sphere caps at startPos and endPos
+DrawPlane           :: (centerPos: Vector3, size: Vector2, color: Color); // Draw a plane XZ
+DrawRay             :: (ray: Ray, color: Color); // Draw a ray line
+DrawGrid            :: (slices: int, spacing: float); // Draw a grid (centered at (0, 0, 0))
 
 //------------------------------------------------------------------------------------
 // Model 3d Loading and Drawing Functions (Module: models)
 //------------------------------------------------------------------------------------
 
 // Model management functions
-LoadModel           :: (fileName: string) -> Model #extern "C" // Load model from files (meshes and materials)
-LoadModelFromMesh   :: (mesh: Mesh) -> Model #extern "C" // Load model from generated mesh (default material)
-IsModelValid        :: (model: Model) -> bool #extern "C" // Check if a model is valid (loaded in GPU, VAO/VBOs)
-UnloadModel         :: (model: Model) #extern "C" // Unload model (including meshes) from memory (RAM and/or VRAM)
-GetModelBoundingBox :: (model: Model) -> BoundingBox #extern "C" // Compute model bounding box limits (considers all meshes)
+LoadModel           :: (fileName: string) -> Model; // Load model from files (meshes and materials)
+LoadModelFromMesh   :: (mesh: Mesh) -> Model; // Load model from generated mesh (default material)
+IsModelValid        :: (model: Model) -> bool; // Check if a model is valid (loaded in GPU, VAO/VBOs)
+UnloadModel         :: (model: Model); // Unload model (including meshes) from memory (RAM and/or VRAM)
+GetModelBoundingBox :: (model: Model) -> BoundingBox; // Compute model bounding box limits (considers all meshes)
 
 // Model drawing functions
-DrawModel           :: (model: Model, position: Vector3, scale: float, tint: Color) #extern "C" // Draw a model (with texture if set)
-DrawModelEx         :: (model: Model, position: Vector3, rotationAxis: Vector3, rotationAngle: float, scale: Vector3, tint: Color) #extern "C" // Draw a model with extended parameters
-DrawModelWires      :: (model: Model, position: Vector3, scale: float, tint: Color) #extern "C" // Draw a model wires (with texture if set)
-DrawModelWiresEx    :: (model: Model, position: Vector3, rotationAxis: Vector3, rotationAngle: float, scale: Vector3, tint: Color) #extern "C" // Draw a model wires (with texture if set) with extended parameters
-DrawModelPoints     :: (model: Model, position: Vector3, scale: float, tint: Color) #extern "C" // Draw a model as points
-DrawModelPointsEx   :: (model: Model, position: Vector3, rotationAxis: Vector3, rotationAngle: float, scale: Vector3, tint: Color) #extern "C" // Draw a model as points with extended parameters
-DrawBoundingBox     :: (box: BoundingBox, color: Color) #extern "C" // Draw bounding box (wires)
-DrawBillboard       :: (camera: Camera3D, texture: Texture, position: Vector3, scale: float, tint: Color) #extern "C" // Draw a billboard texture
-DrawBillboardRec    :: (camera: Camera3D, texture: Texture, source: Rectangle, position: Vector3, size: Vector2, tint: Color) #extern "C" // Draw a billboard texture defined by source
-DrawBillboardPro    :: (camera: Camera3D, texture: Texture, source: Rectangle, position: Vector3, up: Vector3, size: Vector2, origin: Vector2, rotation: float, tint: Color) #extern "C" // Draw a billboard texture defined by source and rotation
+DrawModel           :: (model: Model, position: Vector3, scale: float, tint: Color); // Draw a model (with texture if set)
+DrawModelEx         :: (model: Model, position: Vector3, rotationAxis: Vector3, rotationAngle: float, scale: Vector3, tint: Color); // Draw a model with extended parameters
+DrawModelWires      :: (model: Model, position: Vector3, scale: float, tint: Color); // Draw a model wires (with texture if set)
+DrawModelWiresEx    :: (model: Model, position: Vector3, rotationAxis: Vector3, rotationAngle: float, scale: Vector3, tint: Color); // Draw a model wires (with texture if set) with extended parameters
+DrawModelPoints     :: (model: Model, position: Vector3, scale: float, tint: Color); // Draw a model as points
+DrawModelPointsEx   :: (model: Model, position: Vector3, rotationAxis: Vector3, rotationAngle: float, scale: Vector3, tint: Color); // Draw a model as points with extended parameters
+DrawBoundingBox     :: (box: BoundingBox, color: Color); // Draw bounding box (wires)
+DrawBillboard       :: (camera: Camera3D, texture: Texture, position: Vector3, scale: float, tint: Color); // Draw a billboard texture
+DrawBillboardRec    :: (camera: Camera3D, texture: Texture, source: Rectangle, position: Vector3, size: Vector2, tint: Color); // Draw a billboard texture defined by source
+DrawBillboardPro    :: (camera: Camera3D, texture: Texture, source: Rectangle, position: Vector3, up: Vector3, size: Vector2, origin: Vector2, rotation: float, tint: Color); // Draw a billboard texture defined by source and rotation
 
 // Mesh management functions
-UploadMesh          :: (mesh: *Mesh, dynamic: bool) #extern "C" // Upload mesh vertex data in GPU and provide VAO/VBO ids
-UpdateMeshBuffer    :: (mesh: Mesh, index: int, data: *void, dataSize: int, offset: int) #extern "C" // Update mesh vertex data in GPU for a specific buffer index
-UnloadMesh          :: (mesh: Mesh) #extern "C" // Unload mesh data from CPU and GPU
-DrawMesh            :: (mesh: Mesh, material: Material, transform: Matrix) #extern "C" // Draw a 3d mesh with material and transform
-DrawMeshInstanced   :: (mesh: Mesh, material: Material, transforms: *Matrix, instances: int) #extern "C" // Draw multiple mesh instances with material and different transforms
-GetMeshBoundingBox  :: (mesh: Mesh) -> BoundingBox #extern "C" // Compute mesh bounding box limits
-GenMeshTangents     :: (mesh: *Mesh) #extern "C" // Compute mesh tangents
-ExportMesh          :: (mesh: Mesh, fileName: string) -> bool #extern "C" // Export mesh data to file, returns true on success
-ExportMeshAsCode    :: (mesh: Mesh, fileName: string) -> bool #extern "C" // Export mesh as code file (.h) defining multiple arrays of vertex attributes
+UploadMesh          :: (mesh: *Mesh, dynamic: bool); // Upload mesh vertex data in GPU and provide VAO/VBO ids
+UpdateMeshBuffer    :: (mesh: Mesh, index: int, data: *void, dataSize: int, offset: int); // Update mesh vertex data in GPU for a specific buffer index
+UnloadMesh          :: (mesh: Mesh); // Unload mesh data from CPU and GPU
+DrawMesh            :: (mesh: Mesh, material: Material, transform: Matrix); // Draw a 3d mesh with material and transform
+DrawMeshInstanced   :: (mesh: Mesh, material: Material, transforms: *Matrix, instances: int); // Draw multiple mesh instances with material and different transforms
+GetMeshBoundingBox  :: (mesh: Mesh) -> BoundingBox; // Compute mesh bounding box limits
+GenMeshTangents     :: (mesh: *Mesh); // Compute mesh tangents
+ExportMesh          :: (mesh: Mesh, fileName: string) -> bool; // Export mesh data to file, returns true on success
+ExportMeshAsCode    :: (mesh: Mesh, fileName: string) -> bool; // Export mesh as code file (.h) defining multiple arrays of vertex attributes
 
 // Mesh generation functions
-GenMeshPoly         :: (sides: int, radius: float) -> Mesh #extern "C" // Generate polygonal mesh
-GenMeshPlane        :: (width: float, length: float, resX: int, resZ: int) -> Mesh #extern "C" // Generate plane mesh (with subdivisions)
-GenMeshCube         :: (width: float, height: float, length: float) -> Mesh #extern "C" // Generate cuboid mesh
-GenMeshSphere       :: (radius: float, rings: int, slices: int) -> Mesh #extern "C" // Generate sphere mesh (standard sphere)
-GenMeshHemiSphere   :: (radius: float, rings: int, slices: int) -> Mesh #extern "C" // Generate half-sphere mesh (no bottom cap)
-GenMeshCylinder     :: (radius: float, height: float, slices: int) -> Mesh #extern "C" // Generate cylinder mesh
-GenMeshCone         :: (radius: float, height: float, slices: int) -> Mesh #extern "C" // Generate cone/pyramid mesh
-GenMeshTorus        :: (radius: float, size: float, radSeg: int, sides: int) -> Mesh #extern "C" // Generate torus mesh
-GenMeshKnot         :: (radius: float, size: float, radSeg: int, sides: int) -> Mesh #extern "C" // Generate trefoil knot mesh
-GenMeshHeightmap    :: (heightmap: Image, size: Vector3) -> Mesh #extern "C" // Generate heightmap mesh from image data
-GenMeshCubicmap     :: (cubicmap: Image, cubeSize: Vector3) -> Mesh #extern "C" // Generate cubes-based map mesh from image data
+GenMeshPoly         :: (sides: int, radius: float) -> Mesh; // Generate polygonal mesh
+GenMeshPlane        :: (width: float, length: float, resX: int, resZ: int) -> Mesh; // Generate plane mesh (with subdivisions)
+GenMeshCube         :: (width: float, height: float, length: float) -> Mesh; // Generate cuboid mesh
+GenMeshSphere       :: (radius: float, rings: int, slices: int) -> Mesh; // Generate sphere mesh (standard sphere)
+GenMeshHemiSphere   :: (radius: float, rings: int, slices: int) -> Mesh; // Generate half-sphere mesh (no bottom cap)
+GenMeshCylinder     :: (radius: float, height: float, slices: int) -> Mesh; // Generate cylinder mesh
+GenMeshCone         :: (radius: float, height: float, slices: int) -> Mesh; // Generate cone/pyramid mesh
+GenMeshTorus        :: (radius: float, size: float, radSeg: int, sides: int) -> Mesh; // Generate torus mesh
+GenMeshKnot         :: (radius: float, size: float, radSeg: int, sides: int) -> Mesh; // Generate trefoil knot mesh
+GenMeshHeightmap    :: (heightmap: Image, size: Vector3) -> Mesh; // Generate heightmap mesh from image data
+GenMeshCubicmap     :: (cubicmap: Image, cubeSize: Vector3) -> Mesh; // Generate cubes-based map mesh from image data
 
 // Material loading/unloading functions
-LoadMaterials       :: (fileName: string, materialCount: *int) -> *Material #extern "C" // Load materials from model file
-LoadMaterialDefault :: () -> Material #extern "C" // Load default material (Supports: DIFFUSE, SPECULAR, NORMAL maps)
-IsMaterialValid     :: (material: Material) -> bool #extern "C" // Check if a material is valid (shader assigned, map textures loaded in GPU)
-UnloadMaterial      :: (material: Material) #extern "C" // Unload material from GPU memory (VRAM)
-SetMaterialTexture  :: (material: *Material, mapType: int, texture: Texture) #extern "C" // Set texture for a material map type (MATERIAL_MAP_DIFFUSE, MATERIAL_MAP_SPECULAR...)
-SetModelMeshMaterial:: (model: *Model, meshId: int, materialId: int) #extern "C" // Set material for a mesh
+LoadMaterials       :: (fileName: string, materialCount: *int) -> *Material; // Load materials from model file
+LoadMaterialDefault :: () -> Material; // Load default material (Supports: DIFFUSE, SPECULAR, NORMAL maps)
+IsMaterialValid     :: (material: Material) -> bool; // Check if a material is valid (shader assigned, map textures loaded in GPU)
+UnloadMaterial      :: (material: Material); // Unload material from GPU memory (VRAM)
+SetMaterialTexture  :: (material: *Material, mapType: int, texture: Texture); // Set texture for a material map type (MATERIAL_MAP_DIFFUSE, MATERIAL_MAP_SPECULAR...)
+SetModelMeshMaterial:: (model: *Model, meshId: int, materialId: int); // Set material for a mesh
 
 // Model animations loading/unloading functions
-LoadModelAnimations     :: (fileName: string, animCount: *int) -> *ModelAnimation #extern "C" // Load model animations from file
-UpdateModelAnimation    :: (model: Model, anim: ModelAnimation, frame: int) #extern "C" // Update model animation pose (CPU)
-UpdateModelAnimationBones :: (model: Model, anim: ModelAnimation, frame: int) #extern "C" // Update model animation mesh bone matrices (GPU skinning)
-UnloadModelAnimation    :: (anim: ModelAnimation) #extern "C" // Unload animation data
-UnloadModelAnimations   :: (animations: *ModelAnimation, animCount: int) #extern "C" // Unload animation array data
-IsModelAnimationValid   :: (model: Model, anim: ModelAnimation) -> bool #extern "C" // Check model animation skeleton match
+LoadModelAnimations     :: (fileName: string, animCount: *int) -> *ModelAnimation; // Load model animations from file
+UpdateModelAnimation    :: (model: Model, anim: ModelAnimation, frame: int); // Update model animation pose (CPU)
+UpdateModelAnimationBones :: (model: Model, anim: ModelAnimation, frame: int); // Update model animation mesh bone matrices (GPU skinning)
+UnloadModelAnimation    :: (anim: ModelAnimation); // Unload animation data
+UnloadModelAnimations   :: (animations: *ModelAnimation, animCount: int); // Unload animation array data
+IsModelAnimationValid   :: (model: Model, anim: ModelAnimation) -> bool; // Check model animation skeleton match
 
 // Collision detection functions
-CheckCollisionSpheres     :: (center1: Vector3, radius1: float, center2: Vector3, radius2: float) -> bool #extern "C" // Check collision between two spheres
-CheckCollisionBoxes       :: (box1: BoundingBox, box2: BoundingBox) -> bool #extern "C" // Check collision between two bounding boxes
-CheckCollisionBoxSphere   :: (box: BoundingBox, center: Vector3, radius: float) -> bool #extern "C" // Check collision between box and sphere
-GetRayCollisionSphere     :: (ray: Ray, center: Vector3, radius: float) -> RayCollision #extern "C" // Get collision info between ray and sphere
-GetRayCollisionBox        :: (ray: Ray, box: BoundingBox) -> RayCollision #extern "C" // Get collision info between ray and box
-GetRayCollisionMesh       :: (ray: Ray, mesh: Mesh, transform: Matrix) -> RayCollision #extern "C" // Get collision info between ray and mesh
-GetRayCollisionTriangle   :: (ray: Ray, p1: Vector3, p2: Vector3, p3: Vector3) -> RayCollision #extern "C" // Get collision info between ray and triangle
-GetRayCollisionQuad       :: (ray: Ray, p1: Vector3, p2: Vector3, p3: Vector3, p4: Vector3) -> RayCollision #extern "C" // Get collision info between ray and quad
+CheckCollisionSpheres     :: (center1: Vector3, radius1: float, center2: Vector3, radius2: float) -> bool; // Check collision between two spheres
+CheckCollisionBoxes       :: (box1: BoundingBox, box2: BoundingBox) -> bool; // Check collision between two bounding boxes
+CheckCollisionBoxSphere   :: (box: BoundingBox, center: Vector3, radius: float) -> bool; // Check collision between box and sphere
+GetRayCollisionSphere     :: (ray: Ray, center: Vector3, radius: float) -> RayCollision; // Get collision info between ray and sphere
+GetRayCollisionBox        :: (ray: Ray, box: BoundingBox) -> RayCollision; // Get collision info between ray and box
+GetRayCollisionMesh       :: (ray: Ray, mesh: Mesh, transform: Matrix) -> RayCollision; // Get collision info between ray and mesh
+GetRayCollisionTriangle   :: (ray: Ray, p1: Vector3, p2: Vector3, p3: Vector3) -> RayCollision; // Get collision info between ray and triangle
+GetRayCollisionQuad       :: (ray: Ray, p1: Vector3, p2: Vector3, p3: Vector3, p4: Vector3) -> RayCollision; // Get collision info between ray and quad
 
 //------------------------------------------------------------------------------------
 // Audio Loading and Playing Functions (Module: audio)
@@ -1403,79 +1405,81 @@ GetRayCollisionQuad       :: (ray: Ray, p1: Vector3, p2: Vector3, p3: Vector3, p
 // AudioCallback :: *void; // Typedef placeholder
 
 // Audio device management functions
-InitAudioDevice     :: () #extern "C" // Initialize audio device and context
-CloseAudioDevice    :: () #extern "C" // Close the audio device and context
-IsAudioDeviceReady  :: () -> bool #extern "C" // Check if audio device has been initialized successfully
-SetMasterVolume     :: (volume: float) #extern "C" // Set master volume (listener)
-GetMasterVolume     :: () -> float #extern "C" // Get master volume (listener)
+InitAudioDevice     :: (); // Initialize audio device and context
+CloseAudioDevice    :: (); // Close the audio device and context
+IsAudioDeviceReady  :: () -> bool; // Check if audio device has been initialized successfully
+SetMasterVolume     :: (volume: float); // Set master volume (listener)
+GetMasterVolume     :: () -> float; // Get master volume (listener)
 
 // Wave/Sound loading/unloading functions
-LoadWave            :: (fileName: string) -> Wave #extern "C" // Load wave data from file
-LoadWaveFromMemory  :: (fileType: string, fileData: *u8, dataSize: int) -> Wave #extern "C" // Load wave from memory buffer, fileType refers to extension: i.e. '.wav'
-IsWaveValid         :: (wave: Wave) -> bool #extern "C" // Checks if wave data is valid (data loaded and parameters)
-LoadSound           :: (fileName: string) -> Sound #extern "C" // Load sound from file
-LoadSoundFromWave   :: (wave: Wave) -> Sound #extern "C" // Load sound from wave data
-LoadSoundAlias      :: (source: Sound) -> Sound #extern "C" // Create a new sound that shares the same sample data as the source sound, does not own the sound data
-IsSoundValid        :: (sound: Sound) -> bool #extern "C" // Checks if a sound is valid (data loaded and buffers initialized)
-UpdateSound         :: (sound: Sound, data: *void, sampleCount: int) #extern "C" // Update sound buffer with new data
-UnloadWave          :: (wave: Wave) #extern "C" // Unload wave data
-UnloadSound         :: (sound: Sound) #extern "C" // Unload sound
-UnloadSoundAlias    :: (alias: Sound) #extern "C" // Unload a sound alias (does not deallocate sample data)
-ExportWave          :: (wave: Wave, fileName: string) -> bool #extern "C" // Export wave data to file, returns true on success
-ExportWaveAsCode    :: (wave: Wave, fileName: string) -> bool #extern "C" // Export wave sample data to code (.h), returns true on success
+LoadWave            :: (fileName: string) -> Wave; // Load wave data from file
+LoadWaveFromMemory  :: (fileType: string, fileData: *u8, dataSize: int) -> Wave; // Load wave from memory buffer, fileType refers to extension: i.e. '.wav'
+IsWaveValid         :: (wave: Wave) -> bool; // Checks if wave data is valid (data loaded and parameters)
+LoadSound           :: (fileName: string) -> Sound; // Load sound from file
+LoadSoundFromWave   :: (wave: Wave) -> Sound; // Load sound from wave data
+LoadSoundAlias      :: (source: Sound) -> Sound; // Create a new sound that shares the same sample data as the source sound, does not own the sound data
+IsSoundValid        :: (sound: Sound) -> bool; // Checks if a sound is valid (data loaded and buffers initialized)
+UpdateSound         :: (sound: Sound, data: *void, sampleCount: int); // Update sound buffer with new data
+UnloadWave          :: (wave: Wave); // Unload wave data
+UnloadSound         :: (sound: Sound); // Unload sound
+UnloadSoundAlias    :: (alias: Sound); // Unload a sound alias (does not deallocate sample data)
+ExportWave          :: (wave: Wave, fileName: string) -> bool; // Export wave data to file, returns true on success
+ExportWaveAsCode    :: (wave: Wave, fileName: string) -> bool; // Export wave sample data to code (.h), returns true on success
 
 // Wave/Sound management functions
-PlaySound           :: (sound: Sound) #extern "C" // Play a sound
-StopSound           :: (sound: Sound) #extern "C" // Stop playing a sound
-PauseSound          :: (sound: Sound) #extern "C" // Pause a sound
-ResumeSound         :: (sound: Sound) #extern "C" // Resume a paused sound
-IsSoundPlaying      :: (sound: Sound) -> bool #extern "C" // Check if a sound is currently playing
-SetSoundVolume      :: (sound: Sound, volume: float) #extern "C" // Set volume for a sound (1.0 is max level)
-SetSoundPitch       :: (sound: Sound, pitch: float) #extern "C" // Set pitch for a sound (1.0 is base level)
-SetSoundPan         :: (sound: Sound, pan: float) #extern "C" // Set pan for a sound (0.5 is center)
-WaveCopy            :: (wave: Wave) -> Wave #extern "C" // Copy a wave to a new wave
-WaveCrop            :: (wave: *Wave, initFrame: int, finalFrame: int) #extern "C" // Crop a wave to defined frames range
-WaveFormat          :: (wave: *Wave, sampleRate: int, sampleSize: int, channels: int) #extern "C" // Convert wave data to desired format
-LoadWaveSamples     :: (wave: Wave) -> *float #extern "C" // Load samples data from wave as a 32bit float data array
-UnloadWaveSamples   :: (samples: *float) #extern "C" // Unload samples data loaded with LoadWaveSamples()
+PlaySound           :: (sound: Sound); // Play a sound
+StopSound           :: (sound: Sound); // Stop playing a sound
+PauseSound          :: (sound: Sound); // Pause a sound
+ResumeSound         :: (sound: Sound); // Resume a paused sound
+IsSoundPlaying      :: (sound: Sound) -> bool; // Check if a sound is currently playing
+SetSoundVolume      :: (sound: Sound, volume: float); // Set volume for a sound (1.0 is max level)
+SetSoundPitch       :: (sound: Sound, pitch: float); // Set pitch for a sound (1.0 is base level)
+SetSoundPan         :: (sound: Sound, pan: float); // Set pan for a sound (0.5 is center)
+WaveCopy            :: (wave: Wave) -> Wave; // Copy a wave to a new wave
+WaveCrop            :: (wave: *Wave, initFrame: int, finalFrame: int); // Crop a wave to defined frames range
+WaveFormat          :: (wave: *Wave, sampleRate: int, sampleSize: int, channels: int); // Convert wave data to desired format
+LoadWaveSamples     :: (wave: Wave) -> *float; // Load samples data from wave as a 32bit float data array
+UnloadWaveSamples   :: (samples: *float); // Unload samples data loaded with LoadWaveSamples()
 
 // Music management functions
-LoadMusicStream     :: (fileName: string) -> Music #extern "C" // Load music stream from file
-LoadMusicStreamFromMemory :: (fileType: string, data: *u8, dataSize: int) -> Music #extern "C" // Load music stream from data
-IsMusicValid        :: (music: Music) -> bool #extern "C" // Checks if a music stream is valid (context and buffers initialized)
-UnloadMusicStream   :: (music: Music) #extern "C" // Unload music stream
-PlayMusicStream     :: (music: Music) #extern "C" // Start music playing
-IsMusicStreamPlaying :: (music: Music) -> bool #extern "C" // Check if music is playing
-UpdateMusicStream   :: (music: Music) #extern "C" // Updates buffers for music streaming
-StopMusicStream     :: (music: Music) #extern "C" // Stop music playing
-PauseMusicStream    :: (music: Music) #extern "C" // Pause music playing
-ResumeMusicStream   :: (music: Music) #extern "C" // Resume playing paused music
-SeekMusicStream     :: (music: Music, position: float) #extern "C" // Seek music to a position (in seconds)
-SetMusicVolume      :: (music: Music, volume: float) #extern "C" // Set volume for music (1.0 is max level)
-SetMusicPitch       :: (music: Music, pitch: float) #extern "C" // Set pitch for a music (1.0 is base level)
-SetMusicPan         :: (music: Music, pan: float) #extern "C" // Set pan for a music (0.5 is center)
-GetMusicTimeLength  :: (music: Music) -> float #extern "C" // Get music time length (in seconds)
-GetMusicTimePlayed  :: (music: Music) -> float #extern "C" // Get current music time played (in seconds)
+LoadMusicStream     :: (fileName: string) -> Music; // Load music stream from file
+LoadMusicStreamFromMemory :: (fileType: string, data: *u8, dataSize: int) -> Music; // Load music stream from data
+IsMusicValid        :: (music: Music) -> bool; // Checks if a music stream is valid (context and buffers initialized)
+UnloadMusicStream   :: (music: Music); // Unload music stream
+PlayMusicStream     :: (music: Music); // Start music playing
+IsMusicStreamPlaying :: (music: Music) -> bool; // Check if music is playing
+UpdateMusicStream   :: (music: Music); // Updates buffers for music streaming
+StopMusicStream     :: (music: Music); // Stop music playing
+PauseMusicStream    :: (music: Music); // Pause music playing
+ResumeMusicStream   :: (music: Music); // Resume playing paused music
+SeekMusicStream     :: (music: Music, position: float); // Seek music to a position (in seconds)
+SetMusicVolume      :: (music: Music, volume: float); // Set volume for music (1.0 is max level)
+SetMusicPitch       :: (music: Music, pitch: float); // Set pitch for a music (1.0 is base level)
+SetMusicPan         :: (music: Music, pan: float); // Set pan for a music (0.5 is center)
+GetMusicTimeLength  :: (music: Music) -> float; // Get music time length (in seconds)
+GetMusicTimePlayed  :: (music: Music) -> float; // Get current music time played (in seconds)
 
 // AudioStream management functions
-LoadAudioStream                 :: (sampleRate: uint, sampleSize: uint, channels: uint) -> AudioStream #extern "C" // Load audio stream (to stream raw audio pcm data)
-IsAudioStreamValid              :: (stream: AudioStream) -> bool #extern "C" // Checks if an audio stream is valid (buffers initialized)
-UnloadAudioStream               :: (stream: AudioStream) #extern "C" // Unload audio stream and free memory
-UpdateAudioStream               :: (stream: AudioStream, data: *void, frameCount: int) #extern "C" // Update audio stream buffers with data
-IsAudioStreamProcessed          :: (stream: AudioStream) -> bool #extern "C" // Check if any audio stream buffers requires refill
-PlayAudioStream                 :: (stream: AudioStream) #extern "C" // Play audio stream
-PauseAudioStream                :: (stream: AudioStream) #extern "C" // Pause audio stream
-ResumeAudioStream               :: (stream: AudioStream) #extern "C" // Resume audio stream
-IsAudioStreamPlaying            :: (stream: AudioStream) -> bool #extern "C" // Check if audio stream is playing
-StopAudioStream                 :: (stream: AudioStream) #extern "C" // Stop audio stream
-SetAudioStreamVolume            :: (stream: AudioStream, volume: float) #extern "C" // Set volume for audio stream (1.0 is max level)
-SetAudioStreamPitch             :: (stream: AudioStream, pitch: float) #extern "C" // Set pitch for audio stream (1.0 is base level)
-SetAudioStreamPan               :: (stream: AudioStream, pan: float) #extern "C" // Set pan for audio stream (0.5 is centered)
-SetAudioStreamBufferSizeDefault :: (size: int) #extern "C" // Default size for new audio streams
-SetAudioStreamCallback          :: (stream: AudioStream, callback: *void) #extern "C" // Audio thread callback to request new data
+LoadAudioStream                 :: (sampleRate: uint, sampleSize: uint, channels: uint) -> AudioStream; // Load audio stream (to stream raw audio pcm data)
+IsAudioStreamValid              :: (stream: AudioStream) -> bool; // Checks if an audio stream is valid (buffers initialized)
+UnloadAudioStream               :: (stream: AudioStream); // Unload audio stream and free memory
+UpdateAudioStream               :: (stream: AudioStream, data: *void, frameCount: int); // Update audio stream buffers with data
+IsAudioStreamProcessed          :: (stream: AudioStream) -> bool; // Check if any audio stream buffers requires refill
+PlayAudioStream                 :: (stream: AudioStream); // Play audio stream
+PauseAudioStream                :: (stream: AudioStream); // Pause audio stream
+ResumeAudioStream               :: (stream: AudioStream); // Resume audio stream
+IsAudioStreamPlaying            :: (stream: AudioStream) -> bool; // Check if audio stream is playing
+StopAudioStream                 :: (stream: AudioStream); // Stop audio stream
+SetAudioStreamVolume            :: (stream: AudioStream, volume: float); // Set volume for audio stream (1.0 is max level)
+SetAudioStreamPitch             :: (stream: AudioStream, pitch: float); // Set pitch for audio stream (1.0 is base level)
+SetAudioStreamPan               :: (stream: AudioStream, pan: float); // Set pan for audio stream (0.5 is centered)
+SetAudioStreamBufferSizeDefault :: (size: int); // Default size for new audio streams
+SetAudioStreamCallback          :: (stream: AudioStream, callback: *void); // Audio thread callback to request new data
 
-AttachAudioStreamProcessor :: (stream: AudioStream, processor: *void) #extern "C" // Attach audio stream processor to stream, receives the samples as 'float'
-DetachAudioStreamProcessor :: (stream: AudioStream, processor: *void) #extern "C" // Detach audio stream processor from stream
+AttachAudioStreamProcessor :: (stream: AudioStream, processor: *void); // Attach audio stream processor to stream, receives the samples as 'float'
+DetachAudioStreamProcessor :: (stream: AudioStream, processor: *void); // Detach audio stream processor from stream
 
-AttachAudioMixedProcessor :: (processor: *void) #extern "C" // Attach audio stream processor to the entire audio pipeline, receives the samples as 'float'
-DetachAudioMixedProcessor :: (processor: *void) #extern "C" // Detach audio stream processor from the entire audio pipeline
+AttachAudioMixedProcessor :: (processor: *void); // Attach audio stream processor to the entire audio pipeline, receives the samples as 'float'
+DetachAudioMixedProcessor :: (processor: *void); // Detach audio stream processor from the entire audio pipeline
+
+}

@@ -1,8 +1,9 @@
 //////////////////////////////////////////////////////////////////////////////////////
 //  C math.h functions
 //////////////////////////////////////////////////////////////////////////////////////
-
-round :: (value: f64) -> f64 #extern "C"
-sin   :: (angle: f64) -> f64 #extern "C"
-cos   :: (angle: f64) -> f64 #extern "C"
-sqrt  :: (value: f64) -> f64 #extern "C"
+extern "C" {
+    round :: (value: f64) -> f64;
+    sin   :: (angle: f64) -> f64;
+    cos   :: (angle: f64) -> f64;
+    sqrt  :: (value: f64) -> f64;
+}

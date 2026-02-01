@@ -1,4 +1,6 @@
-realloc :: (buffer: *void, new_size: int) -> *void #extern "C"
+extern "C" {
+    realloc :: (buffer: *void, new_size: int) -> *void;
+}
 
 append :: (array: *[..]int, elem: int) {
 

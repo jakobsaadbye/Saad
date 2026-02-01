@@ -13,6 +13,7 @@ typedef struct Typer {
     AstWhile        *enclosing_while;    // Same as above
 
     AstDeclaration  *inside_declaration; // Set if we are currently type checking a declaration
+    AstExtern       *inside_extern_block; // Set if we are currently type checking function definitions inside an extern block
     
     int array_literal_depth;
 
@@ -169,6 +170,15 @@ bool check_import(Typer *typer, AstImport *import) {
     return true;
 }
 
+bool check_extern(Typer *typer, AstExtern *ast_extern) {
+    typer->inside_extern_block = ast_extern;
+    bool ok = check_block(typer, ast_extern->block);
+    if (!ok) return false;
+    typer->inside_extern_block = NULL;
+    
+    return true;
+}
+
 bool check_block(Typer *typer, AstBlock *block) {
     bool ok;
 
@@ -201,27 +211,27 @@ Type *resolve_type(Typer *typer, Type *type) {
     }
 
     if (type->kind == TYPE_ANY) {
-        TypeAny *any = (TypeAny *)type;
-
-        // Look for the Type :: struct {...} in the "reflect" package
-        AstIdentifier *type_any_identifier = lookup_from_scope(typer->parser, typer->current_scope, "TypeAny");
-        if (!type_any_identifier) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)any, "Compiler Error: Failed to find the 'TypeAny' struct in reflect.sd");
-            return NULL;
+        if (!typer->inside_extern_block)  {
+            TypeAny *any = (TypeAny *)type;
+    
+            // Look for the Type :: struct {...} in the "reflect" package
+            AstIdentifier *type_any_identifier = lookup_from_scope(typer->parser, typer->current_scope, "TypeAny");
+            if (!type_any_identifier) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)any, "Compiler Error: Failed to find the 'TypeAny' struct in reflect.sd");
+                return NULL;
+            }
+            // if (!type_identifier->type || type_identifier->type->kind == TYPE_STRUCT) {
+            //     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)type_identifier, "Compiler Error: Found a different identifier for Type than the one declared in 'reflect.sd'");
+            //     return NULL;
+            // }
+    
+            any->struct_defn = (TypeStruct *)type_any_identifier->type;
+    
+            // dump_struct(any->struct_defn->node);
+            // AstIdentifier *type_info = ((AstIdentifier **)any->struct_defn->node->scope->identifiers.items)[1];
+            // TypeStruct *type_info_struct = (TypeStruct *)(((TypePointer *)type_info->type)->pointer_to);
+            // dump_struct(type_info_struct->node);
         }
-        // if (!type_identifier->type || type_identifier->type->kind == TYPE_STRUCT) {
-        //     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)type_identifier, "Compiler Error: Found a different identifier for Type than the one declared in 'reflect.sd'");
-        //     return NULL;
-        // }
-
-        any->struct_defn = (TypeStruct *)type_any_identifier->type;
-
-        // dump_struct(any->struct_defn->node);
-        // AstIdentifier *type_info = ((AstIdentifier **)any->struct_defn->node->scope->identifiers.items)[1];
-        // TypeStruct *type_info_struct = (TypeStruct *)(((TypePointer *)type_info->type)->pointer_to);
-        // dump_struct(type_info_struct->node);
-
-        // Add the struct definition for the any type
 
 
         return type;
@@ -763,6 +773,14 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         return types_are_equal(left_pointer_to, right_pointer_to);
     }
 
+    // if (lhs->kind == TYPE_STRING && rhs->kind == TYPE_POINTER) {
+    //     Type *right_pointer_to = ((TypePointer *)(rhs))->pointer_to;
+
+    //     if (right_pointer_to->kind == TYPE_INTEGER) {
+
+    //     }
+    // }
+
     if (lhs->kind == TYPE_FUNCTION && rhs->kind == TYPE_FUNCTION) {
         TypeFunction *left_func = (TypeFunction *) lhs;
         TypeFunction *right_func = (TypeFunction *) rhs;
@@ -795,7 +813,7 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         return true;
     }
 
-    if (lhs->kind == TYPE_ANY) {
+    if (lhs->kind == TYPE_ANY || rhs->kind == TYPE_ANY) {
         // Allow all types to cast into type any
         return true;
     }
@@ -1392,6 +1410,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
 
     switch (stmt->kind) {
     case AST_IMPORT:            return check_import(typer, (AstImport *)(stmt));
+    case AST_EXTERN:            return check_extern(typer, (AstExtern *)(stmt));
     case AST_BLOCK:             return check_block(typer, (AstBlock *)(stmt));
     case AST_DECLARATION:       return check_declaration(typer, (AstDeclaration *)(stmt));
     case AST_ASSIGNMENT:        return check_assignment(typer, (AstAssignment *)(stmt));
@@ -1557,8 +1576,8 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             }
         }
 
-        // Generate a slice argument to hold the variadic arguments
         if (!func_defn->is_extern) {
+            // Generate a slice argument to hold the variadic arguments
             int num_varargs = call->arguments.count - func_defn->variadic_parameter_index;
 
             TypeArray *slice_type = generate_slice_of(typer->parser, vararg_type->type);
@@ -1590,7 +1609,19 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             da_append(&call->lowered_arguments, slice);
 
         } else {
-            XXX;
+
+            // Build up the lowered argument list
+            call->lowered_arguments = da_init(func_defn->variadic_parameter_index + 1, sizeof(AstExpr *));
+
+            // Add all the arguments and mark the variadic arguments
+            for (int i = 0; i < call->arguments.count; i++) {
+                AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
+                if (i >= func_defn->variadic_parameter_index) {
+                    arg->head.flags |= AST_FLAG_IS_C_VARARG;
+                }
+                da_append(&call->lowered_arguments, arg);
+            }
+
         }
 
     } else {
@@ -1647,10 +1678,12 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     if (func_defn->is_variadic) {
         // Reserve space for the created array + slice to it
         int num_varargs = call->arguments.count - func_defn->variadic_parameter_index;
-
-        AstIdentifier *var_param = ((AstIdentifier **)func_defn->parameters.items)[func_defn->variadic_parameter_index];
-        TypeVariadic *variadic = (TypeVariadic *) var_param->type;
-        reserve_local_storage(typer->enclosing_function, num_varargs * variadic->type->size);
+        if (!func_defn->is_extern) {
+            // Reserve space for the created array + slice to it
+            AstIdentifier *var_param = ((AstIdentifier **)func_defn->parameters.items)[func_defn->variadic_parameter_index];
+            TypeVariadic *variadic = (TypeVariadic *) var_param->type;
+            reserve_local_storage(typer->enclosing_function, num_varargs * variadic->type->size);
+        }
     }
 
     for (int i = 0; i < call->lowered_arguments.count; i++) {
@@ -2711,7 +2744,8 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
         // @Note - If applied to a pointer, we will do a pointer to bool conversion
         return primitive_type(PRIMITIVE_BOOL);
     }
-    else if (unary->operator == OP_BITWISE_NOT) {
+
+    if (unary->operator == OP_BITWISE_NOT) {
         if (type_kind != TYPE_INTEGER) { // Maybe give a warning when not applying bitwise not to an integer?
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Operator '~' expects expression to be an integer type. Got type %s\n", type_to_str(expr_type));
             return NULL;
@@ -2719,15 +2753,21 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
 
         return expr_type;
     } 
-    else if (unary->operator == OP_UNARY_MINUS) {
+
+    if (unary->operator == OP_UNARY_MINUS) {
         if (type_kind != TYPE_INTEGER && type_kind != TYPE_FLOAT && type_kind != TYPE_ENUM) { // Maybe give a warning when applying unary minus to an enum??? Seems kinda strange
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Type mismatch. Operator '-' is not applicative on expression of type '%s'\n", type_to_str(expr_type));
             return NULL;
         };
 
         return expr_type;
-    } 
-    else if (unary->operator == OP_ADDRESS_OF) {
+    }
+
+    if (unary->operator == OP_SPREAD) {
+        XXX;
+    }
+
+    if (unary->operator == OP_ADDRESS_OF) {
         bool lvalue = false;
         if (unary->expr->head.kind == AST_LITERAL && ((AstLiteral *)(unary->expr))->kind == LITERAL_IDENTIFIER) {
             lvalue = true;
@@ -2753,7 +2793,8 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
         ptr->pointer_to      = expr_type;
         return (Type *)(ptr);
     }
-    else if (unary->operator == OP_POINTER_DEREFERENCE) {
+
+    if (unary->operator == OP_POINTER_DEREFERENCE) {
         if (expr_type->kind != TYPE_POINTER) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Invalid pointer dereference. Expression has type %s", type_to_str(expr_type));
             return NULL;
@@ -2762,9 +2803,9 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
         Type *points_to = ((TypePointer *)(expr_type))->pointer_to;
         return points_to;
     }
-    else {
-        XXX;
-    }
+
+    report_error_ast(typer->parser, LABEL_ERROR, (Ast *) unary, "Compiler Error: Typechecking unknown unary operator");
+    return NULL;
 }
 
 bool can_cast_implicitly(Type *from, Type *to) {

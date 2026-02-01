@@ -1,0 +1,67 @@
+import "c_stdlib";
+
+StringBuilder :: struct {
+    buffer:    *u8;
+    cursor:    int;
+    capacity:  int;
+}
+
+NewStringBuilder :: (initialCapacity: int) -> StringBuilder {
+    buffer: *u8 = malloc(initialCapacity);
+
+    memset(buffer, 0, initialCapacity);
+
+    return {
+        buffer   = buffer,
+        cursor   = 0,
+        capacity = initialCapacity,
+    };
+}
+
+append :: method (sb: *StringBuilder, format: string, args: ...any) {
+    MaxAppendedStringLen :: 2048;
+
+    str: *u8 = malloc(MaxAppendedStringLen);
+    strLen := sprintf(str, format, ...args);
+
+    if sb.cursor + strLen < sb.capacity {
+        memcpy(&sb.buffer[sb.cursor], str, strLen);
+        sb.cursor += strLen;
+        free(str);
+    } else {
+        newCapacity := sb.capacity * 2;
+        while newCapacity <= sb.cursor + strLen {
+            newCapacity *= 2;
+        }
+
+        newBuffer: *u8 = realloc(sb.buffer, newCapacity);
+        if newBuffer == null {
+            print("OutOfMemoryException: Failed to reallocate a new buffer for the string builder");
+            exit(1);
+        }
+
+        sb.buffer = newBuffer;
+        sb.capacity = newCapacity;
+
+        memset(&sb.buffer[sb.cursor], 0, newCapacity - sb.cursor);
+
+        // Append the string
+        memcpy(&sb.buffer[sb.cursor], str, strLen);
+        sb.cursor += strLen;
+        free(str);
+    }
+
+    return;
+}
+
+clear :: method (sb: *StringBuilder) {
+    memset(sb.buffer, 0, sb.capacity);
+}
+
+toString :: method (sb: *StringBuilder) -> string {
+    return cast(string) sb.buffer;
+}
+
+free :: method (sb: *StringBuilder) {
+    free(sb.buffer);
+}
