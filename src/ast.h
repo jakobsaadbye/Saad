@@ -100,6 +100,7 @@ typedef enum AstFlags {
     AST_FLAG_IS_CODE_GENED                         = 1 << 3, // Set if the Ast Node has gone through codegeneration e.g function definitions, enums etc. so we don't duplicate symbols in the outputted .asm
     AST_FLAG_IS_C_VARARG                           = 1 << 4, // Set if the argument is a variadic c argument
     AST_FLAG_EXPR_IS_SPREADED                      = 1 << 5, // Set if the expression has had the operator ... applied to it
+    AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER            = 1 << 7, // Set on an array access on a pointer
 } AstFlags;
 
 typedef struct Ast {

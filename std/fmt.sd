@@ -1,0 +1,31 @@
+import "c_string"; // strlen, @Remove: Once we have better strings
+import "strings";
+
+extern "C" {
+    sprintf :: (buffer: *u8, format: string, args: ...any) -> int;
+    printf  :: (format: string, args: ...any) -> int;
+}
+
+Print :: (format: string, args: ...any) -> int {
+    sb := NewStringBuilder(1024);
+    print("%", strlen(format));
+    
+
+    // Parse the format string
+    placeholderIndicies: [..]int;
+
+
+    for i in 0..strlen(format) {
+        c := cast(*u8)format;
+        print("% ", c);
+    }
+
+    for arg in args {
+
+        print("arg.type = %\n", *arg.type);
+    }
+
+    sb.free();
+
+    return 0;
+}

@@ -1,33 +1,23 @@
-import "strings";
+// import "fmt";
 
-extern "C" {
-    sprintf :: (buffer: *u8, format: string, args: ...any) -> int;
-    printf  :: (format: string, args: ...any) -> int;
-}
+// HttpStatus :: enum {
+//     Ok = 200,
+//     Created = 201,
+//     BadRequest = 400,
+// }
 
-Print :: (format: string, args: ...any) -> int {
-    sb := NewStringBuilder(1024);
-
-    for arg in args {
-        print("arg.type = %\n", *arg.type);
-    }
-
-    sb.free();
-
-    return 0;
-}
-
-HttpStatus :: enum {
-    Ok = 200,
-    Created = 201,
-    BadRequest = 400,
-}
-
-Vector3 :: struct {
-    x, y, z: float;
-}
+// Vector3 :: struct {
+//     x, y, z: float;
+// }
 
 main :: () {
-    written := Print("% % % % % % %", 1, 3.14, true, "Hello saad", HttpStatus.Ok, [1, 2, 3], Vector3{1, 4, 9});
-    // Print("% % % % % % %", 1, 3.14, true, "Hello saad", HttpStatus.Ok, [1, 2, 3], Vector3{1, 4, 9})
+    // written := Print("$ $ $ $ $ $ Hellope", 1, 3.14, true, "Hello saad", HttpStatus.Ok, Vector3{1, 4, 9});
+    // written := Print("$ Hellope", 1);
+
+    myString := "Hello world";
+
+    for i in 0..11 {
+        c := (cast(*u8)myString)[i];
+        print("% ", c);
+    }
 }

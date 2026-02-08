@@ -2364,6 +2364,7 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
         array->count           = 0;
 
         array_ac->accessing->type = (Type *) array;
+        array_ac->head.head.flags |= AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER;
 
         type_being_accessed = (Type *) array;
     }

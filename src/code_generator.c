@@ -2624,7 +2624,7 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue)
     POP(RBX); // rbx = address of array
 
     // Set rbx to the address of the 0'th element (.data pointer)
-    if (array_type->array_kind == ARRAY_FIXED) {
+    if (array_type->array_kind == ARRAY_FIXED || (array_ac->head.head.flags & AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER)) {
         // Skip as the address of the array is already the address of the 0'th element
     } else {
         sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
