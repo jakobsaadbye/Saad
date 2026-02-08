@@ -1,5 +1,10 @@
 //////////////////////////////////
 // Runtime support file that is linked with the user program executable
+//
+// @Important:
+//
+// The struct layout of these types HAS TO match 1:1 the memory layout
+// of the types found in "reflect.sd"
 //////////////////////////////////
 #include <stdio.h>
 #include <stdlib.h>
@@ -103,6 +108,12 @@ typedef struct TypeStruct {
     uint64_t  _pad2;        // tail padding → 64
 } TypeStruct;
 
+typedef struct TypeAny {
+    Type  head;
+    void *data;
+    Type *type;
+} TypeAny;
+
 TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.head = {.kind = TYPE_INTEGER, .size = 4, .name = "uint"   }, .kind = PRIMITIVE_UINT     },
     {.head = {.kind = TYPE_INTEGER, .size = 1, .name = "u8"     }, .kind = PRIMITIVE_U8       },
@@ -178,4 +189,15 @@ TypeStruct *runtime_get_type_struct(char *name, StructMember *members, int membe
     type_struct->members.count = (size_t) members_count;
     type_struct->alignment     = alignment;
     return type_struct;
+}
+
+TypeAny *runtime_get_type_any() {
+    TypeAny *type_any       = malloc(sizeof(TypeAny));
+    type_any->head.kind     = TYPE_ANY;
+    type_any->head.name     = "any";
+    type_any->head.size     = 16;
+    type_any->head.flags    = 0;
+    type_any->data          = NULL;
+    type_any->type          = NULL;
+    return type_any;
 }

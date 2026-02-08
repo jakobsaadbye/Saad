@@ -86,7 +86,13 @@ TypeStruct :: struct {
     alignment: int;
 };
 
+Any :: struct {
+    data: *void;
+    type: *Type;
+}
+
 TypeAny :: struct {
+    head:  Type;
     data: *void;
     type: *Type;
 }
@@ -95,4 +101,6 @@ extern "C" {
     runtime_get_type_array  :: (name: string, kind: TypeArrayKind, elem_type: *Type, count: int) -> *TypeArray;
     runtime_get_type_enum   :: (name: string, backingType: *Type, minValue: int, maxValue: int) -> *TypeEnum;
     runtime_get_type_struct :: (name: string, members: *StructMember, members_count: int, size: int, alignment: int) -> *TypeStruct;
+    // runtime_get_type_any    :: (data: *void, type: *Type) -> *TypeAny;
+    runtime_get_type_any    :: () -> *TypeAny;
 }

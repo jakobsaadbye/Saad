@@ -999,7 +999,7 @@ TypePointer *generate_pointer_to_type(Parser *parser, Type *type) {
 }
 
 TypeArray *generate_slice_of(Parser *parser, Type *type) {
-    TypeArray *slice = ast_allocate(parser, sizeof(TypeArray));
+    TypeArray *slice       = ast_allocate(parser, sizeof(TypeArray));
     slice->head.head.kind  = AST_TYPE;
     slice->head.head.file  = type->head.file;
     slice->head.head.start = type->head.start;
@@ -2738,6 +2738,12 @@ void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const
     va_list args;
     va_start(args, message);
     assert(parser->current_file);
+
+    // Check if the failing ast has a location
+    if (failing_ast != NULL) {
+        if      (failing_ast->file == NULL) failing_ast = NULL;
+        else if (failing_ast->start.input_idx == 0 && failing_ast->end.input_idx == 0) failing_ast = NULL;
+    }
 
     if (failing_ast) {
         report_error_helper(failing_ast->file->absolute_path, failing_ast->file->text, label, failing_ast->start, failing_ast->end, message, args);

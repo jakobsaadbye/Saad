@@ -10,7 +10,6 @@ Myprint2 :: (format: string, args: ...any) {
 }
 
 Myprint3 :: (format: string, args: ...any) {
-    // print("typeof(args) = %\n", typeof(args));
     Myprint3Helper(format, ...args);
 }
 

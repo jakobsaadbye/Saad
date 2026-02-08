@@ -98,6 +98,7 @@ typedef enum AstFlags {
     AST_FLAG_CG_EXPR_ASSIGNED_DIRECTLY_TO_VARIABLE = 1 << 1,
     AST_FLAG_IS_TYPE_CHECKED                       = 1 << 2, // Ast nodes that have this flag has gone through type checking
     AST_FLAG_IS_C_VARARG                           = 1 << 3, // Set if the argument is a variadic c argument
+    AST_FLAG_EXPR_IS_SPREADED                      = 1 << 4, // Set if the expression has had the operator ... applied to it
 } AstFlags;
 
 typedef struct Ast {

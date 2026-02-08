@@ -12,8 +12,10 @@ typedef struct Typer {
     AstFor          *enclosing_for;      // Used by break or continue statements to know where to branch to
     AstWhile        *enclosing_while;    // Same as above
 
-    AstDeclaration  *inside_declaration; // Set if we are currently type checking a declaration
+    AstDeclaration  *inside_declaration;  // Set if we are currently type checking a declaration
     AstExtern       *inside_extern_block; // Set if we are currently type checking function definitions inside an extern block
+
+    TypeAny         *type_any;       // The resolved type of 'any'
     
     int array_literal_depth;
 
@@ -48,10 +50,10 @@ bool is_untyped_literal(AstExpr *expr);
 void statically_cast_literal(AstLiteral *untyped_literal, Type *cast_into);
 void reserve_local_storage(AstFunctionDefn *func_defn, int size);
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size);
-int push_temporary_value(AstFunctionDefn *func_defn, int size);
-int pop_temporary_value(AstFunctionDefn *func_defn, int size);
 void reset_temporary_storage();
 AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name);
+
+AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr);
 char *generate_c_format_specifier_for_type(Type *type);
 
 
@@ -171,9 +173,14 @@ bool check_import(Typer *typer, AstImport *import) {
 }
 
 bool check_extern(Typer *typer, AstExtern *ast_extern) {
+
+    // We don't call check_block() as it expects a normal scope, while the extern scope lives at the same level
     typer->inside_extern_block = ast_extern;
-    bool ok = check_block(typer, ast_extern->block);
-    if (!ok) return false;
+    for (int i = 0; i < ast_extern->block->statements.count; i++) {
+        Ast *stmt = ((Ast **)ast_extern->block->statements.items)[i];
+        bool ok = check_statement(typer, stmt);
+        if (!ok) return false;
+    }
     typer->inside_extern_block = NULL;
     
     return true;
@@ -205,6 +212,18 @@ int round_up_to_nearest_power_of_two(int value) {
     return value + 1;
 }
 
+void dump_scope_recursive(Parser *parser, AstBlock *scope) {
+    if (scope == NULL) return;
+
+    printf("---------------------- Scope %d ----------------------\n", scope->scope_number);
+    for (int i = 0; i < scope->identifiers.count; i++) {
+        AstIdentifier *ident = ((AstIdentifier **) scope->identifiers.items)[i];
+        printf("%s: %s\n", ident->name, type_to_str(ident->type));
+    }
+
+    dump_scope_recursive(parser, scope->parent);
+}
+
 Type *resolve_type(Typer *typer, Type *type) {
     if (is_primitive_type(type->kind)) {
         return type;
@@ -215,24 +234,42 @@ Type *resolve_type(Typer *typer, Type *type) {
             TypeAny *any = (TypeAny *)type;
     
             // Look for the Type :: struct {...} in the "reflect" package
-            AstIdentifier *type_any_identifier = lookup_from_scope(typer->parser, typer->current_scope, "TypeAny");
-            if (!type_any_identifier) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)any, "Compiler Error: Failed to find the 'TypeAny' struct in reflect.sd");
-                return NULL;
-            }
-            // if (!type_identifier->type || type_identifier->type->kind == TYPE_STRUCT) {
-            //     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)type_identifier, "Compiler Error: Found a different identifier for Type than the one declared in 'reflect.sd'");
-            //     return NULL;
-            // }
-    
-            any->struct_defn = (TypeStruct *)type_any_identifier->type;
-    
-            // dump_struct(any->struct_defn->node);
-            // AstIdentifier *type_info = ((AstIdentifier **)any->struct_defn->node->scope->identifiers.items)[1];
-            // TypeStruct *type_info_struct = (TypeStruct *)(((TypePointer *)type_info->type)->pointer_to);
-            // dump_struct(type_info_struct->node);
-        }
+            // dump_scope_recursive(typer->parser, typer->current_scope);
 
+            if (typer->type_any == NULL) {
+                AstIdentifier *type_any_identifier = lookup_from_scope(typer->parser, typer->current_scope, "Any");
+
+                if (!type_any_identifier) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)any, "Compiler Error: Failed to find the 'Any' struct in reflect.sd");
+                    return NULL;
+                }
+
+                if (type_any_identifier->type == NULL || type_any_identifier->type->kind != TYPE_STRUCT) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)any, "Compiler Error: Type 'Any' was unresolved or of a different type in typechecking");
+                    return NULL;
+                }
+
+                // if (strcmp(type_any_identifier->head.file->absolute_path, "reflect") != 0) {
+                //     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)any, "Compiler Error: Type 'Any' was linked to a different 'Any' than that found in reflect.sd");
+                //     return NULL;
+                // }
+                
+                // Construct a global instance of TypeAny with the struct definition of the struct "Any" found in the reflect.sd package
+                TypeAny *any = ast_allocate(typer->parser, sizeof(TypeAny));
+                any->head.head.kind  = AST_TYPE;
+                any->head.head.file  = type_any_identifier->head.file;
+                any->head.head.start = type_any_identifier->type->head.start;
+                any->head.head.end   = type_any_identifier->type->head.end;
+                any->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+                any->head.kind       = TYPE_ANY;
+                any->head.size       = 16;
+                any->struct_defn     = (TypeStruct *)type_any_identifier->type;
+
+                typer->type_any = any;
+            }
+
+            any->struct_defn = typer->type_any->struct_defn;
+        }
 
         return type;
     }
@@ -496,13 +533,22 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         }
         
         for (int i = 0; i < decl->values.count; i++) {
-            AstExpr *value = ((AstExpr **)decl->values.items)[i];
+            AstExpr **value_ptr = &((AstExpr **)decl->values.items)[i];
             AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+            AstExpr *value = *value_ptr;
 
-            Type *value_type = check_expression(typer, value, decl->type);
-            if (!value_type) return false;
-            if (!types_are_equal(decl->type, value_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", ident->name, type_to_str(decl->type), type_to_str(value_type));
+            Type *resolved = check_expression(typer, value, decl->type);
+            if (!resolved) return false;
+
+            if (decl->type->kind == TYPE_ANY && value->type->kind != TYPE_ANY) {
+                AstCast *any_cast = generate_cast_to_any(typer, value);
+                if (!any_cast) return false;
+                *value_ptr = (AstExpr *) any_cast;
+                value = (AstExpr *) any_cast;
+            }
+
+            if (!types_are_equal(decl->type, value->type)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", ident->name, type_to_str(decl->type), type_to_str(value->type));
                 return false;
             }
         }
@@ -714,13 +760,6 @@ check_identifiers_vs_values:
         for (int i = 0; i < decl->idents.count; i++) {
             AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
             reserve_local_storage(typer->enclosing_function, ident->type->size);
-
-            // Reserve temporary space for doing runtime type reflection on an any value initialization
-            if (ident->type->kind == TYPE_ANY && ident->value) {
-                Type *value_type = ident->value->type;
-
-                reserve_space_for_runtime_any_value(typer, value_type);
-            }
         }
 
         return true;
@@ -773,6 +812,15 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         return types_are_equal(left_pointer_to, right_pointer_to);
     }
 
+    // Allow spreaded slices or varargs to be passed as variadic parameters
+    if (lhs->kind == TYPE_VARIADIC && rhs->kind == TYPE_VARIADIC) {
+        // Match on the inner type
+        Type *inner_lhs = ((TypeVariadic *) lhs)->type;
+        Type *inner_rhs = ((TypeVariadic *) rhs)->type;
+
+        return types_are_equal(inner_lhs, inner_rhs);
+    }
+
     // if (lhs->kind == TYPE_STRING && rhs->kind == TYPE_POINTER) {
     //     Type *right_pointer_to = ((TypePointer *)(rhs))->pointer_to;
 
@@ -813,7 +861,7 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         return true;
     }
 
-    if (lhs->kind == TYPE_ANY || rhs->kind == TYPE_ANY) {
+    if (lhs->kind == TYPE_ANY && rhs->kind == TYPE_ANY) {
         // Allow all types to cast into type any
         return true;
     }
@@ -862,6 +910,14 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         }
     }
 
+    if (assign->lhs->type->kind == TYPE_ANY && assign->expr->type->kind != TYPE_ANY) {
+        // Insert an any cast
+        AstCast *any_cast = generate_cast_to_any(typer, assign->expr);
+        if (!any_cast) return false;
+        assign->expr = (AstExpr *) any_cast;
+        expr_type = any_cast->head.type;
+    }
+
     if (lhs_type->kind == TYPE_POINTER) {
         if (expr_type->kind != TYPE_POINTER) {
             Type *points_to = ((TypePointer *)(lhs_type))->pointer_to;
@@ -908,11 +964,6 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
             // report_error_ast(typer->parser, LABEL_HINT, NULL, "If you really need to reassign the array, make a slice out of the fixed size array");
             return false;
         }
-    }
-
-    // Reserve space for an any runtime instantiation
-    if (lhs_type->kind == TYPE_ANY) {
-        reserve_space_for_runtime_any_value(typer, expr_type);
     }
 
     return true;
@@ -1479,6 +1530,30 @@ bool check_if_function_needs_a_return(Typer *typer, AstFunctionDefn *func_defn) 
     return true;
 }
 
+AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr) {
+    if (typer->type_any == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "Compiler Error: Global type 'Any' was not set during typechecking while doing an any cast");
+        return NULL;
+    }
+
+    AstCast *any_cast = ast_allocate(typer->parser, sizeof(AstCast));
+    any_cast->head.head.kind      = AST_CAST;
+    any_cast->head.head.start     = expr->head.start;
+    any_cast->head.head.end       = expr->head.end;
+    any_cast->head.head.file      = expr->head.file;
+    any_cast->head.head.flags     = AST_FLAG_COMPILER_GENERATED | expr->head.flags;
+    any_cast->head.type           = (Type *) typer->type_any;
+    any_cast->cast_to             = (Type *) typer->type_any;
+    any_cast->expr                = expr;
+
+    Type *resolved = check_cast(typer, any_cast, any_cast->cast_to);
+    if (!resolved) return NULL;
+
+    reserve_space_for_runtime_any_value(typer, expr->type);
+
+    return any_cast;
+}
+
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
     if (typer->enclosing_function == NULL) {
@@ -1532,20 +1607,54 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         typer_restore_state(typer, temp);
     }
 
+    bool call_contains_spreaded_arg = false;
+    int spreaded_arg_index     = -1;
+    for (int i = 0; i < call->arguments.count; i++) {
+        AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
+        if (arg->head.kind == AST_UNARY && ((AstUnary *)arg)->operator == OP_SPREAD) {
+            call_contains_spreaded_arg = true;
+            spreaded_arg_index = i;
+        }
+    }
+
     //
     // Typecheck the arguments against the parameter list
     //
     if (func_defn->is_variadic) {
-        
-        if (call->arguments.count < func_defn->variadic_parameter_index) {
-            if (call->arguments.count == 0) {
-                report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Too few arguments: Wanted atleast %d, got %d", func_defn->variadic_parameter_index, call->arguments.count);
-            } else {
-                AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted atleast %d, got %d", func_defn->variadic_parameter_index, call->arguments.count);
+
+        if (call_contains_spreaded_arg) {
+            // Arguments vs parameters must match in length 1:1
+            // @Cleanup @CopyPasta
+            if (call->arguments.count != func_defn->parameters.count) {
+                if (call->arguments.count < func_defn->parameters.count) {
+                    if (call->arguments.count > 0) {
+                        AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
+                        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
+                    } else {
+                        report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
+                    }
+                } else {
+                    AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too many arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
+                }
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
+                if (call->is_method_call && call->arguments.count == func_defn->parameters.count + 1) {
+                    report_error_ast(typer->parser, LABEL_NOTE, ((Ast **)func_defn->parameters.items)[0], "Methods takes their first parameter as the receiver and should therefore not be passed as an explicit argument");
+                }
+                return NULL;
             }
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
-            return NULL;
+        } else {
+            // All arguments up untill the varargs must match in length
+            if (call->arguments.count < func_defn->variadic_parameter_index) {
+                if (call->arguments.count == 0) {
+                    report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Too few arguments: Wanted atleast %d, got %d", func_defn->variadic_parameter_index, call->arguments.count);
+                } else {
+                    AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted atleast %d, got %d", func_defn->variadic_parameter_index, call->arguments.count);
+                }
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
+                return NULL;
+            }
         }
         
         // Typecheck the arguments up until the varargs arg begins
@@ -1565,48 +1674,113 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                 wanted_type = param->type;
             }
 
+            AstExpr **arg_ptr = &((AstExpr **)(call->arguments.items))[i];
             AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
-            Type *arg_type = check_expression(typer, arg, wanted_type);
-            if (!arg_type) return NULL;
+            Type *given_type = check_expression(typer, arg, wanted_type);
+            if (!given_type) return NULL;
 
-            if (!types_are_equal(arg_type, wanted_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(wanted_type)), text_bold(type_to_str(arg_type)));
+            // Match a spreaded vararg or slice against their inner type
+            if (arg->head.flags & AST_FLAG_EXPR_IS_SPREADED) {
+                if (arg->type->kind == TYPE_VARIADIC) {
+                    TypeVariadic *variadic = (TypeVariadic *) arg->type;
+                    given_type = variadic->type;
+                } else if (arg->type->kind == TYPE_ARRAY) {
+                    TypeArray *array = (TypeArray *) arg->type;
+                    given_type = array->elem_type;
+                }
+            }
+
+            if (arg->type->kind != TYPE_ANY && wanted_type->kind == TYPE_ANY) {
+                if (!func_defn->is_extern) {
+                    if (arg->type->kind != TYPE_VARIADIC) {
+                        AstCast *any_cast = generate_cast_to_any(typer, arg);
+                        if (!any_cast) return NULL;
+                        *arg_ptr = (AstExpr *) any_cast;
+                        arg      = (AstExpr *) any_cast;
+                        given_type = any_cast->cast_to;
+                    }
+                } else {
+                    // Let the given type be coerced into the type any so 
+                    given_type = wanted_type;
+                }
+            }
+
+            if (!types_are_equal(given_type, wanted_type)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(wanted_type)), text_bold(type_to_str(given_type)));
+                if (given_type->kind == TYPE_VARIADIC && ((TypeVariadic *)given_type)->type->kind == wanted_type->kind) {
+                    report_error_ast(typer->parser, LABEL_HINT, (Ast *)(arg), "Use ... to spread the variadic argument into the parameter");
+                }
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param->decl), "Here is the definition of '%s'", param->name);
                 return NULL;
             }
         }
 
         if (!func_defn->is_extern) {
-            // Generate a slice argument to hold the variadic arguments
-            int num_varargs = call->arguments.count - func_defn->variadic_parameter_index;
+            if (call_contains_spreaded_arg) {
+                // Use the provided slice or variadic as the underlying slice
+                AstExpr *spreaded_arg = ((AstExpr **)call->arguments.items)[spreaded_arg_index];
 
-            TypeArray *slice_type = generate_slice_of(typer->parser, vararg_type->type);
-            slice_type->count = num_varargs;
-            
-            AstArrayLiteral *slice = ast_allocate(typer->parser, sizeof(AstArrayLiteral));
-            slice->head.head.kind = AST_ARRAY_LITERAL;
-            slice->head.head.flags = AST_FLAG_COMPILER_GENERATED;
-            slice->head.type = (Type *)slice_type;
-            slice->expressions = da_init(num_varargs, sizeof(AstExpr *));
-            
-            for (int i = 0; i < call->arguments.count; i++) {
-                if (i < func_defn->variadic_parameter_index) continue;
-                AstExpr *vararg = ((AstExpr **)call->arguments.items)[i];
-                da_append(&slice->expressions, vararg);
+                if (spreaded_arg->type->kind != TYPE_ARRAY && spreaded_arg->type->kind != TYPE_VARIADIC) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)spreaded_arg, "Compiler Error: Expected spreaded argument to be of type slice or variadic");
+                    return NULL;
+                }
+
+                if (spreaded_arg->type->kind == TYPE_VARIADIC) {
+                    TypeArray *slice_type = generate_slice_of(typer->parser, vararg_type->type);    
+                    spreaded_arg->type = (Type *)slice_type;
+                }
+
+                // Build up the lowered argument list
+                call->lowered_arguments = da_init(func_defn->variadic_parameter_index + 1, sizeof(AstExpr *));
+    
+                // Add the user arguments
+                for (int i = 0; i < call->arguments.count; i++) {
+                    AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
+                    da_append(&call->lowered_arguments, arg);
+                }
+            } else {
+                // Generate a slice argument to hold the variadic arguments
+                int num_varargs = call->arguments.count - func_defn->variadic_parameter_index;
+    
+                TypeArray *slice_type = generate_slice_of(typer->parser, vararg_type->type);
+                slice_type->count = num_varargs;
+                
+                AstArrayLiteral *slice = ast_allocate(typer->parser, sizeof(AstArrayLiteral));
+                slice->head.head.kind = AST_ARRAY_LITERAL;
+                slice->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+                slice->head.type = (Type *)slice_type;
+                slice->expressions = da_init(num_varargs, sizeof(AstExpr *));
+                
+                for (int i = 0; i < call->arguments.count; i++) {
+                    if (i < func_defn->variadic_parameter_index) continue;
+                    AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
+
+                    if (arg->type->kind != TYPE_ANY && vararg_type->type->kind == TYPE_ANY) {
+                        AstCast *any_cast = generate_cast_to_any(typer, arg);
+                        if (!any_cast) return NULL;
+                        arg = (AstExpr *) any_cast;
+                    }
+
+                    da_append(&slice->expressions, arg);
+                    
+                    // Reserve space for the caller to allocate the each variadic argument
+                    reserve_temporary_storage(typer->enclosing_function, arg->type->size);
+                }
+
+                // Build up the lowered argument list
+                call->lowered_arguments = da_init(func_defn->variadic_parameter_index + 1, sizeof(AstExpr *));
+    
+                // Add the user arguments
+                for (int i = 0; i < call->arguments.count; i++) {
+                    if (i == func_defn->variadic_parameter_index) break;
+                    AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
+                    da_append(&call->lowered_arguments, arg);
+                }
+    
+                // Add the slice
+                da_append(&call->lowered_arguments, slice);
             }
-            
-            // Build up the lowered argument list
-            call->lowered_arguments = da_init(func_defn->variadic_parameter_index + 1, sizeof(AstExpr *));
 
-            // Add the user arguments
-            for (int i = 0; i < call->arguments.count; i++) {
-                if (i == func_defn->variadic_parameter_index) break;
-                AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
-                da_append(&call->lowered_arguments, arg);
-            }
-
-            // Add the slice
-            da_append(&call->lowered_arguments, slice);
 
         } else {
 
@@ -1619,9 +1793,9 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                 if (i >= func_defn->variadic_parameter_index) {
                     arg->head.flags |= AST_FLAG_IS_C_VARARG;
                 }
+
                 da_append(&call->lowered_arguments, arg);
             }
-
         }
 
     } else {
@@ -1644,21 +1818,31 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             return NULL;
         }
 
+        call->lowered_arguments = da_init(call->arguments.count, sizeof(AstExpr *));
+
         for (int i = 0; i < call->arguments.count; i++) {
             AstIdentifier *param = ((AstIdentifier **)(func_defn->parameters.items))[i];
 
+            AstExpr **arg_ptr = &((AstExpr **)(call->arguments.items))[i];
             AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
-            Type *arg_type = check_expression(typer, arg, param->type);
-            if (!arg_type) return NULL;
+            Type *resolved = check_expression(typer, arg, param->type);
+            if (!resolved) return NULL;
 
-            if (!types_are_equal(arg_type, param->type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg_type)));
+            if (!func_defn->is_extern && arg->type->kind != TYPE_ANY && param->type->kind == TYPE_ANY) {
+                AstCast *any_cast = generate_cast_to_any(typer, arg);
+                if (!any_cast) return NULL;
+                *arg_ptr = (AstExpr *) any_cast;
+                arg      = (AstExpr *) any_cast;
+            }
+
+            if (!types_are_equal(arg->type, param->type)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg->type)));
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param->decl), "Here is the definition of '%s'", param->name);
                 return NULL;
             }
-        }
 
-        call->lowered_arguments = call->arguments;
+            da_append(&call->lowered_arguments, arg);
+        }
     }
     
 
@@ -1829,7 +2013,6 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     // Mark the function as fully typed, when we have typechecked the function signature
     // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again
     func_defn->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
-    typer->current_scope = func_defn->body;
 
     // Check the body
     bool ok = check_block(typer, func_defn->body);
@@ -2073,6 +2256,7 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
 
     // Typecheck each of the expressions
     for (int i = 0; i < array_lit->expressions.count; i++) {
+        AstExpr **expr_ptr = &((AstExpr **)(array_lit->expressions.items))[i];
         AstExpr *expr = ((AstExpr **)(array_lit->expressions.items))[i];
 
         bool ok = leads_to_integer_overflow(typer, array->elem_type, expr);
@@ -2080,11 +2264,19 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
 
         if (infer_type_from_first_element && i == 0) continue;  // We already type checked this expression
 
-        Type *expr_type = check_expression(typer, expr, array->elem_type);
-        if (!expr_type) return NULL;
+        Type *resolved = check_expression(typer, expr, array->elem_type);
+        if (!resolved) return NULL;
 
-        if (!types_are_equal(array->elem_type, expr_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(expr), "Expected element to have type %s, but element is of type %s", type_to_str(array->elem_type), type_to_str(expr_type));
+        if (array->elem_type->kind == TYPE_ANY && expr->type->kind != TYPE_ANY) {
+            // Insert an any cast
+            AstCast *any_cast = generate_cast_to_any(typer, expr);
+            if (!any_cast) return false;
+            *expr_ptr = (AstExpr *) any_cast;
+            expr = (AstExpr *) any_cast;
+        }
+
+        if (!types_are_equal(array->elem_type, expr->type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(expr), "Expected element to have type %s, but element is of type %s", type_to_str(array->elem_type), type_to_str(expr->type));
             return NULL;
         }
     }
@@ -2361,6 +2553,11 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         struct_type = array_defn->struct_defn;
         valid_lhs = true;
     }
+    else if (type_lhs->kind == TYPE_VARIADIC) {
+        TypeVariadic *variadic = (TypeVariadic *)(type_lhs);
+        struct_type = variadic->slice->struct_defn;
+        valid_lhs = true;
+    }
     else if (type_lhs->kind == TYPE_ANY) {
         TypeAny *any = (TypeAny *)(type_lhs);
         struct_type = any->struct_defn;
@@ -2536,11 +2733,17 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
             }
 
             Type *member_type = member->type;
-            Type *value_type  = check_expression(typer, init->value, member_type); // @Note - Passing down the member_type here, makes it possible for sub-struct initialization without explicitly having to type them
-            if (!value_type) return NULL;
+            Type *resolved  = check_expression(typer, init->value, member_type); // @Note - Passing down the member_type here, makes it possible for sub-struct initialization without explicitly having to type them
+            if (!resolved) return NULL;
 
-            if (!types_are_equal(member_type, value_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", member->name, type_to_str(member_type), type_to_str(value_type));
+            if (member_type->kind == TYPE_ANY && init->value->type->kind != TYPE_ANY) {
+                AstCast *any_cast = generate_cast_to_any(typer, init->value);
+                if (!any_cast) return false;
+                init->value = (AstExpr *) any_cast;
+            }
+
+            if (!types_are_equal(member_type, init->value->type)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", member->name, type_to_str(member_type), type_to_str(init->value->type));
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
                 return NULL;
             }
@@ -2558,11 +2761,17 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
             
             AstIdentifier *member = ((AstIdentifier **)(members.items))[i];
             Type *member_type = member->type;
-            Type *value_type  = check_expression(typer, init->value, member_type);
-            if (!value_type) return NULL;
+            Type *resolved  = check_expression(typer, init->value, member_type);
+            if (!resolved) return NULL;
 
-            if (!types_are_equal(member_type, value_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->name, type_to_str(member_type), type_to_str(value_type));
+            if (member_type->kind == TYPE_ANY && init->value->type->kind != TYPE_ANY) {
+                AstCast *any_cast = generate_cast_to_any(typer, init->value);
+                if (!any_cast) return false;
+                init->value = (AstExpr *) any_cast;
+            }
+
+            if (!types_are_equal(member_type, init->value->type)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->name, type_to_str(member_type), type_to_str(init->value->type));
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(member), "Here is the member '%s' in %s", member->name, struct_defn->identifier->name);
                 return NULL;
             }
@@ -2764,7 +2973,32 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     }
 
     if (unary->operator == OP_SPREAD) {
-        XXX;
+        if (type_kind != TYPE_ARRAY && type_kind != TYPE_VARIADIC) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Operator '...' expects expression to be a slice or a variadic parameter. Got type %s\n", type_to_str(expr_type));
+            return NULL;
+        }
+
+        unary->head.head.flags |= AST_FLAG_EXPR_IS_SPREADED;
+        // if (type_kind == TYPE_ARRAY) {
+
+            // TypeArray *array = (TypeArray *) unary->expr->type;
+
+            // // Make a variadic type out of the element type
+            // TypeVariadic *variadic    = ast_allocate(typer->parser, sizeof(TypeVariadic));
+            // variadic->head.head.kind  = AST_TYPE;
+            // variadic->head.head.file  = array->head.head.file;
+            // variadic->head.head.start = unary->expr->head.start;
+            // variadic->head.head.end   = unary->expr->head.end;
+            // variadic->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+            // variadic->head.kind       = TYPE_VARIADIC;
+            // variadic->head.size       = 16;
+            // variadic->type            = array->elem_type;
+            // variadic->slice           = generate_slice_of(typer->parser, array->elem_type);
+
+            // return (Type *) variadic;
+        // }
+
+        return expr_type;
     }
 
     if (unary->operator == OP_ADDRESS_OF) {
@@ -2904,6 +3138,11 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
         return NULL;
     }
 
+    if (is_untyped_type(expr_type)) {
+        Type *solidified_type = solidify_untyped_type(expr_type);
+        cast->expr->type = solidified_type;
+    }
+
     cast->cast_to = wanted_type;
 
     return wanted_type;
@@ -3015,38 +3254,6 @@ void reserve_temporary_storage(AstFunctionDefn *func_defn, int size) {
     if (func_defn->temp_ptr > func_defn->num_bytes_temporaries) {
         func_defn->num_bytes_temporaries = func_defn->temp_ptr;
     }
-}
-
-// Push size bytes to temporary storage
-int push_temporary_value(AstFunctionDefn *func_defn, int size) {
-    // Temporary storage lives after the shadow-space and local variables
-    int aligned_size = size;
-    int loc = - (align_value(func_defn->num_bytes_locals, 8) + func_defn->temp_ptr + aligned_size);
-
-    // Assert that we don't use more space than what we have reserved during the sizing step!
-    if (func_defn->num_bytes_temporaries <= func_defn->temp_ptr) {
-        printf("Compiler Error: Using more temporary storage space that what was allocated. Bytes allocated: %d, bytes used: %d\n", func_defn->num_bytes_temporaries, func_defn->temp_ptr);
-        // assert(false && "Using more bytes than what was allocated in temporary storage");
-    }
-
-    func_defn->temp_ptr += aligned_size;
-
-    return loc;
-}
-
-// Pop size bytes from temporary storage
-int pop_temporary_value(AstFunctionDefn *func_defn, int size) {
-    assert(func_defn);
-
-    int loc = - (align_value(func_defn->num_bytes_locals, 8) + func_defn->temp_ptr);
-
-    func_defn->temp_ptr -= size;
-    if (func_defn->temp_ptr < 0) {
-        printf("Compiler Error: Push/Pop mismatch\n");
-        // assert(false && "Popping more values than what was pushed");
-    }
-
-    return loc;
 }
 
 void reset_temporary_storage(AstFunctionDefn *func_defn) {
