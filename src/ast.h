@@ -97,8 +97,9 @@ typedef enum AstFlags {
     AST_FLAG_COMPILER_GENERATED                    = 1 << 0,
     AST_FLAG_CG_EXPR_ASSIGNED_DIRECTLY_TO_VARIABLE = 1 << 1,
     AST_FLAG_IS_TYPE_CHECKED                       = 1 << 2, // Ast nodes that have this flag has gone through type checking
-    AST_FLAG_IS_C_VARARG                           = 1 << 3, // Set if the argument is a variadic c argument
-    AST_FLAG_EXPR_IS_SPREADED                      = 1 << 4, // Set if the expression has had the operator ... applied to it
+    AST_FLAG_IS_CODE_GENED                         = 1 << 3, // Set if the Ast Node has gone through codegeneration e.g function definitions, enums etc. so we don't duplicate symbols in the outputted .asm
+    AST_FLAG_IS_C_VARARG                           = 1 << 4, // Set if the argument is a variadic c argument
+    AST_FLAG_EXPR_IS_SPREADED                      = 1 << 5, // Set if the expression has had the operator ... applied to it
 } AstFlags;
 
 typedef struct Ast {
@@ -256,7 +257,6 @@ typedef struct AstEnumerator {
     int      value; // Evaluated value set by the typer
     int      index;
     int      label; // Used by print to determine how to branch to this enum value
-    bool     is_typechecked; // @Deprectate!! We have the AST_FLAG_IS_TYPE_CHECKED to tell us this
 } AstEnumerator;
 
 typedef struct AstEnumLiteral {

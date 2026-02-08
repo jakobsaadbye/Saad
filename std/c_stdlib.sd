@@ -1,7 +1,8 @@
 extern "C" {
     memset  :: (dest: *void, value: int, size: int) -> *void;
+    memcpy  :: (dest: *void, src: *void, size: int) -> *void;
     malloc  :: (size: int) -> *void;
     realloc :: (buffer: *void, new_size: int) -> *void;
-    free    :: (ptr: *void);;
+    free    :: (ptr: *void);
     exit    :: (code: int);
 }

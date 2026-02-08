@@ -397,11 +397,14 @@ void emit_break_or_continue(CodeGenerator *cg, AstBreakOrContinue *boc) {
 }
 
 void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
+    if (ast_enum->head.flags & AST_FLAG_IS_CODE_GENED) {
+        return;
+    }
+
     for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
         sb_append(&cg->data, "   __%s.%s DB \".%s\", 0\n", ast_enum->identifier->name, etor->name, etor->name);
     }
-
 
     // char *get_enum_string_<ENUM_NAME>(char *buf, int value)
     // - buf is in rcx
@@ -445,6 +448,8 @@ void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
         sb_append(&cg->code, "   mov\t\trax, __%s.%s\n", ast_enum->identifier->name, etor->name);
         sb_append(&cg->code, "   ret\n");
     }
+
+    ast_enum->head.flags |= AST_FLAG_IS_CODE_GENED;
 }
 
 char *cvtsi2ss_or_cvtsi2sd(Type *float_type) {
@@ -1091,6 +1096,10 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
 }
 
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
+    if (func_defn->head.flags & AST_FLAG_IS_CODE_GENED) {
+        return;
+    }
+
     cg->enclosing_function = func_defn;
 
     if (func_defn->is_extern) {
@@ -1204,6 +1213,8 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "   add\t\trsp, %d\n", bytes_total);
     POP(RBP);
     sb_append(&cg->code, "   ret\n");
+
+    func_defn->head.flags |= AST_FLAG_IS_CODE_GENED;
 }
 
 void emit_cast(CodeGenerator *cg, AstCast *cast) {

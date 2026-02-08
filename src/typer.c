@@ -138,6 +138,11 @@ bool import_declarations(Parser *parser, AstImport *import, AstFile *to_file) {
     for (int i = 0; i < from_file->scope->identifiers.count; i++) {
         AstIdentifier *src_ident = ((AstIdentifier **)from_file->scope->identifiers.items)[i];
 
+        // Don't include the identifier if it does not originate from the file it self
+        if (src_ident->head.file != from_file) {
+            continue;
+        }
+
         AstIdentifier *existing = add_identifier_to_scope(parser, to_file->scope, src_ident);
         if (existing != NULL) {
             report_error_ast(parser, LABEL_ERROR, (Ast *)src_ident, "Import of identifier '%s' conflicts with existing identifier", src_ident->name);
@@ -1129,7 +1134,7 @@ bool check_while(Typer *typer, AstWhile *ast_while) {
 AstEnumerator *enum_value_is_unique(AstEnum *ast_enum, int value) {
     for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
-        if (!etor->is_typechecked) continue;
+        if (!(etor->head.flags & AST_FLAG_IS_TYPE_CHECKED)) continue;
 
         if (etor->value == value) return etor;
     }
@@ -2107,6 +2112,10 @@ Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
     TypeEnum *enum_defn = (TypeEnum *)(type_lookup(&typer->parser->type_table, ast_enum->identifier->name));
     assert(enum_defn != NULL);
 
+    if (ast_enum->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
+        return (Type *) enum_defn;
+    }
+
     int min_value = 0;
     int max_value = 0;
     int auto_increment_value = 0;
@@ -2139,17 +2148,21 @@ Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
         
         AstEnumerator *enumerator_with_same_value = enum_value_is_unique(ast_enum, etor->value);
         if (enumerator_with_same_value) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Enum values must be unique. Both '%s' and '%s' have value %d", etor->name, enumerator_with_same_value->name, etor->value);
+            Ast *site = (Ast *) etor->expr;
+            if (!site) site = (Ast *) etor;
+            report_error_ast(typer->parser, LABEL_ERROR, site, "Enum values must be unique. Both '%s' and '%s' have value %d", etor->name, enumerator_with_same_value->name, etor->value);
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(enumerator_with_same_value), "Here is the enum member with the same value ...");
             return NULL;
         }
 
-        etor->is_typechecked = true;
+        etor->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
     }
 
     enum_defn->head.size = enum_defn->backing_type->size;
     enum_defn->min_value = min_value;
     enum_defn->max_value = max_value;
+
+    ast_enum->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
 
     return (Type *)enum_defn;
 }
@@ -2184,7 +2197,7 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) 
         return NULL;
     }
 
-    if (!found->is_typechecked) {
+    if (!(found->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Enum member used before being declared", enum_name, enum_defn->identifier->name);
         return NULL;
     }
