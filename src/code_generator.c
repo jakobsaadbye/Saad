@@ -355,6 +355,7 @@ void emit_expr_stmt(CodeGenerator *cg, AstExprStmt *expr_stmt) {
 void emit_statement(CodeGenerator *cg, Ast *stmt) {
 
     reset_temporary_storage(cg->enclosing_function);
+    cg->num_pushed_arguments = 0;
 
     switch (stmt->kind) {
     case AST_IMPORT:            emit_import(cg, (AstImport *)(stmt)); break;
@@ -1325,25 +1326,26 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
 
     if (to->kind == TYPE_ANY) {
 
-        // Allocate the Any type
-        int offset = push_temporary_value(cg, 16, (Ast *)cast);
+        // Copy the value on the stack (Box it)
+        int tmp_offset = allocate_variable(cg, cast->expr->type->size);
+        emit_simple_initialization(cg, tmp_offset, false, false, cast->expr->type, cast->expr->type);
 
-        // Box the value (copy the value on the stack)
-        // @Incomplete
-        
+        // Allocate the Any type
+        int any_offset = push_temporary_value(cg, 16, (Ast *)cast);
+
+        // Store a pointer to the value
+        sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", tmp_offset);
+        sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", any_offset);
+        sb_append(&cg->code, "   mov\t\tQWORD 0[rbx], rax\n");
+
         // Get a pointer to the type descriptor
         emit_type_descriptor(cg, cast->expr->type);
         POP(RCX);
-        
-        // Get pointer to boxed value
-        POP(RAX);
 
-        // Assign data + type ptr
-        sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", offset);
-        sb_append(&cg->code, "   mov\t\tQWORD 0[rbx], rax\n");
+        // Store the pointer to the type
+        sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", any_offset);
         sb_append(&cg->code, "   mov\t\tQWORD 8[rbx], rcx\n");
-        sb_append(&cg->code, "   mov\t\trax, rbx\n");
-        PUSH(RAX);
+        PUSH(RBX);
 
         return;
     }
@@ -1825,7 +1827,9 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
         sb_append(&cg->code, "   mov\t\tedx, %d\n", type_array->array_kind);
         POP(R8);
         sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_array->count);
+        sb_append(&cg->code, "   sub\t\trsp, 32\n");
         sb_append(&cg->code, "   call\t\truntime_get_type_array\n");
+        sb_append(&cg->code, "   add\t\trsp, 32\n");
         PUSH(RAX);
         return;
     }
@@ -1840,7 +1844,10 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
         int size_struct_member = 24; // sizeof(StructMember) in reflect.sd
 
         // Generate type descriptors for the struct members
+        sb_append(&cg->code, "   sub\t\trsp, 32\n");
         emit_malloc(cg, members.count * size_struct_member);
+        sb_append(&cg->code, "   add\t\trsp, 32\n");
+
         int base_offset = push_temporary_value(cg, 8, (Ast *)type);
         int cursor_offset = push_temporary_value(cg, 8, (Ast *)type);
         sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", base_offset);
@@ -1867,8 +1874,10 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
         sb_append(&cg->code, "   mov\t\trdx, %d[rbp]\n", base_offset);
         sb_append(&cg->code, "   mov\t\tr8d, %d\n", members.count);
         sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_struct->head.size);
+        sb_append(&cg->code, "   sub\t\trsp, 40\n");
         sb_append(&cg->code, "   mov\t\tDWORD 32[rsp], %d\n", type_struct->alignment);
         sb_append(&cg->code, "   call\t\truntime_get_type_struct\n");
+        sb_append(&cg->code, "   add\t\trsp, 40\n");
         PUSH(RAX);
         return;
     }
@@ -1881,7 +1890,9 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
         POP(RDX);
         sb_append(&cg->code, "   mov\t\tr8d, %d\n", type_enum->min_value);
         sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_enum->max_value);
+        sb_append(&cg->code, "   sub\t\trsp, 32\n");
         sb_append(&cg->code, "   call\t\truntime_get_type_enum\n");
+        sb_append(&cg->code, "   add\t\trsp, 32\n");
         PUSH(RAX);
         return;
     }
@@ -1899,7 +1910,9 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
         // POP(RBX);
 
         // Basically copy the any 
+        sb_append(&cg->code, "   sub\t\trsp, 32\n");
         sb_append(&cg->code, "   call\t\truntime_get_type_any\n");
+        sb_append(&cg->code, "   add\t\trsp, 32\n");
         PUSH(RAX);
         return;
     }

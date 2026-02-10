@@ -506,7 +506,13 @@ TypeTuple *make_tuple_type_from_type_list(Typer *typer, DynamicArray types) {
 }
 
 void reserve_space_for_runtime_any_value(Typer *typer, Type *value_type) {
-    reserve_temporary_storage(typer->enclosing_function, 8); // 8 bytes for preserving the destination address across a function call
+
+    // 8 bytes for preserving the destination address across a function call
+    reserve_temporary_storage(typer->enclosing_function, 8);
+
+    // Reserve space for copying the value on the stack
+    reserve_local_storage(typer->enclosing_function, value_type->size);
+
     if (value_type->kind == TYPE_STRUCT) {
         reserve_temporary_storage(typer->enclosing_function, 16); // 16 bytes is needed to keep a stable base_offset and cursor for types that needs arrays
 
@@ -1553,8 +1559,6 @@ AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr) {
 
     Type *resolved = check_cast(typer, any_cast, any_cast->cast_to);
     if (!resolved) return NULL;
-
-    reserve_space_for_runtime_any_value(typer, expr->type);
 
     return any_cast;
 }
@@ -3155,6 +3159,11 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
     if (is_untyped_type(expr_type)) {
         Type *solidified_type = solidify_untyped_type(expr_type);
         cast->expr->type = solidified_type;
+    }
+
+    if (expr_type->kind != TYPE_ANY && wanted_type->kind == TYPE_ANY) {
+        // Reserve space for boxing the value
+        reserve_space_for_runtime_any_value(typer, expr_type);
     }
 
     cast->cast_to = wanted_type;

@@ -6,9 +6,19 @@ extern "C" {
     printf  :: (format: string, args: ...any) -> int;
 }
 
+Print2 :: (x, y, z: int, args: ...any) -> int {
+    print("x, y, z = % % %", x, y, z);
+    for arg in args {
+        print("arg.type = %\n", *arg.type);
+    }
+
+    return 5;
+}
+
 Print :: (format: string, args: ...any) -> int {
+    fmtLen := strlen(format);
+    print("Format string = %\n", format);
     sb := NewStringBuilder(1024);
-    print("%", strlen(format));
     
 
     // Parse the format string
@@ -16,12 +26,11 @@ Print :: (format: string, args: ...any) -> int {
 
 
     for i in 0..strlen(format) {
-        c := cast(*u8)format;
+        c := (cast(*u8)format)[i];
         print("% ", c);
     }
 
     for arg in args {
-
         print("arg.type = %\n", *arg.type);
     }
 
