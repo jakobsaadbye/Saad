@@ -1,0 +1,15 @@
+extern "C" {
+    realloc :: (buffer: *void, new_size: int) -> *void;
+}
+
+appendInt :: (array: *[..]int, elem: int) {
+    if array.count + 1 > array.capacity {
+        new_cap := array.capacity * 2;
+        array.data = realloc(array.data, new_cap);
+        array.capacity = new_cap;
+    }
+
+    arr := *array;
+    arr[array.count] = elem;
+    array.count += 1;
+}

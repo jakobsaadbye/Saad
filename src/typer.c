@@ -234,6 +234,10 @@ Type *resolve_type(Typer *typer, Type *type) {
         return type;
     }
 
+    if (type->kind == TYPE_ENUM) {
+        return type;
+    }
+
     if (type->kind == TYPE_ANY) {
         if (!typer->inside_extern_block)  {
             TypeAny *any = (TypeAny *)type;
@@ -507,8 +511,8 @@ TypeTuple *make_tuple_type_from_type_list(Typer *typer, DynamicArray types) {
 
 void reserve_space_for_runtime_any_value(Typer *typer, Type *value_type) {
 
-    // 8 bytes for preserving the destination address across a function call
-    reserve_temporary_storage(typer->enclosing_function, 8);
+    // 16 bytes for preserving the destination address + value across a function call
+    reserve_temporary_storage(typer->enclosing_function, 16);
 
     // Reserve space for copying the value on the stack
     reserve_local_storage(typer->enclosing_function, value_type->size);
@@ -523,6 +527,16 @@ void reserve_space_for_runtime_any_value(Typer *typer, Type *value_type) {
             AstIdentifier *member = ((AstIdentifier **) members.items)[i];
             reserve_space_for_runtime_any_value(typer, member->type);
         }
+    }
+
+    if (value_type->kind == TYPE_POINTER) {
+        TypePointer *type_ptr = (TypePointer *) value_type;
+        reserve_space_for_runtime_any_value(typer, type_ptr->pointer_to);
+    }
+
+    if (value_type->kind == TYPE_ARRAY) {
+        TypeArray *type_array = (TypeArray *) value_type;
+        reserve_space_for_runtime_any_value(typer, type_array->elem_type);
     }
 }
 
@@ -955,7 +969,11 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         } else if (is_identifier) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to variable '%s' of type '%s'", type_to_str(expr_type), ident->name, type_to_str(lhs_type));
         } else if (is_array_ac) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to array index '%s' of type '%s'", type_to_str(expr_type), ident->name, type_to_str(lhs_type));
+            if (ident) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to array index '%s' of type '%s'", type_to_str(expr_type), ident->name, type_to_str(lhs_type));
+            } else {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to array index of type '%s'", type_to_str(expr_type), type_to_str(lhs_type));
+            }
         } else {
             XXX;
         }
@@ -2341,9 +2359,17 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
     Type *type_being_accessed = check_expression(typer, array_ac->accessing, NULL);
     if (!type_being_accessed) return NULL;
 
-    if (type_being_accessed->kind != TYPE_ARRAY && type_being_accessed->kind != TYPE_POINTER) {
+    if (type_being_accessed->kind != TYPE_ARRAY && type_being_accessed->kind != TYPE_POINTER && type_being_accessed->kind != TYPE_VARIADIC) {
         report_error_range(typer->parser, array_ac->accessing->head.start, array_ac->open_bracket.start, "Cannot index into expression of type %s", type_to_str(type_being_accessed));
         return NULL;
+    }
+
+    if (type_being_accessed->kind == TYPE_VARIADIC) {
+        // Treat the variadic as a slice
+        TypeVariadic *variadic = (TypeVariadic *) type_being_accessed;
+
+        array_ac->accessing->type = (Type *) variadic->slice;
+        type_being_accessed = (Type *) variadic->slice;
     }
 
     if (type_being_accessed->kind == TYPE_POINTER) {
@@ -2923,13 +2949,14 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         }
     }
 
-
     if (binary->operator == '%') {
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
     }
+
     if (is_boolean_operator(binary->operator)) {
         if (lhs == TYPE_BOOL && rhs == TYPE_BOOL)       return primitive_type(PRIMITIVE_BOOL);
     }
+
     if (is_comparison_operator(binary->operator)) {
         if (lhs == TYPE_BOOL    && rhs == TYPE_BOOL)    return primitive_type(PRIMITIVE_BOOL);
 

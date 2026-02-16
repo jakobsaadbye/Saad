@@ -46,6 +46,11 @@ Todo list:
 
 Bug fixes:
 -------------------
+
+error: Compiler Error: Failed to link the following import
+  3 | import "arrays"
+
+
 - Fix hash_table when collisions happen. Currently we crash if defining two structs with the same name !!!!
 - @Investigate - examples/for_loops crashes once in a while. Is it a hisenbug?
 

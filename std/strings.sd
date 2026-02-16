@@ -1,4 +1,5 @@
 import "c_stdlib";
+import "c_string";
 
 StringBuilder :: struct {
     buffer:    *u8;
@@ -18,40 +19,99 @@ NewStringBuilder :: (initialCapacity: int) -> StringBuilder {
     };
 }
 
-append :: method (sb: *StringBuilder, format: string, args: ...any) {
-    MaxAppendedStringLen :: 2048;
-
-    str: *u8 = malloc(MaxAppendedStringLen);
-    strLen := sprintf(str, format, ...args);
-
-    if sb.cursor + strLen < sb.capacity {
-        memcpy(&sb.buffer[sb.cursor], str, strLen);
-        sb.cursor += strLen;
-        free(str);
-    } else {
-        newCapacity := sb.capacity * 2;
-        while newCapacity <= sb.cursor + strLen {
-            newCapacity *= 2;
-        }
-
-        newBuffer: *u8 = realloc(sb.buffer, newCapacity);
-        if newBuffer == null {
-            print("OutOfMemoryException: Failed to reallocate a new buffer for the string builder");
-            exit(1);
-        }
-
-        sb.buffer = newBuffer;
-        sb.capacity = newCapacity;
-
-        memset(&sb.buffer[sb.cursor], 0, newCapacity - sb.cursor);
-
-        // Append the string
-        memcpy(&sb.buffer[sb.cursor], str, strLen);
-        sb.cursor += strLen;
-        free(str);
+grow :: method (sb: *StringBuilder, len: int) {
+    newCapacity := sb.capacity * 2;
+    while newCapacity <= sb.cursor + len {
+        newCapacity *= 2;
     }
 
-    return;
+    newBuffer: *u8 = realloc(sb.buffer, newCapacity);
+    if newBuffer == null {
+        print("OutOfMemoryException: Failed to reallocate a new buffer for the string builder");
+        exit(1);
+    }
+
+    sb.buffer = newBuffer;
+    sb.capacity = newCapacity;
+
+    memset(&sb.buffer[sb.cursor], 0, newCapacity - sb.cursor);
+}
+
+add :: method (sb: *StringBuilder, strPtr: *u8, len: int) {
+    if sb.cursor + len < sb.capacity {
+        memcpy(&sb.buffer[sb.cursor], strPtr, len);
+        sb.cursor += len;
+    } else {
+        sb.grow(len);
+    
+        // Append the string
+        memcpy(&sb.buffer[sb.cursor], strPtr, len);
+        sb.cursor += len;
+    }
+}
+
+addStringSlice :: method (sb: *StringBuilder, str: string, start: int, end: int) {
+    strLen := end - start;
+    strPtr := cast(*u8)str;
+    strPtr = &strPtr[start];
+    sb.add(strPtr, strLen);
+}
+
+addChar :: method (sb: *StringBuilder, char: u8) {
+    strLen := 1;
+    strPtr := &char;
+    sb.add(strPtr, strLen);
+}
+
+addString :: method (sb: *StringBuilder, str: string) {
+    strLen := strlen(str);
+    strPtr := cast(*u8)str;
+    sb.add(strPtr, strLen);
+}
+
+addInt :: method (sb: *StringBuilder, v: int) {
+    if v == 0 {
+        sb.addChar(48);
+        return;
+    }
+
+    tmp: [32]u8; // enough for 64-bit int
+
+    n := 0;
+    while v != 0 {
+        digit := v % 10;
+        v = v / 10;
+
+        char := cast(u8) (digit + 48);
+
+        tmp[n] = char;
+        n += 1;
+    }
+
+    // Add the digits in reverse order
+    for i in 0..n {
+        ri := (n - 1) - i;
+        char := tmp[ri];
+        sb.addChar(char);
+    }
+}
+
+addFloat32 :: method (sb: *StringBuilder, v: f32) {
+    buf: [18]u8;
+    sprintf(buf.data, "%f", v);
+
+    strPtr := cast(*u8) buf.data;
+    strLen := strlen(cast(string) strPtr);
+    sb.add(strPtr, strLen);
+}
+
+addFloat64 :: method (sb: *StringBuilder, v: f64) {
+    buf: [18]u8;
+    sprintf(buf.data, "%lf", v);
+
+    strPtr := cast(*u8) buf.data;
+    strLen := strlen(cast(string) strPtr);
+    sb.add(strPtr, strLen);
 }
 
 clear :: method (sb: *StringBuilder) {

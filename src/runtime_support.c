@@ -8,6 +8,7 @@
 //////////////////////////////////
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
 
 // @Important: This has to match the TypeKind in ast.h
@@ -73,6 +74,11 @@ typedef struct TypePrimitive {
     PrimitiveKind  kind;
 } TypePrimitive;
 
+typedef struct TypePointer {
+    Type      head;
+    Type     *pointer_to;
+} TypePointer;
+
 typedef struct TypeArray {
     Type      head;
     ArrayKind kind;
@@ -82,6 +88,7 @@ typedef struct TypeArray {
 
 typedef struct TypeEnum {
     Type           head;
+    char          *value_name;
     Type          *backing_type;
     int            min_value;
     int            max_value;
@@ -90,6 +97,7 @@ typedef struct TypeEnum {
 typedef struct StructMember {
     char *name;
     Type *type;
+    void *value;
     int   index;
     int   offset;
 } StructMember;
@@ -154,12 +162,22 @@ TypePrimitive *Type_void          = &primitive_types[PRIMITIVE_VOID];
 TypePrimitive *Type_untyped_int   = &primitive_types[PRIMITIVE_UNTYPED_INT];
 TypePrimitive *Type_untyped_float = &primitive_types[PRIMITIVE_UNTYPED_FLOAT];
 
+TypePointer *runtime_get_type_pointer(char *name, Type *pointer_to) {
+    TypePointer *type_ptr = malloc(sizeof(TypePointer));
+    type_ptr->head.kind   = TYPE_POINTER;
+    type_ptr->head.name   = name;
+    type_ptr->head.size   = 8;
+    type_ptr->head.flags  = 0;
+    type_ptr->pointer_to  = pointer_to;
+    return type_ptr;
+}
+
 // @Speed @Improvement: We want to do something better than heap allocating every runtime type!
 TypeArray *runtime_get_type_array(char *name, ArrayKind kind, Type *elem_type, int count) {
     TypeArray *type_array  = malloc(sizeof(TypeArray));
     type_array->head.kind  = TYPE_ARRAY;
     type_array->head.name  = name;
-    type_array->head.size  = elem_type->size * count;
+    type_array->head.size  = kind == ARRAY_FIXED ? elem_type->size * count : kind == ARRAY_SLICE ? 16 : 24;
     type_array->head.flags = 0;
     type_array->kind       = kind;
     type_array->elem_type  = elem_type;
@@ -167,7 +185,7 @@ TypeArray *runtime_get_type_array(char *name, ArrayKind kind, Type *elem_type, i
     return type_array;
 }
 
-TypeEnum *runtime_get_type_enum(char *name, Type *backing_type, int min_value, int max_value) {
+TypeEnum *runtime_get_type_enum(char *name, char *value_name, Type *backing_type, int min_value, int max_value) {
     TypeEnum *type_enum     = malloc(sizeof(TypeEnum));
     type_enum->head.kind    = TYPE_ENUM;
     type_enum->head.name    = name;
@@ -176,6 +194,10 @@ TypeEnum *runtime_get_type_enum(char *name, Type *backing_type, int min_value, i
     type_enum->backing_type = backing_type;
     type_enum->min_value    = min_value;
     type_enum->max_value    = max_value;
+
+    type_enum->value_name   = malloc(strlen(value_name) + 1);
+    strcpy(type_enum->value_name, value_name);
+
     return type_enum;
 }
 

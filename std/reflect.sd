@@ -59,6 +59,11 @@ TypePrimitive :: struct  {
     kind: TypePrimitiveKind;
 };
 
+TypePointer :: struct {
+    head:       Type;
+    pointerTo: *Type;
+}
+
 TypeArray :: struct {
     head:      Type;
     kind:      TypeArrayKind;
@@ -68,6 +73,7 @@ TypeArray :: struct {
 
 TypeEnum :: struct {
     head:         Type;
+    valueName:    string;
     backingType: *Type;
     minValue:     int;
     maxValue:     int;
@@ -76,6 +82,7 @@ TypeEnum :: struct {
 StructMember :: struct {
     name:  string;
     type:  *Type;
+    value: *void;
     index:  int;
     offset: int;
 }
@@ -98,9 +105,17 @@ TypeAny :: struct {
 }
 
 extern "C" {
-    runtime_get_type_array  :: (name: string, kind: TypeArrayKind, elem_type: *Type, count: int) -> *TypeArray;
-    runtime_get_type_enum   :: (name: string, backingType: *Type, minValue: int, maxValue: int) -> *TypeEnum;
-    runtime_get_type_struct :: (name: string, members: *StructMember, members_count: int, size: int, alignment: int) -> *TypeStruct;
-    // runtime_get_type_any    :: (data: *void, type: *Type) -> *TypeAny;
-    runtime_get_type_any    :: () -> *TypeAny;
+    runtime_get_type_pointer :: (name: string, pointerTo: *Type) -> *TypePointer;
+    runtime_get_type_array   :: (name: string, kind: TypeArrayKind, elem_type: *Type, count: int) -> *TypeArray;
+    runtime_get_type_enum    :: (name: string, valueName: string, backingType: *Type, minValue: int, maxValue: int) -> *TypeEnum;
+    runtime_get_type_struct  :: (name: string, members: *StructMember, members_count: int, size: int, alignment: int) -> *TypeStruct;
+    runtime_get_type_any     :: () -> *TypeAny;
+}
+
+isPrimitive :: method (type: *Type) -> bool {
+    if type.kind == .Bool { return true; } 
+    if type.kind == .Int { return true; }
+    if type.kind == .Float { return true; }
+    if type.kind == .String { return true; }
+    return false;
 }

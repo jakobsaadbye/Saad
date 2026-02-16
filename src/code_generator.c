@@ -52,7 +52,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if);
 void emit_for(CodeGenerator *cg, AstFor *ast_for);
 void emit_while(CodeGenerator *cg, AstWhile *ast_while);
 void emit_break_or_continue(CodeGenerator *cg, AstBreakOrContinue *boc);
-void emit_enum(CodeGenerator *cg, AstEnum *ast_enum);
+void emit_enum_defn(CodeGenerator *cg, AstEnum *ast_enum);
 void emit_array_literal(CodeGenerator *cg, AstArrayLiteral *array_lit, int base_offset, bool offset_is_runtime_computed);
 void emit_struct_literal(CodeGenerator *cg, AstStructLiteral *struct_lit, int base_offset, bool offset_is_runtime_computed);
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl);
@@ -245,6 +245,7 @@ void emit_header(CodeGenerator *cg) {
     sb_append(&cg->data, "   string_false DB \"false\", 0\n");
     sb_append(&cg->data, "   string_true  DB \"true\", 0\n");
     sb_append(&cg->data, "   string_assert_fail  DB \"Assertion failed at line %s\", 10, 0\n", "%d");
+    sb_append(&cg->data, "   enum_to_int_buffer times 20 DB 0\n"); // 20 is the length of the largest integer number 2^64
     sb_append(&cg->code, "\n");
 
     sb_append(&cg->code_header, "segment .text\n");
@@ -369,7 +370,7 @@ void emit_statement(CodeGenerator *cg, Ast *stmt) {
     case AST_FOR:               emit_for(cg, (AstFor *)(stmt)); break;
     case AST_WHILE:             emit_while(cg, (AstWhile *)(stmt)); break;
     case AST_BREAK_OR_CONTINUE: emit_break_or_continue(cg, (AstBreakOrContinue *)(stmt)); break;
-    case AST_ENUM:              emit_enum(cg, (AstEnum *)(stmt)); break;
+    case AST_ENUM:              emit_enum_defn(cg, (AstEnum *)(stmt)); break;
     case AST_STRUCT:            break;
     case AST_EXPR_STMT:         emit_expr_stmt(cg, (AstExprStmt *)(stmt)); break;
     case AST_PRINT:             emit_print(cg, (AstPrint *)(stmt)); break;
@@ -397,14 +398,14 @@ void emit_break_or_continue(CodeGenerator *cg, AstBreakOrContinue *boc) {
     }
 }
 
-void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
+void emit_enum_defn(CodeGenerator *cg, AstEnum *ast_enum) {
     if (ast_enum->head.flags & AST_FLAG_IS_CODE_GENED) {
         return;
     }
 
     for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
-        sb_append(&cg->data, "   __%s.%s DB \".%s\", 0\n", ast_enum->identifier->name, etor->name, etor->name);
+        sb_append(&cg->data, "   __%s.%s DB \"%s\", 0\n", ast_enum->identifier->name, etor->name, etor->name);
     }
 
     // char *get_enum_string_<ENUM_NAME>(char *buf, int value)
@@ -432,7 +433,7 @@ void emit_enum(CodeGenerator *cg, AstEnum *ast_enum) {
     PUSH(RDX);
     PUSH(RCX);
 
-    sb_append(&cg->code, "   call\t\tsprintf\n"); // @Note - For some reason sprintf reads its arguments from the stack instead of in rcx, rdx ... ??? Say what
+    sb_append(&cg->code, "   call\t\tsprintf\n");
 
     POP(RAX);
 
@@ -1327,8 +1328,25 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
     if (to->kind == TYPE_ANY) {
 
         // Copy the value on the stack (Box it)
-        int tmp_offset = allocate_variable(cg, cast->expr->type->size);
-        emit_simple_initialization(cg, tmp_offset, false, false, cast->expr->type, cast->expr->type);
+        int tmp_offset = -1;
+
+        // Only copy the pointer to the array for fixed sized arrays
+        if (cast->expr->type->kind == TYPE_ARRAY) {
+            TypeArray *type_array = (TypeArray *) cast->expr->type;
+            if (type_array->array_kind == ARRAY_FIXED) {
+                // Only allocate 8 bytes for the pointer
+                tmp_offset = allocate_variable(cg, 8);
+                POP(RAX);
+                sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", tmp_offset);
+            } else {
+                tmp_offset = allocate_variable(cg, cast->expr->type->size);
+                emit_simple_initialization(cg, tmp_offset, false, false, cast->expr->type, cast->expr->type);
+            }
+        } 
+        else {
+            tmp_offset = allocate_variable(cg, cast->expr->type->size);
+            emit_simple_initialization(cg, tmp_offset, false, false, cast->expr->type, cast->expr->type);
+        }
 
         // Allocate the Any type
         int any_offset = push_temporary_value(cg, 16, (Ast *)cast);
@@ -1338,8 +1356,9 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
         sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", any_offset);
         sb_append(&cg->code, "   mov\t\tQWORD 0[rbx], rax\n");
 
-        // Get a pointer to the type descriptor
-        emit_type_descriptor(cg, cast->expr->type);
+        // Get a pointer to the type descriptor. Pointer to *value is carried in rbx
+        sb_append(&cg->code, "   mov\t\tQWORD rbx, %d[rbp]\n", any_offset);
+        emit_type_descriptor(cg,  cast->expr->type);
         POP(RCX);
 
         // Store the pointer to the type
@@ -1720,7 +1739,7 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset, bool offset_
     case TYPE_ENUM:
     case TYPE_POINTER: {
         if (offset_is_runtime_computed) {
-            sb_append(&cg->code, "   mov\t\t%s [rbx], 0\n", word_size(type), dst_offset);
+            sb_append(&cg->code, "   mov\t\t%s [rbx], 0\n", word_size(type));
         } else {
             sb_append(&cg->code, "   mov\t\t%s %d[rbp], 0\n", word_size(type), dst_offset);
         }
@@ -1787,6 +1806,16 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset, bool offset_
             
         return;
     }
+    case TYPE_ANY : {
+        if (offset_is_runtime_computed) {
+            sb_append(&cg->code, "   mov\t\tQWORD 0[rbx], 0\n");
+            sb_append(&cg->code, "   mov\t\tQWORD 8[rbx], 0\n");
+        } else {
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset + 0);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0\n", dst_offset + 8);
+        }
+        return;
+    }
     default:
         printf("%s:%d: compiler-error: There were unhandled cases in 'zero_initialize'\n", __FILE__, __LINE__);
         exit(1);
@@ -1800,7 +1829,8 @@ void emit_add_constant_string(CodeGenerator *cg, char *string, Register reg) {
     cg->constants++;
 }
 
-// Puts a pointer to the type descriptor in rax
+// Puts a pointer to the type descriptor in rax. 
+// An additional pointer to the value is caried in rbx if the type requires it e.g enums or struct members
 // @See runtime_support.c for the type descriptor functions
 void emit_type_descriptor(CodeGenerator *cg, Type *type) {
     switch (type->kind) {
@@ -1819,14 +1849,24 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
     case TYPE_ARRAY: {
         TypeArray *type_array = (TypeArray *)type;
 
-        if (type_array->array_kind != ARRAY_FIXED) XXX;
+        int value_ptr_offset = push_temporary_value(cg, 8, (Ast *)type);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", value_ptr_offset);
 
         emit_type_descriptor(cg, type_array->elem_type);
         
         emit_add_constant_string(cg, type_to_str(type), REG_RCX);
         sb_append(&cg->code, "   mov\t\tedx, %d\n", type_array->array_kind);
         POP(R8);
-        sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_array->count);
+
+        if (type_array->array_kind != ARRAY_FIXED) {
+            // Get the element count
+            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", value_ptr_offset);
+            sb_append(&cg->code, "   mov\t\trbx, rbx\n");
+            sb_append(&cg->code, "   mov\t\tr9d, 8[rbx]\n");
+        } else {
+            sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_array->count);
+        }
+
         sb_append(&cg->code, "   sub\t\trsp, 32\n");
         sb_append(&cg->code, "   call\t\truntime_get_type_array\n");
         sb_append(&cg->code, "   add\t\trsp, 32\n");
@@ -1834,14 +1874,29 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
         return;
     }
     case TYPE_POINTER: {
-        XXX;
+        TypePointer *type_ptr = (TypePointer *)type;
+
+        emit_type_descriptor(cg, type_ptr->pointer_to);
+
+        emit_add_constant_string(cg, type_to_str(type), REG_RCX);
+        POP(RDX);
+        sb_append(&cg->code, "   sub\t\trsp, 32\n");
+        sb_append(&cg->code, "   call\t\truntime_get_type_pointer\n");
+        sb_append(&cg->code, "   add\t\trsp, 32\n");
+        PUSH(RAX);
+
+        return;
     }
     case TYPE_STRUCT: {
         TypeStruct *type_struct = (TypeStruct *)type;
 
+        // Store pointer to value
+        int value_ptr_offset = push_temporary_value(cg, 8, (Ast *)type);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", value_ptr_offset);
+
         DynamicArray members = type_struct->node->scope->identifiers;
 
-        int size_struct_member = 24; // sizeof(StructMember) in reflect.sd
+        int size_struct_member = 32; // sizeof(StructMember) in reflect.sd
 
         // Generate type descriptors for the struct members
         sb_append(&cg->code, "   sub\t\trsp, 32\n");
@@ -1857,15 +1912,21 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
+            sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", value_ptr_offset);
+            sb_append(&cg->code, "   lea\t\trbx, %d[rbx]\n", member->member_offset);
             emit_type_descriptor(cg, member->type);
             POP(RCX);
+
+            sb_append(&cg->code, "   mov\t\trdx, %d[rbp]\n", value_ptr_offset);      // Rdx = Pointer to struct
+            sb_append(&cg->code, "   lea\t\trdx, %d[rdx]\n", member->member_offset); // Rdx = Value of member
 
             sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", cursor_offset);
             emit_add_constant_string(cg, member->name, REG_RAX);
             sb_append(&cg->code, "   mov\t\t0[rbx], rax\n");
             sb_append(&cg->code, "   mov\t\t8[rbx], rcx\n");
-            sb_append(&cg->code, "   mov\t\tDWORD 16[rbx], %d\n", member->member_index);
-            sb_append(&cg->code, "   mov\t\tDWORD 20[rbx], %d\n", member->member_offset);
+            sb_append(&cg->code, "   mov\t\t16[rbx], rdx\n");
+            sb_append(&cg->code, "   mov\t\tDWORD 24[rbx], %d\n", member->member_index);
+            sb_append(&cg->code, "   mov\t\tDWORD 28[rbx], %d\n", member->member_offset);
             sb_append(&cg->code, "   add\t\trbx, %d\n", size_struct_member);
             sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", cursor_offset);
         }
@@ -1884,15 +1945,26 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
     case TYPE_ENUM: {
         TypeEnum *type_enum = (TypeEnum *)type;
 
+        // Store pointer to value
+        int value_ptr_offset = push_temporary_value(cg, 8, (Ast *)type);
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", value_ptr_offset);
+
         emit_type_descriptor(cg, type_enum->backing_type);
+
+        // Get string representation of the enum value
+        sb_append(&cg->code, "   mov\t\trcx, enum_to_int_buffer\n");
+        sb_append(&cg->code, "   mov\t\trdx, %d[rbp]\n", value_ptr_offset);
+        sb_append(&cg->code, "   mov\t\tedx, [rdx]\n");
+        sb_append(&cg->code, "   call\t\tget_enum_string_%s\n", type_enum->identifier->name);
+        sb_append(&cg->code, "   mov\t\trdx, rax\n");
         
         emit_add_constant_string(cg, type_enum->identifier->name, REG_RCX);
-        POP(RDX);
-        sb_append(&cg->code, "   mov\t\tr8d, %d\n", type_enum->min_value);
-        sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_enum->max_value);
-        sb_append(&cg->code, "   sub\t\trsp, 32\n");
+        POP(R8);
+        sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_enum->min_value);
+        sb_append(&cg->code, "   sub\t\trsp, 40\n");
+        sb_append(&cg->code, "   mov\t\tDWORD 32[rsp], %d\n", type_enum->max_value);
         sb_append(&cg->code, "   call\t\truntime_get_type_enum\n");
-        sb_append(&cg->code, "   add\t\trsp, 32\n");
+        sb_append(&cg->code, "   add\t\trsp, 40\n");
         PUSH(RAX);
         return;
     }
@@ -2070,33 +2142,6 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
 
         return;
 
-        // // Save the destination address
-        // int dest_offset = push_temporary_value(cg, 8, (Ast *)lhs_type);
-        // if (dst_is_runtime_computed) {
-        //     sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", dest_offset);
-        // }
-        
-        // // Box the value (copy the value on the stack)
-        // // @Incomplete
-        
-        // // Get a pointer to the type descriptor
-        // emit_type_descriptor(cg, rhs_type);
-        // POP(RCX);
-        
-        // // Get the destination address
-        // if (dst_is_runtime_computed) {
-        //     sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", dest_offset);
-        // } else {
-        //     sb_append(&cg->code, "   lea\t\trbx, %s\n", dst);
-        // }
-
-        // // Get pointer to boxed value
-        // POP(RAX);
-
-        // sb_append(&cg->code, "   mov\t\tQWORD 0[rbx], rax\n");
-        // sb_append(&cg->code, "   mov\t\tQWORD 8[rbx], rcx\n");
-        
-        // return;
     }
     default:
     XXX;
@@ -2335,7 +2380,13 @@ void emit_arithmetic_operator(CodeGenerator *cg, AstBinary *bin) {
         else if (bin->operator == '/') {
             sb_append(&cg->code, "   cqo\n");           // sign extend rax through rax:rdx needed for division for some reason???
             sb_append(&cg->code, "   idiv\t\trbx\n");
-        } else exit(1); // Should not happen
+        } 
+        else if (bin->operator == '%') {
+            sb_append(&cg->code, "   cqo\n");
+            sb_append(&cg->code, "   idiv\t\trbx\n");
+            sb_append(&cg->code, "   mov\t\trax, rdx\n");
+        } 
+        else XXX; // Should not happen
 
         PUSH(RAX);
         return;
@@ -2626,8 +2677,7 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue)
 
     TypeArray *array_type = (TypeArray *) array_ac->accessing->type;
 
-    // Emit the left side as an lvalue
-    set_flag(cg, CODEGEN_EMIT_EXPRESSION_AS_LVALUE);
+    // Emit the left side
     emit_expression(cg, array_ac->accessing);
 
     // Emit index expression as rvalue
@@ -2728,8 +2778,14 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         PUSH(RAX);
         return;
     }
+    case TYPE_VOID: {
+        // Treat as *void
+        sb_append(&cg->code, "   mov\t\trax, %s\n", src);
+        PUSH(RAX);
+        return;
+    }
     default:
-        printf("internal-compiler-error: Unhandled case %s in emit_move_and_push()", type_to_str(src_type));
+        printf("internal-compiler-error: Unhandled case '%s' in emit_move_and_push()", type_to_str(src_type));
         XXX;
     }
 }
@@ -2742,6 +2798,92 @@ bool is_arithmetic_operator(TokenType op) {
     if (op == '%') return true;
     if (op == '^') return true;
     return false;
+}
+
+void emit_binary(CodeGenerator *cg, AstBinary *bin) {
+    TokenType op = bin->operator;
+    if      (is_bitwise_operator(op))    emit_bitwise_operator(cg, bin);
+    else if (is_arithmetic_operator(op)) emit_arithmetic_operator(cg, bin);
+    else if (is_comparison_operator(op)) emit_comparison_operator(cg, bin);
+    else if (is_boolean_operator(op))    emit_boolean_operator(cg, bin); 
+    else XXX;
+
+    return;
+}
+
+void emit_unary(CodeGenerator *cg, AstUnary *unary) {
+    if (unary->operator == OP_NOT) {
+        emit_expression(cg, unary->expr);
+        POP(RAX);
+        sb_append(&cg->code, "   test\t\trax, rax\n");
+        sb_append(&cg->code, "   sete\t\tal\n");
+        sb_append(&cg->code, "   movzx\t\trax, al\n");
+        PUSH(RAX);
+        return;
+    }
+
+    if (unary->operator == OP_BITWISE_NOT) {
+        emit_expression(cg, unary->expr);
+        POP(RAX);
+        sb_append(&cg->code, "   not\t\trax\n");
+        PUSH(RAX);
+        return;
+    }
+
+    if (unary->operator == OP_UNARY_MINUS) {
+        emit_expression(cg, unary->expr);
+        POP(RAX);
+        Type *type = unary->expr->type;
+        if (type->kind == TYPE_FLOAT) {
+            if (type->size == 4) {
+                sb_append(&cg->code, "   movd\t\txmm0, eax\n");
+                sb_append(&cg->code, "   xorpd\t\txmm1, xmm1\n");
+                sb_append(&cg->code, "   subss\t\txmm1, xmm0\n");
+                sb_append(&cg->code, "   movd\t\teax, xmm1\n");
+            } else {
+                sb_append(&cg->code, "   movq\t\txmm0, rax\n");
+                sb_append(&cg->code, "   xorpd\t\txmm1, xmm1\n");
+                sb_append(&cg->code, "   subsd\t\txmm1, xmm0\n");
+                sb_append(&cg->code, "   movq\t\trax, xmm1\n");
+            }
+        } else if (type->kind == TYPE_INTEGER) {
+            sb_append(&cg->code, "   neg\t\trax\n");
+        } else {
+            XXX;
+        }
+        PUSH(RAX);
+        return;
+    }
+
+    if (unary->operator == OP_ADDRESS_OF) {
+        // Emit the lvalue of the expression
+        set_flag(cg, CODEGEN_EMIT_EXPRESSION_AS_LVALUE);
+        emit_expression(cg, unary->expr);
+        return;
+    }
+
+    if (unary->operator == OP_POINTER_DEREFERENCE) {
+        emit_expression(cg, unary->expr);
+
+        Type *dereferenced_type = unary->head.type;
+        POP(RBX);
+        emit_move_and_push(cg, 0, true, dereferenced_type, false);
+
+        if (dereferenced_type->kind == TYPE_POINTER) {
+            // Mark the pointer as dereferenced so e.g a member access knows not to dereference the pointer again
+            TypePointer *ptr_type = (TypePointer *) dereferenced_type;
+            ptr_type->has_been_dereferenced = true;
+        }
+
+        return;
+    }
+
+    if (unary->operator == OP_SPREAD) {
+        emit_expression(cg, unary->expr);
+        return;
+    }
+
+    XXX;
 }
 
 void emit_expression(CodeGenerator *cg, AstExpr *expr) {
@@ -2758,90 +2900,12 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
     switch (expr->head.kind) {
     case AST_BINARY: {
-        AstBinary *bin = (AstBinary *)(expr);
-        TokenType op = bin->operator;
-        if      (is_bitwise_operator(op))    emit_bitwise_operator(cg, bin);
-        else if (is_arithmetic_operator(op)) emit_arithmetic_operator(cg, bin);
-        else if (is_comparison_operator(op)) emit_comparison_operator(cg, bin);
-        else if (is_boolean_operator(op))    emit_boolean_operator(cg, bin); 
-        else XXX;
-
+        emit_binary(cg, (AstBinary *)expr);
         return;
     }
     case AST_UNARY: {
-        AstUnary *unary = (AstUnary *)(expr);
-        if (unary->operator == OP_NOT) {
-            emit_expression(cg, unary->expr);
-            POP(RAX);
-            sb_append(&cg->code, "   test\t\trax, rax\n");
-            sb_append(&cg->code, "   sete\t\tal\n");
-            sb_append(&cg->code, "   movzx\t\trax, al\n");
-            PUSH(RAX);
-            return;
-        }
-
-        if (unary->operator == OP_BITWISE_NOT) {
-            emit_expression(cg, unary->expr);
-            POP(RAX);
-            sb_append(&cg->code, "   not\t\trax\n");
-            PUSH(RAX);
-            return;
-        }
-
-        if (unary->operator == OP_UNARY_MINUS) {
-            emit_expression(cg, unary->expr);
-            POP(RAX);
-            Type *type = unary->expr->type;
-            if (type->kind == TYPE_FLOAT) {
-                if (type->size == 4) {
-                    sb_append(&cg->code, "   movd\t\txmm0, eax\n");
-                    sb_append(&cg->code, "   xorpd\t\txmm1, xmm1\n");
-                    sb_append(&cg->code, "   subss\t\txmm1, xmm0\n");
-                    sb_append(&cg->code, "   movd\t\teax, xmm1\n");
-                } else {
-                    sb_append(&cg->code, "   movq\t\txmm0, rax\n");
-                    sb_append(&cg->code, "   xorpd\t\txmm1, xmm1\n");
-                    sb_append(&cg->code, "   subsd\t\txmm1, xmm0\n");
-                    sb_append(&cg->code, "   movq\t\trax, xmm1\n");
-                }
-            } else if (type->kind == TYPE_INTEGER) {
-                sb_append(&cg->code, "   neg\t\trax\n");
-            } else {
-                XXX;
-            }
-            PUSH(RAX);
-            return;
-        }
-
-        if (unary->operator == OP_ADDRESS_OF) {
-            // Emit the lvalue of the expression
-            set_flag(cg, CODEGEN_EMIT_EXPRESSION_AS_LVALUE);
-            emit_expression(cg, unary->expr);
-            return;
-        }
-
-        if (unary->operator == OP_POINTER_DEREFERENCE) {
-            emit_expression(cg, unary->expr);
-
-            Type *dereferenced_type = unary->head.type;
-            POP(RBX);
-            emit_move_and_push(cg, 0, true, dereferenced_type, false);
-
-            if (dereferenced_type->kind == TYPE_POINTER) {
-                // Mark the pointer as dereferenced so e.g a member access knows not to dereference the pointer again
-                TypePointer *ptr_type = (TypePointer *) dereferenced_type;
-                ptr_type->has_been_dereferenced = true;
-            }
-
-            return;
-        }
-
-        if (unary->operator == OP_SPREAD) {
-            emit_expression(cg, unary->expr);
-            return;
-        }
-
-        XXX;
+        emit_unary(cg, (AstUnary *)expr);
+        return;
     }
     case AST_SEMICOLON_EXPR: {
         // No-op
