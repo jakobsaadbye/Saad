@@ -1,5 +1,6 @@
 import "c_stdlib";
 import "c_string";
+import "arrays";
 
 StringBuilder :: struct {
     buffer:    *u8;
@@ -19,7 +20,7 @@ NewStringBuilder :: (initialCapacity: int) -> StringBuilder {
     };
 }
 
-grow :: method (sb: *StringBuilder, len: int) {
+internalGrow :: method (sb: *StringBuilder, len: int) {
     newCapacity := sb.capacity * 2;
     while newCapacity <= sb.cursor + len {
         newCapacity *= 2;
@@ -37,12 +38,12 @@ grow :: method (sb: *StringBuilder, len: int) {
     memset(&sb.buffer[sb.cursor], 0, newCapacity - sb.cursor);
 }
 
-add :: method (sb: *StringBuilder, strPtr: *u8, len: int) {
+internalAdd :: method (sb: *StringBuilder, strPtr: *u8, len: int) {
     if sb.cursor + len < sb.capacity {
         memcpy(&sb.buffer[sb.cursor], strPtr, len);
         sb.cursor += len;
     } else {
-        sb.grow(len);
+        sb.internalGrow(len);
     
         // Append the string
         memcpy(&sb.buffer[sb.cursor], strPtr, len);
@@ -54,19 +55,19 @@ addStringSlice :: method (sb: *StringBuilder, str: string, start: int, end: int)
     strLen := end - start;
     strPtr := cast(*u8)str;
     strPtr = &strPtr[start];
-    sb.add(strPtr, strLen);
+    sb.internalAdd(strPtr, strLen);
 }
 
 addChar :: method (sb: *StringBuilder, char: u8) {
     strLen := 1;
     strPtr := &char;
-    sb.add(strPtr, strLen);
+    sb.internalAdd(strPtr, strLen);
 }
 
 addString :: method (sb: *StringBuilder, str: string) {
     strLen := strlen(str);
     strPtr := cast(*u8)str;
-    sb.add(strPtr, strLen);
+    sb.internalAdd(strPtr, strLen);
 }
 
 addInt :: method (sb: *StringBuilder, v: int) {
@@ -102,7 +103,7 @@ addFloat32 :: method (sb: *StringBuilder, v: f32) {
 
     strPtr := cast(*u8) buf.data;
     strLen := strlen(cast(string) strPtr);
-    sb.add(strPtr, strLen);
+    sb.internalAdd(strPtr, strLen);
 }
 
 addFloat64 :: method (sb: *StringBuilder, v: f64) {
@@ -111,7 +112,147 @@ addFloat64 :: method (sb: *StringBuilder, v: f64) {
 
     strPtr := cast(*u8) buf.data;
     strLen := strlen(cast(string) strPtr);
-    sb.add(strPtr, strLen);
+    sb.internalAdd(strPtr, strLen);
+}
+
+addAnyValue :: method (sb: *StringBuilder, arg: any)  {
+    if arg.type.kind == .Int {
+        value := cast(*int) arg.data;
+        sb.addInt(*value);
+    }
+    else if arg.type.kind == .Float {
+        if (arg.type.size == 4) {
+            value := cast(*f32) arg.data;
+            sb.addFloat32(*value);
+        } else {
+            value := cast(*f64) arg.data;
+            sb.addFloat64(*value);
+        }
+    }
+    else if arg.type.kind == .Bool {
+        value := cast(*bool) arg.data;
+        if *value {
+            sb.addString("true");
+        } else {
+            sb.addString("false");
+        }
+    }
+    else if arg.type.kind == .String {
+        value := cast(*string) arg.data;
+        sb.addString(*value);
+    }
+    else if arg.type.kind == .Enum {
+        enumType := cast(*TypeEnum) arg.type;
+        sb.addString(enumType.head.name);
+        sb.addString(".");
+        sb.addString(enumType.valueName);
+    }
+    else if arg.type.kind == .Pointer {
+        ptrType := cast(*TypePointer) arg.type;
+
+        buf: [64]u8;
+        sprintf(buf.data, "0x%p", *arg.data);
+
+        sb.addString(cast(string)buf.data);
+    }
+    else if arg.type.kind == .Array {
+        arrType := cast(*TypeArray) arg.type;
+
+        sb.addString("[");
+        for i in 0..arrType.count {
+            
+            elemSize := arrType.elemType.size;
+
+            elemPtr: *u8 = null;
+            if arrType.kind == .Fixed {
+                arrPtr := cast(**u8) arg.data;
+                elem0Ptr := *arrPtr;
+                elemPtr = &elem0Ptr[i * elemSize];
+            } else if arrType.kind == .Slice {
+                slicePtr := cast(*[]u8) arg.data;
+                slice := *slicePtr;
+                elem0 := slice.data;
+                elemPtr = &elem0[i * elemSize];
+            } else if arrType.kind == .Dynamic {
+                dynArrPtr := cast(*[..]u8) arg.data;
+                dynArr := *dynArrPtr;
+                elem0 := dynArr.data;
+                elemPtr = &elem0[i * elemSize];
+            }
+
+            // Only show the full value if its a primitive type since we don't
+            // generate type descriptors for each element.
+            if arrType.elemType.isPrimitive() {
+                value: any;
+                value.type = arrType.elemType;
+                value.data = elemPtr;
+                sb.addAnyValue(value);
+            } 
+            else {
+                buf: [64]u8;
+                sprintf(buf.data, "0x%p", elemPtr);
+                sb.addString(cast(string)buf.data);
+            }
+
+            if i != arrType.count - 1 {
+                sb.addString(", ");
+            }
+        }
+        sb.addString("]");
+    }
+    else if arg.type.kind == .Struct {
+        structType := cast(*TypeStruct) arg.type;
+        sb.addString(structType.head.name);
+        sb.addString("{ ");
+        for member, i in structType.members {
+            sb.addString(member.name);
+            sb.addString(" = ");
+
+            value: any;
+            value.type = member.type;
+            value.data = member.value;
+            sb.addAnyValue(value);
+
+            if i != structType.members.count - 1 {
+                sb.addString(", ");
+            }
+        }
+        sb.addString(" }");
+    }
+    else {
+        sb.addString("<");
+        sb.addString(arg.type.name);
+        sb.addString(">");
+    }
+}
+
+add :: method (sb: *StringBuilder, format: string, args: ...any) {
+
+    // Scan the format string to find all the placeholders
+    placeholderIndicies: [..]int;
+    for i in 0..strlen(format) {
+        c := (cast(*u8)format)[i];
+        if c == 37 { // '%'
+            appendInt(&placeholderIndicies, i);
+        }
+    }
+
+    // Build up the result string by pasting each segment of the source string
+    cursor := 0;
+    for index, i in placeholderIndicies {
+
+        // Add the static text up untill the placeholder
+        sb.addStringSlice(format, cursor, index);
+
+        // Fill in the placeholder
+        arg := args[i];
+        sb.addAnyValue(arg);
+
+        cursor = index + 1;
+    }
+
+    // Append the trailing part after the last placeholder
+    sb.addStringSlice(format, cursor, strlen(format));
 }
 
 clear :: method (sb: *StringBuilder) {

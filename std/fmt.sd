@@ -32,7 +32,7 @@ Print :: (format: string, args: ...any) {
 
         // Fill in the placeholder
         arg := args[i];
-        addValue(&sb, arg);
+        sb.addAnyValue(arg);
 
         cursor = index + 1;
     }
@@ -46,116 +46,5 @@ Print :: (format: string, args: ...any) {
     
     sb.free();
     return;
-}
-
-addValue :: (sb: *StringBuilder, arg: any)  {
-    if arg.type.kind == .Int {
-        value := cast(*int) arg.data;
-        sb.addInt(*value);
-    }
-    else if arg.type.kind == .Float {
-        if (arg.type.size == 4) {
-            value := cast(*f32) arg.data;
-            sb.addFloat32(*value);
-        } else {
-            value := cast(*f64) arg.data;
-            sb.addFloat64(*value);
-        }
-    }
-    else if arg.type.kind == .Bool {
-        value := cast(*bool) arg.data;
-        if *value {
-            sb.addString("true");
-        } else {
-            sb.addString("false");
-        }
-    }
-    else if arg.type.kind == .String {
-        value := cast(*string) arg.data;
-        sb.addString(*value);
-    }
-    else if arg.type.kind == .Enum {
-        enumType := cast(*TypeEnum) arg.type;
-        sb.addString(enumType.head.name);
-        sb.addString(".");
-        sb.addString(enumType.valueName);
-    }
-    else if arg.type.kind == .Pointer {
-        ptrType := cast(*TypePointer) arg.type;
-
-        buf: [64]u8;
-        sprintf(buf.data, "0x%p", *arg.data);
-
-        sb.addString(cast(string)buf.data);
-    }
-    else if arg.type.kind == .Array {
-        arrType := cast(*TypeArray) arg.type;
-
-        sb.addString("[");
-        for i in 0..arrType.count {
-            
-            elemSize := arrType.elemType.size;
-
-            elemPtr: *u8 = null;
-            if arrType.kind == .Fixed {
-                arrPtr := cast(**u8) arg.data;
-                elem0Ptr := *arrPtr;
-                elemPtr = &elem0Ptr[i * elemSize];
-            } else if arrType.kind == .Slice {
-                slicePtr := cast(*[]u8) arg.data;
-                slice := *slicePtr;
-                elem0 := slice.data;
-                elemPtr = &elem0[i * elemSize];
-            } else if arrType.kind == .Dynamic {
-                dynArrPtr := cast(*[..]u8) arg.data;
-                dynArr := *dynArrPtr;
-                elem0 := dynArr.data;
-                elemPtr = &elem0[i * elemSize];
-            }
-
-            // Only show the full value if its a primitive type since we don't
-            // generate type descriptors for each element.
-            if arrType.elemType.isPrimitive() {
-                value: any;
-                value.type = arrType.elemType;
-                value.data = elemPtr;
-                addValue(sb, value);
-            } 
-            else {
-                buf: [64]u8;
-                sprintf(buf.data, "0x%p", elemPtr);
-                sb.addString(cast(string)buf.data);
-            }
-
-            if i != arrType.count - 1 {
-                sb.addString(", ");
-            }
-        }
-        sb.addString("]");
-    }
-    else if arg.type.kind == .Struct {
-        structType := cast(*TypeStruct) arg.type;
-        sb.addString(structType.head.name);
-        sb.addString("{ ");
-        for member, i in structType.members {
-            sb.addString(member.name);
-            sb.addString(" = ");
-
-            value: any;
-            value.type = member.type;
-            value.data = member.value;
-            addValue(sb, value);
-
-            if i != structType.members.count - 1 {
-                sb.addString(", ");
-            }
-        }
-        sb.addString(" }");
-    }
-    else {
-        sb.addString("<");
-        sb.addString(arg.type.name);
-        sb.addString(">");
-    }
 }
 

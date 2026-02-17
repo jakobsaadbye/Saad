@@ -144,6 +144,11 @@ bool import_declarations(Parser *parser, AstImport *import, AstFile *to_file) {
         }
 
         AstIdentifier *existing = add_identifier_to_scope(parser, to_file->scope, src_ident);
+
+        if (existing == src_ident) {
+            continue;
+        }
+
         if (existing != NULL) {
             report_error_ast(parser, LABEL_ERROR, (Ast *)src_ident, "Import of identifier '%s' conflicts with existing identifier", src_ident->name);
             report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the existing identifier ...");
@@ -1008,6 +1013,7 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     bool ok;
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+        if (member->flags & IDENTIFIER_IS_STRUCT_METHOD) continue;
         ok = check_declaration(typer, member->decl);
         if (!ok) return false;
     }

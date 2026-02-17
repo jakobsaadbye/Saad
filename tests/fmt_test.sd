@@ -25,7 +25,7 @@ Entity :: struct {
     buffer: *u8;
 }
 
-main :: () {
+printTest :: () {
     e := Entity{
         kind = .Monster,
         position = {1, 2, 3},
@@ -63,5 +63,8 @@ main :: () {
 
         Print("%", a);
     }
-    
+}
+
+main :: () {
+    printTest();
 }

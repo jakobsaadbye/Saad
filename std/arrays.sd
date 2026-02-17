@@ -1,6 +1,7 @@
-extern "C" {
-    realloc :: (buffer: *void, new_size: int) -> *void;
-}
+// extern "C" {
+//     realloc :: (buffer: *void, new_size: int) -> *void;
+// }
+import "c_stdlib";
 
 appendInt :: (array: *[..]int, elem: int) {
     if array.count + 1 > array.capacity {

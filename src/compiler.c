@@ -200,7 +200,11 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
             }
         }
         if (is_visited) {
-            break;
+            file_path_cursor += 1;
+            if (file_paths_to_visit.count == file_path_cursor) {
+                break;
+            }
+            continue;
         }
 
         // Parse file
@@ -223,7 +227,6 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
         }
 
         file_path_cursor += 1;
-
         if (file_paths_to_visit.count == file_path_cursor) {
             break;
         }
