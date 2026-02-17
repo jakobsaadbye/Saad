@@ -10,12 +10,8 @@ segment .data
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
    enum_to_int_buffer times 20 DB 0
-   __DogKind.samoid DB "samoid", 0
-   __DogKind.chiwawa DB "chiwawa", 0
-   __DogKind.bulldog DB "bulldog", 0
-   CF0 DD 20.0000000
-   CF1 DD 0.5000000
-   CF2 DD 80.0000000
+   CS0 DB `v = %d`, 0 
+   CS1 DB `%s %d %d\n`, 0 
 segment .text
    global main
    extern ExitProcess
@@ -56,142 +52,111 @@ assert_fail:
    mov		rcx, 1
    call		ExitProcess
 
-get_enum_string_DogKind:
-   mov		r8, 0
-   cmp		rdx, r8
-   jz			enum_case_0
-   mov		r8, 1
-   cmp		rdx, r8
-   jz			enum_case_1
-   mov		r8, 2
-   cmp		rdx, r8
-   jz			enum_case_2
-   push		rcx
-   mov		r8, rdx
-   mov		rdx, fmt_int
-   push		r8
-   push		rdx
-   push		rcx
-   call		sprintf
+
+; bytes locals   : 16
+; bytes temp     : 8
+; bytes total    : 64
+foo:
+   push		rbp
+   mov		rbp, rsp
+   sub		rsp, 64
+   ; Param v
+   mov		-4[rbp], ecx
+   ; Ln 4 Print
+   mov		eax, DWORD -4[rbp]
+   movsx		rax, eax
+   push		rax
+   ; Pop print arguments
    pop		rax
-   pop		rbx
-   pop		rbx
-   pop		rbx
-   ret
-enum_case_0:
-   mov		rax, __DogKind.samoid
-   ret
-enum_case_1:
-   mov		rax, __DogKind.chiwawa
-   ret
-enum_case_2:
-   mov		rax, __DogKind.bulldog
+   mov		rdx, rax
+   mov		rcx, CS0
+   call		printf
+L0:
+   mov		rax, 0
+   add		rsp, 64
+   pop		rbp
    ret
 
-; bytes locals   : 24
-; bytes temp     : 16
+; bytes locals   : 48
+; bytes temp     : 8
+; bytes total    : 96
+bar:
+   push		rbp
+   mov		rbp, rsp
+   sub		rsp, 96
+   ; Param a
+   mov		-1[rbp], cl
+   ; Param b
+   mov		-8[rbp], edx
+   ; Param c
+   mov		-12[rbp], r8d
+   ; Ln 8 Print
+   movzx		eax, BYTE -1[rbp]
+   push		rax
+   pop		rax
+   cmp		al, 0
+   jnz		L2
+   mov		rax, string_false
+   jmp		L3
+L2:
+   mov		rax, string_true
+L3:
+   push		rax
+   mov		eax, DWORD -8[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		eax, DWORD -12[rbp]
+   movsx		rax, eax
+   push		rax
+   ; Pop print arguments
+   pop		rax
+   mov		r9, rax
+   pop		rax
+   mov		r8, rax
+   pop		rax
+   mov		rdx, rax
+   mov		rcx, CS1
+   call		printf
+L1:
+   mov		rax, 0
+   add		rsp, 96
+   pop		rbp
+   ret
+
+; bytes locals   : 0
+; bytes temp     : 48
 ; bytes total    : 80
 main:
    push		rbp
    mov		rbp, rsp
    sub		rsp, 80
-   ; Ln 15: $samoid : Dog = -16[rbp]
-   lea		rcx, -16[rbp]
-   mov		rdx, 0
-   mov		r8, 16
-   call		memset
-   push		0
-   pop		rax
-   mov		DWORD -16[rbp], eax
-   mov		rax, 4
+   push		1
+   mov		rax, 5
    push		rax
-   pop		rax
-   mov		DWORD -12[rbp], eax
-   movss		xmm0, [CF0]
-   movd		eax, xmm0
+   mov		rax, 8
    push		rax
-   pop		rax
-   mov		-8[rbp], eax
-   movss		xmm0, [CF1]
-   movd		eax, xmm0
-   push		rax
-   pop		rax
-   mov		-4[rbp], eax
-   ; Ln 22: $bmi : float = -20[rbp]
-   lea		rax, -16[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 8
-   push		rbx
-   pop		rbx
-   mov		eax, [rbx]
-   push		rax
-   lea		rax, -16[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 12
-   push		rbx
-   pop		rbx
-   mov		eax, [rbx]
-   push		rax
-   lea		rax, -16[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 12
-   push		rbx
-   pop		rbx
-   mov		eax, [rbx]
-   push		rax
-   pop		rbx
-   pop		rax
-   movd		xmm1, ebx
-   movd		xmm0, eax
-   mulss		xmm0, xmm1
-   movd		eax, xmm0
-   push		rax
-   pop		rbx
-   pop		rax
-   movd		xmm1, ebx
-   movd		xmm0, eax
-   divss		xmm0, xmm1
-   movd		eax, xmm0
-   push		rax
-   pop		rax
-   mov		-20[rbp], eax
-   mov		eax, -20[rbp]
-   push		rax
-   movss		xmm0, [CF2]
-   movd		eax, xmm0
-   push		rax
-   pop		rbx
-   pop		rax
-   movd		xmm1, ebx
-   movd		xmm0, eax
-   comiss	xmm0, xmm1
-   sete		al
-   push		rax
+   pop		r8 
+   pop		rdx
    pop		rcx
-   mov		rdx, 23
-   call		assert
-   lea		rax, -16[rbp]
+   call		bar
+   push		1
+   mov		rax, 1
    push		rax
-   pop		rbx
-   add		rbx, 4
-   push		rbx
-   pop		rbx
-   mov		eax, DWORD [rbx]
-   movsx		rax, eax
+   mov		rax, 8
    push		rax
-   mov		rax, 4
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
+   pop		r8 
+   pop		rdx
    pop		rcx
-   mov		rdx, 24
-   call		assert
+   call		bar
+   push		1
+   mov		rax, 1
+   push		rax
+   mov		rax, 42
+   push		rax
+   pop		r8 
+   pop		rdx
+   pop		rcx
+   call		bar
 L4:
    mov		rax, 0
    add		rsp, 80

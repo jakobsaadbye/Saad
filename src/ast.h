@@ -284,6 +284,7 @@ typedef struct AstFunctionDefn {
     AstIdentifier  *receiver;   // set if its a method and is just a short-hand for the 0'th parameter
     DynamicArray    parameters; // of *AstIdentifier
     int             variadic_parameter_index; // set to the index of a variadic parameter in the parameter list
+    int             default_parameter_index;   // set to the first index where a default parameter appears. Set to -1 if the function contains no default parameters
     AstBlock       *body;
     DynamicArray    return_types;  // of *Type
     CallingConv     calling_convention;
@@ -291,6 +292,7 @@ typedef struct AstFunctionDefn {
     bool            is_lambda;
     bool            is_extern;
     bool            is_variadic;
+    bool            has_default_parameters;
     
     int   num_bytes_locals;      // Number of bytes allocated for variables in the function
     int   num_bytes_temporaries; // Number of bytes allocated for temporaries in the function

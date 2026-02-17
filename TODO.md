@@ -1,3 +1,7 @@
+* Check that default parameters are compile time evaluable
+
+
+
 Todo list:
 -------------------
   

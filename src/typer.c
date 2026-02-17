@@ -1651,6 +1651,13 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     }
 
     //
+    // Add default parameters as arguments
+    //
+    if (func_defn->has_default_parameters) {
+        
+    }
+
+    //
     // Typecheck the arguments against the parameter list
     //
     if (func_defn->is_variadic) {
@@ -1831,25 +1838,73 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             }
         }
 
-    } else {
-        if (call->arguments.count != func_defn->parameters.count) {
-            if (call->arguments.count < func_defn->parameters.count) {
+    } 
+    else {
+        // Non-variadic
+
+        bool has_argument_mismatch = false;
+
+        if (func_defn->has_default_parameters) {
+            int required_parameters = func_defn->parameters.count - (func_defn->default_parameter_index + 1);
+
+            if (call->arguments.count < required_parameters) {
                 if (call->arguments.count > 0) {
                     AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted between %d and %d, got %d", required_parameters, func_defn->parameters.count, call->arguments.count);
                 } else {
-                    report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
+                    report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Too few arguments: Wanted between %d and %d, got %d", required_parameters, func_defn->parameters.count, call->arguments.count);
                 }
-            } else {
-                AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too many arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
+
+                has_argument_mismatch = true;
             }
+
+            else if (call->arguments.count > func_defn->parameters.count) {
+                AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too many arguments: Wanted between %d and %d, got %d", required_parameters, func_defn->parameters.count, call->arguments.count);
+                has_argument_mismatch = true;
+            }
+            
+        }
+        else {
+            if (call->arguments.count != func_defn->parameters.count) {
+                if (call->arguments.count < func_defn->parameters.count) {
+                    if (call->arguments.count > 0) {
+                        AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
+                        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
+                    } else {
+                        report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
+                    }
+                } else {
+                    AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too many arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
+                }
+
+                has_argument_mismatch = true;
+            }
+        }
+
+        if (has_argument_mismatch) {
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
             if (call->is_method_call && call->arguments.count == func_defn->parameters.count + 1) {
                 report_error_ast(typer->parser, LABEL_NOTE, ((Ast **)func_defn->parameters.items)[0], "Methods takes their first parameter as the receiver and should therefore not be passed as an explicit argument");
             }
             return NULL;
         }
+
+        // Fillout missing arguments with default parameter values
+        if (func_defn->has_default_parameters && call->arguments.count < func_defn->parameters.count) {
+            for (int i = call->arguments.count; i < func_defn->parameters.count; i++) {
+                AstIdentifier *defaultParam = ((AstIdentifier **)func_defn->parameters.items)[i];
+
+                if (!defaultParam->value) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *) defaultParam, "Compiler Error: Default parameter has no value");
+                    return NULL;
+                }
+
+                da_append(&call->arguments, defaultParam->value);
+            }
+        }
+
 
         call->lowered_arguments = da_init(call->arguments.count, sizeof(AstExpr *));
 

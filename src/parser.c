@@ -667,20 +667,17 @@ bool generate_and_add_import(Parser *parser, char *path) {
     return true;
 }
 
-TypeFunction *parse_function_signature(Parser *parser) {
-    AstFunctionDefn *func_defn = (AstFunctionDefn *)(ast_allocate(parser, sizeof(AstFunctionDefn)));
-    func_defn->parameters   = da_init(2, sizeof(AstIdentifier *));
-    func_defn->return_types = da_init(2, sizeof(Type *));
-
+bool parse_parameter_list(Parser *parser, AstFunctionDefn *func_defn) {
     Token next = peek_next_token(parser);
     expect(parser, next, '(');
     func_defn->paren_start_token = next;
     eat_token(parser);
 
-    // parser->enclosing_function = func_defn;
-    parser->inside_parameter_list = true;
+    func_defn->default_parameter_index = -1;
+    func_defn->has_default_parameters  = false;
 
-    AstBlock *body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters can be pushed down into the scope of the body
+    parser->inside_parameter_list = true;
+    func_defn->body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters can be pushed down into the scope of the body
     bool first_parameter_seen = false;
     while (true) {
         if (!first_parameter_seen) {
@@ -693,17 +690,28 @@ TypeFunction *parse_function_signature(Parser *parser) {
 
         AstDeclaration *decl = parse_declaration(parser);
         if (!decl) {
-            return NULL;
+            return false;
         }
 
         if (decl->flags & (DECLARATION_INFER | DECLARATION_TYPED)) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *) decl, "Default function arguments are currently not supported");
-            return NULL;
+            if (!func_defn->has_default_parameters) {
+                func_defn->default_parameter_index = func_defn->parameters.count;
+                func_defn->has_default_parameters = true;
+            }
+        }
+        else {
+            if (func_defn->has_default_parameters) {
+                AstIdentifier *ident0 = ((AstIdentifier **)decl->idents.items)[0];
+                AstIdentifier *defaultParam = ((AstIdentifier **)func_defn->parameters.items)[func_defn->default_parameter_index];
+                report_error_ast(parser, LABEL_ERROR, (Ast *) ident0->decl, "Normal parameters must appear before default parameters");
+                report_error_ast(parser, LABEL_HINT, (Ast *) defaultParam->decl, "Put it before this default parameter to be valid");
+                return false;
+            }
         }
 
         if (decl->flags & (DECLARATION_CONSTANT)) {
             report_error_ast(parser, LABEL_ERROR, (Ast *) decl, "Constants are not allowed as function arguments");
-            return NULL;
+            return false;
         }
 
         first_parameter_seen = true;
@@ -721,16 +729,26 @@ TypeFunction *parse_function_signature(Parser *parser) {
 
         if (next.type != ',') {
             report_error_token(parser, LABEL_ERROR, next, "Expected a ',' between parameters");
-            return NULL;
+            return false;
         }
 
         eat_token(parser);
     }
-
     parser->inside_parameter_list = false;
 
+    return true;
+}
+
+TypeFunction *parse_function_signature(Parser *parser) {
+    AstFunctionDefn *func_defn = (AstFunctionDefn *)(ast_allocate(parser, sizeof(AstFunctionDefn)));
+    func_defn->parameters   = da_init(2, sizeof(AstIdentifier *));
+    func_defn->return_types = da_init(2, sizeof(Type *));
+
+    bool ok = parse_parameter_list(parser, func_defn);
+    if (!ok) return NULL;
+
     // Parse return type(s)
-    next = peek_next_token(parser);
+    Token next = peek_next_token(parser);
 
     if (next.type == TOKEN_RIGHT_ARROW) {
         eat_token(parser);
@@ -781,14 +799,11 @@ TypeFunction *parse_function_signature(Parser *parser) {
         }
     }
 
-    // @Incomplete: We need to generate a unique name for the function
-    
 
     func_defn->head.kind   = AST_FUNCTION_DEFN;
     func_defn->head.file   = parser->current_file;
     func_defn->head.start  = func_defn->paren_start_token.start;
     func_defn->head.end    = next.end;
-    func_defn->body        = body; // An empty body
     func_defn->is_extern   = is_extern;
     func_defn->is_method   = false;
     func_defn->is_lambda   = true;
@@ -1757,7 +1772,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     AstFunctionDefn *func_defn = (AstFunctionDefn *)(ast_allocate(parser, sizeof(AstFunctionDefn)));
     func_defn->parameters   = da_init(2, sizeof(AstIdentifier *));
     func_defn->return_types = da_init(2, sizeof(Type *));
-
+    
     Token ident_token = peek_next_token(parser);
     expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
     eat_token(parser);
@@ -1776,61 +1791,10 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         next = peek_next_token(parser);
     }
 
-    expect(parser, next, '(');
-    func_defn->paren_start_token = next;
-    eat_token(parser);
-
     parser->enclosing_function = func_defn;
-    parser->inside_parameter_list = true;
 
-    AstBlock *body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters can be pushed down into the scope of the body
-    bool first_parameter_seen = false;
-    while (true) {
-        if (!first_parameter_seen) {
-            next = peek_next_token(parser);
-            if (next.type == ')') {
-                eat_token(parser); 
-                break;
-            }
-        }
-
-        AstDeclaration *decl = parse_declaration(parser);
-        if (!decl) {
-            return NULL;
-        }
-
-        if (decl->flags & (DECLARATION_INFER | DECLARATION_TYPED)) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *) decl, "Default function arguments are currently not supported");
-            return NULL;
-        }
-
-        if (decl->flags & (DECLARATION_CONSTANT)) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *) decl, "Constants are not allowed as function arguments");
-            return NULL;
-        }
-
-        first_parameter_seen = true;
-
-        for (int i = 0; i < decl->idents.count; i++) {
-            AstIdentifier *param = ((AstIdentifier **)decl->idents.items)[i];
-            da_append(&func_defn->parameters, param);
-        }
-
-        next = peek_next_token(parser);
-        if (next.type == ')') {
-            eat_token(parser); 
-            break;
-        }
-
-        if (next.type != ',') {
-            report_error_token(parser, LABEL_ERROR, next, "Expected a ',' between parameters");
-            return NULL;
-        }
-
-        eat_token(parser);
-    }
-
-    parser->inside_parameter_list = false;
+    bool ok = parse_parameter_list(parser, func_defn);
+    if (!ok) return NULL;
 
     if (func_defn->is_method) {
         if (func_defn->parameters.count == 0) {
@@ -1875,8 +1839,8 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     }
 
     if (!func_defn->is_extern) {
-        body = parse_block(parser, body); // Here we tell parse_block to explicitly not make a new lexical scope, but instead use our existing function header
-        if (!body) return NULL;
+        AstBlock *body_parsed = parse_block(parser, func_defn->body); // Here we tell parse_block to explicitly not make a new lexical scope, but instead use our existing function header
+        if (!body_parsed) return NULL;
     }
 
     close_block(parser);
@@ -1900,9 +1864,8 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->head.kind   = AST_FUNCTION_DEFN;
     func_defn->head.file   = parser->current_file;
     func_defn->head.start  = ident_token.start;
-    func_defn->head.end    = body->head.start;
+    func_defn->head.end    = func_defn->body->head.start;
     func_defn->identifier  = ident;
-    func_defn->body        = body;
     func_defn->is_method   = func_is_method;
     func_defn->num_bytes_locals       = 0;
     func_defn->num_bytes_temporaries  = 0;
