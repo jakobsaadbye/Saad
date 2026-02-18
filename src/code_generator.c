@@ -834,6 +834,42 @@ void MOV_ADDR_ADDR(CodeGenerator *cg, int dst_addr, Type *dst_type, int src_addr
     }
 }
 
+char *get_lowered_function_signature_string(AstFunctionDefn *func_defn) {
+    StringBuilder sb = sb_init(256);
+
+    sb_append(&sb, "(");
+    for (int i = 0; i < func_defn->lowered_params.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)func_defn->lowered_params.items)[i];
+        
+        sb_append(&sb, "%s: %s", param->name, type_to_str(param->type));
+
+        if (i < func_defn->lowered_params.count - 1) {
+            sb_append(&sb, ", ");
+        }
+    }
+    sb_append(&sb, ")");
+
+    return sb_to_string(&sb);
+}
+
+char *get_lowered_function_argument_list_string(AstFunctionCall *func_call) {
+    StringBuilder sb = sb_init(256);
+
+    sb_append(&sb, "(");
+    for (int i = 0; i < func_call->lowered_arguments.count; i++) {
+        AstExpr *expr = ((AstExpr **)func_call->lowered_arguments.items)[i];
+        
+        sb_append(&sb, "%s", type_to_str(expr->type));
+
+        if (i < func_call->lowered_arguments.count - 1) {
+            sb_append(&sb, ", ");
+        }
+    }
+    sb_append(&sb, ")");
+
+    return sb_to_string(&sb);
+}
+
 Register get_argument_register_from_index(int index, Type *type) {
     if (type && type->kind == TYPE_FLOAT) {
         if (index == 0) return REG_XMM0;
@@ -1065,6 +1101,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
         sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", param->stack_offset);
         sb_append(&cg->code, "   call\t\trax\n");
     } else {
+        sb_append(&cg->code, "   ; %s \n", get_lowered_function_argument_list_string(call));
         sb_append(&cg->code, "   call\t\t%s\n", func_defn->symbol_name);
     }
 
@@ -1122,6 +1159,8 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     sb_append(&cg->code, "; bytes locals   : %d\n", bytes_locals);
     sb_append(&cg->code, "; bytes temp     : %d\n", bytes_temporaries);
     sb_append(&cg->code, "; bytes total    : %d\n", bytes_total);
+    sb_append(&cg->code, "; %s\n", get_lowered_function_signature_string(func_defn));
+
 
     sb_append(&cg->code, "%s:\n", func_defn->symbol_name);
 

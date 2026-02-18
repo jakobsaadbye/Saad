@@ -28,6 +28,7 @@ typedef enum AstKind {
     AST_ENUM_LITERAL,
     AST_FUNCTION_DEFN,
     AST_FUNCTION_CALL,
+    AST_ARGUMENT,
     AST_DECLARATION,
     AST_ASSIGNMENT,
     AST_DIRECTIVE,
@@ -285,8 +286,8 @@ typedef struct AstFunctionDefn {
     DynamicArray    parameters; // of *AstIdentifier
     int             variadic_parameter_index; // set to the index of a variadic parameter in the parameter list
     int             default_parameter_index;   // set to the first index where a default parameter appears. Set to -1 if the function contains no default parameters
-    AstBlock       *body;
     DynamicArray    return_types;  // of *Type
+    AstBlock       *body;
     CallingConv     calling_convention;
     bool            is_method;
     bool            is_lambda;
@@ -305,6 +306,15 @@ typedef struct AstFunctionDefn {
     DynamicArray    lowered_params;         // of *AstIdentifier. A lowered representation of the parameter list with hidden return parameters / methods and all
 } AstFunctionDefn;
 
+typedef struct AstArgument {
+    Ast            head;
+    AstExpr       *value;
+    AstIdentifier *ident;       // set if its a positional argument
+    int            param_index; // set to the parameter index that the positional argument is initializing
+    int            vararg_index;
+    bool           is_vararg;
+} AstArgument;
+
 typedef struct AstFunctionCall {
     AstExpr          head;
     AstIdentifier   *identifer;
@@ -312,7 +322,9 @@ typedef struct AstFunctionCall {
     AstFunctionDefn *func_defn;         // The called function
     DynamicArray     arguments;         // of *AstExpr
     AstStruct       *belongs_to_struct; // The struct the function definition is defined on
-    bool             is_method_call;    // If the function is defined within the struct or is a method of the struct, this field is true
+    int              first_positional_argument_index;
+    bool             is_method_call;    // If the function is defined within a struct or is a method of a struct, this field is true
+    bool             has_positional_arguments;
 
     DynamicArray     lowered_arguments;      // of *AstExpr. A lowered representation of the argument list including hidden return arguments
 } AstFunctionCall;

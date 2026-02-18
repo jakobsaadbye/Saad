@@ -4,6 +4,27 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.2.1 - 18. Feb 2026
+
+* Introduction of default parameters and positional arguments for functions
+
+Function parameters can now have default values
+
+```odin
+Myprint :: (format: string, args: ...any, newline := true) {
+    Print(format, ...args);
+    if newline {
+        Print("\n");
+    }
+}
+
+main :: () {
+    Myprint("Default parameters are %", "useful during refactoring or providing an extensible api", newline = false);
+}
+
+
+```
+
 ## Update v0.2 - 1. Feb 2026
 
 * Introduction of runtime type reflection. 

@@ -29,6 +29,7 @@ const char *ast_to_str(Ast *ast) {
     case AST_ENUM_LITERAL:       return "AST_ENUM_LITERAL";
     case AST_FUNCTION_DEFN:      return "AST_FUNCTION_DEFN";
     case AST_FUNCTION_CALL:      return "AST_FUNCTION_CALL";
+    case AST_ARGUMENT:           return "AST_ARGUMENT";
     case AST_IF:                 return "AST_IF";
     case AST_RETURN:             return "AST_RETURN";
     case AST_FOR:                return "AST_FOR";

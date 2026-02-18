@@ -483,11 +483,6 @@ Ast *parse_statement(Parser *parser) {
         matched_a_statement = true;
     }
 
-    // else if (token.type == '#') {
-    //     stmt = (Ast *) parse_directive(parser);
-    //     matched_a_statement = true;
-    // }
-
     else if (token.type == '{') {
         stmt = (Ast *)(parse_block(parser, NULL));
         statement_ends_with_semicolon = false;
@@ -497,7 +492,9 @@ Ast *parse_statement(Parser *parser) {
     else {
         AstExpr *lhs = parse_expression(parser, MIN_PRECEDENCE);
         if (!lhs) {
-            report_error_token(parser, LABEL_ERROR, peek_next_token(parser), "Invalid expression");
+            if (!parser->reported_error) {
+                report_error_token(parser, LABEL_ERROR, peek_next_token(parser), "Invalid expression");
+            }
             return NULL;
         }
 
@@ -703,8 +700,12 @@ bool parse_parameter_list(Parser *parser, AstFunctionDefn *func_defn) {
             if (func_defn->has_default_parameters) {
                 AstIdentifier *ident0 = ((AstIdentifier **)decl->idents.items)[0];
                 AstIdentifier *defaultParam = ((AstIdentifier **)func_defn->parameters.items)[func_defn->default_parameter_index];
-                report_error_ast(parser, LABEL_ERROR, (Ast *) ident0->decl, "Normal parameters must appear before default parameters");
-                report_error_ast(parser, LABEL_HINT, (Ast *) defaultParam->decl, "Put it before this default parameter to be valid");
+                if (ident0->type && ident0->type->kind == TYPE_VARIADIC) {
+                    report_error_ast(parser, LABEL_ERROR, (Ast *) ident0->decl, "Variadic parameters must appear before default parameters");
+                } else {
+                    report_error_ast(parser, LABEL_ERROR, (Ast *) ident0->decl, "Normal parameters must appear before default parameters");
+                }
+                report_error_ast(parser, LABEL_HINT, (Ast *) defaultParam->decl, "Put it before this default parameter");
                 return false;
             }
         }
@@ -1721,7 +1722,7 @@ AstExpr *parse_array_access(Parser *parser, Token open_bracket, AstExpr *left) {
 
 AstFunctionCall *parse_function_call(Parser *parser) {
     AstFunctionCall *call = (AstFunctionCall *)(ast_allocate(parser, sizeof(AstFunctionCall)));
-    call->arguments       = da_init(2, sizeof(AstExpr *));
+    call->arguments       = da_init(2, sizeof(AstArgument *));
 
     Token ident_token = peek_next_token(parser);
     expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER); // Should be impossible to fail
@@ -1732,6 +1733,7 @@ AstFunctionCall *parse_function_call(Parser *parser) {
     call->paren_start_token = next;
     eat_token(parser);
 
+    call->first_positional_argument_index = -1;
     bool first_argument_seen = false;
     while (true) {
         //
@@ -1746,14 +1748,50 @@ AstFunctionCall *parse_function_call(Parser *parser) {
         if (first_argument_seen) {
             if (next.type != ',') {
                 report_error_token(parser, LABEL_ERROR, next, "Expected a ',' between arguments");
-                exit(1);    
+                return NULL;
             }
             eat_token(parser);
             next = peek_next_token(parser);
+
+            if (next.type == ')') {
+                // Allow a trailing comma
+                eat_token(parser);
+                break;
+            }
         }
 
-        AstExpr *arg = parse_expression(parser, MIN_PRECEDENCE);
-        if (!arg) return NULL;
+        AstArgument *arg = ast_allocate(parser, sizeof(AstArgument));
+        arg->head.kind = AST_ARGUMENT;
+        arg->head.file = parser->current_file;
+
+        if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '=') {
+            Token ident = next;
+            eat_token(parser);
+            eat_token(parser);
+
+            arg->ident = make_identifier_from_token(parser, ident, NULL);
+            arg->param_index = -1; // Set later in typechecking
+
+            if (!call->has_positional_arguments) {
+                call->has_positional_arguments = true;
+                call->first_positional_argument_index = call->arguments.count;
+            }
+        }
+        else {
+            if (call->has_positional_arguments) {
+                AstArgument *pos_arg = ((AstArgument **)call->arguments.items)[call->first_positional_argument_index];
+                report_error_token(parser, LABEL_ERROR, next, "Normal arguments needs to be specified before positional arguments");
+                report_error_ast(parser, LABEL_HINT, (Ast *) pos_arg, "Put it before this positional argument");
+                return NULL;
+            }
+        }
+
+        AstExpr *value = parse_expression(parser, MIN_PRECEDENCE);
+        if (!value) return NULL;
+
+        arg->head.start = arg->ident ? arg->ident->head.start : value->head.start;
+        arg->head.end   = value->head.end;
+        arg->value      = value;
 
         da_append(&call->arguments, arg);
         first_argument_seen = true;
@@ -2498,16 +2536,19 @@ AstExpr *parse_leaf(Parser *parser) {
 
     if (starts_struct_literal(parser)) {
         AstStructLiteral *struct_literal = parse_struct_literal(parser);
+        if (!struct_literal) return NULL;
         return (AstExpr *)(struct_literal);
     }
 
     if (starts_array_literal(parser))  {
         AstArrayLiteral *array_lit = parse_array_literal(parser);
+        if (!array_lit) return NULL;
         return (AstExpr *)(array_lit);
     }
 
     if (t.type == TOKEN_XX || t.type == TOKEN_CAST)  {
         AstCast *cast = parse_cast(parser);
+        if (!cast) return NULL;
         return (AstExpr *)(cast);
     }
 
@@ -2529,6 +2570,7 @@ AstExpr *parse_leaf(Parser *parser) {
 
     if (t.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '(') {
         AstFunctionCall *call = parse_function_call(parser);
+        if (!call) return NULL;
         return (AstExpr *)(call);
     }
 
@@ -2691,6 +2733,8 @@ void report_error_range(Parser *parser, Pos start, Pos end, const char *message,
     va_start(args, message);
     assert(parser->current_file);
 
+    parser->reported_error = true;
+
     report_error_helper(parser->current_file->absolute_path, parser->current_file->text, LABEL_ERROR, start, end, message, args);
 
     va_end(args);
@@ -2701,6 +2745,8 @@ void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const
     va_list args;
     va_start(args, message);
     assert(parser->current_file);
+
+    parser->reported_error = true;
 
     // Check if the failing ast has a location
     if (failing_ast != NULL) {
@@ -2722,6 +2768,8 @@ void report_error_token(Parser *parser, const char* label, Token failing_token, 
     va_list args;
     va_start(args, message);
     assert(parser->current_file);
+
+    parser->reported_error = true;
 
     report_error_helper(parser->current_file->absolute_path, parser->current_file->text, label, failing_token.start, failing_token.end, message, args);
 

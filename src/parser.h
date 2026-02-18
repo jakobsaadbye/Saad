@@ -17,6 +17,7 @@ typedef struct Parser {
     bool inside_statement_header;
     bool inside_parameter_list;
     bool inside_extern_block;
+    bool reported_error;
 } Parser;
 
 Parser   parser_init(Lexer *lexer);

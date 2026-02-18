@@ -851,6 +851,14 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         return types_are_equal(inner_lhs, inner_rhs);
     }
 
+    // Allow normal varargs passing
+    if (lhs->kind == TYPE_VARIADIC && rhs->kind != TYPE_VARIADIC) {
+        // Match on the inner type
+        Type *inner_lhs = ((TypeVariadic *) lhs)->type;
+
+        return types_are_equal(inner_lhs, rhs);
+    }
+
     // if (lhs->kind == TYPE_STRING && rhs->kind == TYPE_POINTER) {
     //     Type *right_pointer_to = ((TypePointer *)(rhs))->pointer_to;
 
@@ -1587,6 +1595,17 @@ AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr) {
     return any_cast;
 }
 
+int compare_argument_index(const void *e1, const void *e2) {
+    AstArgument *a = *((AstArgument **)e1);
+    AstArgument *b = *((AstArgument **)e2);
+
+    if (a->param_index == b->param_index) {
+        return a->vararg_index - b->vararg_index;
+    }
+
+    return a->param_index - b->param_index;
+}
+
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
     if (typer->enclosing_function == NULL) {
@@ -1640,21 +1659,169 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         typer_restore_state(typer, temp);
     }
 
-    bool call_contains_spreaded_arg = false;
+    // @Cleanup: Set a bool in the parser and just set a flag on the function call node
+    bool has_spreaded_vararg = false;
     int spreaded_arg_index     = -1;
     for (int i = 0; i < call->arguments.count; i++) {
-        AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
-        if (arg->head.kind == AST_UNARY && ((AstUnary *)arg)->operator == OP_SPREAD) {
-            call_contains_spreaded_arg = true;
+        AstArgument *arg   = ((AstArgument **)(call->arguments.items))[i];
+        if (arg->value->head.kind == AST_UNARY && ((AstUnary *)arg->value)->operator == OP_SPREAD) {
+            has_spreaded_vararg = true;
             spreaded_arg_index = i;
         }
     }
 
     //
-    // Add default parameters as arguments
+    // Resolve argument positions
+    //
+    for (int arg_index = 0; arg_index < call->arguments.count; arg_index++) {
+        AstArgument *arg = ((AstArgument **)call->arguments.items)[arg_index];
+
+        // Non-positional arguments
+        if (!arg->ident) {
+            if (func_defn->is_variadic && arg_index >= func_defn->variadic_parameter_index) {
+                arg->param_index = func_defn->variadic_parameter_index;
+                arg->is_vararg = true;
+                arg->vararg_index = arg_index;
+            } else {
+                arg->param_index = arg_index;
+            }
+            continue;
+        }
+
+        // Positional arguments
+        bool matched_parameter = false;
+        for (int param_index = 0; param_index < func_defn->parameters.count; param_index++) {
+            AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[param_index];
+            
+            if (strcmp(arg->ident->name, param->name) == 0) {
+
+                for (int k = 0; k < arg_index; k++) {
+                    AstArgument *prev_arg = ((AstArgument **)call->arguments.items)[k];
+                    if (!prev_arg->ident) continue;
+                    if (prev_arg->param_index == param_index) {
+                        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Positional argument '%s' is specified twice", arg->ident->name);
+                        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)prev_arg, "Here is the first occurence");
+                        return NULL;
+                    }
+                }
+
+                if (param_index < arg_index) {
+                    if (func_defn->is_variadic) {
+                        // Skip the check
+                    } else {
+                        AstArgument *prev_arg = ((AstArgument **)call->arguments.items)[param_index];
+                        if (!prev_arg->ident) {
+                            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Positional argument '%s' is already given", arg->ident->name);
+                            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)prev_arg, "Here");
+                            return NULL;
+                        }
+                    }
+                }
+
+                arg->param_index = param_index;
+                matched_parameter = true;
+                break;
+            }
+        }
+        if (!matched_parameter) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg->ident, "Unknown argument '%s'", arg->ident->name);
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
+            return NULL;
+        }
+    }
+
+    //
+    // Check that all the required parameters are given
+    //
+    for (int i = 0; i < func_defn->parameters.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
+
+        // Skip default values
+        if (param->value) continue;
+
+        // Skip variadic arguments which is optional
+        if (func_defn->is_variadic && i >= func_defn->variadic_parameter_index) continue;
+
+        bool is_given = false;
+        for (int j = 0; j < call->arguments.count; j++) {
+            AstArgument *arg = ((AstArgument **)(call->arguments.items))[j];
+            if (arg->param_index == i) {
+                is_given = true;
+                break;
+            }
+        }
+
+        if (!is_given) {
+            report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Missing required parameter '%s'", param->name);
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)param->decl, "", param->name);
+            return NULL;
+        }
+    }
+
+    //
+    // Fillout default parameter values if any
     //
     if (func_defn->has_default_parameters) {
-        
+        for (int param_index = 0; param_index < func_defn->parameters.count; param_index++) {
+            AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[param_index];
+
+            // Skip required parameters
+            if (!param->value) continue;
+
+
+            bool add_default_arg = false;
+
+            if (!func_defn->is_variadic) {
+
+                // Search for an argument that is providing this default value
+                add_default_arg = true;
+
+                for (int j = 0; j < call->arguments.count; j++) {
+                    AstArgument *arg = ((AstArgument **)call->arguments.items)[j];
+                    if (arg->param_index == param_index) {
+                        add_default_arg = false;
+                        break;
+                    }
+                }
+            } else {
+
+                if (!call->has_positional_arguments) {
+                    // If we haven't provided any positional arguments then we know that we haven't provided any
+                    // default arguments
+                    add_default_arg = true;
+                } else {
+
+                    // Search for a positional argument after the varargs that is providing the default value
+                    add_default_arg = true;
+
+                    for (int j = call->first_positional_argument_index; j < call->arguments.count; j++) {
+                        AstArgument *arg = ((AstArgument **)call->arguments.items)[j];
+                        if (arg->param_index == param_index) {
+                            add_default_arg = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (add_default_arg) {
+                AstArgument *default_arg = ast_allocate(typer->parser, sizeof(AstArgument));
+                default_arg->head.kind   = AST_ARGUMENT;
+                default_arg->head.file   = call->head.head.file;
+                default_arg->head.start  = call->head.head.end;
+                default_arg->head.end    = call->head.head.end;
+                default_arg->value       = param->value;
+                default_arg->param_index = param_index;
+                
+                da_append(&call->arguments, default_arg);
+            }
+            
+        }
+    }
+
+    // Sort the argument list if it has any positional arguments
+    if (call->has_positional_arguments) {
+        qsort(call->arguments.items, call->arguments.count, sizeof(AstArgument *), compare_argument_index);
     }
 
     //
@@ -1662,85 +1829,51 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     //
     if (func_defn->is_variadic) {
 
-        if (call_contains_spreaded_arg) {
-            // Arguments vs parameters must match in length 1:1
-            // @Cleanup @CopyPasta
-            if (call->arguments.count != func_defn->parameters.count) {
-                if (call->arguments.count < func_defn->parameters.count) {
-                    if (call->arguments.count > 0) {
-                        AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-                        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
-                    } else {
-                        report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
-                    }
-                } else {
-                    AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too many arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
-                }
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
-                if (call->is_method_call && call->arguments.count == func_defn->parameters.count + 1) {
-                    report_error_ast(typer->parser, LABEL_NOTE, ((Ast **)func_defn->parameters.items)[0], "Methods takes their first parameter as the receiver and should therefore not be passed as an explicit argument");
-                }
-                return NULL;
-            }
-        } else {
-            // All arguments up untill the varargs must match in length
-            if (call->arguments.count < func_defn->variadic_parameter_index) {
-                if (call->arguments.count == 0) {
-                    report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Too few arguments: Wanted atleast %d, got %d", func_defn->variadic_parameter_index, call->arguments.count);
-                } else {
-                    AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted atleast %d, got %d", func_defn->variadic_parameter_index, call->arguments.count);
-                }
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
-                return NULL;
-            }
-        }
-        
         // Typecheck the arguments up until the varargs arg begins
         AstIdentifier *var_param = ((AstIdentifier **)func_defn->parameters.items)[func_defn->variadic_parameter_index];
         assert(var_param->type->kind == TYPE_VARIADIC);
         TypeVariadic *vararg_type = (TypeVariadic *) var_param->type;
 
         for (int i = 0; i < call->arguments.count; i++) {
-            Type *wanted_type    = NULL;
-            AstIdentifier *param = NULL;
-            
-            if (i >= func_defn->variadic_parameter_index) {
-                param = var_param;
-                wanted_type = vararg_type->type;
-            } else {
-                param = ((AstIdentifier **)(func_defn->parameters.items))[i];
-                wanted_type = param->type;
-            }
+            AstArgument   *arg = ((AstArgument **)(call->arguments.items))[i];
+            AstIdentifier *param = ((AstIdentifier **)(func_defn->parameters.items))[arg->param_index];
 
-            AstExpr **arg_ptr = &((AstExpr **)(call->arguments.items))[i];
-            AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
-            Type *given_type = check_expression(typer, arg, wanted_type);
+            Type *wanted_type = param->type;
+
+            Type *given_type = check_expression(typer, arg->value, wanted_type);
             if (!given_type) return NULL;
 
+            if (wanted_type->kind == TYPE_VARIADIC) {
+                // Unwrap the variadic to match against its type
+                wanted_type = ((TypeVariadic *)wanted_type)->type;
+            }
+            
             // Match a spreaded vararg or slice against their inner type
-            if (arg->head.flags & AST_FLAG_EXPR_IS_SPREADED) {
-                if (arg->type->kind == TYPE_VARIADIC) {
-                    TypeVariadic *variadic = (TypeVariadic *) arg->type;
+            if (arg->value->head.flags & AST_FLAG_EXPR_IS_SPREADED) {
+                if (arg->value->type->kind == TYPE_VARIADIC) {
+                    TypeVariadic *variadic = (TypeVariadic *) arg->value->type;
                     given_type = variadic->type;
-                } else if (arg->type->kind == TYPE_ARRAY) {
-                    TypeArray *array = (TypeArray *) arg->type;
+                } else if (arg->value->type->kind == TYPE_ARRAY) {
+                    TypeArray *array = (TypeArray *) arg->value->type;
                     given_type = array->elem_type;
                 }
             }
 
-            if (arg->type->kind != TYPE_ANY && wanted_type->kind == TYPE_ANY) {
+            if (arg->value->type->kind != TYPE_ANY && wanted_type->kind == TYPE_ANY) {
                 if (!func_defn->is_extern) {
-                    if (arg->type->kind != TYPE_VARIADIC) {
-                        AstCast *any_cast = generate_cast_to_any(typer, arg);
-                        if (!any_cast) return NULL;
-                        *arg_ptr = (AstExpr *) any_cast;
-                        arg      = (AstExpr *) any_cast;
-                        given_type = any_cast->cast_to;
+                    if (arg->value->type->kind != TYPE_VARIADIC) {
+                        if (arg->value->type->kind == TYPE_ARRAY && ((TypeArray *)arg->value->type)->elem_type->kind == TYPE_ANY) {
+                            // @Incomplete: This should probably check for nested arrays too
+                            // Skip
+                        } else {
+                            AstCast *any_cast = generate_cast_to_any(typer, arg->value);
+                            if (!any_cast) return NULL;
+                            arg->value = (AstExpr *) any_cast;
+                            given_type = any_cast->cast_to;
+                        }
                     }
                 } else {
-                    // Let the given type be coerced into the type any so 
+                    // Let the given type be coerced into the type any
                     given_type = wanted_type;
                 }
             }
@@ -1756,18 +1889,18 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         }
 
         if (!func_defn->is_extern) {
-            if (call_contains_spreaded_arg) {
+            if (has_spreaded_vararg) {
                 // Use the provided slice or variadic as the underlying slice
-                AstExpr *spreaded_arg = ((AstExpr **)call->arguments.items)[spreaded_arg_index];
+                AstArgument *spreaded_arg = ((AstArgument **)call->arguments.items)[spreaded_arg_index];
 
-                if (spreaded_arg->type->kind != TYPE_ARRAY && spreaded_arg->type->kind != TYPE_VARIADIC) {
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)spreaded_arg, "Compiler Error: Expected spreaded argument to be of type slice or variadic");
+                if (spreaded_arg->value->type->kind != TYPE_ARRAY && spreaded_arg->value->type->kind != TYPE_VARIADIC) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)spreaded_arg->value, "Compiler Error: Expected spreaded argument to be of type slice, variadic or any. Got type %s", type_to_str(spreaded_arg->value->type));
                     return NULL;
                 }
 
-                if (spreaded_arg->type->kind == TYPE_VARIADIC) {
+                if (spreaded_arg->value->type->kind == TYPE_VARIADIC) {
                     TypeArray *slice_type = generate_slice_of(typer->parser, vararg_type->type);    
-                    spreaded_arg->type = (Type *)slice_type;
+                    spreaded_arg->value->type = (Type *)slice_type;
                 }
 
                 // Build up the lowered argument list
@@ -1775,66 +1908,68 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     
                 // Add the user arguments
                 for (int i = 0; i < call->arguments.count; i++) {
-                    AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
-                    da_append(&call->lowered_arguments, arg);
+                    AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
+                    da_append(&call->lowered_arguments, arg->value);
                 }
             } else {
                 // Generate a slice argument to hold the variadic arguments
-                int num_varargs = call->arguments.count - func_defn->variadic_parameter_index;
-    
                 TypeArray *slice_type = generate_slice_of(typer->parser, vararg_type->type);
-                slice_type->count = num_varargs;
                 
                 AstArrayLiteral *slice = ast_allocate(typer->parser, sizeof(AstArrayLiteral));
                 slice->head.head.kind = AST_ARRAY_LITERAL;
                 slice->head.head.flags = AST_FLAG_COMPILER_GENERATED;
                 slice->head.type = (Type *)slice_type;
-                slice->expressions = da_init(num_varargs, sizeof(AstExpr *));
-                
-                for (int i = 0; i < call->arguments.count; i++) {
-                    if (i < func_defn->variadic_parameter_index) continue;
-                    AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
+                slice->expressions = da_init(2, sizeof(AstExpr *));
 
-                    if (arg->type->kind != TYPE_ANY && vararg_type->type->kind == TYPE_ANY) {
-                        AstCast *any_cast = generate_cast_to_any(typer, arg);
+                for (int i = 0; i < call->arguments.count; i++) {
+                    AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
+                    if (!arg->is_vararg) continue;
+
+                    if (arg->value->type->kind != TYPE_ANY && vararg_type->type->kind == TYPE_ANY) {
+                        AstCast *any_cast = generate_cast_to_any(typer, arg->value);
                         if (!any_cast) return NULL;
-                        arg = (AstExpr *) any_cast;
+                        arg->value = (AstExpr *) any_cast;
                     }
 
-                    da_append(&slice->expressions, arg);
+                    da_append(&slice->expressions, arg->value);
                     
-                    // Reserve space for the caller to allocate the each variadic argument
-                    reserve_temporary_storage(typer->enclosing_function, arg->type->size);
+                    // Reserve space for the caller to allocate each variadic argument
+                    reserve_temporary_storage(typer->enclosing_function, arg->value->type->size);
                 }
 
+                slice_type->count = slice->expressions.count;
+
                 // Build up the lowered argument list
-                call->lowered_arguments = da_init(func_defn->variadic_parameter_index + 1, sizeof(AstExpr *));
+                call->lowered_arguments = da_init(func_defn->parameters.count, sizeof(AstExpr *));
     
                 // Add the user arguments
                 for (int i = 0; i < call->arguments.count; i++) {
-                    if (i == func_defn->variadic_parameter_index) break;
-                    AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
-                    da_append(&call->lowered_arguments, arg);
+                    AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
+
+                    // Add the variadic slice argument
+                    if (i == func_defn->variadic_parameter_index) {
+                        da_append(&call->lowered_arguments, slice);
+                        continue;
+                    }
+
+                    // Skip over varargs
+                    if (arg->is_vararg) continue;
+
+                    da_append(&call->lowered_arguments, arg->value);
                 }
-    
-                // Add the slice
-                da_append(&call->lowered_arguments, slice);
             }
-
-
         } else {
-
             // Build up the lowered argument list
             call->lowered_arguments = da_init(func_defn->variadic_parameter_index + 1, sizeof(AstExpr *));
 
             // Add all the arguments and mark the variadic arguments
             for (int i = 0; i < call->arguments.count; i++) {
-                AstExpr *arg = ((AstExpr **)call->arguments.items)[i];
+                AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
                 if (i >= func_defn->variadic_parameter_index) {
-                    arg->head.flags |= AST_FLAG_IS_C_VARARG;
+                    arg->value->head.flags |= AST_FLAG_IS_C_VARARG;
                 }
 
-                da_append(&call->lowered_arguments, arg);
+                da_append(&call->lowered_arguments, arg->value);
             }
         }
 
@@ -1842,94 +1977,28 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     else {
         // Non-variadic
 
-        bool has_argument_mismatch = false;
-
-        if (func_defn->has_default_parameters) {
-            int required_parameters = func_defn->parameters.count - (func_defn->default_parameter_index + 1);
-
-            if (call->arguments.count < required_parameters) {
-                if (call->arguments.count > 0) {
-                    AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted between %d and %d, got %d", required_parameters, func_defn->parameters.count, call->arguments.count);
-                } else {
-                    report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Too few arguments: Wanted between %d and %d, got %d", required_parameters, func_defn->parameters.count, call->arguments.count);
-                }
-
-                has_argument_mismatch = true;
-            }
-
-            else if (call->arguments.count > func_defn->parameters.count) {
-                AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too many arguments: Wanted between %d and %d, got %d", required_parameters, func_defn->parameters.count, call->arguments.count);
-                has_argument_mismatch = true;
-            }
-            
-        }
-        else {
-            if (call->arguments.count != func_defn->parameters.count) {
-                if (call->arguments.count < func_defn->parameters.count) {
-                    if (call->arguments.count > 0) {
-                        AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-                        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
-                    } else {
-                        report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Too few arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
-                    }
-                } else {
-                    AstExpr *last_argument = ((AstExpr **)call->arguments.items)[call->arguments.count - 1];
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(last_argument), "Too many arguments: Wanted %d, got %d", func_defn->parameters.count, call->arguments.count);
-                }
-
-                has_argument_mismatch = true;
-            }
-        }
-
-        if (has_argument_mismatch) {
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of %s", func_defn->identifier->name);
-            if (call->is_method_call && call->arguments.count == func_defn->parameters.count + 1) {
-                report_error_ast(typer->parser, LABEL_NOTE, ((Ast **)func_defn->parameters.items)[0], "Methods takes their first parameter as the receiver and should therefore not be passed as an explicit argument");
-            }
-            return NULL;
-        }
-
-        // Fillout missing arguments with default parameter values
-        if (func_defn->has_default_parameters && call->arguments.count < func_defn->parameters.count) {
-            for (int i = call->arguments.count; i < func_defn->parameters.count; i++) {
-                AstIdentifier *defaultParam = ((AstIdentifier **)func_defn->parameters.items)[i];
-
-                if (!defaultParam->value) {
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *) defaultParam, "Compiler Error: Default parameter has no value");
-                    return NULL;
-                }
-
-                da_append(&call->arguments, defaultParam->value);
-            }
-        }
-
-
         call->lowered_arguments = da_init(call->arguments.count, sizeof(AstExpr *));
 
         for (int i = 0; i < call->arguments.count; i++) {
             AstIdentifier *param = ((AstIdentifier **)(func_defn->parameters.items))[i];
 
-            AstExpr **arg_ptr = &((AstExpr **)(call->arguments.items))[i];
-            AstExpr *arg   = ((AstExpr **)(call->arguments.items))[i];
-            Type *resolved = check_expression(typer, arg, param->type);
+            AstArgument *arg = ((AstArgument **)(call->arguments.items))[i];
+            Type *resolved = check_expression(typer, arg->value, param->type);
             if (!resolved) return NULL;
 
-            if (!func_defn->is_extern && arg->type->kind != TYPE_ANY && param->type->kind == TYPE_ANY) {
-                AstCast *any_cast = generate_cast_to_any(typer, arg);
+            if (!func_defn->is_extern && arg->value->type->kind != TYPE_ANY && param->type->kind == TYPE_ANY) {
+                AstCast *any_cast = generate_cast_to_any(typer, arg->value);
                 if (!any_cast) return NULL;
-                *arg_ptr = (AstExpr *) any_cast;
-                arg      = (AstExpr *) any_cast;
+                arg->value = (AstExpr *) any_cast;
             }
 
-            if (!types_are_equal(arg->type, param->type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg->type)));
+            if (!types_are_equal(arg->value->type, param->type)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg->value->type)));
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param->decl), "Here is the definition of '%s'", param->name);
                 return NULL;
             }
 
-            da_append(&call->lowered_arguments, arg);
+            da_append(&call->lowered_arguments, arg->value);
         }
     }
     
@@ -1950,6 +2019,10 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     if (func_defn->is_variadic) {
         // Reserve space for the created array + slice to it
         int num_varargs = call->arguments.count - func_defn->variadic_parameter_index;
+        if (call->has_positional_arguments) {
+            num_varargs = call->first_positional_argument_index - func_defn->variadic_parameter_index;
+        }
+
         if (!func_defn->is_extern) {
             // Reserve space for the created array + slice to it
             AstIdentifier *var_param = ((AstIdentifier **)func_defn->parameters.items)[func_defn->variadic_parameter_index];
@@ -2007,8 +2080,8 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
             func_defn->is_variadic = true;
             func_defn->variadic_parameter_index = i;
 
-            if (i != func_defn->parameters.count - 1) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *) param, "Variadic parameters must appear as the last parameter");
+            if (i != func_defn->parameters.count - 1 && !func_defn->has_default_parameters) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *) param, "Variadic parameters must appear as the last normal parameter");
                 return false;
             }
         }
@@ -2534,7 +2607,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_S64); // @Investigate - Shouldn't this be checked for both sides being integers???
     else if (expr->head.kind == AST_SEMICOLON_EXPR) result = primitive_type(PRIMITIVE_VOID);
     else {
-        printf("%s:%d: compiler-error: Unhandled cases in 'type_expression'. Expression was of type %s", __FILE__, __LINE__, ast_to_str((Ast *)expr));
+        printf("%s:%d: compiler-error: Unhandled cases in 'check_expression()'. Expression was of type %s", __FILE__, __LINE__, ast_to_str((Ast *)expr));
         exit(1);
     }
 
@@ -2546,6 +2619,18 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     return result;
 }
 
+AstArgument *generate_argument_from_expr(Typer *typer, AstExpr *expr) {
+    AstArgument *arg = ast_allocate(typer->parser, sizeof(AstArgument));
+    arg->head.kind   = AST_ARGUMENT;
+    arg->head.file   = expr->head.file;
+    arg->head.start  = expr->head.start;
+    arg->head.end    = expr->head.end;
+    arg->head.flags |= AST_FLAG_COMPILER_GENERATED;
+    arg->value       = expr;
+
+    return arg;
+}
+
 bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberAccess *ma) {
     AstExpr       *recv_arg = ma->left;
     AstIdentifier *recv_param = func_call->func_defn->receiver;
@@ -2555,7 +2640,8 @@ bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberA
     if ((recv_arg->type->kind == TYPE_POINTER && recv_param->type->kind == TYPE_POINTER) || (recv_arg->type->kind != TYPE_POINTER && recv_param->type->kind != TYPE_POINTER)) {
         // Pointer vs Pointer
         // Value   vs Value
-        da_insert(&func_call->arguments, ma->left, 0);
+        AstArgument *arg = generate_argument_from_expr(typer, (AstExpr *) ma->left);
+        da_insert(&func_call->arguments, arg, 0);
         return true;
     }
 
@@ -2571,7 +2657,8 @@ bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberA
         Type *type = check_unary(typer, deref, recv_param->type);
         if (!type) return false;
 
-        da_insert(&func_call->arguments, deref, 0);
+        AstArgument *arg = generate_argument_from_expr(typer, (AstExpr *)deref);
+        da_insert(&func_call->arguments, arg, 0);
         return true;
     }
 
@@ -2587,7 +2674,8 @@ bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberA
         Type *type = check_unary(typer, addr_of, recv_param->type);
         if (!type) return false;
 
-        da_insert(&func_call->arguments, addr_of, 0);
+        AstArgument *arg = generate_argument_from_expr(typer, (AstExpr *)addr_of);
+        da_insert(&func_call->arguments, arg, 0);
         return true;
     }
 
