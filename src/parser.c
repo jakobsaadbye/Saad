@@ -779,6 +779,7 @@ TypeFunction *parse_function_signature(Parser *parser) {
 
     close_block(parser);
 
+    // @Cleanup: Is now deprecated. Use extern {} block instead
     // Parse extern directive @Deprecate
     func_defn->calling_convention = CALLING_CONV_SAAD;
     bool is_extern = false;
@@ -841,6 +842,21 @@ Type *parse_type(Parser *parser) {
         ti->head.head.start = next.start;
         ti->head.head.end   = next.end;
         return (Type *)(ti);
+    }
+
+    if (next.type == TOKEN_STRING) {
+        eat_token(parser);
+        TypeString *type_string = ast_allocate(parser, sizeof(TypeString));
+
+        type_string->head.head.kind  = AST_TYPE;
+        type_string->head.head.file  = parser->current_file;
+        type_string->head.head.start = next.start;
+        type_string->head.head.end   = next.end;
+        type_string->head.kind       = TYPE_STRING;
+        type_string->head.size       = 16;
+        type_string->struct_defn     = NULL; // Is added in typechecking
+
+        return (Type *) type_string;
     }
 
     if (next.type == TOKEN_ANY) {
@@ -1910,16 +1926,17 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->base_ptr               = 0;
     func_defn->temp_ptr               = 0;
 
-    TypeFunction *func    = type_alloc(&parser->type_table, sizeof(TypeFunction));
-    func->head.head.kind  = AST_TYPE;
-    func->head.head.file  = parser->current_file;
-    func->head.head.start = func_defn->head.start;
-    func->head.head.end   = func_defn->head.end;
-    func->head.kind       = TYPE_FUNCTION;
-    func->node            = func_defn;
+    TypeFunction *func_type    = type_alloc(&parser->type_table, sizeof(TypeFunction));
+    func_type->head.head.kind  = AST_TYPE;
+    func_type->head.head.file  = parser->current_file;
+    func_type->head.head.start = func_defn->head.start;
+    func_type->head.head.end   = func_defn->head.end;
+    func_type->head.kind       = TYPE_FUNCTION;
+    func_type->head.size       = 8;
+    func_type->node            = func_defn;
 
     // This is later down
-    ident->type = (Type *)func;
+    ident->type = (Type *)func_type;
 
     return func_defn;
 }
@@ -2454,9 +2471,18 @@ AstExpr *parse_leaf(Parser *parser) {
     if (t.type == TOKEN_LITERAL_BOOLEAN ||
         t.type == TOKEN_LITERAL_INTEGER ||
         t.type == TOKEN_LITERAL_FLOAT   ||
-        t.type == TOKEN_LITERAL_NULL    ||
-        t.type == TOKEN_LITERAL_STRING
+        t.type == TOKEN_LITERAL_NULL
     ) {
+        eat_token(parser);
+        return make_literal_node(parser, t);
+    }
+
+    if (t.type == TOKEN_LITERAL_STRING) {
+        if (!parser->current_file->has_imported_builtin_string && strcmp(parser->current_file->absolute_path, "C:\\Saad\\std\\builtin_string.sd") != 0) {
+            bool ok = generate_and_add_import(parser, "builtin_string");
+            if (!ok) return NULL;
+            parser->current_file->has_imported_builtin_string = true;
+        }
         eat_token(parser);
         return make_literal_node(parser, t);
     }

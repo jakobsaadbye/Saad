@@ -1,0 +1,149 @@
+import "c_stdlib";
+
+String :: struct {
+    data: *char;
+    len:   s64;
+}
+
+// toCString :: method (s: string) -> *u8 {
+//     tmp: *u8;
+//     return tmp;
+// }
+
+slice :: method (s: string, from: int, to := -1) -> string {
+    result: string;
+
+    if to == -1 {
+        result.data = &s.data[from];
+        result.len = s.len - from;
+    } else {
+        result.data = &s.data[from];
+        result.len = to - from;
+    }
+
+    return result;
+}
+
+copy :: method (s: string) -> string {
+    result: string;
+
+    result.data = malloc(s.len);
+    memcpy(result.data, s.data, s.len);
+
+    result.len = s.len;
+
+    return result;
+}
+
+toUpper :: method (s: string) -> string {
+    result := s.copy();
+
+    for c, i in s {
+        if c >= 97 && c <= 122 {
+            result[i] = c - 32;
+        }
+    }
+
+    return result;
+}
+
+toLower :: method (s: string) -> string {
+    result := s.copy();
+
+    for c, i in s {
+        if c >= 65 && c <= 90 {
+            result[i] = c + 32;
+        }
+    }
+
+    return result;
+}
+
+startsWith :: method (s: string, str: string) -> bool {
+    for c, i in str {
+        if s[i] != c {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+endsWith :: method (s: string, str: string) -> bool {
+    if s.len < str.len {
+        return false;
+    }
+
+    trailing := s.slice(s.len - str.len);
+
+    for c, i in trailing {
+        if str[i] != c {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+//@Deprecate: Once we have ==
+equals :: method (s: string, str: string) -> bool {
+    if s.len != str.len {
+        return false;
+    }
+
+    for c, i in s {
+        if str[i] != c {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Returns the first index at which a given element can be found in the array, or -1 if it is not present.
+indexOf :: method (s: string, str: string, fromIndex := 0) -> int {
+    if s.len == 0 || str.len == 0 {
+        return -1;
+    }
+
+    if fromIndex >= s.len {
+        return -1;
+    }
+
+    src := s.slice(fromIndex);
+
+    for c1, i in src {
+        if src[i] == str[0] {
+
+            // Scan forward to match substrings
+            match := true;
+            for c2, j in str {
+
+                if i + j >= src.len {
+                    // We wen't to the end of the soruce string
+                    return -1;
+                }
+
+                c1f := src[i + j];
+
+                if c2 != c1f {
+                    // Substrings didn't match
+                    match = false;
+                    break;
+                }
+            }
+
+            if match {
+                return i;
+            }
+        }
+    }
+
+    return -1;
+}
+
+split :: method (s: string, sep: string) -> []string {
+    result: [..]string;
+
+    return result;
+}

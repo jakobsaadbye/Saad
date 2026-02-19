@@ -1,0 +1,28 @@
+main :: () {
+
+    
+    if true {
+        // Getting the length of a string
+        text := "Now to him who is able to do immeasurably more than all we ask or imagine, according to his power that is at work within us.";
+        print("data = %, len = %", text.data, text.len);
+    }
+    if true {
+        // Iterating over strings
+        text := "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nullam commodo nulla interdum nunc dignissim, non euismod nisl luctus. Vivamus eu turpis tempus ante dictum congue. Vivamus eu ultrices augue, ac imperdiet est. Etiam iaculis molestie lorem interdum facilisis. Phasellus porttitor tincidunt facilisis. Vestibulum eget rhoncus quam, ac semper est. Vivamus eget diam eu risus aliquet egestas eu ac ante. Proin in porta orci, interdum porttitor dolor. Suspendisse volutpat elit at quam lacinia tincidunt. Pellentesque malesuada sed risus non tincidunt. Maecenas maximus lectus id odio molestie feugiat. Sed mollis, lorem eget pharetra mattis, nisl nisi elementum erat, sed luctus purus turpis nec tortor. Nulla gravida volutpat augue, sed porta metus dictum eget. Sed fringilla mollis nulla bibendum consequat.";
+
+        for c in text {
+            print("%", c);
+        }
+    }
+    if true {
+        // Indexing into strings
+        text := "May the God of hope fill you with all joy and peace as you trust in him, so that you may overflow with hope by the power of the Holy Spirit.";
+        d := text[3];
+        print("%\n", d);
+    }
+    if true {
+        // Comparing strings
+
+    }
+
+}

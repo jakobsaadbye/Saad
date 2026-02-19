@@ -16,6 +16,7 @@ typedef struct Typer {
     AstExtern       *inside_extern_block; // Set if we are currently type checking function definitions inside an extern block
 
     TypeAny         *type_any;       // The resolved type of 'any'
+    TypeString      *type_string;    // The resolved type of 'string'
     
     int array_literal_depth;
 
@@ -243,11 +244,49 @@ Type *resolve_type(Typer *typer, Type *type) {
         return type;
     }
 
+    if (type->kind == TYPE_STRING) {
+        TypeString *type_string = (TypeString *)type;
+
+        if (typer->type_string == NULL) {
+            // Look for the String :: struct {...} in the "reflect" package
+
+            AstIdentifier *type_string_identifier = lookup_from_scope(typer->parser, typer->current_scope, "String");
+
+            if (!type_string_identifier) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)type_string, "Compiler Error: Failed to find the 'String' struct in strings.sd");
+                return NULL;
+            }
+
+            if (type_string_identifier->type == NULL || type_string_identifier->type->kind != TYPE_STRUCT) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)type_string, "Compiler Error: Type 'String' was unresolved or of a different type in typechecking");
+                return NULL;
+            }
+            
+            // Construct a global instance of TypeString with the struct definition of the struct "String" found in the strings.sd package
+            TypeString *str = ast_allocate(typer->parser, sizeof(TypeString));
+            str->head.head.kind  = AST_TYPE;
+            str->head.head.file  = type_string_identifier->head.file;
+            str->head.head.start = type_string_identifier->type->head.start;
+            str->head.head.end   = type_string_identifier->type->head.end;
+            str->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+            str->head.kind       = TYPE_STRING;
+            str->head.size       = 16;
+            str->struct_defn     = (TypeStruct *)type_string_identifier->type;
+
+            typer->type_string = str;
+        }
+
+        type_string->struct_defn      = typer->type_string->struct_defn;
+        type_defn_string->struct_defn = typer->type_string->struct_defn;
+
+        return (Type *) type_string;
+    }
+
     if (type->kind == TYPE_ANY) {
         if (!typer->inside_extern_block)  {
             TypeAny *any = (TypeAny *)type;
     
-            // Look for the Type :: struct {...} in the "reflect" package
+            // Look for the Any :: struct {...} in the "reflect" package
             // dump_scope_recursive(typer->parser, typer->current_scope);
 
             if (typer->type_any == NULL) {
@@ -404,6 +443,7 @@ unsigned long long max_integer_value(TypePrimitive *type) {
     switch (type->kind) {
     case PRIMITIVE_UINT: return U32_MAX;
     case PRIMITIVE_INT:  return S32_MAX;
+    case PRIMITIVE_CHAR: return U8_MAX;
     case PRIMITIVE_U8:  return U8_MAX;
     case PRIMITIVE_U16: return U16_MAX;
     case PRIMITIVE_U32: return U32_MAX;
@@ -817,6 +857,10 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         return can_cast_implicitly(rhs, lhs);
     }
 
+    if (lhs->kind == TYPE_STRING && rhs->kind == TYPE_STRING) {
+        return true;
+    }
+
     if ((lhs->kind == TYPE_STRUCT && rhs->kind == TYPE_STRUCT) || (lhs->kind == TYPE_ENUM && rhs->kind == TYPE_ENUM)) {
         return strcmp(lhs->name, rhs->name) == 0;
     }
@@ -1108,14 +1152,15 @@ bool check_for(Typer *typer, AstFor *ast_for) {
         Type *type = check_expression(typer, (AstExpr *)ast_for->iterable, NULL);
         if (!type) return NULL;
 
-        if (type->kind != TYPE_ARRAY && type->kind != TYPE_VARIADIC) {
+        if (type->kind != TYPE_ARRAY && type->kind != TYPE_VARIADIC && type->kind != TYPE_STRING) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_for->iterable), "Cannot iterate through expression of type %s", type_to_str(type));
             return NULL;
         }
 
-        TypeArray *iterable_type = type->kind == TYPE_ARRAY ? (TypeArray *)type : ((TypeVariadic *)type)->slice;
-
-        Type *iterator_type = iterable_type->elem_type;
+        Type *iterator_type = NULL;
+        if (type->kind == TYPE_ARRAY)    iterator_type = ((TypeArray *)type)->elem_type;
+        if (type->kind == TYPE_VARIADIC) iterator_type = ((TypeVariadic *)type)->type;
+        if (type->kind == TYPE_STRING)   iterator_type = primitive_type(PRIMITIVE_CHAR);
 
         if (ast_for->is_by_pointer) {
             // Wrap the iterator in a pointer type
@@ -1125,7 +1170,7 @@ bool check_for(Typer *typer, AstFor *ast_for) {
             ptr->head.head.end   = ast_for->asterix.end;
             ptr->head.kind       = TYPE_POINTER;
             ptr->head.size       = 8;
-            ptr->pointer_to      = iterable_type->elem_type;
+            ptr->pointer_to      = iterator_type;
 
             iterator_type = (Type *) ptr;
         }
@@ -1254,8 +1299,13 @@ char *generate_c_format_specifier_for_type(Type *type) {
     case TYPE_ARRAY:   return "0x%p";
     case TYPE_ANY:     return "0x%p";
     case TYPE_INTEGER: {
+        TypePrimitive *prim = (TypePrimitive *) type;
         if (is_unsigned_integer(type)) {
-            return type->size == 4 ? "%u" : "%llu";
+            if (prim->kind == PRIMITIVE_CHAR) {
+                return "%c";
+            } else {
+                return type->size == 4 ? "%u" : "%llu";
+            }
         } else {
             return type->size == 4 ? "%d" : "%lld";
         }
@@ -2143,6 +2193,11 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
             if (pointer_type->pointer_to->kind == TYPE_STRUCT) {
                 receiver_struct = (TypeStruct *) pointer_type->pointer_to;
             }
+            else if (pointer_type->pointer_to->kind == TYPE_STRING) {
+                TypeString *str = (TypeString *) receiver_type;
+                assert(str->struct_defn && "Compiler Error: String was unresolved during method resolution");
+                receiver_struct = str->struct_defn;
+            }
             else {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must be a struct or a pointer to a struct. Got type %s", text_bold(type_to_str(receiver_type)));
                 report_error_ast(typer->parser, LABEL_NOTE, NULL, "Methods on arbitrary types is still unsupported");
@@ -2151,6 +2206,11 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         }
         else if (receiver_type->kind == TYPE_STRUCT) {
             receiver_struct = (TypeStruct *) receiver_type;
+        }
+        else if (receiver_type->kind == TYPE_STRING) {
+            TypeString *str = (TypeString *) receiver_type;
+            assert(str->struct_defn && "Compiler Error: String was unresolved during method resolution");
+            receiver_struct = str->struct_defn;
         }
         else {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must be a struct or a pointer to a struct. Got type %s", text_bold(type_to_str(receiver_type)));
@@ -2493,17 +2553,30 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
     Type *type_being_accessed = check_expression(typer, array_ac->accessing, NULL);
     if (!type_being_accessed) return NULL;
 
-    if (type_being_accessed->kind != TYPE_ARRAY && type_being_accessed->kind != TYPE_POINTER && type_being_accessed->kind != TYPE_VARIADIC) {
+    if (type_being_accessed->kind != TYPE_ARRAY && type_being_accessed->kind != TYPE_POINTER && type_being_accessed->kind != TYPE_VARIADIC && type_being_accessed->kind != TYPE_STRING) {
         report_error_range(typer->parser, array_ac->accessing->head.start, array_ac->open_bracket.start, "Cannot index into expression of type %s", type_to_str(type_being_accessed));
         return NULL;
+    }
+
+    Type *elem_type = NULL;
+
+    if (type_being_accessed->kind == TYPE_ARRAY) {
+        TypeArray *type_array = (TypeArray *) type_being_accessed;
+
+        elem_type = type_array->elem_type;
     }
 
     if (type_being_accessed->kind == TYPE_VARIADIC) {
         // Treat the variadic as a slice
         TypeVariadic *variadic = (TypeVariadic *) type_being_accessed;
-
         array_ac->accessing->type = (Type *) variadic->slice;
-        type_being_accessed = (Type *) variadic->slice;
+
+        elem_type = variadic->type;
+    }
+
+    if (type_being_accessed->kind == TYPE_STRING) {
+        array_ac->accessing->type = (Type *) type_defn_string_as_slice;
+        elem_type = primitive_type(PRIMITIVE_CHAR);
     }
 
     if (type_being_accessed->kind == TYPE_POINTER) {
@@ -2530,10 +2603,8 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
         array_ac->accessing->type = (Type *) array;
         array_ac->head.head.flags |= AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER;
 
-        type_being_accessed = (Type *) array;
+        elem_type = ptr->pointer_to;
     }
-
-    TypeArray *array_defn = (TypeArray *) type_being_accessed;
 
     Type *index_expr_type = check_expression(typer, array_ac->index_expr, primitive_type(PRIMITIVE_U32));
     if (!index_expr_type) return NULL;
@@ -2549,14 +2620,14 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
         reserve_temporary_storage(typer->enclosing_function, array_ac->accessing->type->size);
     }
 
-    return array_defn->elem_type;
+    return elem_type;
 }
 
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof) {
     Type *expr_type = check_expression(typer, ast_typeof->expr, NULL);
     if (!expr_type) return NULL;
 
-    return primitive_type(PRIMITIVE_STRING);
+    return (Type *) type_defn_string;
 }
 
 Type *check_sizeof(Typer *typer, AstSizeof *ast_sizeof) {
@@ -2754,6 +2825,11 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     else if (type_lhs->kind == TYPE_ANY) {
         TypeAny *any = (TypeAny *)(type_lhs);
         struct_type = any->struct_defn;
+        valid_lhs = true;
+    }
+    else if (type_lhs->kind == TYPE_STRING) {
+        TypeString *str = (TypeString *)(type_lhs);
+        struct_type = str->struct_defn;
         valid_lhs = true;
     }
 
@@ -3275,16 +3351,22 @@ bool can_cast_explicitly(Type *from, Type *to) {
 
     if (from->kind == TYPE_POINTER && to->kind == TYPE_INTEGER) return true;    // address to a u64 number
     if (from->kind == TYPE_POINTER && to->kind == TYPE_BOOL) return true;       // null pointer = false, otherwise = true
+
     if (from->kind == TYPE_POINTER && to->kind == TYPE_STRING) {
         TypePointer *from_ptr = (TypePointer *)from;
         if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_U8) {
             return true;     // allow string to *u8
         }
+        if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_CHAR) {
+            return true;     // allow string to *char
+        }
     }
-
     if (from->kind == TYPE_STRING && to->kind == TYPE_POINTER) {
         TypePointer *to_ptr = (TypePointer *)to;
         if (to_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)to_ptr->pointer_to)->kind == PRIMITIVE_U8) {
+            return true;     // allow string to *u8
+        }
+        if (to_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)to_ptr->pointer_to)->kind == PRIMITIVE_CHAR) {
             return true;     // allow string to *u8
         }
     }
@@ -3405,9 +3487,15 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         return primitive_type(PRIMITIVE_UNTYPED_INT);
     }
     case LITERAL_FLOAT:     return (ctx_type && ctx_type->kind == TYPE_FLOAT)   ? ctx_type : primitive_type(PRIMITIVE_FLOAT);
-    case LITERAL_STRING:    return (ctx_type && ctx_type->kind == TYPE_STRING)  ? ctx_type : primitive_type(PRIMITIVE_STRING);
     case LITERAL_BOOLEAN:   return (ctx_type && ctx_type->kind == TYPE_BOOL)    ? ctx_type : primitive_type(PRIMITIVE_BOOL);
-    case LITERAL_NULL:      return (Type *) type_null_ptr;
+    case LITERAL_NULL:      return (Type *) type_defn_null_ptr;
+    case LITERAL_STRING: {
+        if (type_defn_string->struct_defn == NULL) {
+            Type *ok = resolve_type(typer, (Type *) type_defn_string);
+            if (!ok) return NULL;
+        }
+        return (ctx_type && ctx_type->kind == TYPE_STRING) ? ctx_type : (Type *) type_defn_string;
+    }
     case LITERAL_IDENTIFIER: {
         char   *ident_name   = literal->as.value.identifier.name;
         AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);

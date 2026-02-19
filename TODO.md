@@ -1,26 +1,14 @@
-* Check that default parameters are compile time evaluable
-
-
-
 Todo list:
 -------------------
-  
-* Function call overhaul:
-  [x] Multiple return values
-  [] Variadic arguments
-  [] Higher order functions (passing functions as values)
-  [] Default arguments
-  [] Named arguments
-  [] Able to call methods defined later
 
 * Better string handling
-  [] Changing them to be a data + count
-  [] Iterating over strings
-  [] Indexing into them
-
-* Import system
-  [x] Simple import system
-  [] Modules / Packages n' stuff
+  [x] Changing them to be a data + count
+  [x] Iterating over strings
+  [x] Indexing into them
+  [] To C string (*u8 \0 escaped)
+  [] From C string (*u8 -> string)
+  [] Compare strings
+  [] Slice a string
 
 * Better structs
   [] Constant members
@@ -28,12 +16,36 @@ Todo list:
   [] Defining inner structs
   [] Struct embedding (inheritence)
 
+* Generics
+  [] For functions
+  [] For structs
+  [] Methods on generic types
+
+* For-loops
+  [] Able to iterate backwards
+  [] Custom iterators
+
+* Function call overhaul:
+  [x] Multiple return values
+  [x] Variadic arguments
+  [x] Default arguments
+  [x] Named arguments
+  [] Higher order functions (passing functions as values)
+  [] Able to call methods defined later
+  [] Methods on any type (including arrays and primitives)
+
+* Import system
+  [x] Simple import system
+  [] Detect circular dependencies
+  [] Modules / Packages n' stuff
+
 * Better struct literals
   [] Able to take pointer to struct literal (struct literal should in that case be allocated as a local)
 
 * Better enums
   [] Get the names of enums
   [] Backing integer types for enums
+
 
 * Better constants / literals
   [] Structs as constants
@@ -50,10 +62,6 @@ Todo list:
 
 Bug fixes:
 -------------------
-
-error: Compiler Error: Failed to link the following import
-  3 | import "arrays"
-
 
 - Fix hash_table when collisions happen. Currently we crash if defining two structs with the same name !!!!
 - @Investigate - examples/for_loops crashes once in a while. Is it a hisenbug?

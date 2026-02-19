@@ -2,6 +2,9 @@ import "c_stdlib";
 import "c_string";
 import "arrays";
 
+////////////////////////////////////////////////////////////////////////////////////
+//   StringBuilder
+////////////////////////////////////////////////////////////////////////////////////
 StringBuilder :: struct {
     buffer:    *u8;
     cursor:    int;
@@ -58,9 +61,9 @@ addStringSlice :: method (sb: *StringBuilder, str: string, start: int, end: int)
     sb.internalAdd(strPtr, strLen);
 }
 
-addChar :: method (sb: *StringBuilder, char: u8) {
+addChar :: method (sb: *StringBuilder, c: u8) {
     strLen := 1;
-    strPtr := &char;
+    strPtr := &c;
     sb.internalAdd(strPtr, strLen);
 }
 
@@ -83,17 +86,17 @@ addInt :: method (sb: *StringBuilder, v: int) {
         digit := v % 10;
         v = v / 10;
 
-        char := cast(u8) (digit + 48);
+        c := cast(u8) (digit + 48);
 
-        tmp[n] = char;
+        tmp[n] = c;
         n += 1;
     }
 
     // Add the digits in reverse order
     for i in 0..n {
         ri := (n - 1) - i;
-        char := tmp[ri];
-        sb.addChar(char);
+        c := tmp[ri];
+        sb.addChar(c);
     }
 }
 

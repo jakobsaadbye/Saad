@@ -93,7 +93,8 @@ typedef enum TokenType {
     TOKEN_STRUCT  = 180,
     TOKEN_ENUM    = 181,
     TOKEN_ANY     = 182,
-    TOKEN_METHOD  = 183,
+    TOKEN_STRING  = 183,
+    TOKEN_METHOD  = 184,
 
     // Primitive kinds
     // @Important!!! - Order should follow PrimitiveKind order
@@ -110,7 +111,7 @@ typedef enum TokenType {
     TOKEN_TYPE_FLOAT,
     TOKEN_TYPE_F32,
     TOKEN_TYPE_F64,
-    TOKEN_TYPE_STRING,
+    TOKEN_TYPE_CHAR, 
     TOKEN_TYPE_BOOL, 
     TOKEN_TYPE_VOID, // @Important!!! - void must be the final type token
     

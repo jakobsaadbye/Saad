@@ -94,9 +94,10 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_TYPE_FLOAT:            return "TYPE_FLOAT";
         case TOKEN_TYPE_F32:              return "TYPE_F32";
         case TOKEN_TYPE_F64:              return "TYPE_F64";
-        case TOKEN_TYPE_STRING:           return "TYPE_STRING";
+        case TOKEN_TYPE_CHAR:             return "TYPE_CHAR";
         case TOKEN_TYPE_BOOL:             return "TYPE_BOOL";
         case TOKEN_ANY:                   return "TYPE_ANY";
+        case TOKEN_STRING:                return "TYPE_STRING";
         case TOKEN_TYPE_VOID:             return "TYPE_VOID";
         case TOKEN_STRUCT:                return "TYPE_STRUCT";
         case TOKEN_ENUM:                  return "TYPE_ENUM";
@@ -328,6 +329,7 @@ KeywordMatch match_keyword(Lexer *lexer) {
     if (keyword_len == 4) {
         if (strcmp(text, "uint") == 0) token = TOKEN_TYPE_UINT;
         if (strcmp(text, "null") == 0) token = TOKEN_LITERAL_NULL;
+        if (strcmp(text, "char") == 0) token = TOKEN_TYPE_CHAR;
         if (strcmp(text, "bool") == 0) token = TOKEN_TYPE_BOOL;
         if (strcmp(text, "void") == 0) token = TOKEN_TYPE_VOID;
         if (strcmp(text, "true") == 0) token = TOKEN_LITERAL_TRUE;
@@ -345,7 +347,7 @@ KeywordMatch match_keyword(Lexer *lexer) {
     if (keyword_len == 6) {
         if (strcmp(text, "struct") == 0) token = TOKEN_STRUCT;
         if (strcmp(text, "method") == 0) token = TOKEN_METHOD;
-        if (strcmp(text, "string") == 0) token = TOKEN_TYPE_STRING;
+        if (strcmp(text, "string") == 0) token = TOKEN_STRING;
         if (strcmp(text, "return") == 0) token = TOKEN_RETURN;
         if (strcmp(text, "assert") == 0) token = TOKEN_ASSERT;
         if (strcmp(text, "typeof") == 0) token = TOKEN_TYPEOF;

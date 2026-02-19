@@ -616,22 +616,22 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
     } 
     else {
         assert(ast_for->iterable);
-        assert(ast_for->iterable->type->kind == TYPE_ARRAY || ast_for->iterable->type->kind == TYPE_VARIADIC);
+        assert(ast_for->iterable->type->kind == TYPE_ARRAY || ast_for->iterable->type->kind == TYPE_VARIADIC || ast_for->iterable->type->kind == TYPE_STRING);
 
         AstIdentifier *iterator = ast_for->iterator;
         AstIdentifier *index    = ast_for->index;
         AstExpr       *iterable = ast_for->iterable;
-        TypeArray     *iterable_type = iterable->type->kind == TYPE_ARRAY ? (TypeArray *)iterable->type : ((TypeVariadic *)iterable->type)->slice;
+
+        // Type *iterable_type = 
+        // TypeArray     *iterable_type = iterable->type->kind == TYPE_ARRAY ? (TypeArray *)iterable->type : ((TypeVariadic *)iterable->type)->slice;
 
         // Allocate space for iterator, pointer to start of array, stop condition (count) and index
         //
         // :WrongForLoopSizing @Investigate - Might have to do with the fact that we are not aligning the stack before allocating space for the iterator!
-        int aligned_iterator_size = iterator->type->size;
-        int offset_iterator       = cg->enclosing_function->base_ptr - aligned_iterator_size;
-        int offset_data           = offset_iterator - 8;
-        int offset_count          = offset_iterator - 16;
-        int offset_index          = offset_iterator - 24;
-        cg->enclosing_function->base_ptr -= (24 + aligned_iterator_size);
+        int offset_iterator       = allocate_variable(cg, iterator->type->size); // cg->enclosing_function->base_ptr - aligned_iterator_size;
+        int offset_data           = allocate_variable(cg, 8); // offset_iterator - 8;
+        int offset_count          = allocate_variable(cg, 8); // offset_iterator - 16;
+        int offset_index          = allocate_variable(cg, 8); // offset_iterator - 24;
         
         iterator->stack_offset = offset_iterator;
         if (index) {
@@ -644,23 +644,64 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for) {
         POP(RAX);
 
         // Copy .data and .count from the iterable (array) into rbx and rcx respectively
-        switch (iterable_type->array_kind) {
-        case ARRAY_FIXED: {
-            sb_append(&cg->code, "   mov\t\trbx, rax\n");
-            sb_append(&cg->code, "   mov\t\trcx, %d\n", iterable_type->capacity);
+        switch (iterable->type->kind) {
+        case TYPE_ARRAY: {
+            TypeArray *array = (TypeArray *) iterable->type;
+            switch (array->array_kind) {
+                case ARRAY_FIXED: {
+                sb_append(&cg->code, "   mov\t\trbx, rax\n");
+                sb_append(&cg->code, "   mov\t\trcx, %d\n", array->capacity);
+                break;
+            }
+            case ARRAY_SLICE: {
+                sb_append(&cg->code, "   mov\t\trbx, 0[rax]\n");
+                sb_append(&cg->code, "   mov\t\trcx, 8[rax]\n");
+                break;
+            }
+            case ARRAY_DYNAMIC: {
+                sb_append(&cg->code, "   mov\t\trbx, 0[rax]\n");
+                sb_append(&cg->code, "   mov\t\trcx, 8[rax]\n");
+                break;
+            }
+            }
             break;
         }
-        case ARRAY_SLICE: {
+        case TYPE_VARIADIC: {
+            // Same as a slice
             sb_append(&cg->code, "   mov\t\trbx, 0[rax]\n");
             sb_append(&cg->code, "   mov\t\trcx, 8[rax]\n");
             break;
         }
-        case ARRAY_DYNAMIC: {
+        case TYPE_STRING: {
+            // Same as a slice
             sb_append(&cg->code, "   mov\t\trbx, 0[rax]\n");
             sb_append(&cg->code, "   mov\t\trcx, 8[rax]\n");
             break;
         }
+        default: {
+            XXX;
         }
+        }
+
+
+        // switch (iterable_type->array_kind) {
+        // case ARRAY_FIXED: {
+        //     sb_append(&cg->code, "   mov\t\trbx, rax\n");
+        //     sb_append(&cg->code, "   mov\t\trcx, %d\n", iterable_type->capacity);
+        //     break;
+        // }
+        // case ARRAY_SLICE: {
+        //     sb_append(&cg->code, "   mov\t\trbx, 0[rax]\n");
+        //     sb_append(&cg->code, "   mov\t\trcx, 8[rax]\n");
+        //     break;
+        // }
+        // case ARRAY_DYNAMIC: {
+        //     sb_append(&cg->code, "   mov\t\trbx, 0[rax]\n");
+        //     sb_append(&cg->code, "   mov\t\trcx, 8[rax]\n");
+        //     break;
+        // }
+        // }
+
         sb_append(&cg->code, "   mov\t\t%d[rbp], rbx     ; data\n", offset_data);
         sb_append(&cg->code, "   mov\t\t%d[rbp], rcx     ; count\n", offset_count);
         sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], 0 ; index\n", offset_index);
@@ -1342,19 +1383,26 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
         return;
     }
 
-    if (from->kind == TYPE_POINTER && to->kind == TYPE_STRING) {
-        TypePointer *from_ptr = (TypePointer *)from;
-        if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_U8) {
-            return; // handled
-        }
-    }
+    // @StringRefactoring: This needs to go
+    // if (from->kind == TYPE_POINTER && to->kind == TYPE_STRING) {
+    //     TypePointer *from_ptr = (TypePointer *)from;
+    //     if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_U8) {
+    //         return; // handled
+    //     }
+    //     if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_CHAR) {
+    //         return; // handled
+    //     }
+    // }
 
-    if (from->kind == TYPE_STRING && to->kind == TYPE_POINTER) {
-        TypePointer *to_ptr = (TypePointer *)to;
-        if (to_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)to_ptr->pointer_to)->kind == PRIMITIVE_U8) {
-            return; // handled
-        }
-    }
+    // if (from->kind == TYPE_STRING && to->kind == TYPE_POINTER) {
+    //     TypePointer *to_ptr = (TypePointer *)to;
+    //     if (to_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)to_ptr->pointer_to)->kind == PRIMITIVE_U8) {
+    //         return; // handled
+    //     }
+    //     if (to_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)to_ptr->pointer_to)->kind == PRIMITIVE_CHAR) {
+    //         return; // handled
+    //     }
+    // }
 
     if (from->kind == TYPE_POINTER && to->kind == TYPE_POINTER) {
         return; // handled
@@ -1609,6 +1657,33 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
         *num_enum_arguments += 1;
         break;
     }
+    case TYPE_STRING: {
+        POP(RBX);
+        int tmp_offset = push_temporary_value(cg, 8, (Ast *) arg_type);
+
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", tmp_offset);
+        sb_append(&cg->code, "   mov\t\trdx, 8[rbx]\n");
+
+        // Perform a copy of the string and insert a \0 terminator
+        sb_append(&cg->code, "   add\t\trdx, 1\n");
+        sb_append(&cg->code, "   mov\t\trcx, 1\n");
+        sb_append(&cg->code, "   sub\t\trsp, 32\n");
+        sb_append(&cg->code, "   call\t\tcalloc\n");
+        sb_append(&cg->code, "   add\t\trsp, 32\n");
+
+        sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", tmp_offset);
+        sb_append(&cg->code, "   mov\t\trdx, 0[rbx]\n");
+        sb_append(&cg->code, "   mov\t\tr8d, 8[rbx]\n");
+        sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", tmp_offset);
+        sb_append(&cg->code, "   mov\t\trcx, rax\n");
+        sb_append(&cg->code, "   sub\t\trsp, 32\n");
+        sb_append(&cg->code, "   call\t\tmemcpy\n");    // void* memcpy( void* dest, const void* src, std::size_t count );
+        sb_append(&cg->code, "   add\t\trsp, 32\n");
+
+        sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", tmp_offset);
+        PUSH(RAX);
+        break;
+    }
     case TYPE_STRUCT: {
         TypeStruct *struct_defn = (TypeStruct *)arg_type;
         AstStruct  *struct_node = struct_defn->node;
@@ -1774,7 +1849,6 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset, bool offset_
     case TYPE_INTEGER:
     case TYPE_FLOAT:
     case TYPE_BOOL:
-    case TYPE_STRING:
     case TYPE_ENUM:
     case TYPE_POINTER: {
         if (offset_is_runtime_computed) {
@@ -1785,7 +1859,6 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset, bool offset_
 
         return;
     } 
-
     case TYPE_STRUCT: {
         TypeStruct *struct_defn = (TypeStruct *) type;
 
@@ -1800,7 +1873,6 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset, bool offset_
 
         return;
     }
-
     case TYPE_ARRAY : {
         TypeArray *array = (TypeArray *)(type);
 
@@ -1845,6 +1917,7 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset, bool offset_
             
         return;
     }
+    case TYPE_STRING:
     case TYPE_ANY : {
         if (offset_is_runtime_computed) {
             sb_append(&cg->code, "   mov\t\tQWORD 0[rbx], 0\n");
@@ -1876,12 +1949,16 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
     case TYPE_VOID:
     case TYPE_BOOL:
     case TYPE_INTEGER:
-    case TYPE_FLOAT:
-    case TYPE_STRING: {
+    case TYPE_FLOAT: {
         TypePrimitive *primitive = (TypePrimitive *) type;
         char type_name[32];
         sprintf(type_name, "Type_%s", primitive->name);
         sb_append(&cg->code, "   mov\t\trax, QWORD [%s]\n", type_name);
+        PUSH(RAX);
+        return;
+    }
+    case TYPE_STRING: {
+        sb_append(&cg->code, "   mov\t\trax, QWORD [Type_string]\n");
         PUSH(RAX);
         return;
     }
@@ -2088,11 +2165,6 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
 
         return;
     }
-    case TYPE_STRING: {
-        POP(RAX);
-        sb_append(&cg->code, "   mov\t\tQWORD %s, rax\n", dst);
-        return;
-    }
     case TYPE_ENUM: {
         POP(RAX);
         sb_append(&cg->code, "   mov\t\tDWORD %s, eax\n", dst);
@@ -2170,17 +2242,15 @@ void emit_simple_initialization(CodeGenerator *cg, int dst_offset, bool dst_is_r
         
         return;
     }
+    case TYPE_STRING: // @Cleanup: Make this NOT use a memcpy. Just copy the two fields over
     case TYPE_ANY: {
-        TypeAny *type_any = (TypeAny *) lhs_type;
-
         POP(RAX);
         if (!dst_is_runtime_computed) {
             sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", dst_offset);
         }
-        emit_memcpy(cg, 0, 0, type_any->head.size);
+        emit_memcpy(cg, 0, 0, 16);
 
         return;
-
     }
     default:
     XXX;
@@ -2766,7 +2836,6 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         PUSH(RAX);
         return;
     }
-    case TYPE_STRING:
     case TYPE_ENUM: {
         sb_append(&cg->code, "   mov\t\t%s, %s %s\n", REG_A(src_type), word_size(src_type), src);
         PUSH(RAX);
@@ -2794,6 +2863,7 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         PUSH(RAX);
         return;
     }
+    case TYPE_STRING:
     case TYPE_ANY:
     case TYPE_VARIADIC:
     case TYPE_ARRAY: {
@@ -3163,8 +3233,12 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_STRING: {
+            int tmp_offset = push_temporary_value(cg, 16, (Ast *)expr);
             sb_append(&cg->data, "   CS%d DB `%s`, 0 \n", cg->constants, lit->as.value.string.data);
             sb_append(&cg->code, "   mov\t\trax, CS%d\n", cg->constants);
+            sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n",       tmp_offset + 0);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n",  tmp_offset + 8, lit->as.value.string.length);
+            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n",       tmp_offset);
             PUSH(RAX);
             cg->constants++;
             return;

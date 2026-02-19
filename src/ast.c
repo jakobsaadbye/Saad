@@ -71,12 +71,13 @@ TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.kind = PRIMITIVE_FLOAT,   .name = "float",     .head = {.kind = TYPE_FLOAT,   .size = 4}},
     {.kind = PRIMITIVE_F32,     .name = "f32",       .head = {.kind = TYPE_FLOAT,   .size = 4}},
     {.kind = PRIMITIVE_F64,     .name = "f64",       .head = {.kind = TYPE_FLOAT,   .size = 8}},
-    {.kind = PRIMITIVE_STRING,  .name = "string",    .head = {.kind = TYPE_STRING,  .size = 8}},
+    {.kind = PRIMITIVE_CHAR,    .name = "char",      .head = {.kind = TYPE_INTEGER, .size = 1}},
     {.kind = PRIMITIVE_BOOL,    .name = "bool",      .head = {.kind = TYPE_BOOL,    .size = 1}},
     {.kind = PRIMITIVE_VOID,    .name = "void",      .head = {.kind = TYPE_VOID,    .size = 0}},
     {.kind = PRIMITIVE_UNTYPED_INT,   .name = "number", .head = {.kind = TYPE_INTEGER, .size = 4}}, // Should probably match input - Alexander
     {.kind = PRIMITIVE_UNTYPED_FLOAT, .name = "untyped(float)", .head = {.kind = TYPE_FLOAT, .size = 4}},
 };
+
 
 Type *primitive_type(PrimitiveKind kind) {
     return (Type *)(&primitive_types[kind]);
@@ -88,9 +89,27 @@ const char *directive_names[] = {
     "extern"
 };
 
-TypePointer *type_null_ptr = &(TypePointer){
+TypePointer *type_defn_null_ptr = &(TypePointer){
     .head = {.kind = TYPE_POINTER, .size = 8},
     .pointer_to = (Type *)&(TypePrimitive){.kind = PRIMITIVE_VOID, .name = "void", .head = {.kind = TYPE_VOID, .size = 0}}
+};
+
+TypeString *type_defn_string = &(TypeString){
+    .head = {.kind = TYPE_STRING, .size = 16},
+    .struct_defn = NULL
+};
+
+TypeArray *type_defn_string_as_slice = &(TypeArray){
+    .head = {
+        .kind = TYPE_ARRAY, 
+        .size = 16
+    },
+    .array_kind = ARRAY_SLICE,
+    .elem_type = (Type *) &primitive_types[PRIMITIVE_CHAR],
+    .struct_defn = NULL,
+    .capacity_expr = NULL,
+    .capacity = 0,
+    .count = 0,
 };
 
 bool compare_user_types(const void *key, const void *item) {
@@ -133,10 +152,12 @@ char *type_to_str(Type *type) {
     case TYPE_VOID:
     case TYPE_BOOL:
     case TYPE_INTEGER:
-    case TYPE_FLOAT:
-    case TYPE_STRING: {
+    case TYPE_FLOAT: {
         TypePrimitive *prim = (TypePrimitive *)(type);
         return prim->name;
+    }
+    case TYPE_STRING: {
+        return "string";
     }
     case TYPE_POINTER: {
         TypePointer *ptr = (TypePointer *)(type);
@@ -249,7 +270,6 @@ bool is_primitive_type(TypeKind kind) {
     if (kind == TYPE_BOOL)    return true;
     if (kind == TYPE_INTEGER) return true;
     if (kind == TYPE_FLOAT)   return true;
-    if (kind == TYPE_STRING)  return true;
 
     return false;
 }
@@ -276,6 +296,7 @@ bool is_unsigned_integer(Type *type) {
 
     TypePrimitive *prim = (TypePrimitive *)(type);
     switch (prim->kind) {
+    case PRIMITIVE_CHAR:
     case PRIMITIVE_UINT:
     case PRIMITIVE_U8:
     case PRIMITIVE_U16:

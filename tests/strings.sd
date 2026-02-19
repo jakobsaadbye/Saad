@@ -1,4 +1,0 @@
-main :: () {
-    a := "Hello world!";
-    print("%", a);
-}

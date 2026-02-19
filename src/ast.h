@@ -125,6 +125,7 @@ typedef struct AstFile {
     DynamicArray imports;    // of AstImport*
     AstBlock    *scope;      // All exported declarations in this file e.g function definitions, struct definitions etc is contained here
     bool         is_parsed;
+    bool         has_imported_builtin_string;
 } AstFile;
 
 typedef struct AstImport {
@@ -568,7 +569,7 @@ typedef enum PrimitiveKind {
     PRIMITIVE_F32,
     PRIMITIVE_F64,
 
-    PRIMITIVE_STRING,
+    PRIMITIVE_CHAR, // alias for u8
     PRIMITIVE_BOOL,
     PRIMITIVE_VOID,
 
@@ -577,6 +578,8 @@ typedef enum PrimitiveKind {
 
     PRIMITIVE_COUNT,
 } PrimitiveKind;
+
+typedef struct TypeArray TypeArray;
 
 typedef struct TypePrimitive {
     Type           head;
@@ -594,7 +597,15 @@ typedef struct TypePointer {
     bool has_been_dereferenced;
 } TypePointer;
 
-extern TypePointer *type_null_ptr;
+extern TypePointer *type_defn_null_ptr;
+
+typedef struct TypeString {
+    Type        head;
+    TypeStruct *struct_defn;    // set to struct 'String' defined in strings.sd
+} TypeString;
+
+extern TypeString *type_defn_string;
+extern TypeArray  *type_defn_string_as_slice;
 
 typedef enum ArrayKind {
     ARRAY_FIXED,
@@ -654,7 +665,7 @@ typedef struct TypeVariadic {
 
 typedef struct TypeAny {
     Type        head;
-    TypeStruct *struct_defn;
+    TypeStruct *struct_defn;    // set to struct 'Any' defined in reflect.sd
 } TypeAny;
 
 typedef struct TypeTable {

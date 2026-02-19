@@ -46,7 +46,7 @@ typedef enum PrimitiveKind {
     PRIMITIVE_F32,
     PRIMITIVE_F64,
 
-    PRIMITIVE_STRING,
+    PRIMITIVE_CHAR,
     PRIMITIVE_BOOL,
     PRIMITIVE_VOID,
 
@@ -122,6 +122,12 @@ typedef struct TypeAny {
     Type *type;
 } TypeAny;
 
+typedef struct TypeString {
+    Type  head;
+    char *data;
+    int   len;
+} TypeString;
+
 TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.head = {.kind = TYPE_INTEGER, .size = 4, .name = "uint"   }, .kind = PRIMITIVE_UINT     },
     {.head = {.kind = TYPE_INTEGER, .size = 1, .name = "u8"     }, .kind = PRIMITIVE_U8       },
@@ -136,7 +142,7 @@ TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.head = {.kind = TYPE_FLOAT,   .size = 4, .name = "float"  }, .kind = PRIMITIVE_FLOAT    },
     {.head = {.kind = TYPE_FLOAT,   .size = 4, .name = "f32"    }, .kind = PRIMITIVE_F32      },
     {.head = {.kind = TYPE_FLOAT,   .size = 8, .name = "f64"    }, .kind = PRIMITIVE_F64      },
-    {.head = {.kind = TYPE_STRING,  .size = 8, .name = "string" }, .kind = PRIMITIVE_STRING   },
+    {.head = {.kind = TYPE_INTEGER, .size = 1, .name = "char"   }, .kind = PRIMITIVE_CHAR     },
     {.head = {.kind = TYPE_BOOL,    .size = 1, .name = "bool"   }, .kind = PRIMITIVE_BOOL     },
     {.head = {.kind = TYPE_VOID,    .size = 0, .name = "void"   }, .kind = PRIMITIVE_VOID     },
     {.head = {.kind = TYPE_INTEGER, .size = 4, .name = "number" }, .kind = PRIMITIVE_UNTYPED_INT  },
@@ -156,11 +162,17 @@ TypePrimitive *Type_s64           = &primitive_types[PRIMITIVE_S64];
 TypePrimitive *Type_float         = &primitive_types[PRIMITIVE_FLOAT];
 TypePrimitive *Type_f32           = &primitive_types[PRIMITIVE_F32];
 TypePrimitive *Type_f64           = &primitive_types[PRIMITIVE_F64];
-TypePrimitive *Type_string        = &primitive_types[PRIMITIVE_STRING];
+TypePrimitive *Type_char          = &primitive_types[PRIMITIVE_CHAR];
 TypePrimitive *Type_bool          = &primitive_types[PRIMITIVE_BOOL];
 TypePrimitive *Type_void          = &primitive_types[PRIMITIVE_VOID];
 TypePrimitive *Type_untyped_int   = &primitive_types[PRIMITIVE_UNTYPED_INT];
 TypePrimitive *Type_untyped_float = &primitive_types[PRIMITIVE_UNTYPED_FLOAT];
+
+TypeString *Type_string = &(TypeString){
+    .head = {.kind = TYPE_STRING, .size = 16},
+    .data = NULL,
+    .len  = 0,
+};
 
 TypePointer *runtime_get_type_pointer(char *name, Type *pointer_to) {
     TypePointer *type_ptr = malloc(sizeof(TypePointer));
