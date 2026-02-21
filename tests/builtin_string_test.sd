@@ -1,5 +1,7 @@
 main :: () {
-    if false {
+    skip := false;
+
+    if !skip {
         // Taking a slice of a string
         text := "The quick brown fox jumps over the lazy dog";
 
@@ -12,7 +14,7 @@ main :: () {
         print("%\n", fox);
         print("%\n", fox.len);
     }
-    if false {
+    if !skip {
         // Copying a string
         text := "The quick brown fox jumps over the lazy dog";
         
@@ -27,7 +29,7 @@ main :: () {
 
         print("%", copy);
     }
-    if false {
+    if !skip {
         // To uppercase
         text := "The quick brown fox jumps over the lazy dog";
 
@@ -35,7 +37,7 @@ main :: () {
         print("%\n", uppercased);
     }
 
-    if false {
+    if !skip {
         // To lowercase
         text := "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG";
 
@@ -43,19 +45,19 @@ main :: () {
         print("%\n", lowercase);
     }
 
-    if false {
+    if !skip {
         // startsWith
         text := "The quick brown fox jumps over the lazy dog";
         assert(text.startsWith("The"));
     }
 
-    if false {
+    if !skip {
         // endsWith
         text := "The quick brown fox jumps over the lazy dog";
         assert(text.endsWith("dog"));
     }
 
-    if false {
+    if !skip {
         // indexOf
         text := "the quick brown fox jumps over the lazy dog";
 
@@ -70,17 +72,19 @@ main :: () {
         assert(index3 == -1);
 
         index4 := text.indexOf("the", 4);
-        assert(index4 == 27);
+        assert(index4 == 31);
     }
 
-    if false {
+    if true {
         // split
         text := "The quick brown fox jumps over the lazy dog";
 
         splitted := text.split(" ");
-        
+
+        assert(splitted.count == 9);
+
         for s in splitted {
-            print("%", s);
+            print("%\n", s);
         }
     }
     

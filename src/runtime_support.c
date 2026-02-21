@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 // @Important: This has to match the TypeKind in ast.h
 typedef enum TypeKind {
@@ -243,6 +244,11 @@ typedef struct RawDynamicArray {
     size_t         elem_size;
 } RawDynamicArray;
 
+typedef struct RawString {
+    char  *data;
+    size_t len;
+} RawString;
+
 
 void runtime_builtin_append(RawDynamicArray da, void *item) {
     if (da.count + 1 > da.capacity) {
@@ -258,4 +264,8 @@ void runtime_builtin_append(RawDynamicArray da, void *item) {
     void *dst = da.data + (da.count * da.elem_size);
     memcpy(dst, item, da.elem_size);
     da.count += 1;
+}
+
+int runtime_compare_strings(RawString *str1, RawString *str2) {
+    return strcmp(str1->data, str2->data);
 }

@@ -1,16 +1,13 @@
 main :: () {
-    myStrings: [..]string;
 
-    append(myStrings, "Hello");
-    append(myStrings, "World");
-    append(myStrings, "Dynamic");
-    append(myStrings, "Arrays");
-    append(myStrings, "Just");
-    append(myStrings, "Got");
-    append(myStrings, "Better");
-    
-    for s in myStrings {
-        print("%\n", s);
-    }
+    a := "kiwi";
+    b := "kiwi";
+    c := "mango";
+    d := "bananna";
+
+    assert(a == b);
+    assert(a != c);
+    assert(d < a);
+    assert(c > a);
 
 }

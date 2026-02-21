@@ -404,7 +404,7 @@ Type *resolve_type(Typer *typer, Type *type) {
         case ARRAY_DYNAMIC: {
             array->capacity  = 2;
             array->count     = 0;
-            array->head.size = 24; // Reserve 24 bytes for .data, .count and .capacity
+            array->head.size = 32; // Reserve 32 bytes for .data, .count, .capacity and .elemSize
             break;
         }
         }
@@ -3259,6 +3259,7 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         if (lhs == TYPE_ENUM    && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_INTEGER && rhs == TYPE_ENUM)    return primitive_type(PRIMITIVE_BOOL);
 
+        if (lhs == TYPE_STRING && rhs == TYPE_STRING)   return primitive_type(PRIMITIVE_BOOL);
 
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Type '%s' and '%s' are not comparable", type_to_str(ti_lhs), type_to_str(ti_rhs));
         return NULL;
@@ -3554,6 +3555,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             Type *ok = resolve_type(typer, (Type *) type_defn_string);
             if (!ok) return NULL;
         }
+        reserve_temporary_storage(typer->enclosing_function, 16);
         return (ctx_type && ctx_type->kind == TYPE_STRING) ? ctx_type : (Type *) type_defn_string;
     }
     case LITERAL_IDENTIFIER: {

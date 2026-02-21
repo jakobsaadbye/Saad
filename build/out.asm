@@ -44,15 +44,10 @@ segment .data
    __TypeArrayKind.Fixed DB "Fixed", 0
    __TypeArrayKind.Slice DB "Slice", 0
    __TypeArrayKind.Dynamic DB "Dynamic", 0
-   CS0 DB `Hello`, 0 
-   CS1 DB `World`, 0 
-   CS2 DB `Dynamic`, 0 
-   CS3 DB `Arrays`, 0 
-   CS4 DB `Just`, 0 
-   CS5 DB `Got`, 0 
-   CS6 DB `Better`, 0 
-   CS7 DB `len = %lld\n`, 0 
-   CS8 DB `%s\n`, 0 
+   CS0 DB `kiwi`, 0 
+   CS1 DB `kiwi`, 0 
+   CS2 DB `mango`, 0 
+   CS3 DB `bananna`, 0 
 segment .text
    global main
    extern ExitProcess
@@ -87,6 +82,7 @@ segment .text
    extern runtime_get_type_struct
    extern runtime_get_type_any
    extern runtime_builtin_append
+   extern runtime_compare_strings
    extern memset
    extern memcpy
    extern malloc
@@ -1729,6 +1725,13 @@ L82:
    mov		eax, DWORD -96[rbp]
    movsx		rax, eax
    push		rax
+   mov		eax, DWORD -44[rbp]
+   movsx		rax, eax
+   push		rax
+   pop		rbx
+   pop		rax
+   add		rax, rbx
+   push		rax
    pop		rax
    mov		rbx, -8[rbp]
    mov		DWORD [rbx], eax
@@ -1759,14 +1762,14 @@ L73:
    pop		rbp
    ret
 
-; bytes locals   : 128
+; bytes locals   : 152
 ; bytes temp     : 72
-; bytes total    : 240
-; (ret_0: *[]string, s: string, sep: string)
+; bytes total    : 256
+; (ret_0: *[..]string, s: string, sep: string)
 String.split:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 240
+   sub		rsp, 256
    mov		16[rbp], rcx
    mov		24[rbp], rdx
    mov		32[rbp], r8 
@@ -1787,8 +1790,8 @@ String.split:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   ; Ln 141: $result : [..]string = -64[rbp]
-   lea		rbx, -64[rbp]
+   ; Ln 141: $result : [..]string = -72[rbp]
+   lea		rbx, -72[rbp]
    push		rbx
    mov		rdx, 16
    mov		rcx, 2
@@ -1798,25 +1801,25 @@ String.split:
    mov		QWORD 8[rbx], 0
    mov		QWORD 16[rbx], 2
    mov		QWORD 24[rbx], 16
-   ; Ln 143: $cursor : int = -68[rbp]
+   ; Ln 143: $cursor : int = -76[rbp]
    mov		rax, 0
    push		rax
    pop		rax
-   mov		DWORD -68[rbp], eax
+   mov		DWORD -76[rbp], eax
 L87:
    push		1
    pop		rax
    cmp		al, 0
    jz			L88
    ; While body
-   ; Ln 145: $i : int = -72[rbp]
-   lea		rax, -132[rbp]
+   ; Ln 145: $i : int = -80[rbp]
+   lea		rax, -156[rbp]
    push		rax
    lea		rax, -24[rbp]
    push		rax
    lea		rax, -40[rbp]
    push		rax
-   mov		eax, DWORD -68[rbp]
+   mov		eax, DWORD -76[rbp]
    movsx		rax, eax
    push		rax
    pop		r9 
@@ -1825,12 +1828,12 @@ L87:
    pop		rcx
    ; (string, string, int) 
    call		String.indexOf
-   mov		eax, DWORD -132[rbp]
+   mov		eax, DWORD -156[rbp]
    movsx		rax, eax
    push		rax
    pop		rax
-   mov		DWORD -72[rbp], eax
-   mov		eax, DWORD -72[rbp]
+   mov		DWORD -80[rbp], eax
+   mov		eax, DWORD -80[rbp]
    movsx		rax, eax
    push		rax
    mov		rax, 1
@@ -1847,12 +1850,12 @@ L87:
    cmp		al, 0
    jz			L90
    ; block of if
-   ; Ln 147: $tail : string = -88[rbp]
-   lea		rax, -144[rbp]
+   ; Ln 147: $tail : string = -96[rbp]
+   lea		rax, -168[rbp]
    push		rax
    lea		rax, -24[rbp]
    push		rax
-   mov		eax, DWORD -68[rbp]
+   mov		eax, DWORD -76[rbp]
    movsx		rax, eax
    push		rax
    mov		rax, 1
@@ -1866,23 +1869,76 @@ L87:
    pop		rcx
    ; (string, int, int) 
    call		String.slice
-   lea		rax, -144[rbp]
+   lea		rax, -168[rbp]
    push		rax
    pop		rax
-   lea		rbx, -88[rbp]
+   lea		rbx, -96[rbp]
    lea		rcx, 0[rbx]
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
+   lea		rax, -72[rbp]
+   push		rax
+   lea		rax, -96[rbp]
+   push		rax
+   pop		rdx
+   pop		rcx
+   ; ([..]string, string) 
+   call		runtime_builtin_append
    jmp		L88
    jmp L89
 ; else
 L90:
-   ; Ln 151: Assignment
-   mov		eax, DWORD -72[rbp]
+   ; Ln 151: $segment : string = -112[rbp]
+   lea		rax, -168[rbp]
+   push		rax
+   lea		rax, -24[rbp]
+   push		rax
+   mov		eax, DWORD -76[rbp]
    movsx		rax, eax
    push		rax
-   lea		rax, -68[rbp]
+   mov		eax, DWORD -80[rbp]
+   movsx		rax, eax
+   push		rax
+   pop		r9 
+   pop		r8 
+   pop		rdx
+   pop		rcx
+   ; (string, int, int) 
+   call		String.slice
+   lea		rax, -168[rbp]
+   push		rax
+   pop		rax
+   lea		rbx, -112[rbp]
+   lea		rcx, 0[rbx]
+   lea		rdx, 0[rax]
+   mov		r8, 16
+   call		memcpy
+   lea		rax, -72[rbp]
+   push		rax
+   lea		rax, -112[rbp]
+   push		rax
+   pop		rdx
+   pop		rcx
+   ; ([..]string, string) 
+   call		runtime_builtin_append
+   ; Ln 153: Assignment
+   mov		eax, DWORD -80[rbp]
+   movsx		rax, eax
+   push		rax
+   lea		rax, -40[rbp]
+   push		rax
+   pop		rbx
+   add		rbx, 8
+   push		rbx
+   pop		rbx
+   mov		rax, QWORD [rbx]
+   push		rax
+   pop		rbx
+   pop		rax
+   add		rax, rbx
+   push		rax
+   lea		rax, -76[rbp]
    push		rax
    pop		rbx
    pop		rax
@@ -1893,183 +1949,141 @@ L89:
    jmp			L87
 L88:
    ; Return
-   lea		rax, -64[rbp]
+   lea		rax, -72[rbp]
    push		rax
    pop		rax
    mov		rbx, -8[rbp]
    lea		rcx, 0[rbx]
    lea		rdx, 0[rax]
-   mov		r8, 16
+   mov		r8, 32
    call		memcpy
    jmp		L86
 L86:
    mov		rax, 0
-   add		rsp, 240
+   add		rsp, 256
    pop		rbp
    ret
 
 ; bytes locals   : 64
-; bytes temp     : 8
+; bytes temp     : 16
 ; bytes total    : 112
 ; ()
 main:
    push		rbp
    mov		rbp, rsp
    sub		rsp, 112
-   ; Ln 2: $myStrings : [..]string = -24[rbp]
-   lea		rbx, -24[rbp]
-   push		rbx
-   mov		rdx, 16
-   mov		rcx, 2
-   call		calloc
-   pop		rbx
-   mov		QWORD 0[rbx], rax
-   mov		QWORD 8[rbx], 0
-   mov		QWORD 16[rbx], 2
-   mov		QWORD 24[rbx], 16
-   lea		rax, -24[rbp]
-   push		rax
+   ; Ln 3: $a : string = -16[rbp]
    mov		rax, CS0
-   mov		-80[rbp], rax
-   mov		QWORD -72[rbp], 5
-   lea		rax, -80[rbp]
-   push		rax
-   pop		rdx
-   pop		rcx
-   ; ([..]string, string) 
-   call		runtime_builtin_append
-   lea		rax, -24[rbp]
-   push		rax
-   mov		rax, CS1
-   mov		-80[rbp], rax
-   mov		QWORD -72[rbp], 5
-   lea		rax, -80[rbp]
-   push		rax
-   pop		rdx
-   pop		rcx
-   ; ([..]string, string) 
-   call		runtime_builtin_append
-   lea		rax, -24[rbp]
-   push		rax
-   mov		rax, CS2
-   mov		-80[rbp], rax
-   mov		QWORD -72[rbp], 7
-   lea		rax, -80[rbp]
-   push		rax
-   pop		rdx
-   pop		rcx
-   ; ([..]string, string) 
-   call		runtime_builtin_append
-   lea		rax, -24[rbp]
-   push		rax
-   mov		rax, CS3
-   mov		-80[rbp], rax
-   mov		QWORD -72[rbp], 6
-   lea		rax, -80[rbp]
-   push		rax
-   pop		rdx
-   pop		rcx
-   ; ([..]string, string) 
-   call		runtime_builtin_append
-   lea		rax, -24[rbp]
-   push		rax
-   mov		rax, CS4
    mov		-80[rbp], rax
    mov		QWORD -72[rbp], 4
    lea		rax, -80[rbp]
    push		rax
-   pop		rdx
-   pop		rcx
-   ; ([..]string, string) 
-   call		runtime_builtin_append
-   lea		rax, -24[rbp]
-   push		rax
-   mov		rax, CS5
-   mov		-80[rbp], rax
-   mov		QWORD -72[rbp], 3
-   lea		rax, -80[rbp]
-   push		rax
-   pop		rdx
-   pop		rcx
-   ; ([..]string, string) 
-   call		runtime_builtin_append
-   lea		rax, -24[rbp]
-   push		rax
-   mov		rax, CS6
-   mov		-80[rbp], rax
-   mov		QWORD -72[rbp], 6
-   lea		rax, -80[rbp]
-   push		rax
-   pop		rdx
-   pop		rcx
-   ; ([..]string, string) 
-   call		runtime_builtin_append
-   ; Ln 13 Print
-   lea		rax, -24[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 8
-   push		rbx
-   pop		rbx
-   mov		rax, QWORD [rbx]
-   push		rax
-   ; Pop print arguments
    pop		rax
-   mov		rdx, rax
-   mov		rcx, CS7
-   call		printf
-   ; Ln 15: For-loop
-   lea		rax, -24[rbp]
-   push		rax
-   pop		rax
-   mov		rbx, 0[rax]
-   mov		rcx, 8[rax]
-   mov		-48[rbp], rbx     ; data
-   mov		-56[rbp], rcx     ; count
-   mov		QWORD -64[rbp], 0 ; index
-L92:
-   mov		rbx, -56[rbp]
-   mov		rax, -64[rbp]
-   cmp		rax, rbx
-   jge		L94
-   mov		rbx, QWORD -48[rbp]
-   mov		rax, QWORD -64[rbp]
-   imul		rax, 16
-   lea		rbx, [rbx + rax]
+   lea		rbx, -16[rbp]
+   lea		rcx, 0[rbx]
+   lea		rdx, 0[rax]
    mov		r8, 16
-   mov		rdx, rbx
-   lea		rcx, -40[rbp]
    call		memcpy
-   ; Ln 16 Print
-   lea		rax, -40[rbp]
+   ; Ln 4: $b : string = -32[rbp]
+   mov		rax, CS1
+   mov		-80[rbp], rax
+   mov		QWORD -72[rbp], 4
+   lea		rax, -80[rbp]
    push		rax
-   pop		rbx
-   mov		-72[rbp], rbx
-   mov		rdx, 8[rbx]
-   add		rdx, 1
-   mov		rcx, 1
-   sub		rsp, 32
-   call		calloc
-   add		rsp, 32
-   mov		rbx, -72[rbp]
-   mov		rdx, 0[rbx]
-   mov		r8d, 8[rbx]
-   mov		-72[rbp], rax
-   mov		rcx, rax
-   sub		rsp, 32
-   call		memcpy
-   add		rsp, 32
-   mov		rax, -72[rbp]
-   push		rax
-   ; Pop print arguments
    pop		rax
-   mov		rdx, rax
-   mov		rcx, CS8
-   call		printf
-L93:
-   inc		QWORD -64[rbp]
-   jmp		L92
-L94:
+   lea		rbx, -32[rbp]
+   lea		rcx, 0[rbx]
+   lea		rdx, 0[rax]
+   mov		r8, 16
+   call		memcpy
+   ; Ln 5: $c : string = -48[rbp]
+   mov		rax, CS2
+   mov		-80[rbp], rax
+   mov		QWORD -72[rbp], 5
+   lea		rax, -80[rbp]
+   push		rax
+   pop		rax
+   lea		rbx, -48[rbp]
+   lea		rcx, 0[rbx]
+   lea		rdx, 0[rax]
+   mov		r8, 16
+   call		memcpy
+   ; Ln 6: $d : string = -64[rbp]
+   mov		rax, CS3
+   mov		-80[rbp], rax
+   mov		QWORD -72[rbp], 7
+   lea		rax, -80[rbp]
+   push		rax
+   pop		rax
+   lea		rbx, -64[rbp]
+   lea		rcx, 0[rbx]
+   lea		rdx, 0[rax]
+   mov		r8, 16
+   call		memcpy
+   lea		rax, -16[rbp]
+   push		rax
+   lea		rax, -32[rbp]
+   push		rax
+   pop		rdx
+   pop		rcx
+   sub		rsp, 32
+   call		runtime_compare_strings
+   add		rsp, 32
+   cmp		eax, 0
+   sete		al
+   movzx		eax, al
+   push		rax
+   pop		rcx
+   mov		rdx, 8
+   call		assert
+   lea		rax, -16[rbp]
+   push		rax
+   lea		rax, -48[rbp]
+   push		rax
+   pop		rdx
+   pop		rcx
+   sub		rsp, 32
+   call		runtime_compare_strings
+   add		rsp, 32
+   cmp		eax, 0
+   setne		al
+   movzx		eax, al
+   push		rax
+   pop		rcx
+   mov		rdx, 9
+   call		assert
+   lea		rax, -64[rbp]
+   push		rax
+   lea		rax, -16[rbp]
+   push		rax
+   pop		rdx
+   pop		rcx
+   sub		rsp, 32
+   call		runtime_compare_strings
+   add		rsp, 32
+   cmp		eax, 0
+   setl		al
+   movzx		eax, al
+   push		rax
+   pop		rcx
+   mov		rdx, 10
+   call		assert
+   lea		rax, -48[rbp]
+   push		rax
+   lea		rax, -16[rbp]
+   push		rax
+   pop		rdx
+   pop		rcx
+   sub		rsp, 32
+   call		runtime_compare_strings
+   add		rsp, 32
+   cmp		eax, 0
+   setg		al
+   movzx		eax, al
+   push		rax
+   pop		rcx
+   mov		rdx, 11
+   call		assert
 L91:
    mov		rax, 0
    add		rsp, 112

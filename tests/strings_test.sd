@@ -22,7 +22,15 @@ main :: () {
     }
     if true {
         // Comparing strings
+        a := "kiwi";
+        b := "kiwi";
+        c := "mango";
+        d := "bananna";
 
+        assert(a == b);
+        assert(a != c);
+        assert(d < a);
+        assert(c > a);
     }
 
 }

@@ -2642,6 +2642,19 @@ void emit_comparison_operator(CodeGenerator *cg, AstBinary *bin) {
         return;
     }
 
+    if (l_kind == TYPE_STRING && r_kind == TYPE_STRING) {
+        POP(RDX);
+        POP(RCX);
+        sb_append(&cg->code, "   sub\t\trsp, 32\n");
+        sb_append(&cg->code, "   call\t\truntime_compare_strings\n");
+        sb_append(&cg->code, "   add\t\trsp, 32\n");
+        sb_append(&cg->code, "   cmp\t\teax, 0\n");
+        sb_append(&cg->code, "   %s\t\tal\n", set_instruction);
+        sb_append(&cg->code, "   movzx\t\teax, al\n");
+        PUSH(RAX);
+        return;
+    }
+
     printf("%s:%d: compiler-error: There were unhandled cases in 'emit_comparison_operator', while doing %s '%s' %s\n", __FILE__, __LINE__, type_to_str(l_type), token_type_to_str(bin->operator), type_to_str(r_type));
     exit(1);
 }
@@ -2686,8 +2699,9 @@ const char *get_comparison_set_instruction(CodeGenerator *cg, AstBinary *bin) {
     Type *lhs_type = bin->left->type;
     Type *rhs_type = bin->right->type;
 
+    
     bool do_signed_comparison = false;
-
+    
     if      (lhs_type->kind == TYPE_BOOL    && rhs_type->kind == TYPE_BOOL)    do_signed_comparison = false;
     else if (lhs_type->kind == TYPE_FLOAT   && rhs_type->kind == TYPE_INTEGER) do_signed_comparison = false;
     else if (lhs_type->kind == TYPE_INTEGER && rhs_type->kind == TYPE_FLOAT)   do_signed_comparison = false;
@@ -2697,6 +2711,8 @@ const char *get_comparison_set_instruction(CodeGenerator *cg, AstBinary *bin) {
     else if (lhs_type->kind == TYPE_ENUM || rhs_type->kind == TYPE_ENUM)       do_signed_comparison = true;
     else if (is_signed_integer(lhs_type) || is_signed_integer(rhs_type))       do_signed_comparison = true;
     else if (lhs_type->kind == TYPE_INTEGER && rhs_type->kind == TYPE_INTEGER) do_signed_comparison = true;
+    else if (lhs_type->kind == TYPE_STRING  && rhs_type->kind == TYPE_STRING)  do_signed_comparison = true;
+    
     else {
         report_error_ast(cg->parser, LABEL_ERROR, (Ast *) bin, "Internal Compiler Error: There were unhandled cases in 'comparison_operator_to_instruction()'. Left type = %s, Right type = %s", type_to_str(lhs_type), type_to_str(rhs_type));
         exit(1);

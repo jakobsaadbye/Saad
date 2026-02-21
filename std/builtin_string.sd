@@ -129,7 +129,7 @@ indexOf :: method (s: string, str: string, fromIndex := 0) -> int {
             }
 
             if match {
-                return i;
+                return i + fromIndex;
             }
         }
     }
@@ -137,7 +137,7 @@ indexOf :: method (s: string, str: string, fromIndex := 0) -> int {
     return -1;
 }
 
-split :: method (s: string, sep: string) -> []string {
+split :: method (s: string, sep: string) -> [..]string {
     result: [..]string;
 
     cursor := 0;
@@ -145,10 +145,12 @@ split :: method (s: string, sep: string) -> []string {
         i := s.indexOf(sep, cursor);
         if i == -1 {
             tail := s.slice(cursor);
-            // result.add(tail);
+            append(result, tail);
             break;
         } else {
-            cursor = i;
+            segment := s.slice(cursor, i);
+            append(result, segment);
+            cursor = i + cast(int) sep.len;
         }
     }
 
