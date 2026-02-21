@@ -80,21 +80,6 @@ endsWith :: method (s: string, str: string) -> bool {
     return true;
 }
 
-//@Deprecate: Once we have ==
-equals :: method (s: string, str: string) -> bool {
-    if s.len != str.len {
-        return false;
-    }
-
-    for c, i in s {
-        if str[i] != c {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 // Returns the first index at which a given element can be found in the array, or -1 if it is not present.
 indexOf :: method (s: string, str: string, fromIndex := 0) -> int {
     if s.len == 0 || str.len == 0 {
@@ -152,6 +137,17 @@ split :: method (s: string, sep: string) -> [..]string {
             append(result, segment);
             cursor = i + cast(int) sep.len;
         }
+    }
+
+    return result;
+}
+
+reverse :: method (s: string) -> string {
+    result := s.copy();
+
+    for c, i in s {
+        j := s.len - 1 - i;
+        result[j] = c;
     }
 
     return result;

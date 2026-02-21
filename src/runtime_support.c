@@ -267,5 +267,41 @@ void runtime_builtin_append(RawDynamicArray da, void *item) {
 }
 
 int runtime_compare_strings(RawString *str1, RawString *str2) {
-    return strcmp(str1->data, str2->data);
+    if (str1->len == str2->len) {
+        for (size_t i = 0; i < str1->len; i++) {
+            char c1 = str1->data[i];
+            char c2 = str2->data[i];
+
+            if (c1 == c2) continue;
+            if (c1 < c2) return -1;
+            if (c1 > c2) return +1;
+        }
+
+        return 0;
+    }
+
+    if (str1->len < str2->len) {
+        for (size_t i = 0; i < str1->len; i++) {
+            char c1 = str1->data[i];
+            char c2 = str2->data[i];
+
+            if (c1 == c2) continue;
+            if (c1 < c2) return -1;
+            if (c1 > c2) return +1;
+        }
+
+        return -1;
+    } else {
+        for (size_t i = 0; i < str2->len; i++) {
+            char c1 = str1->data[i];
+            char c2 = str2->data[i];
+
+            if (c1 == c2) continue;
+            if (c1 < c2) return -1;
+            if (c1 > c2) return +1;
+        }
+
+        return +1;
+
+    }
 }
