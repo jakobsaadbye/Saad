@@ -1,4 +1,4 @@
-import "reflect";
+import "runtime";
 
 Fruit :: enum {
     Mango,

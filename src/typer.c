@@ -248,12 +248,10 @@ Type *resolve_type(Typer *typer, Type *type) {
         TypeString *type_string = (TypeString *)type;
 
         if (typer->type_string == NULL) {
-            // Look for the String :: struct {...} in the "reflect" package
-
             AstIdentifier *type_string_identifier = lookup_from_scope(typer->parser, typer->current_scope, "String");
 
             if (!type_string_identifier) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)type_string, "Compiler Error: Failed to find the 'String' struct in strings.sd");
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)type_string, "Compiler Error: Failed to find the 'String' struct");
                 return NULL;
             }
 
@@ -286,7 +284,7 @@ Type *resolve_type(Typer *typer, Type *type) {
         if (!typer->inside_extern_block)  {
             TypeAny *any = (TypeAny *)type;
     
-            // Look for the Any :: struct {...} in the "reflect" package
+            // Look for the Any :: struct {...} in the "runtime" package
             // dump_scope_recursive(typer->parser, typer->current_scope);
 
             if (typer->type_any == NULL) {
@@ -1656,6 +1654,65 @@ int compare_argument_index(const void *e1, const void *e2) {
     return a->param_index - b->param_index;
 }
 
+Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
+    if (call->arguments.count != 2) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Type mismatch. Wanted type ([..]T, T), Got type ()");
+        return NULL;
+    }
+
+    AstArgument *arg0 = ((AstArgument **)call->arguments.items)[0];
+    AstArgument *arg1 = ((AstArgument **)call->arguments.items)[1];
+
+    Type *resolved0 = check_expression(typer, arg0->value, NULL);
+    if (!resolved0) return NULL;
+    Type *resolved1 = check_expression(typer, arg1->value, NULL);
+    if (!resolved1) return NULL;
+
+    if (arg0->value->type->kind != TYPE_ARRAY) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg0->value), "Type mismatch. Wanted type [..]T, got type %s", type_to_str(arg0->value->type));
+        return NULL;
+    }
+
+    TypeArray *da_type = (TypeArray *) arg0->value->type;
+    if (da_type->array_kind != ARRAY_DYNAMIC) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg0->value), "Type mismatch. Wanted type [..]%s, got type %s", type_to_str(da_type->elem_type), type_to_str((Type *)da_type));
+        return NULL;
+    }
+    
+    if (!types_are_equal(da_type->elem_type, arg1->value->type)) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg1->value), "Type mismatch. Wanted type %s, got type %s", type_to_str(da_type->elem_type), type_to_str(arg1->value->type));
+        return NULL;
+    }
+    
+    AstIdentifier *func_defn_ident = lookup_from_scope(typer->parser, typer->current_scope, "runtime_builtin_append");
+    if (func_defn_ident == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Compiler Error: Failed to find builtin function 'runtime_builtin_append'");
+        return NULL;
+    }
+    if (func_defn_ident->type == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Compiler Error: 'runtime_builtin_append' was not typechecked before being called");
+        return NULL;
+    }
+    if (func_defn_ident->type->kind != TYPE_FUNCTION) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(func_defn_ident), "Compiler Error: 'runtime_builtin_append' identifier found, but it was not a function");
+        return NULL;
+    }
+
+    Type *return_type = primitive_type(PRIMITIVE_VOID);
+
+    call->head.type = return_type;
+    call->func_defn = ((TypeFunction *)func_defn_ident->type)->node;
+
+    // Build up the lowered argument list
+    call->lowered_arguments = da_init(call->arguments.count, sizeof(AstExpr *));
+    for (int i = 0; i < call->arguments.count; i++) {
+        AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
+        da_append(&call->lowered_arguments, arg->value);
+    }
+
+    return return_type;
+}
+
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
     if (typer->enclosing_function == NULL) {
@@ -1664,6 +1721,9 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     }
 
     AstIdentifier *func_ident = NULL;
+
+    // Check for builtin functions
+    if (strcmp(call->identifer->name, "append") == 0) return check_builtin_function_call_append(typer, call);
 
     if (call->is_method_call) {
         // Lookup the function within the scope of the struct

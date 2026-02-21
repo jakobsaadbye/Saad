@@ -235,3 +235,27 @@ TypeAny *runtime_get_type_any() {
     type_any->type          = NULL;
     return type_any;
 }
+
+typedef struct RawDynamicArray {
+    unsigned char *data;
+    size_t         count;
+    size_t         capacity;
+    size_t         elem_size;
+} RawDynamicArray;
+
+
+void runtime_builtin_append(RawDynamicArray da, void *item) {
+    if (da.count + 1 > da.capacity) {
+        // Reallocate memory
+        da.data = realloc(da.data, da.capacity * 2 * da.elem_size);
+        if (da.data == NULL) {
+            printf("Buy more ram!\n");
+            exit(1);
+        }
+        da.capacity *= 2;
+    }
+
+    void *dst = da.data + (da.count * da.elem_size);
+    memcpy(dst, item, da.elem_size);
+    da.count += 1;
+}

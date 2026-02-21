@@ -9,8 +9,8 @@
 #define da_insert(da, item, index) _da_insert(da, &item, index);
 
 typedef struct DynamicArray {
-    int item_size;
     unsigned char *items;
+    int item_size;
     int count;
     int capacity;
 } DynamicArray;

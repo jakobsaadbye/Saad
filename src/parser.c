@@ -42,6 +42,7 @@ AstIdentifier  *generate_identifier(Parser *parser, char *ident_name, Type *type
 TypeStruct     *generate_struct_for_dynamic_array(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_data, char *struct_name);
+bool            generate_and_add_import(Parser *parser, char *path);
 
 bool starts_array_literal(Parser *parser);
 bool starts_struct_literal(Parser *parser);
@@ -120,6 +121,12 @@ AstFile *parse_file(Parser *parser, char *file_path) {
     parser->current_file  = file;
     parser->current_scope = file->scope;
 
+    // Add import to the runtime library
+    if (strcmp(parser->current_file->absolute_path, "C:\\Saad\\std\\runtime.sd") != 0) {
+        ok = generate_and_add_import(parser, "runtime");
+        if (!ok) return NULL;
+    }
+
     Token next = peek_next_token(parser);
     while (true) {
         next = peek_next_token(parser);
@@ -142,6 +149,39 @@ AstFile *parse_file(Parser *parser, char *file_path) {
 char *resolve_import_path(Parser *parser, char *path_string) {
     (void) parser;
     return path_string;
+}
+
+bool generate_and_add_import(Parser *parser, char *path) {
+
+    // Check if we already have the import
+    for (int i = 0; i < parser->current_file->imports.count; i++) {
+        AstImport *existing = ((AstImport **)parser->current_file->imports.items)[i];
+        if (strcmp(existing->string, path) == 0) {
+            // Import already exists
+            return true;
+        }
+    }
+
+    AstImport *ast_import  = ast_allocate(parser, sizeof(AstImport));
+    ast_import->head.kind  = AST_IMPORT;
+    ast_import->head.file  = parser->current_file;
+    ast_import->head.start = (Pos){0, 0, 0};
+    ast_import->head.end   = (Pos){0, 0, 0};
+    ast_import->head.flags = AST_FLAG_COMPILER_GENERATED;
+    ast_import->path_token = (Token){0};
+    ast_import->string     = path;
+    ast_import->resolved_path = resolve_import_path(parser, path);
+    if (ast_import->string == NULL) {
+        report_error_ast(parser, LABEL_ERROR, NULL, "Compiler Error: Failed to resolve import '%s'", path);
+        return false;
+    }
+
+    // Insert the import at the top of the file
+    da_insert(&parser->current_file->statements, ast_import, 0);
+
+    da_append(&parser->current_file->imports, ast_import);
+
+    return true;
 }
 
 AstImport *parse_import(Parser *parser) {
@@ -631,39 +671,6 @@ void add_struct_member(Parser *parser, TypeStruct *struct_defn, char *name, Type
 
 }
 
-bool generate_and_add_import(Parser *parser, char *path) {
-
-    // Check if we already have the import
-    for (int i = 0; i < parser->current_file->imports.count; i++) {
-        AstImport *existing = ((AstImport **)parser->current_file->imports.items)[i];
-        if (strcmp(existing->string, path) == 0) {
-            // Import already exists
-            return true;
-        }
-    }
-
-    AstImport *ast_import  = ast_allocate(parser, sizeof(AstImport));
-    ast_import->head.kind  = AST_IMPORT;
-    ast_import->head.file  = parser->current_file;
-    ast_import->head.start = (Pos){0, 0, 0};
-    ast_import->head.end   = (Pos){0, 0, 0};
-    ast_import->head.flags = AST_FLAG_COMPILER_GENERATED;
-    ast_import->path_token = (Token){0};
-    ast_import->string     = path;
-    ast_import->resolved_path = resolve_import_path(parser, path);
-    if (ast_import->string == NULL) {
-        report_error_ast(parser, LABEL_ERROR, NULL, "Compiler Error: Failed to resolve import '%s'", path);
-        return false;
-    }
-
-    // Insert the import at the top of the file
-    da_insert(&parser->current_file->statements, ast_import, 0);
-
-    da_append(&parser->current_file->imports, ast_import);
-
-    return true;
-}
-
 bool parse_parameter_list(Parser *parser, AstFunctionDefn *func_defn) {
     Token next = peek_next_token(parser);
     expect(parser, next, '(');
@@ -872,12 +879,6 @@ Type *parse_type(Parser *parser) {
         any->head.size       = 16;
         any->struct_defn     = NULL; // Is added in typechecking
 
-        // Add an import to the "reflect" package
-        if (!parser->inside_extern_block) {     // Don't include the reflect package if this is an 'any' inside the signature of a C function
-            bool ok = generate_and_add_import(parser, "reflect");
-            if (!ok) return NULL;
-        }
-
         return (Type *)(any);
     }
 
@@ -1055,15 +1056,17 @@ TypeStruct *generate_struct_for_slice(Parser *parser, Type *type_data) {
 TypeStruct *generate_struct_for_dynamic_array(Parser *parser, Type *type_data) {
     TypeStruct *dynamic_array = generate_struct_type_with_data_and_count(parser, type_data, "dynamic array");
 
-    dynamic_array->head.size = 24;
+    dynamic_array->head.size = 32;
 
-    // Add .capacity for the runtime capacity of the array
     AstIdentifier *capacity = generate_identifier(parser, "capacity", primitive_type(PRIMITIVE_S64), IDENTIFIER_IS_STRUCT_MEMBER);
-
     capacity->member_index   = 2;
     capacity->member_offset  = 16;
+    AstIdentifier *elem_size = generate_identifier(parser, "elemSize", primitive_type(PRIMITIVE_S64), IDENTIFIER_IS_STRUCT_MEMBER);
+    capacity->member_index   = 3;
+    capacity->member_offset  = 24;
 
     add_member_to_struct_scope(parser, dynamic_array->node, capacity);
+    add_member_to_struct_scope(parser, dynamic_array->node, elem_size);
 
     return dynamic_array;
 }

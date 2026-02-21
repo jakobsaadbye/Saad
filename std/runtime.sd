@@ -1,8 +1,13 @@
 //////////////////////////////////
-// Runtime reflection package
+// Runtime package
 //
 // @Note: This MUST match the datastructures laid out in runtime_support.c
 //////////////////////////////////
+
+String :: struct {
+    data: *char;
+    len:   s64;
+}
 
 TypeKind :: enum {
     Void,
@@ -93,15 +98,26 @@ TypeStruct :: struct {
     alignment: int;
 };
 
+TypeAny :: struct {
+    head:  Type;
+    data: *void;
+    type: *Type;
+}
+
+//////////////////////////////////
+// Raw underlying types
+//////////////////////////////////
+
 Any :: struct {
     data: *void;
     type: *Type;
 }
 
-TypeAny :: struct {
-    head:  Type;
-    data: *void;
-    type: *Type;
+RawDynamicArray :: struct {
+    data:     *u8;
+    count:    s64;
+    cap:      s64;
+    elemSize: s64;
 }
 
 extern "C" {
@@ -110,6 +126,7 @@ extern "C" {
     runtime_get_type_enum    :: (name: string, valueName: string, backingType: *Type, minValue: int, maxValue: int) -> *TypeEnum;
     runtime_get_type_struct  :: (name: string, members: *StructMember, members_count: int, size: int, alignment: int) -> *TypeStruct;
     runtime_get_type_any     :: () -> *TypeAny;
+    runtime_builtin_append   :: (arr: RawDynamicArray, elem: *void) -> void;
 }
 
 isPrimitive :: method (type: *Type) -> bool {

@@ -1,10 +1,5 @@
 import "c_stdlib";
 
-String :: struct {
-    data: *char;
-    len:   s64;
-}
-
 // toCString :: method (s: string) -> *u8 {
 //     tmp: *u8;
 //     return tmp;
@@ -144,6 +139,18 @@ indexOf :: method (s: string, str: string, fromIndex := 0) -> int {
 
 split :: method (s: string, sep: string) -> []string {
     result: [..]string;
+
+    cursor := 0;
+    while true {
+        i := s.indexOf(sep, cursor);
+        if i == -1 {
+            tail := s.slice(cursor);
+            // result.add(tail);
+            break;
+        } else {
+            cursor = i;
+        }
+    }
 
     return result;
 }

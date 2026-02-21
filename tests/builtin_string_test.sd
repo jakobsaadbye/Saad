@@ -27,7 +27,7 @@ main :: () {
 
         print("%", copy);
     }
-    if true {
+    if false {
         // To uppercase
         text := "The quick brown fox jumps over the lazy dog";
 
@@ -35,11 +35,55 @@ main :: () {
         print("%\n", uppercased);
     }
 
-    if true {
+    if false {
         // To lowercase
         text := "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG";
 
         lowercase := text.toLower();
         print("%\n", lowercase);
     }
+
+    if false {
+        // startsWith
+        text := "The quick brown fox jumps over the lazy dog";
+        assert(text.startsWith("The"));
+    }
+
+    if false {
+        // endsWith
+        text := "The quick brown fox jumps over the lazy dog";
+        assert(text.endsWith("dog"));
+    }
+
+    if false {
+        // indexOf
+        text := "the quick brown fox jumps over the lazy dog";
+
+        index1 := text.indexOf("quick");
+        assert(index1 == 4);
+
+        index2 := text.indexOf("dog");
+        assert(index2 == 40);
+
+        // check fromIndex works
+        index3 := text.indexOf("quick", 10);
+        assert(index3 == -1);
+
+        index4 := text.indexOf("the", 4);
+        assert(index4 == 27);
+    }
+
+    if false {
+        // split
+        text := "The quick brown fox jumps over the lazy dog";
+
+        splitted := text.split(" ");
+        
+        for s in splitted {
+            print("%", s);
+        }
+    }
+    
+    
+
 }

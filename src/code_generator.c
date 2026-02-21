@@ -995,7 +995,20 @@ void adapt_function_argument_to_parameter(CodeGenerator *cg, AstExpr *arg, AstId
         break;
     }
     case TYPE_ARRAY: {
-        assert(param->type->kind == TYPE_ARRAY || param->type->kind == TYPE_VARIADIC);
+        assert(param->type->kind == TYPE_ARRAY || param->type->kind == TYPE_VARIADIC || param->type->kind == TYPE_STRUCT);
+
+        if (param->type->kind == TYPE_STRUCT) {
+            TypeStruct *type_struct = (TypeStruct *) param->type;
+            if (strcmp(type_struct->identifier->name, "RawDynamicArray") == 0) {
+
+                // Pass normally as a dynamic array
+                return;
+
+            } else {
+                report_error_ast(cg->parser, LABEL_ERROR, (Ast *)param, "Compiler Error: Got unexpected parameter vs argument type mismatch. Parameter is of type %s", type_to_str(param->type));
+                exit(1);
+            }
+        }
 
         TypeArray *array_arg   = (TypeArray *) arg->type;
         TypeArray *array_param = (TypeArray *) param->type;
@@ -1184,6 +1197,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
     if (func_defn->is_extern) {
         sb_append(&cg->code_header, "   extern %s\n", func_defn->identifier->name);
+        func_defn->head.flags |= AST_FLAG_IS_CODE_GENED;
         return;
     }
 
@@ -1912,6 +1926,7 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset, bool offset_
             sb_append(&cg->code, "   mov\t\tQWORD 0[rbx], rax\n");
             sb_append(&cg->code, "   mov\t\tQWORD 8[rbx], %d\n", array->count);
             sb_append(&cg->code, "   mov\t\tQWORD 16[rbx], %d\n", array->capacity);
+            sb_append(&cg->code, "   mov\t\tQWORD 24[rbx], %d\n", array->elem_type->size);
             break;
         }}
             
@@ -3161,12 +3176,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             break;
         }
         case ARRAY_DYNAMIC: {
-            int dyn_array_offset = doing_direct_assignment ? direct_offset : push_temporary_value(cg, 24, (Ast *)expr);
+            int dyn_array_offset = doing_direct_assignment ? direct_offset : push_temporary_value(cg, 32, (Ast *)expr);
 
             POP(RBX); // address to the malloced array
             sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rbx\n",  dyn_array_offset + 0);
             sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n", dyn_array_offset + 8, array_type->count);
             sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n", dyn_array_offset + 16, array_type->capacity);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n", dyn_array_offset + 24, array_type->elem_type->size);
             
             if (!doing_direct_assignment) {
                 sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", dyn_array_offset);

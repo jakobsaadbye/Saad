@@ -1,86 +1,16 @@
 main :: () {
-    if false {
-        // Taking a slice of a string
-        text := "The quick brown fox jumps over the lazy dog";
+    myStrings: [..]string;
 
-        quickBrown := text.slice(4, 15);
-
-        print("%\n", quickBrown);
-        print("%\n", quickBrown.len);
-
-        fox := text.slice(16);
-        print("%\n", fox);
-        print("%\n", fox.len);
-    }
-    if false {
-        // Copying a string
-        text := "The quick brown fox jumps over the lazy dog";
-        
-        copy := text.copy();
-
-        text[4] = 115; // 's'
-        text[5] = 108; // 'l'
-        text[6] = 111; // 'o'
-        text[7] = 119; // 'w'
-        text[8] = 32;
-        print("%\n", text);
-
-        print("%", copy);
-    }
-    if false {
-        // To uppercase
-        text := "The quick brown fox jumps over the lazy dog";
-
-        uppercased := text.toUpper();
-        print("%\n", uppercased);
+    append(myStrings, "Hello");
+    append(myStrings, "World");
+    append(myStrings, "Dynamic");
+    append(myStrings, "Arrays");
+    append(myStrings, "Just");
+    append(myStrings, "Got");
+    append(myStrings, "Better");
+    
+    for s in myStrings {
+        print("%\n", s);
     }
 
-    if false {
-        // To lowercase
-        text := "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG";
-
-        lowercase := text.toLower();
-        print("%\n", lowercase);
-    }
-
-    if true {
-        // startsWith
-        text := "The quick brown fox jumps over the lazy dog";
-        assert(text.startsWith("The"));
-    }
-
-    if true {
-        // endsWith
-        text := "The quick brown fox jumps over the lazy dog";
-        assert(text.endsWith("dog"));
-    }
-
-    if true {
-        // indexOf
-        text := "the quick brown fox jumps over the lazy dog";
-
-        index1 := text.indexOf("quick");
-        assert(index1 == 4);
-
-        index2 := text.indexOf("dog");
-        assert(index2 == 40);
-
-        // check fromIndex works
-        index3 := text.indexOf("quick", 10);
-        assert(index3 == -1);
-
-        index4 := text.indexOf("the", 4);
-        assert(index4 == 27);
-    }
-
-    if true {
-        // split
-        text := "The quick brown fox jumps over the lazy dog";
-
-        splitted := text.split(" ");
-
-        for s in splitted {
-            print("%", s);
-        }
-    }
 }

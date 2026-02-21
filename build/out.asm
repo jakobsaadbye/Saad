@@ -10,30 +10,49 @@ segment .data
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
    enum_to_int_buffer times 20 DB 0
-   CS0 DB `The quick brown fox jumps over the lazy dog`, 0 
-   CS1 DB `%s\n`, 0 
-   CS2 DB `%lld\n`, 0 
-   CS3 DB `%s\n`, 0 
-   CS4 DB `%lld\n`, 0 
-   CS5 DB `The quick brown fox jumps over the lazy dog`, 0 
-   CS6 DB `%s\n`, 0 
-   CS7 DB `%s`, 0 
-   CS8 DB `The quick brown fox jumps over the lazy dog`, 0 
-   CS9 DB `%s\n`, 0 
-   CS10 DB `THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG`, 0 
-   CS11 DB `%s\n`, 0 
-   CS12 DB `The quick brown fox jumps over the lazy dog`, 0 
-   CS13 DB `The`, 0 
-   CS14 DB `The quick brown fox jumps over the lazy dog`, 0 
-   CS15 DB `dog`, 0 
-   CS16 DB `the quick brown fox jumps over the lazy dog`, 0 
-   CS17 DB `quick`, 0 
-   CS18 DB `dog`, 0 
-   CS19 DB `quick`, 0 
-   CS20 DB `the`, 0 
-   CS21 DB `The quick brown fox jumps over the lazy dog`, 0 
-   CS22 DB ` `, 0 
-   CS23 DB `%s`, 0 
+   __TypeKind.Void DB "Void", 0
+   __TypeKind.Bool DB "Bool", 0
+   __TypeKind.Int DB "Int", 0
+   __TypeKind.Float DB "Float", 0
+   __TypeKind.String DB "String", 0
+   __TypeKind.Array DB "Array", 0
+   __TypeKind.Pointer DB "Pointer", 0
+   __TypeKind.Struct DB "Struct", 0
+   __TypeKind.Enum DB "Enum", 0
+   __TypeKind.Function DB "Function", 0
+   __TypeKind.Tuple DB "Tuple", 0
+   __TypeKind.Variadic DB "Variadic", 0
+   __TypeKind.Any DB "Any", 0
+   __TypePrimitiveKind.Uint DB "Uint", 0
+   __TypePrimitiveKind.U8 DB "U8", 0
+   __TypePrimitiveKind.U16 DB "U16", 0
+   __TypePrimitiveKind.U32 DB "U32", 0
+   __TypePrimitiveKind.U64 DB "U64", 0
+   __TypePrimitiveKind.Int DB "Int", 0
+   __TypePrimitiveKind.S8 DB "S8", 0
+   __TypePrimitiveKind.S16 DB "S16", 0
+   __TypePrimitiveKind.S32 DB "S32", 0
+   __TypePrimitiveKind.S64 DB "S64", 0
+   __TypePrimitiveKind.Float DB "Float", 0
+   __TypePrimitiveKind.F32 DB "F32", 0
+   __TypePrimitiveKind.F64 DB "F64", 0
+   __TypePrimitiveKind.String DB "String", 0
+   __TypePrimitiveKind.Bool DB "Bool", 0
+   __TypePrimitiveKind.Void DB "Void", 0
+   __TypePrimitiveKind.UntypedInt DB "UntypedInt", 0
+   __TypePrimitiveKind.UntypedFloat DB "UntypedFloat", 0
+   __TypeArrayKind.Fixed DB "Fixed", 0
+   __TypeArrayKind.Slice DB "Slice", 0
+   __TypeArrayKind.Dynamic DB "Dynamic", 0
+   CS0 DB `Hello`, 0 
+   CS1 DB `World`, 0 
+   CS2 DB `Dynamic`, 0 
+   CS3 DB `Arrays`, 0 
+   CS4 DB `Just`, 0 
+   CS5 DB `Got`, 0 
+   CS6 DB `Better`, 0 
+   CS7 DB `len = %lld\n`, 0 
+   CS8 DB `%s\n`, 0 
 segment .text
    global main
    extern ExitProcess
@@ -62,6 +81,12 @@ segment .text
    extern Type_void
    extern Type_untyped_int
    extern Type_untyped_float
+   extern runtime_get_type_pointer
+   extern runtime_get_type_array
+   extern runtime_get_type_enum
+   extern runtime_get_type_struct
+   extern runtime_get_type_any
+   extern runtime_builtin_append
    extern memset
    extern memcpy
    extern malloc
@@ -80,6 +105,381 @@ assert_fail:
    mov		rcx, 1
    call		ExitProcess
 
+get_enum_string_TypeKind:
+   mov		r8, 0
+   cmp		rdx, r8
+   jz			enum_case_0
+   mov		r8, 1
+   cmp		rdx, r8
+   jz			enum_case_1
+   mov		r8, 2
+   cmp		rdx, r8
+   jz			enum_case_2
+   mov		r8, 3
+   cmp		rdx, r8
+   jz			enum_case_3
+   mov		r8, 4
+   cmp		rdx, r8
+   jz			enum_case_4
+   mov		r8, 5
+   cmp		rdx, r8
+   jz			enum_case_5
+   mov		r8, 6
+   cmp		rdx, r8
+   jz			enum_case_6
+   mov		r8, 7
+   cmp		rdx, r8
+   jz			enum_case_7
+   mov		r8, 8
+   cmp		rdx, r8
+   jz			enum_case_8
+   mov		r8, 9
+   cmp		rdx, r8
+   jz			enum_case_9
+   mov		r8, 10
+   cmp		rdx, r8
+   jz			enum_case_10
+   mov		r8, 11
+   cmp		rdx, r8
+   jz			enum_case_11
+   mov		r8, 12
+   cmp		rdx, r8
+   jz			enum_case_12
+   push		rcx
+   mov		r8, rdx
+   mov		rdx, fmt_int
+   push		r8
+   push		rdx
+   push		rcx
+   call		sprintf
+   pop		rax
+   pop		rbx
+   pop		rbx
+   pop		rbx
+   ret
+enum_case_0:
+   mov		rax, __TypeKind.Void
+   ret
+enum_case_1:
+   mov		rax, __TypeKind.Bool
+   ret
+enum_case_2:
+   mov		rax, __TypeKind.Int
+   ret
+enum_case_3:
+   mov		rax, __TypeKind.Float
+   ret
+enum_case_4:
+   mov		rax, __TypeKind.String
+   ret
+enum_case_5:
+   mov		rax, __TypeKind.Array
+   ret
+enum_case_6:
+   mov		rax, __TypeKind.Pointer
+   ret
+enum_case_7:
+   mov		rax, __TypeKind.Struct
+   ret
+enum_case_8:
+   mov		rax, __TypeKind.Enum
+   ret
+enum_case_9:
+   mov		rax, __TypeKind.Function
+   ret
+enum_case_10:
+   mov		rax, __TypeKind.Tuple
+   ret
+enum_case_11:
+   mov		rax, __TypeKind.Variadic
+   ret
+enum_case_12:
+   mov		rax, __TypeKind.Any
+   ret
+get_enum_string_TypePrimitiveKind:
+   mov		r8, 0
+   cmp		rdx, r8
+   jz			enum_case_14
+   mov		r8, 1
+   cmp		rdx, r8
+   jz			enum_case_15
+   mov		r8, 2
+   cmp		rdx, r8
+   jz			enum_case_16
+   mov		r8, 3
+   cmp		rdx, r8
+   jz			enum_case_17
+   mov		r8, 4
+   cmp		rdx, r8
+   jz			enum_case_18
+   mov		r8, 5
+   cmp		rdx, r8
+   jz			enum_case_19
+   mov		r8, 6
+   cmp		rdx, r8
+   jz			enum_case_20
+   mov		r8, 7
+   cmp		rdx, r8
+   jz			enum_case_21
+   mov		r8, 8
+   cmp		rdx, r8
+   jz			enum_case_22
+   mov		r8, 9
+   cmp		rdx, r8
+   jz			enum_case_23
+   mov		r8, 10
+   cmp		rdx, r8
+   jz			enum_case_24
+   mov		r8, 11
+   cmp		rdx, r8
+   jz			enum_case_25
+   mov		r8, 12
+   cmp		rdx, r8
+   jz			enum_case_26
+   mov		r8, 13
+   cmp		rdx, r8
+   jz			enum_case_27
+   mov		r8, 14
+   cmp		rdx, r8
+   jz			enum_case_28
+   mov		r8, 15
+   cmp		rdx, r8
+   jz			enum_case_29
+   mov		r8, 16
+   cmp		rdx, r8
+   jz			enum_case_30
+   mov		r8, 17
+   cmp		rdx, r8
+   jz			enum_case_31
+   push		rcx
+   mov		r8, rdx
+   mov		rdx, fmt_int
+   push		r8
+   push		rdx
+   push		rcx
+   call		sprintf
+   pop		rax
+   pop		rbx
+   pop		rbx
+   pop		rbx
+   ret
+enum_case_14:
+   mov		rax, __TypePrimitiveKind.Uint
+   ret
+enum_case_15:
+   mov		rax, __TypePrimitiveKind.U8
+   ret
+enum_case_16:
+   mov		rax, __TypePrimitiveKind.U16
+   ret
+enum_case_17:
+   mov		rax, __TypePrimitiveKind.U32
+   ret
+enum_case_18:
+   mov		rax, __TypePrimitiveKind.U64
+   ret
+enum_case_19:
+   mov		rax, __TypePrimitiveKind.Int
+   ret
+enum_case_20:
+   mov		rax, __TypePrimitiveKind.S8
+   ret
+enum_case_21:
+   mov		rax, __TypePrimitiveKind.S16
+   ret
+enum_case_22:
+   mov		rax, __TypePrimitiveKind.S32
+   ret
+enum_case_23:
+   mov		rax, __TypePrimitiveKind.S64
+   ret
+enum_case_24:
+   mov		rax, __TypePrimitiveKind.Float
+   ret
+enum_case_25:
+   mov		rax, __TypePrimitiveKind.F32
+   ret
+enum_case_26:
+   mov		rax, __TypePrimitiveKind.F64
+   ret
+enum_case_27:
+   mov		rax, __TypePrimitiveKind.String
+   ret
+enum_case_28:
+   mov		rax, __TypePrimitiveKind.Bool
+   ret
+enum_case_29:
+   mov		rax, __TypePrimitiveKind.Void
+   ret
+enum_case_30:
+   mov		rax, __TypePrimitiveKind.UntypedInt
+   ret
+enum_case_31:
+   mov		rax, __TypePrimitiveKind.UntypedFloat
+   ret
+get_enum_string_TypeArrayKind:
+   mov		r8, 0
+   cmp		rdx, r8
+   jz			enum_case_33
+   mov		r8, 1
+   cmp		rdx, r8
+   jz			enum_case_34
+   mov		r8, 2
+   cmp		rdx, r8
+   jz			enum_case_35
+   push		rcx
+   mov		r8, rdx
+   mov		rdx, fmt_int
+   push		r8
+   push		rdx
+   push		rcx
+   call		sprintf
+   pop		rax
+   pop		rbx
+   pop		rbx
+   pop		rbx
+   ret
+enum_case_33:
+   mov		rax, __TypeArrayKind.Fixed
+   ret
+enum_case_34:
+   mov		rax, __TypeArrayKind.Slice
+   ret
+enum_case_35:
+   mov		rax, __TypeArrayKind.Dynamic
+   ret
+
+; bytes locals   : 24
+; bytes temp     : 0
+; bytes total    : 64
+; (ret_0: *bool, type: *Type)
+Type.isPrimitive:
+   push		rbp
+   mov		rbp, rsp
+   sub		rsp, 64
+   ; Param ret_0
+   mov		-8[rbp], rcx
+   ; Param type
+   mov		-16[rbp], rdx
+   lea		rax, -16[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   push		rax
+   push		1
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rax
+   cmp		al, 0
+   jz			L38
+   ; block of if
+   ; Return
+   push		1
+   pop		rax
+   mov		rbx, -8[rbp]
+   mov		BYTE [rbx], al
+   jmp		L37
+   jmp L38
+; done
+L38:
+   lea		rax, -16[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   push		rax
+   push		2
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rax
+   cmp		al, 0
+   jz			L39
+   ; block of if
+   ; Return
+   push		1
+   pop		rax
+   mov		rbx, -8[rbp]
+   mov		BYTE [rbx], al
+   jmp		L37
+   jmp L39
+; done
+L39:
+   lea		rax, -16[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   push		rax
+   push		3
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rax
+   cmp		al, 0
+   jz			L40
+   ; block of if
+   ; Return
+   push		1
+   pop		rax
+   mov		rbx, -8[rbp]
+   mov		BYTE [rbx], al
+   jmp		L37
+   jmp L40
+; done
+L40:
+   lea		rax, -16[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   mov		eax, DWORD [rbx]
+   push		rax
+   push		4
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rax
+   cmp		al, 0
+   jz			L41
+   ; block of if
+   ; Return
+   push		1
+   pop		rax
+   mov		rbx, -8[rbp]
+   mov		BYTE [rbx], al
+   jmp		L37
+   jmp L41
+; done
+L41:
+   ; Return
+   push		0
+   pop		rax
+   mov		rbx, -8[rbp]
+   mov		BYTE [rbx], al
+   jmp		L37
+L37:
+   mov		rax, 0
+   add		rsp, 64
+   pop		rbp
+   ret
 
 ; bytes locals   : 88
 ; bytes temp     : 0
@@ -109,7 +509,7 @@ String.slice:
    ; Param to
    mov		rax, 40[rbp]
    mov		-32[rbp], eax
-   ; Ln 14: $result : string = -48[rbp]
+   ; Ln 9: $result : string = -48[rbp]
    mov		QWORD -48[rbp], 0
    mov		QWORD -40[rbp], 0
    mov		eax, DWORD -32[rbp]
@@ -127,9 +527,9 @@ String.slice:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L2
+   jz			L44
    ; block of if
-   ; Ln 17: Assignment
+   ; Ln 12: Assignment
    lea		rax, -24[rbp]
    push		rax
    pop		rbx
@@ -151,7 +551,7 @@ String.slice:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
-   ; Ln 18: Assignment
+   ; Ln 13: Assignment
    lea		rax, -24[rbp]
    push		rax
    pop		rbx
@@ -178,10 +578,10 @@ String.slice:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
-   jmp L1
+   jmp L43
 ; else
-L2:
-   ; Ln 20: Assignment
+L44:
+   ; Ln 15: Assignment
    lea		rax, -24[rbp]
    push		rax
    pop		rbx
@@ -203,7 +603,7 @@ L2:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
-   ; Ln 21: Assignment
+   ; Ln 16: Assignment
    mov		eax, DWORD -32[rbp]
    movsx		rax, eax
    push		rax
@@ -225,9 +625,9 @@ L2:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
-   jmp L1
+   jmp L43
 ; done
-L1:
+L43:
    ; Return
    lea		rax, -48[rbp]
    push		rax
@@ -237,8 +637,8 @@ L1:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   jmp		L0
-L0:
+   jmp		L42
+L42:
    mov		rax, 0
    add		rsp, 128
    pop		rbp
@@ -264,10 +664,10 @@ String.copy:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   ; Ln 28: $result : string = -40[rbp]
+   ; Ln 23: $result : string = -40[rbp]
    mov		QWORD -40[rbp], 0
    mov		QWORD -32[rbp], 0
-   ; Ln 30: Assignment
+   ; Ln 25: Assignment
    lea		rax, -24[rbp]
    push		rax
    pop		rbx
@@ -313,7 +713,7 @@ String.copy:
    call		memcpy
    push		rax
    pop		rax
-   ; Ln 33: Assignment
+   ; Ln 28: Assignment
    lea		rax, -24[rbp]
    push		rax
    pop		rbx
@@ -342,8 +742,8 @@ String.copy:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   jmp		L3
-L3:
+   jmp		L45
+L45:
    mov		rax, 0
    add		rsp, 160
    pop		rbp
@@ -369,7 +769,7 @@ String.toUpper:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   ; Ln 39: $result : string = -40[rbp]
+   ; Ln 34: $result : string = -40[rbp]
    lea		rax, -104[rbp]
    push		rax
    lea		rax, -24[rbp]
@@ -386,7 +786,7 @@ String.toUpper:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   ; Ln 41: For-loop
+   ; Ln 36: For-loop
    lea		rax, -24[rbp]
    push		rax
    pop		rax
@@ -395,11 +795,11 @@ String.toUpper:
    mov		-56[rbp], rbx     ; data
    mov		-64[rbp], rcx     ; count
    mov		QWORD -72[rbp], 0 ; index
-L5:
+L47:
    mov		rbx, -64[rbp]
    mov		rax, -72[rbp]
    cmp		rax, rbx
-   jge		L7
+   jge		L49
    mov		rbx, QWORD -56[rbp]
    mov		rax, QWORD -72[rbp]
    imul		rax, 1
@@ -431,9 +831,9 @@ L5:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L8
+   jz			L50
    ; block of if
-   ; Ln 43: Assignment
+   ; Ln 38: Assignment
    movzx		eax, BYTE -41[rbp]
    push		rax
    mov		rax, 32
@@ -456,13 +856,13 @@ L5:
    pop		rbx
    pop		rax
    mov		BYTE [rbx], al
-   jmp L8
+   jmp L50
 ; done
-L8:
-L6:
+L50:
+L48:
    inc		QWORD -72[rbp]
-   jmp		L5
-L7:
+   jmp		L47
+L49:
    ; Return
    lea		rax, -40[rbp]
    push		rax
@@ -472,8 +872,8 @@ L7:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   jmp		L4
-L4:
+   jmp		L46
+L46:
    mov		rax, 0
    add		rsp, 176
    pop		rbp
@@ -499,7 +899,7 @@ String.toLower:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   ; Ln 51: $result : string = -40[rbp]
+   ; Ln 46: $result : string = -40[rbp]
    lea		rax, -104[rbp]
    push		rax
    lea		rax, -24[rbp]
@@ -516,7 +916,7 @@ String.toLower:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   ; Ln 53: For-loop
+   ; Ln 48: For-loop
    lea		rax, -24[rbp]
    push		rax
    pop		rax
@@ -525,11 +925,11 @@ String.toLower:
    mov		-56[rbp], rbx     ; data
    mov		-64[rbp], rcx     ; count
    mov		QWORD -72[rbp], 0 ; index
-L10:
+L52:
    mov		rbx, -64[rbp]
    mov		rax, -72[rbp]
    cmp		rax, rbx
-   jge		L12
+   jge		L54
    mov		rbx, QWORD -56[rbp]
    mov		rax, QWORD -72[rbp]
    imul		rax, 1
@@ -561,9 +961,9 @@ L10:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L13
+   jz			L55
    ; block of if
-   ; Ln 55: Assignment
+   ; Ln 50: Assignment
    movzx		eax, BYTE -41[rbp]
    push		rax
    mov		rax, 32
@@ -586,13 +986,13 @@ L10:
    pop		rbx
    pop		rax
    mov		BYTE [rbx], al
-   jmp L13
+   jmp L55
 ; done
-L13:
-L11:
+L55:
+L53:
    inc		QWORD -72[rbp]
-   jmp		L10
-L12:
+   jmp		L52
+L54:
    ; Return
    lea		rax, -40[rbp]
    push		rax
@@ -602,8 +1002,8 @@ L12:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   jmp		L9
-L9:
+   jmp		L51
+L51:
    mov		rax, 0
    add		rsp, 176
    pop		rbp
@@ -637,7 +1037,7 @@ String.startsWith:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   ; Ln 63: For-loop
+   ; Ln 58: For-loop
    lea		rax, -40[rbp]
    push		rax
    pop		rax
@@ -646,11 +1046,11 @@ String.startsWith:
    mov		-56[rbp], rbx     ; data
    mov		-64[rbp], rcx     ; count
    mov		QWORD -72[rbp], 0 ; index
-L15:
+L57:
    mov		rbx, -64[rbp]
    mov		rax, -72[rbp]
    cmp		rax, rbx
-   jge		L17
+   jge		L59
    mov		rbx, QWORD -56[rbp]
    mov		rax, QWORD -72[rbp]
    imul		rax, 1
@@ -678,28 +1078,28 @@ L15:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L18
+   jz			L60
    ; block of if
    ; Return
    push		0
    pop		rax
    mov		rbx, -8[rbp]
    mov		BYTE [rbx], al
-   jmp		L14
-   jmp L18
+   jmp		L56
+   jmp L60
 ; done
-L18:
-L16:
+L60:
+L58:
    inc		QWORD -72[rbp]
-   jmp		L15
-L17:
+   jmp		L57
+L59:
    ; Return
    push		1
    pop		rax
    mov		rbx, -8[rbp]
    mov		BYTE [rbx], al
-   jmp		L14
-L14:
+   jmp		L56
+L56:
    mov		rax, 0
    add		rsp, 144
    pop		rbp
@@ -756,18 +1156,18 @@ String.endsWith:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L20
+   jz			L62
    ; block of if
    ; Return
    push		0
    pop		rax
    mov		rbx, -8[rbp]
    mov		BYTE [rbx], al
-   jmp		L19
-   jmp L20
+   jmp		L61
+   jmp L62
 ; done
-L20:
-   ; Ln 77: $trailing : string = -56[rbp]
+L62:
+   ; Ln 72: $trailing : string = -56[rbp]
    lea		rax, -136[rbp]
    push		rax
    lea		rax, -24[rbp]
@@ -811,7 +1211,7 @@ L20:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   ; Ln 79: For-loop
+   ; Ln 74: For-loop
    lea		rax, -56[rbp]
    push		rax
    pop		rax
@@ -820,11 +1220,11 @@ L20:
    mov		-72[rbp], rbx     ; data
    mov		-80[rbp], rcx     ; count
    mov		QWORD -88[rbp], 0 ; index
-L21:
+L63:
    mov		rbx, -80[rbp]
    mov		rax, -88[rbp]
    cmp		rax, rbx
-   jge		L23
+   jge		L65
    mov		rbx, QWORD -72[rbp]
    mov		rax, QWORD -88[rbp]
    imul		rax, 1
@@ -852,28 +1252,28 @@ L21:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L24
+   jz			L66
    ; block of if
    ; Return
    push		0
    pop		rax
    mov		rbx, -8[rbp]
    mov		BYTE [rbx], al
-   jmp		L19
-   jmp L24
+   jmp		L61
+   jmp L66
 ; done
-L24:
-L22:
+L66:
+L64:
    inc		QWORD -88[rbp]
-   jmp		L21
-L23:
+   jmp		L63
+L65:
    ; Return
    push		1
    pop		rax
    mov		rbx, -8[rbp]
    mov		BYTE [rbx], al
-   jmp		L19
-L19:
+   jmp		L61
+L61:
    mov		rax, 0
    add		rsp, 240
    pop		rbp
@@ -930,18 +1330,18 @@ String.equals:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L26
+   jz			L68
    ; block of if
    ; Return
    push		0
    pop		rax
    mov		rbx, -8[rbp]
    mov		BYTE [rbx], al
-   jmp		L25
-   jmp L26
+   jmp		L67
+   jmp L68
 ; done
-L26:
-   ; Ln 94: For-loop
+L68:
+   ; Ln 89: For-loop
    lea		rax, -24[rbp]
    push		rax
    pop		rax
@@ -950,11 +1350,11 @@ L26:
    mov		-56[rbp], rbx     ; data
    mov		-64[rbp], rcx     ; count
    mov		QWORD -72[rbp], 0 ; index
-L27:
+L69:
    mov		rbx, -64[rbp]
    mov		rax, -72[rbp]
    cmp		rax, rbx
-   jge		L29
+   jge		L71
    mov		rbx, QWORD -56[rbp]
    mov		rax, QWORD -72[rbp]
    imul		rax, 1
@@ -982,28 +1382,28 @@ L27:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L30
+   jz			L72
    ; block of if
    ; Return
    push		0
    pop		rax
    mov		rbx, -8[rbp]
    mov		BYTE [rbx], al
-   jmp		L25
-   jmp L30
+   jmp		L67
+   jmp L72
 ; done
-L30:
-L28:
+L72:
+L70:
    inc		QWORD -72[rbp]
-   jmp		L27
-L29:
+   jmp		L69
+L71:
    ; Return
    push		1
    pop		rax
    mov		rbx, -8[rbp]
    mov		BYTE [rbx], al
-   jmp		L25
-L25:
+   jmp		L67
+L67:
    mov		rax, 0
    add		rsp, 144
    pop		rbp
@@ -1078,7 +1478,7 @@ String.indexOf:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L32
+   jz			L74
    ; block of if
    ; Return
    mov		rax, 1
@@ -1089,10 +1489,10 @@ String.indexOf:
    pop		rax
    mov		rbx, -8[rbp]
    mov		DWORD [rbx], eax
-   jmp		L31
-   jmp L32
+   jmp		L73
+   jmp L74
 ; done
-L32:
+L74:
    mov		eax, DWORD -44[rbp]
    movsx		rax, eax
    push		rax
@@ -1111,7 +1511,7 @@ L32:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L33
+   jz			L75
    ; block of if
    ; Return
    mov		rax, 1
@@ -1122,11 +1522,11 @@ L32:
    pop		rax
    mov		rbx, -8[rbp]
    mov		DWORD [rbx], eax
-   jmp		L31
-   jmp L33
+   jmp		L73
+   jmp L75
 ; done
-L33:
-   ; Ln 113: $src : string = -64[rbp]
+L75:
+   ; Ln 108: $src : string = -64[rbp]
    lea		rax, -200[rbp]
    push		rax
    lea		rax, -24[rbp]
@@ -1153,7 +1553,7 @@ L33:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   ; Ln 115: For-loop
+   ; Ln 110: For-loop
    lea		rax, -64[rbp]
    push		rax
    pop		rax
@@ -1162,11 +1562,11 @@ L33:
    mov		-80[rbp], rbx     ; data
    mov		-88[rbp], rcx     ; count
    mov		QWORD -96[rbp], 0 ; index
-L34:
+L76:
    mov		rbx, -88[rbp]
    mov		rax, -96[rbp]
    cmp		rax, rbx
-   jge		L36
+   jge		L78
    mov		rbx, QWORD -80[rbp]
    mov		rax, QWORD -96[rbp]
    imul		rax, 1
@@ -1203,13 +1603,13 @@ L34:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L37
+   jz			L79
    ; block of if
-   ; Ln 119: $match : bool = -97[rbp]
+   ; Ln 114: $match : bool = -97[rbp]
    push		1
    pop		rax
    mov		BYTE -97[rbp], al
-   ; Ln 120: For-loop
+   ; Ln 115: For-loop
    lea		rax, -40[rbp]
    push		rax
    pop		rax
@@ -1218,11 +1618,11 @@ L34:
    mov		-112[rbp], rbx     ; data
    mov		-120[rbp], rcx     ; count
    mov		QWORD -128[rbp], 0 ; index
-L38:
+L80:
    mov		rbx, -120[rbp]
    mov		rax, -128[rbp]
    cmp		rax, rbx
-   jge		L40
+   jge		L82
    mov		rbx, QWORD -112[rbp]
    mov		rax, QWORD -128[rbp]
    imul		rax, 1
@@ -1254,7 +1654,7 @@ L38:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L41
+   jz			L83
    ; block of if
    ; Return
    mov		rax, 1
@@ -1265,11 +1665,11 @@ L38:
    pop		rax
    mov		rbx, -8[rbp]
    mov		DWORD [rbx], eax
-   jmp		L31
-   jmp L41
+   jmp		L73
+   jmp L83
 ; done
-L41:
-   ; Ln 127: $c1f : char = -129[rbp]
+L83:
+   ; Ln 122: $c1f : char = -129[rbp]
    lea		rax, -64[rbp]
    push		rax
    mov		eax, DWORD -96[rbp]
@@ -1302,28 +1702,28 @@ L41:
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L42
+   jz			L84
    ; block of if
-   ; Ln 131: Assignment
+   ; Ln 126: Assignment
    push		0
    lea		rax, -97[rbp]
    push		rax
    pop		rbx
    pop		rax
    mov		BYTE [rbx], al
-   jmp		L40
-   jmp L42
+   jmp		L82
+   jmp L84
 ; done
-L42:
-L39:
+L84:
+L81:
    inc		QWORD -128[rbp]
-   jmp		L38
-L40:
+   jmp		L80
+L82:
    movzx		eax, BYTE -97[rbp]
    push		rax
    pop		rax
    cmp		al, 0
-   jz			L43
+   jz			L85
    ; block of if
    ; Return
    mov		eax, DWORD -96[rbp]
@@ -1332,17 +1732,17 @@ L40:
    pop		rax
    mov		rbx, -8[rbp]
    mov		DWORD [rbx], eax
-   jmp		L31
-   jmp L43
+   jmp		L73
+   jmp L85
 ; done
-L43:
-   jmp L37
+L85:
+   jmp L79
 ; done
-L37:
-L35:
+L79:
+L77:
    inc		QWORD -96[rbp]
-   jmp		L34
-L36:
+   jmp		L76
+L78:
    ; Return
    mov		rax, 1
    push		rax
@@ -1352,21 +1752,21 @@ L36:
    pop		rax
    mov		rbx, -8[rbp]
    mov		DWORD [rbx], eax
-   jmp		L31
-L31:
+   jmp		L73
+L73:
    mov		rax, 0
    add		rsp, 288
    pop		rbp
    ret
 
-; bytes locals   : 96
-; bytes temp     : 0
-; bytes total    : 128
+; bytes locals   : 128
+; bytes temp     : 72
+; bytes total    : 240
 ; (ret_0: *[]string, s: string, sep: string)
 String.split:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 128
+   sub		rsp, 240
    mov		16[rbp], rcx
    mov		24[rbp], rdx
    mov		32[rbp], r8 
@@ -1387,7 +1787,7 @@ String.split:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   ; Ln 146: $result : [..]string = -64[rbp]
+   ; Ln 141: $result : [..]string = -64[rbp]
    lea		rbx, -64[rbp]
    push		rbx
    mov		rdx, 16
@@ -1397,6 +1797,101 @@ String.split:
    mov		QWORD 0[rbx], rax
    mov		QWORD 8[rbx], 0
    mov		QWORD 16[rbx], 2
+   mov		QWORD 24[rbx], 16
+   ; Ln 143: $cursor : int = -68[rbp]
+   mov		rax, 0
+   push		rax
+   pop		rax
+   mov		DWORD -68[rbp], eax
+L87:
+   push		1
+   pop		rax
+   cmp		al, 0
+   jz			L88
+   ; While body
+   ; Ln 145: $i : int = -72[rbp]
+   lea		rax, -132[rbp]
+   push		rax
+   lea		rax, -24[rbp]
+   push		rax
+   lea		rax, -40[rbp]
+   push		rax
+   mov		eax, DWORD -68[rbp]
+   movsx		rax, eax
+   push		rax
+   pop		r9 
+   pop		r8 
+   pop		rdx
+   pop		rcx
+   ; (string, string, int) 
+   call		String.indexOf
+   mov		eax, DWORD -132[rbp]
+   movsx		rax, eax
+   push		rax
+   pop		rax
+   mov		DWORD -72[rbp], eax
+   mov		eax, DWORD -72[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 1
+   push		rax
+   pop		rax
+   neg		rax
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   sete		al
+   push		rax
+   pop		rax
+   cmp		al, 0
+   jz			L90
+   ; block of if
+   ; Ln 147: $tail : string = -88[rbp]
+   lea		rax, -144[rbp]
+   push		rax
+   lea		rax, -24[rbp]
+   push		rax
+   mov		eax, DWORD -68[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 1
+   push		rax
+   pop		rax
+   neg		rax
+   push		rax
+   pop		r9 
+   pop		r8 
+   pop		rdx
+   pop		rcx
+   ; (string, int, int) 
+   call		String.slice
+   lea		rax, -144[rbp]
+   push		rax
+   pop		rax
+   lea		rbx, -88[rbp]
+   lea		rcx, 0[rbx]
+   lea		rdx, 0[rax]
+   mov		r8, 16
+   call		memcpy
+   jmp		L88
+   jmp L89
+; else
+L90:
+   ; Ln 151: Assignment
+   mov		eax, DWORD -72[rbp]
+   movsx		rax, eax
+   push		rax
+   lea		rax, -68[rbp]
+   push		rax
+   pop		rbx
+   pop		rax
+   mov		DWORD [rbx], eax
+   jmp L89
+; done
+L89:
+   jmp			L87
+L88:
    ; Return
    lea		rax, -64[rbp]
    push		rax
@@ -1406,807 +1901,177 @@ String.split:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   jmp		L44
-L44:
+   jmp		L86
+L86:
    mov		rax, 0
-   add		rsp, 128
+   add		rsp, 240
    pop		rbp
    ret
 
-; bytes locals   : 296
-; bytes temp     : 72
-; bytes total    : 400
+; bytes locals   : 64
+; bytes temp     : 8
+; bytes total    : 112
 ; ()
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 400
-   push		0
-   pop		rax
-   cmp		al, 0
-   jz			L46
-   ; block of if
-   ; Ln 4: $text : string = -16[rbp]
+   sub		rsp, 112
+   ; Ln 2: $myStrings : [..]string = -24[rbp]
+   lea		rbx, -24[rbp]
+   push		rbx
+   mov		rdx, 16
+   mov		rcx, 2
+   call		calloc
+   pop		rbx
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 0
+   mov		QWORD 16[rbx], 2
+   mov		QWORD 24[rbx], 16
+   lea		rax, -24[rbp]
+   push		rax
    mov		rax, CS0
-   mov		-312[rbp], rax
-   mov		QWORD -304[rbp], 43
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -16[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   ; Ln 6: $quickBrown : string = -32[rbp]
-   lea		rax, -312[rbp]
-   push		rax
-   lea		rax, -16[rbp]
-   push		rax
-   mov		rax, 4
-   push		rax
-   mov		rax, 15
-   push		rax
-   pop		r9 
-   pop		r8 
-   pop		rdx
-   pop		rcx
-   ; (string, int, int) 
-   call		String.slice
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -32[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   ; Ln 8 Print
-   lea		rax, -32[rbp]
-   push		rax
-   pop		rbx
-   mov		-304[rbp], rbx
-   mov		rdx, 8[rbx]
-   add		rdx, 1
-   mov		rcx, 1
-   sub		rsp, 32
-   call		calloc
-   add		rsp, 32
-   mov		rbx, -304[rbp]
-   mov		rdx, 0[rbx]
-   mov		r8d, 8[rbx]
-   mov		-304[rbp], rax
-   mov		rcx, rax
-   sub		rsp, 32
-   call		memcpy
-   add		rsp, 32
-   mov		rax, -304[rbp]
-   push		rax
-   ; Pop print arguments
-   pop		rax
-   mov		rdx, rax
-   mov		rcx, CS1
-   call		printf
-   ; Ln 9 Print
-   lea		rax, -32[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 8
-   push		rbx
-   pop		rbx
-   mov		rax, QWORD [rbx]
-   push		rax
-   ; Pop print arguments
-   pop		rax
-   mov		rdx, rax
-   mov		rcx, CS2
-   call		printf
-   ; Ln 11: $fox : string = -48[rbp]
-   lea		rax, -312[rbp]
-   push		rax
-   lea		rax, -16[rbp]
-   push		rax
-   mov		rax, 16
-   push		rax
-   mov		rax, 1
-   push		rax
-   pop		rax
-   neg		rax
-   push		rax
-   pop		r9 
-   pop		r8 
-   pop		rdx
-   pop		rcx
-   ; (string, int, int) 
-   call		String.slice
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -48[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   ; Ln 12 Print
-   lea		rax, -48[rbp]
-   push		rax
-   pop		rbx
-   mov		-304[rbp], rbx
-   mov		rdx, 8[rbx]
-   add		rdx, 1
-   mov		rcx, 1
-   sub		rsp, 32
-   call		calloc
-   add		rsp, 32
-   mov		rbx, -304[rbp]
-   mov		rdx, 0[rbx]
-   mov		r8d, 8[rbx]
-   mov		-304[rbp], rax
-   mov		rcx, rax
-   sub		rsp, 32
-   call		memcpy
-   add		rsp, 32
-   mov		rax, -304[rbp]
-   push		rax
-   ; Pop print arguments
-   pop		rax
-   mov		rdx, rax
-   mov		rcx, CS3
-   call		printf
-   ; Ln 13 Print
-   lea		rax, -48[rbp]
-   push		rax
-   pop		rbx
-   add		rbx, 8
-   push		rbx
-   pop		rbx
-   mov		rax, QWORD [rbx]
-   push		rax
-   ; Pop print arguments
-   pop		rax
-   mov		rdx, rax
-   mov		rcx, CS4
-   call		printf
-   jmp L46
-; done
-L46:
-   push		0
-   pop		rax
-   cmp		al, 0
-   jz			L47
-   ; block of if
-   ; Ln 17: $text : string = -64[rbp]
-   mov		rax, CS5
-   mov		-312[rbp], rax
-   mov		QWORD -304[rbp], 43
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -64[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   ; Ln 19: $copy : string = -80[rbp]
-   lea		rax, -312[rbp]
-   push		rax
-   lea		rax, -64[rbp]
-   push		rax
-   pop		rdx
-   pop		rcx
-   ; (string) 
-   call		String.copy
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -80[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   ; Ln 21: Assignment
-   mov		rax, 115
-   push		rax
-   lea		rax, -64[rbp]
-   push		rax
-   mov		rax, 4
-   push		rax
-   pop		rax
-   pop		rbx
-   mov		rbx, [rbx]
-   imul		rax, 1; Add index expr
-   add		rbx, rax
-   push		rbx
-   pop		rbx
-   pop		rax
-   mov		BYTE [rbx], al
-   ; Ln 22: Assignment
-   mov		rax, 108
-   push		rax
-   lea		rax, -64[rbp]
-   push		rax
-   mov		rax, 5
-   push		rax
-   pop		rax
-   pop		rbx
-   mov		rbx, [rbx]
-   imul		rax, 1; Add index expr
-   add		rbx, rax
-   push		rbx
-   pop		rbx
-   pop		rax
-   mov		BYTE [rbx], al
-   ; Ln 23: Assignment
-   mov		rax, 111
-   push		rax
-   lea		rax, -64[rbp]
-   push		rax
-   mov		rax, 6
-   push		rax
-   pop		rax
-   pop		rbx
-   mov		rbx, [rbx]
-   imul		rax, 1; Add index expr
-   add		rbx, rax
-   push		rbx
-   pop		rbx
-   pop		rax
-   mov		BYTE [rbx], al
-   ; Ln 24: Assignment
-   mov		rax, 119
-   push		rax
-   lea		rax, -64[rbp]
-   push		rax
-   mov		rax, 7
-   push		rax
-   pop		rax
-   pop		rbx
-   mov		rbx, [rbx]
-   imul		rax, 1; Add index expr
-   add		rbx, rax
-   push		rbx
-   pop		rbx
-   pop		rax
-   mov		BYTE [rbx], al
-   ; Ln 25: Assignment
-   mov		rax, 32
-   push		rax
-   lea		rax, -64[rbp]
-   push		rax
-   mov		rax, 8
-   push		rax
-   pop		rax
-   pop		rbx
-   mov		rbx, [rbx]
-   imul		rax, 1; Add index expr
-   add		rbx, rax
-   push		rbx
-   pop		rbx
-   pop		rax
-   mov		BYTE [rbx], al
-   ; Ln 26 Print
-   lea		rax, -64[rbp]
-   push		rax
-   pop		rbx
-   mov		-304[rbp], rbx
-   mov		rdx, 8[rbx]
-   add		rdx, 1
-   mov		rcx, 1
-   sub		rsp, 32
-   call		calloc
-   add		rsp, 32
-   mov		rbx, -304[rbp]
-   mov		rdx, 0[rbx]
-   mov		r8d, 8[rbx]
-   mov		-304[rbp], rax
-   mov		rcx, rax
-   sub		rsp, 32
-   call		memcpy
-   add		rsp, 32
-   mov		rax, -304[rbp]
-   push		rax
-   ; Pop print arguments
-   pop		rax
-   mov		rdx, rax
-   mov		rcx, CS6
-   call		printf
-   ; Ln 28 Print
+   mov		-80[rbp], rax
+   mov		QWORD -72[rbp], 5
    lea		rax, -80[rbp]
    push		rax
+   pop		rdx
+   pop		rcx
+   ; ([..]string, string) 
+   call		runtime_builtin_append
+   lea		rax, -24[rbp]
+   push		rax
+   mov		rax, CS1
+   mov		-80[rbp], rax
+   mov		QWORD -72[rbp], 5
+   lea		rax, -80[rbp]
+   push		rax
+   pop		rdx
+   pop		rcx
+   ; ([..]string, string) 
+   call		runtime_builtin_append
+   lea		rax, -24[rbp]
+   push		rax
+   mov		rax, CS2
+   mov		-80[rbp], rax
+   mov		QWORD -72[rbp], 7
+   lea		rax, -80[rbp]
+   push		rax
+   pop		rdx
+   pop		rcx
+   ; ([..]string, string) 
+   call		runtime_builtin_append
+   lea		rax, -24[rbp]
+   push		rax
+   mov		rax, CS3
+   mov		-80[rbp], rax
+   mov		QWORD -72[rbp], 6
+   lea		rax, -80[rbp]
+   push		rax
+   pop		rdx
+   pop		rcx
+   ; ([..]string, string) 
+   call		runtime_builtin_append
+   lea		rax, -24[rbp]
+   push		rax
+   mov		rax, CS4
+   mov		-80[rbp], rax
+   mov		QWORD -72[rbp], 4
+   lea		rax, -80[rbp]
+   push		rax
+   pop		rdx
+   pop		rcx
+   ; ([..]string, string) 
+   call		runtime_builtin_append
+   lea		rax, -24[rbp]
+   push		rax
+   mov		rax, CS5
+   mov		-80[rbp], rax
+   mov		QWORD -72[rbp], 3
+   lea		rax, -80[rbp]
+   push		rax
+   pop		rdx
+   pop		rcx
+   ; ([..]string, string) 
+   call		runtime_builtin_append
+   lea		rax, -24[rbp]
+   push		rax
+   mov		rax, CS6
+   mov		-80[rbp], rax
+   mov		QWORD -72[rbp], 6
+   lea		rax, -80[rbp]
+   push		rax
+   pop		rdx
+   pop		rcx
+   ; ([..]string, string) 
+   call		runtime_builtin_append
+   ; Ln 13 Print
+   lea		rax, -24[rbp]
+   push		rax
    pop		rbx
-   mov		-304[rbp], rbx
-   mov		rdx, 8[rbx]
-   add		rdx, 1
-   mov		rcx, 1
-   sub		rsp, 32
-   call		calloc
-   add		rsp, 32
-   mov		rbx, -304[rbp]
-   mov		rdx, 0[rbx]
-   mov		r8d, 8[rbx]
-   mov		-304[rbp], rax
-   mov		rcx, rax
-   sub		rsp, 32
-   call		memcpy
-   add		rsp, 32
-   mov		rax, -304[rbp]
+   add		rbx, 8
+   push		rbx
+   pop		rbx
+   mov		rax, QWORD [rbx]
    push		rax
    ; Pop print arguments
    pop		rax
    mov		rdx, rax
    mov		rcx, CS7
    call		printf
-   jmp L47
-; done
-L47:
-   push		0
-   pop		rax
-   cmp		al, 0
-   jz			L48
-   ; block of if
-   ; Ln 32: $text : string = -96[rbp]
-   mov		rax, CS8
-   mov		-312[rbp], rax
-   mov		QWORD -304[rbp], 43
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -96[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   ; Ln 34: $uppercased : string = -112[rbp]
-   lea		rax, -312[rbp]
-   push		rax
-   lea		rax, -96[rbp]
-   push		rax
-   pop		rdx
-   pop		rcx
-   ; (string) 
-   call		String.toUpper
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -112[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   ; Ln 35 Print
-   lea		rax, -112[rbp]
-   push		rax
-   pop		rbx
-   mov		-304[rbp], rbx
-   mov		rdx, 8[rbx]
-   add		rdx, 1
-   mov		rcx, 1
-   sub		rsp, 32
-   call		calloc
-   add		rsp, 32
-   mov		rbx, -304[rbp]
-   mov		rdx, 0[rbx]
-   mov		r8d, 8[rbx]
-   mov		-304[rbp], rax
-   mov		rcx, rax
-   sub		rsp, 32
-   call		memcpy
-   add		rsp, 32
-   mov		rax, -304[rbp]
-   push		rax
-   ; Pop print arguments
-   pop		rax
-   mov		rdx, rax
-   mov		rcx, CS9
-   call		printf
-   jmp L48
-; done
-L48:
-   push		0
-   pop		rax
-   cmp		al, 0
-   jz			L49
-   ; block of if
-   ; Ln 40: $text : string = -128[rbp]
-   mov		rax, CS10
-   mov		-312[rbp], rax
-   mov		QWORD -304[rbp], 43
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -128[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   ; Ln 42: $lowercase : string = -144[rbp]
-   lea		rax, -312[rbp]
-   push		rax
-   lea		rax, -128[rbp]
-   push		rax
-   pop		rdx
-   pop		rcx
-   ; (string) 
-   call		String.toLower
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -144[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   ; Ln 43 Print
-   lea		rax, -144[rbp]
-   push		rax
-   pop		rbx
-   mov		-304[rbp], rbx
-   mov		rdx, 8[rbx]
-   add		rdx, 1
-   mov		rcx, 1
-   sub		rsp, 32
-   call		calloc
-   add		rsp, 32
-   mov		rbx, -304[rbp]
-   mov		rdx, 0[rbx]
-   mov		r8d, 8[rbx]
-   mov		-304[rbp], rax
-   mov		rcx, rax
-   sub		rsp, 32
-   call		memcpy
-   add		rsp, 32
-   mov		rax, -304[rbp]
-   push		rax
-   ; Pop print arguments
-   pop		rax
-   mov		rdx, rax
-   mov		rcx, CS11
-   call		printf
-   jmp L49
-; done
-L49:
-   push		1
-   pop		rax
-   cmp		al, 0
-   jz			L50
-   ; block of if
-   ; Ln 48: $text : string = -160[rbp]
-   mov		rax, CS12
-   mov		-312[rbp], rax
-   mov		QWORD -304[rbp], 43
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -160[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   lea		rax, -297[rbp]
-   push		rax
-   lea		rax, -160[rbp]
-   push		rax
-   mov		rax, CS13
-   mov		-313[rbp], rax
-   mov		QWORD -305[rbp], 3
-   lea		rax, -313[rbp]
-   push		rax
-   pop		r8 
-   pop		rdx
-   pop		rcx
-   ; (string, string) 
-   call		String.startsWith
-   movzx		eax, BYTE -297[rbp]
-   push		rax
-   pop		rcx
-   mov		rdx, 49
-   call		assert
-   jmp L50
-; done
-L50:
-   push		1
-   pop		rax
-   cmp		al, 0
-   jz			L51
-   ; block of if
-   ; Ln 54: $text : string = -176[rbp]
-   mov		rax, CS14
-   mov		-312[rbp], rax
-   mov		QWORD -304[rbp], 43
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -176[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   lea		rax, -297[rbp]
-   push		rax
-   lea		rax, -176[rbp]
-   push		rax
-   mov		rax, CS15
-   mov		-313[rbp], rax
-   mov		QWORD -305[rbp], 3
-   lea		rax, -313[rbp]
-   push		rax
-   pop		r8 
-   pop		rdx
-   pop		rcx
-   ; (string, string) 
-   call		String.endsWith
-   movzx		eax, BYTE -297[rbp]
-   push		rax
-   pop		rcx
-   mov		rdx, 55
-   call		assert
-   jmp L51
-; done
-L51:
-   push		1
-   pop		rax
-   cmp		al, 0
-   jz			L52
-   ; block of if
-   ; Ln 60: $text : string = -192[rbp]
-   mov		rax, CS16
-   mov		-312[rbp], rax
-   mov		QWORD -304[rbp], 43
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -192[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   ; Ln 62: $index1 : int = -196[rbp]
-   lea		rax, -300[rbp]
-   push		rax
-   lea		rax, -192[rbp]
-   push		rax
-   mov		rax, CS17
-   mov		-316[rbp], rax
-   mov		QWORD -308[rbp], 5
-   lea		rax, -316[rbp]
-   push		rax
-   mov		rax, 0
-   push		rax
-   pop		r9 
-   pop		r8 
-   pop		rdx
-   pop		rcx
-   ; (string, string, int) 
-   call		String.indexOf
-   mov		eax, DWORD -300[rbp]
-   movsx		rax, eax
-   push		rax
-   pop		rax
-   mov		DWORD -196[rbp], eax
-   mov		eax, DWORD -196[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 4
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 63
-   call		assert
-   ; Ln 65: $index2 : int = -200[rbp]
-   lea		rax, -300[rbp]
-   push		rax
-   lea		rax, -192[rbp]
-   push		rax
-   mov		rax, CS18
-   mov		-316[rbp], rax
-   mov		QWORD -308[rbp], 3
-   lea		rax, -316[rbp]
-   push		rax
-   mov		rax, 0
-   push		rax
-   pop		r9 
-   pop		r8 
-   pop		rdx
-   pop		rcx
-   ; (string, string, int) 
-   call		String.indexOf
-   mov		eax, DWORD -300[rbp]
-   movsx		rax, eax
-   push		rax
-   pop		rax
-   mov		DWORD -200[rbp], eax
-   mov		eax, DWORD -200[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 40
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 66
-   call		assert
-   ; Ln 69: $index3 : int = -204[rbp]
-   lea		rax, -300[rbp]
-   push		rax
-   lea		rax, -192[rbp]
-   push		rax
-   mov		rax, CS19
-   mov		-316[rbp], rax
-   mov		QWORD -308[rbp], 5
-   lea		rax, -316[rbp]
-   push		rax
-   mov		rax, 10
-   push		rax
-   pop		r9 
-   pop		r8 
-   pop		rdx
-   pop		rcx
-   ; (string, string, int) 
-   call		String.indexOf
-   mov		eax, DWORD -300[rbp]
-   movsx		rax, eax
-   push		rax
-   pop		rax
-   mov		DWORD -204[rbp], eax
-   mov		eax, DWORD -204[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 1
-   push		rax
-   pop		rax
-   neg		rax
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 70
-   call		assert
-   ; Ln 72: $index4 : int = -208[rbp]
-   lea		rax, -300[rbp]
-   push		rax
-   lea		rax, -192[rbp]
-   push		rax
-   mov		rax, CS20
-   mov		-316[rbp], rax
-   mov		QWORD -308[rbp], 3
-   lea		rax, -316[rbp]
-   push		rax
-   mov		rax, 4
-   push		rax
-   pop		r9 
-   pop		r8 
-   pop		rdx
-   pop		rcx
-   ; (string, string, int) 
-   call		String.indexOf
-   mov		eax, DWORD -300[rbp]
-   movsx		rax, eax
-   push		rax
-   pop		rax
-   mov		DWORD -208[rbp], eax
-   mov		eax, DWORD -208[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 27
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   sete		al
-   push		rax
-   pop		rcx
-   mov		rdx, 73
-   call		assert
-   jmp L52
-; done
-L52:
-   push		1
-   pop		rax
-   cmp		al, 0
-   jz			L53
-   ; block of if
-   ; Ln 78: $text : string = -224[rbp]
-   mov		rax, CS21
-   mov		-312[rbp], rax
-   mov		QWORD -304[rbp], 43
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -224[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   ; Ln 80: $splitted : []string = -240[rbp]
-   lea		rax, -312[rbp]
-   push		rax
-   lea		rax, -224[rbp]
-   push		rax
-   mov		rax, CS22
-   mov		-328[rbp], rax
-   mov		QWORD -320[rbp], 1
-   lea		rax, -328[rbp]
-   push		rax
-   pop		r8 
-   pop		rdx
-   pop		rcx
-   ; (string, string) 
-   call		String.split
-   lea		rax, -312[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -240[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   ; Ln 82: For-loop
-   lea		rax, -240[rbp]
+   ; Ln 15: For-loop
+   lea		rax, -24[rbp]
    push		rax
    pop		rax
    mov		rbx, 0[rax]
    mov		rcx, 8[rax]
-   mov		-264[rbp], rbx     ; data
-   mov		-272[rbp], rcx     ; count
-   mov		QWORD -280[rbp], 0 ; index
-L54:
-   mov		rbx, -272[rbp]
-   mov		rax, -280[rbp]
+   mov		-48[rbp], rbx     ; data
+   mov		-56[rbp], rcx     ; count
+   mov		QWORD -64[rbp], 0 ; index
+L92:
+   mov		rbx, -56[rbp]
+   mov		rax, -64[rbp]
    cmp		rax, rbx
-   jge		L56
-   mov		rbx, QWORD -264[rbp]
-   mov		rax, QWORD -280[rbp]
+   jge		L94
+   mov		rbx, QWORD -48[rbp]
+   mov		rax, QWORD -64[rbp]
    imul		rax, 16
    lea		rbx, [rbx + rax]
    mov		r8, 16
    mov		rdx, rbx
-   lea		rcx, -256[rbp]
+   lea		rcx, -40[rbp]
    call		memcpy
-   ; Ln 83 Print
-   lea		rax, -256[rbp]
+   ; Ln 16 Print
+   lea		rax, -40[rbp]
    push		rax
    pop		rbx
-   mov		-304[rbp], rbx
+   mov		-72[rbp], rbx
    mov		rdx, 8[rbx]
    add		rdx, 1
    mov		rcx, 1
    sub		rsp, 32
    call		calloc
    add		rsp, 32
-   mov		rbx, -304[rbp]
+   mov		rbx, -72[rbp]
    mov		rdx, 0[rbx]
    mov		r8d, 8[rbx]
-   mov		-304[rbp], rax
+   mov		-72[rbp], rax
    mov		rcx, rax
    sub		rsp, 32
    call		memcpy
    add		rsp, 32
-   mov		rax, -304[rbp]
+   mov		rax, -72[rbp]
    push		rax
    ; Pop print arguments
    pop		rax
    mov		rdx, rax
-   mov		rcx, CS23
+   mov		rcx, CS8
    call		printf
-L55:
-   inc		QWORD -280[rbp]
-   jmp		L54
-L56:
-   jmp L53
-; done
-L53:
-L45:
+L93:
+   inc		QWORD -64[rbp]
+   jmp		L92
+L94:
+L91:
    mov		rax, 0
-   add		rsp, 400
+   add		rsp, 112
    pop		rbp
    ret
