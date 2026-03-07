@@ -762,7 +762,7 @@ extern "C" {
 //------------------------------------------------------------------------------------
 
 // Window-related functions
-InitWindow               :: (width: int, height: int, title: string); // Initialize window and OpenGL context
+InitWindow               :: (width: int, height: int, title: *u8); // Initialize window and OpenGL context
 CloseWindow              :: (); // Close window and unload OpenGL context
 WindowShouldClose        :: () -> bool; // Check if application should close (KEY_ESCAPE pressed or windows close icon clicked)
 IsWindowReady            :: () -> bool; // Check if window has been initialized successfully
@@ -782,7 +782,7 @@ MinimizeWindow           :: (); // Set window state: minimized, if resizable
 RestoreWindow            :: (); // Set window state: not minimized/maximized
 SetWindowIcon            :: (image: Image); // Set icon for window (single image, RGBA 32bit)
 SetWindowIcons           :: (images: *Image, count: int); // Set icon for window (multiple images, RGBA 32bit)
-SetWindowTitle           :: (title: string); // Set title for window
+SetWindowTitle           :: (title: *u8); // Set title for window
 SetWindowPosition        :: (x: int, y: int); // Set window position on screen
 SetWindowMonitor         :: (monitor: int); // Set monitor for the current window
 SetWindowMinSize         :: (width: int, height: int); // Set window minimum dimensions (for FLAG_WINDOW_RESIZABLE)
@@ -805,9 +805,9 @@ GetMonitorPhysicalHeight :: (monitor: int) -> int; // Get specified monitor phys
 GetMonitorRefreshRate    :: (monitor: int) -> int; // Get specified monitor refresh rate
 GetWindowPosition        :: () -> Vector2; // Get window position XY on monitor
 GetWindowScaleDPI        :: () -> Vector2; // Get window scale DPI factor
-GetMonitorName           :: (monitor: int) -> string; // Get the human-readable, UTF-8 encoded name of the specified monitor
-SetClipboardText         :: (text: string); // Set clipboard text content
-GetClipboardText         :: () -> string; // Get clipboard text content
+GetMonitorName           :: (monitor: int) -> *u8; // Get the human-readable, UTF-8 encoded name of the specified monitor
+SetClipboardText         :: (text: *u8); // Set clipboard text content
+GetClipboardText         :: () -> *u8; // Get clipboard text content
 GetClipboardImage        :: () -> Image; // Get clipboard image content
 EnableEventWaiting       :: (); // Enable waiting for events on EndDrawing(), no automatic event polling
 DisableEventWaiting      :: (); // Disable waiting for events on EndDrawing(), automatic events polling
@@ -844,11 +844,11 @@ LoadVrStereoConfig   :: (device: VrDeviceInfo) -> VrStereoConfig; // Load VR ste
 UnloadVrStereoConfig :: (config: VrStereoConfig); // Unload VR stereo config
 
 // Shader management functions
-LoadShader              :: (vsFileName: string, fsFileName: string) -> Shader; // Load shader from files and bind default locations
-LoadShaderFromMemory    :: (vsCode: string, fsCode: string) -> Shader; // Load shader from code strings and bind default locations
+LoadShader              :: (vsFileName: *u8, fsFileName: *u8) -> Shader; // Load shader from files and bind default locations
+LoadShaderFromMemory    :: (vsCode: *u8, fsCode: *u8) -> Shader; // Load shader from code *u8s and bind default locations
 IsShaderValid           :: (shader: Shader) -> bool; // Check if a shader is valid (loaded on GPU)
-GetShaderLocation       :: (shader: Shader, uniformName: string) -> int; // Get shader uniform location
-GetShaderLocationAttrib :: (shader: Shader, attribName: string) -> int; // Get shader attribute location
+GetShaderLocation       :: (shader: Shader, uniformName: *u8) -> int; // Get shader uniform location
+GetShaderLocationAttrib :: (shader: Shader, attribName: *u8) -> int; // Get shader attribute location
 SetShaderValue          :: (shader: Shader, locIndex: int, value: *void, uniformType: int); // Set shader uniform value
 SetShaderValueV         :: (shader: Shader, locIndex: int, value: *void, uniformType: int, count: int); // Set shader uniform value vector
 SetShaderValueMatrix    :: (shader: Shader, locIndex: int, mat: Matrix); // Set shader uniform value (matrix 4x4)
@@ -883,9 +883,9 @@ LoadRandomSequence   :: (count: uint, min: int, max: int) -> *int; // Load rando
 UnloadRandomSequence :: (sequence: *int); // Unload random values sequence
 
 // Misc. functions
-TakeScreenshot :: (fileName: string); // Takes a screenshot of current screen (filename extension defines format)
+TakeScreenshot :: (fileName: *u8); // Takes a screenshot of current screen (filename extension defines format)
 SetConfigFlags :: (flags: uint); // Setup init configuration flags (view FLAGS)
-OpenURL        :: (url: string); // Open URL with default system browser (if available)
+OpenURL        :: (url: *u8); // Open URL with default system browser (if available)
 
 // Utils
 SetTraceLogLevel :: (logLevel: int); // Set the current threshold (minimum) log level
@@ -894,51 +894,51 @@ MemRealloc       :: (ptr: *void, size: uint) -> *void; // Internal memory reallo
 MemFree          :: (ptr: *void); // Internal memory free
 
 // Files management functions
-LoadFileData     :: (fileName: string, dataSize: *int) -> *u8; // Load file data as byte array (read)
+LoadFileData     :: (fileName: *u8, dataSize: *int) -> *u8; // Load file data as byte array (read)
 UnloadFileData   :: (data: *u8); // Unload file data allocated by LoadFileData()
-SaveFileData     :: (fileName: string, data: *void, dataSize: int) -> bool; // Save data to file from byte array (write), returns true on success
-ExportDataAsCode :: (data: *u8, dataSize: int, fileName: string) -> bool; // Export data to code (.h), returns true on success
-LoadFileText     :: (fileName: string) -> string; // Load text data from file (read), returns a '\0' terminated string
-UnloadFileText   :: (text: string); // Unload file text data allocated by LoadFileText()
-SaveFileText     :: (fileName: string, text: string) -> bool; // Save text data to file (write), string must be '\0' terminated, returns true on success
+SaveFileData     :: (fileName: *u8, data: *void, dataSize: int) -> bool; // Save data to file from byte array (write), returns true on success
+ExportDataAsCode :: (data: *u8, dataSize: int, fileName: *u8) -> bool; // Export data to code (.h), returns true on success
+LoadFileText     :: (fileName: *u8) -> *u8; // Load text data from file (read), returns a '\0' terminated *u8
+UnloadFileText   :: (text: *u8); // Unload file text data allocated by LoadFileText()
+SaveFileText     :: (fileName: *u8, text: *u8) -> bool; // Save text data to file (write), *u8 must be '\0' terminated, returns true on success
 
 // File system functions
-FileExists              :: (fileName: string) -> bool; // Check if file exists
-DirectoryExists         :: (dirPath: string) -> bool; // Check if a directory path exists
-IsFileExtension         :: (fileName: string, ext: string) -> bool; // Check file extension (including point: .png, .wav)
-GetFileLength           :: (fileName: string) -> int; // Get file length in bytes (NOTE: GetFileSize() conflicts with windows.h)
-GetFileExtension        :: (fileName: string) -> string; // Get pointer to extension for a filename string (includes dot: '.png')
-GetFileName             :: (filePath: string) -> string; // Get pointer to filename for a path string
-GetFileNameWithoutExt   :: (filePath: string) -> string; // Get filename string without extension (uses static string)
-GetDirectoryPath        :: (filePath: string) -> string; // Get full path for a given fileName with path (uses static string)
-GetPrevDirectoryPath    :: (dirPath: string) -> string; // Get previous directory path for a given path (uses static string)
-GetWorkingDirectory     :: () -> string; // Get current working directory (uses static string)
-GetApplicationDirectory :: () -> string; // Get the directory of the running application (uses static string)
-MakeDirectory           :: (dirPath: string) -> int; // Create directories (including full path requested), returns 0 on success
-ChangeDirectory         :: (dir: string) -> bool; // Change working directory, return true on success
-IsPathFile              :: (path: string) -> bool; // Check if a given path is a file or a directory
-IsFileNameValid         :: (fileName: string) -> bool; // Check if fileName is valid for the platform/OS
-LoadDirectoryFiles      :: (dirPath: string) -> FilePathList; // Load directory filepaths
-LoadDirectoryFilesEx    :: (basePath: string, filter: string, scanSubdirs: bool) -> FilePathList; // Load directory filepaths with extension filtering and recursive directory scan
+FileExists              :: (fileName: *u8) -> bool; // Check if file exists
+DirectoryExists         :: (dirPath: *u8) -> bool; // Check if a directory path exists
+IsFileExtension         :: (fileName: *u8, ext: *u8) -> bool; // Check file extension (including point: .png, .wav)
+GetFileLength           :: (fileName: *u8) -> int; // Get file length in bytes (NOTE: GetFileSize() conflicts with windows.h)
+GetFileExtension        :: (fileName: *u8) -> *u8; // Get pointer to extension for a filename *u8 (includes dot: '.png')
+GetFileName             :: (filePath: *u8) -> *u8; // Get pointer to filename for a path *u8
+GetFileNameWithoutExt   :: (filePath: *u8) -> *u8; // Get filename *u8 without extension (uses static *u8)
+GetDirectoryPath        :: (filePath: *u8) -> *u8; // Get full path for a given fileName with path (uses static *u8)
+GetPrevDirectoryPath    :: (dirPath: *u8) -> *u8; // Get previous directory path for a given path (uses static *u8)
+GetWorkingDirectory     :: () -> *u8; // Get current working directory (uses static *u8)
+GetApplicationDirectory :: () -> *u8; // Get the directory of the running application (uses static *u8)
+MakeDirectory           :: (dirPath: *u8) -> int; // Create directories (including full path requested), returns 0 on success
+ChangeDirectory         :: (dir: *u8) -> bool; // Change working directory, return true on success
+IsPathFile              :: (path: *u8) -> bool; // Check if a given path is a file or a directory
+IsFileNameValid         :: (fileName: *u8) -> bool; // Check if fileName is valid for the platform/OS
+LoadDirectoryFiles      :: (dirPath: *u8) -> FilePathList; // Load directory filepaths
+LoadDirectoryFilesEx    :: (basePath: *u8, filter: *u8, scanSubdirs: bool) -> FilePathList; // Load directory filepaths with extension filtering and recursive directory scan
 UnloadDirectoryFiles    :: (files: FilePathList); // Unload filepaths
 IsFileDropped           :: () -> bool; // Check if a file has been dropped into window
 LoadDroppedFiles        :: () -> FilePathList; // Load dropped filepaths
 UnloadDroppedFiles      :: (files: FilePathList); // Unload dropped filepaths
-GetFileModTime          :: (fileName: string) -> s64; // Get file modification time (last write time)
+GetFileModTime          :: (fileName: *u8) -> s64; // Get file modification time (last write time)
 
 // Compression/Encoding functionality
 CompressData                  :: (data: *u8, dataSize: int, compDataSize: *int) -> *u8; // Compress data (DEFLATE algorithm), memory must be MemFree()
 DecompressData                :: (compData: *u8, compDataSize: int, dataSize: *int) -> *u8; // Decompress data (DEFLATE algorithm), memory must be MemFree()
-EncodeDataBase64              :: (data: *u8, dataSize: int, outputSize: *int) -> string; // Encode data to Base64 string, memory must be MemFree()
-DecodeDataBase64              :: (data: *u8, outputSize: *int) -> *u8; // Decode Base64 string data, memory must be MemFree()
+EncodeDataBase64              :: (data: *u8, dataSize: int, outputSize: *int) -> *u8; // Encode data to Base64 *u8, memory must be MemFree()
+DecodeDataBase64              :: (data: *u8, outputSize: *int) -> *u8; // Decode Base64 *u8 data, memory must be MemFree()
 ComputeCRC32                  :: (data: *u8, dataSize: int) -> uint; // Compute CRC32 hash code
 ComputeMD5                    :: (data: *u8, dataSize: int) -> *uint; // Compute MD5 hash code, returns static int[4] (16 bytes)
 ComputeSHA1                   :: (data: *u8, dataSize: int) -> *uint; // Compute SHA1 hash code, returns static int[5] (20 bytes)
 
 // Automation events functionality
-LoadAutomationEventList       :: (fileName: string) -> AutomationEventList; // Load automation events list from file, NULL for empty list, capacity = MAX_AUTOMATION_EVENTS
+LoadAutomationEventList       :: (fileName: *u8) -> AutomationEventList; // Load automation events list from file, NULL for empty list, capacity = MAX_AUTOMATION_EVENTS
 UnloadAutomationEventList     :: (list: AutomationEventList); // Unload automation events list from file
-ExportAutomationEventList     :: (list: AutomationEventList, fileName: string) -> bool; // Export automation events list as text file
+ExportAutomationEventList     :: (list: AutomationEventList, fileName: *u8) -> bool; // Export automation events list as text file
 SetAutomationEventList        :: (list: *AutomationEventList); // Set automation event list to record to
 SetAutomationEventBaseFrame   :: (frame: int); // Set automation event internal base frame to start recording
 StartAutomationEventRecording :: (); // Start recording
@@ -962,7 +962,7 @@ SetExitKey         :: (key: KeyboardKey); // Set a custom key to exit program (d
 
 // Input-related functions: gamepads
 IsGamepadAvailable      :: (gamepad: int) -> bool; // Check if a gamepad is available
-GetGamepadName          :: (gamepad: int) -> string; // Get gamepad internal name id
+GetGamepadName          :: (gamepad: int) -> *u8; // Get gamepad internal name id
 IsGamepadButtonPressed  :: (gamepad: int, button: int) -> bool; // Check if a gamepad button has been pressed once
 IsGamepadButtonDown     :: (gamepad: int, button: int) -> bool; // Check if a gamepad button is being pressed
 IsGamepadButtonReleased :: (gamepad: int, button: int) -> bool; // Check if a gamepad button has been released once
@@ -970,7 +970,7 @@ IsGamepadButtonUp       :: (gamepad: int, button: int) -> bool; // Check if a ga
 GetGamepadButtonPressed :: () -> int; // Get the last gamepad button pressed
 GetGamepadAxisCount     :: (gamepad: int) -> int; // Get gamepad axis count for a gamepad
 GetGamepadAxisMovement  :: (gamepad: int, axis: int) -> float; // Get axis movement value for a gamepad axis
-SetGamepadMappings      :: (mappings: string) -> int; // Set internal gamepad mappings (SDL_GameControllerDB)
+SetGamepadMappings      :: (mappings: *u8) -> int; // Set internal gamepad mappings (SDL_GameControllerDB)
 SetGamepadVibration     :: (gamepad: int, leftMotor: float, rightMotor: float, duration: float); // Set gamepad vibration for both motors (duration in seconds)
 
 // Input-related functions: mouse
@@ -1101,18 +1101,18 @@ GetCollisionRec           :: (rec1: Rectangle, rec2: Rectangle) -> Rectangle; //
 
 // Image loading functions
 // NOTE: These functions do not require GPU access
-LoadImage               :: (fileName: string) -> Image; // Load image from file into CPU memory (RAM)
-LoadImageRaw            :: (fileName: string, width: int, height: int, format: int, headerSize: int) -> Image; // Load image from RAW file data
-LoadImageAnim           :: (fileName: string, frames: *int) -> Image; // Load image sequence from file (frames appended to image.data)
-LoadImageAnimFromMemory :: (fileType: string, fileData: *u8, dataSize: int, frames: *int) -> Image; // Load image sequence from memory buffer
-LoadImageFromMemory     :: (fileType: string, fileData: *u8, dataSize: int) -> Image; // Load image from memory buffer, fileType refers to extension: i.e. '.png'
+LoadImage               :: (fileName: *u8) -> Image; // Load image from file into CPU memory (RAM)
+LoadImageRaw            :: (fileName: *u8, width: int, height: int, format: int, headerSize: int) -> Image; // Load image from RAW file data
+LoadImageAnim           :: (fileName: *u8, frames: *int) -> Image; // Load image sequence from file (frames appended to image.data)
+LoadImageAnimFromMemory :: (fileType: *u8, fileData: *u8, dataSize: int, frames: *int) -> Image; // Load image sequence from memory buffer
+LoadImageFromMemory     :: (fileType: *u8, fileData: *u8, dataSize: int) -> Image; // Load image from memory buffer, fileType refers to extension: i.e. '.png'
 LoadImageFromTexture    :: (texture: Texture) -> Image; // Load image from GPU texture data
 LoadImageFromScreen     :: () -> Image; // Load image from screen buffer and (screenshot)
 IsImageValid            :: (image: Image) -> bool; // Check if an image is valid (data and parameters)
 UnloadImage             :: (image: Image); // Unload image from CPU memory (RAM)
-ExportImage             :: (image: Image, fileName: string) -> bool; // Export image data to file, returns true on success
-ExportImageToMemory     :: (image: Image, fileType: string, fileSize: *int) -> *u8; // Export image to memory buffer
-ExportImageAsCode       :: (image: Image, fileName: string) -> bool; // Export image as code file defining an array of bytes, returns true on success
+ExportImage             :: (image: Image, fileName: *u8) -> bool; // Export image data to file, returns true on success
+ExportImageToMemory     :: (image: Image, fileType: *u8, fileSize: *int) -> *u8; // Export image to memory buffer
+ExportImageAsCode       :: (image: Image, fileName: *u8) -> bool; // Export image as code file defining an array of bytes, returns true on success
 
 // Image generation functions
 GenImageColor           :: (width: int, height: int, color: Color) -> Image; // Generate image: plain color
@@ -1123,14 +1123,14 @@ GenImageChecked         :: (width: int, height: int, checksX: int, checksY: int,
 GenImageWhiteNoise      :: (width: int, height: int, factor: float) -> Image; // Generate image: white noise
 GenImagePerlinNoise     :: (width: int, height: int, offsetX: int, offsetY: int, scale: float) -> Image; // Generate image: perlin noise
 GenImageCellular        :: (width: int, height: int, tileSize: int) -> Image; // Generate image: cellular algorithm, bigger tileSize means bigger cells
-GenImageText            :: (width: int, height: int, text: string) -> Image; // Generate image: grayscale image from text data
+GenImageText            :: (width: int, height: int, text: *u8) -> Image; // Generate image: grayscale image from text data
 
 // Image manipulation functions
 ImageCopy              :: (image: Image) -> Image; // Create an image duplicate (useful for transformations)
 ImageFromImage         :: (image: Image, rec: Rectangle) -> Image; // Create an image from another image piece
 ImageFromChannel       :: (image: Image, selectedChannel: int) -> Image; // Create an image from a selected channel of another image (GRAYSCALE)
-ImageText              :: (text: string, fontSize: int, color: Color) -> Image; // Create an image from text (default font)
-ImageTextEx            :: (font: Font, text: string, fontSize: float, spacing: float, tint: Color) -> Image; // Create an image from text (custom sprite font)
+ImageText              :: (text: *u8, fontSize: int, color: Color) -> Image; // Create an image from text (default font)
+ImageTextEx            :: (font: Font, text: *u8, fontSize: float, spacing: float, tint: Color) -> Image; // Create an image from text (custom sprite font)
 ImageFormat            :: (image: *Image, newFormat: int); // Convert image data to desired format
 ImageToPOT             :: (image: *Image, fill: Color); // Convert image to POT (power-of-two)
 ImageCrop              :: (image: *Image, crop: Rectangle); // Crop an image to a defined rectangle
@@ -1185,12 +1185,12 @@ ImageDrawTriangleLines :: (dst: *Image, v1: Vector2, v2: Vector2, v3: Vector2, c
 ImageDrawTriangleFan   :: (dst: *Image, points: *Vector2, pointCount: int, color: Color); // Draw a triangle fan defined by points within an image (first vertex is the center)
 ImageDrawTriangleStrip :: (dst: *Image, points: *Vector2, pointCount: int, color: Color); // Draw a triangle strip defined by points within an image
 ImageDraw              :: (dst: *Image, src: Image, srcRec: Rectangle, dstRec: Rectangle, tint: Color); // Draw a source image within a destination image (tint applied to source)
-ImageDrawText          :: (dst: *Image, text: string, posX: int, posY: int, fontSize: int, color: Color); // Draw text (using default font) within an image (destination)
-ImageDrawTextEx        :: (dst: *Image, font: Font, text: string, position: Vector2, fontSize: float, spacing: float, tint: Color); // Draw text (custom sprite font) within an image (destination)
+ImageDrawText          :: (dst: *Image, text: *u8, posX: int, posY: int, fontSize: int, color: Color); // Draw text (using default font) within an image (destination)
+ImageDrawTextEx        :: (dst: *Image, font: Font, text: *u8, position: Vector2, fontSize: float, spacing: float, tint: Color); // Draw text (custom sprite font) within an image (destination)
 
 // Texture loading functions
 // NOTE: These functions require GPU access
-LoadTexture             :: (fileName: string) -> Texture; // Load texture from file into GPU memory (VRAM)
+LoadTexture             :: (fileName: *u8) -> Texture; // Load texture from file into GPU memory (VRAM)
 LoadTextureFromImage    :: (image: Image) -> Texture; // Load texture from image data
 LoadTextureCubemap      :: (image: Image, layout: int) -> Texture; // Load cubemap from image, multiple image cubemap layouts supported
 LoadRenderTexture       :: (width: int, height: int) -> RenderTexture; // Load texture for rendering (framebuffer)
@@ -1239,64 +1239,64 @@ GetPixelDataSize        :: (width: int, height: int, format: int) -> int; // Get
 
 // Font loading/unloading functions
 GetFontDefault       :: () -> Font; // Get the default Font
-LoadFont             :: (fileName: string) -> Font; // Load font from file into GPU memory (VRAM)
-LoadFontEx           :: (fileName: string, fontSize: int, codepoints: *int, codepointCount: int) -> Font; // Load font from file with extended parameters, use NULL for codepoints and 0 for codepointCount to load the default character set, font size is provided in pixels height
+LoadFont             :: (fileName: *u8) -> Font; // Load font from file into GPU memory (VRAM)
+LoadFontEx           :: (fileName: *u8, fontSize: int, codepoints: *int, codepointCount: int) -> Font; // Load font from file with extended parameters, use NULL for codepoints and 0 for codepointCount to load the default character set, font size is provided in pixels height
 LoadFontFromImage    :: (image: Image, key: Color, firstChar: int) -> Font; // Load font from Image (XNA style)
-LoadFontFromMemory   :: (fileType: string, fileData: *u8, dataSize: int, fontSize: int, codepoints: *int, codepointCount: int) -> Font; // Load font from memory buffer, fileType refers to extension: i.e. '.ttf'
+LoadFontFromMemory   :: (fileType: *u8, fileData: *u8, dataSize: int, fontSize: int, codepoints: *int, codepointCount: int) -> Font; // Load font from memory buffer, fileType refers to extension: i.e. '.ttf'
 IsFontValid          :: (font: Font) -> bool; // Check if a font is valid (font data loaded, WARNING: GPU texture not checked)
 LoadFontData         :: (fileData: *u8, dataSize: int, fontSize: int, codepoints: *int, codepointCount: int, type: int) -> *GlyphInfo; // Load font data for further use
 GenImageFontAtlas    :: (glyphs: *GlyphInfo, glyphRecs: **Rectangle, glyphCount: int, fontSize: int, padding: int, packMethod: int) -> Image; // Generate image font atlas using chars info
 UnloadFontData       :: (glyphs: *GlyphInfo, glyphCount: int); // Unload font chars info data (RAM)
 UnloadFont           :: (font: Font); // Unload font from GPU memory (VRAM)
-ExportFontAsCode     :: (font: Font, fileName: string) -> bool; // Export font as code file, returns true on success
+ExportFontAsCode     :: (font: Font, fileName: *u8) -> bool; // Export font as code file, returns true on success
 
 // Text drawing functions
 DrawFPS             :: (posX: int, posY: int); // Draw current FPS
-DrawText            :: (text: string, posX: int, posY: int, fontSize: int, color: Color); // Draw text (using default font)
-DrawTextEx          :: (font: Font, text: string, position: Vector2, fontSize: float, spacing: float, tint: Color); // Draw text using font and additional parameters
-DrawTextPro         :: (font: Font, text: string, position: Vector2, origin: Vector2, rotation: float, fontSize: float, spacing: float, tint: Color); // Draw text using Font and pro parameters (rotation)
+DrawText            :: (text: *u8, posX: int, posY: int, fontSize: int, color: Color); // Draw text (using default font)
+DrawTextEx          :: (font: Font, text: *u8, position: Vector2, fontSize: float, spacing: float, tint: Color); // Draw text using font and additional parameters
+DrawTextPro         :: (font: Font, text: *u8, position: Vector2, origin: Vector2, rotation: float, fontSize: float, spacing: float, tint: Color); // Draw text using Font and pro parameters (rotation)
 DrawTextCodepoint   :: (font: Font, codepoint: int, position: Vector2, fontSize: float, tint: Color); // Draw one character (codepoint)
 DrawTextCodepoints  :: (font: Font, codepoints: *int, codepointCount: int, position: Vector2, fontSize: float, spacing: float, tint: Color); // Draw multiple character (codepoint)
 
 // Text font info functions
 SetTextLineSpacing  :: (spacing: int); // Set vertical line spacing when drawing with line-breaks
-MeasureText         :: (text: string, fontSize: int) -> int; // Measure string width for default font
-MeasureTextEx       :: (font: Font, text: string, fontSize: float, spacing: float) -> Vector2; // Measure string size for Font
+MeasureText         :: (text: *u8, fontSize: int) -> int; // Measure *u8 width for default font
+MeasureTextEx       :: (font: Font, text: *u8, fontSize: float, spacing: float) -> Vector2; // Measure *u8 size for Font
 GetGlyphIndex       :: (font: Font, codepoint: int) -> int; // Get glyph index position in font for a codepoint (unicode character), fallback to '?' if not found
 GetGlyphInfo        :: (font: Font, codepoint: int) -> GlyphInfo; // Get glyph font info data for a codepoint (unicode character), fallback to '?' if not found
 GetGlyphAtlasRec    :: (font: Font, codepoint: int) -> Rectangle; // Get glyph rectangle in font atlas for a codepoint (unicode character), fallback to '?' if not found
 
 // Text codepoints management functions (unicode characters)
-LoadUTF8            :: (codepoints: *int, length: int) -> string; // Load UTF-8 text encoded from codepoints array
-UnloadUTF8          :: (text: string); // Unload UTF-8 text encoded from codepoints array
-LoadCodepoints      :: (text: string, count: *int) -> *int; // Load all codepoints from a UTF-8 text string, codepoints count returned by parameter
+LoadUTF8            :: (codepoints: *int, length: int) -> *u8; // Load UTF-8 text encoded from codepoints array
+UnloadUTF8          :: (text: *u8); // Unload UTF-8 text encoded from codepoints array
+LoadCodepoints      :: (text: *u8, count: *int) -> *int; // Load all codepoints from a UTF-8 text *u8, codepoints count returned by parameter
 UnloadCodepoints    :: (codepoints: *int); // Unload codepoints data from memory
-GetCodepointCount   :: (text: string) -> int; // Get total number of codepoints in a UTF-8 encoded string
-GetCodepoint        :: (text: string, codepointSize: *int) -> int; // Get next codepoint in a UTF-8 encoded string, 0x3f('?') is returned on failure
-GetCodepointNext    :: (text: string, codepointSize: *int) -> int; // Get next codepoint in a UTF-8 encoded string, 0x3f('?') is returned on failure
-GetCodepointPrevious :: (text: string, codepointSize: *int) -> int; // Get previous codepoint in a UTF-8 encoded string, 0x3f('?') is returned on failure
-CodepointToUTF8     :: (codepoint: int, utf8Size: *int) -> string; // Encode one codepoint into UTF-8 byte array (array length returned as parameter)
+GetCodepointCount   :: (text: *u8) -> int; // Get total number of codepoints in a UTF-8 encoded *u8
+GetCodepoint        :: (text: *u8, codepointSize: *int) -> int; // Get next codepoint in a UTF-8 encoded *u8, 0x3f('?') is returned on failure
+GetCodepointNext    :: (text: *u8, codepointSize: *int) -> int; // Get next codepoint in a UTF-8 encoded *u8, 0x3f('?') is returned on failure
+GetCodepointPrevious :: (text: *u8, codepointSize: *int) -> int; // Get previous codepoint in a UTF-8 encoded *u8, 0x3f('?') is returned on failure
+CodepointToUTF8     :: (codepoint: int, utf8Size: *int) -> *u8; // Encode one codepoint into UTF-8 byte array (array length returned as parameter)
 
-// Text strings management functions (no UTF-8 strings, only byte chars)
-// NOTE: Some strings allocate memory internally for returned strings, just be careful!
-TextCopy            :: (dst: string, src: string) -> int; // Copy one string to another, returns bytes copied
-TextIsEqual         :: (text1: string, text2: string) -> bool; // Check if two text string are equal
-TextLength          :: (text: string) -> uint; // Get text length, checks for '\0' ending
-// TextFormat          :: (text: string, ...) -> string; // Text formatting with variables (sprintf() style)
-TextSubtext         :: (text: string, position: int, length: int) -> string; // Get a piece of a text string
-TextReplace         :: (text: string, replace: string, by: string) -> string; // Replace text string (WARNING: memory must be freed!)
-TextInsert          :: (text: string, insert: string, position: int) -> string; // Insert text in a position (WARNING: memory must be freed!)
-TextJoin            :: (textList: **u8, count: int, delimiter: string) -> string; // Join text strings with delimiter
-TextSplit           :: (text: string, delimiter: u8, count: *int) -> **u8; // Split text into multiple strings
-TextAppend          :: (text: string, append: string, position: *int); // Append text at specific position and move cursor!
-TextFindIndex       :: (text: string, find: string) -> int; // Find first text occurrence within a string
-TextToUpper         :: (text: string) -> string; // Get upper case version of provided string
-TextToLower         :: (text: string) -> string; // Get lower case version of provided string
-TextToPascal        :: (text: string) -> string; // Get Pascal case notation version of provided string
-TextToSnake         :: (text: string) -> string; // Get Snake case notation version of provided string
-TextToCamel         :: (text: string) -> string; // Get Camel case notation version of provided string
-TextToInteger       :: (text: string) -> int; // Get integer value from text (negative values not supported)
-TextToFloat         :: (text: string) -> float; // Get float value from text (negative values not supported)
+// Text *u8s management functions (no UTF-8 *u8s, only byte chars)
+// NOTE: Some *u8s allocate memory internally for returned *u8s, just be careful!
+TextCopy            :: (dst: *u8, src: *u8) -> int; // Copy one *u8 to another, returns bytes copied
+TextIsEqual         :: (text1: *u8, text2: *u8) -> bool; // Check if two text *u8 are equal
+TextLength          :: (text: *u8) -> uint; // Get text length, checks for '\0' ending
+// TextFormat          :: (text: *u8, ...) -> *u8; // Text formatting with variables (sprintf() style)
+TextSubtext         :: (text: *u8, position: int, length: int) -> *u8; // Get a piece of a text *u8
+TextReplace         :: (text: *u8, replace: *u8, by: *u8) -> *u8; // Replace text *u8 (WARNING: memory must be freed!)
+TextInsert          :: (text: *u8, insert: *u8, position: int) -> *u8; // Insert text in a position (WARNING: memory must be freed!)
+TextJoin            :: (textList: **u8, count: int, delimiter: *u8) -> *u8; // Join text *u8s with delimiter
+TextSplit           :: (text: *u8, delimiter: u8, count: *int) -> **u8; // Split text into multiple *u8s
+TextAppend          :: (text: *u8, append: *u8, position: *int); // Append text at specific position and move cursor!
+TextFindIndex       :: (text: *u8, find: *u8) -> int; // Find first text occurrence within a *u8
+TextToUpper         :: (text: *u8) -> *u8; // Get upper case version of provided *u8
+TextToLower         :: (text: *u8) -> *u8; // Get lower case version of provided *u8
+TextToPascal        :: (text: *u8) -> *u8; // Get Pascal case notation version of provided *u8
+TextToSnake         :: (text: *u8) -> *u8; // Get Snake case notation version of provided *u8
+TextToCamel         :: (text: *u8) -> *u8; // Get Camel case notation version of provided *u8
+TextToInteger       :: (text: *u8) -> int; // Get integer value from text (negative values not supported)
+TextToFloat         :: (text: *u8) -> float; // Get float value from text (negative values not supported)
 
 //------------------------------------------------------------------------------------
 // Basic 3d Shapes Drawing Functions (Module: models)
@@ -1330,7 +1330,7 @@ DrawGrid            :: (slices: int, spacing: float); // Draw a grid (centered a
 //------------------------------------------------------------------------------------
 
 // Model management functions
-LoadModel           :: (fileName: string) -> Model; // Load model from files (meshes and materials)
+LoadModel           :: (fileName: *u8) -> Model; // Load model from files (meshes and materials)
 LoadModelFromMesh   :: (mesh: Mesh) -> Model; // Load model from generated mesh (default material)
 IsModelValid        :: (model: Model) -> bool; // Check if a model is valid (loaded in GPU, VAO/VBOs)
 UnloadModel         :: (model: Model); // Unload model (including meshes) from memory (RAM and/or VRAM)
@@ -1356,8 +1356,8 @@ DrawMesh            :: (mesh: Mesh, material: Material, transform: Matrix); // D
 DrawMeshInstanced   :: (mesh: Mesh, material: Material, transforms: *Matrix, instances: int); // Draw multiple mesh instances with material and different transforms
 GetMeshBoundingBox  :: (mesh: Mesh) -> BoundingBox; // Compute mesh bounding box limits
 GenMeshTangents     :: (mesh: *Mesh); // Compute mesh tangents
-ExportMesh          :: (mesh: Mesh, fileName: string) -> bool; // Export mesh data to file, returns true on success
-ExportMeshAsCode    :: (mesh: Mesh, fileName: string) -> bool; // Export mesh as code file (.h) defining multiple arrays of vertex attributes
+ExportMesh          :: (mesh: Mesh, fileName: *u8) -> bool; // Export mesh data to file, returns true on success
+ExportMeshAsCode    :: (mesh: Mesh, fileName: *u8) -> bool; // Export mesh as code file (.h) defining multiple arrays of vertex attributes
 
 // Mesh generation functions
 GenMeshPoly         :: (sides: int, radius: float) -> Mesh; // Generate polygonal mesh
@@ -1373,7 +1373,7 @@ GenMeshHeightmap    :: (heightmap: Image, size: Vector3) -> Mesh; // Generate he
 GenMeshCubicmap     :: (cubicmap: Image, cubeSize: Vector3) -> Mesh; // Generate cubes-based map mesh from image data
 
 // Material loading/unloading functions
-LoadMaterials       :: (fileName: string, materialCount: *int) -> *Material; // Load materials from model file
+LoadMaterials       :: (fileName: *u8, materialCount: *int) -> *Material; // Load materials from model file
 LoadMaterialDefault :: () -> Material; // Load default material (Supports: DIFFUSE, SPECULAR, NORMAL maps)
 IsMaterialValid     :: (material: Material) -> bool; // Check if a material is valid (shader assigned, map textures loaded in GPU)
 UnloadMaterial      :: (material: Material); // Unload material from GPU memory (VRAM)
@@ -1381,7 +1381,7 @@ SetMaterialTexture  :: (material: *Material, mapType: int, texture: Texture); //
 SetModelMeshMaterial:: (model: *Model, meshId: int, materialId: int); // Set material for a mesh
 
 // Model animations loading/unloading functions
-LoadModelAnimations     :: (fileName: string, animCount: *int) -> *ModelAnimation; // Load model animations from file
+LoadModelAnimations     :: (fileName: *u8, animCount: *int) -> *ModelAnimation; // Load model animations from file
 UpdateModelAnimation    :: (model: Model, anim: ModelAnimation, frame: int); // Update model animation pose (CPU)
 UpdateModelAnimationBones :: (model: Model, anim: ModelAnimation, frame: int); // Update model animation mesh bone matrices (GPU skinning)
 UnloadModelAnimation    :: (anim: ModelAnimation); // Unload animation data
@@ -1412,10 +1412,10 @@ SetMasterVolume     :: (volume: float); // Set master volume (listener)
 GetMasterVolume     :: () -> float; // Get master volume (listener)
 
 // Wave/Sound loading/unloading functions
-LoadWave            :: (fileName: string) -> Wave; // Load wave data from file
-LoadWaveFromMemory  :: (fileType: string, fileData: *u8, dataSize: int) -> Wave; // Load wave from memory buffer, fileType refers to extension: i.e. '.wav'
+LoadWave            :: (fileName: *u8) -> Wave; // Load wave data from file
+LoadWaveFromMemory  :: (fileType: *u8, fileData: *u8, dataSize: int) -> Wave; // Load wave from memory buffer, fileType refers to extension: i.e. '.wav'
 IsWaveValid         :: (wave: Wave) -> bool; // Checks if wave data is valid (data loaded and parameters)
-LoadSound           :: (fileName: string) -> Sound; // Load sound from file
+LoadSound           :: (fileName: *u8) -> Sound; // Load sound from file
 LoadSoundFromWave   :: (wave: Wave) -> Sound; // Load sound from wave data
 LoadSoundAlias      :: (source: Sound) -> Sound; // Create a new sound that shares the same sample data as the source sound, does not own the sound data
 IsSoundValid        :: (sound: Sound) -> bool; // Checks if a sound is valid (data loaded and buffers initialized)
@@ -1423,8 +1423,8 @@ UpdateSound         :: (sound: Sound, data: *void, sampleCount: int); // Update 
 UnloadWave          :: (wave: Wave); // Unload wave data
 UnloadSound         :: (sound: Sound); // Unload sound
 UnloadSoundAlias    :: (alias: Sound); // Unload a sound alias (does not deallocate sample data)
-ExportWave          :: (wave: Wave, fileName: string) -> bool; // Export wave data to file, returns true on success
-ExportWaveAsCode    :: (wave: Wave, fileName: string) -> bool; // Export wave sample data to code (.h), returns true on success
+ExportWave          :: (wave: Wave, fileName: *u8) -> bool; // Export wave data to file, returns true on success
+ExportWaveAsCode    :: (wave: Wave, fileName: *u8) -> bool; // Export wave sample data to code (.h), returns true on success
 
 // Wave/Sound management functions
 PlaySound           :: (sound: Sound); // Play a sound
@@ -1442,8 +1442,8 @@ LoadWaveSamples     :: (wave: Wave) -> *float; // Load samples data from wave as
 UnloadWaveSamples   :: (samples: *float); // Unload samples data loaded with LoadWaveSamples()
 
 // Music management functions
-LoadMusicStream     :: (fileName: string) -> Music; // Load music stream from file
-LoadMusicStreamFromMemory :: (fileType: string, data: *u8, dataSize: int) -> Music; // Load music stream from data
+LoadMusicStream     :: (fileName: *u8) -> Music; // Load music stream from file
+LoadMusicStreamFromMemory :: (fileType: *u8, data: *u8, dataSize: int) -> Music; // Load music stream from data
 IsMusicValid        :: (music: Music) -> bool; // Checks if a music stream is valid (context and buffers initialized)
 UnloadMusicStream   :: (music: Music); // Unload music stream
 PlayMusicStream     :: (music: Music); // Start music playing
