@@ -1654,6 +1654,40 @@ int compare_argument_index(const void *e1, const void *e2) {
     return a->param_index - b->param_index;
 }
 
+AstExpr *generate_literal_bool(Parser *parser, bool value) {
+    AstLiteral *lit          = ast_allocate(parser, sizeof(AstLiteral));
+    lit->head.head.kind      = AST_LITERAL;
+    lit->head.head.file      = parser->current_file;
+    lit->head.head.flags     = AST_FLAG_COMPILER_GENERATED;
+    lit->head.type           = primitive_type(PRIMITIVE_BOOL);
+    lit->kind                = LITERAL_BOOLEAN;
+    lit->as.value.boolean    = value;
+    return (AstExpr *)(lit);
+}
+
+AstArgument *generate_argument_from_expr(Typer *typer, AstExpr *expr) {
+    AstArgument *arg = ast_allocate(typer->parser, sizeof(AstArgument));
+    arg->head.kind   = AST_ARGUMENT;
+    arg->head.file   = expr->head.file;
+    arg->head.start  = expr->head.start;
+    arg->head.end    = expr->head.end;
+    arg->head.flags |= AST_FLAG_COMPILER_GENERATED;
+    arg->value       = expr;
+
+    return arg;
+}
+
+AstUnary *generate_address_of_value(Typer *typer, AstExpr *value) {
+    AstUnary *addr_of        = ast_allocate(typer->parser, sizeof(AstUnary));
+    addr_of->head.head       = value->head;
+    addr_of->head.head.kind  = AST_UNARY;
+    addr_of->head.head.flags = value->head.flags | AST_FLAG_COMPILER_GENERATED;
+    addr_of->head.type       = (Type *) generate_pointer_to_type(typer->parser, value->type);
+    addr_of->operator        = OP_ADDRESS_OF;
+    addr_of->expr            = value;
+    return addr_of;
+}
+
 Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
     if (call->arguments.count != 2) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Type mismatch. Wanted type ([..]T, T), Got type ()");
@@ -1665,8 +1699,6 @@ Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
 
     Type *resolved0 = check_expression(typer, arg0->value, NULL);
     if (!resolved0) return NULL;
-    Type *resolved1 = check_expression(typer, arg1->value, NULL);
-    if (!resolved1) return NULL;
 
     if (arg0->value->type->kind != TYPE_ARRAY) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg0->value), "Type mismatch. Wanted type [..]T, got type %s", type_to_str(arg0->value->type));
@@ -1678,6 +1710,9 @@ Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg0->value), "Type mismatch. Wanted type [..]%s, got type %s", type_to_str(da_type->elem_type), type_to_str((Type *)da_type));
         return NULL;
     }
+
+    Type *resolved1 = check_expression(typer, arg1->value, da_type->elem_type);
+    if (!resolved1) return NULL;
     
     if (!types_are_equal(da_type->elem_type, arg1->value->type)) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg1->value), "Type mismatch. Wanted type %s, got type %s", type_to_str(da_type->elem_type), type_to_str(arg1->value->type));
@@ -1698,10 +1733,35 @@ Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
         return NULL;
     }
 
-    Type *return_type = primitive_type(PRIMITIVE_VOID);
-
-    call->head.type = return_type;
     call->func_defn = ((TypeFunction *)func_defn_ident->type)->node;
+    call->head.type = ((Type **)call->func_defn->return_types.items)[0];
+
+    // Pass the dynamic array as a ptr
+    arg0->value = (AstExpr *) generate_address_of_value(typer, arg0->value);
+
+    // Try reduce the value argument to a literal to know weather its going to be passed by value or reference
+    bool pass_by_value = false;
+
+    AstExpr *const_expr = simplify_expression(typer->const_evaluator, typer->current_scope, arg1->value);
+    if (!const_expr) return NULL;
+
+    if (const_expr->head.kind == AST_LITERAL) {
+        AstLiteral *lit = (AstLiteral *) const_expr;
+
+        if (lit->kind != LITERAL_IDENTIFIER) {
+            pass_by_value = true;
+        }
+    }
+    else if (const_expr->head.kind == AST_STRUCT_LITERAL) {
+        if (const_expr->type->size <= 8) {
+            pass_by_value = true;
+        }
+    }
+
+    AstExpr *arg2_value = generate_literal_bool(typer->parser, pass_by_value);
+    AstArgument *arg2   = generate_argument_from_expr(typer, arg2_value);
+    arg2->ident         = generate_identifier(typer->parser, "by_value", arg2_value->type, 0);
+    da_append(&call->arguments, arg2);
 
     // Build up the lowered argument list
     call->lowered_arguments = da_init(call->arguments.count, sizeof(AstExpr *));
@@ -1710,7 +1770,7 @@ Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
         da_append(&call->lowered_arguments, arg->value);
     }
 
-    return return_type;
+    return call->head.type;
 }
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
@@ -2431,6 +2491,21 @@ Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
             return NULL;
         }
 
+        if (strcmp(etor->name, "count") == 0) {
+            Ast *site = (Ast *) etor->expr;
+            if (!site) site = (Ast *) etor;
+            report_error_ast(typer->parser, LABEL_ERROR, site, "Enum value 'count' is reserved for the number of enum values contained in the enum definition");
+            report_error_ast(typer->parser, LABEL_NOTE, NULL, "If you are trying to do C-style count to get the number of enum values, simply use %s.count", ast_enum->identifier->name);
+            return NULL;
+        }
+        if (strcmp(etor->name, "names") == 0) {
+            Ast *site = (Ast *) etor->expr;
+            if (!site) site = (Ast *) etor;
+            report_error_ast(typer->parser, LABEL_ERROR, site, "Enum value 'names' is reserved for the list of enum value names");
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Please pick a different name for the enum value");
+            return NULL;
+        }
+
         etor->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
     }
 
@@ -2441,6 +2516,20 @@ Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
     ast_enum->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
 
     return (Type *)enum_defn;
+}
+
+AstIdentifier *get_static_enum_member(TypeEnum *enum_defn, char *name) {
+    if (strcmp(name, "count") == 0) {
+        return enum_defn->count;
+    }
+    if (strcmp(name, "names") == 0) {
+        return enum_defn->names;
+    }
+    if (strcmp(name, "values") == 0) {
+        return enum_defn->values;
+    }
+
+    return NULL;
 }
 
 AstEnumerator *find_enum_member(AstEnum *enum_defn, char *name) {
@@ -2462,6 +2551,17 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) 
 
     TypeEnum *enum_defn = (TypeEnum *)(lhs_type);
     char     *enum_name = literal->identifier->name;
+
+
+    // Try get a static enum member
+    // @EnumRefactor @Cleanup: I think we want enum definitions to have a proper scope. All the enum values
+    //           could just be constant struct members
+    AstIdentifier *static_member = get_static_enum_member(enum_defn, enum_name);
+    if (static_member) {
+        literal->enum_member = (AstEnumerator *) static_member;
+        return static_member->type;
+    }
+
     AstEnumerator *found = find_enum_member(enum_defn->node, enum_name);
     if (!found) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "'%s' is not a member of enum '%s'", enum_name, enum_defn->identifier->name);
@@ -2750,18 +2850,6 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     return result;
 }
 
-AstArgument *generate_argument_from_expr(Typer *typer, AstExpr *expr) {
-    AstArgument *arg = ast_allocate(typer->parser, sizeof(AstArgument));
-    arg->head.kind   = AST_ARGUMENT;
-    arg->head.file   = expr->head.file;
-    arg->head.start  = expr->head.start;
-    arg->head.end    = expr->head.end;
-    arg->head.flags |= AST_FLAG_COMPILER_GENERATED;
-    arg->value       = expr;
-
-    return arg;
-}
-
 bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberAccess *ma) {
     AstExpr       *recv_arg = ma->left;
     AstIdentifier *recv_param = func_call->func_defn->receiver;
@@ -2795,13 +2883,7 @@ bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberA
 
     if (recv_arg->type->kind != TYPE_POINTER && recv_param->type->kind == TYPE_POINTER) {
         // Insert an address-of to match
-        AstUnary *addr_of        = ast_allocate(typer->parser, sizeof(AstUnary));
-        addr_of->head.head       = recv_arg->head;
-        addr_of->head.head.kind  = AST_UNARY;
-        addr_of->head.head.flags = AST_FLAG_COMPILER_GENERATED;
-        addr_of->operator        = OP_ADDRESS_OF;
-        addr_of->expr            = recv_arg;
-
+        AstUnary *addr_of = generate_address_of_value(typer, recv_arg);
         Type *type = check_unary(typer, addr_of, recv_param->type);
         if (!type) return false;
 
@@ -2832,6 +2914,17 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
             AstExpr *rhs = ma->right;
             if (rhs->head.kind == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
                 char *name = ((AstLiteral *)(rhs))->as.value.identifier.name;
+
+                // Try get one of the static members on type enum
+                // @EnumRefactor
+                AstIdentifier *static_member = get_static_enum_member(enum_defn, name);
+                if (static_member) {
+                    ma->access_kind = MEMBER_ACCESS_ENUM;
+                    ma->enum_member = (AstEnumerator *) static_member;
+                    return static_member->type;
+                }
+
+                // Normal case
                 AstEnumerator *enum_member = find_enum_member(enum_defn->node, name);
                 if (!enum_member) {
                     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "%s is not a member of enum %s", name, enum_defn->identifier->name);
@@ -2841,6 +2934,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
 
                 ma->access_kind = MEMBER_ACCESS_ENUM;
                 ma->enum_member = enum_member;
+
                 return (Type *)(enum_defn);
             }
         }
@@ -3413,15 +3507,15 @@ bool can_cast_explicitly(Type *from, Type *to) {
     if (from->kind == TYPE_POINTER && to->kind == TYPE_INTEGER) return true;    // address to a u64 number
     if (from->kind == TYPE_POINTER && to->kind == TYPE_BOOL) return true;       // null pointer = false, otherwise = true
 
-    if (from->kind == TYPE_POINTER && to->kind == TYPE_STRING) {
-        TypePointer *from_ptr = (TypePointer *)from;
-        if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_U8) {
-            return true;     // allow string to *u8
-        }
-        if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_CHAR) {
-            return true;     // allow string to *char
-        }
-    }
+    // if (from->kind == TYPE_POINTER && to->kind == TYPE_STRING) {
+    //     TypePointer *from_ptr = (TypePointer *)from;
+    //     if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_U8) {
+    //         return true;     // allow string to *u8
+    //     }
+    //     if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_CHAR) {
+    //         return true;     // allow string to *char
+    //     }
+    // }
     if (from->kind == TYPE_STRING && to->kind == TYPE_POINTER) {
         TypePointer *to_ptr = (TypePointer *)to;
         if (to_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)to_ptr->pointer_to)->kind == PRIMITIVE_U8) {
@@ -3555,7 +3649,9 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             Type *ok = resolve_type(typer, (Type *) type_defn_string);
             if (!ok) return NULL;
         }
-        reserve_temporary_storage(typer->enclosing_function, 16);
+        if (typer->enclosing_function) {
+            reserve_temporary_storage(typer->enclosing_function, 16);
+        }
         return (ctx_type && ctx_type->kind == TYPE_STRING) ? ctx_type : (Type *) type_defn_string;
     }
     case LITERAL_IDENTIFIER: {

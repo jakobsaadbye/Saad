@@ -1,9 +1,19 @@
 import "c_stdlib";
+import "c_string";
 
-// toCString :: method (s: string) -> *u8 {
-//     tmp: *u8;
-//     return tmp;
-// }
+toCString :: method (s: string) -> *u8 {
+    cstr := cast(*u8) malloc(s.len + 1);
+    memcpy(cstr, s.data, s.len);
+    cstr[s.len] = 0;
+    return cstr;
+}
+
+fromCString :: (cstr: *u8) -> string {
+    result: string;
+    result.data = cstr;
+    result.len = strlen(cstr);
+    return result;
+}
 
 slice :: method (s: string, from: int, to := -1) -> string {
     result: string;

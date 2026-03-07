@@ -56,7 +56,7 @@ internalAdd :: method (sb: *StringBuilder, strPtr: *u8, len: int) {
 
 addStringSlice :: method (sb: *StringBuilder, str: string, start: int, end: int) {
     strLen := end - start;
-    strPtr := cast(*u8)str;
+    strPtr := str.data;
     strPtr = &strPtr[start];
     sb.internalAdd(strPtr, strLen);
 }
@@ -68,9 +68,9 @@ addChar :: method (sb: *StringBuilder, c: u8) {
 }
 
 addString :: method (sb: *StringBuilder, str: string) {
-    strLen := strlen(str);
-    strPtr := cast(*u8)str;
-    sb.internalAdd(strPtr, strLen);
+    // strLen := strlen(str);
+    // strPtr := cast(*u8)str;
+    sb.internalAdd(str.data, str.len);
 }
 
 addInt :: method (sb: *StringBuilder, v: int) {
@@ -102,20 +102,22 @@ addInt :: method (sb: *StringBuilder, v: int) {
 
 addFloat32 :: method (sb: *StringBuilder, v: f32) {
     buf: [18]u8;
-    sprintf(buf.data, "%f", v);
+    sprintf(buf.data, xx "%f", v);
 
-    strPtr := cast(*u8) buf.data;
-    strLen := strlen(cast(string) strPtr);
-    sb.internalAdd(strPtr, strLen);
+    str: string;
+    str.data = cast(*u8) buf.data;
+    str.len = strlen(buf.data);
+    sb.internalAdd(str.data, str.len);
 }
 
 addFloat64 :: method (sb: *StringBuilder, v: f64) {
     buf: [18]u8;
-    sprintf(buf.data, "%lf", v);
+    sprintf(buf.data, xx "%lf", v);
 
-    strPtr := cast(*u8) buf.data;
-    strLen := strlen(cast(string) strPtr);
-    sb.internalAdd(strPtr, strLen);
+    str: string;
+    str.data = cast(*u8) buf.data;
+    str.len = strlen(buf.data);
+    sb.internalAdd(str.data, str.len);
 }
 
 addAnyValue :: method (sb: *StringBuilder, arg: any)  {
@@ -146,17 +148,21 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
     }
     else if arg.type.kind == .Enum {
         enumType := cast(*TypeEnum) arg.type;
-        sb.addString(enumType.head.name);
         sb.addString(".");
         sb.addString(enumType.valueName);
     }
     else if arg.type.kind == .Pointer {
         ptrType := cast(*TypePointer) arg.type;
+        value := cast(**void) arg.data;
 
         buf: [64]u8;
-        sprintf(buf.data, "0x%p", *arg.data);
+        written := sprintf(buf.data, xx "0x%p", *value);
 
-        sb.addString(cast(string)buf.data);
+        str: string;
+        str.data = buf.data;
+        str.len  = written; // written;
+
+        sb.addString(str);
     }
     else if arg.type.kind == .Array {
         arrType := cast(*TypeArray) arg.type;
@@ -185,7 +191,7 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
 
             // Only show the full value if its a primitive type since we don't
             // generate type descriptors for each element.
-            if arrType.elemType.isPrimitive() {
+            if isPrimitive(arrType.elemType) || arrType.elemType.kind == .String {
                 value: any;
                 value.type = arrType.elemType;
                 value.data = elemPtr;
@@ -193,8 +199,11 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
             } 
             else {
                 buf: [64]u8;
-                sprintf(buf.data, "0x%p", elemPtr);
-                sb.addString(cast(string)buf.data);
+                sprintf(buf.data, xx "0x%p", elemPtr);
+                str: string;
+                str.data = buf.data;
+                str.len  = strlen(buf.data);
+                sb.addString(str);
             }
 
             if i != arrType.count - 1 {
@@ -211,6 +220,8 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
             sb.addString(member.name);
             sb.addString(" = ");
 
+            // print("%\n", member.name);
+            
             value: any;
             value.type = member.type;
             value.data = member.value;
@@ -219,8 +230,12 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
             if i != structType.members.count - 1 {
                 sb.addString(", ");
             }
+
         }
         sb.addString(" }");
+
+
+
     }
     else {
         sb.addString("<");
@@ -233,8 +248,7 @@ add :: method (sb: *StringBuilder, format: string, args: ...any) {
 
     // Scan the format string to find all the placeholders
     placeholderIndicies: [..]int;
-    for i in 0..strlen(format) {
-        c := (cast(*u8)format)[i];
+    for c, i in format {
         if c == 37 { // '%'
             appendInt(&placeholderIndicies, i);
         }
@@ -255,7 +269,7 @@ add :: method (sb: *StringBuilder, format: string, args: ...any) {
     }
 
     // Append the trailing part after the last placeholder
-    sb.addStringSlice(format, cursor, strlen(format));
+    sb.addStringSlice(format, cursor, format.len);
 }
 
 clear :: method (sb: *StringBuilder) {
@@ -263,7 +277,10 @@ clear :: method (sb: *StringBuilder) {
 }
 
 toString :: method (sb: *StringBuilder) -> string {
-    return cast(string) sb.buffer;
+    str: string;
+    str.data = sb.buffer;
+    str.len  = sb.cursor;
+    return str;
 }
 
 free :: method (sb: *StringBuilder) {

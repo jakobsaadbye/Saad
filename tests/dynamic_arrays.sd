@@ -1,30 +1,61 @@
-extern "C" {
-    realloc :: (buffer: *void, new_size: int) -> *void;
+Vector2 :: struct {
+    x, y: f32;
 }
 
-append :: (array: *[..]int, elem: int) {
-    if array.count + 1 > array.capacity {
-        new_cap := array.capacity * 2;
-        array.data = realloc(array.data, new_cap);
-        array.capacity = new_cap;
-    }
-
-    // @Improvement: We could make it allowed to index access into pointer
-    // to array, so we don't need to do the dereference here manually
-    arr := *array;
-    arr[array.count] = elem;
-    array.count += 1;
+Fruit :: enum {
+    mango,
+    kiwi,
+    dragonfruit,
+    apple,
+    orange,
+    grape,
 }
 
 main :: () {
-    numbers: [..]int;
+    {
+        // Simple numbers
+        numbers: [..]u8;
+        
+        append(numbers, 1 + 2);
+        append(numbers, 2);
+        append(numbers, 3);
+        append(numbers, 4);
+        append(numbers, 5);
+    
+        for v in numbers {
+            print("v = %\n", v);
+        }
+    
+        assert(numbers.count == 5);
+        assert(numbers.capacity == 8);
+    }
+    {
+        // Structs
+        verticies: [..]Vector2;
 
-    append(&numbers, 1);
-    append(&numbers, 2);
-    append(&numbers, 3);
-    append(&numbers, 4);
-    append(&numbers, 5);
+        append(verticies, {1, 2});
+        append(verticies, {3, 4});
+        append(verticies, {5, 6});
+        append(verticies, {7, 8});
+        append(verticies, {9, 10});
 
-    assert(numbers.count == 5);
-    assert(numbers.capacity == 8);
+        for v in verticies {
+            print("v = %\n", v);
+        }
+    }
+    {
+        // Enums
+        fruits: [..]Fruit;
+
+        append(fruits, .mango);
+        append(fruits, .kiwi);
+        append(fruits, .dragonfruit);
+        append(fruits, .apple);
+        append(fruits, .orange);
+
+        for v in fruits {
+            print("v = %\n", v);
+        }
+    }
+
 }

@@ -1,11 +1,8 @@
-extern "C" {
-    sprintf :: (buffer: *u8, format: string, args: ...any) -> int;
-    printf  :: (format: string, args: ...any) -> int;
-}
+import "fmt";
 
 Myprint2 :: (format: string, args: ...any) {
     for arg, i in args {
-        print("%\n", *arg.type);
+        Print("%\n", *arg.type);
     }
 }
 
@@ -15,12 +12,12 @@ Myprint3 :: (format: string, args: ...any) {
 
 Myprint3Helper :: (format: string, args: ...any) {
     for arg, i in args {
-        print("%\n", *arg.type);
+        Print("%\n", *arg.type);
     }
 }
 
 functionWithAny :: (x: any) {
-    print("%\n", *x.type);
+    Print("%\n", *x.type);
 }
 
 MyJsonData :: struct {
@@ -36,15 +33,15 @@ main :: () {
     print("----------- Struct with any member -----------\n");
     {
         x := MyJsonData{3.14, 1};
-        print("%\n", *x.data.type);
+        Print("%\n", *x.data.type);
     }
     print("----------- Array of any -----------\n");
     {
         x: []any = [3.14, 5, Vector3{1, 4, 9}, [cast(int) 1, 2, 3]];
-        print("%\n", *x[0].type);
-        print("%\n", *x[1].type);
-        print("%\n", *x[2].type);
-        print("%\n", *x[3].type);
+        Print("%\n", *x[0].type);
+        Print("%\n", *x[1].type);
+        Print("%\n", *x[2].type);
+        Print("%\n", *x[3].type);
     }
     print("----------- Passing argument to an any parameter -----------\n");
     {
@@ -60,6 +57,6 @@ main :: () {
     }
     print("---------------- Passing variadic arguments to C function ----------------\n");
     {
-        printf("Passing %s arguments into %s functions is %d doable", "variadic", "C", 100);
+        printf(xx "Passing %s arguments into %s functions is %d doable", "variadic".data, "C".data, 100);
     }
 }

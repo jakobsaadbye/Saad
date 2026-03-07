@@ -17,8 +17,6 @@ CardValue :: enum {
     jack,
     queen,
     king,
-
-    count
 }
 
 CardSuit :: enum {
@@ -29,8 +27,6 @@ CardSuit :: enum {
     spades = 4,
 
     // also_joker = .joker, // All enum members must have unique values, so this will fail if you uncomment it
-
-    count
 }
 
 main :: () {

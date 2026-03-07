@@ -9,6 +9,7 @@ typedef enum CodeGenFlags {
 typedef struct CodeGenerator {
     StringBuilder head;     // Declaring bit target and other misc stuff
     StringBuilder data;     // Corresponding to section .data
+    StringBuilder rdata;    // Corresponding to section .rdata
     StringBuilder code;     // Corresponding to section .text
     StringBuilder code_header;  // Header of externs, globals etc within the .text section
 
@@ -201,6 +202,7 @@ CodeGenerator code_generator_init(Parser *parser) {
     CodeGenerator cg = {0};
     cg.head = sb_init(1024);
     cg.data = sb_init(1024);
+    cg.rdata = sb_init(1024);
     cg.code = sb_init(1024);
     cg.code_header = sb_init(1024);
 
@@ -246,6 +248,9 @@ void emit_header(CodeGenerator *cg) {
     sb_append(&cg->data, "   string_true  DB \"true\", 0\n");
     sb_append(&cg->data, "   string_assert_fail  DB \"Assertion failed at line %s\", 10, 0\n", "%d");
     sb_append(&cg->data, "   enum_to_int_buffer times 20 DB 0\n"); // 20 is the length of the largest integer number 2^64
+    sb_append(&cg->code, "\n");
+
+    sb_append(&cg->rdata, "segment .rdata\n");
     sb_append(&cg->code, "\n");
 
     sb_append(&cg->code_header, "segment .text\n");
@@ -403,51 +408,94 @@ void emit_enum_defn(CodeGenerator *cg, AstEnum *ast_enum) {
         return;
     }
 
+    //
+    // Add the name of the enum type: string
+    //
+    sb_append(&cg->rdata, "   %s.name.data DB \"%s\", 0\n", ast_enum->identifier->name, ast_enum->identifier->name);
+    sb_append(&cg->rdata, "   align 8\n");
+    sb_append(&cg->rdata, "   %s.name:\n", ast_enum->identifier->name);
+    sb_append(&cg->rdata, "   dq %s.name.data\n", ast_enum->identifier->name);
+    sb_append(&cg->rdata, "   dq %lld\n", strlen(ast_enum->identifier->name));
+
+    //
+    // Add the names: []string
+    //
     for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
-        sb_append(&cg->data, "   __%s.%s DB \"%s\", 0\n", ast_enum->identifier->name, etor->name, etor->name);
+        sb_append(&cg->rdata, "   __%s.%s DB \"%s\", 0\n", ast_enum->identifier->name, etor->name, etor->name);
     }
+    sb_append(&cg->rdata, "   align 8\n");
+    sb_append(&cg->rdata, "   %s.names.array:\n", ast_enum->identifier->name);
+    for (int i = 0; i < ast_enum->enumerators.count; i++) {
+        AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
+        sb_append(&cg->rdata, "   dq __%s.%s\n", ast_enum->identifier->name, etor->name);
+        sb_append(&cg->rdata, "   dq %lld\n", strlen(etor->name));
+    }
+    sb_append(&cg->rdata, "   align 8\n");
+    sb_append(&cg->rdata, "   %s.names:\n", ast_enum->identifier->name);
+    sb_append(&cg->rdata, "   dq %s.names.array:\n", ast_enum->identifier->name);
+    sb_append(&cg->rdata, "   dq %lld\n", ast_enum->enumerators.count);
 
-    // char *get_enum_string_<ENUM_NAME>(char *buf, int value)
-    // - buf is in rcx
-    // - value is in rdx
-    // - returned string is in rax
-    int case_label = make_label_number(cg);
+
+    //
+    // Add the values: []Enum
+    //
+    sb_append(&cg->rdata, "   align 4\n");
+    sb_append(&cg->rdata, "   %s.values.array:\n", ast_enum->identifier->name);
+    for (int i = 0; i < ast_enum->enumerators.count; i++) {
+        AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
+        sb_append(&cg->rdata, "   dd %lld\n", etor->value);
+    }
+    sb_append(&cg->rdata, "   align 8\n");
+    sb_append(&cg->rdata, "   %s.values:\n", ast_enum->identifier->name);
+    sb_append(&cg->rdata, "   dq %s.values.array:\n", ast_enum->identifier->name);
+    sb_append(&cg->rdata, "   dq %lld\n", ast_enum->enumerators.count);
+
+
+    // RawString get_enum_string_<ENUM_NAME>(RawString *ret_str, char *buf, int value)
+    // - ret_str: Rcx - Ptr to the returned string
+    // - buf:     Rdx - Buffer to store the string of an integer value
+    // - value:   R8  - Value of the enum
     sb_append(&cg->code, "get_enum_string_%s:\n", ast_enum->identifier->name);
-    for (int i = 0; i < ast_enum->enumerators.count; i++) {
-        AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
-        sb_append(&cg->code, "   mov\t\tr8, %d\n", etor->value);
-        sb_append(&cg->code, "   cmp\t\trdx, r8\n");
-        sb_append(&cg->code, "   jz\t\t\tenum_case_%d\n", case_label);
-
-        etor->label = case_label;
-        case_label  = make_label_number(cg);
+    {
+        int case_label = make_label_number(cg);
+        for (int i = 0; i < ast_enum->enumerators.count; i++) {
+            AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
+            sb_append(&cg->code, "   mov\t\tr9, %d\n", etor->value);
+            sb_append(&cg->code, "   cmp\t\tr8, r9\n");
+            sb_append(&cg->code, "   jz\t\t\tenum_case_%d\n", case_label);
+    
+            etor->label = case_label;
+            case_label  = make_label_number(cg);
+        }
+    
+        // Case integer value
+        // Convert the integer to a string
+        // R8 = value of enum
+        PUSH(RCX);
+        PUSH(RDX);
+        sb_append(&cg->code, "   mov\t\trcx, rdx\n");
+        sb_append(&cg->code, "   mov\t\trdx, fmt_int\n");
+        sb_append(&cg->code, "   sub\t\trsp, 32\n");
+        sb_append(&cg->code, "   call\t\tsprintf\n");
+        sb_append(&cg->code, "   add\t\trsp, 32\n");
+        POP(RDX);
+        POP(RCX);
+        sb_append(&cg->code, "   mov\t\t0[rcx], rdx\n");
+        sb_append(&cg->code, "   mov\t\t8[rcx], rax\n");
+        sb_append(&cg->code, "   mov\t\trax, rcx\n");
+        sb_append(&cg->code, "   ret\n");
     }
-
-    // Case integer value
-    PUSH(RCX);
-    sb_append(&cg->code, "   mov\t\tr8, rdx\n");
-    sb_append(&cg->code, "   mov\t\trdx, fmt_int\n");
-
-    PUSH(R8);
-    PUSH(RDX);
-    PUSH(RCX);
-
-    sb_append(&cg->code, "   call\t\tsprintf\n");
-
-    POP(RAX);
-
-    POP(RBX);
-    POP(RBX);
-    POP(RBX);
-
-    sb_append(&cg->code, "   ret\n");
 
     // Case name of enum member
     for (int i = 0; i < ast_enum->enumerators.count; i++) {
         AstEnumerator *etor = ((AstEnumerator **)(ast_enum->enumerators.items))[i];
         sb_append(&cg->code, "enum_case_%d:\n", etor->label);
         sb_append(&cg->code, "   mov\t\trax, __%s.%s\n", ast_enum->identifier->name, etor->name);
+        sb_append(&cg->code, "   mov\t\tQWORD rbx, %d\n", strlen(etor->name));
+        sb_append(&cg->code, "   mov\t\tQWORD 0[rcx], rax\n");
+        sb_append(&cg->code, "   mov\t\tQWORD 8[rcx], rbx\n");
+        sb_append(&cg->code, "   mov\t\trax, rcx\n");
         sb_append(&cg->code, "   ret\n");
     }
 
@@ -1397,26 +1445,24 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
         return;
     }
 
-    // @StringRefactoring: This needs to go
-    // if (from->kind == TYPE_POINTER && to->kind == TYPE_STRING) {
-    //     TypePointer *from_ptr = (TypePointer *)from;
-    //     if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_U8) {
-    //         return; // handled
-    //     }
-    //     if (from_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)from_ptr->pointer_to)->kind == PRIMITIVE_CHAR) {
-    //         return; // handled
-    //     }
-    // }
+    if (from->kind == TYPE_STRING && to->kind == TYPE_POINTER) {
+        TypePointer *to_ptr = (TypePointer *)to;
 
-    // if (from->kind == TYPE_STRING && to->kind == TYPE_POINTER) {
-    //     TypePointer *to_ptr = (TypePointer *)to;
-    //     if (to_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)to_ptr->pointer_to)->kind == PRIMITIVE_U8) {
-    //         return; // handled
-    //     }
-    //     if (to_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)to_ptr->pointer_to)->kind == PRIMITIVE_CHAR) {
-    //         return; // handled
-    //     }
-    // }
+        // Dereference the .data of the string assuming its zero terminated
+        
+        if (to_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)to_ptr->pointer_to)->kind == PRIMITIVE_U8) {
+            POP(RAX);
+            sb_append(&cg->code, "   mov\trax, [rax]\n");
+            PUSH(RAX);
+            return;
+        }
+        if (to_ptr->pointer_to->kind == TYPE_INTEGER && ((TypePrimitive *)to_ptr->pointer_to)->kind == PRIMITIVE_CHAR) {
+            POP(RAX);
+            sb_append(&cg->code, "   mov\trax, [rax]\n");
+            PUSH(RAX);
+            return; // handled
+        }
+    }
 
     if (from->kind == TYPE_POINTER && to->kind == TYPE_POINTER) {
         return; // handled
@@ -1471,7 +1517,7 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
     }
 
 
-    printf("%s:%d: Compiler Error: There were unhandled cases in 'emit_cast'. Casting from '%s' -> '%s' \n", __FILE__, __LINE__, type_to_str(from), type_to_str(to));
+    report_error_ast(cg->parser, LABEL_WARNING, (Ast *) cast, "Compiler Error: There were unhandled cases in 'emit_cast'. Casting from '%s' -> '%s' \n", type_to_str(from), type_to_str(to));
     return;
 }
 
@@ -1552,8 +1598,14 @@ void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof) {
 
     int const_number = cg->constants++;
 
+    int offset = push_temporary_value(cg, 16, (Ast *) ast_typeof);
     sb_append(&cg->data, "   CS%d\tDB \"%s\", 0\n", const_number, type_name);
     sb_append(&cg->code, "   mov\t\trax, CS%d\n", const_number);
+    sb_append(&cg->code, "   mov\t\tQWORD rbx, %lld\n", strlen(type_name));
+    sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", offset);
+    sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rbx\n", offset + 8);
+    sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", offset);
+
 }
 
 void emit_new(CodeGenerator *cg, AstNew *ast_new) {
@@ -1664,9 +1716,14 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
     }
     case TYPE_ENUM: {
         int buffer_index = *num_enum_arguments;
-        POP(RDX); // enum integer value
-        sb_append(&cg->code, "   mov\t\trcx, enum_buffer_%d\n", buffer_index);
+        int ret_offset = push_temporary_value(cg, 16, (Ast *)arg_type);
+        sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\n", ret_offset);
+        sb_append(&cg->code, "   mov\t\trdx, enum_buffer_%d\n", buffer_index);
+        POP(R8); // enum integer value
         sb_append(&cg->code, "   call\t\tget_enum_string_%s\n", ((TypeEnum *)(arg_type))->identifier->name);
+
+        // Dereference the RawString to pass the .data as we need the string as a cstring
+        sb_append(&cg->code, "   mov\t\trax, 0[rax]\n");
         PUSH(RAX);
         *num_enum_arguments += 1;
         break;
@@ -1985,7 +2042,13 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
 
         emit_type_descriptor(cg, type_array->elem_type);
         
-        emit_add_constant_string(cg, type_to_str(type), REG_RCX);
+        int offset_name = push_temporary_value(cg, 16, (Ast *) type_array);
+        char *type_name = type_to_str(type);
+        emit_add_constant_string(cg, type_name, REG_RAX);
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", offset_name);
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n", offset_name + 8, strlen(type_name));
+        sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\n", offset_name);
+
         sb_append(&cg->code, "   mov\t\tedx, %d\n", type_array->array_kind);
         POP(R8);
 
@@ -1993,9 +2056,9 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
             // Get the element count
             sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", value_ptr_offset);
             sb_append(&cg->code, "   mov\t\trbx, rbx\n");
-            sb_append(&cg->code, "   mov\t\tr9d, 8[rbx]\n");
+            sb_append(&cg->code, "   mov\t\tr9, 8[rbx]\n");
         } else {
-            sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_array->count);
+            sb_append(&cg->code, "   mov\t\tr9, %lld\n", type_array->count);
         }
 
         sb_append(&cg->code, "   sub\t\trsp, 32\n");
@@ -2006,10 +2069,16 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
     }
     case TYPE_POINTER: {
         TypePointer *type_ptr = (TypePointer *)type;
-
+        
         emit_type_descriptor(cg, type_ptr->pointer_to);
 
-        emit_add_constant_string(cg, type_to_str(type), REG_RCX);
+        int offset_name = push_temporary_value(cg, 16, (Ast *) type_ptr);
+        char *type_name = type_to_str(type);
+        emit_add_constant_string(cg, type_name, REG_RAX);
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", offset_name);
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n", offset_name + 8, strlen(type_name));
+        sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\n", offset_name);
+
         POP(RDX);
         sb_append(&cg->code, "   sub\t\trsp, 32\n");
         sb_append(&cg->code, "   call\t\truntime_get_type_pointer\n");
@@ -2027,7 +2096,7 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
 
         DynamicArray members = type_struct->node->scope->identifiers;
 
-        int size_struct_member = 32; // sizeof(StructMember) in reflect.sd
+        int size_struct_member = 48; // sizeof(StructMember) in runtime.sd
 
         // Generate type descriptors for the struct members
         sb_append(&cg->code, "   sub\t\trsp, 32\n");
@@ -2043,6 +2112,10 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
+            if (member->flags & IDENTIFIER_IS_STRUCT_METHOD) {
+                continue;
+            }
+
             sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", value_ptr_offset);
             sb_append(&cg->code, "   lea\t\trbx, %d[rbx]\n", member->member_offset);
             emit_type_descriptor(cg, member->type);
@@ -2053,16 +2126,22 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
 
             sb_append(&cg->code, "   mov\t\trbx, %d[rbp]\n", cursor_offset);
             emit_add_constant_string(cg, member->name, REG_RAX);
-            sb_append(&cg->code, "   mov\t\t0[rbx], rax\n");
-            sb_append(&cg->code, "   mov\t\t8[rbx], rcx\n");
-            sb_append(&cg->code, "   mov\t\t16[rbx], rdx\n");
-            sb_append(&cg->code, "   mov\t\tDWORD 24[rbx], %d\n", member->member_index);
-            sb_append(&cg->code, "   mov\t\tDWORD 28[rbx], %d\n", member->member_offset);
+            sb_append(&cg->code, "   mov\t\tQWORD 0[rbx], rax\n");
+            sb_append(&cg->code, "   mov\t\tQWORD 8[rbx], %lld\n", strlen(member->name));
+            sb_append(&cg->code, "   mov\t\tQWORD 16[rbx], rcx\n");
+            sb_append(&cg->code, "   mov\t\tQWORD 24[rbx], rdx\n");
+            sb_append(&cg->code, "   mov\t\tDWORD 32[rbx], %d\n", member->member_index);
+            sb_append(&cg->code, "   mov\t\tDWORD 36[rbx], %d\n", member->member_offset);
             sb_append(&cg->code, "   add\t\trbx, %d\n", size_struct_member);
             sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", cursor_offset);
         }
-        
-        emit_add_constant_string(cg, type_struct->identifier->name, REG_RCX);
+
+        int offset_name = push_temporary_value(cg, 16, (Ast *) type_struct);
+        emit_add_constant_string(cg, type_struct->identifier->name, REG_RAX);
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", offset_name);
+        sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n", offset_name + 8, strlen(type_struct->identifier->name));
+
+        sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\n", offset_name);
         sb_append(&cg->code, "   mov\t\trdx, %d[rbp]\n", base_offset);
         sb_append(&cg->code, "   mov\t\tr8d, %d\n", members.count);
         sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_struct->head.size);
@@ -2083,13 +2162,16 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
         emit_type_descriptor(cg, type_enum->backing_type);
 
         // Get string representation of the enum value
-        sb_append(&cg->code, "   mov\t\trcx, enum_to_int_buffer\n");
-        sb_append(&cg->code, "   mov\t\trdx, %d[rbp]\n", value_ptr_offset);
-        sb_append(&cg->code, "   mov\t\tedx, [rdx]\n");
+        int offset_enum_member_name = push_temporary_value(cg, 16, (Ast *) type_enum);
+        sb_append(&cg->code, "   lea\t\trcx, %d[rbp]\n", offset_enum_member_name);
+        sb_append(&cg->code, "   mov\t\trdx, enum_to_int_buffer\n");
+        sb_append(&cg->code, "   mov\t\tr8, %d[rbp]\n", value_ptr_offset);
+        sb_append(&cg->code, "   mov\t\tr8d, [r8]\n");
         sb_append(&cg->code, "   call\t\tget_enum_string_%s\n", type_enum->identifier->name);
         sb_append(&cg->code, "   mov\t\trdx, rax\n");
         
-        emit_add_constant_string(cg, type_enum->identifier->name, REG_RCX);
+        sb_append(&cg->code, "   mov\t\trcx, %s.name\n", type_enum->identifier->name);
+
         POP(R8);
         sb_append(&cg->code, "   mov\t\tr9d, %d\n", type_enum->min_value);
         sb_append(&cg->code, "   sub\t\trsp, 40\n");
@@ -2378,7 +2460,14 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
             case LITERAL_BOOLEAN: break; // Immediate value is used
             case LITERAL_INTEGER: break; // Immediate value is used 
             case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", ident->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
-            case LITERAL_STRING:  sb_append(&cg->data, "   C_%s DB \"%s\"\n", ident->name, lit->as.value.string.data); break; // :IdentifierNameAsConstant @Cleanup
+            case LITERAL_STRING: {
+                sb_append(&cg->rdata, "   C_%s.data DB \"%s\", 0\n", ident->name, lit->as.value.string.data);
+                sb_append(&cg->rdata, "   align 8\n");
+                sb_append(&cg->rdata, "   C_%s:\n", ident->name);
+                sb_append(&cg->rdata, "   dq C_%s.data\n", ident->name);
+                sb_append(&cg->rdata, "   dq %lld\n", lit->as.value.string.length);
+                break;
+            }
             case LITERAL_NULL:    XXX; // @TODO
             case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
             }
@@ -3097,8 +3186,39 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             emit_function_call(cg, ma->method_call);
         }
         else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
-            sb_append(&cg->code, "   push\t\t%d\n", ma->enum_member->value);
-            INCR_PUSH_COUNT();
+
+            AstEnum *enum_defn = ma->enum_member->parent;
+            
+            // @EnumRefactor
+            // Special case for .count and .names
+            if (ma->enum_member->head.kind == AST_IDENTIFIER) {
+                AstIdentifier *member = (AstIdentifier *) ma->enum_member;
+
+                // Enum definition is found on the decl
+                enum_defn = (AstEnum *) member->decl;
+
+                if (strcmp(member->name, "count") == 0) {
+                    sb_append(&cg->code, "   push\t\t%d\n", enum_defn->enumerators.count);
+                    INCR_PUSH_COUNT();
+                }
+                else if (strcmp(member->name, "names") == 0) {
+                    sb_append(&cg->code, "   mov\t\trax, %s.names\n", enum_defn->identifier->name);
+                    PUSH(RAX);
+                }
+                else if (strcmp(member->name, "values") == 0) {
+                    sb_append(&cg->code, "   mov\t\trax, %s.values\n", enum_defn->identifier->name);
+                    PUSH(RAX);
+                }
+                else {
+                    XXX;
+                }
+
+            }
+            else {
+                sb_append(&cg->code, "   push\t\t%d\n", ma->enum_member->value);
+                INCR_PUSH_COUNT();
+            }
+
         } else {
             XXX;
         }
@@ -3196,7 +3316,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
             POP(RBX); // address to the malloced array
             sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rbx\n",  dyn_array_offset + 0);
-            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n", dyn_array_offset + 8, array_type->count);
+            sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n", dyn_array_offset + 8,  array_type->count);
             sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n", dyn_array_offset + 16, array_type->capacity);
             sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %lld\n", dyn_array_offset + 24, array_type->elem_type->size);
             

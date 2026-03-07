@@ -1062,8 +1062,8 @@ TypeStruct *generate_struct_for_dynamic_array(Parser *parser, Type *type_data) {
     capacity->member_index   = 2;
     capacity->member_offset  = 16;
     AstIdentifier *elem_size = generate_identifier(parser, "elemSize", primitive_type(PRIMITIVE_S64), IDENTIFIER_IS_STRUCT_MEMBER);
-    capacity->member_index   = 3;
-    capacity->member_offset  = 24;
+    elem_size->member_index   = 3;
+    elem_size->member_offset  = 24;
 
     add_member_to_struct_scope(parser, dynamic_array->node, capacity);
     add_member_to_struct_scope(parser, dynamic_array->node, elem_size);
@@ -1235,6 +1235,13 @@ AstEnum *parse_enum_defn(Parser *parser) {
     type_enum->node            = ast_enum; // @Improvement - Probably also need to copy over the hashtable of enumerators
     type_enum->identifier      = ast_enum->identifier;
     type_enum->backing_type    = primitive_type(PRIMITIVE_INT); // @Improvement - Support for having a backing integer type
+
+    type_enum->count = generate_identifier(parser, "count", primitive_type(PRIMITIVE_S64), IDENTIFIER_IS_CONSTANT);
+    type_enum->count->decl = (AstDeclaration *) ast_enum;
+    type_enum->names = generate_identifier(parser, "names", (Type *) generate_slice_of(parser, (Type *) type_defn_string), IDENTIFIER_IS_CONSTANT);
+    type_enum->names->decl = (AstDeclaration *) ast_enum;
+    type_enum->values = generate_identifier(parser, "values", (Type *) generate_slice_of(parser, (Type *) type_enum), IDENTIFIER_IS_CONSTANT);
+    type_enum->values->decl = (AstDeclaration *) ast_enum;
 
     Type *exists = type_add_user_defined(&parser->type_table, (Type *)(type_enum));
     if (exists) {

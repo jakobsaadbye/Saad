@@ -87,7 +87,18 @@ main :: () {
             print("%\n", s);
         }
     }
+
+    if true {
+        // reverse
+        text := "The quick brown fox jumps over the lazy dog";
+
+        reversed := text.reverse();
+
+        assert(reversed == "god yzal eht revo spmuj xof nworb kciuq ehT");
+    }
     
     
 
 }
+
+

@@ -4,6 +4,45 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.2.2 - 07. Mar 2026
+
+### Better enums
+
+Enums now have the members:
+
+* ```count```: To get the number of enum values
+* ```names```: To get the string representation of the enum values
+* ```values```: To get an array of all the enum values of the enum
+
+```odin
+Fruit :: enum {
+    mango,
+    kiwi,
+    watermelon,
+    dragonfruit,
+    pear,
+    apple,
+}
+
+main :: () {
+
+    print("%\n", Fruit.count);
+
+    for name in Fruit.names {
+        print("%\n", name);
+    }
+
+    for value in Fruit.values {
+        print("%\n", cast(int) value);
+    }
+
+}
+```
+
+### Minor fixes
+* Fix ```append``` not working with literals
+* Fix lots of issues in runtime.sd after strings are now 16 bytes slices
+
 ## Update v0.2.1 - 18. Feb 2026
 
 * Introduction of default parameters and positional arguments for functions

@@ -1,4 +1,5 @@
 import "runtime";
+import "fmt";
 
 Fruit :: enum {
     Mango,
@@ -28,36 +29,35 @@ Entity :: struct {
 
 main :: () {
     print("-------------------- Primitive types ----------------\n");
-    {
-        x: any = cast(u8)5;
-
+    if true {
+        x: any = cast(u8) 5;
         assert(x.type.kind == .Int);
-
+        
         type := cast(*TypePrimitive) x.type;
-        print("TypePrimitive = %", *type);
+        Print("TypePrimitive = %", *type);
     }
     print("\n-------------------- Array type ----------------\n");
-    {
+    if true {
         x: any = [1, 2, 3];
 
         assert(x.type.kind == .Array);
 
         type := cast(*TypeArray) x.type;
-        print("TypeArray = %\n", *type);
-        print("ElemType  = %\n", *type.elemType);
+        Print("TypeArray = %\n", *type);
+        Print("ElemType  = %\n", *type.elemType);
     }
     print("\n-------------------- Enum type ----------------\n");
-    {
+    if true {
         x: any = Fruit.Watermelon;
 
         assert(x.type.kind == .Enum);
 
         type := cast(*TypeEnum) x.type;
-        print("TypeEnum = %\n", *type);
-        print("BackingType = %\n", *type.backingType);
+        Print("TypeEnum = %\n", *type);
+        Print("BackingType = %\n", *type.backingType);
     }
     print("\n-------------------- Struct type ----------------\n");
-    {
+    if true {
         x: any = Entity{
             kind     = .Human,
             position = Vector3{3, 3, 3},
@@ -69,9 +69,9 @@ main :: () {
         printStructType(cast(*TypeStruct) x.type);
     }
     print("\n-------------------- Changing types at runtime ----------------\n");
-    {
+    if true {
         x: any = 5;
-        print("%\n", *x.type);
+        Print("%\n", *x.type);
         assert(x.type.kind == .Int);
 
         x = Vector3{1, 4, 9};
@@ -90,9 +90,9 @@ main :: () {
 }
 
 printStructType :: (structType: *TypeStruct) {
-    print("% :: struct {\n", structType.head.name);
+    Print("% :: struct {\n", structType.head.name);
     for member in structType.members {
-        print("\t%: %;\n", member.name, member.type.name);
+        Print("\t%: %;\n", member.name, member.type.name);
     }
-    print("}\n");
+    Print("}\n");
 }

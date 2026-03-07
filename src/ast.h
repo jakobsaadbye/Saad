@@ -5,8 +5,6 @@
 #include "lib/table.h"
 #include "lib/dynamic_array.h"
 
-#define MAX_STATEMENTS_WITHIN_BLOCK 64
-
 typedef struct AstDeclaration AstDeclaration;
 typedef struct AstBlock AstBlock;
 typedef struct AstStruct AstStruct;
@@ -631,6 +629,11 @@ typedef struct TypeEnum {
     Type          *backing_type;
     int            min_value;
     int            max_value;
+
+    // Static enum definition members
+    AstIdentifier *count;
+    AstIdentifier *names;
+    AstIdentifier *values;
 } TypeEnum;
 
 typedef struct TypeEnumValue {

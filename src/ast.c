@@ -189,7 +189,7 @@ char *type_to_str(Type *type) {
     }
     case TYPE_NAME:      return type->name;
     case TYPE_STRUCT:    return type->name;
-    case TYPE_ENUM:      return "enum";
+    case TYPE_ENUM:      return type->name; // "enum";
     case TYPE_FUNCTION: {
         TypeFunction *func = (TypeFunction *)(type);
         StringBuilder sb = sb_init(32);

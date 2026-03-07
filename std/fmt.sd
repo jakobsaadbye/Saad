@@ -5,19 +5,17 @@ import "arrays";
 PLACEHOLDER_CHARACTER :: 37;  // '%'
 
 extern "C" {
-    sprintf :: (buffer: *u8, format: string, args: ...any) -> int;
-    printf  :: (format: string, args: ...any) -> int;
+    sprintf :: (buffer: *u8, format: *u8, args: ...any) -> int;
+    printf  :: (format: *u8, args: ...any) -> int;
 }
 
 Print :: (format: string, args: ...any) {
 
     // Scan the format string to find all the placeholders
     placeholderIndicies: [..]int;
-    for i in 0..strlen(format) {
-        c := (cast(*u8)format)[i];
-
+    for c, i in format {
         if c == PLACEHOLDER_CHARACTER {
-            appendInt(&placeholderIndicies, i);
+            appendInt(&placeholderIndicies, cast(s64) i);
         }
     }
 
@@ -38,11 +36,11 @@ Print :: (format: string, args: ...any) {
     }
 
     // Append the trailing part after the last placeholder
-    sb.addStringSlice(format, cursor, strlen(format));
+    sb.addStringSlice(format, cursor, format.len);
 
     result := sb.toString();
-    
-    printf("%s", result);
+
+    printf("%s".data, result.data);
     
     sb.free();
     return;
