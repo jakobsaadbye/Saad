@@ -237,10 +237,10 @@ typedef struct AstBlock {
 } AstBlock;
 
 typedef struct AstStruct {
-    Ast head;
-
+    Ast            head;
     AstIdentifier *identifier;
-    AstBlock      *scope;
+    AstBlock      *members_scope;
+    AstBlock      *methods;
 } AstStruct;
 
 typedef struct AstEnum {

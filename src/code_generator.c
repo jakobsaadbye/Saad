@@ -1772,11 +1772,11 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
             }
         }
         
-        DynamicArray members = struct_node->scope->identifiers;
+        DynamicArray members = struct_node->members_scope->identifiers;
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-            if (member->flags & IDENTIFIER_IS_STRUCT_METHOD) {
+            if (member->flags & IDENTIFIER_IS_CONSTANT) {
                 continue;
             }
 
@@ -1803,11 +1803,11 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
 }
 
 void pop_struct_members_from_print(CodeGenerator *cg, AstStruct *struct_, int *c_arg_index) {
-    DynamicArray members = struct_->scope->identifiers;
+    DynamicArray members = struct_->members_scope->identifiers;
     for (int i = members.count - 1; i >= 0; i--) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-        if (member->flags & IDENTIFIER_IS_STRUCT_METHOD) {
+        if (member->flags & IDENTIFIER_IS_CONSTANT) {
             continue;
         }
 
@@ -2094,7 +2094,7 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
         int value_ptr_offset = push_temporary_value(cg, 8, (Ast *)type);
         sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", value_ptr_offset);
 
-        DynamicArray members = type_struct->node->scope->identifiers;
+        DynamicArray members = type_struct->node->members_scope->identifiers;
 
         int size_struct_member = 48; // sizeof(StructMember) in runtime.sd
 
@@ -2112,7 +2112,7 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-            if (member->flags & IDENTIFIER_IS_STRUCT_METHOD) {
+            if (member->flags & IDENTIFIER_IS_CONSTANT) {
                 continue;
             }
 

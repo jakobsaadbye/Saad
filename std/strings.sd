@@ -191,7 +191,7 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
 
             // Only show the full value if its a primitive type since we don't
             // generate type descriptors for each element.
-            if isPrimitive(arrType.elemType) || arrType.elemType.kind == .String {
+            if arrType.elemType.isPrimitive() || arrType.elemType.kind == .String {
                 value: any;
                 value.type = arrType.elemType;
                 value.data = elemPtr;

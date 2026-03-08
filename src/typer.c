@@ -53,6 +53,7 @@ void reserve_local_storage(AstFunctionDefn *func_defn, int size);
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size);
 void reset_temporary_storage();
 AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name);
+AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 
 AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr);
 char *generate_c_format_specifier_for_type(Type *type);
@@ -112,7 +113,7 @@ void dump_scope_levels(AstBlock *scope) {
 void dump_struct(AstStruct *struct_defn) {
     printf("%s :: struct {\n", struct_defn->identifier->name);
 
-    DynamicArray members = struct_defn->scope->identifiers;
+    DynamicArray members = struct_defn->members_scope->identifiers;
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
         printf("    %s: %s;\n", member->name, type_to_str(member->type));
@@ -565,7 +566,7 @@ void reserve_space_for_runtime_any_value(Typer *typer, Type *value_type) {
 
         TypeStruct *type_struct = (TypeStruct *) value_type;
 
-        DynamicArray members = type_struct->node->scope->identifiers;
+        DynamicArray members = type_struct->node->members_scope->identifiers;
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **) members.items)[i];
             reserve_space_for_runtime_any_value(typer, member->type);
@@ -1058,16 +1059,20 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     assert(struct_type != NULL && struct_type->head.kind == TYPE_STRUCT);
 
 
-    typer->current_scope = ast_struct->scope;
-    DynamicArray members = ast_struct->scope->identifiers;
+    typer->current_scope = ast_struct->members_scope;
+    DynamicArray members = ast_struct->members_scope->identifiers;
     bool ok;
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
-        if (member->flags & IDENTIFIER_IS_STRUCT_METHOD) continue;
+
+        if (member->flags & IDENTIFIER_IS_CONSTANT) {
+            continue;
+        }
+
         ok = check_declaration(typer, member->decl);
         if (!ok) return false;
     }
-    typer->current_scope = ast_struct->scope->parent;
+    typer->current_scope = ast_struct->members_scope->parent;
     
     // C-style struct alignment + padding
     int alignment = 0;
@@ -1313,23 +1318,18 @@ char *generate_c_format_specifier_for_type(Type *type) {
 
         TypeStruct *struct_defn = (TypeStruct *) type;
 
-        DynamicArray members = struct_defn->node->scope->identifiers;
+        DynamicArray members = struct_defn->node->members_scope->identifiers;
 
         sb_append(&builder, "%s{ ", struct_defn->identifier->name);
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **)members.items)[i];
-
-            if (member->flags & IDENTIFIER_IS_STRUCT_METHOD) continue;
 
             char *format_specifier = generate_c_format_specifier_for_type(member->type);
 
             sb_append(&builder, "%s = %s", member->name, format_specifier);
             
             if (i != members.count - 1) {
-                bool next_member_is_method = ((AstIdentifier **)members.items)[i + 1]->flags & IDENTIFIER_IS_STRUCT_METHOD;
-                if (!next_member_is_method) {
-                    sb_append(&builder, ", ");
-                }
+                sb_append(&builder, ", ");
             }
         }
         sb_append(&builder, " }");
@@ -1343,12 +1343,12 @@ char *generate_c_format_specifier_for_type(Type *type) {
 }
 
 int count_nested_sizeable_struct_members(Typer *typer, AstStruct *struct_, int count) {
-    DynamicArray members = struct_->scope->identifiers;
+    DynamicArray members = struct_->members_scope->identifiers;
 
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-        if (member->flags & IDENTIFIER_IS_STRUCT_METHOD) continue;
+        if (member->flags & IDENTIFIER_IS_CONSTANT) continue;
 
         if (member->type->kind == TYPE_STRUCT) {
             AstStruct *nested_struct = ((TypeStruct *)member->type)->node;
@@ -1789,7 +1789,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         // Lookup the function within the scope of the struct
         assert(call->belongs_to_struct);
 
-        AstIdentifier *func_member = get_struct_member(call->belongs_to_struct, call->identifer->name);
+        AstIdentifier *func_member = get_struct_method(call->belongs_to_struct, call->identifer->name);
         if (!func_member) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined member function '%s'", text_bold(call->identifer->name));
             return NULL;
@@ -2339,9 +2339,10 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         }
 
         // Add the function as a member of the receiver struct
-        AstIdentifier *method_member = generate_identifier(typer->parser, func_defn->identifier->name, (Type *)func_type, IDENTIFIER_IS_STRUCT_MEMBER | IDENTIFIER_IS_STRUCT_METHOD);
-        add_member_to_struct_scope(typer->parser, receiver_struct->node, method_member);
+        AstIdentifier *method = generate_identifier(typer->parser, func_defn->identifier->name, (Type *)func_type, IDENTIFIER_IS_STRUCT_MEMBER | IDENTIFIER_IS_STRUCT_METHOD);
+        add_identifier_to_scope(typer->parser, receiver_struct->node->methods, method);
 
+        // @Cleanup @Speed: Use a string buffer located in Parser to allocate the strings instead of malloc
         char *symbol_name = malloc(strlen(receiver_struct->identifier->name) + 8 + strlen(func_defn->identifier->name));
         sprintf(symbol_name, "%s.%s", receiver_struct->identifier->name, func_defn->identifier->name);
 
@@ -3010,8 +3011,10 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     else if (rhs->head.kind == AST_FUNCTION_CALL) {
         func_call = (AstFunctionCall *) rhs;
 
+        // Method call
+
         member_name = func_call->identifer->name;
-        member = get_struct_member(struct_type->node, member_name);
+        member = get_struct_method(struct_type->node, member_name);
 
         if (member) {
 
@@ -3142,7 +3145,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         struct_defn = (TypeStruct *)(ctx_type);
     }
 
-    DynamicArray members = struct_defn->node->scope->identifiers;
+    DynamicArray members = struct_defn->node->members_scope->identifiers;
     int curr_member_index = 0;
     for (int i = 0; i < literal->initializers.count; i++) {
         AstStructInitializer *init = ((AstStructInitializer **)(literal->initializers.items))[i];
@@ -3708,7 +3711,11 @@ void reset_temporary_storage(AstFunctionDefn *func_defn) {
 }
 
 AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name) {
-    return find_identifier_in_scope(struct_defn->scope, name);
+    return find_identifier_in_scope(struct_defn->members_scope, name);
+}
+
+AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name) {
+    return find_identifier_in_scope(struct_defn->methods, name);
 }
 
 bool is_untyped_literal(AstExpr *expr) {

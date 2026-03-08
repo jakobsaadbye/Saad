@@ -612,16 +612,22 @@ bool compare_enumerator(const void *key, const void *item) {
     return strcmp(key, etor->name) == 0;
 }
 
+AstBlock *make_empty_struct_scope(Parser *parser, AstStruct *struct_defn) {
+    AstBlock *scope          = ast_allocate(parser, sizeof(AstBlock));
+    scope->belongs_to_struct = struct_defn;
+    scope->kind              = BLOCK_DECLARATIVE;
+    scope->identifiers       = da_init(2, sizeof(AstIdentifier *));
+
+    return scope;
+}
+
 TypeStruct *generate_empty_struct_type(Parser *parser, char *name) {
     AstStruct *struct_node       = ast_allocate(parser, sizeof(AstStruct));
     struct_node->head.kind       = AST_STRUCT;
     struct_node->head.file       = parser->current_file;
     struct_node->head.flags      = AST_FLAG_COMPILER_GENERATED;
-
-    struct_node->scope           = ast_allocate(parser, sizeof(AstBlock));
-    struct_node->scope->belongs_to_struct = struct_node;
-    struct_node->scope->kind     = BLOCK_DECLARATIVE;
-    struct_node->scope->identifiers = da_init(2, sizeof(AstIdentifier *));
+    struct_node->members_scope   = make_empty_struct_scope(parser, struct_node);
+    struct_node->methods         = make_empty_struct_scope(parser, struct_node);
 
     TypeStruct *struct_defn      = ast_allocate(parser, sizeof(TypeStruct));
     struct_defn->head.head.kind  = AST_TYPE;
@@ -645,7 +651,7 @@ TypeStruct *generate_empty_struct_type(Parser *parser, char *name) {
 void add_struct_member(Parser *parser, TypeStruct *struct_defn, char *name, Type *type) {
     AstIdentifier *member = generate_identifier(parser, name, type, IDENTIFIER_IS_STRUCT_MEMBER);
 
-    DynamicArray members = struct_defn->node->scope->identifiers;
+    DynamicArray members = struct_defn->node->members_scope->identifiers;
 
     if (members.count == 0) {
         member->member_index  = 0;
@@ -656,7 +662,7 @@ void add_struct_member(Parser *parser, TypeStruct *struct_defn, char *name, Type
         member->member_offset = prev_member->member_offset + member->type->size;
     }
 
-    add_identifier_to_scope(parser, struct_defn->node->scope, member);
+    add_identifier_to_scope(parser, struct_defn->node->members_scope, member);
 
     // Alignment + C-style sizing
     struct_defn->head.size += member->type->size;
@@ -1017,7 +1023,7 @@ Type *parse_type(Parser *parser) {
 }
 
 AstIdentifier *add_member_to_struct_scope(Parser *parser, AstStruct *struct_defn, AstIdentifier *member) {
-    return add_identifier_to_scope(parser, struct_defn->scope, member);
+    return add_identifier_to_scope(parser, struct_defn->members_scope, member);
 }
 
 TypePointer *generate_pointer_to_type(Parser *parser, Type *type) {
@@ -1078,10 +1084,8 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     struct_node->head.flags      = AST_FLAG_COMPILER_GENERATED;
     struct_node->identifier      = NULL;
 
-    struct_node->scope           = ast_allocate(parser, sizeof(AstBlock));
-    struct_node->scope->belongs_to_struct = struct_node;
-    struct_node->scope->kind     = BLOCK_DECLARATIVE;
-    struct_node->scope->identifiers = da_init(2, sizeof(AstIdentifier *));
+    struct_node->members_scope = make_empty_struct_scope(parser, struct_node);
+    struct_node->methods       = make_empty_struct_scope(parser, struct_node);
 
     TypeStruct *struct_defn      = ast_allocate(parser, sizeof(TypeStruct));
     struct_defn->head.head.kind  = AST_TYPE;
@@ -1275,35 +1279,36 @@ AstStruct *parse_struct_defn(Parser *parser) {
     expect(parser, struct_token, TOKEN_STRUCT);
     eat_token(parser);
 
-    AstStruct *ast_struct = (AstStruct *)(ast_allocate(parser, sizeof(AstStruct)));
+    AstStruct *struct_defn = (AstStruct *)(ast_allocate(parser, sizeof(AstStruct)));
     AstBlock *scope = new_block(parser, BLOCK_DECLARATIVE);
-    scope->belongs_to_struct = ast_struct;
+    scope->belongs_to_struct = struct_defn;
 
     scope = parse_block(parser, scope);
     if (!scope) return NULL;
     close_block(parser);
 
-    ast_struct->head.kind  = AST_STRUCT;
-    ast_struct->head.file  = parser->current_file;
-    ast_struct->head.start = ident_token.start;
-    ast_struct->head.end   = scope->head.end;
-    ast_struct->identifier = ident;
-    ast_struct->scope      = scope;
+    struct_defn->head.kind  = AST_STRUCT;
+    struct_defn->head.file  = parser->current_file;
+    struct_defn->head.start = ident_token.start;
+    struct_defn->head.end   = scope->head.end;
+    struct_defn->identifier = ident;
+    struct_defn->members_scope = scope;
+    struct_defn->methods       = make_empty_struct_scope(parser, struct_defn);
 
     if (scope->identifiers.count == 0) {
-        report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct), "Structs must have atleast one member");
+        report_error_ast(parser, LABEL_ERROR, (Ast *)(struct_defn), "Structs must have atleast one member");
         return NULL;
     }
 
     TypeStruct *type_struct      = type_alloc(&parser->type_table, sizeof(TypeStruct));
     type_struct->head.head.kind  = AST_TYPE;
     type_struct->head.head.file  = parser->current_file;
-    type_struct->head.head.start = ast_struct->head.start;
-    type_struct->head.head.end   = ast_struct->head.end;
+    type_struct->head.head.start = struct_defn->head.start;
+    type_struct->head.head.end   = struct_defn->head.end;
     type_struct->head.kind       = TYPE_STRUCT;
     type_struct->head.name       = ident->name;
     type_struct->identifier      = ident;
-    type_struct->node            = ast_struct;
+    type_struct->node            = struct_defn;
 
     type_add_user_defined(&parser->type_table, (Type *)(type_struct));
 
@@ -1324,7 +1329,7 @@ AstStruct *parse_struct_defn(Parser *parser) {
     // }
     
 
-    return ast_struct;
+    return struct_defn;
 }
 
 AstAssignment *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token) {

@@ -665,7 +665,7 @@ enum_case_35:
 ; bytes temp     : 0
 ; bytes total    : 64
 ; (ret_0: *bool, type: *Type)
-isPrimitive:
+Type.isPrimitive:
    push		rbp
    mov		rbp, rsp
    sub		rsp, 64

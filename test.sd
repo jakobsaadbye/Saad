@@ -1,3 +1,5 @@
+import "fmt";
+
 Fruit :: enum {
     mango,
     kiwi,
@@ -7,16 +9,26 @@ Fruit :: enum {
     apple,
 }
 
+Vector2 :: struct {
+    x, y: float;
+}
+
+add :: method (v1, v2: Vector2) -> Vector2 {
+    return {
+        x = v1.x + v2.x,
+        y = v1.y + v2.y,
+    };
+}
+
 main :: () {
+    a := Vector2{1, 3};
+    b := Vector2{4, 6};
+    c := a.add(b);
 
-    print("%\n", Fruit.count);
-
-    for name in Fruit.names {
-        print("%\n", name);
-    }
-
-    for value in Fruit.values {
-        print("%\n", cast(int) value);
-    }
-
+    print("%", c);
+    // x: any = cast(u8) 5;
+    // assert(x.type.kind == .Int);
+    
+    // type := cast(*TypePrimitive) x.type;
+    // Print("TypePrimitive = %", *type);
 }

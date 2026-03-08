@@ -130,7 +130,7 @@ extern "C" {
     runtime_compare_strings  :: (str1: *string, str2: *string) -> int;
 }
 
-isPrimitive :: (type: *Type) -> bool {
+isPrimitive :: method (type: *Type) -> bool {
     if type.kind == .Bool  { return true; } 
     if type.kind == .Int   { return true; }
     if type.kind == .Float { return true; }

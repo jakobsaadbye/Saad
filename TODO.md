@@ -6,26 +6,10 @@ Runtime types are currently broken:
 * Methods are counted as a struct member causing isPrimitive :: method to be counted, leading
   to the runtime printout being wrong
 
-* Enums valeus are currently broken after changing strings to 16 bytes.
-
-  I think it would make sense to invest in a .names to have a fixed array of all the names of the
-  enum members that is user visible as well
-
 * I think it also might make sense to revamp how we use the runtime value of the any type f.x for struct members
   and arrays. The value should NOT be stored on the type it self. Instead we should get that info from the .data on the any.
   Maybe provide some helper functions here
-
   
-
-
-* Better string handling
-  [x] Changing them to be a data + count
-  [x] Iterating over strings
-  [x] Indexing into them
-  [] To C string (*u8 \0 escaped)
-  [] From C string (*u8 -> string)
-  [] Compare strings
-  [] Slice a string
 
 * Better structs
   [] Constant members
