@@ -4,6 +4,19 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.2.3 - 13. Mar 2026
+
+* Structs can now appear as constants
+
+```odin
+MyColor :: Color{255, 127, 0, 255};
+```
+
+### Minor fixes
+
+* Fixed wrong casting behavior for integers. Now works correctly with the new fmt.Print
+* Fixed wrong struct sizing leading to weird behavior
+
 ## Update v0.2.2 - 07. Mar 2026
 
 ### Better enums

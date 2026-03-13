@@ -433,6 +433,14 @@ Type *resolve_type(Typer *typer, Type *type) {
         return (Type *)func_type;
     }
 
+    if (type->kind == TYPE_STRUCT) {
+        if (type->flags & TYPE_IS_FULLY_SIZED) {
+            return type;
+        } else {
+            XXX;
+        }
+    }
+
     report_error_ast(typer->parser, LABEL_ERROR, (Ast *) type, "Compiler Error: Failed to resolve type %s", type_to_str(type));
 
     return NULL;
@@ -680,13 +688,21 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
             ident->type = expr_type;
 
             AstExpr *const_expr = simplify_expression(typer->const_evaluator, typer->current_scope, value);
+            if (const_expr == NULL) {
+                return false;
+            }
             if (const_expr->head.kind == AST_LITERAL) {
                 // Swap out the current expression for the simplified expression
                 // @Speed? @Note - We might in the future cleanup the already allocated expression tree as its no longer needed after this swap.
                 //                 We might be taking many cache misses if we leave big gaps in the allocated ast nodes, so something like packing the ast nodes could be
                 //                 a thing?
                 *value_ptr = const_expr;
-            } else {
+            }
+            else if (const_expr->head.kind == AST_STRUCT_LITERAL) {
+                // Do nothing as we don't fold inner structs
+                *value_ptr = const_expr;
+            }
+            else {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Constant declaration with a non-constant expression");
                 if (value->head.kind == AST_FUNCTION_CALL) {
                     report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(value), "Function calls are not yet allowed to act as a constant expression");
@@ -1054,6 +1070,34 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     return true;
 }
 
+int get_alignment_of_type(Type *type) {
+    if (type->kind == TYPE_STRUCT) {
+        return ((TypeStruct *)(type))->alignment;
+    }
+    else if (type->kind == TYPE_STRING) {
+        return 8;
+    }
+    else if (type->kind == TYPE_ANY) {
+        return 8;
+    }
+    else if (type->kind == TYPE_ARRAY) {
+        TypeArray *array_type = (TypeArray *) type;
+
+        if (array_type->array_kind == ARRAY_FIXED) {
+            return get_alignment_of_type(array_type->elem_type);
+        } 
+        else if (array_type->array_kind == ARRAY_SLICE || array_type->array_kind == ARRAY_DYNAMIC) {
+            return 8;
+        } 
+        else {
+            XXX;
+        }
+    }
+    else {
+        return type->size;
+    }
+}
+
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     TypeStruct *struct_type = (TypeStruct *)(type_lookup(&typer->parser->type_table, ast_struct->identifier->name));
     assert(struct_type != NULL && struct_type->head.kind == TYPE_STRUCT);
@@ -1075,13 +1119,12 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     typer->current_scope = ast_struct->members_scope->parent;
     
     // C-style struct alignment + padding
-    int alignment = 0;
     int largest_alignment = 0;
     int offset  = 0;
+
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
         
-        int member_size = member->type->size;
         if (member->type->kind == TYPE_STRUCT) {
             if (!(member->type->flags & TYPE_IS_FULLY_SIZED)) {
                 AstStruct *nested_struct = ((TypeStruct *)member->type)->node;
@@ -1089,20 +1132,21 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)nested_struct, "Move this struct above the struct using it");
                 return false;
             }
-
-            alignment = ((TypeStruct *)(member->type))->alignment;
-        } else {
-            alignment = member_size;
         }
-        offset = align_value(offset, alignment);
+
+        int alignment = get_alignment_of_type(member->type);
+
+        offset = align_up(offset, alignment);
 
         member->member_offset = offset;
-        offset               += member_size;
+        offset               += member->type->size;
 
-        if (alignment > largest_alignment) largest_alignment = alignment;
+        if (alignment > largest_alignment) {
+            largest_alignment = alignment;
+        }
     }
 
-    struct_type->head.size  = align_value(offset, largest_alignment);
+    struct_type->head.size  = align_up(offset, largest_alignment);
     struct_type->head.flags |= TYPE_IS_FULLY_SIZED;
     struct_type->alignment  = largest_alignment;
 
@@ -1652,6 +1696,13 @@ int compare_argument_index(const void *e1, const void *e2) {
     }
 
     return a->param_index - b->param_index;
+}
+
+int compare_struct_initializers(const void *e1, const void *e2) {
+    AstStructInitializer *a = *((AstStructInitializer **)e1);
+    AstStructInitializer *b = *((AstStructInitializer **)e2);
+
+    return a->member->member_index - b->member->member_index;
 }
 
 AstExpr *generate_literal_bool(Parser *parser, bool value) {
@@ -3210,18 +3261,13 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         }
     }
 
-    // @Cleanup: I think we can remove the commented out code
-    // Type *evaluated_struct;
-    // if (literal->explicit_type != NULL) {
-    //     evaluated_struct = literal->explicit_type;
-    // } else {
-    //     evaluated_struct = ctx_type;
-    // }
+    // Sort the initializers by the member index
+    qsort(literal->initializers.items, literal->initializers.count, sizeof(AstStructInitializer *), compare_struct_initializers);
 
     // Reserve space for the struct literal
-    reserve_temporary_storage(typer->enclosing_function, struct_defn->head.size);
-    // if (!typer->inside_declaration) {
-    // }
+    if (typer->enclosing_function) {
+        reserve_temporary_storage(typer->enclosing_function, struct_defn->head.size);
+    }
 
     return (Type *) struct_defn;
 }

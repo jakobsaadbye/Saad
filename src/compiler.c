@@ -87,6 +87,7 @@ void output_generated_code_to_file(CodeGenerator *cg, const char *output_path) {
 
     fwrite(cg->head.buffer, 1, cg->head.cursor, f);
     fwrite(cg->data.buffer, 1, cg->data.cursor, f);
+    fwrite(cg->rdata_string.buffer, 1, cg->rdata_string.cursor, f);
     fwrite(cg->rdata.buffer, 1, cg->rdata.cursor, f);
     fwrite(cg->code_header.buffer, 1, cg->code_header.cursor, f);
     fwrite("\n", 1, 1, f);

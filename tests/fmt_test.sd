@@ -64,6 +64,23 @@ printTest :: () {
 
         Print("%", a);
     }
+    print("\n------------ Print integer values --------------\n");
+    {
+        {
+            a: s8  = -1;
+            b: s16 = -2;
+            c: s32 = -3;
+            d: s64 = -4;
+            Print("Signed = (% % % %)", a, b, c, d);
+        }
+        {
+            a: u8  = 1;
+            b: u16 = 2;
+            c: u32 = 3;
+            d: u64 = 4;
+            Print("Unsigned = (% % % %)", a, b, c, d);
+        }
+    }
 }
 
 stringBuilderTest :: () {

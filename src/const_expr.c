@@ -122,6 +122,44 @@ AstExpr *simplify_unary(ConstEvaluator *ce, AstBlock *scope, AstUnary *unary) {
     exit(1);
 }
 
+AstExpr *simplify_struct_literal(ConstEvaluator *ce, AstBlock *scope, AstStructLiteral *lit) {
+    for (int i = 0; i < lit->initializers.count; i++) {
+        AstStructInitializer *init = ((AstStructInitializer **)lit->initializers.items)[i];
+
+        AstExpr *const_expr = simplify_expression(ce, scope, init->value);
+        if (!const_expr) return NULL;
+
+
+        if (const_expr->head.kind != AST_LITERAL && const_expr->head.kind != AST_STRUCT_LITERAL && const_expr->head.kind != AST_ARRAY_LITERAL) {
+            report_error_ast(ce->parser, LABEL_ERROR, (Ast *) init, "Non-constant literal in a constant struct");
+            return NULL;
+        }
+
+        init->value = const_expr;
+    }
+
+    return (AstExpr *) lit;
+}
+
+AstExpr *simplify_array_literal(ConstEvaluator *ce, AstBlock *scope, AstArrayLiteral*lit) {
+    for (int i = 0; i < lit->expressions.count; i++) {
+        AstExpr **expr_ptr = &((AstExpr **)lit->expressions.items)[i];
+        AstExpr *expr = *expr_ptr;
+
+        AstExpr *const_expr = simplify_expression(ce, scope, expr);
+        if (!const_expr) return NULL;
+
+        if (const_expr->head.kind != AST_LITERAL && const_expr->head.kind != AST_STRUCT_LITERAL && const_expr->head.kind != AST_ARRAY_LITERAL) {
+            report_error_ast(ce->parser, LABEL_ERROR, (Ast *) expr, "Non-constant literal in a constant array literal");
+            return NULL;
+        }
+
+        *expr_ptr = const_expr;
+    }
+
+    return (AstExpr *) lit;
+}
+
 AstExpr *simplify_expression(ConstEvaluator *ce, AstBlock *scope, AstExpr *expr) {
     switch (expr->head.kind) {
         case AST_FUNCTION_CALL: return expr; // don't evaluate
@@ -145,7 +183,14 @@ AstExpr *simplify_expression(ConstEvaluator *ce, AstBlock *scope, AstExpr *expr)
             AstCast *cast = (AstCast *)expr;
             return simplify_expression(ce, scope, cast->expr);
         }
-        case AST_STRUCT_LITERAL:
+        case AST_STRUCT_LITERAL: {
+            AstStructLiteral *lit = (AstStructLiteral *) expr;
+            return simplify_struct_literal(ce, scope, lit);
+        }
+        case AST_ARRAY_LITERAL: {
+            AstArrayLiteral *lit = (AstArrayLiteral *) expr;
+            return simplify_array_literal(ce, scope, lit);
+        }
         case AST_ENUM_LITERAL: {
             AstEnumLiteral *lit = (AstEnumLiteral *)(expr);
             return make_literal_integer(ce, lit->enum_member->value); // @Note - Potential loss of enum information

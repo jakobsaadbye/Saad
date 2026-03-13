@@ -14,6 +14,7 @@ segment .data
    CF1 DD 0.5000000
    CF2 DD 80.0000000
 segment .rdata
+segment .rdata
    TypeKind.name.data DB "TypeKind", 0
    align 8
    TypeKind.name:
@@ -265,6 +266,7 @@ segment .text
    extern runtime_get_type_any
    extern runtime_builtin_append
    extern runtime_compare_strings
+
 
 
 

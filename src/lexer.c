@@ -182,9 +182,11 @@ bool lex_file(Lexer *lexer) {
             Pos pos_start = get_current_position(lexer);
             eat_character(lexer);
             char next = peek_next_char(lexer);
+
             while (next != '"') {
                 eat_character(lexer);
                 next = peek_next_char(lexer);
+                
             }
             eat_character(lexer);
 

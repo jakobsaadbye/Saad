@@ -32,6 +32,8 @@ TypeArray      *generate_slice_of(Parser *parser, Type *type);
 AstIdentifier  *add_member_to_struct_scope(Parser *parser, AstStruct *struct_defn, AstIdentifier *member);
 void *ast_allocate(Parser *parser, size_t size);
 int   align_value(int value, int alignment);
+int   align_up(int value, int alignment);
+bool  debug_break(Ast *site, char *filename, int line);
 
 AstBlock *make_empty_struct_scope(Parser *parser, AstStruct *struct_defn);
 

@@ -1,15 +1,33 @@
 Todo list:
 -------------------
 
-Runtime types are currently broken:
+Fix member offsets being wrong!
 
-* Methods are counted as a struct member causing isPrimitive :: method to be counted, leading
-  to the runtime printout being wrong
+Correct offsets for the members
+offset  size   field
+----------------------------
+0       4      kind
+4       12     position
+16      8 pad  (align string to 8)
+24      16     debugName
+40      64     animationFrames
+104     1      dead
+105     7 pad  (struct alignment)
 
-* I think it also might make sense to revamp how we use the runtime value of the any type f.x for struct members
-  and arrays. The value should NOT be stored on the type it self. Instead we should get that info from the .data on the any.
-  Maybe provide some helper functions here
-  
+sizeof(Entity) = 112
+alignment = 8
+
+
+
+
+* Structs as constants
+  [] Zero-fill implicit struct initializers
+
+
+* Better constants / literals
+  [] Structs as constants
+  [] Hex values
+  [] Binary values
 
 * Better structs
   [] Constant members
@@ -48,11 +66,6 @@ Runtime types are currently broken:
   [] Backing integer types for enums
 
 
-* Better constants / literals
-  [] Structs as constants
-  [] Hex values
-  [] Binary values
-
 * Bit operators
   [x] Shift left/right
   [x] Bitwise And
@@ -63,6 +76,12 @@ Runtime types are currently broken:
 
 Bug fixes:
 -------------------
+
+// @Todo: Escape sequence for strings
+
+* I think it also might make sense to revamp how we use the runtime value of the any type f.x for struct members
+  and arrays. The value should NOT be stored on the type it self. Instead we should get that info from the .data on the any.
+  Maybe provide some helper functions here
 
 - Fix hash_table when collisions happen. Currently we crash if defining two structs with the same name !!!!
 - @Investigate - examples/for_loops crashes once in a while. Is it a hisenbug?

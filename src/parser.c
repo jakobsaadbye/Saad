@@ -2346,6 +2346,11 @@ int align_value(int value, int alignment) {
     }
 }
 
+int align_up(int value, int alignment) {
+    if (alignment <= 0) return value;
+    return (value + alignment - 1) / alignment * alignment;
+}
+
 AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, Type *type) {
     AstIdentifier *ident = (AstIdentifier *) ast_allocate(parser, sizeof(AstIdentifier));
     ident->head.kind = AST_IDENTIFIER;
@@ -2766,6 +2771,28 @@ bool is_assignment_operator(Token token) {
     if (token.type == TOKEN_MINUS_EQUAL)  return true;
     if (token.type == TOKEN_TIMES_EQUAL)  return true;
     if (token.type == TOKEN_DIVIDE_EQUAL) return true;
+    return false;
+}
+
+
+/*
+SNIPPET:
+
+if ( debug_break((Ast *) decl, "test.sd", 20) ) {
+    int VSCODE = 1;
+}
+
+*/
+
+bool debug_break(Ast *site, char *filename, int line) {
+    if (!site) return false;
+
+    if (site->start.line == line) {
+        if (strcmp(site->file->absolute_path, filename) == 0) {
+            return true;
+        }
+    }
+
     return false;
 }
 

@@ -1,4 +1,5 @@
 #include "typer.c"
+#include <stdint.h>
 
 typedef enum CodeGenFlags {
     CODEGEN_DO_DIRECT_ASSIGNMENT             = 1 << 0,
@@ -7,11 +8,12 @@ typedef enum CodeGenFlags {
 } CodeGenFlags;
 
 typedef struct CodeGenerator {
-    StringBuilder head;     // Declaring bit target and other misc stuff
-    StringBuilder data;     // Corresponding to section .data
-    StringBuilder rdata;    // Corresponding to section .rdata
-    StringBuilder code;     // Corresponding to section .text
-    StringBuilder code_header;  // Header of externs, globals etc within the .text section
+    StringBuilder head;            // Declaring bit target and other misc stuff
+    StringBuilder data;            // Corresponding to section .data
+    StringBuilder rdata;           // Corresponding to section .rdata
+    StringBuilder rdata_string;    // Corresponding to section .rdata
+    StringBuilder code;            // Corresponding to section .text
+    StringBuilder code_header;     // Header of externs, globals etc within the .text section
 
     Parser *parser;
 
@@ -65,6 +67,7 @@ void emit_integer_to_float_conversion(CodeGenerator *cg, Type *l_type, Type *r_t
 void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is_runtime_computed, bool dest_is_relative_to_rsp, Type *lhs_type, Type *rhs_type);
 void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_computed, Type *src_type, bool lvalue);
 void emit_type_descriptor(CodeGenerator *cg, Type *type);
+void emit_constant_expression(CodeGenerator *cg, AstExpr *expr);
 
 int allocate_variable(CodeGenerator *cg, int size);
 void check_main_exists(CodeGenerator *cg, AstFile *file);
@@ -202,6 +205,7 @@ CodeGenerator code_generator_init(Parser *parser) {
     CodeGenerator cg = {0};
     cg.head = sb_init(1024);
     cg.data = sb_init(1024);
+    cg.rdata_string = sb_init(1024);
     cg.rdata = sb_init(1024);
     cg.code = sb_init(1024);
     cg.code_header = sb_init(1024);
@@ -248,6 +252,9 @@ void emit_header(CodeGenerator *cg) {
     sb_append(&cg->data, "   string_true  DB \"true\", 0\n");
     sb_append(&cg->data, "   string_assert_fail  DB \"Assertion failed at line %s\", 10, 0\n", "%d");
     sb_append(&cg->data, "   enum_to_int_buffer times 20 DB 0\n"); // 20 is the length of the largest integer number 2^64
+    sb_append(&cg->code, "\n");
+
+    sb_append(&cg->rdata_string, "segment .rdata\n");
     sb_append(&cg->code, "\n");
 
     sb_append(&cg->rdata, "segment .rdata\n");
@@ -1373,7 +1380,58 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
     //
 
     // Int -> X
-    if (from->kind == TYPE_INTEGER && to->kind == TYPE_INTEGER) return;    // already zero extended in the push
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_INTEGER) {
+
+        if (from->size < to->size) {
+            // Widening
+            POP(RAX);
+            if (is_signed_integer(from)) {
+                // Sign extend
+                if (from->size == 1) {
+                    sb_append(&cg->code, "   movsx\t\trax, al\n");
+                } else if (from->size == 2) {
+                    sb_append(&cg->code, "   movsx\t\trax, ax\n");
+                } else if (from->size == 4) {
+                    sb_append(&cg->code, "   movsxd\t\trax, eax\n");
+                } else {
+                    // Unreachable
+                    XXX;
+                }
+            } else {
+                // Zero extend
+                if (from->size == 1) {
+                    sb_append(&cg->code, "   movzx\t\trax, al\n");
+                } else if (from->size == 2) {
+                    sb_append(&cg->code, "   movzx\t\trax, ax\n");
+                } else if (from->size == 4) {
+                    sb_append(&cg->code, "   mov\t\teax, eax\n");
+                } else {
+                    // Unreachable
+                    XXX;
+                }
+            }
+            PUSH(RAX);
+        } else if (from->size > to->size) {
+            // Truncate
+            // Writing to 32-bit register clears upper bits
+            POP(RAX);
+            if (to->size == 1) {
+                sb_append(&cg->code, "   movzx\t\teax, al\n");
+            } else if (to->size == 2) {
+                sb_append(&cg->code, "   movzx\t\teax, ax\n");
+            } else if (to->size == 4) {
+                sb_append(&cg->code, "   mov\t\teax, eax\n");
+            } else {
+                // Unreachable
+                XXX;
+            }
+            PUSH(RAX);
+        } else {
+            // No change
+        }
+
+        return;
+    }
     if (from->kind == TYPE_INTEGER && to->kind == TYPE_FLOAT) {
         POP(RAX);
         char *op = to->size == 4 ? "cvtsi2ss" : "cvtsi2sd";
@@ -2449,28 +2507,324 @@ int allocate_variable(CodeGenerator *cg, int size) {
     return cg->enclosing_function->base_ptr;
 }
 
+char *get_constant_size_label(int size) {
+    if (size == 1) return "db";
+    if (size == 2) return "dw";
+    if (size == 4) return "dd";
+    if (size == 8) return "dq";
+    return "dq";
+}
+
+void emit_flattened_array_literal(CodeGenerator *cg, AstArrayLiteral *lit) {
+    for (int i = 0; i < lit->expressions.count; i++) {
+        AstExpr *expr = ((AstExpr **) lit->expressions.items)[i];
+        emit_constant_expression(cg, expr);
+    }
+
+    // Pad any trailing part
+
+}
+
+void emit_flattened_struct_literal(CodeGenerator *cg, AstStructLiteral *lit) {
+    TypeStruct *type_struct = (TypeStruct *) lit->head.type;
+
+    int prev_member_index = -1;
+    int prev_member_offset = 0;
+
+    DynamicArray members = ((TypeStruct *) lit->head.type)->node->members_scope->identifiers;
+
+    // for (int i = 0; i < members.count; i++) {
+    //     AstIdentifier *member = ((AstIdentifier **) members.items)[i];
+    //     printf("%s, offset = %d\n", member->name, member->member_offset);
+    // }
+
+    // @Note: All initializers are in sorted order of their initialized member
+    for (int i = 0; i < lit->initializers.count; i++) {
+        AstStructInitializer *init = ((AstStructInitializer **) lit->initializers.items)[i];
+
+        AstIdentifier *member = init->member;
+
+        // Zero fill upto this member
+        if (member->member_index > prev_member_index + 1) {
+            int zero_fill = 0;
+            if (prev_member_index == -1) {
+                // Zero pad all the way upto this member
+                zero_fill = member->member_offset - prev_member_offset;
+            } else {
+                // Zero pad up to this member minus what the previous member size was
+                AstIdentifier *prev_member = ((AstIdentifier **) members.items)[prev_member_index];
+                zero_fill = member->member_offset - prev_member_offset - prev_member->type->size;
+            }
+            sb_append(&cg->rdata, "   times %d db 0\n", zero_fill);
+        }
+
+        prev_member_index  = member->member_index;
+        prev_member_offset = member->member_offset;
+
+        emit_constant_expression(cg, init->value);
+    }
+
+    // Zero fill any trailing part
+    if (prev_member_index < members.count - 1) {
+        int zero_fill = type_struct->head.size - prev_member_offset;
+        sb_append(&cg->rdata, "   times %d db 0; trail\n", zero_fill);
+    }
+
+    // Add struct padding
+    AstIdentifier *last_member = ((AstIdentifier **) members.items)[members.count];
+    int pad = type_struct->head.size - last_member->member_offset + last_member->type->size;
+    if (pad > 0) {
+        sb_append(&cg->rdata, "   times %d db 0; pad\n", pad);
+    }
+}
+
+void emit_constant_expression(CodeGenerator *cg, AstExpr *expr) {
+    if (expr->head.kind == AST_LITERAL) {
+        AstLiteral *lit = (AstLiteral *) expr;
+
+        char *dsize = get_constant_size_label(expr->type->size);
+        switch (expr->type->kind) {
+            case TYPE_BOOL: {
+                sb_append(&cg->rdata, "   %s %d\n", dsize, lit->as.value.boolean);
+                break;
+            }
+            case TYPE_INTEGER: {
+                sb_append(&cg->rdata, "   %s %lld\n", dsize, lit->as.value.integer);
+                break;
+            }
+            case TYPE_FLOAT: {
+                sb_append(&cg->rdata, "   %s %lf\n", dsize, lit->as.value.floating);
+                break;
+            }
+            case TYPE_STRING: {
+                int const_id = ++cg->constants;
+                sb_append(&cg->rdata_string, "   C_%d:\n", const_id);
+                sb_append(&cg->rdata_string, "   db \"%s\", 0\n", lit->as.value.string.data);
+
+                sb_append(&cg->rdata, "   dq C_%d\n", const_id);
+                sb_append(&cg->rdata, "   dq %lld\n", lit->as.value.string.length);
+                break;
+            }
+
+            default: XXX;
+        }
+    }
+    else if (expr->head.kind == AST_STRUCT_LITERAL) {
+        AstStructLiteral *lit = (AstStructLiteral *) expr;
+        emit_flattened_struct_literal(cg, lit);
+    }
+    else if (expr->head.kind == AST_ARRAY_LITERAL) {
+        AstArrayLiteral *lit = (AstArrayLiteral *) expr;
+        emit_flattened_array_literal(cg, lit);
+    }
+    else {
+        XXX;
+    }
+}
+
+typedef struct Relocation {
+    int offset;
+    int id;
+    int size;
+} Relocation;
+
+typedef struct ConstBlob {
+    unsigned char *data;
+    int            cursor;
+    int            size;
+    DynamicArray   relocations;
+} ConstBlob;
+
+void emit_write_constant(CodeGenerator *cg, ConstBlob *cb, AstExpr *expr) {
+    switch (expr->type->kind) {
+        case TYPE_BOOL: {
+            AstLiteral *lit = (AstLiteral *) expr;
+            memcpy((void *) &cb->data[cb->cursor], &lit->as.value.boolean, 1);
+            cb->cursor += 1;
+            break;
+        }
+        case TYPE_INTEGER: {
+            AstLiteral *lit = (AstLiteral *) expr;
+            long long value = lit->as.value.integer;
+            memcpy((void *) &cb->data[cb->cursor], &value, expr->type->size);
+            cb->cursor += expr->type->size;
+            break;
+        }
+        case TYPE_FLOAT: {
+            AstLiteral *lit = (AstLiteral *) expr;
+            if (expr->type->size == 4) {
+                float value = (float) lit->as.value.floating;
+                memcpy((void *) &cb->data[cb->cursor], &value, expr->type->size);
+            } else {
+                memcpy((void *) &cb->data[cb->cursor], &lit->as.value.floating, expr->type->size);
+            }
+            cb->cursor += expr->type->size;
+            break;
+        }
+        case TYPE_STRING: {
+            AstLiteral *lit = (AstLiteral *) expr;
+
+            int const_id = ++cg->constants;
+            sb_append(&cg->rdata_string, "   C_%d:\n", const_id);
+            sb_append(&cg->rdata_string, "   db \"%s\", 0\n", lit->as.value.string.data);
+
+            Relocation symbol = {
+                .offset = cb->cursor,
+                .id = const_id
+            };
+            da_append(&cb->relocations, symbol);
+
+            int64_t len = (int64_t) lit->as.value.string.length;
+            memcpy((void *) &cb->data[cb->cursor + 8], &len, 8);
+
+            cb->cursor += 16;
+            break;
+        }
+        case TYPE_STRUCT: {
+            AstStructLiteral *lit = (AstStructLiteral *) expr;
+
+            int base_offset = cb->cursor;
+            for (int i = 0; i < lit->initializers.count; i++) {
+                AstStructInitializer *init = ((AstStructInitializer **) lit->initializers.items)[i];
+                AstIdentifier *member = init->member;
+
+                cb->cursor = base_offset + member->member_offset;
+
+                emit_write_constant(cg, cb, init->value);
+            }
+            break;
+        }
+        case TYPE_ARRAY: {
+            TypeArray *type_array = (TypeArray *) expr->type;
+
+            if (type_array->array_kind != ARRAY_FIXED) {
+                XXX;
+            }
+
+            AstArrayLiteral *lit = (AstArrayLiteral *) expr;
+
+            int base_offset = cb->cursor;
+            for (int i = 0; i < lit->expressions.count; i++) {
+                AstExpr *expr = ((AstExpr **) lit->expressions.items)[i];
+
+                cb->cursor = base_offset + i * type_array->elem_type->size;
+
+                emit_write_constant(cg, cb, expr);
+            }
+            break;
+        }
+        default: {
+            XXX;
+        }
+    }
+}
+
+void emit_constant_blob(CodeGenerator *cg, ConstBlob *cb) {
+    int zeroes = 0;
+    int relocation_cursor = 0;
+
+    for (int i = 0; i < cb->size; i++) {
+
+        if (cb->relocations.count > 0) {
+
+            // Scan forward to see if we should put a relocation here
+            Relocation *put_symbol = NULL;
+            for (int j = relocation_cursor; j < cb->relocations.count; j++) {
+                Relocation *symbol = &((Relocation *) cb->relocations.items)[j];
+
+                if (i < symbol->offset) {
+                    // Current byte offset is behind the next relocation offset
+                    break;
+                }
+
+                if (i == symbol->offset) {
+                    put_symbol = symbol;
+                    break;
+                }
+            }
+
+            if (put_symbol) {
+                if (zeroes > 0) {
+                    sb_append(&cg->rdata, "   times %d db 0\n", zeroes);
+                    zeroes = 0;
+                }
+
+                sb_append(&cg->rdata, "   dq C_%d\n", put_symbol->id);
+                relocation_cursor += 1;
+                i += 7;
+                continue;
+            }
+
+            // Fallthrough to normal byte output
+        }
+
+        unsigned char byte = cb->data[i];
+        if (byte == 0) {
+            zeroes += 1;
+        } else {
+            if (zeroes > 0) {
+                sb_append(&cg->rdata, "   times %d db 0\n", zeroes);
+                zeroes = 0;
+            }
+            sb_append(&cg->rdata, "   db %u\n", byte);
+        }
+    }
+
+    if (zeroes > 0) {
+        sb_append(&cg->rdata, "   times %d db 0\n", zeroes);
+    }
+}
+
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     if (decl->flags & DECLARATION_CONSTANT) {
         for (int i = 0; i < decl->idents.count; i++) {
             AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
-            assert(ident->value && ident->value->head.kind == AST_LITERAL);
+            assert(ident->value && "No constant value");
 
-            AstLiteral *lit = (AstLiteral *)(ident->value);
-            switch (lit->kind) {
-            case LITERAL_BOOLEAN: break; // Immediate value is used
-            case LITERAL_INTEGER: break; // Immediate value is used 
-            case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", ident->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
-            case LITERAL_STRING: {
-                sb_append(&cg->rdata, "   C_%s.data DB \"%s\", 0\n", ident->name, lit->as.value.string.data);
-                sb_append(&cg->rdata, "   align 8\n");
-                sb_append(&cg->rdata, "   C_%s:\n", ident->name);
-                sb_append(&cg->rdata, "   dq C_%s.data\n", ident->name);
-                sb_append(&cg->rdata, "   dq %lld\n", lit->as.value.string.length);
-                break;
+            if (ident->value->head.kind == AST_LITERAL) {
+                AstLiteral *lit = (AstLiteral *)(ident->value);
+    
+                switch (lit->kind) {
+                case LITERAL_BOOLEAN: break; // Immediate value is used
+                case LITERAL_INTEGER: break; // Immediate value is used 
+                case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", ident->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
+                case LITERAL_STRING: {
+                    sb_append(&cg->rdata, "   C_%s.data DB \"%s\", 0\n", ident->name, lit->as.value.string.data);
+                    sb_append(&cg->rdata, "   align 8\n");
+                    sb_append(&cg->rdata, "   C_%s:\n", ident->name);
+                    sb_append(&cg->rdata, "   dq C_%s.data\n", ident->name);
+                    sb_append(&cg->rdata, "   dq %lld\n", lit->as.value.string.length);
+                    break;
+                }
+                case LITERAL_NULL:    XXX; // @TODO
+                case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
+                }
             }
-            case LITERAL_NULL:    XXX; // @TODO
-            case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
+            else if (ident->value->head.kind == AST_STRUCT_LITERAL) {
+                AstStructLiteral *lit = (AstStructLiteral *) ident->value;
+                assert(lit->head.type->kind == TYPE_STRUCT);
+
+                TypeStruct *type_struct = (TypeStruct *) lit->head.type;
+
+                // Store an id to the constant on the identifier
+                ident->stack_offset = ++cg->constants;
+
+                // Allocate a zero initialized blob of memory and fill in all the members in memory
+                ConstBlob cb = {0};
+                cb.data        = calloc(type_struct->head.size, 1);
+                cb.cursor      = 0;
+                cb.size        = type_struct->head.size;
+                cb.relocations = da_init(2, sizeof(Relocation));
+
+                emit_write_constant(cg, &cb, ident->value);
+
+                sb_append(&cg->rdata, "   %s.%d:\n", ident->name, ident->stack_offset);
+                emit_constant_blob(cg, &cb);
+            } 
+            else {
+                XXX;
             }
+
         }
 
         return;
@@ -3409,38 +3763,53 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             assert(ident);
 
             if (ident->decl && ident->decl->flags & DECLARATION_CONSTANT) {
-                assert(ident->value->head.kind == AST_LITERAL);
-                AstLiteral *lit = (AstLiteral *)(ident->value);
-                switch (lit->kind) {
-                    case LITERAL_BOOLEAN: {
-                        sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);
-                        INCR_PUSH_COUNT();
-                        return;
-                    }
-                    case LITERAL_INTEGER: {
-                        sb_append(&cg->code, "   push\t\t%lld\n", lit->as.value.integer);
-                        INCR_PUSH_COUNT();
-                        return;
-                    }
-                    case LITERAL_FLOAT: {
-                        if (lit->head.type->size == 4) {
-                            sb_append(&cg->code, "   movss\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant @Cleanup - Should the identifier name really be used as the constant name??? Not good if we have the same identifier name in two seperate blocks inside same function!
-                            sb_append(&cg->code, "   movd\t\teax, xmm0\n");
+                if (ident->value->head.kind == AST_LITERAL) {
+                    AstLiteral *lit = (AstLiteral *)(ident->value);
+                    switch (lit->kind) {
+                        case LITERAL_BOOLEAN: {
+                            sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);
+                            INCR_PUSH_COUNT();
+                            return;
+                        }
+                        case LITERAL_INTEGER: {
+                            sb_append(&cg->code, "   push\t\t%lld\n", lit->as.value.integer);
+                            INCR_PUSH_COUNT();
+                            return;
+                        }
+                        case LITERAL_FLOAT: {
+                            if (lit->head.type->size == 4) {
+                                sb_append(&cg->code, "   movss\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant @Cleanup - Should the identifier name really be used as the constant name??? Not good if we have the same identifier name in two seperate blocks inside same function!
+                                sb_append(&cg->code, "   movd\t\teax, xmm0\n");
+                                PUSH(RAX);
+                            } else if (lit->head.type->size == 8) {
+                                sb_append(&cg->code, "   movsd\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant
+                                sb_append(&cg->code, "   movq\t\trax, xmm0\n");
+                                PUSH(RAX);
+                            } else XXX;
+                            return;
+                        }
+                        case LITERAL_STRING: {
+                            sb_append(&cg->code, "   mov\t\trax, C_%s\n", ident->name); // :IdentifierNameAsConstant @Cleanup
                             PUSH(RAX);
-                        } else if (lit->head.type->size == 8) {
-                            sb_append(&cg->code, "   movsd\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant
-                            sb_append(&cg->code, "   movq\t\trax, xmm0\n");
-                            PUSH(RAX);
-                        } else XXX;
-                        return;
+                            return;
+                        }
+                        case LITERAL_NULL: XXX; // @TODO
+                        case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
                     }
-                    case LITERAL_STRING: {
-                        sb_append(&cg->code, "   mov\t\trax, C_%s\n", ident->name); // :IdentifierNameAsConstant @Cleanup
-                        PUSH(RAX);
-                        return;
+                }
+                else if (ident->value->head.kind == AST_STRUCT_LITERAL) {
+                    // Load the struct value from rdata
+                    int const_id = ident->stack_offset;
+
+                    if (ident->value->type->size <= 8) {
+                        sb_append(&cg->code, "   mov\t\t%s, [%s.%d]\n", REG_A(ident->value->type), ident->name, const_id);
+                    } else {
+                        sb_append(&cg->code, "   lea\t\trax, [%s.%d]\n", ident->name, const_id);
                     }
-                    case LITERAL_NULL: XXX; // @TODO
-                    case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
+                    PUSH(RAX);
+                    return;
+                } else {
+                    XXX;
                 }
             } 
             else {

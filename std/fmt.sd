@@ -9,7 +9,7 @@ extern "C" {
     printf  :: (format: *u8, args: ...any) -> int;
 }
 
-Print :: (format: string, args: ...any) {
+Print :: (format: string, args: ...any, newline := true) {
 
     // Scan the format string to find all the placeholders
     placeholderIndicies: [..]int;
@@ -40,7 +40,12 @@ Print :: (format: string, args: ...any) {
 
     result := sb.toString();
 
-    printf("%s".data, result.data);
+    if newline {
+        printf("%s\n".data, result.data);
+    } else {
+        printf("%s".data, result.data);
+    }
+
     
     sb.free();
     return;

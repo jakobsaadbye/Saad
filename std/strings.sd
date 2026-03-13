@@ -73,9 +73,61 @@ addString :: method (sb: *StringBuilder, str: string) {
     sb.internalAdd(str.data, str.len);
 }
 
-addInt :: method (sb: *StringBuilder, v: int) {
+addFloat32 :: method (sb: *StringBuilder, v: f32) {
+    buf: [18]u8;
+    sprintf(buf.data, xx "%f", v);
+
+    str: string;
+    str.data = cast(*u8) buf.data;
+    str.len = strlen(buf.data);
+    sb.internalAdd(str.data, str.len);
+}
+
+addFloat64 :: method (sb: *StringBuilder, v: f64) {
+    buf: [18]u8;
+    sprintf(buf.data, xx "%lf", v);
+
+    str: string;
+    str.data = cast(*u8) buf.data;
+    str.len = strlen(buf.data);
+    sb.internalAdd(str.data, str.len);
+}
+
+addInt64 :: method (sb: *StringBuilder, v: s64) {
     if v == 0 {
-        sb.addChar(48);
+        sb.addChar(48); // 0
+        return;
+    }
+
+    if v < 0 {
+        sb.addChar(45); // -
+        v = -v;
+    }
+
+    tmp: [32]u8; // enough for 64-bit int
+
+    n := 0;
+    while v != 0 {
+        digit := v % 10;
+        v = v / 10;
+
+        c := cast(u8) (digit + 48);
+
+        tmp[n] = c;
+        n += 1;
+    }
+
+    // Add the digits in reverse order
+    for i in 0..n {
+        ri := (n - 1) - i;
+        c := tmp[ri];
+        sb.addChar(c);
+    }
+}
+
+addUInt64 :: method (sb: *StringBuilder, v: u64) {
+    if v == 0 {
+        sb.addChar(48); // 0
         return;
     }
 
@@ -100,30 +152,45 @@ addInt :: method (sb: *StringBuilder, v: int) {
     }
 }
 
-addFloat32 :: method (sb: *StringBuilder, v: f32) {
-    buf: [18]u8;
-    sprintf(buf.data, xx "%f", v);
-
-    str: string;
-    str.data = cast(*u8) buf.data;
-    str.len = strlen(buf.data);
-    sb.internalAdd(str.data, str.len);
-}
-
-addFloat64 :: method (sb: *StringBuilder, v: f64) {
-    buf: [18]u8;
-    sprintf(buf.data, xx "%lf", v);
-
-    str: string;
-    str.data = cast(*u8) buf.data;
-    str.len = strlen(buf.data);
-    sb.internalAdd(str.data, str.len);
-}
-
 addAnyValue :: method (sb: *StringBuilder, arg: any)  {
     if arg.type.kind == .Int {
-        value := cast(*int) arg.data;
-        sb.addInt(*value);
+        prim := cast(*TypePrimitive) arg.type;
+
+        if prim.kind == .U8 {
+            value := *(cast(*u8) arg.data);
+            sb.addUInt64(cast(u64) value);
+        } 
+        else if prim.kind == .U16 {
+            value := *(cast(*u16) arg.data);
+            sb.addUInt64(cast(u64) value);
+        }
+        else if prim.kind == .U32 || prim.kind == .Uint {
+            value := *(cast(*u32) arg.data);
+            sb.addUInt64(cast(u64) value);
+        }
+        else if prim.kind == .U64 {
+            value := *(cast(*u64) arg.data);
+            sb.addUInt64(value);
+        }
+        else if prim.kind == .S8 {
+            value := *(cast(*s8) arg.data);
+            sb.addInt64(cast(s64) value);
+        }
+        else if prim.kind == .S16 {
+            value := *(cast(*s16) arg.data);
+            sb.addInt64(cast(s64) value);
+        }
+        else if prim.kind == .S32 || prim.kind == .Int {
+            value := *(cast(*s32) arg.data);
+            sb.addInt64(cast(s64) value);
+        }
+        else if prim.kind == .S64 {
+            value := *(cast(*s64) arg.data);
+            sb.addInt64(value);
+        } else {
+            // Unhandled
+            sb.addString("UNHANDLED");
+        }
     }
     else if arg.type.kind == .Float {
         if (arg.type.size == 4) {
@@ -144,7 +211,9 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
     }
     else if arg.type.kind == .String {
         value := cast(*string) arg.data;
+        sb.addString("'");
         sb.addString(*value);
+        sb.addString("'");
     }
     else if arg.type.kind == .Enum {
         enumType := cast(*TypeEnum) arg.type;
@@ -166,6 +235,12 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
     }
     else if arg.type.kind == .Array {
         arrType := cast(*TypeArray) arg.type;
+        data := cast(**void) arg.data;
+
+        if *data == null {
+            sb.addString("[]");
+            return;
+        }
 
         sb.addString("[");
         for i in 0..arrType.count {
