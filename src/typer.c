@@ -702,6 +702,10 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
                 // Do nothing as we don't fold inner structs
                 *value_ptr = const_expr;
             }
+            else if (const_expr->head.kind == AST_ARRAY_LITERAL) {
+                // Do nothing as we don't fold inner structs
+                *value_ptr = const_expr;
+            }
             else {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Constant declaration with a non-constant expression");
                 if (value->head.kind == AST_FUNCTION_CALL) {

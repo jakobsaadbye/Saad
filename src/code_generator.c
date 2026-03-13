@@ -2800,20 +2800,17 @@ void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
                 case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
                 }
             }
-            else if (ident->value->head.kind == AST_STRUCT_LITERAL) {
-                AstStructLiteral *lit = (AstStructLiteral *) ident->value;
-                assert(lit->head.type->kind == TYPE_STRUCT);
-
-                TypeStruct *type_struct = (TypeStruct *) lit->head.type;
-
+            else if (ident->value->head.kind == AST_STRUCT_LITERAL || ident->value->head.kind == AST_ARRAY_LITERAL) {
                 // Store an id to the constant on the identifier
                 ident->stack_offset = ++cg->constants;
 
+                int size = ident->value->type->size;
+
                 // Allocate a zero initialized blob of memory and fill in all the members in memory
                 ConstBlob cb = {0};
-                cb.data        = calloc(type_struct->head.size, 1);
+                cb.data        = calloc(size, 1);
                 cb.cursor      = 0;
-                cb.size        = type_struct->head.size;
+                cb.size        = size;
                 cb.relocations = da_init(2, sizeof(Relocation));
 
                 emit_write_constant(cg, &cb, ident->value);
@@ -3797,8 +3794,8 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                         case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
                     }
                 }
-                else if (ident->value->head.kind == AST_STRUCT_LITERAL) {
-                    // Load the struct value from rdata
+                else if (ident->value->head.kind == AST_STRUCT_LITERAL || ident->value->head.kind == AST_ARRAY_LITERAL) {
+                    // Load the constant from rdata
                     int const_id = ident->stack_offset;
 
                     if (ident->value->type->size <= 8) {
