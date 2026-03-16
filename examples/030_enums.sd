@@ -40,7 +40,7 @@ main :: () {
     v = CardValue.ten;
 
     // Unlike C, enums needs to be explicitly casted to an integer before it can be treated as such
-    v = xx (cast(int)v + 1);
+    v = xx ((v as int) + 1);
     print("%", v); // .jack
     
     // Also means we can assign values not in range of the enum

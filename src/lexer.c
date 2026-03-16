@@ -70,6 +70,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_ASSERT:                return "assert";
         case TOKEN_TYPEOF:                return "typeof";
         case TOKEN_SIZEOF:                return "sizeof";
+        case TOKEN_AS:                    return "as";
         case TOKEN_RETURN:                return "return";
         case TOKEN_BREAK:                 return "break";
         case TOKEN_CONTINUE:              return "continue";
@@ -77,7 +78,6 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_WHILE:                 return "while";
         case TOKEN_IF:                    return "if";
         case TOKEN_ELSE:                  return "else";
-        case TOKEN_CAST:                  return "cast";
         case TOKEN_NEW:                   return "new";
         case TOKEN_IMPORT:                return "import";
         case TOKEN_EXTERN:                return "extern";
@@ -309,6 +309,7 @@ KeywordMatch match_keyword(Lexer *lexer) {
     TokenType token = TOKEN_NONE;
     if (keyword_len == 2) {
         if (strcmp(text, "if") == 0) token = TOKEN_IF;
+        if (strcmp(text, "as") == 0) token = TOKEN_AS;
         if (strcmp(text, "in") == 0) token = TOKEN_IN;
         if (strcmp(text, "u8") == 0) token = TOKEN_TYPE_U8;
         if (strcmp(text, "s8") == 0) token = TOKEN_TYPE_S8;
@@ -337,7 +338,6 @@ KeywordMatch match_keyword(Lexer *lexer) {
         if (strcmp(text, "true") == 0) token = TOKEN_LITERAL_TRUE;
         if (strcmp(text, "else") == 0) token = TOKEN_ELSE;
         if (strcmp(text, "enum") == 0) token = TOKEN_ENUM;
-        if (strcmp(text, "cast") == 0) token = TOKEN_CAST;
     }
     if (keyword_len == 5) {
         if (strcmp(text, "float") == 0) token = TOKEN_TYPE_FLOAT;

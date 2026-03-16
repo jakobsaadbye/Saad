@@ -85,7 +85,7 @@ typedef enum TokenType {
     TOKEN_WHILE        = 168,
     TOKEN_TYPEOF       = 169,
     TOKEN_SIZEOF       = 170,
-    TOKEN_CAST         = 171,
+    TOKEN_AS           = 171,
     TOKEN_NEW          = 172,
     TOKEN_IMPORT       = 173,
     TOKEN_EXTERN       = 174,

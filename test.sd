@@ -1,87 +1,12 @@
 import "fmt";
 
-Fruit :: enum {
-    mango,
-    kiwi,
-    watermelon,
-    dragonfruit,
-    pear,
-    apple,
-}
-
-Vector3 :: struct {
-    x, y, z: float;
-}
-
-Color :: struct {
-    r, g, b, a: u8;
-}
-
-EntityKind :: enum {
-    Human,
-    Monster,
-    Door,
-}
-
-AnimationFrame :: struct {
-    key: int;
-    color: Color;
-}
-
-Entity :: struct {
-    kind: EntityKind;
-    name: string;
-    position: Vector3;
-    animationFrames: [8]AnimationFrame;
-    dead: bool;
-}
-
-Monster :: struct {
-    firstname: string;
-    lastname: string;
-    health: int;
+foo :: (v: int) {
+    Print("%", v);
 }
 
 main :: () {
-    {
-        Mike :: Monster{
-            firstname = "Mike",
-            lastname = "Masowski",
-            health = 100,
-        };
+    a := 5 as s64;
 
-        Print("%", Mike);
-    }
-    {
-        Red :: Color{255, 0, 0, 255};
-        RandomVector3 :: Vector3{69, 420, 1337};
-        IdentityVector3 :: Vector3{2 + 2, 1, 1};
-
-        Print("Red = %", Red);
-        Print("RandomVector3 = %", RandomVector3);
-        Print("IdentityVector3 = %", IdentityVector3);
-    }
-    {
-        Alex :: Entity{
-            kind = .Monster,
-            name = "Alex the great",
-            position = {1, 2, 3},
-            animationFrames = [
-                { key = 1, color = {255, 0, 0, 0} },
-                { key = 2, color = {0, 255, 0, 0} },
-                { key = 3, color = {0, 0, 255, 0} },
-            ],
-            dead = true,
-        };
-
-        Print("%", Alex);
-
-        for frame, i in Alex.animationFrames {
-            Print("[%] = %", i, frame);
-        }
-    }
-    {
-        MyArray :: [1, 2, 3, 4, 5, 6];
-        Print("%", MyArray);
-    }
+    Print("%", typeof(a));
+    foo(xx a);
 }

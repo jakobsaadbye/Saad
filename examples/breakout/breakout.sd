@@ -159,12 +159,12 @@ update :: method (pe: *ParticleEmitter) {
         p.pos.x += p.vel.x * dt;
         p.pos.y += p.vel.y * dt;
 
-        p.lifetime -= cast(int) (dt * 1000.0);
+        p.lifetime -= (dt * 1000.0) as int;
         if p.lifetime < 0 {
             p.lifetime = 0;
         }
 
-        p.color.a = cast(u8) (255.0 *  p.lifetime / pe.particleLifetime);
+        p.color.a = (255.0 *  p.lifetime / pe.particleLifetime) as u8;
     }
 }
 
@@ -411,7 +411,7 @@ main :: () {
                 y = - xx sin(xx theta),
             };
 
-            speed := cast(f32) sqrt(xx (ball.velX*ball.velX + ball.velY*ball.velY));
+            speed := sqrt(xx (ball.velX*ball.velX + ball.velY*ball.velY)) as f32;
 
             ball.velX = directionVector.x * speed;
             ball.velY = directionVector.y * speed;
@@ -556,7 +556,7 @@ main :: () {
         // Draw lives
         for 0..player.lives {
             padX := 6.0;
-            posX := cast(int) (10.0 + (heartTexture.width + padX) * it);
+            posX := (10.0 + (heartTexture.width + padX) * it) as int;
 
             DrawTexture(heartTexture, posX, 16, Color{255, 255, 255, 255});
         }
@@ -629,7 +629,7 @@ spawnPickup :: (ps: *PickupSpawner, pos: Vector2) {
     index := GetRandomValue(0, xx PickupType.COUNT - 1);
 
     pickup := Pickup{
-        type = cast(PickupType) index,
+        type = index as PickupType,
         x = pos.x,
         y = pos.y,
         velY = xx GetRandomValue(80, 120),

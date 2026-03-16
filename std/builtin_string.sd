@@ -2,7 +2,7 @@ import "c_stdlib";
 import "c_string";
 
 toCString :: method (s: string) -> *u8 {
-    cstr := cast(*u8) malloc(s.len + 1);
+    cstr := malloc(s.len + 1) as *u8;
     memcpy(cstr, s.data, s.len);
     cstr[s.len] = 0;
     return cstr;
@@ -145,7 +145,7 @@ split :: method (s: string, sep: string) -> [..]string {
         } else {
             segment := s.slice(cursor, i);
             append(result, segment);
-            cursor = i + cast(int) sep.len;
+            cursor = i + sep.len as int;
         }
     }
 

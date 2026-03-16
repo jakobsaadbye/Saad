@@ -30,10 +30,10 @@ Entity :: struct {
 main :: () {
     print("-------------------- Primitive types ----------------\n");
     if true {
-        x: any = cast(u8) 5;
+        x: any = 5 as u8;
         assert(x.type.kind == .Int);
         
-        type := cast(*TypePrimitive) x.type;
+        type := x.type as *TypePrimitive;
         Print("TypePrimitive = %", *type);
     }
     print("\n-------------------- Array type ----------------\n");
@@ -42,7 +42,7 @@ main :: () {
 
         assert(x.type.kind == .Array);
 
-        type := cast(*TypeArray) x.type;
+        type := x.type as *TypeArray;
         Print("TypeArray = %\n", *type);
         Print("ElemType  = %\n", *type.elemType);
     }
@@ -52,7 +52,7 @@ main :: () {
 
         assert(x.type.kind == .Enum);
 
-        type := cast(*TypeEnum) x.type;
+        type := x.type as *TypeEnum;
         Print("TypeEnum = %\n", *type);
         Print("BackingType = %\n", *type.backingType);
     }
@@ -66,7 +66,7 @@ main :: () {
         };
 
         assert(x.type.kind == .Struct);
-        printStructType(cast(*TypeStruct) x.type);
+        printStructType(x.type as *TypeStruct);
     }
     print("\n-------------------- Changing types at runtime ----------------\n");
     if true {
@@ -76,7 +76,7 @@ main :: () {
 
         x = Vector3{1, 4, 9};
         assert(x.type.kind == .Struct);
-        printStructType(cast(*TypeStruct) x.type);
+        printStructType(x.type as *TypeStruct);
 
         x = Entity{
             kind     = .Human,
@@ -85,7 +85,7 @@ main :: () {
             dead     = false,
         };
         assert(x.type.kind == .Struct);
-        printStructType(cast(*TypeStruct) x.type);
+        printStructType(x.type as *TypeStruct);
     }
 }
 

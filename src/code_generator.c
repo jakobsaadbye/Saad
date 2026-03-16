@@ -1657,7 +1657,7 @@ void emit_typeof(CodeGenerator *cg, AstTypeof *ast_typeof) {
     int const_number = cg->constants++;
 
     int offset = push_temporary_value(cg, 16, (Ast *) ast_typeof);
-    sb_append(&cg->data, "   CS%d\tDB \"%s\", 0\n", const_number, type_name);
+    sb_append(&cg->data, "   CS%d\tDB `%s`, 0\n", const_number, type_name);
     sb_append(&cg->code, "   mov\t\trax, CS%d\n", const_number);
     sb_append(&cg->code, "   mov\t\tQWORD rbx, %lld\n", strlen(type_name));
     sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", offset);
@@ -3756,6 +3756,9 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_IDENTIFIER: {
+            
+            // @Cleanup: The literal identifier should have been resolved at this point so we don't need to do scope lookups!
+            // One idea could be to replace the lit->identifier with the resolved identifer
             AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, lit->as.value.identifier.name);
             assert(ident);
 

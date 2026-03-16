@@ -15,7 +15,7 @@ Print :: (format: string, args: ...any, newline := true) {
     placeholderIndicies: [..]int;
     for c, i in format {
         if c == PLACEHOLDER_CHARACTER {
-            appendInt(&placeholderIndicies, cast(s64) i);
+            appendInt(&placeholderIndicies, i as s64);
         }
     }
 

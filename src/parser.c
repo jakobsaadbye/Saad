@@ -19,7 +19,7 @@ AstEnum         *parse_enum_defn(Parser *parser);
 AstIf           *parse_if(Parser *parser);
 AstFor          *parse_for(Parser *parser);
 AstWhile        *parse_while(Parser *parser);
-AstCast         *parse_cast(Parser *parser);
+AstCast         *parse_auto_cast(Parser *parser);
 AstPrint        *parse_print(Parser *parser);
 AstAssert       *parse_assert(Parser *parser);
 AstNew          *parse_new(Parser *parser);
@@ -1365,55 +1365,25 @@ AstAssignment *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token) {
     return assign;
 }
 
-AstCast *parse_cast(Parser *parser) {
+AstCast *parse_auto_cast(Parser *parser) {
     Token next = peek_next_token(parser);
-    assert(next.type == TOKEN_XX || next.type == TOKEN_CAST);
+    assert(next.type == TOKEN_XX);
     eat_token(parser);
 
-    Token cast_token = next;
+    int precedence = get_operator_precedence((OperatorType) TOKEN_AS);
+    AstExpr *expr = parse_expression(parser, precedence);
+    if (!expr) return NULL;
 
-    if (cast_token.type == TOKEN_XX) {
-        int precedence = get_operator_precedence((OperatorType) TOKEN_CAST);
-        AstExpr *expr = parse_expression(parser, precedence);
-        if (!expr) return NULL;
+    AstCast *cast         = ast_allocate(parser, sizeof(AstCast));
+    cast->head.head.kind  = AST_CAST;
+    cast->head.head.file  = parser->current_file;
+    cast->head.head.start = next.start;
+    cast->head.head.end   = expr->head.end;
+    cast->expr            = expr;
+    cast->cast_to         = NULL;
+    cast->is_auto         = true;
 
-        AstCast *cast         = ast_allocate(parser, sizeof(AstCast));
-        cast->head.head.kind  = AST_CAST;
-        cast->head.head.file  = parser->current_file;
-        cast->head.head.start = cast_token.start;
-        cast->head.head.end   = expr->head.end;
-        cast->expr            = expr;
-        cast->cast_to         = NULL;
-        cast->is_auto         = true;
-
-        return cast;
-    } else {
-        next = peek_next_token(parser);
-        expect(parser, next, '(');
-        eat_token(parser);
-
-        Type *cast_to = parse_type(parser);
-        if (!cast_to) return NULL;
-
-        next = peek_next_token(parser);
-        expect(parser, next, ')');
-        eat_token(parser);
-
-        int precedence = get_operator_precedence((OperatorType) TOKEN_CAST);
-        AstExpr *expr = parse_expression(parser, precedence);
-        if (!expr) return NULL;
-
-        AstCast *cast         = ast_allocate(parser, sizeof(AstCast));
-        cast->head.head.kind  = AST_CAST;
-        cast->head.head.file  = parser->current_file;
-        cast->head.head.start = cast_token.start;
-        cast->head.head.end   = expr->head.end;
-        cast->expr            = expr;
-        cast->cast_to         = cast_to;
-        cast->is_auto         = false;
-
-        return cast;
-    }
+    return cast;
 }
 
 AstFor *parse_for(Parser *parser) {
@@ -2423,7 +2393,7 @@ int get_operator_precedence(OperatorType op) {
         case OP_ADDRESS_OF:
         case OP_POINTER_DEREFERENCE:
         case OP_SPREAD:
-        case OP_CAST:
+        case OP_AS:
             return 13;
         case OP_DOT:
         case OP_SUBSCRIPT:
@@ -2458,6 +2428,25 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
 
     while (true) {
         Token next = peek_next_token(parser);
+
+        // As-cast is parsed from rigth to left
+        if (next.type == TOKEN_AS) {
+            eat_token(parser);
+            
+            Type *type = parse_type(parser);
+            if (!type) return NULL;
+
+            AstCast *as_cast = ast_allocate(parser, sizeof(AstCast));
+            as_cast->head.head.kind  = AST_CAST;
+            as_cast->head.head.file  = parser->current_file;
+            as_cast->head.head.start = left->head.start;
+            as_cast->head.head.end   = type->head.end;
+            as_cast->expr            = left;
+            as_cast->cast_to         = type;
+            as_cast->is_as_cast      = true;
+
+            return (AstExpr *) as_cast;
+        }
 
         if (ends_expression(next))          break;
         if (!is_binary_operator(next.type)) break;
@@ -2509,7 +2498,6 @@ AstExpr *parse_leaf(Parser *parser) {
 
     if (t.type == ';') {
         // We intentionally don't eat the semicolon because we want the expression to end right after this @Bug; "a := ;" currently doesn't produce a parse error
-
         AstSemicolonExpr *sce = ast_allocate(parser, sizeof(AstSemicolonExpr));
         sce->head.head.kind   = AST_SEMICOLON_EXPR;
         sce->head.head.file   = parser->current_file;
@@ -2592,8 +2580,8 @@ AstExpr *parse_leaf(Parser *parser) {
         return (AstExpr *)(array_lit);
     }
 
-    if (t.type == TOKEN_XX || t.type == TOKEN_CAST)  {
-        AstCast *cast = parse_cast(parser);
+    if (t.type == TOKEN_XX)  {
+        AstCast *cast = parse_auto_cast(parser);
         if (!cast) return NULL;
         return (AstExpr *)(cast);
     }

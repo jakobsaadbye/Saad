@@ -68,8 +68,6 @@ addChar :: method (sb: *StringBuilder, c: u8) {
 }
 
 addString :: method (sb: *StringBuilder, str: string) {
-    // strLen := strlen(str);
-    // strPtr := cast(*u8)str;
     sb.internalAdd(str.data, str.len);
 }
 
@@ -78,7 +76,7 @@ addFloat32 :: method (sb: *StringBuilder, v: f32) {
     sprintf(buf.data, xx "%f", v);
 
     str: string;
-    str.data = cast(*u8) buf.data;
+    str.data = buf.data as *u8;
     str.len = strlen(buf.data);
     sb.internalAdd(str.data, str.len);
 }
@@ -88,7 +86,7 @@ addFloat64 :: method (sb: *StringBuilder, v: f64) {
     sprintf(buf.data, xx "%lf", v);
 
     str: string;
-    str.data = cast(*u8) buf.data;
+    str.data = buf.data as *u8;
     str.len = strlen(buf.data);
     sb.internalAdd(str.data, str.len);
 }
@@ -111,7 +109,7 @@ addInt64 :: method (sb: *StringBuilder, v: s64) {
         digit := v % 10;
         v = v / 10;
 
-        c := cast(u8) (digit + 48);
+        c := (digit + 48) as u8;
 
         tmp[n] = c;
         n += 1;
@@ -138,7 +136,7 @@ addUInt64 :: method (sb: *StringBuilder, v: u64) {
         digit := v % 10;
         v = v / 10;
 
-        c := cast(u8) (digit + 48);
+        c := (digit + 48) as u8;
 
         tmp[n] = c;
         n += 1;
@@ -154,38 +152,38 @@ addUInt64 :: method (sb: *StringBuilder, v: u64) {
 
 addAnyValue :: method (sb: *StringBuilder, arg: any)  {
     if arg.type.kind == .Int {
-        prim := cast(*TypePrimitive) arg.type;
+        prim := arg.type as *TypePrimitive;
 
         if prim.kind == .U8 {
-            value := *(cast(*u8) arg.data);
-            sb.addUInt64(cast(u64) value);
+            value := *(arg.data as *u8);
+            sb.addUInt64(value as u64);
         } 
         else if prim.kind == .U16 {
-            value := *(cast(*u16) arg.data);
-            sb.addUInt64(cast(u64) value);
+            value := *(arg.data as *u16);
+            sb.addUInt64(value as u64);
         }
         else if prim.kind == .U32 || prim.kind == .Uint {
-            value := *(cast(*u32) arg.data);
-            sb.addUInt64(cast(u64) value);
+            value := *(arg.data as *u32);
+            sb.addUInt64(value as u64);
         }
         else if prim.kind == .U64 {
-            value := *(cast(*u64) arg.data);
+            value := *(arg.data as *u64);
             sb.addUInt64(value);
         }
         else if prim.kind == .S8 {
-            value := *(cast(*s8) arg.data);
-            sb.addInt64(cast(s64) value);
+            value := *(arg.data as *s8);
+            sb.addInt64(value as s64);
         }
         else if prim.kind == .S16 {
-            value := *(cast(*s16) arg.data);
-            sb.addInt64(cast(s64) value);
+            value := *(arg.data as *s16);
+            sb.addInt64(value as s64);
         }
         else if prim.kind == .S32 || prim.kind == .Int {
-            value := *(cast(*s32) arg.data);
-            sb.addInt64(cast(s64) value);
+            value := *(arg.data as *s32);
+            sb.addInt64(value as s64);
         }
         else if prim.kind == .S64 {
-            value := *(cast(*s64) arg.data);
+            value := *(arg.data as *s64);
             sb.addInt64(value);
         } else {
             // Unhandled
@@ -194,15 +192,15 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
     }
     else if arg.type.kind == .Float {
         if (arg.type.size == 4) {
-            value := cast(*f32) arg.data;
+            value := arg.data as *f32;
             sb.addFloat32(*value);
         } else {
-            value := cast(*f64) arg.data;
+            value := arg.data as *f64;
             sb.addFloat64(*value);
         }
     }
     else if arg.type.kind == .Bool {
-        value := cast(*bool) arg.data;
+        value := arg.data as *bool;
         if *value {
             sb.addString("true");
         } else {
@@ -210,19 +208,19 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
         }
     }
     else if arg.type.kind == .String {
-        value := cast(*string) arg.data;
-        sb.addString("'");
+        value := arg.data as *string;
+        // sb.addString("'");
         sb.addString(*value);
-        sb.addString("'");
+        // sb.addString("'");
     }
     else if arg.type.kind == .Enum {
-        enumType := cast(*TypeEnum) arg.type;
+        enumType := arg.type as *TypeEnum;
         sb.addString(".");
         sb.addString(enumType.valueName);
     }
     else if arg.type.kind == .Pointer {
-        ptrType := cast(*TypePointer) arg.type;
-        value := cast(**void) arg.data;
+        ptrType := arg.type as *TypePointer;
+        value := arg.data as **void;
 
         buf: [64]u8;
         written := sprintf(buf.data, xx "0x%p", *value);
@@ -234,8 +232,8 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
         sb.addString(str);
     }
     else if arg.type.kind == .Array {
-        arrType := cast(*TypeArray) arg.type;
-        data := cast(**void) arg.data;
+        arrType := arg.type as *TypeArray;
+        data := arg.data as **void;
 
         if *data == null {
             sb.addString("[]");
@@ -249,16 +247,16 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
 
             elemPtr: *u8 = null;
             if arrType.kind == .Fixed {
-                arrPtr := cast(**u8) arg.data;
+                arrPtr := arg.data as **u8;
                 elem0Ptr := *arrPtr;
                 elemPtr = &elem0Ptr[i * elemSize];
             } else if arrType.kind == .Slice {
-                slicePtr := cast(*[]u8) arg.data;
+                slicePtr := arg.data as *[]u8;
                 slice := *slicePtr;
                 elem0 := slice.data;
                 elemPtr = &elem0[i * elemSize];
             } else if arrType.kind == .Dynamic {
-                dynArrPtr := cast(*[..]u8) arg.data;
+                dynArrPtr := arg.data as *[..]u8;
                 dynArr := *dynArrPtr;
                 elem0 := dynArr.data;
                 elemPtr = &elem0[i * elemSize];
@@ -288,7 +286,7 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
         sb.addString("]");
     }
     else if arg.type.kind == .Struct {
-        structType := cast(*TypeStruct) arg.type;
+        structType := arg.type as *TypeStruct;
         sb.addString(structType.head.name);
         sb.addString("{ ");
         for member, i in structType.members {

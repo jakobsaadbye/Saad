@@ -89,7 +89,7 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
     OP_ADDRESS_OF   = 3,
     OP_POINTER_DEREFERENCE = 4, // Picked arbitrarily. Should just not conflict with the others
     OP_SPREAD       = TOKEN_TRIPLE_DOT, // Spread operator e.g `foo(...args)`
-    OP_CAST         = TOKEN_CAST,
+    OP_AS           = TOKEN_AS,
 } OperatorType;
 
 typedef enum AstFlags {
@@ -471,8 +471,9 @@ typedef struct AstUnary {
 typedef struct AstCast {
     AstExpr  head;
     AstExpr *expr;
-    Type    *cast_to;  // Explicit type cast e.g "cast(f64)x"
-    bool     is_auto;  // Weather its an auto-cast "xx 2 / 4.0"
+    Type    *cast_to;     // Explicit type cast e.g "x as f64"
+    bool     is_auto;     // Weather its an auto-cast "xx 2 / 4.0"
+    bool     is_as_cast;  // E.g `a := 5 as int`
 } AstCast;
 
 typedef struct AstStructLiteral {

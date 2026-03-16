@@ -4,6 +4,25 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.2.4 - 16. Mar 2026
+
+* BREAKING: New syntax for casting
+
+The keyword 'cast' is now replaced with the suffix 'as' keyword, like in Rust
+
+```odin
+myString := "New cast syntax" as *u8;
+
+memory := malloc(1024) as *u8;
+
+mySmallNumbers := [1 as u8, 2, 3, 4, 5];
+```
+
+Auto-casting with 'xx' is left unchanged.
+
+The 'as' way of casting is often more natural to write as you append to the right of your expression when you need a cast,
+opposed to cast(type) being prefix and requiring paranthesis.
+
 ## Update v0.2.3 - 13. Mar 2026
 
 * Structs can now appear as constants

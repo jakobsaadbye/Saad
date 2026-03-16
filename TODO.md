@@ -1,31 +1,16 @@
 Todo list:
 -------------------
 
-Fix member offsets being wrong!
+* Syntax
+  [] Change cast syntax to use `as` instead of cast. Maybe also remove xx
+  [] Import for named imports, `use` for loading in all identifiers. Goes together with as keyword to rename import
 
-Correct offsets for the members
-offset  size   field
-----------------------------
-0       4      kind
-4       12     position
-16      8 pad  (align string to 8)
-24      16     debugName
-40      64     animationFrames
-104     1      dead
-105     7 pad  (struct alignment)
-
-sizeof(Entity) = 112
-alignment = 8
-
-
-
-
-* Structs as constants
-  [] Zero-fill implicit struct initializers
-
+* Import system
+  [] Detect circular dependencies
+  [] Modules / Packages n' stuff
 
 * Better constants / literals
-  [] Structs as constants
+  [x] Structs as constants
   [] Hex values
   [] Binary values
 
@@ -52,11 +37,6 @@ alignment = 8
   [] Higher order functions (passing functions as values)
   [] Able to call methods defined later
   [] Methods on any type (including arrays and primitives)
-
-* Import system
-  [x] Simple import system
-  [] Detect circular dependencies
-  [] Modules / Packages n' stuff
 
 * Better struct literals
   [] Able to take pointer to struct literal (struct literal should in that case be allocated as a local)

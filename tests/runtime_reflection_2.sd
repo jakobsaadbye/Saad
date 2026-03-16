@@ -37,7 +37,7 @@ main :: () {
     }
     print("----------- Array of any -----------\n");
     {
-        x: []any = [3.14, 5, Vector3{1, 4, 9}, [cast(int) 1, 2, 3]];
+        x: []any = [3.14, 5, Vector3{1, 4, 9}, [1 as int, 2, 3]];
         Print("%\n", *x[0].type);
         Print("%\n", *x[1].type);
         Print("%\n", *x[2].type);
