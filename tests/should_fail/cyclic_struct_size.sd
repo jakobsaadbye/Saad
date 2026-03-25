@@ -1,0 +1,19 @@
+A :: struct {
+    b: B;
+}
+
+B :: struct {
+    c: C;
+}
+
+C :: struct {
+    d: D;
+}
+
+D :: struct {
+    a: A;    // <-- Should not be allowed
+}
+
+main :: () {
+    
+}

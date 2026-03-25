@@ -349,7 +349,21 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
         if (!stmt) return NULL;
 
         if (block->kind == BLOCK_DECLARATIVE) {
-            if (stmt->kind != AST_DECLARATION) {
+
+            bool valid_stmt = false;
+            if      (stmt->kind == AST_DECLARATION)   valid_stmt = true;
+            else if (stmt->kind == AST_STRUCT) {
+                report_error_ast(parser, LABEL_ERROR, (Ast *)stmt, "Inner struct definitions are not yet supported");
+                return NULL;
+            }
+            else if (stmt->kind == AST_ENUM) {
+                report_error_ast(parser, LABEL_ERROR, (Ast *)stmt, "Inner enum definitions are not yet supported");
+                return NULL;
+            }
+            else if (stmt->kind == AST_FUNCTION_DEFN) valid_stmt = true;
+            else if (stmt->kind == AST_EXPR_STMT)     valid_stmt = true;
+
+            if (!valid_stmt) {
                 report_error_ast(parser, LABEL_ERROR, (Ast *)stmt, "Invalid statement. Only declarations are allowed inside a struct or enum definition");
                 return NULL;
             }
@@ -626,7 +640,8 @@ TypeStruct *generate_empty_struct_type(Parser *parser, char *name) {
     struct_node->head.kind       = AST_STRUCT;
     struct_node->head.file       = parser->current_file;
     struct_node->head.flags      = AST_FLAG_COMPILER_GENERATED;
-    struct_node->members_scope   = make_empty_struct_scope(parser, struct_node);
+    struct_node->members         = make_empty_struct_scope(parser, struct_node);
+    struct_node->static_members  = make_empty_struct_scope(parser, struct_node);
     struct_node->methods         = make_empty_struct_scope(parser, struct_node);
 
     TypeStruct *struct_defn      = ast_allocate(parser, sizeof(TypeStruct));
@@ -651,7 +666,7 @@ TypeStruct *generate_empty_struct_type(Parser *parser, char *name) {
 void add_struct_member(Parser *parser, TypeStruct *struct_defn, char *name, Type *type) {
     AstIdentifier *member = generate_identifier(parser, name, type, IDENTIFIER_IS_STRUCT_MEMBER);
 
-    DynamicArray members = struct_defn->node->members_scope->identifiers;
+    DynamicArray members = struct_defn->node->members->identifiers;
 
     if (members.count == 0) {
         member->member_index  = 0;
@@ -662,7 +677,7 @@ void add_struct_member(Parser *parser, TypeStruct *struct_defn, char *name, Type
         member->member_offset = prev_member->member_offset + member->type->size;
     }
 
-    add_identifier_to_scope(parser, struct_defn->node->members_scope, member);
+    add_identifier_to_scope(parser, struct_defn->node->members, member);
 
     // Alignment + C-style sizing
     struct_defn->head.size += member->type->size;
@@ -1023,7 +1038,7 @@ Type *parse_type(Parser *parser) {
 }
 
 AstIdentifier *add_member_to_struct_scope(Parser *parser, AstStruct *struct_defn, AstIdentifier *member) {
-    return add_identifier_to_scope(parser, struct_defn->members_scope, member);
+    return add_identifier_to_scope(parser, struct_defn->members, member);
 }
 
 TypePointer *generate_pointer_to_type(Parser *parser, Type *type) {
@@ -1084,8 +1099,9 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     struct_node->head.flags      = AST_FLAG_COMPILER_GENERATED;
     struct_node->identifier      = NULL;
 
-    struct_node->members_scope = make_empty_struct_scope(parser, struct_node);
-    struct_node->methods       = make_empty_struct_scope(parser, struct_node);
+    struct_node->members        = make_empty_struct_scope(parser, struct_node);
+    struct_node->static_members = make_empty_struct_scope(parser, struct_node);
+    struct_node->methods        = make_empty_struct_scope(parser, struct_node);
 
     TypeStruct *struct_defn      = ast_allocate(parser, sizeof(TypeStruct));
     struct_defn->head.head.kind  = AST_TYPE;
@@ -1254,6 +1270,7 @@ AstEnum *parse_enum_defn(Parser *parser) {
     }
 
     ident->type = (Type *)(type_enum);
+    ident->flags |= IDENTIFIER_IS_RESOLVED;
 
     return ast_enum;
 }
@@ -1281,7 +1298,9 @@ AstStruct *parse_struct_defn(Parser *parser) {
 
     AstStruct *struct_defn = (AstStruct *)(ast_allocate(parser, sizeof(AstStruct)));
     AstBlock *scope = new_block(parser, BLOCK_DECLARATIVE);
+
     scope->belongs_to_struct = struct_defn;
+    struct_defn->static_members = make_empty_struct_scope(parser, struct_defn);
 
     scope = parse_block(parser, scope);
     if (!scope) return NULL;
@@ -1292,15 +1311,15 @@ AstStruct *parse_struct_defn(Parser *parser) {
     struct_defn->head.start = ident_token.start;
     struct_defn->head.end   = scope->head.end;
     struct_defn->identifier = ident;
-    struct_defn->members_scope = scope;
-    struct_defn->methods       = make_empty_struct_scope(parser, struct_defn);
+    struct_defn->members    = scope;
+    struct_defn->methods    = make_empty_struct_scope(parser, struct_defn);
 
     if (scope->identifiers.count == 0) {
         report_error_ast(parser, LABEL_ERROR, (Ast *)(struct_defn), "Structs must have atleast one member");
         return NULL;
     }
 
-    TypeStruct *type_struct      = type_alloc(&parser->type_table, sizeof(TypeStruct));
+    TypeStruct *type_struct      = ast_allocate(parser, sizeof(TypeStruct));
     type_struct->head.head.kind  = AST_TYPE;
     type_struct->head.head.file  = parser->current_file;
     type_struct->head.head.start = struct_defn->head.start;
@@ -1310,9 +1329,10 @@ AstStruct *parse_struct_defn(Parser *parser) {
     type_struct->identifier      = ident;
     type_struct->node            = struct_defn;
 
-    type_add_user_defined(&parser->type_table, (Type *)(type_struct));
+    // type_add_user_defined(&parser->type_table, (Type *)(type_struct));
 
     ident->type = (Type *)type_struct;
+    ident->flags |= IDENTIFIER_IS_RESOLVED | IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_CONSTANT;
 
     // if (existing) {
     //     if (existing->kind == TYPE_STRUCT) {
@@ -2283,8 +2303,15 @@ AstDeclaration *parse_declaration(Parser *parser) {
 
     // Add the identifiers to the current scope
     if (parser->current_scope) {
-    
-        AstIdentifier *existing = add_declaration_to_scope(parser, parser->current_scope, decl);
+
+        AstIdentifier *existing = NULL;
+        if (parser->current_scope->belongs_to_struct && decl->flags & DECLARATION_CONSTANT) {
+            existing = add_declaration_to_scope(parser, parser->current_scope->belongs_to_struct->static_members, decl);
+        } 
+        else {
+            existing = add_declaration_to_scope(parser, parser->current_scope, decl);
+        }
+
         if (existing != NULL) {
             return NULL;
         }

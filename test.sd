@@ -1,12 +1,15 @@
 import "fmt";
 
-foo :: (v: int) {
-    Print("%", v);
+Color :: struct {
+    r, g, b, a: u8;
+
+    Red   :: Color{255, 0, 0, 255};
+    Green :: Color{0, 255, 0, 255};
+    Blue  :: Color{0, 0, 255, 255};
 }
 
 main :: () {
-    a := 5 as s64;
-
-    Print("%", typeof(a));
-    foo(xx a);
+    Print("%", Color.Red);
+    Print("%", Color.Green);
+    Print("%", Color.Blue);
 }

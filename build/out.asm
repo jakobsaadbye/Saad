@@ -31,9 +31,14 @@ segment .data
    CS18 DB `>`, 0 
    CS19 DB `%s\n`, 0 
    CS20 DB `%s`, 0 
-   CS21 DB `%`, 0 
+   CS21 DB `Hungergames 3 - Mockingbird`, 0 
    CS22 DB `%`, 0 
-   CS23	DB `s64`, 0
+   CS23 DB `title`, 0 
+   CS24 DB `oneStars`, 0 
+   CS25 DB `fiveStars`, 0 
+   CS26 DB `Rating`, 0 
+   CS27 DB `rating`, 0 
+   CS28 DB `Movie`, 0 
 segment .rdata
 segment .rdata
    TypeKind.name.data DB "TypeKind", 0
@@ -6314,53 +6319,184 @@ L168:
    pop		rbp
    ret
 
-; bytes locals   : 56
-; bytes temp     : 120
-; bytes total    : 208
-; (v: int)
-foo:
+; bytes locals   : 120
+; bytes temp     : 216
+; bytes total    : 368
+; ()
+main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 208
-   ; Param v
-   mov		-4[rbp], ecx
+   sub		rsp, 368
+   ; Ln 14: $movie : Movie = -24[rbp]
+   lea		rcx, -24[rbp]
+   mov		rdx, 0
+   mov		r8, 24
+   call		memset
    mov		rax, CS21
-   mov		-72[rbp], rax
-   mov		QWORD -64[rbp], 1
-   lea		rax, -72[rbp]
+   mov		-136[rbp], rax
+   mov		QWORD -128[rbp], 27
+   lea		rax, -136[rbp]
    push		rax
-   mov		eax, DWORD -4[rbp]
-   movsx		rax, eax
-   push		rax
-   pop		rax
-   mov		DWORD -28[rbp], eax
-   lea		rax, -28[rbp]
-   lea		rbx, -88[rbp]
-   mov		QWORD 0[rbx], rax
-   mov		QWORD rbx, -88[rbp]
-   mov		rax, QWORD [Type_int]
-   push		rax
-   pop		rcx
-   lea		rbx, -88[rbp]
-   mov		QWORD 8[rbx], rcx
-   push		rbx
    pop		rax
    lea		rbx, -24[rbp]
    lea		rcx, 0[rbx]
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
+   lea		rcx, -8[rbp]
+   mov		rdx, 0
+   mov		r8, 8
+   call		memset
+   mov		rax, 10
+   push		rax
+   pop		rax
+   mov		DWORD -8[rbp], eax
+   mov		rax, 50
+   push		rax
+   pop		rax
+   mov		DWORD -4[rbp], eax
+   mov		rax, CS22
+   mov		-136[rbp], rax
+   mov		QWORD -128[rbp], 1
+   lea		rax, -136[rbp]
+   push		rax
    lea		rax, -24[rbp]
-   mov		QWORD -104[rbp], rax
-   mov		QWORD -96[rbp], 1
-   lea		rax, -104[rbp]
+   push		rax
+   pop		rax
+   lea		rbx, -64[rbp]
+   lea		rcx, 0[rbx]
+   lea		rdx, 0[rax]
+   mov		r8, 24
+   call		memcpy
+   lea		rax, -64[rbp]
+   lea		rbx, -152[rbp]
+   mov		QWORD 0[rbx], rax
+   mov		QWORD rbx, -152[rbp]
+   mov		-160[rbp], rbx
+   sub		rsp, 32
+   mov		rcx, 96
+   call		malloc
+   add		rsp, 32
+   mov		-168[rbp], rax
+   mov		-176[rbp], rax
+   mov		rbx, -160[rbp]
+   lea		rbx, 0[rbx]
+   mov		rax, QWORD [Type_string]
+   push		rax
+   pop		rcx
+   mov		rdx, -160[rbp]
+   lea		rdx, 0[rdx]
+   mov		rbx, -176[rbp]
+   mov		rax, CS23
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 5
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 0
+   mov		DWORD 36[rbx], 0
+   add		rbx, 48
+   mov		-176[rbp], rbx
+   mov		rbx, -160[rbp]
+   lea		rbx, 16[rbx]
+   mov		-184[rbp], rbx
+   sub		rsp, 32
+   mov		rcx, 96
+   call		malloc
+   add		rsp, 32
+   mov		-192[rbp], rax
+   mov		-200[rbp], rax
+   mov		rbx, -184[rbp]
+   lea		rbx, 0[rbx]
+   mov		rax, QWORD [Type_int]
+   push		rax
+   pop		rcx
+   mov		rdx, -184[rbp]
+   lea		rdx, 0[rdx]
+   mov		rbx, -200[rbp]
+   mov		rax, CS24
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 8
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 0
+   mov		DWORD 36[rbx], 0
+   add		rbx, 48
+   mov		-200[rbp], rbx
+   mov		rbx, -184[rbp]
+   lea		rbx, 4[rbx]
+   mov		rax, QWORD [Type_int]
+   push		rax
+   pop		rcx
+   mov		rdx, -184[rbp]
+   lea		rdx, 4[rdx]
+   mov		rbx, -200[rbp]
+   mov		rax, CS25
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 9
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 1
+   mov		DWORD 36[rbx], 4
+   add		rbx, 48
+   mov		-200[rbp], rbx
+   mov		rax, CS26
+   mov		QWORD -216[rbp], rax
+   mov		QWORD -208[rbp], 6
+   lea		rcx, -216[rbp]
+   mov		rdx, -192[rbp]
+   mov		r8d, 2
+   mov		r9d, 8
+   sub		rsp, 40
+   mov		DWORD 32[rsp], 4
+   call		runtime_get_type_struct
+   add		rsp, 40
+   push		rax
+   pop		rcx
+   mov		rdx, -160[rbp]
+   lea		rdx, 16[rdx]
+   mov		rbx, -176[rbp]
+   mov		rax, CS27
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 6
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 1
+   mov		DWORD 36[rbx], 16
+   add		rbx, 48
+   mov		-176[rbp], rbx
+   mov		rax, CS28
+   mov		QWORD -232[rbp], rax
+   mov		QWORD -224[rbp], 5
+   lea		rcx, -232[rbp]
+   mov		rdx, -168[rbp]
+   mov		r8d, 2
+   mov		r9d, 24
+   sub		rsp, 40
+   mov		DWORD 32[rsp], 8
+   call		runtime_get_type_struct
+   add		rsp, 40
+   push		rax
+   pop		rcx
+   lea		rbx, -152[rbp]
+   mov		QWORD 8[rbx], rcx
+   push		rbx
+   pop		rax
+   lea		rbx, -40[rbp]
+   lea		rcx, 0[rbx]
+   lea		rdx, 0[rax]
+   mov		r8, 16
+   call		memcpy
+   lea		rax, -40[rbp]
+   mov		QWORD -248[rbp], rax
+   mov		QWORD -240[rbp], 1
+   lea		rax, -248[rbp]
    push		rax
    pop		rax
    mov		rbx, 0[rax]
    mov		rcx, 8[rax]
-   mov		QWORD -120[rbp], rbx
-   mov		QWORD -112[rbp], rcx
-   lea		rax, -120[rbp]
+   mov		QWORD -264[rbp], rbx
+   mov		QWORD -256[rbp], rcx
+   lea		rax, -264[rbp]
    push		rax
    push		1
    pop		r8 
@@ -6370,87 +6506,6 @@ foo:
    call		Print
 L178:
    mov		rax, 0
-   add		rsp, 208
-   pop		rbp
-   ret
-
-; bytes locals   : 56
-; bytes temp     : 120
-; bytes total    : 208
-; ()
-main:
-   push		rbp
-   mov		rbp, rsp
-   sub		rsp, 208
-   ; Ln 8: $a : s64 = -8[rbp]
-   mov		rax, 5
-   push		rax
-   pop		rax
-   movsxd		rax, eax
-   push		rax
-   pop		rax
-   mov		QWORD -8[rbp], rax
-   mov		rax, CS22
-   mov		-72[rbp], rax
-   mov		QWORD -64[rbp], 1
-   lea		rax, -72[rbp]
-   push		rax
-   mov		rax, CS23
-   mov		QWORD rbx, 3
-   mov		QWORD -88[rbp], rax
-   mov		QWORD -80[rbp], rbx
-   lea		rax, -88[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -40[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   lea		rax, -40[rbp]
-   lea		rbx, -104[rbp]
-   mov		QWORD 0[rbx], rax
-   mov		QWORD rbx, -104[rbp]
-   mov		rax, QWORD [Type_string]
-   push		rax
-   pop		rcx
-   lea		rbx, -104[rbp]
-   mov		QWORD 8[rbx], rcx
-   push		rbx
-   pop		rax
-   lea		rbx, -24[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   lea		rax, -24[rbp]
-   mov		QWORD -120[rbp], rax
-   mov		QWORD -112[rbp], 1
-   lea		rax, -120[rbp]
-   push		rax
-   pop		rax
-   mov		rbx, 0[rax]
-   mov		rcx, 8[rax]
-   mov		QWORD -136[rbp], rbx
-   mov		QWORD -128[rbp], rcx
-   lea		rax, -136[rbp]
-   push		rax
-   push		1
-   pop		r8 
-   pop		rdx
-   pop		rcx
-   ; (string, []any, bool) 
-   call		Print
-   mov		rax, QWORD -8[rbp]
-   push		rax
-   pop		rax
-   mov		eax, eax
-   push		rax
-   pop		rcx
-   ; (int) 
-   call		foo
-L179:
-   mov		rax, 0
-   add		rsp, 208
+   add		rsp, 368
    pop		rbp
    ret

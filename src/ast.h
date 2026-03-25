@@ -239,7 +239,8 @@ typedef struct AstBlock {
 typedef struct AstStruct {
     Ast            head;
     AstIdentifier *identifier;
-    AstBlock      *members_scope;
+    AstBlock      *members;
+    AstBlock      *static_members;
     AstBlock      *methods;
 } AstStruct;
 
@@ -443,6 +444,7 @@ typedef struct AstArrayAccess {
 
 typedef enum MemberAccessKind {
     MEMBER_ACCESS_STRUCT,
+    MEMBER_ACCESS_STRUCT_STATIC,
     MEMBER_ACCESS_ENUM,
     MEMBER_ACCESS_METHOD_CALL,
 } AccessorKind;

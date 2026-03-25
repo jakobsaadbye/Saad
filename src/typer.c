@@ -15,8 +15,13 @@ typedef struct Typer {
     AstDeclaration  *inside_declaration;  // Set if we are currently type checking a declaration
     AstExtern       *inside_extern_block; // Set if we are currently type checking function definitions inside an extern block
 
+    ////////////////////////////////////////////////////////////////////
+    // Non state related fields
+    ////////////////////////////////////////////////////////////////////
     TypeAny         *type_any;       // The resolved type of 'any'
     TypeString      *type_string;    // The resolved type of 'string'
+
+    DynamicArray     struct_wait_list; // of *AstIdentifier. A list of struct identifiers that are waiting to be sized as they depend on knowing the size of other structs
     
     int array_literal_depth;
 
@@ -72,6 +77,7 @@ Typer typer_init(Parser *parser, ConstEvaluator *ce) {
     typer.inside_declaration  = NULL;
     typer.scope_rewrites      = da_init(8, sizeof(void*));
     typer.array_literal_depth = 0;
+    typer.struct_wait_list = da_init(8, sizeof(AstIdentifier *));
 
     return typer;
 }
@@ -113,7 +119,7 @@ void dump_scope_levels(AstBlock *scope) {
 void dump_struct(AstStruct *struct_defn) {
     printf("%s :: struct {\n", struct_defn->identifier->name);
 
-    DynamicArray members = struct_defn->members_scope->identifiers;
+    DynamicArray members = struct_defn->members->identifiers;
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
         printf("    %s: %s;\n", member->name, type_to_str(member->type));
@@ -327,13 +333,13 @@ Type *resolve_type(Typer *typer, Type *type) {
     }
 
     if (type->kind == TYPE_NAME) {
-        Type *found = type_lookup(&typer->parser->type_table, type->name);
-        if (found == NULL) {
+        AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, type->name);
+        if (ident == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Unknown type '%s'", type_to_str(type));
             return NULL;
         }
 
-        return found;
+        return ident->type;
     }
 
     if (type->kind == TYPE_POINTER) {
@@ -574,9 +580,12 @@ void reserve_space_for_runtime_any_value(Typer *typer, Type *value_type) {
 
         TypeStruct *type_struct = (TypeStruct *) value_type;
 
-        DynamicArray members = type_struct->node->members_scope->identifiers;
+        DynamicArray members = type_struct->node->members->identifiers;
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **) members.items)[i];
+            if (member->flags & IDENTIFIER_IS_CONSTANT) {
+                continue;
+            }
             reserve_space_for_runtime_any_value(typer, member->type);
         }
     }
@@ -1103,24 +1112,75 @@ int get_alignment_of_type(Type *type) {
 }
 
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
-    TypeStruct *struct_type = (TypeStruct *)(type_lookup(&typer->parser->type_table, ast_struct->identifier->name));
+    if (ast_struct->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
+        return true;
+    }
+
+    TypeStruct *struct_type = (TypeStruct *) ast_struct->identifier->type;
     assert(struct_type != NULL && struct_type->head.kind == TYPE_STRUCT);
 
-
-    typer->current_scope = ast_struct->members_scope;
-    DynamicArray members = ast_struct->members_scope->identifiers;
-    bool ok;
+    typer->current_scope = ast_struct->members;
+    DynamicArray members = ast_struct->members->identifiers;
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
-        if (member->flags & IDENTIFIER_IS_CONSTANT) {
+        bool ok = check_declaration(typer, member->decl);
+        if (!ok) return false;
+
+        if (member->decl->type == (Type *) struct_type) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *) member->decl, "Illegal recursive definition of type '%s'", struct_type->node->identifier->name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Did you mean to give it type *%s?", struct_type->node->identifier->name);
+            return false;
+        }
+
+        if (member->type->kind == TYPE_STRUCT) {
+            if ( !(member->type->flags & TYPE_IS_FULLY_SIZED) && member->type != (Type *) struct_type) {
+                AstStruct *non_checked_struct = ((TypeStruct *)member->type)->node;
+
+                // Check for cyclic sizing dependency
+                for (int i = 0; i < typer->struct_wait_list.count; i++) {
+                    AstIdentifier *waiting_struct = ((AstIdentifier **)typer->struct_wait_list.items)[i];
+                    
+                    if (non_checked_struct->identifier == waiting_struct) {
+                        // Detected a cycle!
+                        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)member->type, "Cyclic struct dependency detected. Struct %s and %s are dependent on eachothers types to be sized", waiting_struct->name, ast_struct->identifier->name);
+                        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)ast_struct, "");
+                        report_error_ast(typer->parser, LABEL_HINT, NULL, "One of the structs needs to be taken by pointer");
+                        return NULL;
+                    }
+                }
+
+                // Add ourself to the struct "needing to be sized" waiting list
+                da_append(&typer->struct_wait_list, ast_struct->identifier);
+
+                // Go typecheck the unknown struct
+                Typer current_state = *typer;
+                bool ok = check_struct_defn(typer, non_checked_struct);
+                if (!ok) return NULL;
+                typer_restore_state(typer, current_state);
+
+                // Pop ourselves from the waiting list
+                da_remove(&typer->struct_wait_list, typer->struct_wait_list.count - 1);
+            }
+        }
+
+    }
+    typer->current_scope = ast_struct->members->parent;
+
+    // Check all constant members
+    DynamicArray static_members = ast_struct->static_members->identifiers;
+    for (int i = 0; i < static_members.count; i++) {
+        AstIdentifier *member = ((AstIdentifier **)static_members.items)[i];
+
+        if (member->flags & IDENTIFIER_IS_NAME_OF_STRUCT) {
             continue;
         }
 
-        ok = check_declaration(typer, member->decl);
+        bool ok = check_declaration(typer, member->decl);
         if (!ok) return false;
     }
-    typer->current_scope = ast_struct->members_scope->parent;
+
+    // Check that none of the sizeable members use the struct type recursively
     
     // C-style struct alignment + padding
     int largest_alignment = 0;
@@ -1128,15 +1188,6 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
 
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
-        
-        if (member->type->kind == TYPE_STRUCT) {
-            if (!(member->type->flags & TYPE_IS_FULLY_SIZED)) {
-                AstStruct *nested_struct = ((TypeStruct *)member->type)->node;
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)member, "Error: Temporarily, nested structs needs to be declared before the struct they appear in.");
-                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)nested_struct, "Move this struct above the struct using it");
-                return false;
-            }
-        }
 
         int alignment = get_alignment_of_type(member->type);
 
@@ -1149,6 +1200,8 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
             largest_alignment = alignment;
         }
     }
+
+    ast_struct->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
 
     struct_type->head.size  = align_up(offset, largest_alignment);
     struct_type->head.flags |= TYPE_IS_FULLY_SIZED;
@@ -1366,7 +1419,7 @@ char *generate_c_format_specifier_for_type(Type *type) {
 
         TypeStruct *struct_defn = (TypeStruct *) type;
 
-        DynamicArray members = struct_defn->node->members_scope->identifiers;
+        DynamicArray members = struct_defn->node->members->identifiers;
 
         sb_append(&builder, "%s{ ", struct_defn->identifier->name);
         for (int i = 0; i < members.count; i++) {
@@ -1391,7 +1444,7 @@ char *generate_c_format_specifier_for_type(Type *type) {
 }
 
 int count_nested_sizeable_struct_members(Typer *typer, AstStruct *struct_, int count) {
-    DynamicArray members = struct_->members_scope->identifiers;
+    DynamicArray members = struct_->members->identifiers;
 
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
@@ -2501,7 +2554,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 }
 
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
-    TypeEnum *enum_defn = (TypeEnum *)(type_lookup(&typer->parser->type_table, ast_enum->identifier->name));
+    TypeEnum *enum_defn = (TypeEnum *) ast_enum->identifier->type;
     assert(enum_defn != NULL);
 
     if (ast_enum->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
@@ -2996,6 +3049,17 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         }
     }
 
+    bool is_static_member_access = false;
+    if (type_lhs->kind == TYPE_STRUCT && lhs->head.kind == AST_LITERAL && ((AstLiteral *)(lhs))->kind == LITERAL_IDENTIFIER) {
+        char *ident_name = ((AstLiteral *)(lhs))->as.value.identifier.name;
+        AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
+        assert(ident && "Typechecked the name of a struct, but didn't find it again while resolving member access");
+
+        if (ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT) {
+            is_static_member_access = true;
+        }
+    }
+
     //
     // 2'nd case : Member access on struct
     //
@@ -3058,9 +3122,15 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     if (rhs->head.kind == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
         AstLiteral *ident = (AstLiteral *) rhs;
         member_name = ident->as.value.identifier.name;
-        member = get_struct_member(struct_type->node, member_name);
 
-        ma->access_kind   = MEMBER_ACCESS_STRUCT;
+        if (is_static_member_access) {
+            member = find_identifier_in_scope(struct_type->node->static_members, member_name);
+            ma->access_kind   = MEMBER_ACCESS_STRUCT_STATIC;
+        } else {
+            member = get_struct_member(struct_type->node, member_name);
+            ma->access_kind   = MEMBER_ACCESS_STRUCT;
+        }
+
         ma->struct_member = member;
     } 
     else if (rhs->head.kind == AST_FUNCTION_CALL) {
@@ -3106,7 +3176,12 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     }
 
     if (!member) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a member of '%s'", member_name, type_to_str((Type *)struct_type));
+
+        if (is_static_member_access) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a static member of '%s'", member_name, type_to_str((Type *)struct_type));
+        } else {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a member of '%s'", member_name, type_to_str((Type *)struct_type));
+        }
 
         if (type_lhs->kind == TYPE_ARRAY) {
             TypeArray *array = (TypeArray *) type_lhs;
@@ -3147,6 +3222,11 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         return func_call->head.type;
     }
 
+    if (!member->type) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)member, "Compiler Error: Member has no type in 'check_member_access()'");
+        return NULL;
+    }
+
     return member->type;
 }
 
@@ -3161,19 +3241,16 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         }
 
         if (type->kind == TYPE_NAME) {
-            Type *found = type_lookup(&typer->parser->type_table, type->name);
-            if (!found) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Unknown type '%s'", type_to_str(type));
-                return NULL;
-            }
+            Type *resolved = resolve_type(typer, type);
+            if (!resolved) return NULL;
 
-            if (found->kind != TYPE_STRUCT) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "'%s' is not the name of a struct. Type of '%s' is '%s'", found->name, found->name, type_to_str(type));
+            if (resolved->kind != TYPE_STRUCT) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "'%s' is not the name of a struct. Type of '%s' is '%s'", resolved->name, resolved->name, type_to_str(type));
                 return NULL;
             }
             
-            literal->explicit_type = found;
-            struct_defn = (TypeStruct *)(found);
+            literal->explicit_type = resolved;
+            struct_defn = (TypeStruct *)(resolved);
         } else {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Struct literal cannot conform to type '%s'", type_to_str(ctx_type));
             return NULL;
@@ -3200,7 +3277,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         struct_defn = (TypeStruct *)(ctx_type);
     }
 
-    DynamicArray members = struct_defn->node->members_scope->identifiers;
+    DynamicArray members = struct_defn->node->members->identifiers;
     int curr_member_index = 0;
     for (int i = 0; i < literal->initializers.count; i++) {
         AstStructInitializer *init = ((AstStructInitializer **)(literal->initializers.items))[i];
@@ -3761,7 +3838,7 @@ void reset_temporary_storage(AstFunctionDefn *func_defn) {
 }
 
 AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name) {
-    return find_identifier_in_scope(struct_defn->members_scope, name);
+    return find_identifier_in_scope(struct_defn->members, name);
 }
 
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name) {

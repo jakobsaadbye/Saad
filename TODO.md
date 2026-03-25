@@ -1,24 +1,31 @@
 Todo list:
 -------------------
 
-* Syntax
-  [] Change cast syntax to use `as` instead of cast. Maybe also remove xx
-  [] Import for named imports, `use` for loading in all identifiers. Goes together with as keyword to rename import
-
-* Import system
-  [] Detect circular dependencies
-  [] Modules / Packages n' stuff
-
-* Better constants / literals
-  [x] Structs as constants
-  [] Hex values
-  [] Binary values
-
 * Better structs
   [] Constant members
   [] Default values
   [] Defining inner structs
   [] Struct embedding (inheritence)
+
+* Global variables
+
+* Better types
+  [] Able to define Structs and Enums locally within scopes
+
+
+* Functions:
+  [] Higher order functions (passing functions as values)
+  [] Able to call methods defined later
+  [] Methods on any type (including arrays and primitives)
+
+* Import system
+  [] Detect circular dependencies
+  [] Named imports
+  [] Modules / Packages n' stuff
+
+* Better constants / literals
+  [] Hex values
+  [] Binary values
 
 * Generics
   [] For functions
@@ -29,20 +36,16 @@ Todo list:
   [] Able to iterate backwards
   [] Custom iterators
 
-* Function call overhaul:
-  [x] Multiple return values
-  [x] Variadic arguments
-  [x] Default arguments
-  [x] Named arguments
-  [] Higher order functions (passing functions as values)
-  [] Able to call methods defined later
-  [] Methods on any type (including arrays and primitives)
+* Syntax
+  [] Import for named imports, `use` for loading in all identifiers. Goes together with as keyword to rename import
+
+
 
 * Better struct literals
   [] Able to take pointer to struct literal (struct literal should in that case be allocated as a local)
 
 * Better enums
-  [] Get the names of enums
+  [x] Get the names of enums
   [] Backing integer types for enums
 
 

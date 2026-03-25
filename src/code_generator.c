@@ -56,6 +56,7 @@ void emit_for(CodeGenerator *cg, AstFor *ast_for);
 void emit_while(CodeGenerator *cg, AstWhile *ast_while);
 void emit_break_or_continue(CodeGenerator *cg, AstBreakOrContinue *boc);
 void emit_enum_defn(CodeGenerator *cg, AstEnum *ast_enum);
+void emit_struct_defn(CodeGenerator *cg, AstStruct *ast_struct);
 void emit_array_literal(CodeGenerator *cg, AstArrayLiteral *array_lit, int base_offset, bool offset_is_runtime_computed);
 void emit_struct_literal(CodeGenerator *cg, AstStructLiteral *struct_lit, int base_offset, bool offset_is_runtime_computed);
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl);
@@ -68,6 +69,7 @@ void emit_simple_initialization(CodeGenerator *cg, int dest_offset, bool dest_is
 void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_computed, Type *src_type, bool lvalue);
 void emit_type_descriptor(CodeGenerator *cg, Type *type);
 void emit_constant_expression(CodeGenerator *cg, AstExpr *expr);
+void emit_constant_to_rdata(CodeGenerator *cg, AstIdentifier *ident);
 
 int allocate_variable(CodeGenerator *cg, int size);
 void check_main_exists(CodeGenerator *cg, AstFile *file);
@@ -383,7 +385,7 @@ void emit_statement(CodeGenerator *cg, Ast *stmt) {
     case AST_WHILE:             emit_while(cg, (AstWhile *)(stmt)); break;
     case AST_BREAK_OR_CONTINUE: emit_break_or_continue(cg, (AstBreakOrContinue *)(stmt)); break;
     case AST_ENUM:              emit_enum_defn(cg, (AstEnum *)(stmt)); break;
-    case AST_STRUCT:            break;
+    case AST_STRUCT:            emit_struct_defn(cg, (AstStruct *)(stmt)); break;
     case AST_EXPR_STMT:         emit_expr_stmt(cg, (AstExprStmt *)(stmt)); break;
     case AST_PRINT:             emit_print(cg, (AstPrint *)(stmt)); break;
     case AST_ASSERT:            emit_assert(cg, (AstAssert *)(stmt)); break;
@@ -408,6 +410,20 @@ void emit_break_or_continue(CodeGenerator *cg, AstBreakOrContinue *boc) {
             sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing.while_loop->condition_label);
         }
     }
+}
+
+void emit_struct_defn(CodeGenerator *cg, AstStruct *ast_struct) {
+
+    // Add constant members to rodata
+    DynamicArray members = ast_struct->static_members->identifiers;
+    for (int i = 0; i < members.count; i++) {
+        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+        assert(member->flags & IDENTIFIER_IS_CONSTANT && "Emitting non-constant member");
+
+        emit_constant_to_rdata(cg, member);
+    }
+    
+
 }
 
 void emit_enum_defn(CodeGenerator *cg, AstEnum *ast_enum) {
@@ -1830,7 +1846,7 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
             }
         }
         
-        DynamicArray members = struct_node->members_scope->identifiers;
+        DynamicArray members = struct_node->members->identifiers;
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
@@ -1861,7 +1877,7 @@ void emit_printable_value(CodeGenerator *cg, Type *arg_type, int *num_enum_argum
 }
 
 void pop_struct_members_from_print(CodeGenerator *cg, AstStruct *struct_, int *c_arg_index) {
-    DynamicArray members = struct_->members_scope->identifiers;
+    DynamicArray members = struct_->members->identifiers;
     for (int i = members.count - 1; i >= 0; i--) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
@@ -2152,7 +2168,7 @@ void emit_type_descriptor(CodeGenerator *cg, Type *type) {
         int value_ptr_offset = push_temporary_value(cg, 8, (Ast *)type);
         sb_append(&cg->code, "   mov\t\t%d[rbp], rbx\n", value_ptr_offset);
 
-        DynamicArray members = type_struct->node->members_scope->identifiers;
+        DynamicArray members = type_struct->node->members->identifiers;
 
         int size_struct_member = 48; // sizeof(StructMember) in runtime.sd
 
@@ -2507,117 +2523,53 @@ int allocate_variable(CodeGenerator *cg, int size) {
     return cg->enclosing_function->base_ptr;
 }
 
-char *get_constant_size_label(int size) {
-    if (size == 1) return "db";
-    if (size == 2) return "dw";
-    if (size == 4) return "dd";
-    if (size == 8) return "dq";
-    return "dq";
-}
-
-void emit_flattened_array_literal(CodeGenerator *cg, AstArrayLiteral *lit) {
-    for (int i = 0; i < lit->expressions.count; i++) {
-        AstExpr *expr = ((AstExpr **) lit->expressions.items)[i];
-        emit_constant_expression(cg, expr);
-    }
-
-    // Pad any trailing part
-
-}
-
-void emit_flattened_struct_literal(CodeGenerator *cg, AstStructLiteral *lit) {
-    TypeStruct *type_struct = (TypeStruct *) lit->head.type;
-
-    int prev_member_index = -1;
-    int prev_member_offset = 0;
-
-    DynamicArray members = ((TypeStruct *) lit->head.type)->node->members_scope->identifiers;
-
-    // for (int i = 0; i < members.count; i++) {
-    //     AstIdentifier *member = ((AstIdentifier **) members.items)[i];
-    //     printf("%s, offset = %d\n", member->name, member->member_offset);
-    // }
-
-    // @Note: All initializers are in sorted order of their initialized member
-    for (int i = 0; i < lit->initializers.count; i++) {
-        AstStructInitializer *init = ((AstStructInitializer **) lit->initializers.items)[i];
-
-        AstIdentifier *member = init->member;
-
-        // Zero fill upto this member
-        if (member->member_index > prev_member_index + 1) {
-            int zero_fill = 0;
-            if (prev_member_index == -1) {
-                // Zero pad all the way upto this member
-                zero_fill = member->member_offset - prev_member_offset;
-            } else {
-                // Zero pad up to this member minus what the previous member size was
-                AstIdentifier *prev_member = ((AstIdentifier **) members.items)[prev_member_index];
-                zero_fill = member->member_offset - prev_member_offset - prev_member->type->size;
+void emit_constant_identifier(CodeGenerator *cg, AstIdentifier *ident) {
+    if (ident->value->head.kind == AST_LITERAL) {
+        AstLiteral *lit = (AstLiteral *)(ident->value);
+        switch (lit->kind) {
+            case LITERAL_BOOLEAN: {
+                sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);
+                INCR_PUSH_COUNT();
+                return;
             }
-            sb_append(&cg->rdata, "   times %d db 0\n", zero_fill);
-        }
-
-        prev_member_index  = member->member_index;
-        prev_member_offset = member->member_offset;
-
-        emit_constant_expression(cg, init->value);
-    }
-
-    // Zero fill any trailing part
-    if (prev_member_index < members.count - 1) {
-        int zero_fill = type_struct->head.size - prev_member_offset;
-        sb_append(&cg->rdata, "   times %d db 0; trail\n", zero_fill);
-    }
-
-    // Add struct padding
-    AstIdentifier *last_member = ((AstIdentifier **) members.items)[members.count];
-    int pad = type_struct->head.size - last_member->member_offset + last_member->type->size;
-    if (pad > 0) {
-        sb_append(&cg->rdata, "   times %d db 0; pad\n", pad);
-    }
-}
-
-void emit_constant_expression(CodeGenerator *cg, AstExpr *expr) {
-    if (expr->head.kind == AST_LITERAL) {
-        AstLiteral *lit = (AstLiteral *) expr;
-
-        char *dsize = get_constant_size_label(expr->type->size);
-        switch (expr->type->kind) {
-            case TYPE_BOOL: {
-                sb_append(&cg->rdata, "   %s %d\n", dsize, lit->as.value.boolean);
-                break;
+            case LITERAL_INTEGER: {
+                sb_append(&cg->code, "   push\t\t%lld\n", lit->as.value.integer);
+                INCR_PUSH_COUNT();
+                return;
             }
-            case TYPE_INTEGER: {
-                sb_append(&cg->rdata, "   %s %lld\n", dsize, lit->as.value.integer);
-                break;
+            case LITERAL_FLOAT: {
+                if (lit->head.type->size == 4) {
+                    sb_append(&cg->code, "   movss\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant @Cleanup - Should the identifier name really be used as the constant name??? Not good if we have the same identifier name in two seperate blocks inside same function!
+                    sb_append(&cg->code, "   movd\t\teax, xmm0\n");
+                    PUSH(RAX);
+                } else if (lit->head.type->size == 8) {
+                    sb_append(&cg->code, "   movsd\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant
+                    sb_append(&cg->code, "   movq\t\trax, xmm0\n");
+                    PUSH(RAX);
+                } else XXX;
+                return;
             }
-            case TYPE_FLOAT: {
-                sb_append(&cg->rdata, "   %s %lf\n", dsize, lit->as.value.floating);
-                break;
+            case LITERAL_STRING: {
+                sb_append(&cg->code, "   mov\t\trax, C_%s\n", ident->name); // :IdentifierNameAsConstant @Cleanup
+                PUSH(RAX);
+                return;
             }
-            case TYPE_STRING: {
-                int const_id = ++cg->constants;
-                sb_append(&cg->rdata_string, "   C_%d:\n", const_id);
-                sb_append(&cg->rdata_string, "   db \"%s\", 0\n", lit->as.value.string.data);
-
-                sb_append(&cg->rdata, "   dq C_%d\n", const_id);
-                sb_append(&cg->rdata, "   dq %lld\n", lit->as.value.string.length);
-                break;
-            }
-
-            default: XXX;
+            case LITERAL_NULL: XXX; // @TODO
+            case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
         }
     }
-    else if (expr->head.kind == AST_STRUCT_LITERAL) {
-        AstStructLiteral *lit = (AstStructLiteral *) expr;
-        emit_flattened_struct_literal(cg, lit);
-    }
-    else if (expr->head.kind == AST_ARRAY_LITERAL) {
-        AstArrayLiteral *lit = (AstArrayLiteral *) expr;
-        emit_flattened_array_literal(cg, lit);
-    }
-    else {
+    else if (ident->value->head.kind == AST_STRUCT_LITERAL || ident->value->head.kind == AST_ARRAY_LITERAL) {
+        // Load the constant from rdata
+        int const_id = ident->stack_offset;
+    
+        if (ident->value->type->kind == TYPE_STRUCT && ident->value->type->size <= 8) {
+            sb_append(&cg->code, "   mov\t\t%s, [%s.%d]\n", REG_A(ident->value->type), ident->name, const_id);
+        } else {
+            sb_append(&cg->code, "   lea\t\trax, [%s.%d]\n", ident->name, const_id);
+        }
+        PUSH(RAX);
+        return;
+    } else {
         XXX;
     }
 }
@@ -2635,7 +2587,7 @@ typedef struct ConstBlob {
     DynamicArray   relocations;
 } ConstBlob;
 
-void emit_write_constant(CodeGenerator *cg, ConstBlob *cb, AstExpr *expr) {
+void emit_write_constant_to_blob(CodeGenerator *cg, ConstBlob *cb, AstExpr *expr) {
     switch (expr->type->kind) {
         case TYPE_BOOL: {
             AstLiteral *lit = (AstLiteral *) expr;
@@ -2690,7 +2642,7 @@ void emit_write_constant(CodeGenerator *cg, ConstBlob *cb, AstExpr *expr) {
 
                 cb->cursor = base_offset + member->member_offset;
 
-                emit_write_constant(cg, cb, init->value);
+                emit_write_constant_to_blob(cg, cb, init->value);
             }
             break;
         }
@@ -2709,7 +2661,7 @@ void emit_write_constant(CodeGenerator *cg, ConstBlob *cb, AstExpr *expr) {
 
                 cb->cursor = base_offset + i * type_array->elem_type->size;
 
-                emit_write_constant(cg, cb, expr);
+                emit_write_constant_to_blob(cg, cb, expr);
             }
             break;
         }
@@ -2719,7 +2671,7 @@ void emit_write_constant(CodeGenerator *cg, ConstBlob *cb, AstExpr *expr) {
     }
 }
 
-void emit_constant_blob(CodeGenerator *cg, ConstBlob *cb) {
+void emit_constant_blob_to_rdata(CodeGenerator *cg, ConstBlob *cb) {
     int zeroes = 0;
     int relocation_cursor = 0;
 
@@ -2775,53 +2727,56 @@ void emit_constant_blob(CodeGenerator *cg, ConstBlob *cb) {
     }
 }
 
+void emit_constant_to_rdata(CodeGenerator *cg, AstIdentifier *ident) {
+    assert(ident->value && "Non constant value");
+
+    if (ident->value->head.kind == AST_LITERAL) {
+        AstLiteral *lit = (AstLiteral *)(ident->value);
+
+        switch (lit->kind) {
+        case LITERAL_BOOLEAN: break; // Immediate value is used
+        case LITERAL_INTEGER: break; // Immediate value is used 
+        case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", ident->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
+        case LITERAL_STRING: {
+            sb_append(&cg->rdata, "   C_%s.data DB \"%s\", 0\n", ident->name, lit->as.value.string.data);
+            sb_append(&cg->rdata, "   align 8\n");
+            sb_append(&cg->rdata, "   C_%s:\n", ident->name);
+            sb_append(&cg->rdata, "   dq C_%s.data\n", ident->name);
+            sb_append(&cg->rdata, "   dq %lld\n", lit->as.value.string.length);
+            break;
+        }
+        case LITERAL_NULL:    XXX; // @TODO
+        case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
+        }
+    }
+    else if (ident->value->head.kind == AST_STRUCT_LITERAL || ident->value->head.kind == AST_ARRAY_LITERAL) {
+        // Store an id to the constant on the identifier
+        ident->stack_offset = ++cg->constants;
+
+        int size = ident->value->type->size;
+
+        // Allocate a zero initialized blob of memory and fill in all the members in memory
+        ConstBlob cb = {0};
+        cb.data        = calloc(size, 1);
+        cb.cursor      = 0;
+        cb.size        = size;
+        cb.relocations = da_init(2, sizeof(Relocation));
+
+        emit_write_constant_to_blob(cg, &cb, ident->value);
+
+        sb_append(&cg->rdata, "   %s.%d:\n", ident->name, ident->stack_offset);
+        emit_constant_blob_to_rdata(cg, &cb);
+    } 
+    else {
+        XXX;
+    }
+}
+
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     if (decl->flags & DECLARATION_CONSTANT) {
         for (int i = 0; i < decl->idents.count; i++) {
             AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
-            assert(ident->value && "No constant value");
-
-            if (ident->value->head.kind == AST_LITERAL) {
-                AstLiteral *lit = (AstLiteral *)(ident->value);
-    
-                switch (lit->kind) {
-                case LITERAL_BOOLEAN: break; // Immediate value is used
-                case LITERAL_INTEGER: break; // Immediate value is used 
-                case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", ident->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
-                case LITERAL_STRING: {
-                    sb_append(&cg->rdata, "   C_%s.data DB \"%s\", 0\n", ident->name, lit->as.value.string.data);
-                    sb_append(&cg->rdata, "   align 8\n");
-                    sb_append(&cg->rdata, "   C_%s:\n", ident->name);
-                    sb_append(&cg->rdata, "   dq C_%s.data\n", ident->name);
-                    sb_append(&cg->rdata, "   dq %lld\n", lit->as.value.string.length);
-                    break;
-                }
-                case LITERAL_NULL:    XXX; // @TODO
-                case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
-                }
-            }
-            else if (ident->value->head.kind == AST_STRUCT_LITERAL || ident->value->head.kind == AST_ARRAY_LITERAL) {
-                // Store an id to the constant on the identifier
-                ident->stack_offset = ++cg->constants;
-
-                int size = ident->value->type->size;
-
-                // Allocate a zero initialized blob of memory and fill in all the members in memory
-                ConstBlob cb = {0};
-                cb.data        = calloc(size, 1);
-                cb.cursor      = 0;
-                cb.size        = size;
-                cb.relocations = da_init(2, sizeof(Relocation));
-
-                emit_write_constant(cg, &cb, ident->value);
-
-                sb_append(&cg->rdata, "   %s.%d:\n", ident->name, ident->stack_offset);
-                emit_constant_blob(cg, &cb);
-            } 
-            else {
-                XXX;
-            }
-
+            emit_constant_to_rdata(cg, ident);
         }
 
         return;
@@ -3199,6 +3154,9 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
     // to skip alot of push and pop operations. This was the initial idea about the MemberAccessResult
     MemberAccessResult result = {0, true};
 
+    if (ma->access_kind == MEMBER_ACCESS_STRUCT_STATIC) {
+        return result;
+    }
     if (ma->access_kind == MEMBER_ACCESS_ENUM) {
         // We don't push the address of an enum value
         return result;
@@ -3532,6 +3490,11 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
             return;
         }
+        else if (ma->access_kind == MEMBER_ACCESS_STRUCT_STATIC) {
+            AstIdentifier *member = ma->struct_member;
+            emit_constant_identifier(cg, member);
+            return;
+        }
         else if (ma->access_kind == MEMBER_ACCESS_METHOD_CALL) {
             assert(ma->method_call);
             emit_function_call(cg, ma->method_call);
@@ -3762,55 +3725,15 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, lit->as.value.identifier.name);
             assert(ident);
 
-            if (ident->decl && ident->decl->flags & DECLARATION_CONSTANT) {
-                if (ident->value->head.kind == AST_LITERAL) {
-                    AstLiteral *lit = (AstLiteral *)(ident->value);
-                    switch (lit->kind) {
-                        case LITERAL_BOOLEAN: {
-                            sb_append(&cg->code, "   push\t\t%d\n", lit->as.value.boolean ? -1 : 0);
-                            INCR_PUSH_COUNT();
-                            return;
-                        }
-                        case LITERAL_INTEGER: {
-                            sb_append(&cg->code, "   push\t\t%lld\n", lit->as.value.integer);
-                            INCR_PUSH_COUNT();
-                            return;
-                        }
-                        case LITERAL_FLOAT: {
-                            if (lit->head.type->size == 4) {
-                                sb_append(&cg->code, "   movss\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant @Cleanup - Should the identifier name really be used as the constant name??? Not good if we have the same identifier name in two seperate blocks inside same function!
-                                sb_append(&cg->code, "   movd\t\teax, xmm0\n");
-                                PUSH(RAX);
-                            } else if (lit->head.type->size == 8) {
-                                sb_append(&cg->code, "   movsd\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant
-                                sb_append(&cg->code, "   movq\t\trax, xmm0\n");
-                                PUSH(RAX);
-                            } else XXX;
-                            return;
-                        }
-                        case LITERAL_STRING: {
-                            sb_append(&cg->code, "   mov\t\trax, C_%s\n", ident->name); // :IdentifierNameAsConstant @Cleanup
-                            PUSH(RAX);
-                            return;
-                        }
-                        case LITERAL_NULL: XXX; // @TODO
-                        case LITERAL_IDENTIFIER: assert(false); // Shouldn't happen
-                    }
-                }
-                else if (ident->value->head.kind == AST_STRUCT_LITERAL || ident->value->head.kind == AST_ARRAY_LITERAL) {
-                    // Load the constant from rdata
-                    int const_id = ident->stack_offset;
+            if (ident->flags & IDENTIFIER_IS_CONSTANT) {
 
-                    if (ident->value->type->size <= 8) {
-                        sb_append(&cg->code, "   mov\t\t%s, [%s.%d]\n", REG_A(ident->value->type), ident->name, const_id);
-                    } else {
-                        sb_append(&cg->code, "   lea\t\trax, [%s.%d]\n", ident->name, const_id);
-                    }
-                    PUSH(RAX);
-                    return;
-                } else {
+                // Special case for a static instance
+                if (ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT) {
                     XXX;
                 }
+
+                emit_constant_identifier(cg, ident);
+                return;
             } 
             else {
                 emit_move_and_push(cg, ident->stack_offset, false, ident->type, emit_as_lvalue);

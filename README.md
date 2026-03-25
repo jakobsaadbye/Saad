@@ -4,6 +4,53 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.2.5 - 25. Mar 2026
+
+* Structs can not have constant members that live on the struct instance
+
+```odin
+Color :: struct {
+    r, g, b, a: u8;
+
+    Red   :: Color{255, 0, 0, 255};
+    Green :: Color{0, 255, 0, 255};
+    Blue  :: Color{0, 0, 255, 255};
+}
+
+main :: () {
+    Print("%", Color.Red);
+    Print("%", Color.Green);
+    Print("%", Color.Blue);
+}
+```
+
+* Structs can now be defined in any order
+
+Before, structs had to be declared before any using structs like in C.
+Now there is no order to how structs can be defined
+
+* Bug fixes
+
+** Fixed structs being allowed to have recursive definitions
+
+```odin
+Foo :: struct {
+    x: Foo; // <-- This is not allowed
+}
+```
+
+** Fixed and correctly detect cycles in struct sizing
+```odin
+A :: struct {
+    b: B;
+}
+
+B :: struct {
+    a: A; // <-- This is not allowed, since it would do a cycle back to typechecking A
+}
+
+```
+
 ## Update v0.2.4 - 16. Mar 2026
 
 * BREAKING: New syntax for casting
