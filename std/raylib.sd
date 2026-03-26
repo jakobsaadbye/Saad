@@ -560,60 +560,81 @@ GamepadButton :: enum {
 
 // Gamepad axis
 GamepadAxis :: enum {
-    left_x        = 0,     // Gamepad left stick X axis
-    left_y        = 1,     // Gamepad left stick Y axis
-    right_x       = 2,     // Gamepad right stick X axis
-    right_y       = 3,     // Gamepad right stick Y axis
-    left_trigger  = 4,     // Gamepad back trigger left, pressure level: [1..-1]
-    right_trigger = 5      // Gamepad back trigger right, pressure level: [1..-1]
+    GAMEPAD_AXIS_LEFT_X        = 0,     // Gamepad left stick X axis
+    GAMEPAD_AXIS_LEFT_Y        = 1,     // Gamepad left stick Y axis
+    GAMEPAD_AXIS_RIGHT_X       = 2,     // Gamepad right stick X axis
+    GAMEPAD_AXIS_RIGHT_Y       = 3,     // Gamepad right stick Y axis
+    GAMEPAD_AXIS_LEFT_TRIGGER  = 4,     // Gamepad back trigger left, pressure level: [1..-1]
+    GAMEPAD_AXIS_RIGHT_TRIGGER = 5      // Gamepad back trigger right, pressure level: [1..-1]
 }
 
 // Material map index
 MaterialMapIndex :: enum {
-    albedo = 0,        // Albedo material (same as: MATERIAL_MAP_DIFFUSE)
-    metalness,         // Metalness material (same as: MATERIAL_MAP_SPECULAR)
-    normal,            // Normal material
-    roughness,         // Roughness material
-    occlusion,         // Ambient occlusion material
-    emission,          // Emission material
-    height,            // Heightmap material
-    cubemap,           // Cubemap material (NOTE: Uses GL_TEXTURE_CUBE_MAP)
-    irradiance,        // Irradiance material (NOTE: Uses GL_TEXTURE_CUBE_MAP)
-    prefilter,         // Prefilter material (NOTE: Uses GL_TEXTURE_CUBE_MAP)
-    brdf               // Brdf material
+    MATERIAL_MAP_ALBEDO = 0,        // Albedo material (same as: MATERIAL_MAP_DIFFUSE)
+    MATERIAL_MAP_METALNESS,         // Metalness material (same as: MATERIAL_MAP_SPECULAR)
+    MATERIAL_MAP_NORMAL,            // Normal material
+    MATERIAL_MAP_ROUGHNESS,         // Roughness material
+    MATERIAL_MAP_OCCLUSION,         // Ambient occlusion material
+    MATERIAL_MAP_EMISSION,          // Emission material
+    MATERIAL_MAP_HEIGHT,            // Heightmap material
+    MATERIAL_MAP_CUBEMAP,           // Cubemap material (NOTE: Uses GL_TEXTURE_CUBE_MAP)
+    MATERIAL_MAP_IRRADIANCE,        // Irradiance material (NOTE: Uses GL_TEXTURE_CUBE_MAP)
+    MATERIAL_MAP_PREFILTER,         // Prefilter material (NOTE: Uses GL_TEXTURE_CUBE_MAP)
+    MATERIAL_MAP_BRDF               // Brdf material
 }
 
 // Shader location index
 ShaderLocationIndex :: enum {
-    vertex_position = 0, // Shader location: vertex attribute: position
-    vertex_texcoord01,   // Shader location: vertex attribute: texcoord01
-    vertex_texcoord02,   // Shader location: vertex attribute: texcoord02
-    vertex_normal,       // Shader location: vertex attribute: normal
-    vertex_tangent,      // Shader location: vertex attribute: tangent
-    vertex_color,        // Shader location: vertex attribute: color
-    matrix_mvp,          // Shader location: matrix uniform: model-view-projection
-    matrix_view,         // Shader location: matrix uniform: view (camera transform)
-    matrix_projection,   // Shader location: matrix uniform: projection
-    matrix_model,        // Shader location: matrix uniform: model (transform)
-    matrix_normal,       // Shader location: matrix uniform: normal
-    vector_view,         // Shader location: vector uniform: view
-    color_diffuse,       // Shader location: vector uniform: diffuse color
-    color_specular,      // Shader location: vector uniform: specular color
-    color_ambient,       // Shader location: vector uniform: ambient color
-    map_albedo,          // Shader location: sampler2d texture: albedo (same as: SHADER_LOC_MAP_DIFFUSE)
-    map_metalness,       // Shader location: sampler2d texture: metalness (same as: SHADER_LOC_MAP_SPECULAR)
-    map_normal,          // Shader location: sampler2d texture: normal
-    map_roughness,       // Shader location: sampler2d texture: roughness
-    map_occlusion,       // Shader location: sampler2d texture: occlusion
-    map_emission,        // Shader location: sampler2d texture: emission
-    map_height,          // Shader location: sampler2d texture: height
-    map_cubemap,         // Shader location: samplerCube texture: cubemap
-    map_irradiance,      // Shader location: samplerCube texture: irradiance
-    map_prefilter,       // Shader location: samplerCube texture: prefilter
-    map_brdf,            // Shader location: sampler2d texture: brdf
-    vertex_boneids,      // Shader location: vertex attribute: boneIds
-    vertex_boneweights,  // Shader location: vertex attribute: boneWeights
-    bone_matrices        // Shader location: array of matrices uniform: boneMatrices
+    SHADER_LOC_VERTEX_POSITION = 0, // Shader location: vertex attribute: position
+    SHADER_LOC_VERTEX_TEXCOORD01,   // Shader location: vertex attribute: texcoord01
+    SHADER_LOC_VERTEX_TEXCOORD02,   // Shader location: vertex attribute: texcoord02
+    SHADER_LOC_VERTEX_NORMAL,       // Shader location: vertex attribute: normal
+    SHADER_LOC_VERTEX_TANGENT,      // Shader location: vertex attribute: tangent
+    SHADER_LOC_VERTEX_COLOR,        // Shader location: vertex attribute: color
+    SHADER_LOC_MATRIX_MVP,          // Shader location: matrix uniform: model-view-projection
+    SHADER_LOC_MATRIX_VIEW,         // Shader location: matrix uniform: view (camera transform)
+    SHADER_LOC_MATRIX_PROJECTION,   // Shader location: matrix uniform: projection
+    SHADER_LOC_MATRIX_MODEL,        // Shader location: matrix uniform: model (transform)
+    SHADER_LOC_MATRIX_NORMAL,       // Shader location: matrix uniform: normal
+    SHADER_LOC_VECTOR_VIEW,         // Shader location: vector uniform: view
+    SHADER_LOC_COLOR_DIFFUSE,       // Shader location: vector uniform: diffuse color
+    SHADER_LOC_COLOR_SPECULAR,      // Shader location: vector uniform: specular color
+    SHADER_LOC_COLOR_AMBIENT,       // Shader location: vector uniform: ambient color
+    SHADER_LOC_MAP_ALBEDO,          // Shader location: sampler2d texture: albedo (same as: SHADER_LOC_MAP_DIFFUSE)
+    SHADER_LOC_MAP_METALNESS,       // Shader location: sampler2d texture: metalness (same as: SHADER_LOC_MAP_SPECULAR)
+    SHADER_LOC_MAP_NORMAL,          // Shader location: sampler2d texture: normal
+    SHADER_LOC_MAP_ROUGHNESS,       // Shader location: sampler2d texture: roughness
+    SHADER_LOC_MAP_OCCLUSION,       // Shader location: sampler2d texture: occlusion
+    SHADER_LOC_MAP_EMISSION,        // Shader location: sampler2d texture: emission
+    SHADER_LOC_MAP_HEIGHT,          // Shader location: sampler2d texture: height
+    SHADER_LOC_MAP_CUBEMAP,         // Shader location: samplerCube texture: cubemap
+    SHADER_LOC_MAP_IRRADIANCE,      // Shader location: samplerCube texture: irradiance
+    SHADER_LOC_MAP_PREFILTER,       // Shader location: samplerCube texture: prefilter
+    SHADER_LOC_MAP_BRDF,            // Shader location: sampler2d texture: brdf
+    SHADER_LOC_VERTEX_BONEIDS,      // Shader location: vertex attribute: boneIds
+    SHADER_LOC_VERTEX_BONEWEIGHTS,  // Shader location: vertex attribute: boneWeights
+    SHADER_LOC_BONE_MATRICES        // Shader location: array of matrices uniform: boneMatrices
+}
+
+// Shader uniform data type
+ShaderUniformDataType :: enum {
+    FLOAT = 0,       // Shader uniform type: float
+    VEC2,            // Shader uniform type: vec2 (2 float)
+    VEC3,            // Shader uniform type: vec3 (3 float)
+    VEC4,            // Shader uniform type: vec4 (4 float)
+    INT,             // Shader uniform type: int
+    IVEC2,           // Shader uniform type: ivec2 (2 int)
+    IVEC3,           // Shader uniform type: ivec3 (3 int)
+    IVEC4,           // Shader uniform type: ivec4 (4 int)
+    SAMPLER2D        // Shader uniform type: sampler2d
+}
+
+// Shader attribute data types
+ShaderAttributeDataType :: enum {
+    SHADER_ATTRIB_FLOAT = 0,        // Shader attribute type: float
+    SHADER_ATTRIB_VEC2,             // Shader attribute type: vec2 (2 float)
+    SHADER_ATTRIB_VEC3,             // Shader attribute type: vec3 (3 float)
+    SHADER_ATTRIB_VEC4              // Shader attribute type: vec4 (4 float)
 }
 
 // Pixel formats
@@ -728,32 +749,32 @@ NPatchLayout :: enum {
 }
 
 // Some Basic Colors
-// LIGHTGRAY  :: Color{ 200, 200, 200, 255 };
-// GRAY       :: Color{ 130, 130, 130, 255 };
-// DARKGRAY   :: Color{ 80, 80, 80, 255 };
-// YELLOW     :: Color{ 253, 249, 0, 255 };
-// GOLD       :: Color{ 255, 203, 0, 255 };
-// ORANGE     :: Color{ 255, 161, 0, 255 };
-// PINK       :: Color{ 255, 109, 194, 255 };
-// RED        :: Color{ 230, 41, 55, 255 };
-// MAROON     :: Color{ 190, 33, 55, 255 };
-// GREEN      :: Color{ 0, 228, 48, 255 };
-// LIME       :: Color{ 0, 158, 47, 255 };
-// DARKGREEN  :: Color{ 0, 117, 44, 255 };
-// SKYBLUE    :: Color{ 102, 191, 255, 255 };
-// BLUE       :: Color{ 0, 121, 241, 255 };
-// DARKBLUE   :: Color{ 0, 82, 172, 255 };
-// PURPLE     :: Color{ 200, 122, 255, 255 };
-// VIOLET     :: Color{ 135, 60, 190, 255 };
-// DARKPURPLE :: Color{ 112, 31, 126, 255 };
-// BEIGE      :: Color{ 211, 176, 131, 255 };
-// BROWN      :: Color{ 127, 106, 79, 255 };
-// DARKBROWN  :: Color{ 76, 63, 47, 255 };
-// WHITE      :: Color{ 255, 255, 255, 255 };
-// BLACK      :: Color{ 0, 0, 0, 255 };
-// BLANK      :: Color{ 0, 0, 0, 0 };
-// MAGENTA    :: Color{ 255, 0, 255, 255 };
-// RAYWHITE   :: Color{ 245, 245, 245, 255 };
+LIGHTGRAY  :: Color{ 200, 200, 200, 255 };
+GRAY       :: Color{ 130, 130, 130, 255 };
+DARKGRAY   :: Color{ 80, 80, 80, 255 };
+YELLOW     :: Color{ 253, 249, 0, 255 };
+GOLD       :: Color{ 255, 203, 0, 255 };
+ORANGE     :: Color{ 255, 161, 0, 255 };
+PINK       :: Color{ 255, 109, 194, 255 };
+RED        :: Color{ 230, 41, 55, 255 };
+MAROON     :: Color{ 190, 33, 55, 255 };
+GREEN      :: Color{ 0, 228, 48, 255 };
+LIME       :: Color{ 0, 158, 47, 255 };
+DARKGREEN  :: Color{ 0, 117, 44, 255 };
+SKYBLUE    :: Color{ 102, 191, 255, 255 };
+BLUE       :: Color{ 0, 121, 241, 255 };
+DARKBLUE   :: Color{ 0, 82, 172, 255 };
+PURPLE     :: Color{ 200, 122, 255, 255 };
+VIOLET     :: Color{ 135, 60, 190, 255 };
+DARKPURPLE :: Color{ 112, 31, 126, 255 };
+BEIGE      :: Color{ 211, 176, 131, 255 };
+BROWN      :: Color{ 127, 106, 79, 255 };
+DARKBROWN  :: Color{ 76, 63, 47, 255 };
+WHITE      :: Color{ 255, 255, 255, 255 };
+BLACK      :: Color{ 0, 0, 0, 255 };
+BLANK      :: Color{ 0, 0, 0, 0 };
+MAGENTA    :: Color{ 255, 0, 255, 255 };
+RAYWHITE   :: Color{ 245, 245, 245, 255 };
 
 extern "C" {
 
@@ -849,8 +870,8 @@ LoadShaderFromMemory    :: (vsCode: *u8, fsCode: *u8) -> Shader; // Load shader 
 IsShaderValid           :: (shader: Shader) -> bool; // Check if a shader is valid (loaded on GPU)
 GetShaderLocation       :: (shader: Shader, uniformName: *u8) -> int; // Get shader uniform location
 GetShaderLocationAttrib :: (shader: Shader, attribName: *u8) -> int; // Get shader attribute location
-SetShaderValue          :: (shader: Shader, locIndex: int, value: *void, uniformType: int); // Set shader uniform value
-SetShaderValueV         :: (shader: Shader, locIndex: int, value: *void, uniformType: int, count: int); // Set shader uniform value vector
+SetShaderValue          :: (shader: Shader, locIndex: int, value: *void, uniformType: ShaderUniformDataType); // Set shader uniform value
+SetShaderValueV         :: (shader: Shader, locIndex: int, value: *void, uniformType: ShaderUniformDataType, count: int); // Set shader uniform value vector
 SetShaderValueMatrix    :: (shader: Shader, locIndex: int, mat: Matrix); // Set shader uniform value (matrix 4x4)
 SetShaderValueTexture   :: (shader: Shader, locIndex: int, texture: Texture); // Set shader uniform value for texture (sampler2d)
 UnloadShader            :: (shader: Shader); // Unload shader from GPU memory (VRAM)

@@ -1,6 +1,14 @@
 Todo list:
 -------------------
 
+Fix pointer dereference on the left hand side of an assignment being broken:
+```
+a: int = 5;
+pa := &a;
+
+*pa += 1; // <---- This gives wrong result
+```
+
 * Better structs
   [] Constant members
   [] Default values

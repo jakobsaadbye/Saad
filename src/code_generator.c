@@ -39,7 +39,6 @@ typedef struct MemberAccessResult {
     bool is_runtime_computed;
 } MemberAccessResult;
 
-void emit_file(CodeGenerator *cg, AstFile *code);
 void emit_builtin_functions(CodeGenerator *cg);
 void emit_header(CodeGenerator *cg);
 
@@ -312,6 +311,10 @@ void emit_builtin_functions(CodeGenerator *cg) {
 }
 
 void emit_file(CodeGenerator *cg, AstFile *file) {
+    if (file->head.flags & AST_FLAG_IS_CODE_GENED) {
+        return;
+    }
+
     cg->current_file  = file;
     cg->current_scope = file->scope;
 
@@ -323,6 +326,8 @@ void emit_file(CodeGenerator *cg, AstFile *file) {
         Ast *stmt = ((Ast **)(file->statements.items))[i];
         emit_statement(cg, stmt);
     }
+
+    file->head.flags |= AST_FLAG_IS_CODE_GENED;
 }
 
 void restore_codegen_state(CodeGenerator *cg, CodeGenerator saved_state) {
