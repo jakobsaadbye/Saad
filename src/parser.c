@@ -2472,7 +2472,9 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
             as_cast->cast_to         = type;
             as_cast->is_as_cast      = true;
 
-            return (AstExpr *) as_cast;
+            next = peek_next_token(parser);
+
+            left = (AstExpr *)as_cast;
         }
 
         if (ends_expression(next))          break;

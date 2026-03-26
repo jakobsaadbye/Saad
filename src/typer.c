@@ -1196,7 +1196,7 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
 
     // Check all constant members
     // NOTE: We first check the constant members after the struct has been sized, as
-    // they can refer to the struct type itself. See constants_in_structs.sd
+    // the constants might have expressions of the struct type itself. See constants_in_structs.sd
     typer->current_scope = ast_struct->static_members;
     DynamicArray static_members = ast_struct->static_members->identifiers;
     for (int i = 0; i < static_members.count; i++) {

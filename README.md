@@ -4,6 +4,10 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.2.7 - XX. Mar 2026
+
+* Fixed wrong precedence with casting using 'as'
+
 ## Update v0.2.6 - 26. Mar 2026
 
 * Constants within structs can now refer to other constants within the same struct

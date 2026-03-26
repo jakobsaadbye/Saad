@@ -1,21 +1,5 @@
 import "fmt";
 
-Color :: struct {
-    r, g, b, a: u8;
-
-    Red   :: Color{255, 0, 0, 255};
-    Green :: Color{0, 255, 0, 255};
-    Blue  :: Color{0, 0, 255, 255};
-
-    Rainbow :: [Red, Green, Blue];
-}
-
 main :: () {
-    Print("%", Color.Red);
-    Print("%", Color.Green);
-    Print("%", Color.Blue);
-
-    for c in Color.Rainbow {
-        Print("%", c);
-    }
+    Print("%", 3 as float / 5 as float);
 }
