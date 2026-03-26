@@ -1297,11 +1297,11 @@ AstStruct *parse_struct_defn(Parser *parser) {
     eat_token(parser);
 
     AstStruct *struct_defn = (AstStruct *)(ast_allocate(parser, sizeof(AstStruct)));
-    AstBlock *scope = new_block(parser, BLOCK_DECLARATIVE);
-
-    scope->belongs_to_struct = struct_defn;
     struct_defn->static_members = make_empty_struct_scope(parser, struct_defn);
+    struct_defn->static_members->parent = parser->current_scope;
 
+    AstBlock *scope = new_block(parser, BLOCK_DECLARATIVE);
+    scope->belongs_to_struct = struct_defn;
     scope = parse_block(parser, scope);
     if (!scope) return NULL;
     close_block(parser);

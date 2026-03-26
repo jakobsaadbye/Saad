@@ -181,7 +181,7 @@ draw :: method (pe: *ParticleEmitter) {
 }
 
 main :: () {
-    COLOR_WHITE := Color{255, 255, 255, 255};
+    COLOR_WHITE :: Color{255, 255, 255, 255};
 
     InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, xx "Super Breakout");
     InitAudioDevice();

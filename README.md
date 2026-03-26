@@ -4,6 +4,22 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.2.6 - 26. Mar 2026
+
+* Constants within structs can now refer to other constants within the same struct
+
+```odin
+Color :: struct {
+    r, g, b, a: u8;
+
+    Red   :: Color{255, 0, 0, 255};
+    Green :: Color{0, 255, 0, 255};
+    Blue  :: Color{0, 0, 255, 255};
+
+    Rainbow :: [Red, Green, Blue];
+}
+```
+
 ## Update v0.2.5 - 25. Mar 2026
 
 * Structs can not have constant members that live on the struct instance
@@ -24,7 +40,7 @@ main :: () {
 }
 ```
 
-* Structs can now be defined in any order
+* Structs can now be defined and used in any order
 
 Before, structs had to be declared before any using structs like in C.
 Now there is no order to how structs can be defined

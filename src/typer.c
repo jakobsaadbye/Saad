@@ -1167,20 +1167,6 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     }
     typer->current_scope = ast_struct->members->parent;
 
-    // Check all constant members
-    DynamicArray static_members = ast_struct->static_members->identifiers;
-    for (int i = 0; i < static_members.count; i++) {
-        AstIdentifier *member = ((AstIdentifier **)static_members.items)[i];
-
-        if (member->flags & IDENTIFIER_IS_NAME_OF_STRUCT) {
-            continue;
-        }
-
-        bool ok = check_declaration(typer, member->decl);
-        if (!ok) return false;
-    }
-
-    // Check that none of the sizeable members use the struct type recursively
     
     // C-style struct alignment + padding
     int largest_alignment = 0;
@@ -1206,6 +1192,24 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     struct_type->head.size  = align_up(offset, largest_alignment);
     struct_type->head.flags |= TYPE_IS_FULLY_SIZED;
     struct_type->alignment  = largest_alignment;
+
+
+    // Check all constant members
+    // NOTE: We first check the constant members after the struct has been sized, as
+    // they can refer to the struct type itself. See constants_in_structs.sd
+    typer->current_scope = ast_struct->static_members;
+    DynamicArray static_members = ast_struct->static_members->identifiers;
+    for (int i = 0; i < static_members.count; i++) {
+        AstIdentifier *member = ((AstIdentifier **)static_members.items)[i];
+
+        if (member->flags & IDENTIFIER_IS_NAME_OF_STRUCT) {
+            continue;
+        }
+
+        bool ok = check_declaration(typer, member->decl);
+        if (!ok) return false;
+    }
+    typer->current_scope = ast_struct->static_members->parent;
 
     return true;
 }
@@ -3786,7 +3790,12 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     }
     case LITERAL_IDENTIFIER: {
         char   *ident_name   = literal->as.value.identifier.name;
-        AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
+        AstIdentifier *ident = NULL;
+        if (typer->current_scope->belongs_to_struct) {
+            ident = lookup_from_scope(typer->parser, typer->current_scope->belongs_to_struct->static_members, ident_name);
+        } else {
+            ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
+        }
         if (ident == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared variable '%s'", ident_name);
             return NULL;
