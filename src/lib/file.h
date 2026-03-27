@@ -10,6 +10,8 @@ bool check_file_exists(const char *file_path);
 void change_directory(const char *dir);
 char *get_current_directory();
 void make_directory(const char *dir);
+char *get_absolute_path(const char *relative_path);
+char *get_directory_from_path(char *path);
 
 #endif
 
@@ -80,6 +82,20 @@ void make_directory(const char *dir) {
             exit(1);
         }
     }
+}
+
+// must be freed by caller
+char *get_absolute_path(const char *relative_path) {
+    return _fullpath(NULL, relative_path, 0);
+}
+
+// Strips the filename of the given path to give the directory where the path is located
+char *get_directory_from_path(char *path) {
+    char *last_slash = strrchr(path, '\\');
+    if (last_slash) {
+        *last_slash = '\0';
+    }
+    return path;
 }
 
 #endif

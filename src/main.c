@@ -14,6 +14,11 @@ int main(int argc, char const *argv[]) {
 
     CompilerConfig config = get_standard_compiler_config();
 
+    char *main_file_path_abs = get_absolute_path(main_file_path);
+    char *main_directory = get_directory_from_path(main_file_path_abs);
+
+    config.working_directory = main_directory;
+
     bool success = compile_program(&config, main_file_path, true);
     if (success) {
         printf("\n\nCompiled successfully.\n\n");

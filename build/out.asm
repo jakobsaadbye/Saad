@@ -31,14 +31,30 @@ segment .data
    CS18 DB `>`, 0 
    CS19 DB `%s\n`, 0 
    CS20 DB `%s`, 0 
-   CS21 DB `Hungergames 3 - Mockingbird`, 0 
-   CS22 DB `%`, 0 
-   CS23 DB `title`, 0 
-   CS24 DB `oneStars`, 0 
-   CS25 DB `fiveStars`, 0 
-   CS26 DB `Rating`, 0 
-   CS27 DB `rating`, 0 
-   CS28 DB `Movie`, 0 
+   CS25 DB `%`, 0 
+   CS26 DB `r`, 0 
+   CS27 DB `g`, 0 
+   CS28 DB `b`, 0 
+   CS29 DB `a`, 0 
+   CS30 DB `Color`, 0 
+   CS31 DB `%`, 0 
+   CS32 DB `r`, 0 
+   CS33 DB `g`, 0 
+   CS34 DB `b`, 0 
+   CS35 DB `a`, 0 
+   CS36 DB `Color`, 0 
+   CS37 DB `%`, 0 
+   CS38 DB `r`, 0 
+   CS39 DB `g`, 0 
+   CS40 DB `b`, 0 
+   CS41 DB `a`, 0 
+   CS42 DB `Color`, 0 
+   CS43 DB `%`, 0 
+   CS44 DB `r`, 0 
+   CS45 DB `g`, 0 
+   CS46 DB `b`, 0 
+   CS47 DB `a`, 0 
+   CS48 DB `Color`, 0 
 segment .rdata
 segment .rdata
    TypeKind.name.data DB "TypeKind", 0
@@ -228,6 +244,30 @@ segment .rdata
    TypeArrayKind.values:
    dq TypeArrayKind.values.array:
    dq 3
+   Red.22:
+   db 255
+   times 2 db 0
+   db 255
+   Green.23:
+   times 1 db 0
+   db 255
+   times 1 db 0
+   db 255
+   Blue.24:
+   times 2 db 0
+   db 255
+   db 255
+   Rainbow.25:
+   db 255
+   times 2 db 0
+   db 255
+   times 1 db 0
+   db 255
+   times 1 db 0
+   db 255
+   times 2 db 0
+   db 255
+   db 255
 segment .text
    global main
    extern ExitProcess
@@ -6319,165 +6359,244 @@ L168:
    pop		rbp
    ret
 
-; bytes locals   : 120
-; bytes temp     : 216
-; bytes total    : 368
+; bytes locals   : 320
+; bytes temp     : 200
+; bytes total    : 560
 ; ()
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 368
-   ; Ln 14: $movie : Movie = -24[rbp]
-   lea		rcx, -24[rbp]
-   mov		rdx, 0
-   mov		r8, 24
-   call		memset
-   mov		rax, CS21
-   mov		-136[rbp], rax
-   mov		QWORD -128[rbp], 27
-   lea		rax, -136[rbp]
+   sub		rsp, 560
+   mov		rax, CS25
+   mov		-336[rbp], rax
+   mov		QWORD -328[rbp], 1
+   lea		rax, -336[rbp]
+   push		rax
+   mov		eax, [Red.22]
    push		rax
    pop		rax
-   lea		rbx, -24[rbp]
+   mov		-20[rbp], eax
+   lea		rax, -20[rbp]
+   lea		rbx, -352[rbp]
+   mov		QWORD 0[rbx], rax
+   mov		QWORD rbx, -352[rbp]
+   mov		-360[rbp], rbx
+   sub		rsp, 32
+   mov		rcx, 192
+   call		malloc
+   add		rsp, 32
+   mov		-368[rbp], rax
+   mov		-376[rbp], rax
+   mov		rbx, -360[rbp]
+   lea		rbx, 0[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 0[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS26
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 0
+   mov		DWORD 36[rbx], 0
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rbx, -360[rbp]
+   lea		rbx, 1[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 1[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS27
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 1
+   mov		DWORD 36[rbx], 1
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rbx, -360[rbp]
+   lea		rbx, 2[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 2[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS28
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 2
+   mov		DWORD 36[rbx], 2
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rbx, -360[rbp]
+   lea		rbx, 3[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 3[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS29
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 3
+   mov		DWORD 36[rbx], 3
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rax, CS30
+   mov		QWORD -392[rbp], rax
+   mov		QWORD -384[rbp], 5
+   lea		rcx, -392[rbp]
+   mov		rdx, -368[rbp]
+   mov		r8d, 4
+   mov		r9d, 4
+   sub		rsp, 40
+   mov		DWORD 32[rsp], 1
+   call		runtime_get_type_struct
+   add		rsp, 40
+   push		rax
+   pop		rcx
+   lea		rbx, -352[rbp]
+   mov		QWORD 8[rbx], rcx
+   push		rbx
+   pop		rax
+   lea		rbx, -16[rbp]
    lea		rcx, 0[rbx]
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   lea		rcx, -8[rbp]
-   mov		rdx, 0
-   mov		r8, 8
-   call		memset
-   mov		rax, 10
+   lea		rax, -16[rbp]
+   mov		QWORD -408[rbp], rax
+   mov		QWORD -400[rbp], 1
+   lea		rax, -408[rbp]
    push		rax
    pop		rax
-   mov		DWORD -8[rbp], eax
-   mov		rax, 50
+   mov		rbx, 0[rax]
+   mov		rcx, 8[rax]
+   mov		QWORD -424[rbp], rbx
+   mov		QWORD -416[rbp], rcx
+   lea		rax, -424[rbp]
+   push		rax
+   push		1
+   pop		r8 
+   pop		rdx
+   pop		rcx
+   ; (string, []any, bool) 
+   call		Print
+   mov		rax, CS31
+   mov		-336[rbp], rax
+   mov		QWORD -328[rbp], 1
+   lea		rax, -336[rbp]
+   push		rax
+   mov		eax, [Green.23]
    push		rax
    pop		rax
-   mov		DWORD -4[rbp], eax
-   mov		rax, CS22
-   mov		-136[rbp], rax
-   mov		QWORD -128[rbp], 1
-   lea		rax, -136[rbp]
-   push		rax
-   lea		rax, -24[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -64[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 24
-   call		memcpy
-   lea		rax, -64[rbp]
-   lea		rbx, -152[rbp]
+   mov		-44[rbp], eax
+   lea		rax, -44[rbp]
+   lea		rbx, -352[rbp]
    mov		QWORD 0[rbx], rax
-   mov		QWORD rbx, -152[rbp]
-   mov		-160[rbp], rbx
+   mov		QWORD rbx, -352[rbp]
+   mov		-360[rbp], rbx
    sub		rsp, 32
-   mov		rcx, 96
+   mov		rcx, 192
    call		malloc
    add		rsp, 32
-   mov		-168[rbp], rax
-   mov		-176[rbp], rax
-   mov		rbx, -160[rbp]
+   mov		-368[rbp], rax
+   mov		-376[rbp], rax
+   mov		rbx, -360[rbp]
    lea		rbx, 0[rbx]
-   mov		rax, QWORD [Type_string]
+   mov		rax, QWORD [Type_u8]
    push		rax
    pop		rcx
-   mov		rdx, -160[rbp]
+   mov		rdx, -360[rbp]
    lea		rdx, 0[rdx]
-   mov		rbx, -176[rbp]
-   mov		rax, CS23
+   mov		rbx, -376[rbp]
+   mov		rax, CS32
    mov		QWORD 0[rbx], rax
-   mov		QWORD 8[rbx], 5
+   mov		QWORD 8[rbx], 1
    mov		QWORD 16[rbx], rcx
    mov		QWORD 24[rbx], rdx
    mov		DWORD 32[rbx], 0
    mov		DWORD 36[rbx], 0
    add		rbx, 48
-   mov		-176[rbp], rbx
-   mov		rbx, -160[rbp]
-   lea		rbx, 16[rbx]
-   mov		-184[rbp], rbx
-   sub		rsp, 32
-   mov		rcx, 96
-   call		malloc
-   add		rsp, 32
-   mov		-192[rbp], rax
-   mov		-200[rbp], rax
-   mov		rbx, -184[rbp]
-   lea		rbx, 0[rbx]
-   mov		rax, QWORD [Type_int]
+   mov		-376[rbp], rbx
+   mov		rbx, -360[rbp]
+   lea		rbx, 1[rbx]
+   mov		rax, QWORD [Type_u8]
    push		rax
    pop		rcx
-   mov		rdx, -184[rbp]
-   lea		rdx, 0[rdx]
-   mov		rbx, -200[rbp]
-   mov		rax, CS24
+   mov		rdx, -360[rbp]
+   lea		rdx, 1[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS33
    mov		QWORD 0[rbx], rax
-   mov		QWORD 8[rbx], 8
-   mov		QWORD 16[rbx], rcx
-   mov		QWORD 24[rbx], rdx
-   mov		DWORD 32[rbx], 0
-   mov		DWORD 36[rbx], 0
-   add		rbx, 48
-   mov		-200[rbp], rbx
-   mov		rbx, -184[rbp]
-   lea		rbx, 4[rbx]
-   mov		rax, QWORD [Type_int]
-   push		rax
-   pop		rcx
-   mov		rdx, -184[rbp]
-   lea		rdx, 4[rdx]
-   mov		rbx, -200[rbp]
-   mov		rax, CS25
-   mov		QWORD 0[rbx], rax
-   mov		QWORD 8[rbx], 9
+   mov		QWORD 8[rbx], 1
    mov		QWORD 16[rbx], rcx
    mov		QWORD 24[rbx], rdx
    mov		DWORD 32[rbx], 1
-   mov		DWORD 36[rbx], 4
+   mov		DWORD 36[rbx], 1
    add		rbx, 48
-   mov		-200[rbp], rbx
-   mov		rax, CS26
-   mov		QWORD -216[rbp], rax
-   mov		QWORD -208[rbp], 6
-   lea		rcx, -216[rbp]
-   mov		rdx, -192[rbp]
-   mov		r8d, 2
-   mov		r9d, 8
+   mov		-376[rbp], rbx
+   mov		rbx, -360[rbp]
+   lea		rbx, 2[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 2[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS34
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 2
+   mov		DWORD 36[rbx], 2
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rbx, -360[rbp]
+   lea		rbx, 3[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 3[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS35
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 3
+   mov		DWORD 36[rbx], 3
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rax, CS36
+   mov		QWORD -392[rbp], rax
+   mov		QWORD -384[rbp], 5
+   lea		rcx, -392[rbp]
+   mov		rdx, -368[rbp]
+   mov		r8d, 4
+   mov		r9d, 4
    sub		rsp, 40
-   mov		DWORD 32[rsp], 4
+   mov		DWORD 32[rsp], 1
    call		runtime_get_type_struct
    add		rsp, 40
    push		rax
    pop		rcx
-   mov		rdx, -160[rbp]
-   lea		rdx, 16[rdx]
-   mov		rbx, -176[rbp]
-   mov		rax, CS27
-   mov		QWORD 0[rbx], rax
-   mov		QWORD 8[rbx], 6
-   mov		QWORD 16[rbx], rcx
-   mov		QWORD 24[rbx], rdx
-   mov		DWORD 32[rbx], 1
-   mov		DWORD 36[rbx], 16
-   add		rbx, 48
-   mov		-176[rbp], rbx
-   mov		rax, CS28
-   mov		QWORD -232[rbp], rax
-   mov		QWORD -224[rbp], 5
-   lea		rcx, -232[rbp]
-   mov		rdx, -168[rbp]
-   mov		r8d, 2
-   mov		r9d, 24
-   sub		rsp, 40
-   mov		DWORD 32[rsp], 8
-   call		runtime_get_type_struct
-   add		rsp, 40
-   push		rax
-   pop		rcx
-   lea		rbx, -152[rbp]
+   lea		rbx, -352[rbp]
    mov		QWORD 8[rbx], rcx
    push		rbx
    pop		rax
@@ -6487,16 +6606,16 @@ main:
    mov		r8, 16
    call		memcpy
    lea		rax, -40[rbp]
-   mov		QWORD -248[rbp], rax
-   mov		QWORD -240[rbp], 1
-   lea		rax, -248[rbp]
+   mov		QWORD -408[rbp], rax
+   mov		QWORD -400[rbp], 1
+   lea		rax, -408[rbp]
    push		rax
    pop		rax
    mov		rbx, 0[rax]
    mov		rcx, 8[rax]
-   mov		QWORD -264[rbp], rbx
-   mov		QWORD -256[rbp], rcx
-   lea		rax, -264[rbp]
+   mov		QWORD -424[rbp], rbx
+   mov		QWORD -416[rbp], rcx
+   lea		rax, -424[rbp]
    push		rax
    push		1
    pop		r8 
@@ -6504,8 +6623,288 @@ main:
    pop		rcx
    ; (string, []any, bool) 
    call		Print
+   mov		rax, CS37
+   mov		-336[rbp], rax
+   mov		QWORD -328[rbp], 1
+   lea		rax, -336[rbp]
+   push		rax
+   mov		eax, [Blue.24]
+   push		rax
+   pop		rax
+   mov		-68[rbp], eax
+   lea		rax, -68[rbp]
+   lea		rbx, -352[rbp]
+   mov		QWORD 0[rbx], rax
+   mov		QWORD rbx, -352[rbp]
+   mov		-360[rbp], rbx
+   sub		rsp, 32
+   mov		rcx, 192
+   call		malloc
+   add		rsp, 32
+   mov		-368[rbp], rax
+   mov		-376[rbp], rax
+   mov		rbx, -360[rbp]
+   lea		rbx, 0[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 0[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS38
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 0
+   mov		DWORD 36[rbx], 0
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rbx, -360[rbp]
+   lea		rbx, 1[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 1[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS39
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 1
+   mov		DWORD 36[rbx], 1
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rbx, -360[rbp]
+   lea		rbx, 2[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 2[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS40
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 2
+   mov		DWORD 36[rbx], 2
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rbx, -360[rbp]
+   lea		rbx, 3[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 3[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS41
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 3
+   mov		DWORD 36[rbx], 3
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rax, CS42
+   mov		QWORD -392[rbp], rax
+   mov		QWORD -384[rbp], 5
+   lea		rcx, -392[rbp]
+   mov		rdx, -368[rbp]
+   mov		r8d, 4
+   mov		r9d, 4
+   sub		rsp, 40
+   mov		DWORD 32[rsp], 1
+   call		runtime_get_type_struct
+   add		rsp, 40
+   push		rax
+   pop		rcx
+   lea		rbx, -352[rbp]
+   mov		QWORD 8[rbx], rcx
+   push		rbx
+   pop		rax
+   lea		rbx, -64[rbp]
+   lea		rcx, 0[rbx]
+   lea		rdx, 0[rax]
+   mov		r8, 16
+   call		memcpy
+   lea		rax, -64[rbp]
+   mov		QWORD -408[rbp], rax
+   mov		QWORD -400[rbp], 1
+   lea		rax, -408[rbp]
+   push		rax
+   pop		rax
+   mov		rbx, 0[rax]
+   mov		rcx, 8[rax]
+   mov		QWORD -424[rbp], rbx
+   mov		QWORD -416[rbp], rcx
+   lea		rax, -424[rbp]
+   push		rax
+   push		1
+   pop		r8 
+   pop		rdx
+   pop		rcx
+   ; (string, []any, bool) 
+   call		Print
+   ; Ln 18: For-loop
+   lea		rax, [Rainbow.25]
+   push		rax
+   pop		rax
+   mov		rbx, rax
+   mov		rcx, 3
+   mov		-80[rbp], rbx     ; data
+   mov		-88[rbp], rcx     ; count
+   mov		QWORD -96[rbp], 0 ; index
+L179:
+   mov		rbx, -88[rbp]
+   mov		rax, -96[rbp]
+   cmp		rax, rbx
+   jge		L181
+   mov		rbx, QWORD -80[rbp]
+   mov		rax, QWORD -96[rbp]
+   imul		rax, 4
+   lea		rbx, [rbx + rax]
+   mov		eax, DWORD [rbx]
+   mov		-72[rbp], eax 
+   mov		rax, CS43
+   mov		-336[rbp], rax
+   mov		QWORD -328[rbp], 1
+   lea		rax, -336[rbp]
+   push		rax
+   mov		eax, -72[rbp]
+   push		rax
+   pop		rax
+   mov		-116[rbp], eax
+   lea		rax, -116[rbp]
+   lea		rbx, -352[rbp]
+   mov		QWORD 0[rbx], rax
+   mov		QWORD rbx, -352[rbp]
+   mov		-360[rbp], rbx
+   sub		rsp, 32
+   mov		rcx, 192
+   call		malloc
+   add		rsp, 32
+   mov		-368[rbp], rax
+   mov		-376[rbp], rax
+   mov		rbx, -360[rbp]
+   lea		rbx, 0[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 0[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS44
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 0
+   mov		DWORD 36[rbx], 0
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rbx, -360[rbp]
+   lea		rbx, 1[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 1[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS45
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 1
+   mov		DWORD 36[rbx], 1
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rbx, -360[rbp]
+   lea		rbx, 2[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 2[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS46
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 2
+   mov		DWORD 36[rbx], 2
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rbx, -360[rbp]
+   lea		rbx, 3[rbx]
+   mov		rax, QWORD [Type_u8]
+   push		rax
+   pop		rcx
+   mov		rdx, -360[rbp]
+   lea		rdx, 3[rdx]
+   mov		rbx, -376[rbp]
+   mov		rax, CS47
+   mov		QWORD 0[rbx], rax
+   mov		QWORD 8[rbx], 1
+   mov		QWORD 16[rbx], rcx
+   mov		QWORD 24[rbx], rdx
+   mov		DWORD 32[rbx], 3
+   mov		DWORD 36[rbx], 3
+   add		rbx, 48
+   mov		-376[rbp], rbx
+   mov		rax, CS48
+   mov		QWORD -392[rbp], rax
+   mov		QWORD -384[rbp], 5
+   lea		rcx, -392[rbp]
+   mov		rdx, -368[rbp]
+   mov		r8d, 4
+   mov		r9d, 4
+   sub		rsp, 40
+   mov		DWORD 32[rsp], 1
+   call		runtime_get_type_struct
+   add		rsp, 40
+   push		rax
+   pop		rcx
+   lea		rbx, -352[rbp]
+   mov		QWORD 8[rbx], rcx
+   push		rbx
+   pop		rax
+   lea		rbx, -112[rbp]
+   lea		rcx, 0[rbx]
+   lea		rdx, 0[rax]
+   mov		r8, 16
+   call		memcpy
+   lea		rax, -112[rbp]
+   mov		QWORD -408[rbp], rax
+   mov		QWORD -400[rbp], 1
+   lea		rax, -408[rbp]
+   push		rax
+   pop		rax
+   mov		rbx, 0[rax]
+   mov		rcx, 8[rax]
+   mov		QWORD -424[rbp], rbx
+   mov		QWORD -416[rbp], rcx
+   lea		rax, -424[rbp]
+   push		rax
+   push		1
+   pop		r8 
+   pop		rdx
+   pop		rcx
+   ; (string, []any, bool) 
+   call		Print
+L180:
+   inc		QWORD -96[rbp]
+   jmp		L179
+L181:
 L178:
    mov		rax, 0
-   add		rsp, 368
+   add		rsp, 560
    pop		rbp
    ret

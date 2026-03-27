@@ -35,6 +35,7 @@ typedef struct CompilerReport {
 
 CompilerConfig get_standard_compiler_config() {
     CompilerConfig config = {0};
+
     config.compiler_path  = "C:\\Saad";      // @Hardcoded
     config.stdlib_path    = "C:\\Saad\\std"; // @Hardcoded
     config.working_directory = get_current_directory();
