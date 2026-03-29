@@ -1,5 +1,14 @@
 import "fmt";
 
+SIZE :: 16.5;
+GRID_SIZE :: SIZE;
+
 main :: () {
-    Print("%", 3 as float / 5 as float);
+    myArray: [4]float = [0, GRID_SIZE, 0, GRID_SIZE];
+    myIntArray: [4]int = [0, GRID_SIZE, 0, GRID_SIZE];
+    // myArray: [4]float = [1, 2, 3, 4];
+
+    for v in myArray {
+        Print("%", v);
+    }
 }

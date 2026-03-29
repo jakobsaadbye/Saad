@@ -3813,8 +3813,31 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         }
 
         if (!ident->type) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Internal Compiler Error: '%s' is unresolved", ident->name);
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Compiler Error: '%s' is unresolved", ident->name);
             return NULL;
+        }
+
+        // Try and transform the constant identifier into a constant literal
+        if (ident->flags & IDENTIFIER_IS_CONSTANT) {
+            if (is_primitive_type(ident->type->kind)) {
+
+                if (ident->value->head.kind != AST_LITERAL) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ident, "Compiler Error: Got a non literal when trying to transform constant identifier to a basic literal");
+                    return NULL;
+                }
+
+                if (ident->type->kind == TYPE_INTEGER && ctx_type && ctx_type->kind == TYPE_FLOAT) {
+                    AstLiteral *lit_value = (AstLiteral *) ident->value;
+
+                    double float_value = (double) lit_value->as.value.integer;
+    
+                    literal->kind              = LITERAL_FLOAT;
+                    literal->as.value.floating = float_value;
+                    literal->head.type         = ctx_type;
+
+                    return ctx_type;
+                }
+            }
         }
 
         return ident->type;

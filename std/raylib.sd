@@ -205,7 +205,7 @@ Shader :: struct {
 
 // MaterialMap
 MaterialMap :: struct {
-    texture: Texture;      // Material map texture
+    texture: Texture;        // Material map texture
     color: Color;            // Material map color
     value: float;            // Material map value
 }
@@ -220,7 +220,7 @@ Material :: struct {
 // Transform, vertex transformation data
 Transform :: struct {
     translation: Vector3;    // Translation
-    rotation: Vector4;    // Rotation
+    rotation: Vector4;       // Rotation
     scale: Vector3;          // Scale
 }
 
@@ -1224,8 +1224,8 @@ UpdateTextureRec        :: (texture: Texture, rec: Rectangle, pixels: *void); //
 
 // Texture configuration functions
 GenTextureMipmaps       :: (texture: *Texture); // Generate GPU mipmaps for a texture
-SetTextureFilter        :: (texture: Texture, filter: int); // Set texture scaling filter mode
-SetTextureWrap          :: (texture: Texture, wrap: int); // Set texture wrapping mode
+SetTextureFilter        :: (texture: Texture, filter: TextureFilter); // Set texture scaling filter mode
+SetTextureWrap          :: (texture: Texture, wrap: TextureWrap); // Set texture wrapping mode
 
 // Texture drawing functions
 DrawTexture             :: (texture: Texture, posX: int, posY: int, tint: Color); // Draw a Texture

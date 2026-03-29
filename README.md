@@ -7,6 +7,7 @@ A just for fun compiler
 ## Update v0.2.7 - XX. Mar 2026
 
 * Fixed wrong precedence with casting using 'as'
+* Fixed constant identifiers not transforming to float
 
 ## Update v0.2.6 - 26. Mar 2026
 
