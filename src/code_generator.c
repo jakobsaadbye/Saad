@@ -1455,9 +1455,37 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
     }
     if (from->kind == TYPE_INTEGER && to->kind == TYPE_FLOAT) {
         POP(RAX);
-        char *op = to->size == 4 ? "cvtsi2ss" : "cvtsi2sd";
-        sb_append(&cg->code, "   %s\txmm0, rax\n", op);
-        sb_append(&cg->code, "   movq\trax, xmm0\n");
+
+        // Sign-extend or zero-extend into full rax before float conversion
+        if (is_signed_integer(from)) {
+            if (from->size == 1) {
+                sb_append(&cg->code, "   movsx\t\trax, al\n");
+            } else if (from->size == 2) {
+                sb_append(&cg->code, "   movsx\t\trax, ax\n");
+            } else if (from->size == 4) {
+                sb_append(&cg->code, "   movsxd\t\trax, eax\n");
+            }
+            // size == 8: already in rax, no extension needed
+        } else {
+            if (from->size == 1) {
+                sb_append(&cg->code, "   movzx\t\trax, al\n");
+            } else if (from->size == 2) {
+                sb_append(&cg->code, "   movzx\t\trax, ax\n");
+            } else if (from->size == 4) {
+                sb_append(&cg->code, "   mov\t\t\teax, eax\n");  // clears upper 32 bits
+            }
+            // size == 8: already in rax, no extension needed
+        }
+
+        if (to->size == 4) {
+            sb_append(&cg->code, "   cvtsi2ss\txmm0, rax\n");
+            sb_append(&cg->code, "   movd\t\teax, xmm0\n");   // float is 32-bit, use movd not movq
+            sb_append(&cg->code, "   mov\t\t\teax, eax\n");   // zero upper bits before push
+        } else {
+            sb_append(&cg->code, "   cvtsi2sd\txmm0, rax\n");
+            sb_append(&cg->code, "   movq\t\trax, xmm0\n");
+        }
+
         PUSH(RAX);
         return;
     }
