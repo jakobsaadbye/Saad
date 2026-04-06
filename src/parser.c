@@ -1756,6 +1756,7 @@ AstFunctionCall *parse_function_call(Parser *parser) {
 
     call->first_positional_argument_index = -1;
     bool first_argument_seen = false;
+    parser->inside_argument_list = true;
     while (true) {
         //
         // Parse argument list
@@ -1817,6 +1818,7 @@ AstFunctionCall *parse_function_call(Parser *parser) {
         da_append(&call->arguments, arg);
         first_argument_seen = true;
     }
+    parser->inside_argument_list = false;
 
     call->head.head.kind  = AST_FUNCTION_CALL;
     call->head.head.file  = parser->current_file;
@@ -2678,7 +2680,7 @@ bool starts_struct_literal(Parser *parser) {
     // for a {...}
     //     ^^^
     // here the identifier 'a' and bracket would otherwise be parsed as a struct literal
-    if (parser->inside_statement_header) return false;
+    if (parser->inside_statement_header && !parser->inside_argument_list) return false;
 
     Token next = peek_next_token(parser);
     if (next.type == '{') return true;
