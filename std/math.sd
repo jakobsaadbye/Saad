@@ -2,8 +2,191 @@
 //  C math.h functions
 //////////////////////////////////////////////////////////////////////////////////////
 extern "C" {
-    round :: (value: f64) -> f64;
-    sin   :: (angle: f64) -> f64;
-    cos   :: (angle: f64) -> f64;
+
+    //////////////////////////////////////////////////////////////////////////////////////
+    //  Basic / Rounding
+    //////////////////////////////////////////////////////////////////////////////////////
+    abs   :: (value: f64) -> f64;
+    fabs  :: (value: f64) -> f64;
+    fabsf :: (value: f32) -> f32;
+
+    round  :: (value: f64) -> f64;
+    roundf :: (value: f32) -> f32;
+    lround :: (value: f64) -> s64;
+    llround :: (value: f64) -> s64;
+
+    floor  :: (value: f64) -> f64;
+    floorf :: (value: f32) -> f32;
+
+    ceil  :: (value: f64) -> f64;
+    ceilf :: (value: f32) -> f32;
+
+    trunc  :: (value: f64) -> f64;
+    truncf :: (value: f32) -> f32;
+
+    rint  :: (value: f64) -> f64;
+    rintf :: (value: f32) -> f32;
+
+    nearbyint  :: (value: f64) -> f64;
+    nearbyintf :: (value: f32) -> f32;
+
+    //////////////////////////////////////////////////////////////////////////////////////
+    //  Trigonometry
+    //////////////////////////////////////////////////////////////////////////////////////
+    sin  :: (angle: f64) -> f64;
+    sinf :: (angle: f32) -> f32;
+
+    cos  :: (angle: f64) -> f64;
+    cosf :: (angle: f32) -> f32;
+
+    tan  :: (angle: f64) -> f64;
+    tanf :: (angle: f32) -> f32;
+
+    asin  :: (value: f64) -> f64;
+    asinf :: (value: f32) -> f32;
+
+    acos  :: (value: f64) -> f64;
+    acosf :: (value: f32) -> f32;
+
+    atan  :: (value: f64) -> f64;
+    atanf :: (value: f32) -> f32;
+
+    atan2  :: (y: f64, x: f64) -> f64;
+    atan2f :: (y: f32, x: f32) -> f32;
+
+    //////////////////////////////////////////////////////////////////////////////////////
+    //  Hyperbolic
+    //////////////////////////////////////////////////////////////////////////////////////
+    sinh  :: (value: f64) -> f64;
+    sinhf :: (value: f32) -> f32;
+
+    cosh  :: (value: f64) -> f64;
+    coshf :: (value: f32) -> f32;
+
+    tanh  :: (value: f64) -> f64;
+    tanhf :: (value: f32) -> f32;
+
+    asinh  :: (value: f64) -> f64;
+    asinhf :: (value: f32) -> f32;
+
+    acosh  :: (value: f64) -> f64;
+    acoshf :: (value: f32) -> f32;
+
+    atanh  :: (value: f64) -> f64;
+    atanhf :: (value: f32) -> f32;
+
+    //////////////////////////////////////////////////////////////////////////////////////
+    //  Exponential & Logarithm
+    //////////////////////////////////////////////////////////////////////////////////////
     sqrt  :: (value: f64) -> f64;
+    sqrtf :: (value: f32) -> f32;
+
+    cbrt  :: (value: f64) -> f64;
+    cbrtf :: (value: f32) -> f32;
+
+    exp   :: (value: f64) -> f64;
+    expf  :: (value: f32) -> f32;
+
+    exp2  :: (value: f64) -> f64;
+    exp2f :: (value: f32) -> f32;
+
+    expm1  :: (value: f64) -> f64;
+    expm1f :: (value: f32) -> f32;
+
+    log   :: (value: f64) -> f64;
+    logf  :: (value: f32) -> f32;
+
+    log2  :: (value: f64) -> f64;
+    log2f :: (value: f32) -> f32;
+
+    log10  :: (value: f64) -> f64;
+    log10f :: (value: f32) -> f32;
+
+    log1p  :: (value: f64) -> f64;
+    log1pf :: (value: f32) -> f32;
+
+    //////////////////////////////////////////////////////////////////////////////////////
+    //  Power
+    //////////////////////////////////////////////////////////////////////////////////////
+    pow  :: (base: f64, exp: f64) -> f64;
+    powf :: (base: f32, exp: f32) -> f32;
+
+    hypot  :: (x: f64, y: f64) -> f64;
+    hypotf :: (x: f32, y: f32) -> f32;
+
+    //////////////////////////////////////////////////////////////////////////////////////
+    //  Floating-point manipulation
+    //////////////////////////////////////////////////////////////////////////////////////
+    fmod  :: (x: f64, y: f64) -> f64;
+    fmodf :: (x: f32, y: f32) -> f32;
+
+    remainder  :: (x: f64, y: f64) -> f64;
+    remainderf :: (x: f32, y: f32) -> f32;
+
+    fmin  :: (x: f64, y: f64) -> f64;
+    fminf :: (x: f32, y: f32) -> f32;
+
+    fmax  :: (x: f64, y: f64) -> f64;
+    fmaxf :: (x: f32, y: f32) -> f32;
+
+    fdim  :: (x: f64, y: f64) -> f64;
+    fdimf :: (x: f32, y: f32) -> f32;
+
+    fma  :: (x: f64, y: f64, z: f64) -> f64;
+    fmaf :: (x: f32, y: f32, z: f32) -> f32;
+
+    // Decompose floating-point number into significand and exponent
+    frexp  :: (value: f64, exp: *s32) -> f64;
+    frexpf :: (value: f32, exp: *s32) -> f32;
+
+    // Multiply by power of 2
+    ldexp  :: (value: f64, exp: s32) -> f64;
+    ldexpf :: (value: f32, exp: s32) -> f32;
+
+    // Decompose into integer and fractional parts
+    modf  :: (value: f64, iptr: *f64) -> f64;
+    modff :: (value: f32, iptr: *f32) -> f32;
+
+    // Scale by FLT_RADIX power
+    scalbn  :: (value: f64, exp: s32) -> f64;
+    scalbnf :: (value: f32, exp: s32) -> f32;
+
+    // Extract exponent
+    ilogb  :: (value: f64) -> s32;
+    ilogbf :: (value: f32) -> s32;
+
+    logb  :: (value: f64) -> f64;
+    logbf :: (value: f32) -> f32;
+
+    // Copy sign from one value to another
+    copysign  :: (x: f64, y: f64) -> f64;
+    copysignf :: (x: f32, y: f32) -> f32;
+
+    // Next representable value
+    nextafter  :: (x: f64, y: f64) -> f64;
+    nextafterf :: (x: f32, y: f32) -> f32;
+
+    //////////////////////////////////////////////////////////////////////////////////////
+    //  Classification (return s32: non-zero = true)
+    //////////////////////////////////////////////////////////////////////////////////////
+    isnan    :: (value: f64) -> s32;
+    isinf    :: (value: f64) -> s32;
+    isfinite :: (value: f64) -> s32;
+    isnormal :: (value: f64) -> s32;
+    signbit  :: (value: f64) -> s32;
+
+    //////////////////////////////////////////////////////////////////////////////////////
+    //  Error & Gamma
+    //////////////////////////////////////////////////////////////////////////////////////
+    erf   :: (value: f64) -> f64;
+    erff  :: (value: f32) -> f32;
+
+    erfc  :: (value: f64) -> f64;
+    erfcf :: (value: f32) -> f32;
+
+    tgamma  :: (value: f64) -> f64;
+    tgammaf :: (value: f32) -> f32;
+
+    lgamma  :: (value: f64) -> f64;
+    lgammaf :: (value: f32) -> f32;
 }
