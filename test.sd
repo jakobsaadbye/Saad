@@ -1,14 +1,19 @@
 import "fmt";
+import "c_stdlib";
 
-SIZE :: 16.5;
-GRID_SIZE :: SIZE;
+Vector2 :: struct {
+    x, y: float;
+}
 
 main :: () {
-    myArray: [4]float = [0, GRID_SIZE, 0, GRID_SIZE];
-    myIntArray: [4]int = [0, GRID_SIZE, 0, GRID_SIZE];
-    // myArray: [4]float = [1, 2, 3, 4];
+    arr: [..]Vector2;
+    arr.data = malloc(16 * sizeof(Vector2));
+    arr.capacity = 16;
 
-    for v in myArray {
+    start := Vector2{6, 9};
+    append(arr, start);
+
+    for v in arr {
         Print("%", v);
     }
 }

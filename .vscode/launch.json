@@ -57,6 +57,34 @@
                 }
             ]
         },
+        {
+            "name": "Debug aov",
+            "type": "cppdbg",
+            "request": "launch",
+            "preLaunchTask": "Debug aov",
+            "program": "C:\\Saad\\bin\\saad",
+            "args": [
+                "C:\\aov\\src\\main.sd"
+            ],
+            "stopAtEntry": false,
+            "cwd": "C:\\aov\\src",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:\\mingw64\\bin\\gdb.exe",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ]
+        },
         // {
         //     "name": "Debug !!!",
         //     "type": "cppdbg",

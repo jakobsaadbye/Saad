@@ -8,6 +8,7 @@ A just for fun compiler
 
 * Fixed wrong precedence with casting using 'as'
 * Fixed constant identifiers not transforming to float
+* Fixed `append` being broken when appending structs in a variable
 
 ## Update v0.2.6 - 26. Mar 2026
 

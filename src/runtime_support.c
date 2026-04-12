@@ -265,6 +265,8 @@ void runtime_builtin_append(RawDynamicArray *da, void *item, bool by_value) {
         item = &tmp;
     }
 
+    // printf("[Runtime]: data = %p, count = %lld, capacity = %lld, elemSize = %lld\n", da->data, da->count, da->capacity, da->elem_size);
+
     if (da->count + 1 > da->capacity) {
         // Reallocate memory
         da->data = realloc(da->data, da->capacity * 2 * da->elem_size);
@@ -278,6 +280,7 @@ void runtime_builtin_append(RawDynamicArray *da, void *item, bool by_value) {
     void *dst = da->data + (da->count * da->elem_size);
     memcpy(dst, item, da->elem_size);
     da->count += 1;
+
 }
 
 int runtime_compare_strings(RawString *str1, RawString *str2) {

@@ -2470,7 +2470,7 @@ appendInt:
    cmp		al, 0
    jz			L91
    ; block of if
-   ; Ln 8: $new_cap : s64 = -24[rbp]
+   ; Ln 9: $new_cap : s64 = -24[rbp]
    lea		rax, -8[rbp]
    push		rax
    pop		rbx
@@ -2490,7 +2490,7 @@ appendInt:
    push		rax
    pop		rax
    mov		QWORD -24[rbp], rax
-   ; Ln 9: Assignment
+   ; Ln 10: Assignment
    lea		rax, -8[rbp]
    push		rax
    pop		rbx
@@ -2517,7 +2517,7 @@ appendInt:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
-   ; Ln 10: Assignment
+   ; Ln 11: Assignment
    mov		rax, QWORD -24[rbp]
    push		rax
    lea		rax, -8[rbp]
@@ -2537,7 +2537,7 @@ appendInt:
    jmp L91
 ; done
 L91:
-   ; Ln 13: $arr : [..]int = -56[rbp]
+   ; Ln 14: $arr : [..]int = -56[rbp]
    mov		rax, -8[rbp]
    push		rax
    pop		rbx
@@ -2549,7 +2549,7 @@ L91:
    lea		rdx, 0[rax]
    mov		r8, 32
    call		memcpy
-   ; Ln 14: Assignment
+   ; Ln 15: Assignment
    mov		eax, DWORD -12[rbp]
    movsx		rax, eax
    push		rax
@@ -2575,7 +2575,7 @@ L91:
    pop		rbx
    pop		rax
    mov		DWORD [rbx], eax
-   ; Ln 15: Assignment
+   ; Ln 16: Assignment
    lea		rax, -8[rbp]
    push		rax
    pop		rbx

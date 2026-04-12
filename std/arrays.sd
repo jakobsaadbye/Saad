@@ -3,6 +3,7 @@
 // }
 import "c_stdlib";
 
+// @Deprecated: Use builtin `append`
 appendInt :: (array: *[..]int, elem: int) {
     if array.count + 1 > array.capacity {
         new_cap := array.capacity * 2;

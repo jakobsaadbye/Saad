@@ -1854,18 +1854,8 @@ Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
     // Try reduce the value argument to a literal to know weather its going to be passed by value or reference
     bool pass_by_value = false;
 
-    AstExpr *const_expr = simplify_expression(typer->const_evaluator, typer->current_scope, arg1->value);
-    if (!const_expr) return NULL;
-
-    if (const_expr->head.kind == AST_LITERAL) {
-        AstLiteral *lit = (AstLiteral *) const_expr;
-
-        if (lit->kind != LITERAL_IDENTIFIER) {
-            pass_by_value = true;
-        }
-    }
-    else if (const_expr->head.kind == AST_STRUCT_LITERAL) {
-        if (const_expr->type->size <= 8) {
+    if (arg1->value->type->size <= 8) {
+        if (arg1->value->type->kind != TYPE_POINTER) {
             pass_by_value = true;
         }
     }

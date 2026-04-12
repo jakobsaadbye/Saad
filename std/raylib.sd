@@ -1152,7 +1152,7 @@ ImageFromImage         :: (image: Image, rec: Rectangle) -> Image; // Create an 
 ImageFromChannel       :: (image: Image, selectedChannel: int) -> Image; // Create an image from a selected channel of another image (GRAYSCALE)
 ImageText              :: (text: *u8, fontSize: int, color: Color) -> Image; // Create an image from text (default font)
 ImageTextEx            :: (font: Font, text: *u8, fontSize: float, spacing: float, tint: Color) -> Image; // Create an image from text (custom sprite font)
-ImageFormat            :: (image: *Image, newFormat: int); // Convert image data to desired format
+ImageFormat            :: (image: *Image, newFormat: PixelFormat); // Convert image data to desired format
 ImageToPOT             :: (image: *Image, fill: Color); // Convert image to POT (power-of-two)
 ImageCrop              :: (image: *Image, crop: Rectangle); // Crop an image to a defined rectangle
 ImageAlphaCrop         :: (image: *Image, threshold: float); // Crop image depending on alpha value

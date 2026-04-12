@@ -30,6 +30,20 @@
         },
         {
             "type": "cppbuild",
+            "label": "Debug aov",
+            "command": "make",
+            "args": [],
+            "options": {
+                "cwd": "C:\\Saad"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+        },
+        {
+            "type": "cppbuild",
             "label": "Debug checker",
             "command": "C:/mingw64/bin/gcc.exe",
             "args": [

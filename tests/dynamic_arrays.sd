@@ -1,3 +1,5 @@
+import "fmt";
+
 Vector2 :: struct {
     x, y: f32;
 }
@@ -44,6 +46,17 @@ main :: () {
         }
     }
     {
+        // Struct, but in a variable
+        arr: [..]Vector2;
+
+        start := Vector2{6, 9};
+        append(arr, start);
+
+        for v in arr {
+            Print("%", v);
+        }
+    }
+    {
         // Enums
         fruits: [..]Fruit;
 
@@ -57,5 +70,6 @@ main :: () {
             print("v = %\n", v);
         }
     }
+    
 
 }
