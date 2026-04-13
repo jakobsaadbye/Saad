@@ -1,6 +1,8 @@
 Todo list:
 -------------------
 
+Bug backlog:
+----------------
 Fix pointer dereference on the left hand side of an assignment being broken:
 ```
 a: int = 5;
@@ -9,8 +11,18 @@ pa := &a;
 *pa += 1; // <---- This gives wrong result
 ```
 
+Fix cannot have two constants with the same name, even if declared in different scopes.
+We should assign the constant an id and then use its id when using the constant to prevent name clashes.
+
+
+
+* Better dynamic arrays
+  [] Able to create them with an initial capacity
+  [] More methods on them
+  [] Able to specify an allocator
+
 * Better structs
-  [] Constant members
+  [x] Constant members
   [] Default values
   [] Defining inner structs
   [] Struct embedding (inheritence)

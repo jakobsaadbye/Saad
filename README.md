@@ -6,6 +6,8 @@ A just for fun compiler
 
 ## Update v0.2.7 - XX. Mar 2026
 
+* Fixed name collision when having two constants with the same name in different scopes
+* Fixed crash due to .data array member not being resolved
 * Fixed wrong precedence with casting using 'as'
 * Fixed constant identifiers not transforming to float
 * Fixed `append` being broken when appending structs in a variable

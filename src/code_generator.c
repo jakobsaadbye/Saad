@@ -2571,12 +2571,13 @@ void emit_constant_identifier(CodeGenerator *cg, AstIdentifier *ident) {
                 return;
             }
             case LITERAL_FLOAT: {
+                int const_id = ident->stack_offset;
                 if (lit->head.type->size == 4) {
-                    sb_append(&cg->code, "   movss\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant @Cleanup - Should the identifier name really be used as the constant name??? Not good if we have the same identifier name in two seperate blocks inside same function!
+                    sb_append(&cg->code, "   movss\t\txmm0, [C_%d]\n", const_id); // :IdentifierNameAsConstant @Cleanup - Should the identifier name really be used as the constant name??? Not good if we have the same identifier name in two seperate blocks inside same function!
                     sb_append(&cg->code, "   movd\t\teax, xmm0\n");
                     PUSH(RAX);
                 } else if (lit->head.type->size == 8) {
-                    sb_append(&cg->code, "   movsd\t\txmm0, [C_%s]\n", ident->name); // :IdentifierNameAsConstant
+                    sb_append(&cg->code, "   movsd\t\txmm0, [C_%d]\n", const_id); // :IdentifierNameAsConstant
                     sb_append(&cg->code, "   movq\t\trax, xmm0\n");
                     PUSH(RAX);
                 } else XXX;
@@ -2760,6 +2761,10 @@ void emit_constant_blob_to_rdata(CodeGenerator *cg, ConstBlob *cb) {
     }
 }
 
+int get_constant_id(CodeGenerator *cg) {
+    return ++cg->constants;
+}
+
 void emit_constant_to_rdata(CodeGenerator *cg, AstIdentifier *ident) {
     assert(ident->value && "Non constant value");
 
@@ -2769,8 +2774,15 @@ void emit_constant_to_rdata(CodeGenerator *cg, AstIdentifier *ident) {
         switch (lit->kind) {
         case LITERAL_BOOLEAN: break; // Immediate value is used
         case LITERAL_INTEGER: break; // Immediate value is used 
-        case LITERAL_FLOAT:   sb_append(&cg->data, "   C_%s DD %lf\n", ident->name, lit->as.value.floating); break; // :IdentifierNameAsConstant @Cleanup @FloatRefactor - Not accounting for float64
+        case LITERAL_FLOAT: {
+            int id = get_constant_id(cg);
+            ident->stack_offset = id;
+            sb_append(&cg->data, "   C_%d DD %lf\n", id, lit->as.value.floating); break; // @FloatRefactor - Not accounting for float64
+            break;
+        }
         case LITERAL_STRING: {
+            int id = get_constant_id(cg);
+            ident->stack_offset = id;
             sb_append(&cg->rdata, "   C_%s.data DB \"%s\", 0\n", ident->name, lit->as.value.string.data);
             sb_append(&cg->rdata, "   align 8\n");
             sb_append(&cg->rdata, "   C_%s:\n", ident->name);
@@ -2784,7 +2796,7 @@ void emit_constant_to_rdata(CodeGenerator *cg, AstIdentifier *ident) {
     }
     else if (ident->value->head.kind == AST_STRUCT_LITERAL || ident->value->head.kind == AST_ARRAY_LITERAL) {
         // Store an id to the constant on the identifier
-        ident->stack_offset = ++cg->constants;
+        ident->stack_offset = get_constant_id(cg);
 
         int size = ident->value->type->size;
 

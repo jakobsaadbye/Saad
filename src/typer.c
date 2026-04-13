@@ -378,6 +378,14 @@ Type *resolve_type(Typer *typer, Type *type) {
 
         array->elem_type = elem_type;
 
+        // Resolve the type of the .data member
+        AstIdentifier *memberData = get_struct_member(array->struct_defn->node, "data");
+        if (memberData == NULL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)array, "Compiler Error: Failed to resolve .data member on array");
+            return NULL;
+        }
+        ((TypePointer *)memberData->type)->pointer_to = elem_type;
+
         switch (array->array_kind) {
         case ARRAY_FIXED: {
             assert(array->capacity_expr);
@@ -870,7 +878,10 @@ check_identifiers_vs_values:
 }
 
 bool types_are_equal(Type *lhs, Type *rhs) {
-    assert(!(lhs->kind == TYPE_NAME || rhs->kind == TYPE_NAME)); // Type names should have been resolved at this point
+    if (lhs->kind == TYPE_NAME || rhs->kind == TYPE_NAME) {
+        // Type names should have been resolved at this point
+        assert(false && "Comparing an unresolved struct or enum in types_are_equal()"); 
+    }
 
     if (is_primitive_type(lhs->kind) && is_primitive_type(rhs->kind)) {
         // @Incomplete - I think we only want constants that are untyped integers to implicitly convert
