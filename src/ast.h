@@ -405,15 +405,21 @@ typedef struct AstWhile {
     int done_label;
 } AstWhile;
 
-typedef struct AstBreakOrContinue {
-    Ast       head;
-    Token     token;           // Either TOKEN_BREAK or TOKEN_CONTINUE
-    TokenType enclosing_loop;  // Either TOKEN_FOR or TOKEN_WHILE
+typedef struct EnclosingLoop EnclosingLoop;
+
+typedef struct EnclosingLoop {
+    EnclosingLoop *parent;
+    TokenType type;  // Either TOKEN_FOR or TOKEN_WHILE
     union {
         AstFor   *for_loop;
         AstWhile *while_loop;
-    } enclosing;
+    };
+} EnclosingLoop;
 
+typedef struct AstBreakOrContinue {
+    Ast           head;
+    Token         token;           // Either TOKEN_BREAK or TOKEN_CONTINUE
+    EnclosingLoop *enclosing_loop;
 } AstBreakOrContinue;
 
 typedef struct AstRangeExpr {

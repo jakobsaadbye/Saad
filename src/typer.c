@@ -9,8 +9,7 @@ typedef struct Typer {
     AstBlock *current_scope;
 
     AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
-    AstFor          *enclosing_for;      // Used by break or continue statements to know where to branch to
-    AstWhile        *enclosing_while;    // Same as above
+    EnclosingLoop   *enclosing_loop;     // Used by break or continue statements to know where to branch to
 
     AstDeclaration  *inside_declaration;  // Set if we are currently type checking a declaration
     AstExtern       *inside_extern_block; // Set if we are currently type checking function definitions inside an extern block
@@ -72,8 +71,7 @@ Typer typer_init(Parser *parser, ConstEvaluator *ce) {
     typer.current_file        = NULL;
     typer.current_scope       = NULL;
     typer.enclosing_function  = NULL;
-    typer.enclosing_for       = NULL;
-    typer.enclosing_while     = NULL;
+    typer.enclosing_loop      = NULL;
     typer.inside_declaration  = NULL;
     typer.scope_rewrites      = da_init(8, sizeof(void*));
     typer.array_literal_depth = 0;
@@ -86,8 +84,7 @@ bool check_file(Typer *typer, AstFile *ast_file) {
     typer->current_file        = ast_file;
     typer->current_scope       = ast_file->scope;
     typer->enclosing_function  = NULL;
-    typer->enclosing_for       = NULL;
-    typer->enclosing_while     = NULL;
+    typer->enclosing_loop      = NULL;
     typer->inside_declaration  = NULL;
     typer->array_literal_depth = 0;
 
@@ -131,8 +128,7 @@ void typer_restore_state(Typer *typer, Typer saved_state) {
     typer->current_file        = saved_state.current_file;
     typer->current_scope       = saved_state.current_scope;
     typer->enclosing_function  = saved_state.enclosing_function;
-    typer->enclosing_for       = saved_state.enclosing_for;
-    typer->enclosing_while     = saved_state.enclosing_while;
+    typer->enclosing_loop      = saved_state.enclosing_loop;
     typer->array_literal_depth = saved_state.array_literal_depth;
 
     // @Cleanup @CopyPasta :CopyPasteCurrentFile 
@@ -1225,8 +1221,29 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     return true;
 }
 
+void push_enclosing_loop(Typer *typer, TokenType loop_type, AstFor *for_loop, AstWhile *while_loop) {
+    EnclosingLoop *loop = ast_allocate(typer->parser, sizeof(EnclosingLoop));
+    loop->parent = typer->enclosing_loop;
+    loop->type = loop_type;
+    if (loop_type == TOKEN_FOR) {
+        loop->for_loop = for_loop;
+    } else {
+        loop->while_loop = while_loop;
+    }
+
+    typer->enclosing_loop = loop;
+}
+
+EnclosingLoop *pop_enclosing_loop(Typer *typer) {
+    if (typer->enclosing_loop && typer->enclosing_loop->parent) {
+        typer->enclosing_loop = typer->enclosing_loop->parent;
+        return typer->enclosing_loop;
+    }
+    return NULL;
+}
+
 bool check_for(Typer *typer, AstFor *ast_for) {
-    typer->enclosing_for = ast_for;
+    push_enclosing_loop(typer, TOKEN_FOR, ast_for, NULL);
 
     // for {...}
     if (ast_for->kind == FOR_INFINITY_AND_BEYOND) {
@@ -1310,12 +1327,13 @@ bool check_for(Typer *typer, AstFor *ast_for) {
     bool ok = check_block(typer, ast_for->body);
     if (!ok) return false;
 
-    typer->enclosing_for = NULL;
+    pop_enclosing_loop(typer);
+
     return true;
 }
 
 bool check_while(Typer *typer, AstWhile *ast_while) {
-    typer->enclosing_while = ast_while;
+    push_enclosing_loop(typer, TOKEN_WHILE, NULL, ast_while);
 
     Type *cond_type = check_expression(typer, ast_while->condition, NULL);
     if (!cond_type) return false;
@@ -1328,7 +1346,7 @@ bool check_while(Typer *typer, AstWhile *ast_while) {
     bool ok = check_block(typer, ast_while->body);
     if (!ok) return false;
 
-    typer->enclosing_while = NULL;
+    pop_enclosing_loop(typer);
 
     return true;
 }
@@ -1689,31 +1707,12 @@ bool check_statement(Typer *typer, Ast *stmt) {
 }
 
 bool check_break_or_continue(Typer *typer, AstBreakOrContinue *boc) {
-
-    if (!typer->enclosing_for && !typer->enclosing_while) {
+    if (!typer->enclosing_loop) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(boc), "%s is only allowed inside for-loops or while-loops", boc->token.type ==TOKEN_BREAK ? "break" : "continue");
         return false;
     }
 
-    if (typer->enclosing_for && typer->enclosing_while) {
-        // We are inside a for loop and a while loop. We need to figure out
-        // which is the inner one
-        if (is_a_before_b((Ast *)typer->enclosing_for, (Ast *)typer->enclosing_while)) {
-            boc->enclosing_loop = TOKEN_WHILE;
-            boc->enclosing.while_loop = typer->enclosing_while;
-        } else {
-            boc->enclosing_loop = TOKEN_FOR;
-            boc->enclosing.for_loop = typer->enclosing_for;
-        }
-    }
-
-    if (typer->enclosing_for) {
-        boc->enclosing_loop = TOKEN_FOR;
-        boc->enclosing.for_loop = typer->enclosing_for;
-    } else {
-        boc->enclosing_loop = TOKEN_WHILE;
-        boc->enclosing.while_loop = typer->enclosing_while;
-    }
+    boc->enclosing_loop = typer->enclosing_loop;
 
     return true;
 }

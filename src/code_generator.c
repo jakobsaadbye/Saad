@@ -403,16 +403,16 @@ void emit_statement(CodeGenerator *cg, Ast *stmt) {
 void emit_break_or_continue(CodeGenerator *cg, AstBreakOrContinue *boc) {
 
     if (boc->token.type == TOKEN_BREAK) {
-        if (boc->enclosing_loop == TOKEN_FOR) {
-            sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing.for_loop->done_label);
+        if (boc->enclosing_loop->type == TOKEN_FOR) {
+            sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing_loop->for_loop->done_label);
         } else {
-            sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing.while_loop->done_label);
+            sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing_loop->while_loop->done_label);
         }
     } else {
-        if (boc->enclosing_loop == TOKEN_FOR) {
-            sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing.for_loop->post_expression_label);
+        if (boc->enclosing_loop->type == TOKEN_FOR) {
+            sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing_loop->for_loop->post_expression_label);
         } else {
-            sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing.while_loop->condition_label);
+            sb_append(&cg->code, "   jmp\t\tL%d\n", boc->enclosing_loop->while_loop->condition_label);
         }
     }
 }
