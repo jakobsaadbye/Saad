@@ -1,19 +1,12 @@
 import "fmt";
-import "c_stdlib";
-
-Vector2 :: struct {
-    x, y: float;
-}
 
 main :: () {
-    arr: [..]Vector2;
-    arr.data = malloc(16 * sizeof(Vector2));
-    arr.capacity = 16;
-
-    start := Vector2{6, 9};
-    append(arr, start);
-
-    for v in arr {
-        Print("%", v);
+    {
+        ASTRING :: "Hello mom";
+        Print("%", ASTRING);
+    }
+    {
+        ASTRING :: "Hello mom";
+        Print("%", ASTRING);
     }
 }

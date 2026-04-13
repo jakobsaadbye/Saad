@@ -2584,7 +2584,8 @@ void emit_constant_identifier(CodeGenerator *cg, AstIdentifier *ident) {
                 return;
             }
             case LITERAL_STRING: {
-                sb_append(&cg->code, "   mov\t\trax, C_%s\n", ident->name); // :IdentifierNameAsConstant @Cleanup
+                int const_id = ident->stack_offset;
+                sb_append(&cg->code, "   mov\t\trax, C_%d\n", const_id); // :IdentifierNameAsConstant @Cleanup
                 PUSH(RAX);
                 return;
             }
@@ -2775,18 +2776,18 @@ void emit_constant_to_rdata(CodeGenerator *cg, AstIdentifier *ident) {
         case LITERAL_BOOLEAN: break; // Immediate value is used
         case LITERAL_INTEGER: break; // Immediate value is used 
         case LITERAL_FLOAT: {
-            int id = get_constant_id(cg);
-            ident->stack_offset = id;
-            sb_append(&cg->data, "   C_%d DD %lf\n", id, lit->as.value.floating); break; // @FloatRefactor - Not accounting for float64
+            int const_id = get_constant_id(cg);
+            ident->stack_offset = const_id;
+            sb_append(&cg->data, "   C_%d DD %lf\n", const_id, lit->as.value.floating); break; // @FloatRefactor - Not accounting for float64
             break;
         }
         case LITERAL_STRING: {
-            int id = get_constant_id(cg);
-            ident->stack_offset = id;
-            sb_append(&cg->rdata, "   C_%s.data DB \"%s\", 0\n", ident->name, lit->as.value.string.data);
+            int const_id = get_constant_id(cg);
+            ident->stack_offset = const_id;
+            sb_append(&cg->rdata, "   C_%d.data DB \"%s\", 0\n", const_id, lit->as.value.string.data);
             sb_append(&cg->rdata, "   align 8\n");
-            sb_append(&cg->rdata, "   C_%s:\n", ident->name);
-            sb_append(&cg->rdata, "   dq C_%s.data\n", ident->name);
+            sb_append(&cg->rdata, "   C_%d:\n", const_id);
+            sb_append(&cg->rdata, "   dq C_%d.data\n", const_id);
             sb_append(&cg->rdata, "   dq %lld\n", lit->as.value.string.length);
             break;
         }
