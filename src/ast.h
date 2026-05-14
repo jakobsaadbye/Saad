@@ -323,7 +323,9 @@ typedef struct AstFunctionCall {
     DynamicArray     arguments;         // of *AstExpr
     AstStruct       *belongs_to_struct; // The struct the function definition is defined on
     int              first_positional_argument_index;
-    bool             is_method_call;    // If the function is defined within a struct or is a method of a struct, this field is true
+    bool             is_method_call;    // If the function is called with an implicit self parameter in which the function definition is a method
+    bool             is_member_call;    // If the function is called on a member of a struct. Member calls does not take an implicit 'self' parameter
+    bool             is_lambda_call;    // If the function symbol name is not known at compile time, and we only have a function pointer. Some languages calls these annonymous functions
     bool             has_positional_arguments;
 
     DynamicArray     lowered_arguments;      // of *AstExpr. A lowered representation of the argument list including hidden return arguments
@@ -448,6 +450,10 @@ typedef struct AstArrayAccess {
     Token    close_bracket;
 } AstArrayAccess;
 
+typedef enum MemberAccessFlags {
+    MEMBER_ACCESS_FLAGS_RHS_IS_FUNCTION_CALL = 1 << 0,  // e.g `myStruct.foo()`. Not set if rhs is a method call
+} MemberAccessFlags;
+
 typedef enum MemberAccessKind {
     MEMBER_ACCESS_STRUCT,
     MEMBER_ACCESS_STRUCT_STATIC,
@@ -460,12 +466,15 @@ typedef struct AstMemberAccess {
 
     AstExpr *left;
     AstExpr *right;
+    AstIdentifier *struct_member;
+
+    MemberAccessFlags flags;
     
     AccessorKind access_kind;
     union {
-        AstIdentifier   *struct_member;
         AstEnumerator   *enum_member;
         AstFunctionCall *method_call;
+        AstFunctionCall *function_call;
     };
 } AstMemberAccess;
 

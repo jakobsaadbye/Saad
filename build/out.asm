@@ -266,6 +266,7 @@ segment .text
    extern memset
    extern memcpy
    extern malloc
+   extern calloc
    extern realloc
    extern free
    extern exit

@@ -1,0 +1,35 @@
+CriticalSection :: struct {
+    data: [40]u8;  // opaque, windows manages this internally
+}
+
+ConditionVariable :: struct {
+    ptr: *void;
+}
+
+extern "C" {
+    CreateThread :: (
+        lpThreadAttributes: *void,  // NULL for default
+        dwStackSize:         u64,    // 0 for default
+        lpStartAddress:      (lpParam: *void) -> u32,
+        lpParameter:        *void,
+        dwCreationFlags:     u32,  // 0 to start immediately
+        lpThreadId:         *u32  // NULL if you don't need it
+    ) -> *void;
+
+    CloseHandle :: (hObject: *void) -> bool;
+
+    InitializeCriticalSection   :: (lpCriticalSection: *CriticalSection);
+    EnterCriticalSection        :: (lpCriticalSection: *CriticalSection);
+    LeaveCriticalSection        :: (lpCriticalSection: *CriticalSection);
+    DeleteCriticalSection       :: (lpCriticalSection: *CriticalSection);
+    
+    InitializeConditionVariable :: (conditionVariable: *ConditionVariable);
+
+    SleepConditionVariableCS    :: (
+        conditionVariable: *ConditionVariable,
+        criticalSection:   *CriticalSection,
+        dwMilliseconds:    u32
+    ) -> bool;
+
+    WakeConditionVariable       :: (conditionVariable: *ConditionVariable);
+}

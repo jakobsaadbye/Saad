@@ -1141,8 +1141,14 @@ void adapt_function_argument_to_parameter(CodeGenerator *cg, AstExpr *arg, AstId
     }
 }
 
+
+// Lambda calls are expected to have the function pointer address in RBX
 void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     AstFunctionDefn *func_defn = call->func_defn;
+
+    if (call->is_lambda_call) {
+        PUSH(RBX);
+    }
     
     // Arguments that needs to be passed on the stack goes in the following order
     // 
@@ -1222,15 +1228,21 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
             sb_append(&cg->code, "   mov\t\t%d[rsp], rax\n", stack_offset);
         }
     }
+    
 
     // Do the actual call
-    if (func_defn->is_lambda) {
+    if (call->is_lambda_call) {
+        POP(RAX);
+        sb_append(&cg->code, "   call\t\trax\n");
+    }
+    else if (func_defn->is_lambda) {
         // @Cleanup: This shouldn't be this way!!!
         AstIdentifier *param = lookup_from_scope(cg->parser, cg->current_scope, call->identifer->name);
         assert(param);
         sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", param->stack_offset);
         sb_append(&cg->code, "   call\t\trax\n");
-    } else {
+    } 
+    else {
         sb_append(&cg->code, "   ; %s \n", get_lowered_function_argument_list_string(call));
         sb_append(&cg->code, "   call\t\t%s\n", func_defn->symbol_name);
     }
@@ -2028,6 +2040,7 @@ void zero_initialize(CodeGenerator *cg, Type *type, int dst_offset, bool offset_
     case TYPE_FLOAT:
     case TYPE_BOOL:
     case TYPE_ENUM:
+    case TYPE_FUNCTION:
     case TYPE_POINTER: {
         if (offset_is_runtime_computed) {
             sb_append(&cg->code, "   mov\t\t%s [rbx], 0\n", word_size(type));
@@ -3527,6 +3540,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 } else {
                     XXX;
                 }
+                return;
+            }
+
+            if (ma->flags & MEMBER_ACCESS_FLAGS_RHS_IS_FUNCTION_CALL) {
+                POP(RBX);
+                sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
+                emit_function_call(cg, ma->function_call);
                 return;
             }
 

@@ -1897,17 +1897,27 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     // Check for builtin functions
     if (strcmp(call->identifer->name, "append") == 0) return check_builtin_function_call_append(typer, call);
 
-    if (call->is_method_call) {
-        // Lookup the function within the scope of the struct
+    if (call->is_member_call) {
         assert(call->belongs_to_struct);
 
-        AstIdentifier *func_member = get_struct_method(call->belongs_to_struct, call->identifer->name);
+        AstIdentifier *func_member = get_struct_member(call->belongs_to_struct, call->identifer->name);
         if (!func_member) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined member function '%s'", text_bold(call->identifer->name));
             return NULL;
         }
 
         func_ident = func_member;
+    }
+    else if (call->is_method_call) {
+        assert(call->belongs_to_struct);
+
+        AstIdentifier *method = get_struct_method(call->belongs_to_struct, call->identifer->name);
+        if (!method) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined method '%s'", text_bold(call->identifer->name));
+            return NULL;
+        }
+
+        func_ident = method;
     } else {
         // Look in the current local scope
         func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name);
@@ -3140,37 +3150,62 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     else if (rhs->head.kind == AST_FUNCTION_CALL) {
         func_call = (AstFunctionCall *) rhs;
 
-        // Method call
-
+        // Method or function member call
         member_name = func_call->identifer->name;
-        member = get_struct_method(struct_type->node, member_name);
 
+        // Check if its a normal member of the struct (member function)
+        member = get_struct_member(struct_type->node, member_name);
+        
         if (member) {
+            // Function member call e.g `myStruct.foo()`
 
-            if (member->type->kind != TYPE_FUNCTION) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *) rhs, "Member %s is not a callable function", member->name);
-                return NULL;
-            }
-
-            AstFunctionDefn *func_defn = ((TypeFunction *)member->type)->node;
-            func_call->func_defn = func_defn;
-
-            // @Todo: This assumes that "static" functions on structs are also methods
-            func_call->is_method_call = true;
+            // We mark the function call as a lambda, as the actuall function that will be called is unknown
+            // at compile time
+            func_call->is_lambda_call = true;
+            func_call->is_member_call = true;
             func_call->belongs_to_struct = struct_type->node;
-    
-            // Rewrite the method call into a plain function call, with the 0'th
-            // argument being the left-hand side of the member access
-            // e.g
-            // `foo.bar(x)` -> `bar(foo, x)`
-            bool ok = rewrite_as_method_call(typer, func_call, ma);
-            if (!ok) return NULL;
-    
+
             Type *func_type = check_function_call(typer, func_call);
             if (!func_type) return NULL;
-    
-            ma->access_kind = MEMBER_ACCESS_METHOD_CALL;
-            ma->method_call = func_call;
+
+            ma->flags |= MEMBER_ACCESS_FLAGS_RHS_IS_FUNCTION_CALL;
+            ma->access_kind = MEMBER_ACCESS_STRUCT;
+            ma->struct_member = member;
+            ma->function_call = func_call;
+        } else {
+            // Check if its a method call
+            AstIdentifier *method = get_struct_method(struct_type->node, member_name);
+
+            if (method) {
+                member = method;
+
+                if (method->type->kind != TYPE_FUNCTION) {
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *) rhs, "Member %s is not a callable function", method->name);
+                    return NULL;
+                }
+
+                AstFunctionDefn *func_defn = ((TypeFunction *)method->type)->node;
+                func_call->func_defn = func_defn;
+
+                // @Todo: This assumes that "static" functions on structs are also methods
+                func_call->is_method_call = true;
+                func_call->belongs_to_struct = struct_type->node;
+        
+                // Rewrite the method call into a plain function call, with the 0'th
+                // argument being the left-hand side of the member access
+                // e.g
+                // `foo.bar(x)` -> `bar(foo, x)`
+                bool ok = rewrite_as_method_call(typer, func_call, ma);
+                if (!ok) return NULL;
+        
+                Type *func_type = check_function_call(typer, func_call);
+                if (!func_type) return NULL;
+        
+                ma->access_kind = MEMBER_ACCESS_METHOD_CALL;
+                ma->method_call = func_call;
+            } else {
+                // Fallthrough to 'not a member'
+            }
         }
 
     } 
