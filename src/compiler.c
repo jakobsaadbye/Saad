@@ -79,24 +79,6 @@ void reset_stdout(void) {
     dup2(old_stdout, 1);
 } 
 
-void output_generated_code_to_file(CodeGenerator *cg, const char *output_path) {
-    FILE *f = fopen(output_path, "w");
-    if (f == NULL) {
-        printf("%s:%d: error: Failed to open file '%s'\n", __FILE__, __LINE__, output_path);
-        exit(1);
-    }
-
-    fwrite(cg->head.buffer, 1, cg->head.cursor, f);
-    fwrite(cg->data.buffer, 1, cg->data.cursor, f);
-    fwrite(cg->rdata_string.buffer, 1, cg->rdata_string.cursor, f);
-    fwrite(cg->rdata.buffer, 1, cg->rdata.cursor, f);
-    fwrite(cg->code_header.buffer, 1, cg->code_header.cursor, f);
-    fwrite("\n", 1, 1, f);
-    fwrite(cg->code.buffer, 1, cg->code.cursor, f);
-
-    fclose(f);
-}
-
 void cleanup() {
     reset_stdout();
 }
@@ -282,7 +264,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     report.codegen_time_start = clock();
     begin_emit_code(&codegen, main_file);
     make_directory("build");
-    output_generated_code_to_file(&codegen, "./build/out.asm");
+    emit_generated_code_to_file(&codegen, "./build/out.asm");
     report.codegen_time_end = clock();
 
     report.asm_and_link_time_start = clock();

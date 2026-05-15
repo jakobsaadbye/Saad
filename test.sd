@@ -1,20 +1,20 @@
-Color :: struct {
-    r, g, b, a: u8;
-}
+import "fmt";
 
-toHex :: method (c: Color) -> string {
-    return "#FF00FF";
-}
-
-// THIS SHOULD FAIL
-toHex :: method (c: Color) -> string {
-    return "#FF00FF";
-}
-
-toHex :: (c: Color) -> string {
-    return "#000000";
+Button :: struct {
+    onClick: (e: int) -> void;
 }
 
 main :: () {
+    myButton := Button{
+        onClick = (v: int) {
+            Print("Click! %", v);
+        }
+    };
 
+    doSomething :: (a: int) -> void {
+        Print("%", a);
+    }
+
+    doSomething(10);
+    myButton.onClick(5);
 }

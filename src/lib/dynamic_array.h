@@ -18,8 +18,10 @@ typedef struct DynamicArray {
 DynamicArray da_init(unsigned int init_cap, unsigned int item_size);
 void _da_append(DynamicArray *da, void *item);
 void _da_insert(DynamicArray *da, void *item, int index);
-void da_free(DynamicArray *da);
+void *da_get(DynamicArray da, int index);
+void *da_pop(DynamicArray *da);
 void da_remove(DynamicArray *da, int index);
+void da_free(DynamicArray *da);
 
 #endif 
 
@@ -87,13 +89,28 @@ void _da_insert(DynamicArray *da, void *item, int index) {
     da->count += 1;
 }
 
+void *da_get(DynamicArray da, int index) {
+    if (index == -1) index = da.count - 1; // Special case to get last element
+    if (index >= da.count || index < 0) return NULL;
+
+    unsigned char *item_ptr = da.items + (index * da.item_size);
+    return (void *) item_ptr;
+}
+
+void *da_pop(DynamicArray *da) {
+    da_remove(da, -1);
+    return da_get(*da, -1);
+}
+
+// Return a pointer to the removed element 
+// Use index = -1 to remove the last item in the array
 void da_remove(DynamicArray *da, int index) {
     if (index == -1) index = da->count - 1; // Special case to get last element
     if (index >= da->count || index < 0) return;
 
 
     // Shift over all the bytes by one item size
-    unsigned char *ptr   = da->items + (index * da->item_size);
+    unsigned char *ptr = da->items + (index * da->item_size);
 
     if (index == da->count - 1) {
         // Removing the last element, we can simply NULL it without doing any shifting on the rest of the array

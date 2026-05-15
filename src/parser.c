@@ -1868,14 +1868,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     AstFunctionDefn *func_defn = (AstFunctionDefn *)(ast_allocate(parser, sizeof(AstFunctionDefn)));
     func_defn->parameters   = da_init(2, sizeof(AstIdentifier *));
     func_defn->return_types = da_init(2, sizeof(Type *));
-    
-    // Token ident_token = peek_next_token(parser);
-    // expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
-    // eat_token(parser);
-
-    // Token next = peek_next_token(parser);
-    // expect(parser, next, TOKEN_DOUBLE_COLON);
-    // eat_token(parser);
+    func_defn->is_lambda = true;
 
     Token next = peek_next_token(parser);
 
@@ -2337,6 +2330,7 @@ AstDeclaration *parse_declaration(Parser *parser) {
 
                     // Bind the function definitions' identifier to this constant identifier
                     func_defn->identifier = ident;
+                    func_defn->is_lambda = false;
                 }
             }
         }

@@ -10,8 +10,10 @@ typedef struct Typer {
     AstFile  *current_file;
     AstBlock *current_scope;
 
-    AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to
+    AstFunctionDefn *enclosing_function; // Used by return statements to know which function they belong to. Is always a pointer to the last element on the enclosing function stack
     EnclosingLoop   *enclosing_loop;     // Used by break or continue statements to know where to branch to
+
+    DynamicArray     enclosing_function_stack;
 
     AstDeclaration  *inside_declaration;  // Set if we are currently type checking a declaration
     AstExtern       *inside_extern_block; // Set if we are currently type checking function definitions inside an extern block
@@ -21,9 +23,10 @@ typedef struct Typer {
     ////////////////////////////////////////////////////////////////////
     TypeAny         *type_any;       // The resolved type of 'any'
     TypeString      *type_string;    // The resolved type of 'string'
-
+    
     DynamicArray     struct_wait_list; // of *AstIdentifier. A list of struct identifiers that are waiting to be sized as they depend on knowing the size of other structs
     
+    int next_unique_symbol_id;
     int array_literal_depth;
 
     DynamicArray    scope_rewrites; // of *void. [AstBlock*, AstIdentifier*, AstBlock*, AstIdentifier*]
@@ -64,6 +67,9 @@ AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr);
 char *generate_c_format_specifier_for_type(Type *type);
 
+void push_enclosing_function(Typer *typer, AstFunctionDefn *func_defn);
+void pop_enclosing_function(Typer *typer);
+
 Typer typer_init(Parser *parser, ConstEvaluator *ce) {
     Typer typer = {0};
     typer.parser = parser;
@@ -72,19 +78,33 @@ Typer typer_init(Parser *parser, ConstEvaluator *ce) {
     typer.current_file        = NULL;
     typer.current_scope       = NULL;
     typer.enclosing_function  = NULL;
+    typer.enclosing_function_stack = da_init(2, sizeof(AstFunctionDefn *));
     typer.enclosing_loop      = NULL;
     typer.inside_declaration  = NULL;
     typer.scope_rewrites      = da_init(8, sizeof(void*));
-    typer.array_literal_depth = 0;
     typer.struct_wait_list = da_init(8, sizeof(AstIdentifier *));
 
     return typer;
+}
+
+void typer_restore_state(Typer *typer, Typer saved_state) {
+    typer->current_file        = saved_state.current_file;
+    typer->current_scope       = saved_state.current_scope;
+    typer->enclosing_function  = saved_state.enclosing_function;
+    typer->enclosing_function_stack = saved_state.enclosing_function_stack;
+    typer->enclosing_loop      = saved_state.enclosing_loop;
+    typer->array_literal_depth = saved_state.array_literal_depth;
+
+    // @Cleanup @CopyPasta :CopyPasteCurrentFile 
+    typer->parser->current_file  = saved_state.current_file;
+    typer->parser->current_scope = saved_state.current_scope;
 }
 
 bool check_file(Typer *typer, AstFile *ast_file) {
     typer->current_file        = ast_file;
     typer->current_scope       = ast_file->scope;
     typer->enclosing_function  = NULL;
+    typer->enclosing_function_stack = da_init(2, sizeof(AstFunctionDefn *));
     typer->enclosing_loop      = NULL;
     typer->inside_declaration  = NULL;
     typer->array_literal_depth = 0;
@@ -129,18 +149,6 @@ void dump_struct(AstStruct *struct_defn) {
         printf("    %s: %s;\n", member->name, type_to_str(member->type));
     }
     printf("}\n");
-}
-
-void typer_restore_state(Typer *typer, Typer saved_state) {
-    typer->current_file        = saved_state.current_file;
-    typer->current_scope       = saved_state.current_scope;
-    typer->enclosing_function  = saved_state.enclosing_function;
-    typer->enclosing_loop      = saved_state.enclosing_loop;
-    typer->array_literal_depth = saved_state.array_literal_depth;
-
-    // @Cleanup @CopyPasta :CopyPasteCurrentFile 
-    typer->parser->current_file  = saved_state.current_file;
-    typer->parser->current_scope = saved_state.current_scope;
 }
 
 bool import_declarations(Parser *parser, AstImport *import, AstFile *to_file) {
@@ -2052,7 +2060,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         }
 
         if (!is_given) {
-            report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Missing required parameter '%s'", param->name);
+            report_error_token(typer->parser, LABEL_ERROR, call->paren_start_token, "Missing required parameter '%s' of type %s", param->name, text_bold(type_to_str(param->type)));
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)param->decl, "", param->name);
             return NULL;
         }
@@ -2355,13 +2363,18 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     return call->head.type;
 }
 
+int get_unique_symbol_id(Typer *typer) {
+    typer->next_unique_symbol_id += 1;
+    return typer->next_unique_symbol_id;
+}
+
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     if (func_defn->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return func_defn->head.type;
     }
 
     // Check the parameters
-    typer->enclosing_function = func_defn;
+    push_enclosing_function(typer, func_defn);
     for (int i = 0; i < func_defn->parameters.count; i++) {
         AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
         bool ok = check_declaration(typer, param->decl);
@@ -2427,7 +2440,9 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     func_type->head.head.start = func_defn->head.head.start;
     func_type->head.head.end   = func_defn->head.head.end;
     func_type->head.kind       = TYPE_FUNCTION;
+    func_type->head.size       = 8;
     func_type->node            = func_defn;
+
 
     // Do method specific stuff
     if (func_defn->is_method) {
@@ -2477,15 +2492,9 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
             return NULL;
         }
 
-        // @Cleanup @Speed: Use a string buffer located in Parser to allocate the strings instead of malloc
-        char *symbol_name = malloc(strlen(receiver_struct->identifier->name) + 8 + strlen(func_defn->identifier->name));
-        sprintf(symbol_name, "%s.%s", receiver_struct->identifier->name, func_defn->identifier->name);
+        func_defn->receiver_struct = receiver_struct;
+    }
 
-        func_defn->symbol_name = symbol_name;
-    }
-    else {
-        func_defn->symbol_name = func_defn->identifier->name;
-    }
 
     // Mark the function as fully typed, when we have typechecked the function signature
     // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again
@@ -2495,12 +2504,41 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     // Check the body
     bool ok = check_block(typer, func_defn->body);
     if (!ok) return NULL;
-    typer->enclosing_function = NULL;
+
+    pop_enclosing_function(typer);
 
     // Do a narrow scan for a return statement
     ok = check_if_function_needs_a_return(typer, func_defn);
     if (!ok) return NULL;
 
+
+    // Assign a symbol name to the function
+    if (func_defn->is_lambda) {
+
+        if (func_defn->is_method) {
+            XXX;
+        } else {
+
+            // @Cleanup @Speed: Use a string buffer located in Parser to allocate the strings instead of malloc
+            char *symbol_name = malloc(40);
+
+            int id = get_unique_symbol_id(typer);
+            sprintf(symbol_name, "lambda_%d", id);
+
+            func_defn->symbol_name = symbol_name;
+        }
+
+    } else {
+        if (func_defn->is_method) {
+            // @Cleanup @Speed: Use a string buffer located in Parser to allocate the strings instead of malloc
+            char *symbol_name = malloc(strlen(func_defn->receiver_struct->identifier->name) + 8 + strlen(func_defn->identifier->name));
+            sprintf(symbol_name, "%s.%s", func_defn->receiver_struct->identifier->name, func_defn->identifier->name);
+
+            func_defn->symbol_name = symbol_name;
+        } else {
+            func_defn->symbol_name = func_defn->identifier->name;
+        }
+    }
 
     // Build up the lowered representation of the parameter list for the function (to simplify codegen)
     func_defn->lowered_return_params = da_init(func_defn->return_types.count, sizeof(AstIdentifier *));
@@ -3896,6 +3934,20 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     XXX;
 }
 
+void push_enclosing_function(Typer *typer, AstFunctionDefn *func_defn) {
+    da_append(&typer->enclosing_function_stack, func_defn);
+    typer->enclosing_function = func_defn;
+}
+
+void pop_enclosing_function(Typer *typer) {
+    da_remove(&typer->enclosing_function_stack, -1);
+    if (typer->enclosing_function_stack.count == 0) {
+        typer->enclosing_function = NULL;
+    } else {
+        typer->enclosing_function = da_get(typer->enclosing_function_stack, -1);
+    }
+}
+
 void reserve_local_storage(AstFunctionDefn *func_defn, int size) {
     func_defn->num_bytes_locals += size;
 
@@ -3915,7 +3967,6 @@ void reserve_temporary_storage(AstFunctionDefn *func_defn, int size) {
 
 void reset_temporary_storage(AstFunctionDefn *func_defn) {
     if (func_defn == NULL) return;
-
     func_defn->temp_ptr = 0;
 }
 

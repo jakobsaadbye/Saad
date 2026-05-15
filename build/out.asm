@@ -274,9 +274,6 @@ segment .text
    extern sprintf
    extern printf
 
-
-
-
 assert:
    cmp		cl, 0
    jz 		assert_fail
@@ -670,10 +667,11 @@ enum_case_35:
    mov		rax, rcx
    ret
 
+
 ; bytes locals   : 24
 ; bytes temp     : 0
 ; bytes total    : 64
-; (ret_0: *bool, type: *Type)
+; (ret_0: *bool, type: *Type) -> *bool
 Type.isPrimitive:
    push		rbp
    mov		rbp, rsp
@@ -784,10 +782,11 @@ L37:
    pop		rbp
    ret
 
+
 ; bytes locals   : 48
 ; bytes temp     : 64
 ; bytes total    : 144
-; (ret_0: **u8, s: string)
+; (ret_0: **u8, s: string) -> **u8
 String.toCString:
    push		rbp
    mov		rbp, rsp
@@ -881,10 +880,11 @@ L41:
    pop		rbp
    ret
 
+
 ; bytes locals   : 40
 ; bytes temp     : 32
 ; bytes total    : 112
-; (ret_0: *string, cstr: *u8)
+; (ret_0: *string, cstr: *u8) -> *string
 fromCString:
    push		rbp
    mov		rbp, rsp
@@ -941,10 +941,11 @@ L42:
    pop		rbp
    ret
 
+
 ; bytes locals   : 88
 ; bytes temp     : 0
 ; bytes total    : 128
-; (ret_0: *string, s: string, from: int, to: int)
+; (ret_0: *string, s: string, from: int, to: int) -> *string
 String.slice:
    push		rbp
    mov		rbp, rsp
@@ -1104,10 +1105,11 @@ L43:
    pop		rbp
    ret
 
+
 ; bytes locals   : 56
 ; bytes temp     : 64
 ; bytes total    : 160
-; (ret_0: *string, s: string)
+; (ret_0: *string, s: string) -> *string
 String.copy:
    push		rbp
    mov		rbp, rsp
@@ -1209,10 +1211,11 @@ L46:
    pop		rbp
    ret
 
+
 ; bytes locals   : 88
 ; bytes temp     : 48
 ; bytes total    : 176
-; (ret_0: *string, s: string)
+; (ret_0: *string, s: string) -> *string
 String.toUpper:
    push		rbp
    mov		rbp, rsp
@@ -1339,10 +1342,11 @@ L47:
    pop		rbp
    ret
 
+
 ; bytes locals   : 88
 ; bytes temp     : 48
 ; bytes total    : 176
-; (ret_0: *string, s: string)
+; (ret_0: *string, s: string) -> *string
 String.toLower:
    push		rbp
    mov		rbp, rsp
@@ -1469,10 +1473,11 @@ L52:
    pop		rbp
    ret
 
+
 ; bytes locals   : 104
 ; bytes temp     : 0
 ; bytes total    : 144
-; (ret_0: *bool, s: string, str: string)
+; (ret_0: *bool, s: string, str: string) -> *bool
 String.startsWith:
    push		rbp
    mov		rbp, rsp
@@ -1565,10 +1570,11 @@ L57:
    pop		rbp
    ret
 
+
 ; bytes locals   : 120
 ; bytes temp     : 80
 ; bytes total    : 240
-; (ret_0: *bool, s: string, str: string)
+; (ret_0: *bool, s: string, str: string) -> *bool
 String.endsWith:
    push		rbp
    mov		rbp, rsp
@@ -1739,10 +1745,11 @@ L62:
    pop		rbp
    ret
 
+
 ; bytes locals   : 184
 ; bytes temp     : 72
 ; bytes total    : 288
-; (ret_0: *int, s: string, str: string, fromIndex: int)
+; (ret_0: *int, s: string, str: string, fromIndex: int) -> *int
 String.indexOf:
    push		rbp
    mov		rbp, rsp
@@ -2096,10 +2103,11 @@ L68:
    pop		rbp
    ret
 
+
 ; bytes locals   : 152
 ; bytes temp     : 72
 ; bytes total    : 256
-; (ret_0: *[..]string, s: string, sep: string)
+; (ret_0: *[..]string, s: string, sep: string) -> *[..]string
 String.split:
    push		rbp
    mov		rbp, rsp
@@ -2305,10 +2313,11 @@ L81:
    pop		rbp
    ret
 
+
 ; bytes locals   : 96
 ; bytes temp     : 48
 ; bytes total    : 176
-; (ret_0: *string, s: string)
+; (ret_0: *string, s: string) -> *string
 String.reverse:
    push		rbp
    mov		rbp, rsp
@@ -2421,6 +2430,7 @@ L86:
    add		rsp, 176
    pop		rbp
    ret
+
 
 ; bytes locals   : 72
 ; bytes temp     : 48
@@ -2614,10 +2624,11 @@ L90:
    pop		rbp
    ret
 
+
 ; bytes locals   : 32
 ; bytes temp     : 56
 ; bytes total    : 128
-; (ret_0: *StringBuilder, initialCapacity: int)
+; (ret_0: *StringBuilder, initialCapacity: int) -> *StringBuilder
 NewStringBuilder:
    push		rbp
    mov		rbp, rsp
@@ -2682,6 +2693,7 @@ L92:
    add		rsp, 128
    pop		rbp
    ret
+
 
 ; bytes locals   : 48
 ; bytes temp     : 56
@@ -2898,6 +2910,7 @@ L93:
    add		rsp, 144
    pop		rbp
    ret
+
 
 ; bytes locals   : 48
 ; bytes temp     : 64
@@ -3116,6 +3129,7 @@ L97:
    pop		rbp
    ret
 
+
 ; bytes locals   : 96
 ; bytes temp     : 56
 ; bytes total    : 192
@@ -3199,6 +3213,7 @@ L100:
    pop		rbp
    ret
 
+
 ; bytes locals   : 48
 ; bytes temp     : 56
 ; bytes total    : 144
@@ -3238,6 +3253,7 @@ L101:
    add		rsp, 144
    pop		rbp
    ret
+
 
 ; bytes locals   : 48
 ; bytes temp     : 56
@@ -3284,6 +3300,7 @@ L102:
    add		rsp, 144
    pop		rbp
    ret
+
 
 ; bytes locals   : 72
 ; bytes temp     : 72
@@ -3385,6 +3402,7 @@ L103:
    pop		rbp
    ret
 
+
 ; bytes locals   : 72
 ; bytes temp     : 80
 ; bytes total    : 192
@@ -3479,6 +3497,7 @@ L104:
    add		rsp, 192
    pop		rbp
    ret
+
 
 ; bytes locals   : 128
 ; bytes temp     : 40
@@ -3720,6 +3739,7 @@ L105:
    pop		rbp
    ret
 
+
 ; bytes locals   : 128
 ; bytes temp     : 40
 ; bytes total    : 208
@@ -3924,6 +3944,7 @@ L113:
    add		rsp, 208
    pop		rbp
    ret
+
 
 ; bytes locals   : 608
 ; bytes temp     : 80
@@ -5679,6 +5700,7 @@ L120:
    pop		rbp
    ret
 
+
 ; bytes locals   : 200
 ; bytes temp     : 80
 ; bytes total    : 320
@@ -5881,6 +5903,7 @@ L157:
    pop		rbp
    ret
 
+
 ; bytes locals   : 16
 ; bytes temp     : 56
 ; bytes total    : 112
@@ -5926,10 +5949,11 @@ L165:
    pop		rbp
    ret
 
+
 ; bytes locals   : 40
 ; bytes temp     : 0
 ; bytes total    : 80
-; (ret_0: *string, sb: *StringBuilder)
+; (ret_0: *string, sb: *StringBuilder) -> *string
 StringBuilder.toString:
    push		rbp
    mov		rbp, rsp
@@ -5998,6 +6022,7 @@ L166:
    pop		rbp
    ret
 
+
 ; bytes locals   : 16
 ; bytes temp     : 24
 ; bytes total    : 80
@@ -6024,6 +6049,7 @@ L167:
    add		rsp, 80
    pop		rbp
    ret
+
 
 ; bytes locals   : 232
 ; bytes temp     : 80
@@ -6320,6 +6346,7 @@ L168:
    pop		rbp
    ret
 
+
 ; bytes locals   : 120
 ; bytes temp     : 216
 ; bytes total    : 368
@@ -6510,3 +6537,4 @@ L178:
    add		rsp, 368
    pop		rbp
    ret
+

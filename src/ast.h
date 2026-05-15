@@ -12,6 +12,7 @@ typedef struct AstEnum AstEnum;
 typedef struct AstFile AstFile;
 typedef struct Type Type;
 typedef struct TypeTable TypeTable;
+typedef struct TypeStruct TypeStruct;
 
 typedef enum AstKind {
     AST_ERR,
@@ -285,6 +286,7 @@ typedef struct AstFunctionDefn {
     Token           method_token;  // set if its a method
     Token           paren_start_token;
     AstIdentifier  *receiver;   // set if its a method and is just a short-hand for the 0'th parameter
+    TypeStruct     *receiver_struct; // set to the struct of the receiver type (as currently methods can only be defined on structs)
     DynamicArray    parameters; // of *AstIdentifier
     int             variadic_parameter_index; // set to the index of a variadic parameter in the parameter list
     int             default_parameter_index;   // set to the first index where a default parameter appears. Set to -1 if the function contains no default parameters
