@@ -1,6 +1,8 @@
 #include "const_expr.c"
 #include "lib/string_builder.h"
 
+#define DEBUG_THERE_WERE_ERRORS 0
+
 typedef struct Typer {
     Parser *parser;
     ConstEvaluator *const_evaluator;
@@ -41,7 +43,7 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_t
 Type *check_member_access(Typer *typer, AstMemberAccess * ma);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
-bool  check_function_defn(Typer *typer, AstFunctionDefn *func_defn);
+Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn);
 
 char *type_to_str(Type *type);
 bool types_are_equal(Type *lhs, Type *rhs);
@@ -61,7 +63,6 @@ AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 
 AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr);
 char *generate_c_format_specifier_for_type(Type *type);
-
 
 Typer typer_init(Parser *parser, ConstEvaluator *ce) {
     Typer typer = {0};
@@ -95,7 +96,13 @@ bool check_file(Typer *typer, AstFile *ast_file) {
     for (int i = 0; i < ast_file->statements.count; i++) {
         Ast *stmt = ((Ast **)(ast_file->statements.items))[i];
         bool ok = check_statement(typer, stmt);
-        if (!ok) return false; // @Improvement - Maybe proceed with typechecking if we can still continue after seing the error
+        if (!ok) {
+
+        #if DEBUG_THERE_WERE_ERRORS
+            report_error_ast(typer->parser, LABEL_ERROR, stmt, "Debug error: Something went wrong while typechecking this statement");
+        #endif
+            return false; // @Improvement - Maybe proceed with typechecking if we can still continue after seing the error
+        }
     }
 
     return true;
@@ -709,6 +716,9 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
                 // @Speed? @Note - We might in the future cleanup the already allocated expression tree as its no longer needed after this swap.
                 //                 We might be taking many cache misses if we leave big gaps in the allocated ast nodes, so something like packing the ast nodes could be
                 //                 a thing?
+                *value_ptr = const_expr;
+            }
+            else if (const_expr->head.kind == AST_FUNCTION_DEFN) {
                 *value_ptr = const_expr;
             }
             else if (const_expr->head.kind == AST_STRUCT_LITERAL) {
@@ -1690,7 +1700,6 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_BLOCK:             return check_block(typer, (AstBlock *)(stmt));
     case AST_DECLARATION:       return check_declaration(typer, (AstDeclaration *)(stmt));
     case AST_ASSIGNMENT:        return check_assignment(typer, (AstAssignment *)(stmt));
-    case AST_FUNCTION_DEFN:     return check_function_defn(typer, (AstFunctionDefn *)(stmt));
     case AST_STRUCT:            return check_struct_defn(typer, (AstStruct *)(stmt));
     case AST_ENUM:              return check_enum_defn(typer, (AstEnum *)stmt);
     case AST_FOR:               return check_for(typer, (AstFor *)(stmt));
@@ -1886,7 +1895,6 @@ Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
 }
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
-
     if (typer->enclosing_function == NULL) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Function calls are not allowed at top-level yet");
         return NULL;
@@ -1929,11 +1937,11 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
     }
 
-    if (func_ident->decl && !(func_ident->decl->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *) func_ident, "Illegal shadowing. Declaration of %s shadows the name of function %s(...)", func_ident->name, func_ident->name);
-        report_error_ast(typer->parser, LABEL_HINT, (Ast *) func_ident, "Use a name other than %s to declare the identifier", func_ident->name);
-        return NULL;
-    }
+    // if (func_ident->decl && !(func_ident->decl->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
+    //     report_error_ast(typer->parser, LABEL_ERROR, (Ast *) func_ident, "Illegal shadowing. Declaration of %s shadows the name of function %s(...)", func_ident->name, func_ident->name);
+    //     report_error_ast(typer->parser, LABEL_HINT, (Ast *) func_ident, "Use a name other than %s to declare the identifier", func_ident->name);
+    //     return NULL;
+    // }
 
     if (func_ident->type->kind != TYPE_FUNCTION) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "%s is not the name of a function. Type of %s is %s", func_ident->name, func_ident->name, type_to_str(func_ident->type));
@@ -1943,9 +1951,9 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     AstFunctionDefn *func_defn = ((TypeFunction *)func_ident->type)->node;
 
     // Make sure that the function definition is fully resolved
-    if (!(func_defn->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
+    if (!(func_defn->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
         Typer temp = *typer;
-        bool ok = check_function_defn(typer, func_defn);
+        Type *ok = check_function_defn(typer, func_defn);
         if (!ok) return NULL;
 
         typer_restore_state(typer, temp);
@@ -2347,9 +2355,9 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     return call->head.type;
 }
 
-bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
-    if (func_defn->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
-        return true;
+Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
+    if (func_defn->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) {
+        return func_defn->head.type;
     }
 
     // Check the parameters
@@ -2357,7 +2365,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     for (int i = 0; i < func_defn->parameters.count; i++) {
         AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
         bool ok = check_declaration(typer, param->decl);
-        if (!ok) return false;
+        if (!ok) return NULL;
 
         if (param->type->kind == TYPE_ARRAY && ((TypeArray *)param->type)->array_kind == ARRAY_FIXED) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)param, "Use of fixed size array as parameter. Passing a fixed size array is always done by slice (data + count)");
@@ -2365,7 +2373,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
             TypeArray *array_type = (TypeArray *) param->type;
             array_type->array_kind = ARRAY_SLICE;
             report_error_ast(typer->parser, LABEL_HINT, (Ast *)array_type, "Make the parameter a slice type: %s", type_to_str((Type *)array_type));
-            return false;
+            return NULL;
         }
 
         if (param->type->kind == TYPE_VARIADIC) {
@@ -2374,7 +2382,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
             if (i != func_defn->parameters.count - 1 && !func_defn->has_default_parameters) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *) param, "Variadic parameters must appear as the last normal parameter");
-                return false;
+                return NULL;
             }
         }
     }
@@ -2383,7 +2391,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     for (int i = 0; i < func_defn->return_types.count; i++) {
         Type **return_type_ptr = &((Type **)func_defn->return_types.items)[i];
         Type *resolved_type = resolve_type(typer, *return_type_ptr);
-        if (!resolved_type) return false;
+        if (!resolved_type) return NULL;
         *return_type_ptr = resolved_type;
 
         if (func_defn->return_types.count > 1 && resolved_type->kind == TYPE_VOID) {
@@ -2396,7 +2404,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
             array_type->array_kind = ARRAY_SLICE;
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)resolved_type, "Use of fixed size array as return type. Passing a fixed size array is always done by slice (data + count)");
             report_error_ast(typer->parser, LABEL_HINT, (Ast *)array_type, "Make the return type a slice type: %s", type_to_str((Type *)array_type));
-            return false;
+            return NULL;
         }
     }
 
@@ -2405,19 +2413,19 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         if (func_defn->return_types.count > 1) {
             Type *last_return_type = ((Type **)func_defn->return_types.items)[func_defn->return_types.count - 1];
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)last_return_type, "Only 1 return type is allowed for external C functions");
-            return false;
+            return NULL;
         }
         if (func_defn->is_method) {
             AstIdentifier *receiver = ((AstIdentifier **)func_defn->parameters.items)[0];
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver, "Methods are not allowed for external C functions");
-            return false;
+            return NULL;
         }
     }
 
     TypeFunction *func_type = ast_allocate(typer->parser, sizeof(TypeFunction));
     func_type->head.head.kind  = AST_TYPE;
-    func_type->head.head.start = func_defn->head.start;
-    func_type->head.head.end   = func_defn->head.end;
+    func_type->head.head.start = func_defn->head.head.start;
+    func_type->head.head.end   = func_defn->head.head.end;
     func_type->head.kind       = TYPE_FUNCTION;
     func_type->node            = func_defn;
 
@@ -2443,7 +2451,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
             else {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must be a struct or a pointer to a struct. Got type %s", text_bold(type_to_str(receiver_type)));
                 report_error_ast(typer->parser, LABEL_NOTE, NULL, "Methods on arbitrary types is still unsupported");
-                return false;
+                return NULL;
             }
         }
         else if (receiver_type->kind == TYPE_STRUCT) {
@@ -2461,8 +2469,13 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         }
 
         // Add the function as a member of the receiver struct
-        AstIdentifier *method = generate_identifier(typer->parser, func_defn->identifier->name, (Type *)func_type, IDENTIFIER_IS_STRUCT_MEMBER | IDENTIFIER_IS_STRUCT_METHOD);
-        add_identifier_to_scope(typer->parser, receiver_struct->node->methods, method);
+        func_defn->identifier->flags |= IDENTIFIER_IS_STRUCT_MEMBER | IDENTIFIER_IS_STRUCT_METHOD;
+        AstIdentifier *existing = add_identifier_to_scope(typer->parser, receiver_struct->node->methods, func_defn->identifier);
+        if (existing != NULL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)func_defn->identifier, "Redeclaration of method '%s'", func_defn->identifier->name);
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)existing, "Here is the previous declaration");
+            return NULL;
+        }
 
         // @Cleanup @Speed: Use a string buffer located in Parser to allocate the strings instead of malloc
         char *symbol_name = malloc(strlen(receiver_struct->identifier->name) + 8 + strlen(func_defn->identifier->name));
@@ -2476,16 +2489,17 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
     // Mark the function as fully typed, when we have typechecked the function signature
     // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again
-    func_defn->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
+    func_defn->head.head.flags |= AST_FLAG_IS_TYPE_CHECKED;
+    func_defn->head.type = (Type *) func_type;
 
     // Check the body
     bool ok = check_block(typer, func_defn->body);
-    if (!ok) return false;
-    typer->enclosing_function = false;
+    if (!ok) return NULL;
+    typer->enclosing_function = NULL;
 
     // Do a narrow scan for a return statement
     ok = check_if_function_needs_a_return(typer, func_defn);
-    if (!ok) return false;
+    if (!ok) return NULL;
 
 
     // Build up the lowered representation of the parameter list for the function (to simplify codegen)
@@ -2564,7 +2578,7 @@ bool check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         reserve_local_storage(func_defn, param->type->size);
     }
 
-    return true;
+    return (Type *) func_type;
 }
 
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
@@ -2950,6 +2964,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
     else if (expr->head.kind == AST_CAST)           result = check_cast(typer, (AstCast *)(expr), ctx_type);
     else if (expr->head.kind == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
+    else if (expr->head.kind == AST_FUNCTION_DEFN)  result = check_function_defn(typer, (AstFunctionDefn *)(expr));
     else if (expr->head.kind == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), ctx_type);
     else if (expr->head.kind == AST_ARRAY_LITERAL)  result = check_array_literal(typer, (AstArrayLiteral *)(expr), ctx_type);
     else if (expr->head.kind == AST_ENUM_LITERAL)   result = check_enum_literal(typer, (AstEnumLiteral *)(expr), ctx_type);

@@ -6,7 +6,7 @@ toHex :: method (c: Color) -> string {
     return "#FF00FF";
 }
 
-// THIS SHOULD FAIL
+// This should fail with "Redeclaration of method 'toHex'""
 toHex :: method (c: Color) -> string {
     return "#FF00FF";
 }

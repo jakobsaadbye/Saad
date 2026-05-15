@@ -360,7 +360,7 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
                 report_error_ast(parser, LABEL_ERROR, (Ast *)stmt, "Inner enum definitions are not yet supported");
                 return NULL;
             }
-            else if (stmt->kind == AST_FUNCTION_DEFN) valid_stmt = true;
+            else if (stmt->flags & AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN) valid_stmt = true;
             else if (stmt->kind == AST_EXPR_STMT)     valid_stmt = true;
 
             if (!valid_stmt) {
@@ -370,7 +370,7 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
         }
 
         if (parser->inside_extern_block) {
-            if (stmt->kind != AST_FUNCTION_DEFN) {
+            if (!(stmt->flags & AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN) && stmt->kind != AST_EXPR_STMT) {
                 report_error_ast(parser, LABEL_ERROR, (Ast *)stmt, "Invalid statement. Only function definitions are allowed inside an extern block");
                 return NULL;
             }
@@ -395,9 +395,9 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
     return block;
 }
 
-bool starts_declaration(Parser *parser, Token token) {
+bool starts_declaration(Parser *parser, Token token, int start_lookahead) {
     Token next = token;
-    int cursor = 0;
+    int cursor = start_lookahead;
 
     while (true) {
         if (next.type == TOKEN_LITERAL_IDENTIFIER) {
@@ -424,23 +424,55 @@ bool starts_declaration(Parser *parser, Token token) {
     return false;
 }
 
-bool starts_function_defn(Parser *parser, Token token) {
-    if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON) {
-        Token next = peek_token(parser, 2);
+// zoo :: method (a: int) -> void {}
+// foo :: (a: int) -> void {}
+// bar :: () {}
 
-        if (next.type == TOKEN_METHOD) {
-            next = peek_token(parser, 3);
-            if (next.type == '(') {
+bool starts_function_defn(Parser *parser) {
+    int cursor = 0;
+
+    if (peek_token(parser, cursor).type == TOKEN_METHOD) {
+        cursor += 1;
+    }
+
+    if (peek_token(parser, cursor).type == '(') {
+        cursor += 1;
+
+        // Check for empty zero parameter functions that otherwise could look like a normal paranthesis expression
+        if (peek_token(parser, cursor).type == ')') {
+            cursor += 1;
+
+            if (peek_token(parser, cursor).type == TOKEN_RIGHT_ARROW || peek_token(parser, cursor).type == '{') {
                 return true;
             }
+
+            return false;
         }
-        
-        else if (next.type == '(') {
+
+        if (starts_declaration(parser, peek_token(parser, cursor), cursor)) {
             return true;
         }
     }
 
     return false;
+
+    // OLD CODE:
+    // if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON) {
+    //     Token next = peek_token(parser, 2);
+
+    //     if (next.type == TOKEN_METHOD) {
+    //         next = peek_token(parser, 3);
+    //         if (next.type == '(') {
+    //             return true;
+    //         }
+    //     }
+        
+    //     else if (next.type == '(') {
+    //         return true;
+    //     }
+    // }
+
+    // return false;
 }
 
 Ast *parse_statement(Parser *parser) {
@@ -450,13 +482,13 @@ Ast *parse_statement(Parser *parser) {
     
     Token token = peek_next_token(parser);
 
-    if (starts_function_defn(parser, token)) {
-        stmt = (Ast *)(parse_function_defn(parser));
-        statement_ends_with_semicolon = parser->inside_extern_block;
-        matched_a_statement = true;
-    }
+    // if (starts_function_defn(parser, token)) {
+    //     stmt = (Ast *)(parse_function_defn(parser));
+    //     statement_ends_with_semicolon = parser->inside_extern_block;
+    //     matched_a_statement = true;
+    // }
 
-    else if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_STRUCT) {
+    if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_STRUCT) {
         stmt = (Ast *)(parse_struct_defn(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
@@ -468,10 +500,14 @@ Ast *parse_statement(Parser *parser) {
         matched_a_statement = true;
     }
 
-    else if (starts_declaration(parser, token)) {
+    else if (starts_declaration(parser, token, 0)) {
         stmt = (Ast *)(parse_declaration(parser));
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
+
+        if (stmt && stmt->flags & AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN) {
+            statement_ends_with_semicolon = false;
+        }
     }
 
     else if (token.type == TOKEN_IMPORT) {
@@ -603,7 +639,7 @@ Ast *parse_statement(Parser *parser) {
         if (next.type != ';') {
             Token token_missing_semicolon = peek_token(parser, -2);
             report_error_range(parser, token_missing_semicolon.end, token_missing_semicolon.end, "Syntax Error: Expected a semi-colon");
-            exit(1);
+            return NULL;
         }
         eat_token(parser);
     }
@@ -829,11 +865,10 @@ TypeFunction *parse_function_signature(Parser *parser) {
         }
     }
 
-
-    func_defn->head.kind   = AST_FUNCTION_DEFN;
-    func_defn->head.file   = parser->current_file;
-    func_defn->head.start  = func_defn->paren_start_token.start;
-    func_defn->head.end    = next.end;
+    func_defn->head.head.kind   = AST_FUNCTION_DEFN;
+    func_defn->head.head.file   = parser->current_file;
+    func_defn->head.head.start  = func_defn->paren_start_token.start;
+    func_defn->head.head.end    = next.end;
     func_defn->is_extern   = is_extern;
     func_defn->is_method   = false;
     func_defn->is_lambda   = true;
@@ -845,8 +880,8 @@ TypeFunction *parse_function_signature(Parser *parser) {
     TypeFunction *func_type    = ast_allocate(parser, sizeof(TypeFunction));
     func_type->head.head.kind  = AST_TYPE;
     func_type->head.head.file  = parser->current_file;
-    func_type->head.head.start = func_defn->head.start;
-    func_type->head.head.end   = func_defn->head.end;
+    func_type->head.head.start = func_defn->head.head.start;
+    func_type->head.head.end   = func_defn->head.head.end;
     func_type->head.kind       = TYPE_FUNCTION;
     func_type->head.size       = 8;
     func_type->node            = func_defn;
@@ -1834,15 +1869,15 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->parameters   = da_init(2, sizeof(AstIdentifier *));
     func_defn->return_types = da_init(2, sizeof(Type *));
     
-    Token ident_token = peek_next_token(parser);
-    expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
-    eat_token(parser);
+    // Token ident_token = peek_next_token(parser);
+    // expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
+    // eat_token(parser);
+
+    // Token next = peek_next_token(parser);
+    // expect(parser, next, TOKEN_DOUBLE_COLON);
+    // eat_token(parser);
 
     Token next = peek_next_token(parser);
-    expect(parser, next, TOKEN_DOUBLE_COLON);
-    eat_token(parser);
-
-    next = peek_next_token(parser);
 
     bool func_is_method = false;
     if (next.type == TOKEN_METHOD) {
@@ -1907,25 +1942,26 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     close_block(parser);
     parser->enclosing_function = NULL;
 
-    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // The type of the identifier is set to a type representation of this function later down
+    // OLD: make_identifier_from_token(parser, ident_token, NULL);
+    AstIdentifier *ident = make_identifier_from_string(parser, "lambda", NULL); // The type of the identifier is set to a type representation of this function later down
     ident->flags |= IDENTIFIER_IS_NAME_OF_FUNCTION;
 
     if (func_is_method) {
         // The method will be bound to the receiving struct in typing
     } else {
         // Add the function to the current scope
-        AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
-        if (existing) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of identifier '%s'", ident->name);
-            report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the previous declaration of '%s'", ident->name);
-            return NULL;
-        }
+        // AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
+        // if (existing) {
+        //     report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of identifier '%s'", ident->name);
+        //     report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the previous declaration of '%s'", ident->name);
+        //     return NULL;
+        // }
     }
 
-    func_defn->head.kind   = AST_FUNCTION_DEFN;
-    func_defn->head.file   = parser->current_file;
-    func_defn->head.start  = ident_token.start;
-    func_defn->head.end    = func_defn->body->head.start;
+    func_defn->head.head.kind   = AST_FUNCTION_DEFN;
+    func_defn->head.head.file   = parser->current_file;
+    func_defn->head.head.start  = func_defn->paren_start_token.start;
+    func_defn->head.head.end    = func_defn->body->head.start;
     func_defn->identifier  = ident;
     func_defn->is_method   = func_is_method;
     func_defn->num_bytes_locals       = 0;
@@ -1936,8 +1972,8 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     TypeFunction *func_type    = type_alloc(&parser->type_table, sizeof(TypeFunction));
     func_type->head.head.kind  = AST_TYPE;
     func_type->head.head.file  = parser->current_file;
-    func_type->head.head.start = func_defn->head.start;
-    func_type->head.head.end   = func_defn->head.end;
+    func_type->head.head.start = func_defn->head.head.start;
+    func_type->head.head.end   = func_defn->head.head.end;
     func_type->head.kind       = TYPE_FUNCTION;
     func_type->head.size       = 8;
     func_type->node            = func_defn;
@@ -2282,7 +2318,29 @@ AstDeclaration *parse_declaration(Parser *parser) {
         for (int i = 0; i < decl->idents.count; i++) {
             AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
             ident->flags |= IDENTIFIER_IS_CONSTANT;
+
+            // Assign constant functions the name of the constant identifier
+            if (i < decl->values.count) {
+                AstExpr *expr = ((AstExpr **)decl->values.items)[i];
+
+                if (expr->head.kind == AST_FUNCTION_DEFN) {
+                    AstFunctionDefn *func_defn = (AstFunctionDefn *) expr;
+
+                    decl->head.flags |= AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN;
+
+                    // Transfer all identifier info from the function to this constant identifier
+                    ident->type = func_defn->identifier->type;
+                    ident->flags |= func_defn->identifier->flags | IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN;
+                    if (func_defn->is_method) {
+                        ident->flags |= IDENTIFIER_IS_STRUCT_METHOD;
+                    }
+
+                    // Bind the function definitions' identifier to this constant identifier
+                    func_defn->identifier = ident;
+                }
+            }
         }
+
     }
     else {
         report_error_token(parser, LABEL_ERROR, next, "Invalid declaration");
@@ -2309,7 +2367,7 @@ AstDeclaration *parse_declaration(Parser *parser) {
         AstIdentifier *existing = NULL;
         if (parser->current_scope->belongs_to_struct && decl->flags & DECLARATION_CONSTANT) {
             existing = add_declaration_to_scope(parser, parser->current_scope->belongs_to_struct->static_members, decl);
-        } 
+        }
         else {
             existing = add_declaration_to_scope(parser, parser->current_scope, decl);
         }
@@ -2537,6 +2595,11 @@ AstExpr *parse_leaf(Parser *parser) {
         return (AstExpr *) sce;
     }
 
+    if (starts_function_defn(parser)) {
+        AstFunctionDefn *func_defn = parse_function_defn(parser);
+        return (AstExpr *) func_defn;
+    }
+
     if (t.type == '(') {
         eat_token(parser);
         AstExpr *sub_expr = parse_expression(parser, MIN_PRECEDENCE);
@@ -2759,6 +2822,9 @@ void vomit_token(Parser *parser) {
 }
 
 Token peek_token(Parser *parser, int lookahead) {
+    if (parser->current_token_index + lookahead >= parser->lexer->tokens.count) {
+        return (Token){.type = TOKEN_END};
+    }
     return ((Token *)parser->lexer->tokens.items)[parser->current_token_index + lookahead];
 }
 

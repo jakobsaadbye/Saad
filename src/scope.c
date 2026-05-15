@@ -91,6 +91,12 @@ AstIdentifier *add_identifier_to_scope(Parser *parser, AstBlock *scope, AstIdent
 AstIdentifier *add_declaration_to_scope(Parser *parser, AstBlock *scope, AstDeclaration *decl) {
     for (int i = 0; i < decl->idents.count; i++) {
         AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+
+        if (ident->flags & IDENTIFIER_IS_STRUCT_METHOD) {
+            // Skip, as the identifier will be added to the receiving struct scope in typechecking
+            continue;
+        }
+
         AstIdentifier *existing = add_identifier_to_scope(parser, scope, ident);
         if (existing) {
             report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of variable '%s'", ident->name);

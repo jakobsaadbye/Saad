@@ -99,7 +99,8 @@ typedef enum AstFlags {
     AST_FLAG_IS_CODE_GENED                         = 1 << 3, // Set if the Ast Node has gone through codegeneration e.g function definitions, enums etc. so we don't duplicate symbols in the outputted .asm
     AST_FLAG_IS_C_VARARG                           = 1 << 4, // Set if the argument is a variadic c argument
     AST_FLAG_EXPR_IS_SPREADED                      = 1 << 5, // Set if the expression has had the operator ... applied to it
-    AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER            = 1 << 7, // Set on an array access on a pointer
+    AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER           = 1 << 7, // Set on an array access on a pointer
+    AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN        = 1 << 8, // Set on constant identifiers having a function as value
 } AstFlags;
 
 typedef struct Ast {
@@ -142,13 +143,14 @@ typedef struct AstExtern {
 } AstExtern;
 
 typedef enum IdentifierFlags {
-    IDENTIFIER_IS_NAME_OF_ENUM     = 1 << 0,
-    IDENTIFIER_IS_NAME_OF_STRUCT   = 1 << 1,
-    IDENTIFIER_IS_NAME_OF_FUNCTION = 1 << 2,
-    IDENTIFIER_IS_STRUCT_MEMBER    = 1 << 3,
-    IDENTIFIER_IS_STRUCT_METHOD    = 1 << 4,
-    IDENTIFIER_IS_CONSTANT         = 1 << 5,
-    IDENTIFIER_IS_RESOLVED         = 1 << 6,
+    IDENTIFIER_IS_NAME_OF_ENUM      = 1 << 0,
+    IDENTIFIER_IS_NAME_OF_STRUCT    = 1 << 1,
+    IDENTIFIER_IS_NAME_OF_FUNCTION  = 1 << 2,
+    IDENTIFIER_IS_STRUCT_MEMBER     = 1 << 3,
+    IDENTIFIER_IS_STRUCT_METHOD     = 1 << 4,
+    IDENTIFIER_IS_CONSTANT          = 1 << 5,
+    IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN = 1 << 6,
+    IDENTIFIER_IS_RESOLVED          = 1 << 7,
 } IdentifierFlags;
 
 typedef struct AstIdentifier {
@@ -278,7 +280,7 @@ typedef enum CallingConv {
 } CallingConv;
 
 typedef struct AstFunctionDefn {
-    Ast             head;
+    AstExpr         head;
     AstIdentifier  *identifier;
     Token           method_token;  // set if its a method
     Token           paren_start_token;

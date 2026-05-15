@@ -162,7 +162,8 @@ AstExpr *simplify_array_literal(ConstEvaluator *ce, AstBlock *scope, AstArrayLit
 
 AstExpr *simplify_expression(ConstEvaluator *ce, AstBlock *scope, AstExpr *expr) {
     switch (expr->head.kind) {
-        case AST_FUNCTION_CALL: return expr; // don't evaluate
+        case AST_FUNCTION_CALL: return expr;
+        case AST_FUNCTION_DEFN: return expr;
         case AST_BINARY:        return simplify_binary(ce, scope, (AstBinary *)(expr));
         case AST_UNARY:         return simplify_unary(ce, scope, (AstUnary *)(expr));
         case AST_LITERAL: {

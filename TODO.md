@@ -1,6 +1,13 @@
 Todo list:
 -------------------
 
+Functions as values refactor:
+
+[]: Defining functions within functions:
+    - Make enclosing_function be a stack that can get pushed / popped whenever we leave/enter a function definition. Needed to have inner functions
+
+
+
 Bug backlog:
 ----------------
 Fix pointer dereference on the left hand side of an assignment being broken:

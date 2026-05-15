@@ -1277,7 +1277,7 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
 }
 
 void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
-    if (func_defn->head.flags & AST_FLAG_IS_CODE_GENED) {
+    if (func_defn->head.head.flags & AST_FLAG_IS_CODE_GENED) {
         return;
     }
 
@@ -1285,7 +1285,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
 
     if (func_defn->is_extern) {
         sb_append(&cg->code_header, "   extern %s\n", func_defn->identifier->name);
-        func_defn->head.flags |= AST_FLAG_IS_CODE_GENED;
+        func_defn->head.head.flags |= AST_FLAG_IS_CODE_GENED;
         return;
     }
 
@@ -1398,7 +1398,7 @@ void emit_function_defn(CodeGenerator *cg, AstFunctionDefn *func_defn) {
     POP(RBP);
     sb_append(&cg->code, "   ret\n");
 
-    func_defn->head.flags |= AST_FLAG_IS_CODE_GENED;
+    func_defn->head.head.flags |= AST_FLAG_IS_CODE_GENED;
 }
 
 void emit_cast(CodeGenerator *cg, AstCast *cast) {
@@ -2833,8 +2833,17 @@ void emit_constant_to_rdata(CodeGenerator *cg, AstIdentifier *ident) {
 
 void emit_declaration(CodeGenerator *cg, AstDeclaration *decl) {
     if (decl->flags & DECLARATION_CONSTANT) {
+
         for (int i = 0; i < decl->idents.count; i++) {
             AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+
+            if (ident->flags & IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN) {
+                // Skip writing to rdata
+                AstFunctionDefn *func_defn = (AstFunctionDefn *) ident->value;
+                emit_function_defn(cg, func_defn);
+                continue;
+            }
+
             emit_constant_to_rdata(cg, ident);
         }
 
