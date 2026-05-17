@@ -10,6 +10,7 @@ typedef struct AstBlock AstBlock;
 typedef struct AstStruct AstStruct;
 typedef struct AstEnum AstEnum;
 typedef struct AstFile AstFile;
+typedef struct AstFunctionDefn AstFunctionDefn;
 typedef struct Type Type;
 typedef struct TypeTable TypeTable;
 typedef struct TypeStruct TypeStruct;
@@ -298,7 +299,14 @@ typedef struct AstFunctionDefn {
     bool            is_extern;
     bool            is_variadic;
     bool            has_default_parameters;
-    
+
+    // Misc. stuff
+    AstFunctionDefn *parent_function_defn;
+
+    // Parser specific stuff
+    bool            parser_is_inside_parameter_list;
+
+    // Codegen specific stuff
     int   num_bytes_locals;      // Number of bytes allocated for variables in the function
     int   num_bytes_temporaries; // Number of bytes allocated for temporaries in the function
     int   base_ptr;              // Where rbp is currently at in codegen

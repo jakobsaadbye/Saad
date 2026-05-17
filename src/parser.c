@@ -738,6 +738,7 @@ bool parse_parameter_list(Parser *parser, AstFunctionDefn *func_defn) {
     func_defn->has_default_parameters  = false;
 
     parser->inside_parameter_list = true;
+    func_defn->parser_is_inside_parameter_list = true;
     func_defn->body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters can be pushed down into the scope of the body
     bool first_parameter_seen = false;
     while (true) {
@@ -774,7 +775,7 @@ bool parse_parameter_list(Parser *parser, AstFunctionDefn *func_defn) {
             }
         }
 
-        if (decl->flags & (DECLARATION_CONSTANT)) {
+        if (decl->flags & DECLARATION_CONSTANT) {
             report_error_ast(parser, LABEL_ERROR, (Ast *) decl, "Constants are not allowed as function arguments");
             return false;
         }
@@ -799,41 +800,61 @@ bool parse_parameter_list(Parser *parser, AstFunctionDefn *func_defn) {
 
         eat_token(parser);
     }
-    parser->inside_parameter_list = false;
+    func_defn->parser_is_inside_parameter_list = false;
+    parser->inside_parameter_list = func_defn->parent_function_defn && func_defn->parent_function_defn->parser_is_inside_parameter_list;
 
     return true;
 }
 
-TypeFunction *parse_function_signature(Parser *parser) {
-    AstFunctionDefn *func_defn = (AstFunctionDefn *)(ast_allocate(parser, sizeof(AstFunctionDefn)));
-    func_defn->parameters   = da_init(2, sizeof(AstIdentifier *));
-    func_defn->return_types = da_init(2, sizeof(Type *));
-
-    bool ok = parse_parameter_list(parser, func_defn);
-    if (!ok) return NULL;
-
-    // Parse return type(s)
+bool parse_function_return_types(Parser *parser, AstFunctionDefn *func_defn) {
+    // TODO(jsd): Handle case where the return type is a function
     Token next = peek_next_token(parser);
+    
+    bool return_types_wrapped_in_parenthesis = false;
 
     if (next.type == TOKEN_RIGHT_ARROW) {
         eat_token(parser);
 
         while (true) {
+            next = peek_next_token(parser);
+
+            if (next.type == '(' && !return_types_wrapped_in_parenthesis) {
+                eat_token(parser);
+                // next = peek_next_token(parser);
+                return_types_wrapped_in_parenthesis = true;
+            }
+
             Type *return_type = parse_type(parser);
             if (!return_type) {
-                return NULL;
+                return false;
             }
             da_append(&func_defn->return_types, return_type);
 
             next = peek_next_token(parser);
 
             if (next.type == ',') {
+
+                if (parser->inside_parameter_list && !return_types_wrapped_in_parenthesis) {
+                    // Stop parsing return types as the next thing will be a parameter rather than a return type.
+                    // This is needed to prevent this ambigious case:
+                    //
+                    // foo :: (fn1: () -> void, fn2: () -> void)
+                    //                          ^~~~
+                    // Here 'fn2' would look like a return type while its actually the next parameter in the list.
+                    // So we require a set of parenthesis around return types
+                    break;
+                }
+
                 eat_token(parser);
                 continue;
-            } else {
+            }
+            else if (return_types_wrapped_in_parenthesis && next.type == ')') {
+                eat_token(parser);
                 break;
             }
-
+            else {
+                break;
+            }
         }
     } else {
         // Make void the return type
@@ -841,35 +862,30 @@ TypeFunction *parse_function_signature(Parser *parser) {
         da_append(&func_defn->return_types, void_type);
     }
 
+    return true;
+}
+
+TypeFunction *parse_function_signature(Parser *parser) {
+    AstFunctionDefn *func_defn = ast_allocate(parser, sizeof(AstFunctionDefn));
+    func_defn->parameters   = da_init(2, sizeof(AstIdentifier *));
+    func_defn->return_types = da_init(2, sizeof(Type *));
+    func_defn->parent_function_defn = parser->enclosing_function;
+
+    bool ok = parse_parameter_list(parser, func_defn);
+    if (!ok) return NULL;
+
+    ok = parse_function_return_types(parser, func_defn);
+    if (!ok) return NULL;
+
+    Token signature_end_token = peek_next_token(parser);
+
     close_block(parser);
-
-    // @Cleanup: Is now deprecated. Use extern {} block instead
-    // Parse extern directive @Deprecate
-    func_defn->calling_convention = CALLING_CONV_SAAD;
-    bool is_extern = false;
-
-    next = peek_next_token(parser);
-    if (next.type == '#') {
-        AstDirective *dir = parse_directive(parser);
-        if (!dir) return NULL;
-
-        if (dir->kind != DIRECTIVE_EXTERN) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *)dir, "The #%s directive is not valid in this context", directive_names[dir->kind]);
-            return NULL;
-        }
-
-        is_extern = true;
-
-        if (dir->extern_abi == ABI_C) {
-            func_defn->calling_convention = CALLING_CONV_MSVC;
-        }
-    }
 
     func_defn->head.head.kind   = AST_FUNCTION_DEFN;
     func_defn->head.head.file   = parser->current_file;
     func_defn->head.head.start  = func_defn->paren_start_token.start;
-    func_defn->head.head.end    = next.end;
-    func_defn->is_extern   = is_extern;
+    func_defn->head.head.end    = signature_end_token.end;
+    func_defn->is_extern   = false;
     func_defn->is_method   = false;
     func_defn->is_lambda   = true;
     func_defn->num_bytes_locals       = 0;
@@ -952,7 +968,7 @@ Type *parse_type(Parser *parser) {
         return ti;
     }
 
-    if (next.type == '(') {
+    if (starts_function_defn(parser)) {
         // Function
         TypeFunction *func_type = parse_function_signature(parser);
         if (func_type == NULL) return NULL;
@@ -1869,6 +1885,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->parameters   = da_init(2, sizeof(AstIdentifier *));
     func_defn->return_types = da_init(2, sizeof(Type *));
     func_defn->is_lambda = true;
+    func_defn->parent_function_defn = parser->enclosing_function;
 
     Token next = peek_next_token(parser);
 
@@ -1892,34 +1909,8 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         }
     }
 
-    // Parse return type(s)
-    next = peek_next_token(parser);
-
-    if (next.type == TOKEN_RIGHT_ARROW) {
-        eat_token(parser);
-
-        while (true) {
-            Type *return_type = parse_type(parser);
-            if (!return_type) {
-                return NULL;
-            }
-            da_append(&func_defn->return_types, return_type);
-
-            next = peek_next_token(parser);
-
-            if (next.type == ',') {
-                eat_token(parser);
-                continue;
-            } else {
-                break;
-            }
-
-        }
-    } else {
-        // Make void the return type
-        Type *void_type = primitive_type(PRIMITIVE_VOID);
-        da_append(&func_defn->return_types, void_type);
-    }
+    ok = parse_function_return_types(parser, func_defn);
+    if (!ok) return NULL;
 
     func_defn->calling_convention = CALLING_CONV_SAAD;
     if (parser->inside_extern_block) {
@@ -1935,28 +1926,15 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     close_block(parser);
     parser->enclosing_function = NULL;
 
-    // OLD: make_identifier_from_token(parser, ident_token, NULL);
     AstIdentifier *ident = make_identifier_from_string(parser, "lambda", NULL); // The type of the identifier is set to a type representation of this function later down
     ident->flags |= IDENTIFIER_IS_NAME_OF_FUNCTION;
-
-    if (func_is_method) {
-        // The method will be bound to the receiving struct in typing
-    } else {
-        // Add the function to the current scope
-        // AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
-        // if (existing) {
-        //     report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of identifier '%s'", ident->name);
-        //     report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the previous declaration of '%s'", ident->name);
-        //     return NULL;
-        // }
-    }
 
     func_defn->head.head.kind   = AST_FUNCTION_DEFN;
     func_defn->head.head.file   = parser->current_file;
     func_defn->head.head.start  = func_defn->paren_start_token.start;
     func_defn->head.head.end    = func_defn->body->head.start;
-    func_defn->identifier  = ident;
-    func_defn->is_method   = func_is_method;
+    func_defn->identifier       = ident;
+    func_defn->is_method        = func_is_method;
     func_defn->num_bytes_locals       = 0;
     func_defn->num_bytes_temporaries  = 0;
     func_defn->base_ptr               = 0;

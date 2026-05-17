@@ -3,8 +3,8 @@ Todo list:
 
 Functions as values refactor:
 
-[]: Defining functions within functions:
-    - Make enclosing_function be a stack that can get pushed / popped whenever we leave/enter a function definition. Needed to have inner functions
+[]: The scope of a new function should get their own child scope from the global scope instead of being pushed onto the normal scope stack
+[]: Figure out what the hell to do with annonymous methods? Maybe just don't allow them
 
 
 

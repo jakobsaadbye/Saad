@@ -1277,14 +1277,18 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     // Do the actual call
     if (call->is_lambda_call) {
         POP(RAX);
+        sb_append(cg->code, "   sub\t\trsp, 32\n");
         sb_append(cg->code, "   call\t\trax\n");
+        sb_append(cg->code, "   add\t\trsp, 32\n");
     }
     else if (func_defn->is_lambda) {
         // @Cleanup: This shouldn't be this way!!!
         AstIdentifier *param = lookup_from_scope(cg->parser, cg->current_scope, call->identifer->name);
         assert(param);
         sb_append(cg->code, "   mov\t\trax, %d[rbp]\n", param->stack_offset);
+        sb_append(cg->code, "   sub\t\trsp, 32\n");
         sb_append(cg->code, "   call\t\trax\n");
+        sb_append(cg->code, "   add\t\trsp, 32\n");
     } 
     else {
         sb_append(cg->code, "   ; %s \n", get_lowered_function_argument_list_string(call));

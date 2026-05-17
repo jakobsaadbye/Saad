@@ -1,20 +1,23 @@
 import "fmt";
 
-Button :: struct {
-    onClick: (e: int) -> void;
+buttonComponent :: (onClick1: () -> (int, int), onClick2: () -> void) {
+    onClick1();
+    onClick2();
+}
+
+foo :: () -> int, int {
+    return 1, 2;
 }
 
 main :: () {
-    myButton := Button{
-        onClick = (v: int) {
-            Print("Click! %", v);
-        }
-    };
+    a, b := foo();
+    Print("% %", a, b);
+    // buttonComponent(() -> (int, int) {
+    //     Print("Click1");
+    //     return 1, 2;
+    // }, () {
+    //     Print("Click2");
+    // });
 
-    doSomething :: (a: int) -> void {
-        Print("%", a);
-    }
 
-    doSomething(10);
-    myButton.onClick(5);
 }

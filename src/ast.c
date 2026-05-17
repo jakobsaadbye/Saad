@@ -216,6 +216,9 @@ char *type_to_str(Type *type) {
             for (int i = 0; i < func->node->return_types.count; i++) {
                 Type *return_type = ((Type **)func->node->return_types.items)[i];
                 sb_append(&sb, "%s", type_to_str(return_type));
+                if (i + 1 < func->node->return_types.count) {
+                    sb_append(&sb, ", ");
+                }
             }
             sb_append(&sb, ")");
         }

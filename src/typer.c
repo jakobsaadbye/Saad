@@ -1,7 +1,7 @@
 #include "const_expr.c"
 #include "lib/string_builder.h"
 
-#define DEBUG_THERE_WERE_ERRORS 0
+#define DEBUG_THERE_WERE_ERRORS 1
 
 typedef struct Typer {
     Parser *parser;
