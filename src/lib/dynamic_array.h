@@ -19,7 +19,9 @@ DynamicArray da_init(unsigned int init_cap, unsigned int item_size);
 void _da_append(DynamicArray *da, void *item);
 void _da_insert(DynamicArray *da, void *item, int index);
 void *da_get(DynamicArray da, int index);
+void *da_get_deref(DynamicArray da, int index);
 void *da_pop(DynamicArray *da);
+void *da_pop_deref(DynamicArray *da);
 void da_remove(DynamicArray *da, int index);
 void da_free(DynamicArray *da);
 
@@ -97,9 +99,24 @@ void *da_get(DynamicArray da, int index) {
     return (void *) item_ptr;
 }
 
+void *da_get_deref(DynamicArray da, int index) {
+    void **item = da_get(da, index);
+    return *item;
+}
+
+// Returns a pointer to the removed element
 void *da_pop(DynamicArray *da) {
+    void *item = da_get(*da, -1);
     da_remove(da, -1);
-    return da_get(*da, -1);
+    return item;
+}
+
+// Returns the dereferenced pointer to the last element. Useful when storing an array of pointers to other elements and you just want the pointer to the element
+// instead of pointer to pointer of element
+void *da_pop_deref(DynamicArray *da) {
+    void **item = da_get(*da, -1);
+    da_remove(da, -1);
+    return *item;
 }
 
 // Return a pointer to the removed element 
@@ -108,20 +125,19 @@ void da_remove(DynamicArray *da, int index) {
     if (index == -1) index = da->count - 1; // Special case to get last element
     if (index >= da->count || index < 0) return;
 
-
     // Shift over all the bytes by one item size
     unsigned char *ptr = da->items + (index * da->item_size);
 
     if (index == da->count - 1) {
         // Removing the last element, we can simply NULL it without doing any shifting on the rest of the array
-        memset(ptr, 0, da->item_size);
+        // memset(ptr, 0, da->item_size);
         da->count -= 1;
     } else {
         int after_index = index + 1;
         unsigned char *after = da->items + (after_index * da->item_size);
         memcpy(ptr, after, (da->count - after_index) * da->item_size);
-        unsigned char *last_item = da->items + ((da->count - 1) * da->item_size);
-        memset(last_item, 0, da->item_size);
+        // unsigned char *last_item = da->items + ((da->count - 1) * da->item_size);
+        // memset(last_item, 0, da->item_size);
         da->count -= 1;
     }
 }

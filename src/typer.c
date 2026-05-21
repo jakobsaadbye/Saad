@@ -82,7 +82,7 @@ Typer typer_init(Parser *parser, ConstEvaluator *ce) {
     typer.enclosing_loop      = NULL;
     typer.inside_declaration  = NULL;
     typer.scope_rewrites      = da_init(8, sizeof(void*));
-    typer.struct_wait_list = da_init(8, sizeof(AstIdentifier *));
+    typer.struct_wait_list    = da_init(8, sizeof(AstIdentifier *));
 
     return typer;
 }
@@ -119,7 +119,7 @@ bool check_file(Typer *typer, AstFile *ast_file) {
         if (!ok) {
 
         #if DEBUG_THERE_WERE_ERRORS
-            report_error_ast(typer->parser, LABEL_ERROR, stmt, "Debug error: Something went wrong while typechecking this statement");
+            report_error_ast(typer->parser, LABEL_ERROR, stmt, "Compiler Error: Something went wrong while typechecking this statement");
         #endif
             return false; // @Improvement - Maybe proceed with typechecking if we can still continue after seing the error
         }
@@ -707,12 +707,17 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
     }
     else if (decl->flags & DECLARATION_CONSTANT) {
         for (int i = 0; i < decl->values.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+
+            if ( debug_break((Ast *) ident, "test.sd", 3) ) {
+                int VSCODE = 1;
+            }
+
             AstExpr **value_ptr = &((AstExpr **)decl->values.items)[i];
             AstExpr *value = *value_ptr;
             Type *expr_type = check_expression(typer, value, NULL);
             if (!expr_type) return false;
 
-            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
             ident->type = expr_type;
 
             AstExpr *const_expr = simplify_expression(typer->const_evaluator, typer->current_scope, value);
@@ -2520,21 +2525,17 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         } else {
 
             // @Cleanup @Speed: Use a string buffer located in Parser to allocate the strings instead of malloc
-            char *symbol_name = malloc(40);
+            func_defn->symbol_name = malloc(64);
 
             int id = get_unique_symbol_id(typer);
-            sprintf(symbol_name, "lambda_%d", id);
-
-            func_defn->symbol_name = symbol_name;
+            sprintf(func_defn->symbol_name, "lambda_%d", id);
         }
 
     } else {
         if (func_defn->is_method) {
             // @Cleanup @Speed: Use a string buffer located in Parser to allocate the strings instead of malloc
-            char *symbol_name = malloc(strlen(func_defn->receiver_struct->identifier->name) + 8 + strlen(func_defn->identifier->name));
-            sprintf(symbol_name, "%s.%s", func_defn->receiver_struct->identifier->name, func_defn->identifier->name);
-
-            func_defn->symbol_name = symbol_name;
+            func_defn->symbol_name = malloc(strlen(func_defn->receiver_struct->identifier->name) + 8 + strlen(func_defn->identifier->name));
+            sprintf(func_defn->symbol_name, "%s.%s", func_defn->receiver_struct->identifier->name, func_defn->identifier->name);
         } else {
             func_defn->symbol_name = func_defn->identifier->name;
         }
@@ -3937,14 +3938,19 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 void push_enclosing_function(Typer *typer, AstFunctionDefn *func_defn) {
     da_append(&typer->enclosing_function_stack, func_defn);
     typer->enclosing_function = func_defn;
+
+    da_append(&typer->current_file->flattened_function_defns, func_defn);
 }
 
+// @FutureMe @Beware: This keeping track of an enclosing function stack might need to be tested thougholy as we can jump
+// to a completely different function unrelated to the current function stack f.x when typechecking a function call.
+// In this case we should either remember the enclosing function stack in restore_typer_state to account for this.
 void pop_enclosing_function(Typer *typer) {
     da_remove(&typer->enclosing_function_stack, -1);
     if (typer->enclosing_function_stack.count == 0) {
         typer->enclosing_function = NULL;
     } else {
-        typer->enclosing_function = da_get(typer->enclosing_function_stack, -1);
+        typer->enclosing_function = da_get_deref(typer->enclosing_function_stack, -1);
     }
 }
 

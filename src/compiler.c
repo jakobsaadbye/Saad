@@ -260,13 +260,12 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
         return false;
     }
     
-    
     report.codegen_time_start = clock();
     begin_emit_code(&codegen, main_file);
     make_directory("build");
     emit_generated_code_to_file(&codegen, "./build/out.asm");
     report.codegen_time_end = clock();
-
+    
     report.asm_and_link_time_start = clock();
     system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
     // int exit_code = system("gcc -o ./build/out.exe ./build/out.obj -lkernel32 -lmsvcrt");

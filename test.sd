@@ -1,23 +1,23 @@
 import "fmt";
 
-buttonComponent :: (onClick1: () -> (int, int), onClick2: () -> void) {
-    onClick1();
-    onClick2();
-}
-
-foo :: () -> int, int {
-    return 1, 2;
-}
-
 main :: () {
-    a, b := foo();
-    Print("% %", a, b);
-    // buttonComponent(() -> (int, int) {
-    //     Print("Click1");
-    //     return 1, 2;
-    // }, () {
-    //     Print("Click2");
-    // });
-
-
+    a :: () {};
+    myString :: "Hello world";
+    myInt := 5;
+    Print("%", myInt);
 }
+
+// main :: () {
+
+//     foo := () -> void {
+
+//         // bar := () -> void {
+//         //     Print("foo");
+//         // };
+
+//         Print("foo");
+//         // bar();
+//     };
+
+//     foo();
+// }

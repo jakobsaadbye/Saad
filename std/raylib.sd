@@ -784,7 +784,7 @@ extern "C" {
 
 // Window-related functions
 InitWindow               :: (width: int, height: int, title: *u8); // Initialize window and OpenGL context
-CloseWindow              :: (); // Close window and unload OpenGL context
+CloseWindow              :: () -> void; // Close window and unload OpenGL context
 WindowShouldClose        :: () -> bool; // Check if application should close (KEY_ESCAPE pressed or windows close icon clicked)
 IsWindowReady            :: () -> bool; // Check if window has been initialized successfully
 IsWindowFullscreen       :: () -> bool; // Check if window is currently fullscreen
@@ -796,11 +796,11 @@ IsWindowResized          :: () -> bool; // Check if window has been resized last
 IsWindowState            :: (flag: uint) -> bool; // Check if one specific window flag is enabled
 SetWindowState           :: (flags: uint); // Set window configuration state using flags
 ClearWindowState         :: (flags: uint); // Clear window configuration state flags
-ToggleFullscreen         :: (); // Toggle window state: fullscreen/windowed, resizes monitor to match window resolution
-ToggleBorderlessWindowed :: (); // Toggle window state: borderless windowed, resizes window to match monitor resolution
-MaximizeWindow           :: (); // Set window state: maximized, if resizable
-MinimizeWindow           :: (); // Set window state: minimized, if resizable
-RestoreWindow            :: (); // Set window state: not minimized/maximized
+ToggleFullscreen         :: () -> void; // Toggle window state: fullscreen/windowed, resizes monitor to match window resolution
+ToggleBorderlessWindowed :: () -> void; // Toggle window state: borderless windowed, resizes window to match monitor resolution
+MaximizeWindow           :: () -> void; // Set window state: maximized, if resizable
+MinimizeWindow           :: () -> void; // Set window state: minimized, if resizable
+RestoreWindow            :: () -> void; // Set window state: not minimized/maximized
 SetWindowIcon            :: (image: Image); // Set icon for window (single image, RGBA 32bit)
 SetWindowIcons           :: (images: *Image, count: int); // Set icon for window (multiple images, RGBA 32bit)
 SetWindowTitle           :: (title: *u8); // Set title for window
@@ -810,7 +810,7 @@ SetWindowMinSize         :: (width: int, height: int); // Set window minimum dim
 SetWindowMaxSize         :: (width: int, height: int); // Set window maximum dimensions (for FLAG_WINDOW_RESIZABLE)
 SetWindowSize            :: (width: int, height: int); // Set window dimensions
 SetWindowOpacity         :: (opacity: float); // Set window opacity [0.0f..1.0f]
-SetWindowFocused         :: (); // Set window focused
+SetWindowFocused         :: () -> void; // Set window focused
 GetWindowHandle          :: () -> *void; // Get native window handle
 GetScreenWidth           :: () -> int; // Get current screen width
 GetScreenHeight          :: () -> int; // Get current screen height
@@ -830,35 +830,35 @@ GetMonitorName           :: (monitor: int) -> *u8; // Get the human-readable, UT
 SetClipboardText         :: (text: *u8); // Set clipboard text content
 GetClipboardText         :: () -> *u8; // Get clipboard text content
 GetClipboardImage        :: () -> Image; // Get clipboard image content
-EnableEventWaiting       :: (); // Enable waiting for events on EndDrawing(), no automatic event polling
-DisableEventWaiting      :: (); // Disable waiting for events on EndDrawing(), automatic events polling
+EnableEventWaiting       :: () -> void; // Enable waiting for events on EndDrawing(), no automatic event polling
+DisableEventWaiting      :: () -> void; // Disable waiting for events on EndDrawing(), automatic events polling
 
 // Cursor-related functions
-ShowCursor       :: (); // Shows cursor
-HideCursor       :: (); // Hides cursor
+ShowCursor       :: () -> void; // Shows cursor
+HideCursor       :: () -> void; // Hides cursor
 IsCursorHidden   :: () -> bool; // Check if cursor is not visible
-EnableCursor     :: (); // Enables cursor (unlock cursor)
-DisableCursor    :: (); // Disables cursor (lock cursor)
+EnableCursor     :: () -> void; // Enables cursor (unlock cursor)
+DisableCursor    :: () -> void; // Disables cursor (lock cursor)
 IsCursorOnScreen :: () -> bool; // Check if cursor is on the screen
 
 // Drawing-related functions
 ClearBackground   :: (color: Color); // Set background color (framebuffer clear color)
-BeginDrawing      :: (); // Setup canvas (framebuffer) to start drawing
-EndDrawing        :: (); // End canvas drawing and swap buffers (double buffering)
+BeginDrawing      :: () -> void; // Setup canvas (framebuffer) to start drawing
+EndDrawing        :: () -> void; // End canvas drawing and swap buffers (double buffering)
 BeginMode2D       :: (camera: Camera2D); // Begin 2D mode with custom camera (2D)
-EndMode2D         :: (); // Ends 2D mode with custom camera
+EndMode2D         :: () -> void; // Ends 2D mode with custom camera
 BeginMode3D       :: (camera: Camera3D); // Begin 3D mode with custom camera (3D)
-EndMode3D         :: (); // Ends 3D mode and returns to default 2D orthographic mode
+EndMode3D         :: () -> void; // Ends 3D mode and returns to default 2D orthographic mode
 BeginTextureMode  :: (target: Texture); // Begin drawing to render texture
-EndTextureMode    :: (); // Ends drawing to render texture
+EndTextureMode    :: () -> void; // Ends drawing to render texture
 BeginShaderMode   :: (shader: Shader); // Begin custom shader drawing
-EndShaderMode     :: (); // End custom shader drawing (use default shader)
+EndShaderMode     :: () -> void; // End custom shader drawing (use default shader)
 BeginBlendMode    :: (mode: int); // Begin blending mode (alpha, additive, multiplied, subtract, custom)
-EndBlendMode      :: (); // End blending mode (reset to default: alpha blending)
+EndBlendMode      :: () -> void; // End blending mode (reset to default: alpha blending)
 BeginScissorMode  :: (x: int, y: int, width: int, height: int); // Begin scissor mode (define screen area for following drawing)
-EndScissorMode    :: (); // End scissor mode
+EndScissorMode    :: () -> void; // End scissor mode
 BeginVrStereoMode :: (config: VrStereoConfig); // Begin stereo rendering (requires VR simulator)
-EndVrStereoMode   :: (); // End stereo rendering (requires VR simulator)
+EndVrStereoMode   :: () -> void; // End stereo rendering (requires VR simulator)
 
 // VR stereo config functions for VR simulator
 LoadVrStereoConfig   :: (device: VrDeviceInfo) -> VrStereoConfig; // Load VR stereo config for VR simulator device parameters
@@ -893,8 +893,8 @@ GetTime      :: () -> f64; // Get elapsed time in seconds since InitWindow()
 GetFPS       :: () -> int; // Get current FPS
 
 // Custom frame control functions
-SwapScreenBuffer :: (); // Swap back buffer with front buffer (screen drawing)
-PollInputEvents  :: (); // Register all input events
+SwapScreenBuffer :: () -> void; // Swap back buffer with front buffer (screen drawing)
+PollInputEvents  :: () -> void; // Register all input events
 WaitTime         :: (seconds: f64); // Wait for some time (halt program execution)
 
 // Random values generation functions
@@ -962,9 +962,9 @@ UnloadAutomationEventList     :: (list: AutomationEventList); // Unload automati
 ExportAutomationEventList     :: (list: AutomationEventList, fileName: *u8) -> bool; // Export automation events list as text file
 SetAutomationEventList        :: (list: *AutomationEventList); // Set automation event list to record to
 SetAutomationEventBaseFrame   :: (frame: int); // Set automation event internal base frame to start recording
-StartAutomationEventRecording :: (); // Start recording
+StartAutomationEventRecording :: () -> void; // Start recording
 // Automation events functionality (Module: core)
-StopAutomationEventRecording :: (); // Stop recording automation events
+StopAutomationEventRecording :: () -> void; // Stop recording automation events
 PlayAutomationEvent          :: (event: AutomationEvent); // Play a recorded automation event
 
 //------------------------------------------------------------------------------------
@@ -1426,8 +1426,8 @@ GetRayCollisionQuad       :: (ray: Ray, p1: Vector3, p2: Vector3, p3: Vector3, p
 // AudioCallback :: *void; // Typedef placeholder
 
 // Audio device management functions
-InitAudioDevice     :: (); // Initialize audio device and context
-CloseAudioDevice    :: (); // Close the audio device and context
+InitAudioDevice     :: () -> void; // Initialize audio device and context
+CloseAudioDevice    :: () -> void; // Close the audio device and context
 IsAudioDeviceReady  :: () -> bool; // Check if audio device has been initialized successfully
 SetMasterVolume     :: (volume: float); // Set master volume (listener)
 GetMasterVolume     :: () -> float; // Get master volume (listener)

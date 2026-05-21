@@ -115,6 +115,7 @@ AstFile *parse_file(Parser *parser, char *file_path) {
     file->absolute_path = file_path;
     file->statements    = da_init(64, sizeof(Ast *));
     file->imports       = da_init(8,  sizeof(AstImport *));
+    file->flattened_function_defns = da_init(16, sizeof(AstFunctionDefn *));
     file->scope         = new_block(parser, BLOCK_IMPERATIVE);
     file->is_parsed     = false;
 
@@ -427,7 +428,6 @@ bool starts_declaration(Parser *parser, Token token, int start_lookahead) {
 // zoo :: method (a: int) -> void {}
 // foo :: (a: int) -> void {}
 // bar :: () {}
-
 bool starts_function_defn(Parser *parser) {
     int cursor = 0;
 
@@ -455,24 +455,6 @@ bool starts_function_defn(Parser *parser) {
     }
 
     return false;
-
-    // OLD CODE:
-    // if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON) {
-    //     Token next = peek_token(parser, 2);
-
-    //     if (next.type == TOKEN_METHOD) {
-    //         next = peek_token(parser, 3);
-    //         if (next.type == '(') {
-    //             return true;
-    //         }
-    //     }
-        
-    //     else if (next.type == '(') {
-    //         return true;
-    //     }
-    // }
-
-    // return false;
 }
 
 Ast *parse_statement(Parser *parser) {
@@ -481,12 +463,6 @@ Ast *parse_statement(Parser *parser) {
     bool matched_a_statement = false;
     
     Token token = peek_next_token(parser);
-
-    // if (starts_function_defn(parser, token)) {
-    //     stmt = (Ast *)(parse_function_defn(parser));
-    //     statement_ends_with_semicolon = parser->inside_extern_block;
-    //     matched_a_statement = true;
-    // }
 
     if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_STRUCT) {
         stmt = (Ast *)(parse_struct_defn(parser));
@@ -2309,6 +2285,7 @@ AstDeclaration *parse_declaration(Parser *parser) {
                     // Bind the function definitions' identifier to this constant identifier
                     func_defn->identifier = ident;
                     func_defn->is_lambda = false;
+                    func_defn->head.head.start = ident->head.start; // Make the function appear to start at the identifier instead of the lambda function
                 }
             }
         }

@@ -51,8 +51,10 @@ const char *ast_to_str(Ast *ast) {
     case AST_IDENTIFIER:         return "AST_IDENTIFIER";
     case AST_TYPE:               return "AST_TYPE";
     }
-    printf("%s:%d: compiler-error: Could not give the name of AST node with type id %d\n", __FILE__, __LINE__, ast->kind);
-    exit(1);
+
+    return "UNKNOWN_AST";
+    // printf("%s:%d: compiler-error: Could not give the name of AST node with type id %d\n", __FILE__, __LINE__, ast->kind);
+    // exit(1);
 }
 
 // @Note - maybe make each of these into a global variable instead with prefix t_<TYPE>

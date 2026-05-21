@@ -125,6 +125,7 @@ typedef struct AstFile {
     DynamicArray statements; // of Ast*
     DynamicArray imports;    // of AstImport*
     AstBlock    *scope;      // All exported declarations in this file e.g function definitions, struct definitions etc is contained here
+    DynamicArray flattened_function_defns; // of AstFunctionDefn*. A list of all the functions found in this file, both at top-level or inner functions
     bool         is_parsed;
     bool         has_imported_builtin_string;
 } AstFile;
