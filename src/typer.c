@@ -709,10 +709,6 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         for (int i = 0; i < decl->values.count; i++) {
             AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
 
-            if ( debug_break((Ast *) ident, "test.sd", 3) ) {
-                int VSCODE = 1;
-            }
-
             AstExpr **value_ptr = &((AstExpr **)decl->values.items)[i];
             AstExpr *value = *value_ptr;
             Type *expr_type = check_expression(typer, value, NULL);
@@ -1966,6 +1962,10 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     // Make sure that the function definition is fully resolved
     if (!(func_defn->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
         Typer temp = *typer;
+        // @Incomplete: I don't think this resetting of the function stack is valid when we now have the possibility
+        // of making inner functions
+        temp.enclosing_function_stack = da_init(2, sizeof(AstFunctionDefn *));
+
         Type *ok = check_function_defn(typer, func_defn);
         if (!ok) return NULL;
 

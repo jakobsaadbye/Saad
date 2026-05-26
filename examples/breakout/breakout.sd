@@ -581,6 +581,21 @@ main :: () {
     CloseWindow();
 }
 
+spawnPickup :: (ps: *PickupSpawner, pos: Vector2) {
+    index := GetRandomValue(0, xx PickupType.COUNT - 1);
+
+    pickup := Pickup{
+        type = index as PickupType,
+        x = pos.x,
+        y = pos.y,
+        velY = xx GetRandomValue(80, 120),
+        isShown = true,
+    };
+    
+    ps.pickups[ps.freeIndex] = pickup;
+    ps.freeIndex += 1;
+}
+
 handleBrickCollision :: (game: *GameState, brick: *Brick) {
 
     doBounce := true;
@@ -623,21 +638,6 @@ handleBrickCollision :: (game: *GameState, brick: *Brick) {
     if r <= PICKUP_SPAWN_CHANCE {
         spawnPickup(game.pickupSpawner, {xx brick.x, xx brick.y});
     }
-}
-
-spawnPickup :: (ps: *PickupSpawner, pos: Vector2) {
-    index := GetRandomValue(0, xx PickupType.COUNT - 1);
-
-    pickup := Pickup{
-        type = index as PickupType,
-        x = pos.x,
-        y = pos.y,
-        velY = xx GetRandomValue(80, 120),
-        isShown = true,
-    };
-    
-    ps.pickups[ps.freeIndex] = pickup;
-    ps.freeIndex += 1;
 }
 
 handleOnPickup :: (pickup: *Pickup, bar: *Bar, ball: *Ball, player: *Player, pickup_sound: Sound) {

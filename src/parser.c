@@ -2818,7 +2818,7 @@ if ( debug_break((Ast *) decl, "test.sd", 20) ) {
 
 */
 
-bool debug_break(Ast *site, char *filename, int line) {
+bool debug_break_site(Ast *site, char *filename, int line) {
     if (!site) return false;
 
     if (site->start.line == line) {
