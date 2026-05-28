@@ -1,23 +1,11 @@
-import "fmt";
-
 main :: () {
-    a :: () {};
-    myString :: "Hello world";
-    myInt := 5;
-    Print("%", myInt);
+    myInt := 10;
+    MyConstant :: "Hello world";
+    a :: () {
+        myInt := 5;
+        print("%", myInt);
+        print("%", MyConstant);
+    };
+
+    print("%", myInt);
 }
-
-// main :: () {
-
-//     foo := () -> void {
-
-//         // bar := () -> void {
-//         //     Print("foo");
-//         // };
-
-//         Print("foo");
-//         // bar();
-//     };
-
-//     foo();
-// }

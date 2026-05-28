@@ -99,7 +99,7 @@ AstIdentifier *add_declaration_to_scope(Parser *parser, AstBlock *scope, AstDecl
 
         AstIdentifier *existing = add_identifier_to_scope(parser, scope, ident);
         if (existing) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of variable '%s'", ident->name);
+            report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of identifier '%s'", ident->name);
             report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the previous declaration");
             return existing;
         }

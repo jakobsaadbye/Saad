@@ -716,6 +716,11 @@ bool parse_parameter_list(Parser *parser, AstFunctionDefn *func_defn) {
     parser->inside_parameter_list = true;
     func_defn->parser_is_inside_parameter_list = true;
     func_defn->body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters can be pushed down into the scope of the body
+
+    // The scope of a function always starts from the file scope and out.
+    // Since we don't have closures / captures, we need to modify the scope here
+    func_defn->body->parent = parser->current_file->scope;
+
     bool first_parameter_seen = false;
     while (true) {
         if (!first_parameter_seen) {
@@ -1874,6 +1879,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     }
 
     parser->enclosing_function = func_defn;
+    AstBlock *current_scope = parser->current_scope;
 
     bool ok = parse_parameter_list(parser, func_defn);
     if (!ok) return NULL;
@@ -1891,7 +1897,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     func_defn->calling_convention = CALLING_CONV_SAAD;
     if (parser->inside_extern_block) {
         func_defn->calling_convention = CALLING_CONV_MSVC;
-        func_defn->is_extern = parser->inside_extern_block;
+        func_defn->is_extern = true;
     }
 
     if (!func_defn->is_extern) {
@@ -1899,7 +1905,8 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         if (!body_parsed) return NULL;
     }
 
-    close_block(parser);
+    // close_block(parser);
+    parser->current_scope = current_scope;
     parser->enclosing_function = NULL;
 
     AstIdentifier *ident = make_identifier_from_string(parser, "lambda", NULL); // The type of the identifier is set to a type representation of this function later down

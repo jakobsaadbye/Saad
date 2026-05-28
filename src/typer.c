@@ -1,7 +1,7 @@
 #include "const_expr.c"
 #include "lib/string_builder.h"
 
-#define DEBUG_THERE_WERE_ERRORS 1
+#define DEBUG_THERE_WERE_ERRORS 0
 
 typedef struct Typer {
     Parser *parser;
@@ -1962,6 +1962,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     // Make sure that the function definition is fully resolved
     if (!(func_defn->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
         Typer temp = *typer;
+        
         // @Incomplete: I don't think this resetting of the function stack is valid when we now have the possibility
         // of making inner functions
         temp.enclosing_function_stack = da_init(2, sizeof(AstFunctionDefn *));
@@ -2380,6 +2381,11 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
     // Check the parameters
     push_enclosing_function(typer, func_defn);
+
+    // Change the scope to the function body, as that is where the parameters currently live.
+    AstBlock *scope_before_function_entry = typer->current_scope;
+    typer->current_scope = func_defn->body;
+
     for (int i = 0; i < func_defn->parameters.count; i++) {
         AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
         bool ok = check_declaration(typer, param->decl);
@@ -2510,7 +2516,9 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     bool ok = check_block(typer, func_defn->body);
     if (!ok) return NULL;
 
+    // Close function scope
     pop_enclosing_function(typer);
+    typer->current_scope = scope_before_function_entry;
 
     // Do a narrow scan for a return statement
     ok = check_if_function_needs_a_return(typer, func_defn);
@@ -3878,6 +3886,8 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         return (ctx_type && ctx_type->kind == TYPE_STRING) ? ctx_type : (Type *) type_defn_string;
     }
     case LITERAL_IDENTIFIER: {
+        // TODO: Save the resolved identifier on the literal so we don't have to lookup identifiers in later stages
+
         char   *ident_name   = literal->as.value.identifier.name;
         AstIdentifier *ident = NULL;
         if (typer->current_scope->belongs_to_struct) {
@@ -3886,7 +3896,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
         }
         if (ident == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared variable '%s'", ident_name);
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared identifier '%s'", ident_name);
             return NULL;
         }
 
