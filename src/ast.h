@@ -163,6 +163,7 @@ typedef struct AstIdentifier {
     AstExpr *value;     // The value the identifier is set to in a declaration. @Note: Only available after typechecking
     IdentifierFlags flags;
 
+    AstBlock       *scope; // The scope this identifier was declared in
     AstDeclaration *decl; // The declaration it belongs to
 
     int member_index;   // Used to know the insertion order of a struct member
@@ -237,7 +238,8 @@ typedef struct AstBlock {
     AstBlock     *parent;
     DynamicArray  statements;
     DynamicArray  identifiers; // of *AstIdentifier
-    AstStruct    *belongs_to_struct;
+    AstFunctionDefn *enclosing_function; // The function this scope was made in or null if in global scope
+    AstStruct       *belongs_to_struct;        // If the scope is a struct scope, this is set to that struct
     int           scope_number; // Only for debug purposes
 } AstBlock;
 
@@ -302,7 +304,7 @@ typedef struct AstFunctionDefn {
     bool            has_default_parameters;
 
     // Misc. stuff
-    AstFunctionDefn *parent_function_defn;
+    AstFunctionDefn *parent_function;
 
     // Parser specific stuff
     bool            parser_is_inside_parameter_list;

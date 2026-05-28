@@ -10,7 +10,8 @@ AstBlock *new_block(Parser *parser, BlockKind kind) {
     scope->kind        = kind;
     scope->statements  = da_init(4, sizeof(Ast *));
     scope->identifiers = da_init(4, sizeof(AstIdentifier *));
-    scope->belongs_to_struct = NULL;
+    scope->enclosing_function = parser->enclosing_function;
+    scope->belongs_to_struct  = NULL;
     scope->scope_number      = global_scope_counter++;
 
     parser->current_scope = scope;

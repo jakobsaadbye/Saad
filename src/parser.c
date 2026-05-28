@@ -717,10 +717,6 @@ bool parse_parameter_list(Parser *parser, AstFunctionDefn *func_defn) {
     func_defn->parser_is_inside_parameter_list = true;
     func_defn->body = new_block(parser, BLOCK_IMPERATIVE); // Open a scope, so that the parameters can be pushed down into the scope of the body
 
-    // The scope of a function always starts from the file scope and out.
-    // Since we don't have closures / captures, we need to modify the scope here
-    func_defn->body->parent = parser->current_file->scope;
-
     bool first_parameter_seen = false;
     while (true) {
         if (!first_parameter_seen) {
@@ -782,7 +778,7 @@ bool parse_parameter_list(Parser *parser, AstFunctionDefn *func_defn) {
         eat_token(parser);
     }
     func_defn->parser_is_inside_parameter_list = false;
-    parser->inside_parameter_list = func_defn->parent_function_defn && func_defn->parent_function_defn->parser_is_inside_parameter_list;
+    parser->inside_parameter_list = func_defn->parent_function && func_defn->parent_function->parser_is_inside_parameter_list;
 
     return true;
 }
@@ -846,11 +842,18 @@ bool parse_function_return_types(Parser *parser, AstFunctionDefn *func_defn) {
     return true;
 }
 
-TypeFunction *parse_function_signature(Parser *parser) {
+AstFunctionDefn *new_function_defn(Parser *parser) {
     AstFunctionDefn *func_defn = ast_allocate(parser, sizeof(AstFunctionDefn));
     func_defn->parameters   = da_init(2, sizeof(AstIdentifier *));
     func_defn->return_types = da_init(2, sizeof(Type *));
-    func_defn->parent_function_defn = parser->enclosing_function;
+    func_defn->parent_function = parser->enclosing_function;
+    func_defn->is_lambda = true;
+
+    return func_defn;
+}
+
+TypeFunction *parse_function_signature(Parser *parser) {
+    AstFunctionDefn *func_defn = new_function_defn(parser); 
 
     bool ok = parse_parameter_list(parser, func_defn);
     if (!ok) return NULL;
@@ -1176,11 +1179,11 @@ AstEnum *parse_enum_defn(Parser *parser) {
     expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
     eat_token(parser);
     AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // Type of ident is set later down to refer to the enum it self
+    ident->flags |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_NAME_OF_ENUM;
 
     // Expose the enum as an identifier so enum values can be referenced explicitly using ENUM.value
     // @ScopeRefactoring
     {
-        ident->flags |= IDENTIFIER_IS_NAME_OF_ENUM;
         AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
         if (existing) {
             report_error_ast(parser, LABEL_ERROR, (Ast *)(ident), "Type '%s' already defined", existing->name);
@@ -1862,11 +1865,8 @@ AstFunctionCall *parse_function_call(Parser *parser) {
 }
 
 AstFunctionDefn *parse_function_defn(Parser *parser) {
-    AstFunctionDefn *func_defn = (AstFunctionDefn *)(ast_allocate(parser, sizeof(AstFunctionDefn)));
-    func_defn->parameters   = da_init(2, sizeof(AstIdentifier *));
-    func_defn->return_types = da_init(2, sizeof(Type *));
+    AstFunctionDefn *func_defn = new_function_defn(parser);
     func_defn->is_lambda = true;
-    func_defn->parent_function_defn = parser->enclosing_function;
 
     Token next = peek_next_token(parser);
 
@@ -1879,7 +1879,6 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     }
 
     parser->enclosing_function = func_defn;
-    AstBlock *current_scope = parser->current_scope;
 
     bool ok = parse_parameter_list(parser, func_defn);
     if (!ok) return NULL;
@@ -1905,9 +1904,8 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         if (!body_parsed) return NULL;
     }
 
-    // close_block(parser);
-    parser->current_scope = current_scope;
-    parser->enclosing_function = NULL;
+    close_block(parser);
+    parser->enclosing_function = parser->enclosing_function ? parser->enclosing_function->parent_function : NULL;
 
     AstIdentifier *ident = make_identifier_from_string(parser, "lambda", NULL); // The type of the identifier is set to a type representation of this function later down
     ident->flags |= IDENTIFIER_IS_NAME_OF_FUNCTION;
@@ -2370,6 +2368,7 @@ AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, Typ
     ident->head.file = parser->current_file;
     ident->type      = type;
     ident->name      = (char *)(name);
+    ident->scope     = parser->current_scope;
 
     return ident;
 }
@@ -2384,7 +2383,7 @@ AstIdentifier *make_identifier_from_token(Parser *parser, Token ident_token, Typ
     ident->head.end   = ident_token.end;
     ident->type       = type;
     ident->name       = ident_token.as_value.value.identifier.name;
-    ident->stack_offset = 0;
+    ident->scope      = parser->current_scope;
 
     return ident;
 }

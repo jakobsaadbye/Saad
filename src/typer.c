@@ -57,6 +57,7 @@ bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
 bool is_untyped_type(Type *type);
 bool is_untyped_literal(AstExpr *expr);
+bool is_non_constant_identifier_found_inside_current_function(Typer *typer, AstIdentifier *ident);
 void statically_cast_literal(AstLiteral *untyped_literal, Type *cast_into);
 void reserve_local_storage(AstFunctionDefn *func_defn, int size);
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size);
@@ -1940,6 +1941,11 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name);
 
         if (func_ident == NULL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined function '%s'", text_bold(call->identifer->name));
+            return NULL;
+        }
+
+        if (!is_non_constant_identifier_found_inside_current_function(typer, func_ident)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined function '%s'", text_bold(call->identifer->name));
             return NULL;
         }
@@ -3840,6 +3846,16 @@ bool is_boolean_operator(TokenType op) {
     return false;
 }
 
+bool is_non_constant_identifier_found_inside_current_function(Typer *typer, AstIdentifier *ident) {
+    if (!(ident->flags & IDENTIFIER_IS_CONSTANT) 
+    && typer->enclosing_function && typer->enclosing_function != ident->scope->enclosing_function) 
+    {
+        return false;
+    }
+
+    return true;
+}
+
 Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     switch (literal->kind) {
     case LITERAL_INTEGER: {
@@ -3897,6 +3913,12 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         }
         if (ident == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared identifier '%s'", ident_name);
+            return NULL;
+        }
+
+        if (!is_non_constant_identifier_found_inside_current_function(typer, ident)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)literal, "Undeclared identifier '%s'", ident->name);
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)typer->enclosing_function, "If you intended to use identifier '%s' inside this function then specify it as a parameter", ident->name, typer->enclosing_function->identifier->name);
             return NULL;
         }
 

@@ -1,0 +1,22 @@
+main :: () {
+    myInt := 10;
+    a :: () {
+        // Assert on this
+        //.\test.sd:4:20 error: Undecalred identifier 'myInt'
+        //4 |         print("%", myInt);
+        print("%", myInt);
+    };
+
+    {
+        // Inner inner functions can NOT be called if its not a named function
+        foo := () {
+            Print("foo");
+        };
+
+        bar :: () {
+            // Assert on this
+            // Undefined function 'foo'
+            foo();
+        }
+    }
+}
