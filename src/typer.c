@@ -3902,8 +3902,6 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         return (ctx_type && ctx_type->kind == TYPE_STRING) ? ctx_type : (Type *) type_defn_string;
     }
     case LITERAL_IDENTIFIER: {
-        // TODO: Save the resolved identifier on the literal so we don't have to lookup identifiers in later stages
-
         char   *ident_name   = literal->as.value.identifier.name;
         AstIdentifier *ident = NULL;
         if (typer->current_scope->belongs_to_struct) {
@@ -3937,6 +3935,9 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Compiler Error: '%s' is unresolved", ident->name);
             return NULL;
         }
+
+        // Save the resolved identifier on the literal
+        literal->as.value.identifier.resolved_identifier = ident;
 
         // Try and transform the constant identifier into a constant literal
         if (ident->flags & IDENTIFIER_IS_CONSTANT) {

@@ -4,6 +4,8 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.2.8 - 28. Mar 2026
+
 ## Update v0.2.7 - XX. Mar 2026
 
 * Fixed break and continue in for-loops or while-loops not correctly being attached to the correct loop

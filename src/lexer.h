@@ -37,6 +37,8 @@ extern const char *LABEL_NOTE;
 extern const char *LABEL_ERROR;
 extern const char *LABEL_WARNING;
 
+typedef struct AstIdentifier AstIdentifier;
+
 typedef enum TokenType {
     TOKEN_NONE      = 0,
 
@@ -128,8 +130,15 @@ typedef struct As_value {
         bool               boolean;
         long long          integer;
         double             floating;
-        struct { char *data; int length; } string;
-        struct { char *name; int length; } identifier;
+        struct { 
+            char *data; 
+            int length; 
+        } string;
+        struct { 
+            char *name; 
+            int length; 
+            AstIdentifier *resolved_identifier;
+        } identifier;
     } value;
 } As_value;
 

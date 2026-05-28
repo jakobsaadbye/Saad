@@ -3857,10 +3857,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_IDENTIFIER: {
-            
-            // @Cleanup: The literal identifier should have been resolved at this point so we don't need to do scope lookups!
-            // One idea could be to replace the lit->identifier with the resolved identifer
-            AstIdentifier *ident = lookup_from_scope(cg->parser, cg->current_scope, lit->as.value.identifier.name);
+            AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
             assert(ident);
 
             if (ident->flags & IDENTIFIER_IS_CONSTANT) {
