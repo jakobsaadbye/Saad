@@ -1,31 +1,19 @@
-import "fmt";
+// import "fmt";
+
+many_small_parameters :: (a, b, c, d, e, f, g, h, i, j, k, l, m: int) -> int, int, int, int, int, int, int, int, int, int, int, int, int {
+    // print("% % % % % % % % % % % % %", a, b, c, d, e, f, g, h, i, j, k, l, m);
+    return a, b, c, d, e, f, g, h, i, j, k, l, m;
+}
+
+foo4 :: (a, b, c, d: int) -> (int, int, int, int) {
+    return a, b, c, d;
+}
+
+foo2 :: (a, b: int) -> (int, int) {
+    return a, b;
+}
 
 main :: () {
-    {
-        // Constants can be seen in inner functions
-        Color :: struct {
-            r, g, b, a: u8;
-        }
-
-        Red :: Color{r = 255};
-
-        a :: () {
-            Print("%", Red); // -> Color{ r = 255, g = 0, b = 0, a = 0 }
-        };
-
-        a();
-    }
-
-    {
-        // Inner inner functions can be called
-        foo :: () {
-            Print("foo");
-        };
-
-        bar :: () {
-            foo();
-        }
-
-        bar(); // -> foo
-    }
-}
+    a, b, c, d := foo4(1, 2, 3, 4);
+    print("% % % %", a, b, c, d);
+};

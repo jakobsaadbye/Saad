@@ -1,15 +1,20 @@
 Todo list:
 -------------------
 
-Functions as values refactor:
+Functions as values:
 
-[]: The scope of a new function should get their own child scope from the global scope instead of being pushed onto the normal scope stack
+[]: Fix `resolved_identifier` not being used in codegen due to rewrite when we have args: ...any
+[]: Fix builtin append function not being correctly understood with the new way we do function lookup 
+
 []: Figure out what the hell to do with annonymous methods? Maybe just don't allow them
+[]: Functions inside constant arrays
+  - e.g functionInArray :: [() -> void {}]
 
 
 
 Bug backlog:
 ----------------
+
 Fix pointer dereference on the left hand side of an assignment being broken:
 ```
 a: int = 5;

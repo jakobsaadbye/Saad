@@ -887,7 +887,8 @@ check_identifiers_vs_values:
         return true;
     } else {
         // @TODO: Non-constant declarations in global scope should also be sized. Variables that live in global scope, should probably have some defined stack address of where they live, so they can be referenced locally. Still an open question on how i would do this.
-        XXX;
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)decl, "Global variables are not yet supported. Only constants");
+        return false;
     }
 
     return true;
@@ -1829,6 +1830,52 @@ AstUnary *generate_address_of_value(Typer *typer, AstExpr *value) {
     return addr_of;
 }
 
+bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberAccess *ma) {
+    AstExpr       *recv_arg = ma->left;
+    AstIdentifier *recv_param = func_call->func_defn->receiver;
+
+    // @Note: In this block, we don't have full type information on the parameters, so we can only check shallowly if the receiver arg and param matches.
+
+    if ((recv_arg->type->kind == TYPE_POINTER && recv_param->type->kind == TYPE_POINTER) || (recv_arg->type->kind != TYPE_POINTER && recv_param->type->kind != TYPE_POINTER)) {
+        // Pointer vs Pointer
+        // Value   vs Value
+        AstArgument *arg = generate_argument_from_expr(typer, (AstExpr *) ma->left);
+        da_insert(&func_call->arguments, arg, 0);
+        return true;
+    }
+
+    if (recv_arg->type->kind == TYPE_POINTER && recv_param->type->kind != TYPE_POINTER) {
+        // Insert a dereference to match
+        AstUnary *deref        = ast_allocate(typer->parser, sizeof(AstUnary));
+        deref->head.head       = recv_arg->head;
+        deref->head.head.kind  = AST_UNARY;
+        deref->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+        deref->operator        = OP_POINTER_DEREFERENCE;
+        deref->expr            = recv_arg;
+
+        Type *type = check_unary(typer, deref, recv_param->type);
+        if (!type) return false;
+
+        AstArgument *arg = generate_argument_from_expr(typer, (AstExpr *)deref);
+        da_insert(&func_call->arguments, arg, 0);
+        return true;
+    }
+
+    if (recv_arg->type->kind != TYPE_POINTER && recv_param->type->kind == TYPE_POINTER) {
+        // Insert an address-of to match
+        AstUnary *addr_of = generate_address_of_value(typer, recv_arg);
+        Type *type = check_unary(typer, addr_of, recv_param->type);
+        if (!type) return false;
+
+        AstArgument *arg = generate_argument_from_expr(typer, (AstExpr *)addr_of);
+        da_insert(&func_call->arguments, arg, 0);
+        return true;
+    }
+
+    // Let the check_function_call deal with the actual type mismatch
+    return true;
+}
+
 Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
     if (call->arguments.count != 2) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Type mismatch. Wanted type ([..]T, T), Got type ()");
@@ -1860,7 +1907,7 @@ Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
         return NULL;
     }
     
-    AstIdentifier *func_defn_ident = lookup_from_scope(typer->parser, typer->current_scope, "runtime_builtin_append");
+    AstIdentifier *func_defn_ident = lookup_from_scope(typer->parser, typer->current_file->scope, "runtime_builtin_append");
     if (func_defn_ident == NULL) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Compiler Error: Failed to find builtin function 'runtime_builtin_append'");
         return NULL;
@@ -1904,53 +1951,95 @@ Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
     return call->head.type;
 }
 
+bool is_literal_identifier(AstExpr *expr) {
+    return expr && expr->head.kind == AST_LITERAL && ((AstLiteral *)expr)->kind == LITERAL_IDENTIFIER;
+}
+
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     if (typer->enclosing_function == NULL) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Function calls are not allowed at top-level yet");
         return NULL;
     }
 
-    AstIdentifier *func_ident = NULL;
+    if (call->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) {
+        return call->head.type;
+    }
+
+    Type *expr_type = check_expression(typer, call->expression, NULL);
+    if (!expr_type) return NULL;
 
     // Check for builtin functions
-    if (strcmp(call->identifer->name, "append") == 0) return check_builtin_function_call_append(typer, call);
+    if (is_literal_identifier(call->expression)) {
+        AstIdentifier *call_ident = ((AstLiteral *)call->expression)->as.value.identifier.resolved_identifier;
 
-    if (call->is_member_call) {
-        assert(call->belongs_to_struct);
-
-        AstIdentifier *func_member = get_struct_member(call->belongs_to_struct, call->identifer->name);
-        if (!func_member) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined member function '%s'", text_bold(call->identifer->name));
-            return NULL;
-        }
-
-        func_ident = func_member;
+        if (strcmp(call_ident->name, "runtime_builtin_append") == 0) return check_builtin_function_call_append(typer, call);
     }
-    else if (call->is_method_call) {
-        assert(call->belongs_to_struct);
 
-        AstIdentifier *method = get_struct_method(call->belongs_to_struct, call->identifer->name);
-        if (!method) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined method '%s'", text_bold(call->identifer->name));
-            return NULL;
-        }
-
-        func_ident = method;
-    } else {
-        // Look in the current local scope
-        func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name);
-
-        if (func_ident == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined function '%s'", text_bold(call->identifer->name));
-            return NULL;
-        }
-
-        if (!is_non_constant_identifier_found_inside_current_function(typer, func_ident)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined function '%s'", text_bold(call->identifer->name));
-            return NULL;
-        }
-
+    if (call->expression->type->kind != TYPE_FUNCTION) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->expression), "Expression is not a callable function. Type of expression is %s", type_to_str(call->expression->type));
+        return NULL;
     }
+
+    AstFunctionDefn *func_defn = ((TypeFunction *)call->expression->type)->node;
+
+    call->func_defn = func_defn;
+
+    // Handle member calls
+    if (call->expression->head.kind == AST_MEMBER_ACCESS) {
+        AstMemberAccess *ma = (AstMemberAccess *)call->expression;
+
+        if (func_defn->is_method) {
+            // We are indeed a method call
+            call->is_method_call = true;
+
+            // Rewrite the method call into a plain function call, with the 0'th
+            // argument being the left-hand side of the member access
+            // e.g
+            // `foo.bar(x)` -> `bar(foo, x)`
+            bool ok = rewrite_as_method_call(typer, call, ma);
+            if (!ok) return NULL;
+        }
+        else {
+            // No, just a regular member call
+            call->is_member_call = true;
+        }
+    }
+
+    // if (call->is_member_call) {
+    //     assert(call->belongs_to_struct);
+
+    //     AstIdentifier *func_member = get_struct_member(call->belongs_to_struct, call->identifer->name);
+    //     if (!func_member) {
+    //         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined member function '%s'", text_bold(call->identifer->name));
+    //         return NULL;
+    //     }
+
+    //     func_ident = func_member;
+    // }
+    // else if (call->is_method_call) {
+    //     assert(call->belongs_to_struct);
+
+    //     AstIdentifier *method = get_struct_method(call->belongs_to_struct, call->identifer->name);
+    //     if (!method) {
+    //         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined method '%s'", text_bold(call->identifer->name));
+    //         return NULL;
+    //     }
+
+    //     func_ident = method;
+    // } else {
+    //     // Look in the current local scope
+    //     func_ident = lookup_from_scope(typer->parser, typer->current_scope, call->identifer->name);
+
+    //     if (func_ident == NULL) {
+    //         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined function '%s'", text_bold(call->identifer->name));
+    //         return NULL;
+    //     }
+
+    //     if (!is_non_constant_identifier_found_inside_current_function(typer, func_ident)) {
+    //         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "Undefined function '%s'", text_bold(call->identifer->name));
+    //         return NULL;
+    //     }
+    // }
 
     // if (func_ident->decl && !(func_ident->decl->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
     //     report_error_ast(typer->parser, LABEL_ERROR, (Ast *) func_ident, "Illegal shadowing. Declaration of %s shadows the name of function %s(...)", func_ident->name, func_ident->name);
@@ -1958,12 +2047,6 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     //     return NULL;
     // }
 
-    if (func_ident->type->kind != TYPE_FUNCTION) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->identifer), "%s is not the name of a function. Type of %s is %s", func_ident->name, func_ident->name, type_to_str(func_ident->type));
-        return NULL;
-    }
-
-    AstFunctionDefn *func_defn = ((TypeFunction *)func_ident->type)->node;
 
     // Make sure that the function definition is fully resolved
     if (!(func_defn->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
@@ -2328,7 +2411,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     } else {
         call->head.type = ((Type **)func_defn->return_types.items)[0];
     }
-    call->func_defn = func_defn;
+    call->head.head.flags |= AST_FLAG_IS_TYPE_CHECKED;
 
     //
     // Allocate space for arguments and potentially for the return value in the calling function
@@ -2371,6 +2454,9 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         Type *return_type = ((Type **)func_defn->return_types.items)[i];
         reserve_temporary_storage(typer->enclosing_function, return_type->size + 8);
     }
+
+    // Reserve space for a pushed function pointer
+    reserve_temporary_storage(typer->enclosing_function, 8);
 
     return call->head.type;
 }
@@ -3041,52 +3127,6 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     return result;
 }
 
-bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberAccess *ma) {
-    AstExpr       *recv_arg = ma->left;
-    AstIdentifier *recv_param = func_call->func_defn->receiver;
-
-    // @Note: In this block, we don't have full type information on the parameters, so we can only check shallowly if the receiver arg and param matches.
-
-    if ((recv_arg->type->kind == TYPE_POINTER && recv_param->type->kind == TYPE_POINTER) || (recv_arg->type->kind != TYPE_POINTER && recv_param->type->kind != TYPE_POINTER)) {
-        // Pointer vs Pointer
-        // Value   vs Value
-        AstArgument *arg = generate_argument_from_expr(typer, (AstExpr *) ma->left);
-        da_insert(&func_call->arguments, arg, 0);
-        return true;
-    }
-
-    if (recv_arg->type->kind == TYPE_POINTER && recv_param->type->kind != TYPE_POINTER) {
-        // Insert a dereference to match
-        AstUnary *deref        = ast_allocate(typer->parser, sizeof(AstUnary));
-        deref->head.head       = recv_arg->head;
-        deref->head.head.kind  = AST_UNARY;
-        deref->head.head.flags = AST_FLAG_COMPILER_GENERATED;
-        deref->operator        = OP_POINTER_DEREFERENCE;
-        deref->expr            = recv_arg;
-
-        Type *type = check_unary(typer, deref, recv_param->type);
-        if (!type) return false;
-
-        AstArgument *arg = generate_argument_from_expr(typer, (AstExpr *)deref);
-        da_insert(&func_call->arguments, arg, 0);
-        return true;
-    }
-
-    if (recv_arg->type->kind != TYPE_POINTER && recv_param->type->kind == TYPE_POINTER) {
-        // Insert an address-of to match
-        AstUnary *addr_of = generate_address_of_value(typer, recv_arg);
-        Type *type = check_unary(typer, addr_of, recv_param->type);
-        if (!type) return false;
-
-        AstArgument *arg = generate_argument_from_expr(typer, (AstExpr *)addr_of);
-        da_insert(&func_call->arguments, arg, 0);
-        return true;
-    }
-
-    // Let the check_function_call deal with the actual type mismatch
-    return true;
-}
-
 Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     Type *type_lhs = check_expression(typer, ma->left, NULL);
     if (!type_lhs) return NULL;
@@ -3110,7 +3150,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
                 // @EnumRefactor
                 AstIdentifier *static_member = get_static_enum_member(enum_defn, name);
                 if (static_member) {
-                    ma->access_kind = MEMBER_ACCESS_ENUM;
+                    ma->access_kind = MEMBER_ACCESS_ENUM_MEMBER;
                     ma->enum_member = (AstEnumerator *) static_member;
                     return static_member->type;
                 }
@@ -3123,7 +3163,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
                     return NULL;
                 }
 
-                ma->access_kind = MEMBER_ACCESS_ENUM;
+                ma->access_kind = MEMBER_ACCESS_ENUM_MEMBER;
                 ma->enum_member = enum_member;
 
                 return (Type *)(enum_defn);
@@ -3194,6 +3234,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         return NULL;
     }
 
+    ma->struct_type = struct_type;
 
     AstFunctionCall *func_call = NULL;
     AstIdentifier   *member = NULL;
@@ -3205,78 +3246,81 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         AstLiteral *ident = (AstLiteral *) rhs;
         member_name = ident->as.value.identifier.name;
 
-        if (is_static_member_access) {
+        // Check if its a method
+        AstIdentifier *method = get_struct_method(struct_type->node, member_name);
+        if (method) {
+            member = method;
+
+            // if (method->type->kind != TYPE_FUNCTION) {
+            //     report_error_ast(typer->parser, LABEL_ERROR, (Ast *) rhs, "Member %s is not a callable function", method->name);
+            //     return NULL;
+            // }
+
+            // AstFunctionDefn *func_defn = ((TypeFunction *)method->type)->node;
+            // func_call->func_defn = func_defn;
+            // func_call->is_method_call = true;
+            // func_call->belongs_to_struct = struct_type->node;
+    
+            // // Rewrite the method call into a plain function call, with the 0'th
+            // // argument being the left-hand side of the member access
+            // // e.g
+            // // `foo.bar(x)` -> `bar(foo, x)`
+            // bool ok = rewrite_as_method_call(typer, func_call, ma);
+            // if (!ok) return NULL;
+    
+            // Type *func_type = check_function_call(typer, func_call);
+            // if (!func_type) return NULL;
+    
+            ma->access_kind = MEMBER_ACCESS_STRUCT_MEMBER;
+        }
+        else if (is_static_member_access) {
             member = find_identifier_in_scope(struct_type->node->static_members, member_name);
-            ma->access_kind   = MEMBER_ACCESS_STRUCT_STATIC;
-        } else {
+            ma->access_kind = MEMBER_ACCESS_STATIC_STRUCT_MEMBER;
+        } 
+        else {
             member = get_struct_member(struct_type->node, member_name);
-            ma->access_kind   = MEMBER_ACCESS_STRUCT;
+            ma->access_kind = MEMBER_ACCESS_STRUCT_MEMBER;
         }
 
         ma->struct_member = member;
     } 
-    else if (rhs->head.kind == AST_FUNCTION_CALL) {
-        func_call = (AstFunctionCall *) rhs;
+    // else if (rhs->head.kind == AST_FUNCTION_CALL) {
+    //     func_call = (AstFunctionCall *) rhs;
 
-        // Method or function member call
-        member_name = func_call->identifer->name;
+    //     // Method or function member call
+    //     member_name = func_call->identifer->name;
 
-        // Check if its a normal member of the struct (member function)
-        member = get_struct_member(struct_type->node, member_name);
+    //     // Check if its a normal member of the struct (member function)
+    //     member = get_struct_member(struct_type->node, member_name);
         
-        if (member) {
-            // Function member call e.g `myStruct.foo()`
+    //     if (member) {
+    //         // Function member call e.g `myStruct.foo()`
 
-            // We mark the function call as a lambda, as the actuall function that will be called is unknown
-            // at compile time
-            func_call->is_lambda_call = true;
-            func_call->is_member_call = true;
-            func_call->belongs_to_struct = struct_type->node;
+    //         // We mark the function call as a lambda, as the actuall function that will be called is unknown
+    //         // at compile time
+    //         func_call->is_lambda_call = true;
+    //         func_call->is_member_call = true;
+    //         func_call->belongs_to_struct = struct_type->node;
 
-            Type *func_type = check_function_call(typer, func_call);
-            if (!func_type) return NULL;
+    //         Type *func_type = check_function_call(typer, func_call);
+    //         if (!func_type) return NULL;
 
-            ma->flags |= MEMBER_ACCESS_FLAGS_RHS_IS_FUNCTION_CALL;
-            ma->access_kind = MEMBER_ACCESS_STRUCT;
-            ma->struct_member = member;
-            ma->function_call = func_call;
-        } else {
-            // Check if its a method call
-            AstIdentifier *method = get_struct_method(struct_type->node, member_name);
+    //         ma->flags |= MEMBER_ACCESS_FLAGS_RHS_IS_FUNCTION_CALL;
+    //         ma->access_kind = MEMBER_ACCESS_STRUCT_MEMBER;
+    //         ma->struct_member = member;
+    //         ma->function_call = func_call;
+    //     } else {
+    //         // Check if its a method call
+    //         AstIdentifier *method = get_struct_method(struct_type->node, member_name);
+    //         if (method) {
+    //             member = method;
+    //             XXX;
+    //         } else {
+    //             // Fallthrough to 'not a member'
+    //         }
+    //     }
 
-            if (method) {
-                member = method;
-
-                if (method->type->kind != TYPE_FUNCTION) {
-                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *) rhs, "Member %s is not a callable function", method->name);
-                    return NULL;
-                }
-
-                AstFunctionDefn *func_defn = ((TypeFunction *)method->type)->node;
-                func_call->func_defn = func_defn;
-
-                // @Todo: This assumes that "static" functions on structs are also methods
-                func_call->is_method_call = true;
-                func_call->belongs_to_struct = struct_type->node;
-        
-                // Rewrite the method call into a plain function call, with the 0'th
-                // argument being the left-hand side of the member access
-                // e.g
-                // `foo.bar(x)` -> `bar(foo, x)`
-                bool ok = rewrite_as_method_call(typer, func_call, ma);
-                if (!ok) return NULL;
-        
-                Type *func_type = check_function_call(typer, func_call);
-                if (!func_type) return NULL;
-        
-                ma->access_kind = MEMBER_ACCESS_METHOD_CALL;
-                ma->method_call = func_call;
-            } else {
-                // Fallthrough to 'not a member'
-            }
-        }
-
-    } 
+    // } 
     else {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "Invalid member expression");
         return NULL;
@@ -3909,6 +3953,18 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         } else {
             ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
         }
+
+        if (ident == NULL) {
+            // Check if its an alias for a builtin function
+            if (strcmp(ident_name, "append") == 0) {
+                ident = lookup_from_scope(typer->parser, typer->current_file->scope, "runtime_builtin_append");
+            }
+
+            if (ident != NULL) {
+                ident->flags |= IDENTIFIER_IS_BUILTIN_FUNCTION;
+            }
+        }
+
         if (ident == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared identifier '%s'", ident_name);
             return NULL;
@@ -3921,6 +3977,10 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         }
 
         bool needs_ordering_check = true;
+
+        if (ident->flags & IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN) {
+            needs_ordering_check = false;
+        }
 
         if (needs_ordering_check) {
             bool unresolved = !(ident->flags && IDENTIFIER_IS_RESOLVED);

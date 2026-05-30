@@ -575,6 +575,7 @@ bool is_binary_operator(TokenType op) {
 
     if (op == '.') return true;
     if (op == '[') return true;
+    if (op == '(') return true;
 
     return false;
 }

@@ -81,6 +81,7 @@ main :: () {
 
         splitted := text.split(" ");
 
+        print("%", splitted.count);
         assert(splitted.count == 9);
 
         for s in splitted {

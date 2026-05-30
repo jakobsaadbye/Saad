@@ -781,13 +781,13 @@ L37:
    ret
 
 ; bytes locals   : 48
-; bytes temp     : 64
-; bytes total    : 144
+; bytes temp     : 72
+; bytes total    : 160
 ; (ret_0: **u8, s: string) -> **u8
 String.toCString:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 144
+   sub		rsp, 160
    mov		16[rbp], rcx
    mov		24[rbp], rdx
    ; Param ret_0
@@ -801,6 +801,10 @@ String.toCString:
    mov		r8, 16
    call		memcpy
    ; Ln 5: $cstr : *u8 = -32[rbp]
+   lea		rax, malloc
+   push		rax
+   pop		rax
+   mov		-56[rbp], rax
    lea		rax, -24[rbp]
    push		rax
    pop		rbx
@@ -816,11 +820,18 @@ String.toCString:
    add		rax, rbx
    push		rax
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -56[rbp]
    ; (s64) 
-   call		malloc
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    mov		QWORD -32[rbp], rax
+   lea		rax, memcpy
+   push		rax
+   pop		rax
+   mov		-56[rbp], rax
    mov		rax, -32[rbp]
    push		rax
    lea		rax, -24[rbp]
@@ -839,8 +850,11 @@ String.toCString:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -56[rbp]
    ; (*u8, *char, s64) 
-   call		memcpy
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    ; Ln 7: Assignment
@@ -873,12 +887,12 @@ String.toCString:
    jmp		L41
 L41:
    mov		rax, 0
-   add		rsp, 144
+   add		rsp, 160
    pop		rbp
    ret
 
 ; bytes locals   : 40
-; bytes temp     : 32
+; bytes temp     : 40
 ; bytes total    : 112
 ; (ret_0: *string, cstr: *u8) -> *string
 fromCString:
@@ -904,11 +918,18 @@ fromCString:
    pop		rax
    mov		QWORD [rbx], rax
    ; Ln 14: Assignment
+   lea		rax, strlen
+   push		rax
+   pop		rax
+   mov		-48[rbp], rax
    mov		rax, -16[rbp]
    push		rax
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -48[rbp]
    ; (*u8) 
-   call		strlen
+   call		rax
+   add		rsp, 32
    push		rax
    lea		rax, -32[rbp]
    push		rax
@@ -1101,7 +1122,7 @@ L43:
    ret
 
 ; bytes locals   : 56
-; bytes temp     : 64
+; bytes temp     : 72
 ; bytes total    : 160
 ; (ret_0: *string, s: string) -> *string
 String.copy:
@@ -1124,6 +1145,10 @@ String.copy:
    mov		QWORD -40[rbp], 0
    mov		QWORD -32[rbp], 0
    ; Ln 35: Assignment
+   lea		rax, malloc
+   push		rax
+   pop		rax
+   mov		-64[rbp], rax
    lea		rax, -24[rbp]
    push		rax
    pop		rbx
@@ -1133,8 +1158,11 @@ String.copy:
    mov		rax, QWORD [rbx]
    push		rax
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -64[rbp]
    ; (s64) 
-   call		malloc
+   call		rax
+   add		rsp, 32
    push		rax
    lea		rax, -40[rbp]
    push		rax
@@ -1144,6 +1172,10 @@ String.copy:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
+   lea		rax, memcpy
+   push		rax
+   pop		rax
+   mov		-64[rbp], rax
    lea		rax, -40[rbp]
    push		rax
    pop		rbx
@@ -1165,8 +1197,11 @@ String.copy:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -64[rbp]
    ; (*char, *char, s64) 
-   call		memcpy
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    ; Ln 38: Assignment
@@ -1206,7 +1241,7 @@ L46:
    ret
 
 ; bytes locals   : 88
-; bytes temp     : 48
+; bytes temp     : 56
 ; bytes total    : 176
 ; (ret_0: *string, s: string) -> *string
 String.toUpper:
@@ -1226,15 +1261,25 @@ String.toUpper:
    mov		r8, 16
    call		memcpy
    ; Ln 44: $result : string = -40[rbp]
-   lea		rax, -104[rbp]
+   lea		rax, -24[rbp]
+   push		rax
+   pop		rbx
+   lea		rax, String.copy
+   push		rax
+   pop		rax
+   mov		-96[rbp], rax
+   lea		rax, -112[rbp]
    push		rax
    lea		rax, -24[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -96[rbp]
    ; (string) 
-   call		String.copy
-   lea		rax, -104[rbp]
+   call		rax
+   add		rsp, 32
+   lea		rax, -112[rbp]
    push		rax
    pop		rax
    lea		rbx, -40[rbp]
@@ -1336,7 +1381,7 @@ L47:
    ret
 
 ; bytes locals   : 88
-; bytes temp     : 48
+; bytes temp     : 56
 ; bytes total    : 176
 ; (ret_0: *string, s: string) -> *string
 String.toLower:
@@ -1356,15 +1401,25 @@ String.toLower:
    mov		r8, 16
    call		memcpy
    ; Ln 56: $result : string = -40[rbp]
-   lea		rax, -104[rbp]
+   lea		rax, -24[rbp]
+   push		rax
+   pop		rbx
+   lea		rax, String.copy
+   push		rax
+   pop		rax
+   mov		-96[rbp], rax
+   lea		rax, -112[rbp]
    push		rax
    lea		rax, -24[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -96[rbp]
    ; (string) 
-   call		String.copy
-   lea		rax, -104[rbp]
+   call		rax
+   add		rsp, 32
+   lea		rax, -112[rbp]
    push		rax
    pop		rax
    lea		rbx, -40[rbp]
@@ -1562,7 +1617,7 @@ L57:
    ret
 
 ; bytes locals   : 120
-; bytes temp     : 80
+; bytes temp     : 88
 ; bytes total    : 240
 ; (ret_0: *bool, s: string, str: string) -> *bool
 String.endsWith:
@@ -1624,7 +1679,14 @@ String.endsWith:
 ; done
 L63:
    ; Ln 82: $trailing : string = -56[rbp]
-   lea		rax, -136[rbp]
+   lea		rax, -24[rbp]
+   push		rax
+   pop		rbx
+   lea		rax, String.slice
+   push		rax
+   pop		rax
+   mov		-128[rbp], rax
+   lea		rax, -144[rbp]
    push		rax
    lea		rax, -24[rbp]
    push		rax
@@ -1657,9 +1719,12 @@ L63:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -128[rbp]
    ; (string, s64, int) 
-   call		String.slice
-   lea		rax, -136[rbp]
+   call		rax
+   add		rsp, 32
+   lea		rax, -144[rbp]
    push		rax
    pop		rax
    lea		rbx, -56[rbp]
@@ -1736,13 +1801,13 @@ L62:
    ret
 
 ; bytes locals   : 184
-; bytes temp     : 72
-; bytes total    : 288
+; bytes temp     : 80
+; bytes total    : 304
 ; (ret_0: *int, s: string, str: string, fromIndex: int) -> *int
 String.indexOf:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 288
+   sub		rsp, 304
    mov		16[rbp], rcx
    mov		24[rbp], rdx
    mov		32[rbp], r8 
@@ -1853,7 +1918,14 @@ L69:
 ; done
 L70:
    ; Ln 103: $src : string = -64[rbp]
-   lea		rax, -200[rbp]
+   lea		rax, -24[rbp]
+   push		rax
+   pop		rbx
+   lea		rax, String.slice
+   push		rax
+   pop		rax
+   mov		-192[rbp], rax
+   lea		rax, -208[rbp]
    push		rax
    lea		rax, -24[rbp]
    push		rax
@@ -1869,9 +1941,12 @@ L70:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -192[rbp]
    ; (string, int, int) 
-   call		String.slice
-   lea		rax, -200[rbp]
+   call		rax
+   add		rsp, 32
+   lea		rax, -208[rbp]
    push		rax
    pop		rax
    lea		rbx, -64[rbp]
@@ -2088,18 +2163,18 @@ L73:
    jmp		L68
 L68:
    mov		rax, 0
-   add		rsp, 288
+   add		rsp, 304
    pop		rbp
    ret
 
 ; bytes locals   : 152
-; bytes temp     : 72
-; bytes total    : 256
+; bytes temp     : 80
+; bytes total    : 272
 ; (ret_0: *[..]string, s: string, sep: string) -> *[..]string
 String.split:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 256
+   sub		rsp, 272
    mov		16[rbp], rcx
    mov		24[rbp], rdx
    mov		32[rbp], r8 
@@ -2143,7 +2218,14 @@ L82:
    jz			L83
    ; While body
    ; Ln 140: $i : int = -80[rbp]
-   lea		rax, -156[rbp]
+   lea		rax, -24[rbp]
+   push		rax
+   pop		rbx
+   lea		rax, String.indexOf
+   push		rax
+   pop		rax
+   mov		-160[rbp], rax
+   lea		rax, -164[rbp]
    push		rax
    lea		rax, -24[rbp]
    push		rax
@@ -2156,9 +2238,12 @@ L82:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -160[rbp]
    ; (string, string, int) 
-   call		String.indexOf
-   mov		eax, DWORD -156[rbp]
+   call		rax
+   add		rsp, 32
+   mov		eax, DWORD -164[rbp]
    movsx		rax, eax
    push		rax
    pop		rax
@@ -2181,7 +2266,14 @@ L82:
    jz			L85
    ; block of if
    ; Ln 142: $tail : string = -96[rbp]
-   lea		rax, -168[rbp]
+   lea		rax, -24[rbp]
+   push		rax
+   pop		rbx
+   lea		rax, String.slice
+   push		rax
+   pop		rax
+   mov		-160[rbp], rax
+   lea		rax, -176[rbp]
    push		rax
    lea		rax, -24[rbp]
    push		rax
@@ -2197,9 +2289,12 @@ L82:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -160[rbp]
    ; (string, int, int) 
-   call		String.slice
-   lea		rax, -168[rbp]
+   call		rax
+   add		rsp, 32
+   lea		rax, -176[rbp]
    push		rax
    pop		rax
    lea		rbx, -96[rbp]
@@ -2207,6 +2302,10 @@ L82:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
+   lea		rax, runtime_builtin_append
+   push		rax
+   pop		rax
+   mov		-160[rbp], rax
    lea		rax, -72[rbp]
    push		rax
    lea		rax, -96[rbp]
@@ -2215,14 +2314,24 @@ L82:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -160[rbp]
    ; (*[..]string, string, bool) 
-   call		runtime_builtin_append
+   call		rax
+   add		rsp, 32
    jmp		L83
    jmp L84
 ; else
 L85:
    ; Ln 146: $segment : string = -112[rbp]
-   lea		rax, -168[rbp]
+   lea		rax, -24[rbp]
+   push		rax
+   pop		rbx
+   lea		rax, String.slice
+   push		rax
+   pop		rax
+   mov		-160[rbp], rax
+   lea		rax, -176[rbp]
    push		rax
    lea		rax, -24[rbp]
    push		rax
@@ -2236,9 +2345,12 @@ L85:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -160[rbp]
    ; (string, int, int) 
-   call		String.slice
-   lea		rax, -168[rbp]
+   call		rax
+   add		rsp, 32
+   lea		rax, -176[rbp]
    push		rax
    pop		rax
    lea		rbx, -112[rbp]
@@ -2246,6 +2358,10 @@ L85:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
+   lea		rax, runtime_builtin_append
+   push		rax
+   pop		rax
+   mov		-160[rbp], rax
    lea		rax, -72[rbp]
    push		rax
    lea		rax, -112[rbp]
@@ -2254,8 +2370,11 @@ L85:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -160[rbp]
    ; (*[..]string, string, bool) 
-   call		runtime_builtin_append
+   call		rax
+   add		rsp, 32
    ; Ln 148: Assignment
    mov		eax, DWORD -80[rbp]
    movsx		rax, eax
@@ -2297,18 +2416,18 @@ L83:
    jmp		L81
 L81:
    mov		rax, 0
-   add		rsp, 256
+   add		rsp, 272
    pop		rbp
    ret
 
 ; bytes locals   : 96
-; bytes temp     : 48
-; bytes total    : 176
+; bytes temp     : 56
+; bytes total    : 192
 ; (ret_0: *string, s: string) -> *string
 String.reverse:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 176
+   sub		rsp, 192
    mov		16[rbp], rcx
    mov		24[rbp], rdx
    ; Param ret_0
@@ -2322,15 +2441,25 @@ String.reverse:
    mov		r8, 16
    call		memcpy
    ; Ln 156: $result : string = -40[rbp]
-   lea		rax, -112[rbp]
+   lea		rax, -24[rbp]
+   push		rax
+   pop		rbx
+   lea		rax, String.copy
+   push		rax
+   pop		rax
+   mov		-104[rbp], rax
+   lea		rax, -120[rbp]
    push		rax
    lea		rax, -24[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -104[rbp]
    ; (string) 
-   call		String.copy
-   lea		rax, -112[rbp]
+   call		rax
+   add		rsp, 32
+   lea		rax, -120[rbp]
    push		rax
    pop		rax
    lea		rbx, -40[rbp]
@@ -2414,12 +2543,12 @@ L89:
    jmp		L86
 L86:
    mov		rax, 0
-   add		rsp, 176
+   add		rsp, 192
    pop		rbp
    ret
 
 ; bytes locals   : 72
-; bytes temp     : 48
+; bytes temp     : 56
 ; bytes total    : 160
 ; (array: *[..]int, elem: int)
 appendInt:
@@ -2488,6 +2617,10 @@ appendInt:
    pop		rax
    mov		QWORD -24[rbp], rax
    ; Ln 10: Assignment
+   lea		rax, realloc
+   push		rax
+   pop		rax
+   mov		-80[rbp], rax
    lea		rax, -8[rbp]
    push		rax
    pop		rbx
@@ -2500,8 +2633,11 @@ appendInt:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -80[rbp]
    ; (*int, s64) 
-   call		realloc
+   call		rax
+   add		rsp, 32
    push		rax
    lea		rax, -8[rbp]
    push		rax
@@ -2611,7 +2747,7 @@ L90:
    ret
 
 ; bytes locals   : 32
-; bytes temp     : 56
+; bytes temp     : 64
 ; bytes total    : 128
 ; (ret_0: *StringBuilder, initialCapacity: int) -> *StringBuilder
 NewStringBuilder:
@@ -2623,15 +2759,26 @@ NewStringBuilder:
    ; Param initialCapacity
    mov		-12[rbp], edx
    ; Ln 15: $buffer : *u8 = -24[rbp]
+   lea		rax, malloc
+   push		rax
+   pop		rax
+   mov		-40[rbp], rax
    mov		eax, DWORD -12[rbp]
    movsx		rax, eax
    push		rax
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -40[rbp]
    ; (int) 
-   call		malloc
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    mov		QWORD -24[rbp], rax
+   lea		rax, memset
+   push		rax
+   pop		rax
+   mov		-40[rbp], rax
    mov		rax, -24[rbp]
    push		rax
    mov		rax, 0
@@ -2642,8 +2789,11 @@ NewStringBuilder:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -40[rbp]
    ; (*u8, int, int) 
-   call		memset
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    ; Return
@@ -2680,7 +2830,7 @@ L92:
    ret
 
 ; bytes locals   : 48
-; bytes temp     : 56
+; bytes temp     : 64
 ; bytes total    : 144
 ; (sb: *StringBuilder, len: int)
 StringBuilder.internalGrow:
@@ -2762,6 +2912,10 @@ L94:
    jmp			L94
 L95:
    ; Ln 32: $newBuffer : *u8 = -24[rbp]
+   lea		rax, realloc
+   push		rax
+   pop		rax
+   mov		-56[rbp], rax
    lea		rax, -8[rbp]
    push		rax
    pop		rbx
@@ -2775,8 +2929,11 @@ L95:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -56[rbp]
    ; (*u8, int) 
-   call		realloc
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    mov		QWORD -24[rbp], rax
@@ -2796,11 +2953,18 @@ L95:
    ; Pop print arguments
    mov		rcx, CS0
    call		printf
+   lea		rax, exit
+   push		rax
+   pop		rax
+   mov		-56[rbp], rax
    mov		rax, 1
    push		rax
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -56[rbp]
    ; (int) 
-   call		exit
+   call		rax
+   add		rsp, 32
    jmp L96
 ; done
 L96:
@@ -2836,6 +3000,10 @@ L96:
    pop		rbx
    pop		rax
    mov		DWORD [rbx], eax
+   lea		rax, memset
+   push		rax
+   pop		rax
+   mov		-56[rbp], rax
    lea		rax, -8[rbp]
    push		rax
    pop		rbx
@@ -2885,8 +3053,11 @@ L96:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -56[rbp]
    ; (*u8, int, int) 
-   call		memset
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
 L93:
@@ -2896,13 +3067,13 @@ L93:
    ret
 
 ; bytes locals   : 48
-; bytes temp     : 64
-; bytes total    : 144
+; bytes temp     : 72
+; bytes total    : 160
 ; (sb: *StringBuilder, strPtr: *u8, len: int)
 StringBuilder.internalAdd:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 144
+   sub		rsp, 160
    ; Param sb
    mov		-8[rbp], rcx
    ; Param strPtr
@@ -2949,6 +3120,10 @@ StringBuilder.internalAdd:
    cmp		al, 0
    jz			L99
    ; block of if
+   lea		rax, memcpy
+   push		rax
+   pop		rax
+   mov		-56[rbp], rax
    lea		rax, -8[rbp]
    push		rax
    pop		rbx
@@ -2982,8 +3157,11 @@ StringBuilder.internalAdd:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -56[rbp]
    ; (*u8, *u8, int) 
-   call		memcpy
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    ; Ln 47: Assignment
@@ -3023,6 +3201,16 @@ StringBuilder.internalAdd:
    jmp L98
 ; else
 L99:
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.internalGrow
+   push		rax
+   pop		rax
+   mov		-56[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		eax, DWORD -20[rbp]
@@ -3030,8 +3218,15 @@ L99:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -56[rbp]
    ; (*StringBuilder, int) 
-   call		StringBuilder.internalGrow
+   call		rax
+   add		rsp, 32
+   lea		rax, memcpy
+   push		rax
+   pop		rax
+   mov		-56[rbp], rax
    lea		rax, -8[rbp]
    push		rax
    pop		rbx
@@ -3065,8 +3260,11 @@ L99:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -56[rbp]
    ; (*u8, *u8, int) 
-   call		memcpy
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    ; Ln 53: Assignment
@@ -3108,12 +3306,12 @@ L99:
 L98:
 L97:
    mov		rax, 0
-   add		rsp, 144
+   add		rsp, 160
    pop		rbp
    ret
 
 ; bytes locals   : 96
-; bytes temp     : 56
+; bytes temp     : 64
 ; bytes total    : 192
 ; (sb: *StringBuilder, str: string, start: int, end: int)
 StringBuilder.addStringSlice:
@@ -3177,6 +3375,16 @@ StringBuilder.addStringSlice:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.internalAdd
+   push		rax
+   pop		rax
+   mov		-104[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, -48[rbp]
@@ -3187,8 +3395,11 @@ StringBuilder.addStringSlice:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -104[rbp]
    ; (*StringBuilder, *char, int) 
-   call		StringBuilder.internalAdd
+   call		rax
+   add		rsp, 32
 L100:
    mov		rax, 0
    add		rsp, 192
@@ -3196,7 +3407,7 @@ L100:
    ret
 
 ; bytes locals   : 48
-; bytes temp     : 56
+; bytes temp     : 64
 ; bytes total    : 144
 ; (sb: *StringBuilder, c: u8)
 StringBuilder.addChar:
@@ -3217,6 +3428,16 @@ StringBuilder.addChar:
    push		rax
    pop		rax
    mov		QWORD -24[rbp], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.internalAdd
+   push		rax
+   pop		rax
+   mov		-56[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, -24[rbp]
@@ -3227,8 +3448,11 @@ StringBuilder.addChar:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -56[rbp]
    ; (*StringBuilder, *u8, int) 
-   call		StringBuilder.internalAdd
+   call		rax
+   add		rsp, 32
 L101:
    mov		rax, 0
    add		rsp, 144
@@ -3236,7 +3460,7 @@ L101:
    ret
 
 ; bytes locals   : 48
-; bytes temp     : 56
+; bytes temp     : 64
 ; bytes total    : 144
 ; (sb: *StringBuilder, str: string)
 StringBuilder.addString:
@@ -3255,6 +3479,16 @@ StringBuilder.addString:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.internalAdd
+   push		rax
+   pop		rax
+   mov		-56[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -24[rbp]
@@ -3273,8 +3507,11 @@ StringBuilder.addString:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -56[rbp]
    ; (*StringBuilder, *char, s64) 
-   call		StringBuilder.internalAdd
+   call		rax
+   add		rsp, 32
 L102:
    mov		rax, 0
    add		rsp, 144
@@ -3282,13 +3519,13 @@ L102:
    ret
 
 ; bytes locals   : 72
-; bytes temp     : 72
-; bytes total    : 176
+; bytes temp     : 80
+; bytes total    : 192
 ; (sb: *StringBuilder, v: f32)
 StringBuilder.addFloat32:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 176
+   sub		rsp, 192
    ; Param sb
    mov		-8[rbp], rcx
    ; Param v
@@ -3299,12 +3536,16 @@ StringBuilder.addFloat32:
    mov		rdx, 0
    mov		r8, 18
    call		memset
+   lea		rax, sprintf
+   push		rax
+   pop		rax
+   mov		-80[rbp], rax
    lea		rax, -32[rbp]
    push		rax
    mov		rax, CS1
-   mov		-88[rbp], rax
-   mov		QWORD -80[rbp], 2
-   lea		rax, -88[rbp]
+   mov		-96[rbp], rax
+   mov		QWORD -88[rbp], 2
+   lea		rax, -96[rbp]
    push		rax
    pop		rax
    mov	rax, [rax]
@@ -3319,8 +3560,11 @@ StringBuilder.addFloat32:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -80[rbp]
    ; (*u8, *u8, f32) 
-   call		sprintf
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    ; Ln 78: $str : string = -48[rbp]
@@ -3338,11 +3582,18 @@ StringBuilder.addFloat32:
    pop		rax
    mov		QWORD [rbx], rax
    ; Ln 80: Assignment
+   lea		rax, strlen
+   push		rax
+   pop		rax
+   mov		-80[rbp], rax
    lea		rax, -32[rbp]
    push		rax
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -80[rbp]
    ; (*u8) 
-   call		strlen
+   call		rax
+   add		rsp, 32
    push		rax
    lea		rax, -48[rbp]
    push		rax
@@ -3355,6 +3606,16 @@ StringBuilder.addFloat32:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.internalAdd
+   push		rax
+   pop		rax
+   mov		-80[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -48[rbp]
@@ -3373,16 +3634,19 @@ StringBuilder.addFloat32:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -80[rbp]
    ; (*StringBuilder, *char, s64) 
-   call		StringBuilder.internalAdd
+   call		rax
+   add		rsp, 32
 L103:
    mov		rax, 0
-   add		rsp, 176
+   add		rsp, 192
    pop		rbp
    ret
 
 ; bytes locals   : 72
-; bytes temp     : 80
+; bytes temp     : 88
 ; bytes total    : 192
 ; (sb: *StringBuilder, v: f64)
 StringBuilder.addFloat64:
@@ -3399,12 +3663,16 @@ StringBuilder.addFloat64:
    mov		rdx, 0
    mov		r8, 18
    call		memset
+   lea		rax, sprintf
+   push		rax
+   pop		rax
+   mov		-80[rbp], rax
    lea		rax, -40[rbp]
    push		rax
    mov		rax, CS2
-   mov		-88[rbp], rax
-   mov		QWORD -80[rbp], 3
-   lea		rax, -88[rbp]
+   mov		-96[rbp], rax
+   mov		QWORD -88[rbp], 3
+   lea		rax, -96[rbp]
    push		rax
    pop		rax
    mov	rax, [rax]
@@ -3414,8 +3682,11 @@ StringBuilder.addFloat64:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -80[rbp]
    ; (*u8, *u8, f64) 
-   call		sprintf
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    ; Ln 88: $str : string = -56[rbp]
@@ -3433,11 +3704,18 @@ StringBuilder.addFloat64:
    pop		rax
    mov		QWORD [rbx], rax
    ; Ln 90: Assignment
+   lea		rax, strlen
+   push		rax
+   pop		rax
+   mov		-80[rbp], rax
    lea		rax, -40[rbp]
    push		rax
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -80[rbp]
    ; (*u8) 
-   call		strlen
+   call		rax
+   add		rsp, 32
    push		rax
    lea		rax, -56[rbp]
    push		rax
@@ -3450,6 +3728,16 @@ StringBuilder.addFloat64:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.internalAdd
+   push		rax
+   pop		rax
+   mov		-80[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -56[rbp]
@@ -3468,8 +3756,11 @@ StringBuilder.addFloat64:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -80[rbp]
    ; (*StringBuilder, *char, s64) 
-   call		StringBuilder.internalAdd
+   call		rax
+   add		rsp, 32
 L104:
    mov		rax, 0
    add		rsp, 192
@@ -3477,7 +3768,7 @@ L104:
    ret
 
 ; bytes locals   : 128
-; bytes temp     : 40
+; bytes temp     : 48
 ; bytes total    : 208
 ; (sb: *StringBuilder, v: s64)
 StringBuilder.addInt64:
@@ -3501,14 +3792,27 @@ StringBuilder.addInt64:
    cmp		al, 0
    jz			L106
    ; block of if
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addChar
+   push		rax
+   pop		rax
+   mov		-136[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, 48
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -136[rbp]
    ; (*StringBuilder, u8) 
-   call		StringBuilder.addChar
+   call		rax
+   add		rsp, 32
    ; Return
    jmp		L105
    jmp L106
@@ -3527,14 +3831,27 @@ L106:
    cmp		al, 0
    jz			L107
    ; block of if
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addChar
+   push		rax
+   pop		rax
+   mov		-136[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, 45
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -136[rbp]
    ; (*StringBuilder, u8) 
-   call		StringBuilder.addChar
+   call		rax
+   add		rsp, 32
    ; Ln 102: Assignment
    mov		rax, QWORD -16[rbp]
    push		rax
@@ -3698,14 +4015,27 @@ L110:
    push		rax
    pop		rax
    mov		BYTE -101[rbp], al
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addChar
+   push		rax
+   pop		rax
+   mov		-136[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    movzx		eax, BYTE -101[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -136[rbp]
    ; (*StringBuilder, u8) 
-   call		StringBuilder.addChar
+   call		rax
+   add		rsp, 32
 L111:
    inc		DWORD -80[rbp]
    jmp		L110
@@ -3717,7 +4047,7 @@ L105:
    ret
 
 ; bytes locals   : 128
-; bytes temp     : 40
+; bytes temp     : 48
 ; bytes total    : 208
 ; (sb: *StringBuilder, v: u64)
 StringBuilder.addUInt64:
@@ -3741,14 +4071,27 @@ StringBuilder.addUInt64:
    cmp		al, 0
    jz			L114
    ; block of if
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addChar
+   push		rax
+   pop		rax
+   mov		-136[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, 48
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -136[rbp]
    ; (*StringBuilder, u8) 
-   call		StringBuilder.addChar
+   call		rax
+   add		rsp, 32
    ; Return
    jmp		L113
    jmp L114
@@ -3903,14 +4246,27 @@ L117:
    push		rax
    pop		rax
    mov		BYTE -101[rbp], al
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addChar
+   push		rax
+   pop		rax
+   mov		-136[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    movzx		eax, BYTE -101[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -136[rbp]
    ; (*StringBuilder, u8) 
-   call		StringBuilder.addChar
+   call		rax
+   add		rsp, 32
 L118:
    inc		DWORD -80[rbp]
    jmp		L117
@@ -3922,13 +4278,13 @@ L113:
    ret
 
 ; bytes locals   : 608
-; bytes temp     : 80
-; bytes total    : 720
+; bytes temp     : 88
+; bytes total    : 736
 ; (sb: *StringBuilder, arg: any)
 StringBuilder.addAnyValue:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 720
+   sub		rsp, 736
    mov		16[rbp], rcx
    mov		24[rbp], rdx
    ; Param sb
@@ -4011,6 +4367,16 @@ StringBuilder.addAnyValue:
    push		rax
    pop		rax
    mov		BYTE -33[rbp], al
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addUInt64
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    movzx		eax, BYTE -33[rbp]
@@ -4020,8 +4386,11 @@ StringBuilder.addAnyValue:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, u64) 
-   call		StringBuilder.addUInt64
+   call		rax
+   add		rsp, 32
    jmp L124
 ;#1 else if
 L125:
@@ -4056,6 +4425,16 @@ L125:
    push		rax
    pop		rax
    mov		WORD -36[rbp], ax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addUInt64
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    movzx		eax, WORD -36[rbp]
@@ -4065,8 +4444,11 @@ L125:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, u64) 
-   call		StringBuilder.addUInt64
+   call		rax
+   add		rsp, 32
    jmp L124
 ;#2 else if
 L127:
@@ -4123,6 +4505,16 @@ L127:
    push		rax
    pop		rax
    mov		DWORD -40[rbp], eax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addUInt64
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		eax, DWORD -40[rbp]
@@ -4132,8 +4524,11 @@ L127:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, u64) 
-   call		StringBuilder.addUInt64
+   call		rax
+   add		rsp, 32
    jmp L124
 ;#3 else if
 L128:
@@ -4168,14 +4563,27 @@ L128:
    push		rax
    pop		rax
    mov		QWORD -48[rbp], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addUInt64
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, QWORD -48[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, u64) 
-   call		StringBuilder.addUInt64
+   call		rax
+   add		rsp, 32
    jmp L124
 ;#4 else if
 L129:
@@ -4211,6 +4619,16 @@ L129:
    push		rax
    pop		rax
    mov		BYTE -49[rbp], al
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addInt64
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    movzx		eax, BYTE -49[rbp]
@@ -4221,8 +4639,11 @@ L129:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, s64) 
-   call		StringBuilder.addInt64
+   call		rax
+   add		rsp, 32
    jmp L124
 ;#5 else if
 L130:
@@ -4258,6 +4679,16 @@ L130:
    push		rax
    pop		rax
    mov		WORD -52[rbp], ax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addInt64
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    movzx		eax, WORD -52[rbp]
@@ -4268,8 +4699,11 @@ L130:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, s64) 
-   call		StringBuilder.addInt64
+   call		rax
+   add		rsp, 32
    jmp L124
 ;#6 else if
 L131:
@@ -4327,6 +4761,16 @@ L131:
    push		rax
    pop		rax
    mov		DWORD -56[rbp], eax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addInt64
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		eax, DWORD -56[rbp]
@@ -4337,8 +4781,11 @@ L131:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, s64) 
-   call		StringBuilder.addInt64
+   call		rax
+   add		rsp, 32
    jmp L124
 ;#7 else if
 L132:
@@ -4373,28 +4820,54 @@ L132:
    push		rax
    pop		rax
    mov		QWORD -64[rbp], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addInt64
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, QWORD -64[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, s64) 
-   call		StringBuilder.addInt64
+   call		rax
+   add		rsp, 32
    jmp L124
 ; else
 L126:
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS3
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 9
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 9
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    jmp L124
 ; done
 L124:
@@ -4464,6 +4937,16 @@ L122:
    push		rax
    pop		rax
    mov		QWORD -72[rbp], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addFloat32
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, -72[rbp]
@@ -4474,8 +4957,11 @@ L122:
    pop		rax
    movd		xmm1, eax
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, f32) 
-   call		StringBuilder.addFloat32
+   call		rax
+   add		rsp, 32
    jmp L134
 ; else
 L135:
@@ -4487,6 +4973,16 @@ L135:
    push		rax
    pop		rax
    mov		QWORD -80[rbp], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addFloat64
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, -80[rbp]
@@ -4497,8 +4993,11 @@ L135:
    pop		rax
    movq		xmm1, rax
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, f64) 
-   call		StringBuilder.addFloat64
+   call		rax
+   add		rsp, 32
    jmp L134
 ; done
 L134:
@@ -4548,31 +5047,57 @@ L133:
    cmp		al, 0
    jz			L138
    ; block of if
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS4
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 4
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 4
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    jmp L137
 ; else
 L138:
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS5
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 5
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 5
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    jmp L137
 ; done
 L137:
@@ -4613,6 +5138,16 @@ L136:
    push		rax
    pop		rax
    mov		QWORD -96[rbp], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, -96[rbp]
@@ -4622,8 +5157,11 @@ L136:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    jmp L121
 ;#4 else if
 L139:
@@ -4664,17 +5202,40 @@ L139:
    push		rax
    pop		rax
    mov		QWORD -104[rbp], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS6
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 1
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 1
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -104[rbp]
@@ -4690,8 +5251,11 @@ L139:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    jmp L121
 ;#5 else if
 L140:
@@ -4747,12 +5311,16 @@ L140:
    mov		r8, 64
    call		memset
    ; Ln 226: $written : int = -188[rbp]
+   lea		rax, sprintf
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    lea		rax, -184[rbp]
    push		rax
    mov		rax, CS7
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 4
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 4
+   lea		rax, -632[rbp]
    push		rax
    pop		rax
    mov	rax, [rax]
@@ -4765,8 +5333,11 @@ L140:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*u8, *u8, *void) 
-   call		sprintf
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    mov		DWORD -188[rbp], eax
@@ -4799,14 +5370,27 @@ L140:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -208[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    jmp L121
 ;#6 else if
 L141:
@@ -4870,33 +5454,59 @@ L141:
    cmp		al, 0
    jz			L143
    ; block of if
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS8
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 2
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 2
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    ; Return
    jmp		L120
    jmp L143
 ; done
 L143:
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS9
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 1
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 1
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    ; Ln 244: Ranged for-loop
    mov		rax, 0
    push		rax
@@ -5160,7 +5770,26 @@ L149:
    jmp L147
 ; done
 L147:
-   lea		rax, -609[rbp]
+   lea		rax, -216[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   add		rbx, 40
+   push		rbx
+   pop		rbx
+   lea		rax, [rbx]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, Type.isPrimitive
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
+   lea		rax, -617[rbp]
    push		rax
    lea		rax, -216[rbp]
    push		rax
@@ -5175,9 +5804,12 @@ L147:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*Type) 
-   call		Type.isPrimitive
-   movzx		eax, BYTE -609[rbp]
+   call		rax
+   add		rsp, 32
+   movzx		eax, BYTE -617[rbp]
    push		rax
    lea		rax, -216[rbp]
    push		rax
@@ -5251,14 +5883,27 @@ L147:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addAnyValue
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -376[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, any) 
-   call		StringBuilder.addAnyValue
+   call		rax
+   add		rsp, 32
    jmp L150
 ; else
 L151:
@@ -5268,12 +5913,16 @@ L151:
    mov		rdx, 0
    mov		r8, 64
    call		memset
+   lea		rax, sprintf
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    lea		rax, -440[rbp]
    push		rax
    mov		rax, CS10
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 4
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 4
+   lea		rax, -632[rbp]
    push		rax
    pop		rax
    mov	rax, [rax]
@@ -5283,8 +5932,11 @@ L151:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*u8, *u8, *u8) 
-   call		sprintf
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    ; Ln 276: $str : string = -456[rbp]
@@ -5302,11 +5954,18 @@ L151:
    pop		rax
    mov		QWORD [rbx], rax
    ; Ln 278: Assignment
+   lea		rax, strlen
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    lea		rax, -440[rbp]
    push		rax
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*u8) 
-   call		strlen
+   call		rax
+   add		rsp, 32
    push		rax
    lea		rax, -456[rbp]
    push		rax
@@ -5319,14 +5978,27 @@ L151:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -456[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    jmp L150
 ; done
 L150:
@@ -5359,17 +6031,30 @@ L150:
    cmp		al, 0
    jz			L152
    ; block of if
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS11
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 2
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 2
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    jmp L152
 ; done
 L152:
@@ -5377,17 +6062,30 @@ L145:
    inc		DWORD -232[rbp]
    jmp		L144
 L146:
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS12
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 1
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 1
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    jmp L121
 ;#7 else if
 L142:
@@ -5428,6 +6126,16 @@ L142:
    push		rax
    pop		rax
    mov		QWORD -464[rbp], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -464[rbp]
@@ -5443,19 +6151,35 @@ L142:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS13
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 2
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 2
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    ; Ln 292: For-loop
    lea		rax, -464[rbp]
    push		rax
@@ -5487,6 +6211,16 @@ L153:
    mov		rdx, rbx
    lea		rcx, -512[rbp]
    call		memcpy
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -512[rbp]
@@ -5496,19 +6230,35 @@ L153:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS14
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 3
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 3
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    ; Ln 298: $value : any = -552[rbp]
    mov		QWORD -552[rbp], 0
    mov		QWORD -544[rbp], 0
@@ -5549,14 +6299,27 @@ L153:
    pop		rbx
    pop		rax
    mov		QWORD [rbx], rax
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addAnyValue
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -552[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, any) 
-   call		StringBuilder.addAnyValue
+   call		rax
+   add		rsp, 32
    mov		eax, DWORD -536[rbp]
    movsx		rax, eax
    push		rax
@@ -5592,17 +6355,30 @@ L153:
    cmp		al, 0
    jz			L156
    ; block of if
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS15
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 2
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 2
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    jmp L156
 ; done
 L156:
@@ -5610,31 +6386,67 @@ L154:
    inc		QWORD -536[rbp]
    jmp		L153
 L155:
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS16
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 2
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 2
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    jmp L121
 ; else
 L123:
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS17
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 1
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 1
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -24[rbp]
@@ -5653,30 +6465,46 @@ L123:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addString
+   push		rax
+   pop		rax
+   mov		-616[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    mov		rax, CS18
-   mov		-624[rbp], rax
-   mov		QWORD -616[rbp], 1
-   lea		rax, -624[rbp]
+   mov		-632[rbp], rax
+   mov		QWORD -624[rbp], 1
+   lea		rax, -632[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -616[rbp]
    ; (*StringBuilder, string) 
-   call		StringBuilder.addString
+   call		rax
+   add		rsp, 32
    jmp L121
 ; done
 L121:
 L120:
    mov		rax, 0
-   add		rsp, 720
+   add		rsp, 736
    pop		rbp
    ret
 
 ; bytes locals   : 200
-; bytes temp     : 80
+; bytes temp     : 88
 ; bytes total    : 320
 ; (sb: *StringBuilder, format: string, args: []any)
 StringBuilder.add:
@@ -5747,6 +6575,10 @@ L158:
    cmp		al, 0
    jz			L161
    ; block of if
+   lea		rax, appendInt
+   push		rax
+   pop		rax
+   mov		-208[rbp], rax
    lea		rax, -72[rbp]
    push		rax
    mov		eax, DWORD -104[rbp]
@@ -5754,8 +6586,11 @@ L158:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -208[rbp]
    ; (*[..]int, s32) 
-   call		appendInt
+   call		rax
+   add		rsp, 32
    jmp L161
 ; done
 L161:
@@ -5788,6 +6623,16 @@ L162:
    lea		rbx, [rbx + rax]
    mov		eax, DWORD [rbx]
    mov		-112[rbp], eax 
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addStringSlice
+   push		rax
+   pop		rax
+   mov		-208[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -24[rbp]
@@ -5802,8 +6647,11 @@ L162:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -208[rbp]
    ; (*StringBuilder, string, int, int) 
-   call		StringBuilder.addStringSlice
+   call		rax
+   add		rsp, 32
    ; Ln 338: $arg : any = -152[rbp]
    lea		rax, -40[rbp]
    push		rax
@@ -5823,14 +6671,27 @@ L162:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addAnyValue
+   push		rax
+   pop		rax
+   mov		-208[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -152[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -208[rbp]
    ; (*StringBuilder, any) 
-   call		StringBuilder.addAnyValue
+   call		rax
+   add		rsp, 32
    ; Ln 341: Assignment
    mov		eax, DWORD -112[rbp]
    movsx		rax, eax
@@ -5850,6 +6711,16 @@ L163:
    inc		QWORD -136[rbp]
    jmp		L162
 L164:
+   lea		rax, -8[rbp]
+   push		rax
+   pop		rbx
+   mov		rbx, [rbx]
+   push		rbx
+   pop		rbx
+   lea		rax, StringBuilder.addStringSlice
+   push		rax
+   pop		rax
+   mov		-208[rbp], rax
    mov		rax, -8[rbp]
    push		rax
    lea		rax, -24[rbp]
@@ -5869,8 +6740,11 @@ L164:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -208[rbp]
    ; (*StringBuilder, string, int, s64) 
-   call		StringBuilder.addStringSlice
+   call		rax
+   add		rsp, 32
 L157:
    mov		rax, 0
    add		rsp, 320
@@ -5878,7 +6752,7 @@ L157:
    ret
 
 ; bytes locals   : 16
-; bytes temp     : 56
+; bytes temp     : 64
 ; bytes total    : 112
 ; (sb: *StringBuilder)
 StringBuilder.clear:
@@ -5887,6 +6761,10 @@ StringBuilder.clear:
    sub		rsp, 112
    ; Param sb
    mov		-8[rbp], rcx
+   lea		rax, memset
+   push		rax
+   pop		rax
+   mov		-24[rbp], rax
    lea		rax, -8[rbp]
    push		rax
    pop		rbx
@@ -5912,8 +6790,11 @@ StringBuilder.clear:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -24[rbp]
    ; (*u8, int, int) 
-   call		memset
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
 L165:
@@ -5995,7 +6876,7 @@ L166:
    ret
 
 ; bytes locals   : 16
-; bytes temp     : 24
+; bytes temp     : 32
 ; bytes total    : 80
 ; (sb: *StringBuilder)
 StringBuilder.free:
@@ -6004,6 +6885,10 @@ StringBuilder.free:
    sub		rsp, 80
    ; Param sb
    mov		-8[rbp], rcx
+   lea		rax, free
+   push		rax
+   pop		rax
+   mov		-24[rbp], rax
    lea		rax, -8[rbp]
    push		rax
    pop		rbx
@@ -6013,8 +6898,11 @@ StringBuilder.free:
    mov		rax, [rbx]
    push		rax
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -24[rbp]
    ; (*u8) 
-   call		free
+   call		rax
+   add		rsp, 32
 L167:
    mov		rax, 0
    add		rsp, 80
@@ -6022,7 +6910,7 @@ L167:
    ret
 
 ; bytes locals   : 232
-; bytes temp     : 80
+; bytes temp     : 88
 ; bytes total    : 352
 ; (format: string, args: []any, newline: bool)
 Print:
@@ -6092,6 +6980,10 @@ L169:
    cmp		al, 0
    jz			L172
    ; block of if
+   lea		rax, appendInt
+   push		rax
+   pop		rax
+   mov		-240[rbp], rax
    lea		rax, -72[rbp]
    push		rax
    mov		eax, DWORD -104[rbp]
@@ -6102,8 +6994,11 @@ L169:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -240[rbp]
    ; (*[..]int, s64) 
-   call		appendInt
+   call		rax
+   add		rsp, 32
    jmp L172
 ; done
 L172:
@@ -6112,15 +7007,22 @@ L170:
    jmp		L169
 L171:
    ; Ln 23: $sb : StringBuilder = -120[rbp]
-   lea		rax, -248[rbp]
+   lea		rax, NewStringBuilder
+   push		rax
+   pop		rax
+   mov		-240[rbp], rax
+   lea		rax, -256[rbp]
    push		rax
    mov		rax, 1024
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -240[rbp]
    ; (int) 
-   call		NewStringBuilder
-   lea		rax, -248[rbp]
+   call		rax
+   add		rsp, 32
+   lea		rax, -256[rbp]
    push		rax
    pop		rax
    lea		rbx, -120[rbp]
@@ -6155,6 +7057,13 @@ L173:
    mov		-128[rbp], eax 
    lea		rax, -120[rbp]
    push		rax
+   pop		rbx
+   lea		rax, StringBuilder.addStringSlice
+   push		rax
+   pop		rax
+   mov		-240[rbp], rax
+   lea		rax, -120[rbp]
+   push		rax
    lea		rax, -16[rbp]
    push		rax
    mov		eax, DWORD -124[rbp]
@@ -6167,8 +7076,11 @@ L173:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -240[rbp]
    ; (*StringBuilder, string, int, int) 
-   call		StringBuilder.addStringSlice
+   call		rax
+   add		rsp, 32
    ; Ln 32: $arg : any = -168[rbp]
    lea		rax, -32[rbp]
    push		rax
@@ -6190,12 +7102,22 @@ L173:
    call		memcpy
    lea		rax, -120[rbp]
    push		rax
+   pop		rbx
+   lea		rax, StringBuilder.addAnyValue
+   push		rax
+   pop		rax
+   mov		-240[rbp], rax
+   lea		rax, -120[rbp]
+   push		rax
    lea		rax, -168[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -240[rbp]
    ; (*StringBuilder, any) 
-   call		StringBuilder.addAnyValue
+   call		rax
+   add		rsp, 32
    ; Ln 35: Assignment
    mov		eax, DWORD -128[rbp]
    movsx		rax, eax
@@ -6217,6 +7139,13 @@ L174:
 L175:
    lea		rax, -120[rbp]
    push		rax
+   pop		rbx
+   lea		rax, StringBuilder.addStringSlice
+   push		rax
+   pop		rax
+   mov		-240[rbp], rax
+   lea		rax, -120[rbp]
+   push		rax
    lea		rax, -16[rbp]
    push		rax
    mov		eax, DWORD -124[rbp]
@@ -6234,18 +7163,31 @@ L175:
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -240[rbp]
    ; (*StringBuilder, string, int, s64) 
-   call		StringBuilder.addStringSlice
+   call		rax
+   add		rsp, 32
    ; Ln 41: $result : string = -184[rbp]
-   lea		rax, -248[rbp]
+   lea		rax, -120[rbp]
+   push		rax
+   pop		rbx
+   lea		rax, StringBuilder.toString
+   push		rax
+   pop		rax
+   mov		-240[rbp], rax
+   lea		rax, -256[rbp]
    push		rax
    lea		rax, -120[rbp]
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -240[rbp]
    ; (*StringBuilder) 
-   call		StringBuilder.toString
-   lea		rax, -248[rbp]
+   call		rax
+   add		rsp, 32
+   lea		rax, -256[rbp]
    push		rax
    pop		rax
    lea		rbx, -184[rbp]
@@ -6259,10 +7201,14 @@ L175:
    cmp		al, 0
    jz			L177
    ; block of if
+   lea		rax, printf
+   push		rax
+   pop		rax
+   mov		-240[rbp], rax
    mov		rax, CS19
-   mov		-248[rbp], rax
-   mov		QWORD -240[rbp], 4
-   lea		rax, -248[rbp]
+   mov		-256[rbp], rax
+   mov		QWORD -248[rbp], 4
+   lea		rax, -256[rbp]
    push		rax
    pop		rbx
    mov		rax, [rbx]
@@ -6274,17 +7220,24 @@ L175:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -240[rbp]
    ; (*char, *char) 
-   call		printf
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    jmp L176
 ; else
 L177:
+   lea		rax, printf
+   push		rax
+   pop		rax
+   mov		-240[rbp], rax
    mov		rax, CS20
-   mov		-248[rbp], rax
-   mov		QWORD -240[rbp], 2
-   lea		rax, -248[rbp]
+   mov		-256[rbp], rax
+   mov		QWORD -248[rbp], 2
+   lea		rax, -256[rbp]
    push		rax
    pop		rbx
    mov		rax, [rbx]
@@ -6296,8 +7249,11 @@ L177:
    push		rax
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -240[rbp]
    ; (*char, *char) 
-   call		printf
+   call		rax
+   add		rsp, 32
    push		rax
    pop		rax
    jmp L176
@@ -6305,9 +7261,19 @@ L177:
 L176:
    lea		rax, -120[rbp]
    push		rax
+   pop		rbx
+   lea		rax, StringBuilder.free
+   push		rax
+   pop		rax
+   mov		-240[rbp], rax
+   lea		rax, -120[rbp]
+   push		rax
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -240[rbp]
    ; (*StringBuilder) 
-   call		StringBuilder.free
+   call		rax
+   add		rsp, 32
    ; Return
    jmp		L168
 L168:
@@ -6317,13 +7283,13 @@ L168:
    ret
 
 ; bytes locals   : 120
-; bytes temp     : 216
-; bytes total    : 368
+; bytes temp     : 224
+; bytes total    : 384
 ; ()
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 368
+   sub		rsp, 384
    ; Ln 14: $movie : Movie = -24[rbp]
    lea		rcx, -24[rbp]
    mov		rdx, 0
@@ -6352,10 +7318,14 @@ main:
    push		rax
    pop		rax
    mov		DWORD -4[rbp], eax
+   lea		rax, Print
+   push		rax
+   pop		rax
+   mov		-128[rbp], rax
    mov		rax, CS22
-   mov		-136[rbp], rax
-   mov		QWORD -128[rbp], 1
-   lea		rax, -136[rbp]
+   mov		-144[rbp], rax
+   mov		QWORD -136[rbp], 1
+   lea		rax, -144[rbp]
    push		rax
    lea		rax, -24[rbp]
    push		rax
@@ -6366,24 +7336,24 @@ main:
    mov		r8, 24
    call		memcpy
    lea		rax, -64[rbp]
-   lea		rbx, -152[rbp]
+   lea		rbx, -160[rbp]
    mov		QWORD 0[rbx], rax
-   mov		QWORD rbx, -152[rbp]
-   mov		-160[rbp], rbx
+   mov		QWORD rbx, -160[rbp]
+   mov		-168[rbp], rbx
    sub		rsp, 32
    mov		rcx, 96
    call		malloc
    add		rsp, 32
-   mov		-168[rbp], rax
    mov		-176[rbp], rax
-   mov		rbx, -160[rbp]
+   mov		-184[rbp], rax
+   mov		rbx, -168[rbp]
    lea		rbx, 0[rbx]
    mov		rax, QWORD [Type_string]
    push		rax
    pop		rcx
-   mov		rdx, -160[rbp]
+   mov		rdx, -168[rbp]
    lea		rdx, 0[rdx]
-   mov		rbx, -176[rbp]
+   mov		rbx, -184[rbp]
    mov		rax, CS23
    mov		QWORD 0[rbx], rax
    mov		QWORD 8[rbx], 5
@@ -6392,24 +7362,24 @@ main:
    mov		DWORD 32[rbx], 0
    mov		DWORD 36[rbx], 0
    add		rbx, 48
-   mov		-176[rbp], rbx
-   mov		rbx, -160[rbp]
-   lea		rbx, 16[rbx]
    mov		-184[rbp], rbx
+   mov		rbx, -168[rbp]
+   lea		rbx, 16[rbx]
+   mov		-192[rbp], rbx
    sub		rsp, 32
    mov		rcx, 96
    call		malloc
    add		rsp, 32
-   mov		-192[rbp], rax
    mov		-200[rbp], rax
-   mov		rbx, -184[rbp]
+   mov		-208[rbp], rax
+   mov		rbx, -192[rbp]
    lea		rbx, 0[rbx]
    mov		rax, QWORD [Type_int]
    push		rax
    pop		rcx
-   mov		rdx, -184[rbp]
+   mov		rdx, -192[rbp]
    lea		rdx, 0[rdx]
-   mov		rbx, -200[rbp]
+   mov		rbx, -208[rbp]
    mov		rax, CS24
    mov		QWORD 0[rbx], rax
    mov		QWORD 8[rbx], 8
@@ -6418,15 +7388,15 @@ main:
    mov		DWORD 32[rbx], 0
    mov		DWORD 36[rbx], 0
    add		rbx, 48
-   mov		-200[rbp], rbx
-   mov		rbx, -184[rbp]
+   mov		-208[rbp], rbx
+   mov		rbx, -192[rbp]
    lea		rbx, 4[rbx]
    mov		rax, QWORD [Type_int]
    push		rax
    pop		rcx
-   mov		rdx, -184[rbp]
+   mov		rdx, -192[rbp]
    lea		rdx, 4[rdx]
-   mov		rbx, -200[rbp]
+   mov		rbx, -208[rbp]
    mov		rax, CS25
    mov		QWORD 0[rbx], rax
    mov		QWORD 8[rbx], 9
@@ -6435,12 +7405,12 @@ main:
    mov		DWORD 32[rbx], 1
    mov		DWORD 36[rbx], 4
    add		rbx, 48
-   mov		-200[rbp], rbx
+   mov		-208[rbp], rbx
    mov		rax, CS26
-   mov		QWORD -216[rbp], rax
-   mov		QWORD -208[rbp], 6
-   lea		rcx, -216[rbp]
-   mov		rdx, -192[rbp]
+   mov		QWORD -224[rbp], rax
+   mov		QWORD -216[rbp], 6
+   lea		rcx, -224[rbp]
+   mov		rdx, -200[rbp]
    mov		r8d, 2
    mov		r9d, 8
    sub		rsp, 40
@@ -6449,9 +7419,9 @@ main:
    add		rsp, 40
    push		rax
    pop		rcx
-   mov		rdx, -160[rbp]
+   mov		rdx, -168[rbp]
    lea		rdx, 16[rdx]
-   mov		rbx, -176[rbp]
+   mov		rbx, -184[rbp]
    mov		rax, CS27
    mov		QWORD 0[rbx], rax
    mov		QWORD 8[rbx], 6
@@ -6460,12 +7430,12 @@ main:
    mov		DWORD 32[rbx], 1
    mov		DWORD 36[rbx], 16
    add		rbx, 48
-   mov		-176[rbp], rbx
+   mov		-184[rbp], rbx
    mov		rax, CS28
-   mov		QWORD -232[rbp], rax
-   mov		QWORD -224[rbp], 5
-   lea		rcx, -232[rbp]
-   mov		rdx, -168[rbp]
+   mov		QWORD -240[rbp], rax
+   mov		QWORD -232[rbp], 5
+   lea		rcx, -240[rbp]
+   mov		rdx, -176[rbp]
    mov		r8d, 2
    mov		r9d, 24
    sub		rsp, 40
@@ -6474,7 +7444,7 @@ main:
    add		rsp, 40
    push		rax
    pop		rcx
-   lea		rbx, -152[rbp]
+   lea		rbx, -160[rbp]
    mov		QWORD 8[rbx], rcx
    push		rbx
    pop		rax
@@ -6484,26 +7454,29 @@ main:
    mov		r8, 16
    call		memcpy
    lea		rax, -40[rbp]
-   mov		QWORD -248[rbp], rax
-   mov		QWORD -240[rbp], 1
-   lea		rax, -248[rbp]
+   mov		QWORD -256[rbp], rax
+   mov		QWORD -248[rbp], 1
+   lea		rax, -256[rbp]
    push		rax
    pop		rax
    mov		rbx, 0[rax]
    mov		rcx, 8[rax]
-   mov		QWORD -264[rbp], rbx
-   mov		QWORD -256[rbp], rcx
-   lea		rax, -264[rbp]
+   mov		QWORD -272[rbp], rbx
+   mov		QWORD -264[rbp], rcx
+   lea		rax, -272[rbp]
    push		rax
    push		1
    pop		r8 
    pop		rdx
    pop		rcx
+   sub		rsp, 32
+   mov		rax, -128[rbp]
    ; (string, []any, bool) 
-   call		Print
+   call		rax
+   add		rsp, 32
 L178:
    mov		rax, 0
-   add		rsp, 368
+   add		rsp, 384
    pop		rbp
    ret
 

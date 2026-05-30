@@ -13,7 +13,7 @@ AstDeclaration  *parse_declaration(Parser *parser);
 AstAssignment   *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token);
 AstDirective    *parse_directive(Parser *parser);
 AstFunctionDefn *parse_function_defn(Parser *parser);
-AstFunctionCall *parse_function_call(Parser *parser);
+AstFunctionCall *parse_function_call(Parser *parser, AstExpr *lhs);
 AstStruct       *parse_struct_defn(Parser *parser);
 AstEnum         *parse_enum_defn(Parser *parser);
 AstIf           *parse_if(Parser *parser);
@@ -1776,13 +1776,13 @@ AstExpr *parse_array_access(Parser *parser, Token open_bracket, AstExpr *left) {
     return (AstExpr *)(array_ac);
 }
 
-AstFunctionCall *parse_function_call(Parser *parser) {
+AstFunctionCall *parse_function_call(Parser *parser, AstExpr *lhs) {
     AstFunctionCall *call = (AstFunctionCall *)(ast_allocate(parser, sizeof(AstFunctionCall)));
     call->arguments       = da_init(2, sizeof(AstArgument *));
 
-    Token ident_token = peek_next_token(parser);
-    expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER); // Should be impossible to fail
-    eat_token(parser);
+    if (lhs == NULL || (lhs->head.kind != AST_LITERAL && lhs->head.kind != AST_MEMBER_ACCESS)) {
+        XXX;
+    }
 
     Token next = peek_next_token(parser);
     expect(parser, next, '('); // Should also be impossible to fail
@@ -1857,9 +1857,9 @@ AstFunctionCall *parse_function_call(Parser *parser) {
 
     call->head.head.kind  = AST_FUNCTION_CALL;
     call->head.head.file  = parser->current_file;
-    call->head.head.start = ident_token.start;
+    call->head.head.start = call->paren_start_token.start;
     call->head.head.end   = next.end;
-    call->identifer       = make_identifier_from_token(parser, ident_token, NULL); // The type of the identifier will be set later in the typer, so here i just specify void
+    call->expression      = lhs;
 
     return call;
 }
@@ -2439,6 +2439,7 @@ int get_operator_precedence(OperatorType op) {
             return 13;
         case OP_DOT:
         case OP_SUBSCRIPT:
+        case OP_FUNC_CALL:
             return 14;
         default:
             printf("%s:%d: compiler-error: Unexpected token type '%s'. Expected token to be an operator\n", __FILE__, __LINE__, token_type_to_str((TokenType)(op)));
@@ -2499,16 +2500,23 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
         if (next_prec <= min_prec) {
             break;
         } else {
-            eat_token(parser);
-
             if (next.type == '.') {
+                eat_token(parser);
                 AstExpr *right = parse_leaf(parser);
                 if (!right) return NULL;
                 left = make_member_access(parser, next, left, right);
-            } else if (next.type == '[') {
+            } 
+            else if (next.type == '[') {
+                eat_token(parser);
                 left = parse_array_access(parser, next, left);
                 if (!left) return NULL;
-            } else {
+            }
+            else if (next.type == '(') {
+                left = (AstExpr *) parse_function_call(parser, left);
+                if (!left) return NULL;
+            }
+            else {
+                eat_token(parser);
                 AstExpr *right = parse_expression(parser, next_prec);
                 if (!right) return NULL;
                 left = make_binary_node(parser, next, left, right);
@@ -2649,12 +2657,6 @@ AstExpr *parse_leaf(Parser *parser) {
         eval->identifier      = make_identifier_from_token(parser, ident, NULL);
 
         return (AstExpr *)(eval);
-    }
-
-    if (t.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '(') {
-        AstFunctionCall *call = parse_function_call(parser);
-        if (!call) return NULL;
-        return (AstExpr *)(call);
     }
 
     if (t.type == TOKEN_TYPEOF) {
@@ -2816,15 +2818,22 @@ bool is_assignment_operator(Token token) {
 
 
 /*
-SNIPPET:
+SNIPPETS:
 
+// Break at a specific AST node where you know the file and linenumber
 if ( debug_break((Ast *) decl, "test.sd", 20) ) {
+    int VSCODE = 1;
+}
+
+
+// Debug a particular function
+if (strcmp(func_defn->identifier->name, "add") == 0) {
     int VSCODE = 1;
 }
 
 */
 
-bool debug_break_site(Ast *site, char *filename, int line) {
+bool debug_break(Ast *site, char *filename, int line) {
     if (!site) return false;
 
     if (site->start.line == line) {

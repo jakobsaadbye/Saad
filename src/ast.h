@@ -88,6 +88,7 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
     
     OP_DOT          = '.',
     OP_SUBSCRIPT    = '[',
+    OP_FUNC_CALL    = '(',
     OP_ADDRESS_OF   = 3,
     OP_POINTER_DEREFERENCE = 4, // Picked arbitrarily. Should just not conflict with the others
     OP_SPREAD       = TOKEN_TRIPLE_DOT, // Spread operator e.g `foo(...args)`
@@ -154,6 +155,7 @@ typedef enum IdentifierFlags {
     IDENTIFIER_IS_CONSTANT          = 1 << 5,
     IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN = 1 << 6,
     IDENTIFIER_IS_RESOLVED          = 1 << 7,
+    IDENTIFIER_IS_BUILTIN_FUNCTION  = 1 << 8,
 } IdentifierFlags;
 
 typedef struct AstIdentifier {
@@ -333,10 +335,10 @@ typedef struct AstArgument {
 typedef struct AstFunctionCall {
     AstExpr          head;
     AstIdentifier   *identifer;
+    AstExpr         *expression; // Expression that the function is called on. E.g `foo()`. In this case 'foo' is the identifier expression that the function call is made on
     Token            paren_start_token;
     AstFunctionDefn *func_defn;         // The called function
     DynamicArray     arguments;         // of *AstExpr
-    AstStruct       *belongs_to_struct; // The struct the function definition is defined on
     int              first_positional_argument_index;
     bool             is_method_call;    // If the function is called with an implicit self parameter in which the function definition is a method
     bool             is_member_call;    // If the function is called on a member of a struct. Member calls does not take an implicit 'self' parameter
@@ -470,10 +472,9 @@ typedef enum MemberAccessFlags {
 } MemberAccessFlags;
 
 typedef enum MemberAccessKind {
-    MEMBER_ACCESS_STRUCT,
-    MEMBER_ACCESS_STRUCT_STATIC,
-    MEMBER_ACCESS_ENUM,
-    MEMBER_ACCESS_METHOD_CALL,
+    MEMBER_ACCESS_STRUCT_MEMBER,
+    MEMBER_ACCESS_STATIC_STRUCT_MEMBER,
+    MEMBER_ACCESS_ENUM_MEMBER,
 } AccessorKind;
 
 typedef struct AstMemberAccess {
@@ -481,15 +482,15 @@ typedef struct AstMemberAccess {
 
     AstExpr *left;
     AstExpr *right;
-    AstIdentifier *struct_member;
+    
+    TypeStruct    *struct_type;
 
     MemberAccessFlags flags;
     
     AccessorKind access_kind;
     union {
-        AstEnumerator   *enum_member;
-        AstFunctionCall *method_call;
-        AstFunctionCall *function_call;
+        AstEnumerator *enum_member;
+        AstIdentifier *struct_member;
     };
 } AstMemberAccess;
 

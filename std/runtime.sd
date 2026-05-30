@@ -120,6 +120,14 @@ RawDynamicArray :: struct {
     elemSize: s64;
 }
 
+//////////////////////////////////
+// Builtin functions that are filled out by the compiler
+//////////////////////////////////
+
+//////////////////////////////////
+// Runtime functions
+//////////////////////////////////
+
 extern "C" {
     runtime_get_type_pointer :: (name: string, pointerTo: *Type) -> *TypePointer;
     runtime_get_type_array   :: (name: string, kind: TypeArrayKind, elem_type: *Type, count: s64) -> *TypeArray;

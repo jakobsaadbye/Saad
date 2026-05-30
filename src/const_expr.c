@@ -199,7 +199,7 @@ AstExpr *simplify_expression(ConstEvaluator *ce, AstBlock *scope, AstExpr *expr)
         case AST_MEMBER_ACCESS: {
             AstMemberAccess *ma = (AstMemberAccess *)(expr);
 
-            if (ma->access_kind == MEMBER_ACCESS_ENUM) {
+            if (ma->access_kind == MEMBER_ACCESS_ENUM_MEMBER) {
                 return make_literal_integer(ce, ma->enum_member->value); // @Note - Potential loss of enum information
             }
 

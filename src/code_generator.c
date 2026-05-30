@@ -216,6 +216,10 @@ int push_temporary_value_helper(CodeGenerator *cg, int size, Ast *site, const ch
 
     func_defn->temp_ptr += aligned_size;
 
+    if (loc == 0) {
+        report_error_ast(cg->parser, LABEL_NOTE, (Ast *)func_defn, "Compiler Error: Suspicious 0 address as temporary for this function");
+    }
+
     return loc;
 }
 
@@ -958,6 +962,22 @@ char *register_to_str(Register reg, int width) {
     }
 }
 
+// Moves the source offset to the target register relative to rbp or rsp
+void MOV_REG_ADDR(CodeGenerator *cg, int src_offset, char *relative_to, Register dst_reg, Type *src_type) {
+    char *dst_reg_string = register_to_str(dst_reg, src_type->size > 8 ? 8 : src_type->size);
+
+    if (dst_reg >= REG_XMM0) {
+        assert(src_type->kind == TYPE_FLOAT);
+        if (src_type->size == 8) {
+            sb_append(&cg->code, "   movq\t\t%d[%s], %s\n", src_offset, relative_to, dst_reg_string);
+        } else {
+            sb_append(&cg->code, "   movd\t\t%d[%s], %s\n", src_offset, relative_to, dst_reg_string);
+        }
+    } else {
+        sb_append(&cg->code, "   mov\t\t%s, %d[%s]\n", dst_reg_string, src_offset, relative_to);
+    }
+}
+
 // Moves the source register to the target offset relative to rbp or rsp
 void MOV_ADDR_REG(CodeGenerator *cg, int dst_offset, char *relative_to, Register src_reg, Type *src_type) {
     char *src_reg_string = register_to_str(src_reg, src_type->size > 8 ? 8 : src_type->size);
@@ -1192,11 +1212,13 @@ void adapt_function_argument_to_parameter(CodeGenerator *cg, AstExpr *arg, AstId
 // Lambda calls are expected to have the function pointer address in RBX
 void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     AstFunctionDefn *func_defn = call->func_defn;
-
-    if (call->is_lambda_call) {
-        PUSH(RBX);
-    }
     
+    // Emit the function pointer for the function call
+    emit_expression(cg, call->expression);
+    int func_pointer_addr = push_temporary_value(cg, 8, (Ast *)call->expression);
+    POP(RAX);
+    sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", func_pointer_addr);
+
     // Arguments that needs to be passed on the stack goes in the following order
     // 
     //    stack_arg_0, stack_arg_1, stack_arg_n,
@@ -1264,6 +1286,9 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
         }
     }
 
+    // 3.5 Reserve 32 bytes before the call
+    sb_append(&cg->code, "   sub\t\trsp, 32\n");
+
     // 4. Move arguments to the stack
     for (int i = 0; i < all_arguments_count; i++) {
         if (i < 4) {
@@ -1278,21 +1303,12 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     
 
     // Do the actual call
-    if (call->is_lambda_call) {
-        POP(RAX);
-        sb_append(&cg->code, "   sub\t\trsp, 32\n");
+    if (true || call->is_lambda_call || func_defn->is_lambda) {
+        MOV_REG_ADDR(cg, func_pointer_addr, RBP, REG_RAX, call->expression->type);
+        sb_append(&cg->code, "   ; %s \n", get_lowered_function_argument_list_string(call));
         sb_append(&cg->code, "   call\t\trax\n");
         sb_append(&cg->code, "   add\t\trsp, 32\n");
     }
-    else if (func_defn->is_lambda) {
-        // @Cleanup: This shouldn't be this way!!!
-        AstIdentifier *param = lookup_from_scope(cg->parser, cg->current_scope, call->identifer->name);
-        assert(param);
-        sb_append(&cg->code, "   mov\t\trax, %d[rbp]\n", param->stack_offset);
-        sb_append(&cg->code, "   sub\t\trsp, 32\n");
-        sb_append(&cg->code, "   call\t\trax\n");
-        sb_append(&cg->code, "   add\t\trsp, 32\n");
-    } 
     else {
         sb_append(&cg->code, "   ; %s \n", get_lowered_function_argument_list_string(call));
         sb_append(&cg->code, "   call\t\t%s\n", func_defn->symbol_name);
@@ -2618,6 +2634,10 @@ int allocate_variable(CodeGenerator *cg, int size) {
     cg->enclosing_function->base_ptr -= size;
     cg->enclosing_function->base_ptr = align_value(cg->enclosing_function->base_ptr, size > 8 ? 8 : size);
 
+    if (cg->enclosing_function->base_ptr == 0) {
+        report_error_ast(cg->parser, LABEL_WARNING, NULL, "Compiler Error: Suspicious 0 temporary offset in allocate_variable");
+    }
+
     return cg->enclosing_function->base_ptr;
 }
 
@@ -3279,15 +3299,11 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
     // to skip alot of push and pop operations. This was the initial idea about the MemberAccessResult
     MemberAccessResult result = {0, true};
 
-    if (ma->access_kind == MEMBER_ACCESS_STRUCT_STATIC) {
+    if (ma->access_kind == MEMBER_ACCESS_STATIC_STRUCT_MEMBER) {
         return result;
     }
-    if (ma->access_kind == MEMBER_ACCESS_ENUM) {
+    if (ma->access_kind == MEMBER_ACCESS_ENUM_MEMBER) {
         // We don't push the address of an enum value
-        return result;
-    }
-    if (ma->access_kind == MEMBER_ACCESS_METHOD_CALL) {
-        // We don't push the address of a method call. We let the desugered function call handle it
         return result;
     }
 
@@ -3598,7 +3614,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         
         MemberAccessResult result = emit_member_access(cg, ma);
 
-        if (ma->access_kind == MEMBER_ACCESS_STRUCT) {
+        if (ma->access_kind == MEMBER_ACCESS_STRUCT_MEMBER) {
             AstIdentifier *member = ma->struct_member;
 
             // Special case for member access on an fixed array type
@@ -3615,12 +3631,12 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 return;
             }
 
-            if (ma->flags & MEMBER_ACCESS_FLAGS_RHS_IS_FUNCTION_CALL) {
-                POP(RBX);
-                sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
-                emit_function_call(cg, ma->function_call);
-                return;
-            }
+            // if (ma->flags & MEMBER_ACCESS_FLAGS_RHS_IS_FUNCTION_CALL) {
+            //     POP(RBX);
+            //     sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
+            //     emit_function_call(cg, ma->function_call);
+            //     return;
+            // }
 
             // Simple values stored in the member
             POP(RBX);
@@ -3628,16 +3644,12 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
 
             return;
         }
-        else if (ma->access_kind == MEMBER_ACCESS_STRUCT_STATIC) {
+        else if (ma->access_kind == MEMBER_ACCESS_STATIC_STRUCT_MEMBER) {
             AstIdentifier *member = ma->struct_member;
             emit_constant_identifier(cg, member);
             return;
         }
-        else if (ma->access_kind == MEMBER_ACCESS_METHOD_CALL) {
-            assert(ma->method_call);
-            emit_function_call(cg, ma->method_call);
-        }
-        else if (ma->access_kind == MEMBER_ACCESS_ENUM) {
+        else if (ma->access_kind == MEMBER_ACCESS_ENUM_MEMBER) {
 
             AstEnum *enum_defn = ma->enum_member->parent;
             
@@ -3857,7 +3869,20 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_IDENTIFIER: {
-            AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
+            // @Bug @Incomplete @Cleanup: We should definitly be using `lit->as.value.identifier.resolved_identifier;`
+            // We have a bug right now, that variadic arguments are getting scope rewritten and a new identifier is created for them
+            // so we loose the original resolved_identifier when going into codegen. That causes a mismatch between the resolved_identifier and
+            // parameter which are now two different identifiers. We should definitely fix that!       
+            //             jsd 2026.05.28
+
+            // @Superhack: Swap the identifier if its a builtin function
+            AstIdentifier *ident = NULL;
+            if (lit->as.value.identifier.resolved_identifier->flags & IDENTIFIER_IS_BUILTIN_FUNCTION) {
+                ident = lit->as.value.identifier.resolved_identifier;
+            } else {
+                ident = lookup_from_scope(cg->parser, cg->current_scope, lit->as.value.identifier.name);
+            }
+
             assert(ident);
 
             if (ident->flags & IDENTIFIER_IS_CONSTANT) {
@@ -3871,6 +3896,11 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
                 return;
             } 
             else {
+
+                if (ident->stack_offset == 0) {
+                    report_error_ast(cg->parser, LABEL_WARNING, (Ast *)ident, "Compiler Error: Suspicious 0 stack address while emitting the following identifier");
+                }
+
                 emit_move_and_push(cg, ident->stack_offset, false, ident->type, emit_as_lvalue);
                 return;
             }
