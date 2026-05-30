@@ -4,7 +4,45 @@ A just for fun compiler
 
 # Changelog
 
-## Update v0.2.8 - 28. Mar 2026
+## Update v0.2.8 - 30. May 2026
+
+Big changes to functions to make them first-class citizens
+
+Function definitions can now appear as normal expressions to create annonymous functions.
+
+For example:
+```odin
+MyButton :: struct {
+    onClick: () -> void;
+}
+
+main :: () {
+    // Here we assign a function to the onClick handler
+    btn := MyButton{
+        onClick = () {
+            Print("You clicked!");
+        }
+    };
+
+    btn.onClick(); // Prints You clicked!
+
+    // Here we define a fixed array of functions
+    myFuncs := [
+        () { Print("0"); },
+        () { Print("1"); },
+        () { Print("2"); },
+    ];
+
+    for func in myFuncs {
+        func(); // 0, 1, 2
+    }
+}
+```
+
+Bug fixes:
+
+* Fixed assignment to pointer that would dereference the pointer on assigment making normal pointer assignment impossible
+* Fixed Print not producing newlines correctly because of default arguments being wrong
 
 ## Update v0.2.7 - XX. Mar 2026
 

@@ -3,8 +3,6 @@ Todo list:
 
 Functions as values:
 
-[]: Fix builtin append function not being correctly understood with the new way we do function lookup 
-
 []: Figure out what the hell to do with annonymous methods? Maybe just don't allow them
 []: Functions inside constant arrays
   - e.g functionInArray :: [() -> void {}]
@@ -14,10 +12,12 @@ Functions as values:
 Bug backlog:
 ----------------
 
-Fix cannot have two constants with the same name, even if declared in different scopes.
-We should assign the constant an id and then use its id when using the constant to prevent name clashes.
+----------------
 
 
+
+Future development
+-----------------
 
 * Better dynamic arrays
   [] Able to create them with an initial capacity
