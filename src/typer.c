@@ -2340,6 +2340,9 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                     reserve_temporary_storage(typer->enclosing_function, arg->value->type->size);
                 }
 
+                // Reserve space for the underlying array holding the arguments
+                // reserve_local_storage(typer->enclosing_function, arg->value->type->size);
+
                 slice_type->count = slice->expressions.count;
 
                 // Build up the lowered argument list
@@ -2352,7 +2355,9 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                     // Add the variadic slice argument
                     if (i == func_defn->variadic_parameter_index) {
                         da_append(&call->lowered_arguments, slice);
-                        continue;
+
+                        // There used to be a continue here, but that causes any default arguments not to be included
+                        // continue;
                     }
 
                     // Skip over varargs

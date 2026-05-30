@@ -10,7 +10,6 @@ extern "C" {
 }
 
 Print :: (format: string, args: ...any, newline := true) {
-
     // Scan the format string to find all the placeholders
     placeholderIndicies: [..]int;
     for c, i in format {

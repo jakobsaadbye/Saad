@@ -1303,16 +1303,10 @@ void emit_function_call(CodeGenerator *cg, AstFunctionCall *call) {
     
 
     // Do the actual call
-    if (true || call->is_lambda_call || func_defn->is_lambda) {
-        MOV_REG_ADDR(cg, func_pointer_addr, RBP, REG_RAX, call->expression->type);
-        sb_append(&cg->code, "   ; %s \n", get_lowered_function_argument_list_string(call));
-        sb_append(&cg->code, "   call\t\trax\n");
-        sb_append(&cg->code, "   add\t\trsp, 32\n");
-    }
-    else {
-        sb_append(&cg->code, "   ; %s \n", get_lowered_function_argument_list_string(call));
-        sb_append(&cg->code, "   call\t\t%s\n", func_defn->symbol_name);
-    }
+    MOV_REG_ADDR(cg, func_pointer_addr, RBP, REG_RAX, call->expression->type);
+    sb_append(&cg->code, "   ; %s%s \n", call->func_defn->identifier->name, get_lowered_function_argument_list_string(call));
+    sb_append(&cg->code, "   call\t\trax\n");
+    sb_append(&cg->code, "   add\t\trsp, 32\n");
 
     //
     // Push all the return values
@@ -2635,7 +2629,7 @@ int allocate_variable(CodeGenerator *cg, int size) {
     cg->enclosing_function->base_ptr = align_value(cg->enclosing_function->base_ptr, size > 8 ? 8 : size);
 
     if (cg->enclosing_function->base_ptr == 0) {
-        report_error_ast(cg->parser, LABEL_WARNING, NULL, "Compiler Error: Suspicious 0 temporary offset in allocate_variable");
+        report_error_ast(cg->parser, LABEL_WARNING, NULL, "Compiler Error: Suspicious 0 local offset in allocate_variable");
     }
 
     return cg->enclosing_function->base_ptr;
@@ -3452,8 +3446,14 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         return;
     }
     case TYPE_FUNCTION: {
-        TypeFunction *func_type = (TypeFunction *) src_type;
-        sb_append(&cg->code, "   lea\t\trax, %s\n", func_type->node->symbol_name);
+        AstFunctionDefn *func_defn = ((TypeFunction *)src_type)->node;
+
+        if (func_defn->is_lambda) {
+            sb_append(&cg->code, "   mov\t\trax, %s\n", src);
+        } else {
+            sb_append(&cg->code, "   lea\t\trax, %s\n", func_defn->symbol_name);
+        }
+
         PUSH(RAX);
         return;
     }
@@ -3732,11 +3732,16 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         }
         case ARRAY_SLICE: {
             // Allocate the underlying array in local storage and return a slice to it (data + count)
-            offset = allocate_variable(cg, array_type->count * array_type->elem_type->size);
+            int array_size = array_type->count * array_type->elem_type->size;
+            if (array_size == 0) {
+                offset = 0;
+            } else {
+                offset = allocate_variable(cg, array_size);
+            }
             break;
         }
         case ARRAY_DYNAMIC: {
-            // Allocate the underlying array with malloc
+            // Allocate the underlying array with calloc
             sb_append(&cg->code, "   mov\t\trdx, %d\n", array_type->elem_type->size);
             sb_append(&cg->code, "   mov\t\trcx, %d\n", array_type->capacity);
             sb_append(&cg->code, "   call\t\tcalloc\n");        // void* calloc( size_t num, size_t size );
@@ -3765,7 +3770,13 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         case ARRAY_SLICE: {
             int slice_offset = doing_direct_assignment ? direct_offset : push_temporary_value(cg, 16, (Ast *)expr); 
 
-            sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", offset);
+            if (offset == 0) {
+                // Slice pointing to null
+                sb_append(&cg->code, "   mov\t\trax, 0\n");
+            } else {
+                sb_append(&cg->code, "   lea\t\trax, %d[rbp]\n", offset);
+            }
+
             sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], rax\n", slice_offset + 0);
             sb_append(&cg->code, "   mov\t\tQWORD %d[rbp], %d\n",  slice_offset + 8, array_type->count);
             

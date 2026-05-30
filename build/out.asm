@@ -31,14 +31,11 @@ segment .data
    CS18 DB `>`, 0 
    CS19 DB `%s\n`, 0 
    CS20 DB `%s`, 0 
-   CS21 DB `Hungergames 3 - Mockingbird`, 0 
-   CS22 DB `%`, 0 
-   CS23 DB `title`, 0 
-   CS24 DB `oneStars`, 0 
-   CS25 DB `fiveStars`, 0 
-   CS26 DB `Rating`, 0 
-   CS27 DB `rating`, 0 
-   CS28 DB `Movie`, 0 
+   CS21 DB `1`, 0 
+   CS22 DB `2`, 0 
+   CS23 DB `3`, 0 
+   CS24 DB `4`, 0 
+   CS25 DB `5`, 0 
 segment .rdata
 segment .rdata
    TypeKind.name.data DB "TypeKind", 0
@@ -822,7 +819,7 @@ String.toCString:
    pop		rcx
    sub		rsp, 32
    mov		rax, -56[rbp]
-   ; (s64) 
+   ; malloc(s64) 
    call		rax
    add		rsp, 32
    push		rax
@@ -852,7 +849,7 @@ String.toCString:
    pop		rcx
    sub		rsp, 32
    mov		rax, -56[rbp]
-   ; (*u8, *char, s64) 
+   ; memcpy(*u8, *char, s64) 
    call		rax
    add		rsp, 32
    push		rax
@@ -927,7 +924,7 @@ fromCString:
    pop		rcx
    sub		rsp, 32
    mov		rax, -48[rbp]
-   ; (*u8) 
+   ; strlen(*u8) 
    call		rax
    add		rsp, 32
    push		rax
@@ -1160,7 +1157,7 @@ String.copy:
    pop		rcx
    sub		rsp, 32
    mov		rax, -64[rbp]
-   ; (s64) 
+   ; malloc(s64) 
    call		rax
    add		rsp, 32
    push		rax
@@ -1199,7 +1196,7 @@ String.copy:
    pop		rcx
    sub		rsp, 32
    mov		rax, -64[rbp]
-   ; (*char, *char, s64) 
+   ; memcpy(*char, *char, s64) 
    call		rax
    add		rsp, 32
    push		rax
@@ -1276,7 +1273,7 @@ String.toUpper:
    pop		rcx
    sub		rsp, 32
    mov		rax, -96[rbp]
-   ; (string) 
+   ; copy(string) 
    call		rax
    add		rsp, 32
    lea		rax, -112[rbp]
@@ -1416,7 +1413,7 @@ String.toLower:
    pop		rcx
    sub		rsp, 32
    mov		rax, -96[rbp]
-   ; (string) 
+   ; copy(string) 
    call		rax
    add		rsp, 32
    lea		rax, -112[rbp]
@@ -1721,7 +1718,7 @@ L63:
    pop		rcx
    sub		rsp, 32
    mov		rax, -128[rbp]
-   ; (string, s64, int) 
+   ; slice(string, s64, int) 
    call		rax
    add		rsp, 32
    lea		rax, -144[rbp]
@@ -1943,7 +1940,7 @@ L70:
    pop		rcx
    sub		rsp, 32
    mov		rax, -192[rbp]
-   ; (string, int, int) 
+   ; slice(string, int, int) 
    call		rax
    add		rsp, 32
    lea		rax, -208[rbp]
@@ -2240,7 +2237,7 @@ L82:
    pop		rcx
    sub		rsp, 32
    mov		rax, -160[rbp]
-   ; (string, string, int) 
+   ; indexOf(string, string, int) 
    call		rax
    add		rsp, 32
    mov		eax, DWORD -164[rbp]
@@ -2291,7 +2288,7 @@ L82:
    pop		rcx
    sub		rsp, 32
    mov		rax, -160[rbp]
-   ; (string, int, int) 
+   ; slice(string, int, int) 
    call		rax
    add		rsp, 32
    lea		rax, -176[rbp]
@@ -2316,7 +2313,7 @@ L82:
    pop		rcx
    sub		rsp, 32
    mov		rax, -160[rbp]
-   ; (*[..]string, string, bool) 
+   ; runtime_builtin_append(*[..]string, string, bool) 
    call		rax
    add		rsp, 32
    jmp		L83
@@ -2347,7 +2344,7 @@ L85:
    pop		rcx
    sub		rsp, 32
    mov		rax, -160[rbp]
-   ; (string, int, int) 
+   ; slice(string, int, int) 
    call		rax
    add		rsp, 32
    lea		rax, -176[rbp]
@@ -2372,7 +2369,7 @@ L85:
    pop		rcx
    sub		rsp, 32
    mov		rax, -160[rbp]
-   ; (*[..]string, string, bool) 
+   ; runtime_builtin_append(*[..]string, string, bool) 
    call		rax
    add		rsp, 32
    ; Ln 148: Assignment
@@ -2456,7 +2453,7 @@ String.reverse:
    pop		rcx
    sub		rsp, 32
    mov		rax, -104[rbp]
-   ; (string) 
+   ; copy(string) 
    call		rax
    add		rsp, 32
    lea		rax, -120[rbp]
@@ -2635,7 +2632,7 @@ appendInt:
    pop		rcx
    sub		rsp, 32
    mov		rax, -80[rbp]
-   ; (*int, s64) 
+   ; realloc(*int, s64) 
    call		rax
    add		rsp, 32
    push		rax
@@ -2769,7 +2766,7 @@ NewStringBuilder:
    pop		rcx
    sub		rsp, 32
    mov		rax, -40[rbp]
-   ; (int) 
+   ; malloc(int) 
    call		rax
    add		rsp, 32
    push		rax
@@ -2791,7 +2788,7 @@ NewStringBuilder:
    pop		rcx
    sub		rsp, 32
    mov		rax, -40[rbp]
-   ; (*u8, int, int) 
+   ; memset(*u8, int, int) 
    call		rax
    add		rsp, 32
    push		rax
@@ -2931,7 +2928,7 @@ L95:
    pop		rcx
    sub		rsp, 32
    mov		rax, -56[rbp]
-   ; (*u8, int) 
+   ; realloc(*u8, int) 
    call		rax
    add		rsp, 32
    push		rax
@@ -2962,7 +2959,7 @@ L95:
    pop		rcx
    sub		rsp, 32
    mov		rax, -56[rbp]
-   ; (int) 
+   ; exit(int) 
    call		rax
    add		rsp, 32
    jmp L96
@@ -3055,7 +3052,7 @@ L96:
    pop		rcx
    sub		rsp, 32
    mov		rax, -56[rbp]
-   ; (*u8, int, int) 
+   ; memset(*u8, int, int) 
    call		rax
    add		rsp, 32
    push		rax
@@ -3159,7 +3156,7 @@ StringBuilder.internalAdd:
    pop		rcx
    sub		rsp, 32
    mov		rax, -56[rbp]
-   ; (*u8, *u8, int) 
+   ; memcpy(*u8, *u8, int) 
    call		rax
    add		rsp, 32
    push		rax
@@ -3220,7 +3217,7 @@ L99:
    pop		rcx
    sub		rsp, 32
    mov		rax, -56[rbp]
-   ; (*StringBuilder, int) 
+   ; internalGrow(*StringBuilder, int) 
    call		rax
    add		rsp, 32
    lea		rax, memcpy
@@ -3262,7 +3259,7 @@ L99:
    pop		rcx
    sub		rsp, 32
    mov		rax, -56[rbp]
-   ; (*u8, *u8, int) 
+   ; memcpy(*u8, *u8, int) 
    call		rax
    add		rsp, 32
    push		rax
@@ -3397,7 +3394,7 @@ StringBuilder.addStringSlice:
    pop		rcx
    sub		rsp, 32
    mov		rax, -104[rbp]
-   ; (*StringBuilder, *char, int) 
+   ; internalAdd(*StringBuilder, *char, int) 
    call		rax
    add		rsp, 32
 L100:
@@ -3450,7 +3447,7 @@ StringBuilder.addChar:
    pop		rcx
    sub		rsp, 32
    mov		rax, -56[rbp]
-   ; (*StringBuilder, *u8, int) 
+   ; internalAdd(*StringBuilder, *u8, int) 
    call		rax
    add		rsp, 32
 L101:
@@ -3509,7 +3506,7 @@ StringBuilder.addString:
    pop		rcx
    sub		rsp, 32
    mov		rax, -56[rbp]
-   ; (*StringBuilder, *char, s64) 
+   ; internalAdd(*StringBuilder, *char, s64) 
    call		rax
    add		rsp, 32
 L102:
@@ -3562,7 +3559,7 @@ StringBuilder.addFloat32:
    pop		rcx
    sub		rsp, 32
    mov		rax, -80[rbp]
-   ; (*u8, *u8, f32) 
+   ; sprintf(*u8, *u8, f32) 
    call		rax
    add		rsp, 32
    push		rax
@@ -3591,7 +3588,7 @@ StringBuilder.addFloat32:
    pop		rcx
    sub		rsp, 32
    mov		rax, -80[rbp]
-   ; (*u8) 
+   ; strlen(*u8) 
    call		rax
    add		rsp, 32
    push		rax
@@ -3636,7 +3633,7 @@ StringBuilder.addFloat32:
    pop		rcx
    sub		rsp, 32
    mov		rax, -80[rbp]
-   ; (*StringBuilder, *char, s64) 
+   ; internalAdd(*StringBuilder, *char, s64) 
    call		rax
    add		rsp, 32
 L103:
@@ -3684,7 +3681,7 @@ StringBuilder.addFloat64:
    pop		rcx
    sub		rsp, 32
    mov		rax, -80[rbp]
-   ; (*u8, *u8, f64) 
+   ; sprintf(*u8, *u8, f64) 
    call		rax
    add		rsp, 32
    push		rax
@@ -3713,7 +3710,7 @@ StringBuilder.addFloat64:
    pop		rcx
    sub		rsp, 32
    mov		rax, -80[rbp]
-   ; (*u8) 
+   ; strlen(*u8) 
    call		rax
    add		rsp, 32
    push		rax
@@ -3758,7 +3755,7 @@ StringBuilder.addFloat64:
    pop		rcx
    sub		rsp, 32
    mov		rax, -80[rbp]
-   ; (*StringBuilder, *char, s64) 
+   ; internalAdd(*StringBuilder, *char, s64) 
    call		rax
    add		rsp, 32
 L104:
@@ -3810,7 +3807,7 @@ StringBuilder.addInt64:
    pop		rcx
    sub		rsp, 32
    mov		rax, -136[rbp]
-   ; (*StringBuilder, u8) 
+   ; addChar(*StringBuilder, u8) 
    call		rax
    add		rsp, 32
    ; Return
@@ -3849,7 +3846,7 @@ L106:
    pop		rcx
    sub		rsp, 32
    mov		rax, -136[rbp]
-   ; (*StringBuilder, u8) 
+   ; addChar(*StringBuilder, u8) 
    call		rax
    add		rsp, 32
    ; Ln 102: Assignment
@@ -4033,7 +4030,7 @@ L110:
    pop		rcx
    sub		rsp, 32
    mov		rax, -136[rbp]
-   ; (*StringBuilder, u8) 
+   ; addChar(*StringBuilder, u8) 
    call		rax
    add		rsp, 32
 L111:
@@ -4089,7 +4086,7 @@ StringBuilder.addUInt64:
    pop		rcx
    sub		rsp, 32
    mov		rax, -136[rbp]
-   ; (*StringBuilder, u8) 
+   ; addChar(*StringBuilder, u8) 
    call		rax
    add		rsp, 32
    ; Return
@@ -4264,7 +4261,7 @@ L117:
    pop		rcx
    sub		rsp, 32
    mov		rax, -136[rbp]
-   ; (*StringBuilder, u8) 
+   ; addChar(*StringBuilder, u8) 
    call		rax
    add		rsp, 32
 L118:
@@ -4388,7 +4385,7 @@ StringBuilder.addAnyValue:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, u64) 
+   ; addUInt64(*StringBuilder, u64) 
    call		rax
    add		rsp, 32
    jmp L124
@@ -4446,7 +4443,7 @@ L125:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, u64) 
+   ; addUInt64(*StringBuilder, u64) 
    call		rax
    add		rsp, 32
    jmp L124
@@ -4526,7 +4523,7 @@ L127:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, u64) 
+   ; addUInt64(*StringBuilder, u64) 
    call		rax
    add		rsp, 32
    jmp L124
@@ -4581,7 +4578,7 @@ L128:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, u64) 
+   ; addUInt64(*StringBuilder, u64) 
    call		rax
    add		rsp, 32
    jmp L124
@@ -4641,7 +4638,7 @@ L129:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, s64) 
+   ; addInt64(*StringBuilder, s64) 
    call		rax
    add		rsp, 32
    jmp L124
@@ -4701,7 +4698,7 @@ L130:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, s64) 
+   ; addInt64(*StringBuilder, s64) 
    call		rax
    add		rsp, 32
    jmp L124
@@ -4783,7 +4780,7 @@ L131:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, s64) 
+   ; addInt64(*StringBuilder, s64) 
    call		rax
    add		rsp, 32
    jmp L124
@@ -4838,7 +4835,7 @@ L132:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, s64) 
+   ; addInt64(*StringBuilder, s64) 
    call		rax
    add		rsp, 32
    jmp L124
@@ -4865,7 +4862,7 @@ L126:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    jmp L124
@@ -4959,7 +4956,7 @@ L122:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, f32) 
+   ; addFloat32(*StringBuilder, f32) 
    call		rax
    add		rsp, 32
    jmp L134
@@ -4995,7 +4992,7 @@ L135:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, f64) 
+   ; addFloat64(*StringBuilder, f64) 
    call		rax
    add		rsp, 32
    jmp L134
@@ -5068,7 +5065,7 @@ L133:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    jmp L137
@@ -5095,7 +5092,7 @@ L138:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    jmp L137
@@ -5159,7 +5156,7 @@ L136:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    jmp L121
@@ -5223,7 +5220,7 @@ L139:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    lea		rax, -8[rbp]
@@ -5253,7 +5250,7 @@ L139:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    jmp L121
@@ -5335,7 +5332,7 @@ L140:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*u8, *u8, *void) 
+   ; sprintf(*u8, *u8, *void) 
    call		rax
    add		rsp, 32
    push		rax
@@ -5388,7 +5385,7 @@ L140:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    jmp L121
@@ -5475,7 +5472,7 @@ L141:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    ; Return
@@ -5504,7 +5501,7 @@ L143:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    ; Ln 244: Ranged for-loop
@@ -5806,7 +5803,7 @@ L147:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*Type) 
+   ; isPrimitive(*Type) 
    call		rax
    add		rsp, 32
    movzx		eax, BYTE -617[rbp]
@@ -5901,7 +5898,7 @@ L147:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, any) 
+   ; addAnyValue(*StringBuilder, any) 
    call		rax
    add		rsp, 32
    jmp L150
@@ -5934,7 +5931,7 @@ L151:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*u8, *u8, *u8) 
+   ; sprintf(*u8, *u8, *u8) 
    call		rax
    add		rsp, 32
    push		rax
@@ -5963,7 +5960,7 @@ L151:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*u8) 
+   ; strlen(*u8) 
    call		rax
    add		rsp, 32
    push		rax
@@ -5996,7 +5993,7 @@ L151:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    jmp L150
@@ -6052,7 +6049,7 @@ L150:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    jmp L152
@@ -6083,7 +6080,7 @@ L146:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    jmp L121
@@ -6153,7 +6150,7 @@ L142:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    lea		rax, -8[rbp]
@@ -6177,7 +6174,7 @@ L142:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    ; Ln 292: For-loop
@@ -6232,7 +6229,7 @@ L153:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    lea		rax, -8[rbp]
@@ -6256,7 +6253,7 @@ L153:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    ; Ln 298: $value : any = -552[rbp]
@@ -6317,7 +6314,7 @@ L153:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, any) 
+   ; addAnyValue(*StringBuilder, any) 
    call		rax
    add		rsp, 32
    mov		eax, DWORD -536[rbp]
@@ -6376,7 +6373,7 @@ L153:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    jmp L156
@@ -6407,7 +6404,7 @@ L155:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    jmp L121
@@ -6434,7 +6431,7 @@ L123:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    lea		rax, -8[rbp]
@@ -6467,7 +6464,7 @@ L123:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    lea		rax, -8[rbp]
@@ -6491,7 +6488,7 @@ L123:
    pop		rcx
    sub		rsp, 32
    mov		rax, -616[rbp]
-   ; (*StringBuilder, string) 
+   ; addString(*StringBuilder, string) 
    call		rax
    add		rsp, 32
    jmp L121
@@ -6588,7 +6585,7 @@ L158:
    pop		rcx
    sub		rsp, 32
    mov		rax, -208[rbp]
-   ; (*[..]int, s32) 
+   ; appendInt(*[..]int, s32) 
    call		rax
    add		rsp, 32
    jmp L161
@@ -6649,7 +6646,7 @@ L162:
    pop		rcx
    sub		rsp, 32
    mov		rax, -208[rbp]
-   ; (*StringBuilder, string, int, int) 
+   ; addStringSlice(*StringBuilder, string, int, int) 
    call		rax
    add		rsp, 32
    ; Ln 338: $arg : any = -152[rbp]
@@ -6689,7 +6686,7 @@ L162:
    pop		rcx
    sub		rsp, 32
    mov		rax, -208[rbp]
-   ; (*StringBuilder, any) 
+   ; addAnyValue(*StringBuilder, any) 
    call		rax
    add		rsp, 32
    ; Ln 341: Assignment
@@ -6742,7 +6739,7 @@ L164:
    pop		rcx
    sub		rsp, 32
    mov		rax, -208[rbp]
-   ; (*StringBuilder, string, int, s64) 
+   ; addStringSlice(*StringBuilder, string, int, s64) 
    call		rax
    add		rsp, 32
 L157:
@@ -6792,7 +6789,7 @@ StringBuilder.clear:
    pop		rcx
    sub		rsp, 32
    mov		rax, -24[rbp]
-   ; (*u8, int, int) 
+   ; memset(*u8, int, int) 
    call		rax
    add		rsp, 32
    push		rax
@@ -6900,7 +6897,7 @@ StringBuilder.free:
    pop		rcx
    sub		rsp, 32
    mov		rax, -24[rbp]
-   ; (*u8) 
+   ; free(*u8) 
    call		rax
    add		rsp, 32
 L167:
@@ -6937,7 +6934,7 @@ Print:
    ; Param newline
    mov		rax, 32[rbp]
    mov		-33[rbp], al
-   ; Ln 15: $placeholderIndicies : [..]int = -72[rbp]
+   ; Ln 14: $placeholderIndicies : [..]int = -72[rbp]
    lea		rbx, -72[rbp]
    push		rbx
    mov		rdx, 4
@@ -6948,7 +6945,7 @@ Print:
    mov		QWORD 8[rbx], 0
    mov		QWORD 16[rbx], 2
    mov		QWORD 24[rbx], 4
-   ; Ln 16: For-loop
+   ; Ln 15: For-loop
    lea		rax, -16[rbp]
    push		rax
    pop		rax
@@ -6996,7 +6993,7 @@ L169:
    pop		rcx
    sub		rsp, 32
    mov		rax, -240[rbp]
-   ; (*[..]int, s64) 
+   ; appendInt(*[..]int, s64) 
    call		rax
    add		rsp, 32
    jmp L172
@@ -7006,7 +7003,7 @@ L170:
    inc		QWORD -104[rbp]
    jmp		L169
 L171:
-   ; Ln 23: $sb : StringBuilder = -120[rbp]
+   ; Ln 22: $sb : StringBuilder = -120[rbp]
    lea		rax, NewStringBuilder
    push		rax
    pop		rax
@@ -7019,7 +7016,7 @@ L171:
    pop		rcx
    sub		rsp, 32
    mov		rax, -240[rbp]
-   ; (int) 
+   ; NewStringBuilder(int) 
    call		rax
    add		rsp, 32
    lea		rax, -256[rbp]
@@ -7030,12 +7027,12 @@ L171:
    lea		rdx, 0[rax]
    mov		r8, 16
    call		memcpy
-   ; Ln 25: $cursor : int = -124[rbp]
+   ; Ln 24: $cursor : int = -124[rbp]
    mov		rax, 0
    push		rax
    pop		rax
    mov		DWORD -124[rbp], eax
-   ; Ln 26: For-loop
+   ; Ln 25: For-loop
    lea		rax, -72[rbp]
    push		rax
    pop		rax
@@ -7078,10 +7075,10 @@ L173:
    pop		rcx
    sub		rsp, 32
    mov		rax, -240[rbp]
-   ; (*StringBuilder, string, int, int) 
+   ; addStringSlice(*StringBuilder, string, int, int) 
    call		rax
    add		rsp, 32
-   ; Ln 32: $arg : any = -168[rbp]
+   ; Ln 31: $arg : any = -168[rbp]
    lea		rax, -32[rbp]
    push		rax
    mov		eax, DWORD -152[rbp]
@@ -7115,10 +7112,10 @@ L173:
    pop		rcx
    sub		rsp, 32
    mov		rax, -240[rbp]
-   ; (*StringBuilder, any) 
+   ; addAnyValue(*StringBuilder, any) 
    call		rax
    add		rsp, 32
-   ; Ln 35: Assignment
+   ; Ln 34: Assignment
    mov		eax, DWORD -128[rbp]
    movsx		rax, eax
    push		rax
@@ -7165,10 +7162,10 @@ L175:
    pop		rcx
    sub		rsp, 32
    mov		rax, -240[rbp]
-   ; (*StringBuilder, string, int, s64) 
+   ; addStringSlice(*StringBuilder, string, int, s64) 
    call		rax
    add		rsp, 32
-   ; Ln 41: $result : string = -184[rbp]
+   ; Ln 40: $result : string = -184[rbp]
    lea		rax, -120[rbp]
    push		rax
    pop		rbx
@@ -7184,7 +7181,7 @@ L175:
    pop		rcx
    sub		rsp, 32
    mov		rax, -240[rbp]
-   ; (*StringBuilder) 
+   ; toString(*StringBuilder) 
    call		rax
    add		rsp, 32
    lea		rax, -256[rbp]
@@ -7222,7 +7219,7 @@ L175:
    pop		rcx
    sub		rsp, 32
    mov		rax, -240[rbp]
-   ; (*char, *char) 
+   ; printf(*char, *char) 
    call		rax
    add		rsp, 32
    push		rax
@@ -7251,7 +7248,7 @@ L177:
    pop		rcx
    sub		rsp, 32
    mov		rax, -240[rbp]
-   ; (*char, *char) 
+   ; printf(*char, *char) 
    call		rax
    add		rsp, 32
    push		rax
@@ -7271,7 +7268,7 @@ L176:
    pop		rcx
    sub		rsp, 32
    mov		rax, -240[rbp]
-   ; (*StringBuilder) 
+   ; free(*StringBuilder) 
    call		rax
    add		rsp, 32
    ; Return
@@ -7282,201 +7279,296 @@ L168:
    pop		rbp
    ret
 
-; bytes locals   : 120
-; bytes temp     : 224
-; bytes total    : 384
+; bytes locals   : 72
+; bytes temp     : 16
+; bytes total    : 128
 ; ()
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 384
-   ; Ln 14: $movie : Movie = -24[rbp]
-   lea		rcx, -24[rbp]
+   sub		rsp, 128
+   ; Ln 5: $funcs : [5]() -> void = -40[rbp]
+   lea		rbx, -40[rbp]
+   mov		rcx, rbx
    mov		rdx, 0
-   mov		r8, 24
+   mov		r8, 40
    call		memset
-   mov		rax, CS21
-   mov		-136[rbp], rax
-   mov		QWORD -128[rbp], 27
-   lea		rax, -136[rbp]
+   lea		rax, lambda_1
    push		rax
    pop		rax
-   lea		rbx, -24[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
-   lea		rcx, -8[rbp]
-   mov		rdx, 0
-   mov		r8, 8
-   call		memset
-   mov		rax, 10
+   mov		QWORD -40[rbp], rax
+   lea		rax, lambda_2
    push		rax
    pop		rax
-   mov		DWORD -8[rbp], eax
-   mov		rax, 50
+   mov		QWORD -32[rbp], rax
+   lea		rax, lambda_3
    push		rax
    pop		rax
-   mov		DWORD -4[rbp], eax
+   mov		QWORD -24[rbp], rax
+   lea		rax, lambda_4
+   push		rax
+   pop		rax
+   mov		QWORD -16[rbp], rax
+   lea		rax, lambda_5
+   push		rax
+   pop		rax
+   mov		QWORD -8[rbp], rax
+   ; Ln 13: For-loop
+   lea		rax, -40[rbp]
+   push		rax
+   pop		rax
+   mov		rbx, rax
+   mov		rcx, 5
+   mov		-56[rbp], rbx     ; data
+   mov		-64[rbp], rcx     ; count
+   mov		QWORD -72[rbp], 0 ; index
+L179:
+   mov		rbx, -64[rbp]
+   mov		rax, -72[rbp]
+   cmp		rax, rbx
+   jge		L181
+   mov		rbx, QWORD -56[rbp]
+   mov		rax, QWORD -72[rbp]
+   imul		rax, 8
+   lea		rbx, [rbx + rax]
+   mov		rax, QWORD [rbx]
+   mov		-48[rbp], rax 
+   mov		rax, -48[rbp]
+   push		rax
+   pop		rax
+   mov		-80[rbp], rax
+   sub		rsp, 32
+   mov		rax, -80[rbp]
+   ; lambda() 
+   call		rax
+   add		rsp, 32
+L180:
+   inc		QWORD -72[rbp]
+   jmp		L179
+L181:
+L178:
+   mov		rax, 0
+   add		rsp, 128
+   pop		rbp
+   ret
+
+; bytes locals   : 16
+; bytes temp     : 96
+; bytes total    : 144
+; ()
+lambda_1:
+   push		rbp
+   mov		rbp, rsp
+   sub		rsp, 144
    lea		rax, Print
    push		rax
    pop		rax
-   mov		-128[rbp], rax
-   mov		rax, CS22
-   mov		-144[rbp], rax
-   mov		QWORD -136[rbp], 1
-   lea		rax, -144[rbp]
-   push		rax
-   lea		rax, -24[rbp]
-   push		rax
-   pop		rax
-   lea		rbx, -64[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 24
-   call		memcpy
-   lea		rax, -64[rbp]
-   lea		rbx, -160[rbp]
-   mov		QWORD 0[rbx], rax
-   mov		QWORD rbx, -160[rbp]
-   mov		-168[rbp], rbx
-   sub		rsp, 32
-   mov		rcx, 96
-   call		malloc
-   add		rsp, 32
-   mov		-176[rbp], rax
-   mov		-184[rbp], rax
-   mov		rbx, -168[rbp]
-   lea		rbx, 0[rbx]
-   mov		rax, QWORD [Type_string]
-   push		rax
-   pop		rcx
-   mov		rdx, -168[rbp]
-   lea		rdx, 0[rdx]
-   mov		rbx, -184[rbp]
-   mov		rax, CS23
-   mov		QWORD 0[rbx], rax
-   mov		QWORD 8[rbx], 5
-   mov		QWORD 16[rbx], rcx
-   mov		QWORD 24[rbx], rdx
-   mov		DWORD 32[rbx], 0
-   mov		DWORD 36[rbx], 0
-   add		rbx, 48
-   mov		-184[rbp], rbx
-   mov		rbx, -168[rbp]
-   lea		rbx, 16[rbx]
-   mov		-192[rbp], rbx
-   sub		rsp, 32
-   mov		rcx, 96
-   call		malloc
-   add		rsp, 32
-   mov		-200[rbp], rax
-   mov		-208[rbp], rax
-   mov		rbx, -192[rbp]
-   lea		rbx, 0[rbx]
-   mov		rax, QWORD [Type_int]
-   push		rax
-   pop		rcx
-   mov		rdx, -192[rbp]
-   lea		rdx, 0[rdx]
-   mov		rbx, -208[rbp]
-   mov		rax, CS24
-   mov		QWORD 0[rbx], rax
-   mov		QWORD 8[rbx], 8
-   mov		QWORD 16[rbx], rcx
-   mov		QWORD 24[rbx], rdx
-   mov		DWORD 32[rbx], 0
-   mov		DWORD 36[rbx], 0
-   add		rbx, 48
-   mov		-208[rbp], rbx
-   mov		rbx, -192[rbp]
-   lea		rbx, 4[rbx]
-   mov		rax, QWORD [Type_int]
-   push		rax
-   pop		rcx
-   mov		rdx, -192[rbp]
-   lea		rdx, 4[rdx]
-   mov		rbx, -208[rbp]
-   mov		rax, CS25
-   mov		QWORD 0[rbx], rax
-   mov		QWORD 8[rbx], 9
-   mov		QWORD 16[rbx], rcx
-   mov		QWORD 24[rbx], rdx
-   mov		DWORD 32[rbx], 1
-   mov		DWORD 36[rbx], 4
-   add		rbx, 48
-   mov		-208[rbp], rbx
-   mov		rax, CS26
-   mov		QWORD -224[rbp], rax
-   mov		QWORD -216[rbp], 6
-   lea		rcx, -224[rbp]
-   mov		rdx, -200[rbp]
-   mov		r8d, 2
-   mov		r9d, 8
-   sub		rsp, 40
-   mov		DWORD 32[rsp], 4
-   call		runtime_get_type_struct
-   add		rsp, 40
-   push		rax
-   pop		rcx
-   mov		rdx, -168[rbp]
-   lea		rdx, 16[rdx]
-   mov		rbx, -184[rbp]
-   mov		rax, CS27
-   mov		QWORD 0[rbx], rax
-   mov		QWORD 8[rbx], 6
-   mov		QWORD 16[rbx], rcx
-   mov		QWORD 24[rbx], rdx
-   mov		DWORD 32[rbx], 1
-   mov		DWORD 36[rbx], 16
-   add		rbx, 48
-   mov		-184[rbp], rbx
-   mov		rax, CS28
-   mov		QWORD -240[rbp], rax
-   mov		QWORD -232[rbp], 5
-   lea		rcx, -240[rbp]
-   mov		rdx, -176[rbp]
-   mov		r8d, 2
-   mov		r9d, 24
-   sub		rsp, 40
-   mov		DWORD 32[rsp], 8
-   call		runtime_get_type_struct
-   add		rsp, 40
-   push		rax
-   pop		rcx
-   lea		rbx, -160[rbp]
-   mov		QWORD 8[rbx], rcx
-   push		rbx
-   pop		rax
-   lea		rbx, -40[rbp]
-   lea		rcx, 0[rbx]
-   lea		rdx, 0[rax]
-   mov		r8, 16
-   call		memcpy
+   mov		-24[rbp], rax
+   mov		rax, CS21
+   mov		-40[rbp], rax
+   mov		QWORD -32[rbp], 1
    lea		rax, -40[rbp]
-   mov		QWORD -256[rbp], rax
-   mov		QWORD -248[rbp], 1
-   lea		rax, -256[rbp]
+   push		rax
+   mov		rax, 0
+   mov		QWORD -56[rbp], rax
+   mov		QWORD -48[rbp], 0
+   lea		rax, -56[rbp]
    push		rax
    pop		rax
    mov		rbx, 0[rax]
    mov		rcx, 8[rax]
-   mov		QWORD -272[rbp], rbx
-   mov		QWORD -264[rbp], rcx
-   lea		rax, -272[rbp]
+   mov		QWORD -72[rbp], rbx
+   mov		QWORD -64[rbp], rcx
+   lea		rax, -72[rbp]
    push		rax
    push		1
    pop		r8 
    pop		rdx
    pop		rcx
    sub		rsp, 32
-   mov		rax, -128[rbp]
-   ; (string, []any, bool) 
+   mov		rax, -24[rbp]
+   ; Print(string, []any, bool) 
    call		rax
    add		rsp, 32
-L178:
+L182:
    mov		rax, 0
-   add		rsp, 384
+   add		rsp, 144
+   pop		rbp
+   ret
+
+; bytes locals   : 16
+; bytes temp     : 96
+; bytes total    : 144
+; ()
+lambda_2:
+   push		rbp
+   mov		rbp, rsp
+   sub		rsp, 144
+   lea		rax, Print
+   push		rax
+   pop		rax
+   mov		-24[rbp], rax
+   mov		rax, CS22
+   mov		-40[rbp], rax
+   mov		QWORD -32[rbp], 1
+   lea		rax, -40[rbp]
+   push		rax
+   mov		rax, 0
+   mov		QWORD -56[rbp], rax
+   mov		QWORD -48[rbp], 0
+   lea		rax, -56[rbp]
+   push		rax
+   pop		rax
+   mov		rbx, 0[rax]
+   mov		rcx, 8[rax]
+   mov		QWORD -72[rbp], rbx
+   mov		QWORD -64[rbp], rcx
+   lea		rax, -72[rbp]
+   push		rax
+   push		1
+   pop		r8 
+   pop		rdx
+   pop		rcx
+   sub		rsp, 32
+   mov		rax, -24[rbp]
+   ; Print(string, []any, bool) 
+   call		rax
+   add		rsp, 32
+L183:
+   mov		rax, 0
+   add		rsp, 144
+   pop		rbp
+   ret
+
+; bytes locals   : 16
+; bytes temp     : 96
+; bytes total    : 144
+; ()
+lambda_3:
+   push		rbp
+   mov		rbp, rsp
+   sub		rsp, 144
+   lea		rax, Print
+   push		rax
+   pop		rax
+   mov		-24[rbp], rax
+   mov		rax, CS23
+   mov		-40[rbp], rax
+   mov		QWORD -32[rbp], 1
+   lea		rax, -40[rbp]
+   push		rax
+   mov		rax, 0
+   mov		QWORD -56[rbp], rax
+   mov		QWORD -48[rbp], 0
+   lea		rax, -56[rbp]
+   push		rax
+   pop		rax
+   mov		rbx, 0[rax]
+   mov		rcx, 8[rax]
+   mov		QWORD -72[rbp], rbx
+   mov		QWORD -64[rbp], rcx
+   lea		rax, -72[rbp]
+   push		rax
+   push		1
+   pop		r8 
+   pop		rdx
+   pop		rcx
+   sub		rsp, 32
+   mov		rax, -24[rbp]
+   ; Print(string, []any, bool) 
+   call		rax
+   add		rsp, 32
+L184:
+   mov		rax, 0
+   add		rsp, 144
+   pop		rbp
+   ret
+
+; bytes locals   : 16
+; bytes temp     : 96
+; bytes total    : 144
+; ()
+lambda_4:
+   push		rbp
+   mov		rbp, rsp
+   sub		rsp, 144
+   lea		rax, Print
+   push		rax
+   pop		rax
+   mov		-24[rbp], rax
+   mov		rax, CS24
+   mov		-40[rbp], rax
+   mov		QWORD -32[rbp], 1
+   lea		rax, -40[rbp]
+   push		rax
+   mov		rax, 0
+   mov		QWORD -56[rbp], rax
+   mov		QWORD -48[rbp], 0
+   lea		rax, -56[rbp]
+   push		rax
+   pop		rax
+   mov		rbx, 0[rax]
+   mov		rcx, 8[rax]
+   mov		QWORD -72[rbp], rbx
+   mov		QWORD -64[rbp], rcx
+   lea		rax, -72[rbp]
+   push		rax
+   push		1
+   pop		r8 
+   pop		rdx
+   pop		rcx
+   sub		rsp, 32
+   mov		rax, -24[rbp]
+   ; Print(string, []any, bool) 
+   call		rax
+   add		rsp, 32
+L185:
+   mov		rax, 0
+   add		rsp, 144
+   pop		rbp
+   ret
+
+; bytes locals   : 16
+; bytes temp     : 96
+; bytes total    : 144
+; ()
+lambda_5:
+   push		rbp
+   mov		rbp, rsp
+   sub		rsp, 144
+   lea		rax, Print
+   push		rax
+   pop		rax
+   mov		-24[rbp], rax
+   mov		rax, CS25
+   mov		-40[rbp], rax
+   mov		QWORD -32[rbp], 1
+   lea		rax, -40[rbp]
+   push		rax
+   mov		rax, 0
+   mov		QWORD -56[rbp], rax
+   mov		QWORD -48[rbp], 0
+   lea		rax, -56[rbp]
+   push		rax
+   pop		rax
+   mov		rbx, 0[rax]
+   mov		rcx, 8[rax]
+   mov		QWORD -72[rbp], rbx
+   mov		QWORD -64[rbp], rcx
+   lea		rax, -72[rbp]
+   push		rax
+   push		1
+   pop		r8 
+   pop		rdx
+   pop		rcx
+   sub		rsp, 32
+   mov		rax, -24[rbp]
+   ; Print(string, []any, bool) 
+   call		rax
+   add		rsp, 32
+L186:
+   mov		rax, 0
+   add		rsp, 144
    pop		rbp
    ret
 
