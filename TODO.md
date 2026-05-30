@@ -3,7 +3,6 @@ Todo list:
 
 Functions as values:
 
-[]: Fix `resolved_identifier` not being used in codegen due to rewrite when we have args: ...any
 []: Fix builtin append function not being correctly understood with the new way we do function lookup 
 
 []: Figure out what the hell to do with annonymous methods? Maybe just don't allow them

@@ -1,16 +1,7 @@
 import "fmt";
 
 
-main :: () {
-    funcs := [
-        () { Print("1"); },
-        () { Print("2"); },
-        () { Print("3"); },
-        () { Print("4"); },
-        () { Print("5"); },
-    ];
 
-    for func in funcs {
-        func();
-    }
+main :: () {
+    Print("%", "Hello world");
 };

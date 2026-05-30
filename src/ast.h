@@ -168,6 +168,7 @@ typedef struct AstIdentifier {
     AstBlock       *scope; // The scope this identifier was declared in
     AstDeclaration *decl; // The declaration it belongs to
 
+    AstIdentifier *ident_override; // Set on certain identifiers to tell codegen to use a lowered identifier representation instead. E.g variadic parameters are overriden
     int member_index;   // Used to know the insertion order of a struct member
     int member_offset;  // Relative positive offset of the member within the struct
     int stack_offset;

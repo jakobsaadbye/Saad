@@ -13,4 +13,36 @@ main :: () {
 
         foo(); // -> another foo
     }
+
+    // Functions can be stored in arrays
+    {
+        funcs := [
+            () { Print("1"); },
+            () { Print("2"); },
+            () { Print("3"); },
+            () { Print("4"); },
+            () { Print("5"); },
+        ];
+
+        for func in funcs {
+            func();
+        }
+    }
+
+    // Functions as struct members
+    {
+        MyButton :: struct {
+            onClick: () -> void;
+        }
+
+        btn := MyButton{
+            onClick = () {
+                Print("Click!");
+            }
+        };
+    
+        btn.onClick();
+    }
+
+
 }

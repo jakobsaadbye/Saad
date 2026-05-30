@@ -28,8 +28,6 @@ typedef struct Typer {
     
     int next_unique_symbol_id;
     int array_literal_depth;
-
-    DynamicArray    scope_rewrites; // of *void. [AstBlock*, AstIdentifier*, AstBlock*, AstIdentifier*]
 } Typer;
 
 bool  check_block(Typer *typer, AstBlock *block);
@@ -82,7 +80,6 @@ Typer typer_init(Parser *parser, ConstEvaluator *ce) {
     typer.enclosing_function_stack = da_init(2, sizeof(AstFunctionDefn *));
     typer.enclosing_loop      = NULL;
     typer.inside_declaration  = NULL;
-    typer.scope_rewrites      = da_init(8, sizeof(void*));
     typer.struct_wait_list    = da_init(8, sizeof(AstIdentifier *));
 
     return typer;
@@ -2678,12 +2675,8 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
                 TypeArray *slice_type = generate_slice_of(typer->parser, variadic->type);
 
                 AstIdentifier *lowered_var_param = generate_identifier(typer->parser, param->name, (Type *) slice_type, 0);
-
-                // In codegen, we want any lookup of the variadic parameter to be the lowered parameter with the slice type, so we
-                // have to replace the identifier that is returned by the scope lookup. This can only be done when we know, that we
-                // are finished type checking all the nodes
-                da_append(&typer->scope_rewrites, func_defn->body);
-                da_append(&typer->scope_rewrites, lowered_var_param);
+                lowered_var_param->scope = param->scope;
+                param->ident_override = lowered_var_param;
 
                 da_append(&func_defn->lowered_params, lowered_var_param);
                 continue;

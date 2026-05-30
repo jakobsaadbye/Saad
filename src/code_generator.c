@@ -3887,12 +3887,17 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             //             jsd 2026.05.28
 
             // @Superhack: Swap the identifier if its a builtin function
-            AstIdentifier *ident = NULL;
-            if (lit->as.value.identifier.resolved_identifier->flags & IDENTIFIER_IS_BUILTIN_FUNCTION) {
-                ident = lit->as.value.identifier.resolved_identifier;
-            } else {
-                ident = lookup_from_scope(cg->parser, cg->current_scope, lit->as.value.identifier.name);
+            AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
+
+            if (ident->ident_override != NULL) {
+                ident = ident->ident_override;
             }
+
+            // if (lit->as.value.identifier.resolved_identifier->flags & IDENTIFIER_IS_BUILTIN_FUNCTION) {
+            //     ident = 
+            // } else {
+            //     ident = lookup_from_scope(cg->parser, cg->current_scope, lit->as.value.identifier.name);
+            // }
 
             assert(ident);
 
