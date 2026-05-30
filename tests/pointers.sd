@@ -16,22 +16,22 @@ main:: () {
 
         // Update of value at address pointed to
         ptr := &a;
-        ptr = 5;
+        *ptr = 5;
         assert(a == 5);
 
         // Changing address of pointer
         ptr = &b;
-        ptr = 20;
+        *ptr = 20;
         assert(b == 20);
         assert(a == 5);
 
-        // Pointer mania
+        // Pointer -> Pointer -> Pointer -> Value mania
         x := 5;
         ptr1 := &x;
         ptr2 := &ptr1;
         ptr3 := &ptr2;
 
-        ptr3 = 10;
+        ***ptr3 = 10;
 
         assert(x == 10);
     }
@@ -71,9 +71,9 @@ main:: () {
         v : Vector2;
     
         ptr := &v.x;
-        ptr = 1.0;
+        *ptr = 1.0;
         ptr = &v.y;
-        ptr = 3.0;
+        *ptr = 3.0;
     
         assert(v.x == 1.0);
         assert(v.y == 3.0);
@@ -101,7 +101,10 @@ main:: () {
         ptr0 := &n1;
         ptr1 := &ptr0;
         ptr2 := &ptr1;
-        assert((*(*ptr2)).data == 69);
+
+        val := (*(*(*ptr2))).data;
+        print("%", val);
+        assert(val == 69);
     }
 
     print("Checking that it also works inside for-loops");

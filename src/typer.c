@@ -55,6 +55,7 @@ bool is_comparison_operator(TokenType op);
 bool is_boolean_operator(TokenType op);
 bool is_untyped_type(Type *type);
 bool is_untyped_literal(AstExpr *expr);
+bool is_literal_identifier(AstExpr *expr);
 bool is_non_constant_identifier_found_inside_current_function(Typer *typer, AstIdentifier *ident);
 void statically_cast_literal(AstLiteral *untyped_literal, Type *cast_into);
 void reserve_local_storage(AstFunctionDefn *func_defn, int size);
@@ -956,14 +957,6 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         return types_are_equal(inner_lhs, rhs);
     }
 
-    // if (lhs->kind == TYPE_STRING && rhs->kind == TYPE_POINTER) {
-    //     Type *right_pointer_to = ((TypePointer *)(rhs))->pointer_to;
-
-    //     if (right_pointer_to->kind == TYPE_INTEGER) {
-
-    //     }
-    // }
-
     if (lhs->kind == TYPE_FUNCTION && rhs->kind == TYPE_FUNCTION) {
         TypeFunction *left_func = (TypeFunction *) lhs;
         TypeFunction *right_func = (TypeFunction *) rhs;
@@ -1007,34 +1000,36 @@ bool types_are_equal(Type *lhs, Type *rhs) {
 bool check_assignment(Typer *typer, AstAssignment *assign) {
     Type *lhs_type  = check_expression(typer, assign->lhs, NULL);
     if (!lhs_type) return false;
+
     Type *expr_type = check_expression(typer, assign->expr, lhs_type);
     if (!expr_type) return false;
 
-    bool is_member     = assign->lhs->head.kind == AST_MEMBER_ACCESS;
-    bool is_array_ac   = assign->lhs->head.kind == AST_ARRAY_ACCESS;
-    bool is_identifier = assign->lhs->head.kind == AST_LITERAL && ((AstLiteral *)(assign->lhs))->kind == LITERAL_IDENTIFIER;
-
-    AstIdentifier  *member = NULL;
-    AstIdentifier  *ident  = NULL;
 
     bool lhs_is_constant = false;
-    if (is_member) {
-        member = ((AstMemberAccess *)(assign->lhs))->struct_member;
+    if (assign->lhs->head.kind == AST_MEMBER_ACCESS) {
+        AstIdentifier * member = ((AstMemberAccess *)(assign->lhs))->struct_member;
         lhs_is_constant = member->flags & IDENTIFIER_IS_CONSTANT;
     } 
-    else if (is_array_ac) {
+    else if (assign->lhs->head.kind == AST_ARRAY_ACCESS) {
+        // @Incomplete: I guess this could be a constant?
         lhs_is_constant = false;
     }
-    else if (is_identifier) {
-        ident = lookup_from_scope(typer->parser, typer->current_scope, ((AstLiteral *)(assign->lhs))->as.value.identifier.name);
+    else if (is_literal_identifier(assign->lhs)) {
+        AstIdentifier *ident = ((AstLiteral *)(assign->lhs))->as.value.identifier.resolved_identifier;
         assert(ident); // Is checked in check_expression so no need to check it here also
         lhs_is_constant = ident->flags & IDENTIFIER_IS_CONSTANT;
-    } else {
-        XXX;
+    } 
+    else if (assign->lhs->head.kind == AST_UNARY && ((AstUnary *)assign->lhs)->operator == OP_POINTER_DEREFERENCE) {
+        // @Incomplete: I guess this could be a constant?
+        lhs_is_constant = false;
+    }
+    else {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)assign->lhs, "Invalid left hand side of assigment");
+        return false;
     }
 
     if (lhs_is_constant) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign new value to constant '%s'", is_member ? member->name : ident->name);
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign new value to constant");
         return false;
     }
 
@@ -1053,41 +1048,8 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         expr_type = any_cast->head.type;
     }
 
-    if (lhs_type->kind == TYPE_POINTER) {
-        if (expr_type->kind != TYPE_POINTER) {
-            Type *points_to = ((TypePointer *)(lhs_type))->pointer_to;
-            while (points_to->kind == TYPE_POINTER) {
-                points_to = ((TypePointer *)(points_to))->pointer_to;
-            }
-
-            if (!types_are_equal(points_to, expr_type)) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Expression of type %s cannot be assigned to pointer with innermost type %s", type_to_str(expr_type), type_to_str(points_to));
-                return false;
-            }
-
-            bool ok = leads_to_integer_overflow(typer, points_to, assign->expr);
-            if (!ok) return false;
-
-            return true;
-        }
-        /* Fallthrough */
-    } 
-
     if (!types_are_equal(lhs_type, expr_type)) {
-        if (is_member) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to member '%s' of type '%s'", type_to_str(expr_type), member->name, type_to_str(lhs_type));
-        } else if (is_identifier) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to variable '%s' of type '%s'", type_to_str(expr_type), ident->name, type_to_str(lhs_type));
-        } else if (is_array_ac) {
-            if (ident) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to array index '%s' of type '%s'", type_to_str(expr_type), ident->name, type_to_str(lhs_type));
-            } else {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign value of type '%s' to array index of type '%s'", type_to_str(expr_type), type_to_str(lhs_type));
-            }
-        } else {
-            XXX;
-        }
-
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Assignment type mismatch. Wanted type %s. Got type %s", type_to_str(lhs_type), type_to_str(expr_type));
         return false;
     }
 
@@ -1946,10 +1908,6 @@ Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
     }
 
     return call->head.type;
-}
-
-bool is_literal_identifier(AstExpr *expr) {
-    return expr && expr->head.kind == AST_LITERAL && ((AstLiteral *)expr)->kind == LITERAL_IDENTIFIER;
 }
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
@@ -3683,24 +3641,6 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
         }
 
         unary->head.head.flags |= AST_FLAG_EXPR_IS_SPREADED;
-        // if (type_kind == TYPE_ARRAY) {
-
-            // TypeArray *array = (TypeArray *) unary->expr->type;
-
-            // // Make a variadic type out of the element type
-            // TypeVariadic *variadic    = ast_allocate(typer->parser, sizeof(TypeVariadic));
-            // variadic->head.head.kind  = AST_TYPE;
-            // variadic->head.head.file  = array->head.head.file;
-            // variadic->head.head.start = unary->expr->head.start;
-            // variadic->head.head.end   = unary->expr->head.end;
-            // variadic->head.head.flags = AST_FLAG_COMPILER_GENERATED;
-            // variadic->head.kind       = TYPE_VARIADIC;
-            // variadic->head.size       = 16;
-            // variadic->type            = array->elem_type;
-            // variadic->slice           = generate_slice_of(typer->parser, array->elem_type);
-
-            // return (Type *) variadic;
-        // }
 
         return expr_type;
     }
@@ -3722,13 +3662,7 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
             return NULL;
         }
 
-        TypePointer *ptr     = type_alloc(&typer->parser->type_table, sizeof(TypePointer));
-        ptr->head.head.kind  = AST_TYPE;
-        ptr->head.head.start = expr_type->head.start;
-        ptr->head.head.end   = expr_type->head.end;
-        ptr->head.kind       = TYPE_POINTER;
-        ptr->head.size       = 8;
-        ptr->pointer_to      = expr_type;
+        TypePointer *ptr = generate_pointer_to_type(typer->parser, expr_type);
         return (Type *)(ptr);
     }
 
@@ -4073,6 +4007,10 @@ AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name) {
 
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name) {
     return find_identifier_in_scope(struct_defn->methods, name);
+}
+
+bool is_literal_identifier(AstExpr *expr) {
+    return expr && expr->head.kind == AST_LITERAL && ((AstLiteral *)expr)->kind == LITERAL_IDENTIFIER;
 }
 
 bool is_untyped_literal(AstExpr *expr) {

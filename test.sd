@@ -1,7 +1,8 @@
 import "fmt";
 
-
-
 main :: () {
-    Print("%", "Hello world");
+    a := 5;
+    ptr := &a;
+    *ptr = 10;
+    print("%", *ptr);
 };

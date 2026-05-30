@@ -655,14 +655,6 @@ void emit_assignment(CodeGenerator *cg, AstAssignment *assign) {
     emit_expression(cg, assign->lhs);
     POP(RBX);
 
-    // If we assign a pointer to an rvalue, then we derefence the pointer before the assignment. For example:
-    //    a := 5;
-    //    ptr_a := &a;
-    //    ptr_a = 10;      // Derefernce 'ptr_a' and assign 'a' to 10 (like it does in c)
-    if (assign->lhs->type->kind == TYPE_POINTER && assign->expr->type->kind != TYPE_POINTER) {
-        sb_append(&cg->code, "   mov\t\trbx, [rbx]\n");
-    }
-
     emit_simple_initialization(cg, 0, true, false, assign->lhs->type, assign->expr->type);
 }
 
@@ -3490,7 +3482,7 @@ void emit_binary(CodeGenerator *cg, AstBinary *bin) {
     return;
 }
 
-void emit_unary(CodeGenerator *cg, AstUnary *unary) {
+void emit_unary(CodeGenerator *cg, AstUnary *unary, bool emit_as_lvalue) {
     if (unary->operator == OP_NOT) {
         emit_expression(cg, unary->expr);
         POP(RAX);
@@ -3546,7 +3538,7 @@ void emit_unary(CodeGenerator *cg, AstUnary *unary) {
 
         Type *dereferenced_type = unary->head.type;
         POP(RBX);
-        emit_move_and_push(cg, 0, true, dereferenced_type, false);
+        emit_move_and_push(cg, 0, true, dereferenced_type, emit_as_lvalue);
 
         if (dereferenced_type->kind == TYPE_POINTER) {
             // Mark the pointer as dereferenced so e.g a member access knows not to dereference the pointer again
@@ -3583,7 +3575,7 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
         return;
     }
     case AST_UNARY: {
-        emit_unary(cg, (AstUnary *)expr);
+        emit_unary(cg, (AstUnary *)expr, emit_as_lvalue);
         return;
     }
     case AST_SEMICOLON_EXPR: {
@@ -3880,26 +3872,12 @@ void emit_expression(CodeGenerator *cg, AstExpr *expr) {
             return;
         }
         case LITERAL_IDENTIFIER: {
-            // @Bug @Incomplete @Cleanup: We should definitly be using `lit->as.value.identifier.resolved_identifier;`
-            // We have a bug right now, that variadic arguments are getting scope rewritten and a new identifier is created for them
-            // so we loose the original resolved_identifier when going into codegen. That causes a mismatch between the resolved_identifier and
-            // parameter which are now two different identifiers. We should definitely fix that!       
-            //             jsd 2026.05.28
-
-            // @Superhack: Swap the identifier if its a builtin function
             AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
+            assert(ident);
 
             if (ident->ident_override != NULL) {
                 ident = ident->ident_override;
             }
-
-            // if (lit->as.value.identifier.resolved_identifier->flags & IDENTIFIER_IS_BUILTIN_FUNCTION) {
-            //     ident = 
-            // } else {
-            //     ident = lookup_from_scope(cg->parser, cg->current_scope, lit->as.value.identifier.name);
-            // }
-
-            assert(ident);
 
             if (ident->flags & IDENTIFIER_IS_CONSTANT) {
 

@@ -1081,6 +1081,7 @@ TypePointer *generate_pointer_to_type(Parser *parser, Type *type) {
     ptr->head.head.kind  = AST_TYPE;
     ptr->head.head.start = type->head.start;
     ptr->head.head.end   = type->head.end;
+    ptr->head.head.file  = parser->current_file;
     ptr->head.kind       = TYPE_POINTER;
     ptr->head.size       = 8;
     ptr->pointer_to      = type;    
