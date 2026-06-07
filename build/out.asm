@@ -830,7 +830,14 @@ L43:
 ; else
 L44:
    ; Ln 11: Assignment
+   mov		eax, DWORD -4[rbp]
+   movsx		rax, eax
+   push		rax
    mov		rax, 5
+   push		rax
+   pop		rbx
+   pop		rax
+   add		rax, rbx
    push		rax
    lea		rax, -4[rbp]
    push		rax

@@ -1,5 +1,9 @@
 #include "typer.c"
 
+#define SHOW_IR_LINE_NUMBERS 1
+#define SHOW_IR_LIVE_INTERVALS 1
+#define SHOW_IR_DEF_USE 1
+
 typedef struct BasicBlock BasicBlock;
 
 typedef enum TerminatorKind {
@@ -12,6 +16,7 @@ typedef enum TerminatorKind {
 typedef struct Terminator {
     TerminatorKind kind;
     int            condition_vreg;
+    int            index;
     u8             target_count;
     union {
         struct {
@@ -43,12 +48,25 @@ typedef struct BytecodeFunctionParameter {
     Type *type;
 } BytecodeFunctionParameter;
 
+typedef struct LiveInterval {
+    int vreg;
+    int start;
+    int end;
+    int assigned_reg; // -1 = spilled
+    bool is_active;
+} LiveInterval;
+
 typedef struct BytecodeFunction {
     char        *symbol_name;
     BasicBlock  *entry;
     DynamicArray basic_blocks; // of *BasicBlock.
     int          next_vreg;
+    int          next_instruction_index;
+
     DynamicArray params; // of BytecodeFunctionParameter
+
+    // Stuff for liveness analysis
+    DynamicArray live_ranges;
 
     // Emission stage
     int          frame_size;
@@ -188,6 +206,7 @@ typedef struct Operand {
 typedef struct Inst {
     u16     kind;
     u8      op_count;
+    int     index;
     void   *data;       // Pointer to arbitrary extra data the instruction might need
     union {
         struct {
@@ -202,18 +221,6 @@ typedef struct Inst {
 void *bytecode_allocate(BytecodeGenerator *bcg, size_t size) {
     return arena_allocate(&bcg->bytecode_arena, size);
 }
-
-// BasicBlock *new_basic_block(BytecodeGenerator *bcg) {
-//     BasicBlock *bb = bytecode_allocate(bcg, sizeof(BasicBlock));
-
-//     bb->id = bcg->current_basic_block_id++;
-//     bb->instructions = da_init(64, sizeof(Inst));
-
-//     da_append(&bcg->current_function->basic_blocks, bb);
-//     bcg->current_basic_block = bb;
-
-//     return bb;
-// }
 
 BytecodeFunction *new_bytecode_function(BytecodeGenerator *bcg, AstFunctionDefn *func_defn) {
     BytecodeFunction *func = bytecode_allocate(bcg, sizeof(BytecodeFunction));
@@ -287,9 +294,14 @@ void add_instruction(BytecodeGenerator *bcg, Inst inst) {
     da_append(&bcg->current_basic_block->instructions, inst);
 }
 
-static Inst make_instruction_3(InstKind kind, Operand op1, Operand op2, Operand op3) {
+int get_next_instruction_index(BytecodeGenerator *bcg) {
+    return bcg->current_function->next_instruction_index++;
+}
+
+static Inst make_instruction_3(BytecodeGenerator *bcg, InstKind kind, Operand op1, Operand op2, Operand op3) {
     return (Inst) {
         .kind = kind,
+        .index = get_next_instruction_index(bcg),
         .op_count = 3,
         .op1 = op1,
         .op2 = op2,
@@ -297,9 +309,10 @@ static Inst make_instruction_3(InstKind kind, Operand op1, Operand op2, Operand 
     };
 }
 
-static Inst make_instruction_2(InstKind kind, Operand op1, Operand op2) {
+static Inst make_instruction_2(BytecodeGenerator *bcg, InstKind kind, Operand op1, Operand op2) {
     return (Inst) {
         .kind = kind,
+        .index = get_next_instruction_index(bcg),
         .op_count = 2,
         .op1 = op1,
         .op2 = op2,
@@ -317,9 +330,10 @@ static Inst make_instruction_2(InstKind kind, Operand op1, Operand op2) {
 //     };
 // }
 
-static Inst make_instruction_0(InstKind kind) {
+static Inst make_instruction_0(BytecodeGenerator *bcg, InstKind kind) {
     return (Inst) {
         .kind = kind,
+        .index = get_next_instruction_index(bcg),
         .op_count = 0,
         .op1 = NO_OP,
         .op2 = NO_OP,
@@ -360,7 +374,7 @@ Operand make_immediate_float(double value, int size) {
 }
 
 void add_comment(BytecodeGenerator *bcg, char *comment) {
-    Inst inst = make_instruction_0(INST_COMMENT);
+    Inst inst = make_instruction_0(bcg, INST_COMMENT);
     inst.data = comment;
     add_instruction(bcg, inst);
 }
@@ -465,10 +479,17 @@ void bcg_dump_instruction(StringBuilder *sb, Inst *inst) {
     // General case:
     char *inst_kind_str = inst_kind_to_string(inst->kind);
 
+    sb_append(sb, "\t");
+
+    // Show instruction numbers?
+    #if SHOW_IR_LINE_NUMBERS
+        sb_append(sb, "%d: ",inst->index);
+    #endif
+
     if (strlen(inst_kind_str) > 3) {
-        sb_append(sb, "\t%s\t", inst_kind_str);
+        sb_append(sb, "%s\t", inst_kind_str);
     } else {
-        sb_append(sb, "\t%s\t\t", inst_kind_str);
+        sb_append(sb, "%s\t\t", inst_kind_str);
     }
 
     for (int k = 0; k < inst->op_count; k++) {
@@ -499,13 +520,32 @@ void bcg_dump_block_liveness_info(StringBuilder *sb, BasicBlock *bb) {
     sb_append(sb, "\n");
 }
 
+void bcg_dump_live_intervals(StringBuilder *sb, BytecodeFunction *func) {
+
+    sb_append(sb, "; Live-intervals\n");
+    for (int i = 0; i < func->live_ranges.count; i++) {
+        LiveInterval *interval = da_get(func->live_ranges, i);
+
+        sb_append(sb, "; v%d = [%d, %d]\n", interval->vreg, interval->start, interval->end);
+    }
+}
+
 void bcg_dump_function_defn(StringBuilder *sb, BytecodeFunction *func) {
     sb_append(sb, "%s:\n", func->symbol_name);
+
+    #if SHOW_IR_LIVE_INTERVALS
+        bcg_dump_live_intervals(sb, func);
+    #endif
+
     for (int i = 0; i < func->basic_blocks.count; i++) {
         BasicBlock *bb = da_get_deref(func->basic_blocks, i);
 
         sb_append(sb, "\n");
-        bcg_dump_block_liveness_info(sb, bb);
+
+        #if SHOW_IR_USE_DEFS
+            bcg_dump_block_liveness_info(sb, bb);
+        #endif
+
         sb_append(sb, "L%d:\n", bb->id);
         for (int j = 0; j < bb->instructions.count; j++) {
             Inst *inst = da_get(bb->instructions, j);
@@ -514,21 +554,27 @@ void bcg_dump_function_defn(StringBuilder *sb, BytecodeFunction *func) {
         }
 
         // Dump terminator
+        sb_append(sb, "\t");
+
+        #if SHOW_IR_LINE_NUMBERS
+            sb_append(sb, "%d: ", bb->terminator.index);
+        #endif
+
         switch (bb->terminator.kind) {
             case TERMINATOR_NONE: {
-                sb_append(sb, "\tterm_none\n");
+                sb_append(sb, "term_none\n");
                 break;
             }
             case TERMINATOR_JUMP: {
-                sb_append(sb, "\tjmp\t\tL%d\n", bb->terminator.target1->id);
+                sb_append(sb, "jmp\t\tL%d\n", bb->terminator.target1->id);
                 break;
             }
             case TERMINATOR_COND_JUMP: {
-                sb_append(sb, "\tjmp_if\tv%d, L%d, L%d\n", bb->terminator.condition_vreg, bb->terminator.target1->id, bb->terminator.target2->id);
+                sb_append(sb, "jmp_if\tv%d, L%d, L%d\n", bb->terminator.condition_vreg, bb->terminator.target1->id, bb->terminator.target2->id);
                 break;
             }
             case TERMINATOR_RETURN: {
-                sb_append(sb, "\tret\n");
+                sb_append(sb, "ret\n");
                 break;
             }
         }
@@ -576,7 +622,7 @@ void bcg_declaration(BytecodeGenerator *bcg, AstDeclaration *decl) {
             int src = bcg_expression(bcg, value);
             ident->virtual_register = fresh_register(bcg);
 
-            add_instruction(bcg, make_instruction_2(
+            add_instruction(bcg, make_instruction_2(bcg,
                 INST_MOV, 
                 make_sized_register(ident->virtual_register, ident->type->size),
                 make_sized_register(src, value->type->size)
@@ -613,6 +659,7 @@ void add_predecessor(BasicBlock *basic_block, BasicBlock *predecessor) {
 void terminate_with_jump(BytecodeGenerator *bcg, BasicBlock *target) {
     bcg->current_basic_block->terminator = (Terminator){ 
         .kind = TERMINATOR_JUMP,
+        .index = get_next_instruction_index(bcg),
         .target_count = 1,
         .target1 = target,
     };
@@ -623,6 +670,7 @@ void terminate_with_jump(BytecodeGenerator *bcg, BasicBlock *target) {
 void terminate_with_cond_jump(BytecodeGenerator *bcg, int cond_vreg, BasicBlock *true_bb, BasicBlock *false_bb) {
     bcg->current_basic_block->terminator = (Terminator){ 
         .kind = TERMINATOR_COND_JUMP,
+        .index = get_next_instruction_index(bcg),
         .condition_vreg = cond_vreg,
         .target_count = 2,
         .target1 = true_bb,
@@ -636,6 +684,7 @@ void terminate_with_cond_jump(BytecodeGenerator *bcg, int cond_vreg, BasicBlock 
 void terminate_with_return(BytecodeGenerator *bcg) {
     bcg->current_basic_block->terminator = (Terminator){ 
         .kind = TERMINATOR_RETURN,
+        .index = get_next_instruction_index(bcg),
         .target_count = 0,
     };
 }
@@ -694,7 +743,7 @@ void bcg_assignment(BytecodeGenerator *bcg, AstAssignment *assign) {
     int lhs_vreg = bcg_expression(bcg, assign->lhs);
     int rhs_vreg = bcg_expression(bcg, assign->expr);
 
-    Inst result = make_instruction_2(INST_MOV, 
+    Inst result = make_instruction_2(bcg, INST_MOV, 
         make_sized_register(lhs_vreg, assign->lhs->type->size), 
         make_sized_register(rhs_vreg, assign->expr->type->size)
     );
@@ -748,6 +797,7 @@ int bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *call) {
         XXX;
     } else {
         call_instruction = make_instruction_2(
+            bcg,
             INST_CALL, 
             make_sized_register(ret_vreg, 8), 
             LABEL(call->func_defn->identifier->name)
@@ -777,7 +827,7 @@ int bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *call) {
     }
     sb_append(&bcg->temporary_strings, ")\0");
 
-    add_comment(bcg, arg_list_string);
+    // add_comment(bcg, arg_list_string);
     add_instruction(bcg, call_instruction);
 
     return ret_vreg;
@@ -830,7 +880,7 @@ int bcg_arithmetic_operator(BytecodeGenerator *bcg, AstBinary *bin) {
     int rhs_reg = bcg_expression(bcg, bin->right);
     int dst_reg = fresh_register(bcg);
 
-    Inst result = make_instruction_3(INST_NOOP, 
+    Inst result = make_instruction_3(bcg, INST_NOOP, 
         make_sized_register(dst_reg, bin->head.type->size),
         make_sized_register(lhs_reg, bin->left->type->size),
         make_sized_register(rhs_reg, bin->right->type->size)
@@ -870,7 +920,7 @@ int bcg_comparison_operator(BytecodeGenerator *bcg, AstBinary *bin) {
     int rhs_reg = bcg_expression(bcg, bin->right);
     int dst_reg = fresh_register(bcg);
 
-    Inst result = make_instruction_3(INST_NOOP, 
+    Inst result = make_instruction_3(bcg, INST_NOOP, 
         make_sized_register(dst_reg, bin->head.type->size),
         make_sized_register(lhs_reg, bin->left->type->size),
         make_sized_register(rhs_reg, bin->right->type->size)
@@ -954,6 +1004,7 @@ int bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
         
         int dst = fresh_register(bcg);
         add_instruction(bcg, make_instruction_2(
+            bcg,
             INST_MOV, 
             make_sized_register(dst, expr->type->size),
             imm
@@ -1071,12 +1122,82 @@ void bcg_compute_live_in_out(DynamicArray basic_blocks) {
             if (old_in.count != new_in.count || old_out.count != new_out.count) {
                 changed = true;
             }
+        }
+    }
+}
 
+void bcg_widen_live_interval(DynamicArray *intervals, int vreg, int index) {
+    LiveInterval *interval = da_get(*intervals, vreg);
+    if (!interval->is_active) {
+        interval->vreg = vreg;
+        interval->start = index;
+        interval->end = index;
+        interval->assigned_reg = -1;
+        interval->is_active = true;
+    } else {
+        if (index < interval->start) interval->start = index;
+        if (index > interval->end)   interval->end = index;
+    }
+}
+
+void bcg_compute_live_intervals(BytecodeFunction *func) {
+    int num_vregs = func->next_vreg;
+
+    func->live_ranges = da_init(num_vregs, sizeof(LiveInterval));
+    func->live_ranges.count = num_vregs;
+
+    bool *is_live = calloc(num_vregs, sizeof(bool));
+
+    for (int i = func->basic_blocks.count - 1; i >= 0; i--) {
+        BasicBlock *bb = da_get_deref(func->basic_blocks, i);
+
+        int low  = bb->instructions.count > 0 ? ((Inst *)da_get(bb->instructions, 0))->index : -1;
+        int high = bb->terminator.index;
+
+        for (int j = 0; j < num_vregs; j++) {
+            is_live[j] = false;
         }
 
-    }
+        for (int j = 0; j < bb->live_out.count; j++) {
+            int v = *(int *)da_get(bb->live_out, j);
+            is_live[v] = true;
+            // bcg_widen_live_interval(&func->live_ranges, v, low);
+            bcg_widen_live_interval(&func->live_ranges, v, high);
+        }
 
-    
+        if (bb->terminator.kind == TERMINATOR_COND_JUMP) {
+            int v = bb->terminator.condition_vreg;
+            is_live[v] = true;
+            bcg_widen_live_interval(&func->live_ranges, v, high);
+        }
+
+        for (int j = bb->instructions.count - 1; j >= 0; j--) {
+            Inst *inst = da_get(bb->instructions, j);
+
+            for (int k = 0; k < inst->op_count; k++) {
+                Operand op = inst->operands[k];
+
+                if (op.kind == OPERAND_REG) {
+
+                    if (k == 0) {
+                        // Defs end a range (going backward): record, then mark not-live above.
+                        bcg_widen_live_interval(&func->live_ranges, op.vreg, inst->index);
+                        is_live[op.vreg] = false;
+                    } else {
+                        // Uses start/extend a range (going backward).
+                        bcg_widen_live_interval(&func->live_ranges, op.vreg, inst->index);
+                        is_live[op.vreg] = true;
+                    }
+                }
+            }
+        }
+
+        for (int v = 0; v < num_vregs; v++) {
+            if (is_live[v]) {
+                bcg_widen_live_interval(&func->live_ranges, v, low);
+            }
+        }
+    }
 }
 
 void bcg_compute_liveness(BytecodeGenerator *bcg) {
@@ -1092,10 +1213,19 @@ void bcg_compute_liveness(BytecodeGenerator *bcg) {
         }
     }
 
-    // Compute live_in / live_out
+    // Compute live_in / live_out of each block
     for (int i = 0; i < bcg->bytecode_functions.count; i++) {
         BytecodeFunction *func = da_get_deref(bcg->bytecode_functions, i);
         
         bcg_compute_live_in_out(func->basic_blocks);
     }
+
+    // Compute live-intervals
+    for (int i = 0; i < bcg->bytecode_functions.count; i++) {
+        BytecodeFunction *func = da_get_deref(bcg->bytecode_functions, i);
+        
+        bcg_compute_live_intervals(func);
+    }
+
+
 }
