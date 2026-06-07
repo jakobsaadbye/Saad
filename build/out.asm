@@ -741,14 +741,14 @@ L37:
    pop		rbp
    ret
 
-; bytes locals   : 32
+; bytes locals   : 40
 ; bytes temp     : 0
-; bytes total    : 64
+; bytes total    : 80
 ; ()
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 64
+   sub		rsp, 80
    ; Ln 2: $a : int = -4[rbp]
    mov		rax, 3
    push		rax
@@ -805,9 +805,31 @@ main:
    pop		rax
    mov		DWORD -16[rbp], eax
    jmp L42
-; else
+;#1 else if
 L43:
-   ; Ln 8: Assignment
+   mov		eax, DWORD -12[rbp]
+   movsx		rax, eax
+   push		rax
+   mov		rax, 5
+   push		rax
+   pop		rbx
+   pop		rax
+   cmp		rax, rbx
+   setl		al
+   push		rax
+   pop		rax
+   cmp		al, 0
+   jz			L44
+   ; Ln 8: $f : int = -20[rbp]
+   mov		eax, DWORD -4[rbp]
+   movsx		rax, eax
+   push		rax
+   pop		rax
+   mov		DWORD -20[rbp], eax
+   jmp L42
+; else
+L44:
+   ; Ln 11: Assignment
    mov		rax, 5
    push		rax
    lea		rax, -4[rbp]
@@ -818,7 +840,7 @@ L43:
    jmp L42
 ; done
 L42:
-   ; Ln 10: Assignment
+   ; Ln 13: Assignment
    mov		rax, 69
    push		rax
    lea		rax, -8[rbp]
@@ -828,7 +850,7 @@ L42:
    mov		DWORD [rbx], eax
 L41:
    mov		rax, 0
-   add		rsp, 64
+   add		rsp, 80
    pop		rbp
    ret
 

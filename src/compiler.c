@@ -225,11 +225,13 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     }
     report.typer_time_end = clock();
 
-    // Bytecode generation
+    // ----------- Bytecode generation -----------------
     begin_bytecode_generation(&bcg, main_file);
+    bcg_compute_liveness(&bcg);
     bcg_dump_bytecode_to_file(&bcg, "./build/out.ir");
     x64_begin_convert(&x64conv);
     x64_output_generated_x64_to_file(&x64conv, "./build/outV2.asm");
+    // -------------------------------------
 
     // Codegen
     report.codegen_time_start = clock();

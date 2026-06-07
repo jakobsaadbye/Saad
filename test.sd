@@ -4,7 +4,10 @@ main :: () {
     d := a + c;
     if d < 10 {
         e := 2;
-    } else {
+    } else if d < 5 {
+        f := a;
+    }
+    else {
         a = 5;
     }
     c = 69;

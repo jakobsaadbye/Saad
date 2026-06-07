@@ -12,8 +12,14 @@ typedef enum TerminatorKind {
 typedef struct Terminator {
     TerminatorKind kind;
     int            condition_vreg;
-    BasicBlock    *target1;
-    BasicBlock    *target2;
+    u8             target_count;
+    union {
+        struct {
+            BasicBlock    *target1;
+            BasicBlock    *target2;
+        };
+        BasicBlock *targets[2];
+    };
 } Terminator;
 
 typedef struct BasicBlock {
@@ -23,6 +29,13 @@ typedef struct BasicBlock {
     Terminator   terminator;
 
     DynamicArray predeccessors; // of *BasicBlock.
+
+    // Stuff for liveness analysis
+    DynamicArray usages;   // of int
+    DynamicArray defines;  // of int
+    DynamicArray live_in;  // of int
+    DynamicArray live_out; // of int
+
 } BasicBlock;
 
 typedef struct BytecodeFunctionParameter {
@@ -352,6 +365,67 @@ void add_comment(BytecodeGenerator *bcg, char *comment) {
     add_instruction(bcg, inst);
 }
 
+bool set_int_in(DynamicArray da, int value) {
+    for (int i = 0; i < da.count; i++) {
+        int *e = da_get(da, i);
+        if (*e == value) {
+            // Already exists in the set
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void set_int_add(DynamicArray *da, int value) {
+    if (set_int_in(*da, value)) {
+        return;
+    }
+
+    da_append(da, value);
+}
+
+DynamicArray set_int_diff(DynamicArray set1, DynamicArray set2) {
+    DynamicArray result = da_init(set1.count > set2.count ? set1.count : set2.count, sizeof(int));
+
+    for (int i = 0; i < set1.count; i++) {
+        int *el = da_get(set1, i);
+        if (!set_int_in(set2, *el)) {
+            da_append(&result, *el);
+        }
+    }
+
+    return result;
+}
+
+DynamicArray set_int_union(DynamicArray set1, DynamicArray set2) {
+    DynamicArray result = da_init(set1.count + set2.count, sizeof(int));
+
+    for (int i = 0; i < set1.count; i++) {
+        int *el = da_get(set1, i);
+        set_int_add(&result, *el);
+    }
+
+    for (int i = 0; i < set2.count; i++) {
+        int *el = da_get(set2, i);
+        set_int_add(&result, *el);
+    }
+
+    return result;
+}
+
+void set_int_append_string_to_builder(StringBuilder *sb, DynamicArray set) {
+    sb_append(sb, "{");
+    for (int i = 0; i < set.count; i++) {
+        int *el = da_get(set, i);
+        sb_append(sb, "v%d", *el);
+        if (i + 1 < set.count) {
+            sb_append(sb, ",");
+        }
+    }
+    sb_append(sb, "}");
+}
+
 void dump_operand_to_string(StringBuilder *sb, Operand op) {
     switch (op.kind) {
     case OPERAND_NONE: {
@@ -406,11 +480,32 @@ void bcg_dump_instruction(StringBuilder *sb, Inst *inst) {
     sb_append(sb, "\n");
 }
 
+void bcg_dump_block_liveness_info(StringBuilder *sb, BasicBlock *bb) {
+    sb_append(sb, "; Def = ");
+    set_int_append_string_to_builder(sb, bb->defines);
+    sb_append(sb, "\n");
+
+
+    sb_append(sb, "; Use = ");
+    set_int_append_string_to_builder(sb, bb->usages);
+    sb_append(sb, "\n");
+
+    sb_append(sb, "; Live in = ");
+    set_int_append_string_to_builder(sb, bb->live_in);
+    sb_append(sb, "\n");
+
+    sb_append(sb, "; Live out = ");
+    set_int_append_string_to_builder(sb, bb->live_out);
+    sb_append(sb, "\n");
+}
+
 void bcg_dump_function_defn(StringBuilder *sb, BytecodeFunction *func) {
     sb_append(sb, "%s:\n", func->symbol_name);
     for (int i = 0; i < func->basic_blocks.count; i++) {
         BasicBlock *bb = da_get_deref(func->basic_blocks, i);
 
+        sb_append(sb, "\n");
+        bcg_dump_block_liveness_info(sb, bb);
         sb_append(sb, "L%d:\n", bb->id);
         for (int j = 0; j < bb->instructions.count; j++) {
             Inst *inst = da_get(bb->instructions, j);
@@ -499,12 +594,14 @@ void bcg_declaration(BytecodeGenerator *bcg, AstDeclaration *decl) {
 
 BasicBlock *create_basic_block(BytecodeGenerator *bcg, char *internal_name) {
     BasicBlock *bb = arena_allocate(&bcg->bytecode_arena, sizeof(BasicBlock));
-    bb->id = bcg->current_basic_block_id++;
+    bb->id = 0; // Set in set_basic_block
     bb->name = internal_name;
-    bb->instructions = da_init(256, sizeof(Inst));
-    bb->predeccessors = da_init(2, sizeof(BasicBlock));
-
-    da_append(&bcg->current_function->basic_blocks, bb);
+    bb->instructions  = da_init(64, sizeof(Inst));
+    bb->predeccessors = da_init(2,  sizeof(BasicBlock));
+    bb->usages        = da_init(16, sizeof(int));
+    bb->defines       = da_init(16, sizeof(int));
+    bb->live_in       = da_init(16, sizeof(int));
+    bb->live_out      = da_init(16, sizeof(int));
 
     return bb;
 }
@@ -515,8 +612,9 @@ void add_predecessor(BasicBlock *basic_block, BasicBlock *predecessor) {
 
 void terminate_with_jump(BytecodeGenerator *bcg, BasicBlock *target) {
     bcg->current_basic_block->terminator = (Terminator){ 
-        .kind = TERMINATOR_JUMP, 
-        .target1 = target 
+        .kind = TERMINATOR_JUMP,
+        .target_count = 1,
+        .target1 = target,
     };
 
     add_predecessor(target, bcg->current_basic_block);
@@ -526,6 +624,7 @@ void terminate_with_cond_jump(BytecodeGenerator *bcg, int cond_vreg, BasicBlock 
     bcg->current_basic_block->terminator = (Terminator){ 
         .kind = TERMINATOR_COND_JUMP,
         .condition_vreg = cond_vreg,
+        .target_count = 2,
         .target1 = true_bb,
         .target2 = false_bb,
     };
@@ -537,6 +636,7 @@ void terminate_with_cond_jump(BytecodeGenerator *bcg, int cond_vreg, BasicBlock 
 void terminate_with_return(BytecodeGenerator *bcg) {
     bcg->current_basic_block->terminator = (Terminator){ 
         .kind = TERMINATOR_RETURN,
+        .target_count = 0,
     };
 }
 
@@ -547,6 +647,8 @@ void seal_to_merge(BytecodeGenerator *bcg, BasicBlock *merge) {
 }
 
 void set_current_basic_block(BytecodeGenerator *bcg, BasicBlock *basic_block) {
+    basic_block->id = bcg->current_basic_block_id++;
+    da_append(&bcg->current_function->basic_blocks, basic_block);
     bcg->current_basic_block = basic_block;
 }
 
@@ -812,7 +914,6 @@ int bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
     }
     case AST_LITERAL: {
         AstLiteral *lit = (AstLiteral *)expr;
-        int dst = fresh_register(bcg);
 
         Operand imm = {0};
         switch (lit->kind) {
@@ -851,6 +952,7 @@ int bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
             }
         }
         
+        int dst = fresh_register(bcg);
         add_instruction(bcg, make_instruction_2(
             INST_MOV, 
             make_sized_register(dst, expr->type->size),
@@ -864,4 +966,136 @@ int bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
     }
 
     return -1;
+}
+
+bool is_vreg_defined_in_block(BasicBlock *bb, int vreg) {
+    for (int i = 0; i < bb->defines.count; i++) {
+        int *def_vreg = da_get(bb->defines, i);
+
+        if (*def_vreg == vreg) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool is_vreg_used_in_block(BasicBlock *bb, int vreg) {
+    for (int i = 0; i < bb->usages.count; i++) {
+        int *use_vreg = da_get(bb->usages, i);
+
+        if (*use_vreg == vreg) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void bcg_maybe_add_def(BasicBlock *bb, int vreg) {
+    if (!is_vreg_defined_in_block(bb, vreg)) {
+        da_append(&bb->defines, vreg);
+    }
+}
+
+void bcg_maybe_add_use(BasicBlock *bb, int vreg) {
+    if (is_vreg_defined_in_block(bb, vreg)) {
+        return;
+    }
+
+    if (!is_vreg_used_in_block(bb, vreg)) {
+        da_append(&bb->usages, vreg);
+    }
+}
+
+void bcg_compute_def_uses_in_basic_block(BytecodeGenerator *bcg, BasicBlock *bb) {
+    for (int i = 0; i < bb->instructions.count; i++) {
+        Inst *inst = da_get(bb->instructions, i);
+
+        for (int j = 0; j < inst->op_count; j++) {
+            Operand op = inst->operands[j];
+
+            if (op.kind == OPERAND_REG) {
+
+                if (j == 0) {
+                    // Destination = possible def
+                    bcg_maybe_add_def(bb, op.vreg);
+                } else {
+                    // Read = possible use
+                    bcg_maybe_add_use(bb, op.vreg);
+                }
+            }
+        }
+    }
+
+    if (bb->terminator.kind == TERMINATOR_COND_JUMP) {
+        bcg_maybe_add_use(bb, bb->terminator.condition_vreg);
+    }
+}
+
+void bcg_compute_live_in_out(DynamicArray basic_blocks) {
+    // live_out[B] = ∪ live_in[S]   for every successor S of B
+    // live_in[B]  = use[B] ∪ (live_out[B] − def[B])
+
+    bool changed = true;
+    while (changed) {
+        changed = false; // assume we're done...
+
+        // Go through the blocks in reverse order
+        for (int i = basic_blocks.count - 1; i >= 0; i--) {
+            BasicBlock *bb = da_get_deref(basic_blocks, i);
+
+            // Take a snapshot of how the live in/out looks before updating
+            DynamicArray old_in  = bb->live_in;
+            DynamicArray old_out = bb->live_out;
+
+            // live_out[B] = ∪ live_in[S]
+            DynamicArray new_out = da_init(8, sizeof(int));
+            for (int j = 0; j < bb->terminator.target_count; j++) {
+                BasicBlock *succ = bb->terminator.targets[j];
+
+                for (int k = 0; k < succ->live_in.count; k++) {
+                    int *vreg = da_get(succ->live_in, k);
+                    set_int_add(&new_out, *vreg);
+                }
+            }
+
+            // live_in[B]  = use[B] ∪ (live_out[B] − def[B])
+            // (live_out[B] − def[B])
+            DynamicArray live_out_minus_def = set_int_diff(new_out, bb->defines);
+            DynamicArray new_in = set_int_union(bb->usages, live_out_minus_def);
+
+            bb->live_out = new_out;
+            bb->live_in  = new_in;
+
+            if (old_in.count != new_in.count || old_out.count != new_out.count) {
+                changed = true;
+            }
+
+        }
+
+    }
+
+    
+}
+
+void bcg_compute_liveness(BytecodeGenerator *bcg) {
+
+    // Compute def/use per block
+    for (int i = 0; i < bcg->bytecode_functions.count; i++) {
+        BytecodeFunction *func = da_get_deref(bcg->bytecode_functions, i);
+
+        for (int j = 0; j < func->basic_blocks.count; j++) {
+            BasicBlock *bb = da_get_deref(func->basic_blocks, j);
+
+            bcg_compute_def_uses_in_basic_block(bcg, bb);
+        }
+    }
+
+    // Compute live_in / live_out
+    for (int i = 0; i < bcg->bytecode_functions.count; i++) {
+        BytecodeFunction *func = da_get_deref(bcg->bytecode_functions, i);
+        
+        bcg_compute_live_in_out(func->basic_blocks);
+    }
 }
