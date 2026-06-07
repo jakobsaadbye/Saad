@@ -1,6 +1,6 @@
 #include <time.h>
 #include <stdio.h>
-#include "code_generator.c"
+#include "x64_converter.c"
 
 #ifdef __APPLE__
     #include <sys/uio.h>
@@ -126,6 +126,8 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     Parser parser         = parser_init(&lexer);
     ConstEvaluator ce     = const_evaluator_init(&parser);
     Typer typer           = typer_init(&parser, &ce);
+    BytecodeGenerator bcg = bytecode_generator_init(&parser);
+    X64Converter x64conv  = x64_converter_init(&bcg);
     CodeGenerator codegen = code_generator_init(&parser);
 
     DynamicArray  parsed_files = da_init(8, sizeof(AstFile *));
@@ -222,6 +224,12 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
         return false;
     }
     report.typer_time_end = clock();
+
+    // Bytecode generation
+    begin_bytecode_generation(&bcg, main_file);
+    bcg_dump_bytecode_to_file(&bcg, "./build/out.ir");
+    x64_begin_convert(&x64conv);
+    x64_output_generated_x64_to_file(&x64conv, "./build/outV2.asm");
 
     // Codegen
     report.codegen_time_start = clock();

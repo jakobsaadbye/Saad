@@ -4,6 +4,8 @@
 #include "lexer.h"
 #include "lib/table.h"
 #include "lib/dynamic_array.h"
+#include "lib/string_builder.h"
+#include <stdint.h>
 
 typedef struct AstDeclaration AstDeclaration;
 typedef struct AstBlock AstBlock;
@@ -14,6 +16,15 @@ typedef struct AstFunctionDefn AstFunctionDefn;
 typedef struct Type Type;
 typedef struct TypeTable TypeTable;
 typedef struct TypeStruct TypeStruct;
+
+typedef uint8_t   u8;
+typedef uint16_t  u16;
+typedef uint32_t  u32;
+typedef uint64_t  u64;
+typedef int8_t    i8;
+typedef int16_t   i16;
+typedef int32_t   i32;
+typedef int64_t   i64;
 
 typedef enum AstKind {
     AST_ERR,
@@ -167,6 +178,8 @@ typedef struct AstIdentifier {
 
     AstBlock       *scope; // The scope this identifier was declared in
     AstDeclaration *decl; // The declaration it belongs to
+
+    int virtual_register; // Used in bytecode_generator
 
     AstIdentifier *ident_override; // Set on certain identifiers to tell codegen to use a lowered identifier representation instead. E.g variadic parameters are overriden
     int member_index;   // Used to know the insertion order of a struct member
@@ -339,7 +352,7 @@ typedef struct AstFunctionCall {
     AstExpr         *expression; // Expression that the function is called on. E.g `foo()`. In this case 'foo' is the identifier expression that the function call is made on
     Token            paren_start_token;
     AstFunctionDefn *func_defn;         // The called function
-    DynamicArray     arguments;         // of *AstExpr
+    DynamicArray     arguments;         // of *AstArgument
     int              first_positional_argument_index;
     bool             is_method_call;    // If the function is called with an implicit self parameter in which the function definition is a method
     bool             is_member_call;    // If the function is called on a member of a struct. Member calls does not take an implicit 'self' parameter
@@ -722,5 +735,8 @@ char     *type_to_str(Type *type);
 bool is_primitive_type(TypeKind kind);
 bool is_signed_integer(Type *type);
 bool is_unsigned_integer(Type *type);
+
+
+
 
 #endif

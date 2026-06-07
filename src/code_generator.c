@@ -1,5 +1,4 @@
-#include "typer.c"
-#include <stdint.h>
+#include "bytecode_generator.c"
 
 #define DEBUG_OUTPUT_EMITTED_STATEMENTS 0
 
@@ -1720,7 +1719,7 @@ void emit_if(CodeGenerator *cg, AstIf *ast_if) {
 
     int next_if_else_label = first_else_if_label;
     for (int i = 0; i < ast_if->else_ifs.count; i++) {
-        AstIf *else_if = &((AstIf *)(ast_if->else_ifs.items))[i];
+        AstIf *else_if = da_get_deref(ast_if->else_ifs, i);
 
         sb_append(&cg->code, ";#%zu else if\n", i + 1);
         sb_append(&cg->code, "L%d:\n", next_if_else_label);
@@ -3459,16 +3458,6 @@ void emit_move_and_push(CodeGenerator *cg, int src_offset, bool src_is_runtime_c
         printf("internal-compiler-error: Unhandled case '%s' in emit_move_and_push()", type_to_str(src_type));
         XXX;
     }
-}
-
-bool is_arithmetic_operator(TokenType op) {
-    if (op == '+') return true;
-    if (op == '-') return true;
-    if (op == '*') return true;
-    if (op == '/') return true;
-    if (op == '%') return true;
-    if (op == '^') return true;
-    return false;
 }
 
 void emit_binary(CodeGenerator *cg, AstBinary *bin) {

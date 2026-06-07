@@ -1,16 +1,11 @@
-import "fmt";
-
 main :: () {
-
-    // We can create functions anywhere, even in arrays
-    myFuncs := [
-        () { Print("0"); },
-        () { Print("1"); },
-        () { Print("2"); },
-    ];
-
-    for func in myFuncs {
-        func();
+    a := 3 + 5;
+    c := a * 10;
+    d := a + c;
+    if d < 10 {
+        e := 2;
+    } else {
+        a = 5;
     }
-
+    c = 69;
 };

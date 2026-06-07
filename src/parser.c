@@ -1957,7 +1957,7 @@ AstIf *parse_if(Parser *parser) {
     ast_if->head.end   = block->head.end;
     ast_if->then_block = block;
     ast_if->condition  = condition;
-    ast_if->else_ifs   = da_init(2, sizeof(AstIf));
+    ast_if->else_ifs   = da_init(2, sizeof(AstIf *));
 
     while (true) {
         Token next = peek_next_token(parser);
@@ -1975,13 +1975,14 @@ AstIf *parse_if(Parser *parser) {
                 AstBlock *block = parse_block(parser, NULL);
                 if (!block) return NULL;
 
-                AstIf else_if      = {0};
-                else_if.head.kind  = AST_IF;
-                else_if.head.file  = parser->current_file;
-                else_if.head.start = else_token.start;
-                else_if.head.end   = block->head.end;
-                else_if.then_block = block;
-                else_if.condition  = condition;
+
+                AstIf *else_if      = ast_allocate(parser, sizeof(AstIf));
+                else_if->head.kind  = AST_IF;
+                else_if->head.file  = parser->current_file;
+                else_if->head.start = else_token.start;
+                else_if->head.end   = block->head.end;
+                else_if->then_block = block;
+                else_if->condition  = condition;
 
                 da_append(&ast_if->else_ifs, else_if);
 

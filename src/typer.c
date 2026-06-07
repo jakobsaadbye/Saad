@@ -60,7 +60,7 @@ bool is_non_constant_identifier_found_inside_current_function(Typer *typer, AstI
 void statically_cast_literal(AstLiteral *untyped_literal, Type *cast_into);
 void reserve_local_storage(AstFunctionDefn *func_defn, int size);
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size);
-void reset_temporary_storage();
+void reset_temporary_storage(AstFunctionDefn *func_defn);
 AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name);
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 
@@ -403,13 +403,13 @@ Type *resolve_type(Typer *typer, Type *type) {
             Type *cap_type = check_expression(typer, array->capacity_expr, NULL);
             if (!cap_type) return NULL;
 
-            AstExpr *constexpr = simplify_expression(typer->const_evaluator, typer->current_scope, array->capacity_expr);
-            if (constexpr->head.kind != AST_LITERAL && ((AstLiteral *)(constexpr))->kind != LITERAL_INTEGER) {
+            AstExpr *const_expr = simplify_expression(typer->const_evaluator, typer->current_scope, array->capacity_expr);
+            if (const_expr->head.kind != AST_LITERAL && ((AstLiteral *)(const_expr))->kind != LITERAL_INTEGER) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be an integer constant");
                 return NULL;
             }
 
-            long long capacity = ((AstLiteral *)(constexpr))->as.value.integer;
+            long long capacity = ((AstLiteral *)(const_expr))->as.value.integer;
             if (capacity < 0) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be non-negative. Value is %lld", capacity);
                 return NULL;
@@ -1641,7 +1641,7 @@ bool check_if(Typer *typer, AstIf *ast_if) {
     if (!ok) return false;
 
     for (int i = 0; i < ast_if->else_ifs.count; i++) {
-        AstIf *else_if = &(((AstIf *)(ast_if->else_ifs.items))[i]);
+        AstIf *else_if = da_get_deref(ast_if->else_ifs, i);
         ok = check_statement(typer, (Ast *)(else_if));
         if (!ok) return false;
     }
@@ -2694,17 +2694,17 @@ Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
             Type *ok = check_expression(typer, etor->expr, (Type *)(enum_defn)); // Type definition of the enum gets to be the ctx type so we can refer to enum members inside the enum with the shorthand syntax .ENUM_MEMBER
             if (!ok) return NULL;
 
-            AstExpr *constexpr = simplify_expression(typer->const_evaluator, typer->current_scope, etor->expr); // @ScopeRefactoring - We still need to give enums their own scope. This probably doesn't work!!!
-            if (constexpr->head.kind != AST_LITERAL) {
+            AstExpr *const_expr = simplify_expression(typer->const_evaluator, typer->current_scope, etor->expr); // @ScopeRefactoring - We still need to give enums their own scope. This probably doesn't work!!!
+            if (const_expr->head.kind != AST_LITERAL) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Value must be a constant expression");
                 return NULL;
             }
-            if (constexpr->type->kind != TYPE_INTEGER) { // @Robustness - Check that the value of the integer does not overflow the backing type if made explicit. Maybe if the value goes beyond the default int we promote the integer type to fit the largest value???
+            if (const_expr->type->kind != TYPE_INTEGER) { // @Robustness - Check that the value of the integer does not overflow the backing type if made explicit. Maybe if the value goes beyond the default int we promote the integer type to fit the largest value???
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(etor->expr), "Enum value must have type int, but value is of type %s", type_to_str(etor->expr->type));
                 return NULL;
             }
 
-            etor->value = ((AstLiteral *)(constexpr))->as.value.integer;
+            etor->value = ((AstLiteral *)(const_expr))->as.value.integer;
             auto_increment_value = etor->value + 1;
         } else {
             etor->value = auto_increment_value;
@@ -2891,7 +2891,7 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
         if (array->elem_type->kind == TYPE_ANY && expr->type->kind != TYPE_ANY) {
             // Insert an any cast
             AstCast *any_cast = generate_cast_to_any(typer, expr);
-            if (!any_cast) return false;
+            if (!any_cast) return NULL;
             *expr_ptr = (AstExpr *) any_cast;
             expr = (AstExpr *) any_cast;
         }
@@ -3403,7 +3403,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
 
             if (member_type->kind == TYPE_ANY && init->value->type->kind != TYPE_ANY) {
                 AstCast *any_cast = generate_cast_to_any(typer, init->value);
-                if (!any_cast) return false;
+                if (!any_cast) return NULL;
                 init->value = (AstExpr *) any_cast;
             }
 
@@ -3414,7 +3414,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
             }
 
             bool ok = leads_to_integer_overflow(typer, member_type, init->value);
-            if (!ok) return false;
+            if (!ok) return NULL;
 
             init->member = member;
             curr_member_index = member->member_index + 1;
@@ -3431,7 +3431,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
 
             if (member_type->kind == TYPE_ANY && init->value->type->kind != TYPE_ANY) {
                 AstCast *any_cast = generate_cast_to_any(typer, init->value);
-                if (!any_cast) return false;
+                if (!any_cast) return NULL;
                 init->value = (AstExpr *) any_cast;
             }
 
@@ -3442,7 +3442,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
             }
 
             bool ok = leads_to_integer_overflow(typer, member_type, init->value);
-            if (!ok) return false;
+            if (!ok) return NULL;
 
             init->member = member;
             curr_member_index += 1;
@@ -3797,31 +3797,6 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
     return wanted_type;
 }
 
-bool is_comparison_operator(TokenType op) {
-    if (op == '<')                 return true;
-    if (op == '>')                 return true;
-    if (op == TOKEN_GREATER_EQUAL) return true;
-    if (op == TOKEN_LESS_EQUAL)    return true;
-    if (op == TOKEN_DOUBLE_EQUAL)  return true;
-    if (op == TOKEN_NOT_EQUAL)     return true;
-    return false;
-}
-
-bool is_bitwise_operator(TokenType op) {
-    if (op == '&') return true;
-    if (op == '^') return true;
-    if (op == '|') return true;
-    if (op == TOKEN_BITWISE_SHIFT_LEFT)  return true;
-    if (op == TOKEN_BITWISE_SHIFT_RIGHT) return true;
-    return false;
-}
-
-bool is_boolean_operator(TokenType op) {
-    if (op == TOKEN_LOGICAL_AND)   return true;
-    if (op == TOKEN_LOGICAL_OR)    return true;
-    return false;
-}
-
 bool is_non_constant_identifier_found_inside_current_function(Typer *typer, AstIdentifier *ident) {
     if (!(ident->flags & IDENTIFIER_IS_CONSTANT) 
     && typer->enclosing_function && typer->enclosing_function != ident->scope->enclosing_function) 
@@ -4007,6 +3982,41 @@ AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name) {
 
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name) {
     return find_identifier_in_scope(struct_defn->methods, name);
+}
+
+bool is_arithmetic_operator(TokenType op) {
+    if (op == '+') return true;
+    if (op == '-') return true;
+    if (op == '*') return true;
+    if (op == '/') return true;
+    if (op == '%') return true;
+    if (op == '^') return true;
+    return false;
+}
+
+bool is_comparison_operator(TokenType op) {
+    if (op == '<')                 return true;
+    if (op == '>')                 return true;
+    if (op == TOKEN_GREATER_EQUAL) return true;
+    if (op == TOKEN_LESS_EQUAL)    return true;
+    if (op == TOKEN_DOUBLE_EQUAL)  return true;
+    if (op == TOKEN_NOT_EQUAL)     return true;
+    return false;
+}
+
+bool is_bitwise_operator(TokenType op) {
+    if (op == '&') return true;
+    if (op == '^') return true;
+    if (op == '|') return true;
+    if (op == TOKEN_BITWISE_SHIFT_LEFT)  return true;
+    if (op == TOKEN_BITWISE_SHIFT_RIGHT) return true;
+    return false;
+}
+
+bool is_boolean_operator(TokenType op) {
+    if (op == TOKEN_LOGICAL_AND)   return true;
+    if (op == TOKEN_LOGICAL_OR)    return true;
+    return false;
 }
 
 bool is_literal_identifier(AstExpr *expr) {
