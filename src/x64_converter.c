@@ -10,7 +10,15 @@ typedef struct X64Converter {
 
     DynamicArray     *bytecode_functions; // of *BytecodeFunction
     BytecodeFunction *current_bytecode_function;
+
+    Arena temp_string_arena;
 } X64Converter;
+
+typedef struct OffsetOrRegister {
+    bool     is_reg;
+    Register reg;
+    int      offset;
+} OffsetOrRegister;
 
 void x64_emit_basic_block(X64Converter *conv, BasicBlock *bb);
 void x64_emit_bytecode_function(X64Converter *conv, BytecodeFunction *func);
@@ -25,6 +33,7 @@ X64Converter x64_converter_init(BytecodeGenerator *bcg) {
     conv.rdata_string = sb_init(1024);
     conv.code = sb_init(1024);
     conv.code_header = sb_init(1024);
+    conv.temp_string_arena = arena_init(1024);
 
     conv.bytecode_functions = &bcg->bytecode_functions;
 
@@ -93,6 +102,37 @@ void x64_begin_convert(X64Converter *conv) {
 
 }
 
+Register register_index_to_x86_register(int reg_index) {
+    Register gpr_x86_registers[] = {
+        REG_RCX,
+        REG_RDX,
+        REG_R8,
+        REG_R9,
+        REG_R10,
+        REG_R11,
+        REG_R12,
+        REG_R13,
+        REG_R14,
+        REG_R15,
+    };
+
+    return gpr_x86_registers[reg_index];
+}
+
+char *register_index_to_string(int reg_index, int size) {
+    Register x86_reg = register_index_to_x86_register(reg_index);
+    return register_to_str(x86_reg, size);
+}
+
+int allocate_local_variable(X64Converter *conv, int size) {
+    assert(conv->current_bytecode_function);
+
+    conv->current_bytecode_function->base_ptr -= size;
+    conv->current_bytecode_function->base_ptr = align_value(conv->current_bytecode_function->base_ptr, size > 8 ? 8 : size);
+
+    return conv->current_bytecode_function->base_ptr;
+}
+
 int get_vreg_stack_offset(X64Converter *conv, int vreg) {
    int *stack_slot = da_get(conv->current_bytecode_function->vreg_to_stack_slot, vreg);
    return *stack_slot;
@@ -107,9 +147,9 @@ void set_vreg_stack_offset(X64Converter *conv, int vreg, int offset) {
 int spill_vreg(X64Converter *conv, int vreg) {
     int current_offset = get_vreg_stack_offset(conv, vreg);
     if (current_offset == 0) {
-        conv->current_bytecode_function->frame_size += 8;
+        conv->current_bytecode_function->local_stack_size += 8;
 
-        int offset = -conv->current_bytecode_function->frame_size;
+        int offset = -conv->current_bytecode_function->local_stack_size;
         set_vreg_stack_offset(conv, vreg, offset);
         return offset;
     }
@@ -124,36 +164,20 @@ void x64_compute_function_stack_frame(X64Converter *conv, BytecodeFunction *func
         spill_vreg(conv, param->vreg);
     }
 
-    for (int i = 0; i < func->basic_blocks.count; i++) {
-        BasicBlock *bb = da_get_deref(func->basic_blocks, i);
-
-        for (int j = 0; j < bb->instructions.count; j++) {
-            Inst *inst = da_get(bb->instructions, j);
-
-            if (inst->kind == INST_CALL) {
-                InstFunctionCall *call = inst->data;
-                for (int i = 0; i < call->arg_vregs.count; i++) {
-                    int *vreg = da_get(call->arg_vregs, i);
-                    spill_vreg(conv, *vreg);
-                }
-            }
-
-            for (u8 k = 0; k < inst->op_count; k++) {
-                Operand *op = &inst->operands[k];
-                if (op->kind == OPERAND_REG) {
-                    spill_vreg(conv, op->vreg);
-                    op->kind = OPERAND_MEM;
-                }
-                else if (op->kind == OPERAND_MEM) {
-                    func->frame_size += 8;
-                    // op->offset = -func->frame_size;
-                }
-            }
-
+    // Get the stack size by the number of register spills in the function
+    int num_register_spills = 0;
+    for (int i = func->live_intervals.count - 1; i >= 0; i--) {
+        LiveInterval *interval = da_get(func->live_intervals, i);
+        if (interval->assigned_reg == -1) {
+            num_register_spills = interval->spill_slot + 1;
+            break;
         }
     }
 
-    func->frame_size += 32;
+    func->local_stack_size += num_register_spills * 8;
+
+    // Shadow space
+    func->local_stack_size += 32;
 }
 
 void x64_emit_bytecode_function(X64Converter *conv, BytecodeFunction *func) {
@@ -165,7 +189,7 @@ void x64_emit_bytecode_function(X64Converter *conv, BytecodeFunction *func) {
     sb_append(&conv->code, "%s:\n", func->symbol_name);
     sb_append(&conv->code, "\tpush\t\trbp\n");
     sb_append(&conv->code, "\tmov\t\trbp, rsp\n");
-    sb_append(&conv->code, "\tsub\t\trsp, %d\n", func->frame_size);
+    sb_append(&conv->code, "\tsub\t\trsp, %d\n", func->local_stack_size);
 
     // Check if we should save arguments to the shadow space
     bool save_arguments_in_shadow_space = false;
@@ -207,7 +231,7 @@ void x64_emit_bytecode_function(X64Converter *conv, BytecodeFunction *func) {
         x64_emit_basic_block(conv, bb);
     }
 
-    sb_append(&conv->code, "\tadd\t\trsp, %d\n", func->frame_size);
+    sb_append(&conv->code, "\tadd\t\trsp, %d\n", func->local_stack_size);
     sb_append(&conv->code, "\tpop\t\trbp\n");
     sb_append(&conv->code, "\tret\n");
 }
@@ -236,31 +260,38 @@ void x64_emit_call_instruction(X64Converter *conv, Inst *inst) {
 }
 
 void x64_emit_basic_block(X64Converter *conv, BasicBlock *bb) {
+
+    arena_clear(&conv->temp_string_arena);
+
     for (int i = 0; i < bb->instructions.count; i++) {
         Inst *inst = da_get(bb->instructions, i);
         x64_emit_instruction(conv, inst);
     }
 }
 
-void x64_emit_arithmetic_instruction(X64Converter *conv, Inst *inst) {
 
-    sb_append(&conv->code, "   mov\t\trax, %d[rbp]\n", get_vreg_stack_offset(conv, inst->op2.vreg));
-    sb_append(&conv->code, "   mov\t\trbx, %d[rbp]\n", get_vreg_stack_offset(conv, inst->op3.vreg));
+
+void x64_emit_arithmetic_instruction(X64Converter *conv, Inst *inst) {
+    char *dst = register_index_to_string(inst->op1.reg, 8);
+    char *a   = register_index_to_string(inst->op2.reg, 8);
+    char *b   = register_index_to_string(inst->op3.reg, 8);
+
+    sb_append(&conv->code, "   mov\t\t%s, %s\n", dst, a);
 
     if (inst->kind == INST_ADD_INT) {
-        sb_append(&conv->code, "   add\t\trax, rbx\n");
-        sb_append(&conv->code, "   mov\t\t%d[rbp], rax\n", get_vreg_stack_offset(conv, inst->op1.vreg));
+        sb_append(&conv->code, "   add\t\t%s, %s\n", dst, b);
         return;
     }
 
     if (inst->kind == INST_MUL_INT) {
-        sb_append(&conv->code, "   imul\t\trax, rbx\n");
-        sb_append(&conv->code, "   mov\t\t%d[rbp], rax\n", get_vreg_stack_offset(conv, inst->op1.vreg));
+        sb_append(&conv->code, "   imul\t\t%s, %s\n", dst, b);
         return;
     }
 
-    // sb_append(&cg->code, "   sub\t\trax, rbx\n");
-    // sb_append(&cg->code, "   imul\t\trax, rbx\n");
+}
+
+int slot_index_to_stack_offset(int slot) {
+    return -((slot + 1) * 8);
 }
 
 void x64_emit_instruction(X64Converter *conv, Inst *inst) {
@@ -272,28 +303,32 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
         break;
     }
     case INST_MOV: {
-        if (op1->kind == OPERAND_MEM && op2->kind == OPERAND_MEM) {
-            sb_append(&conv->code, "\tmov\t\trax, %d[rbp]\n", get_vreg_stack_offset(conv, op2->vreg));
-            sb_append(&conv->code, "\tmov\t\t%d[rbp], rax\n", get_vreg_stack_offset(conv, op1->vreg));
+        if (op1->kind == OPERAND_REG && op2->kind == OPERAND_REG) {
+            char *dst = register_index_to_string(op1->reg, 8);
+            char *a = register_index_to_string(op2->reg, 8);
+
+            sb_append(&conv->code, "\tmov\t\t%s, %s\n", dst, a);
         }
-        else if (op1->kind == OPERAND_MEM && op2->kind == OPERAND_IMM_INT) {
-            sb_append(&conv->code, "\tmov\t\t%d[rbp], %lld\n", get_vreg_stack_offset(conv, op1->vreg), op2->imm_int);
-        }
-        else if (op1->kind == OPERAND_MEM && op2->kind == OPERAND_IMM_UINT) {
-            sb_append(&conv->code, "\tmov\t\t%d[rbp], %zu\n", get_vreg_stack_offset(conv, op1->vreg), op2->imm_uint);
-        }
-        else if (op1->kind == OPERAND_REG && op2->kind == OPERAND_REG) {
-            XXX;
-        } else {
+        else if (op1->kind == OPERAND_REG && op2->kind == OPERAND_IMM_INT) {
+            char *dst = register_index_to_string(op1->reg, 8);
+            sb_append(&conv->code, "\tmov\t\t%s, %lld\n", dst, op2->imm_int);
+        } 
+        else {
             XXX;
         }
 
         break;
     }
     case INST_LOAD: {
+        char *dst = register_index_to_string(op1->reg, 8);
+        int stack_offset = slot_index_to_stack_offset(op2->slot);
+        sb_append(&conv->code, "\tmov\t\t%s, %d[rbp]\n", dst, stack_offset);
         break;
     }
     case INST_STORE: {
+        char *src = register_index_to_string(op2->reg, 8);
+        int stack_offset = slot_index_to_stack_offset(op1->slot);
+        sb_append(&conv->code, "\tmov\t\t%d[rbp], %s\n", stack_offset, src);
         break;
     }
     case INST_CALL: {

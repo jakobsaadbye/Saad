@@ -21,6 +21,7 @@ Chunk *make_new_chunk(Chunk *old_chunk, size_t capacity);
 Arena arena_init(size_t capacity);
 void *arena_allocate(Arena *arena, size_t size);
 void arena_free_all(Arena *arena);
+void arena_clear(Arena *arena);
 
 #endif
 
@@ -77,6 +78,15 @@ void arena_free_all(Arena *arena) {
         Chunk *temp = chunk;
         chunk = chunk->prev;
         free(temp);
+    }
+}
+
+void arena_clear(Arena *arena) {
+    Chunk *chunk = arena->current_chunk;
+    while(chunk) {
+        memset(chunk->data, 0, chunk->capacity);
+        chunk->cursor = 0;
+        chunk = chunk->prev;
     }
 }
 

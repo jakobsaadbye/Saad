@@ -125,36 +125,6 @@ CodeGenerator code_generator_init(Parser *parser) {
     return cg;
 }
 
-typedef enum Register {
-    REG_RAX,
-    REG_RBX,
-    REG_RCX,
-    REG_RDX,
-    REG_RSI,
-    REG_RDI,
-    REG_RBP,
-    REG_RSP,
-    REG_R8,
-    REG_R9,
-    REG_R10,
-    REG_R11,
-    REG_R12,
-    REG_R13,
-    REG_R14,
-    REG_R15,
-
-    REG_XMM0,
-    REG_XMM1,
-    REG_XMM2,
-    REG_XMM3,
-    REG_XMM4,
-    REG_XMM5,
-    REG_XMM6,
-    REG_XMM7,
-
-    REG_NONE,
-} Register;
-
 char *gpr_register_names[16][4] = {
     { "rax", "eax",  "ax",   "al"   },
     { "rbx", "ebx",  "bx",   "bl"   },

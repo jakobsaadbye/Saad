@@ -1,8 +1,12 @@
 #include "typer.c"
 
-#define SHOW_IR_LINE_NUMBERS 1
+#define SHOW_IR_LINE_NUMBERS 0
 #define SHOW_IR_LIVE_INTERVALS 1
-#define SHOW_IR_DEF_USE 1
+#define SHOW_IR_DEF_USE 0
+
+#define MAX_FREE_REGISTERS 3
+#define SCRATCH_REGISTER_1 (MAX_FREE_REGISTERS - 1)
+#define SCRATCH_REGISTER_2 (MAX_FREE_REGISTERS - 2)
 
 typedef struct BasicBlock BasicBlock;
 
@@ -53,7 +57,9 @@ typedef struct LiveInterval {
     int start;
     int end;
     int assigned_reg; // -1 = spilled
+    int spill_slot;
     bool is_active;
+    bool has_reg;
 } LiveInterval;
 
 typedef struct BytecodeFunction {
@@ -66,10 +72,15 @@ typedef struct BytecodeFunction {
     DynamicArray params; // of BytecodeFunctionParameter
 
     // Stuff for liveness analysis
-    DynamicArray live_ranges;
+    DynamicArray live_intervals; // of LiveInterval
 
     // Emission stage
-    int          frame_size;
+    int          num_spills;    // Number of registers that were spilled to the stack. Used to calculate the stack size
+    int          local_stack_size;
+    int          temporary_stack_size;
+    int          base_ptr;
+    int          temp_ptr;
+
     DynamicArray vreg_to_stack_slot; // of int
 
 } BytecodeFunction;
@@ -101,6 +112,51 @@ typedef struct BytecodeGenerator {
     AstBlock        *current_scope;
     AstFunctionDefn *enclosing_function;  // Current enclosing function
 } BytecodeGenerator;
+
+typedef enum Register {
+    REG_RAX,
+    REG_RBX,
+    REG_RCX,
+    REG_RDX,
+    REG_RSI,
+    REG_RDI,
+    REG_RBP,
+    REG_RSP,
+    REG_R8,
+    REG_R9,
+    REG_R10,
+    REG_R11,
+    REG_R12,
+    REG_R13,
+    REG_R14,
+    REG_R15,
+
+    REG_XMM0,
+    REG_XMM1,
+    REG_XMM2,
+    REG_XMM3,
+    REG_XMM4,
+    REG_XMM5,
+    REG_XMM6,
+    REG_XMM7,
+
+    REG_NONE,
+} Register;
+
+// static Register x64Registers[12] = {
+//     REG_RAX,
+//     REG_RBX,
+//     REG_RCX,
+//     REG_RDX,
+//     REG_R8,
+//     REG_R9,
+//     REG_R10,
+//     REG_R11,
+//     REG_R12,
+//     REG_R13,
+//     REG_R14,
+//     REG_R15,
+// };
 
 typedef enum OperandKind {
     OPERAND_NONE,
@@ -197,7 +253,8 @@ typedef struct Operand {
         u64    imm_uint;      // Immediate unsigned integer value
         double imm_float;     // Immediate float value
         int    vreg;          // Virtual register index
-        int    offset;        // Memory offset (e.g. from rbp)
+        int    reg;           // Physical register index set after it has gone through IR rewrite
+        int    slot;          // Memory offset (e.g. from rbp)
         char  *label;         // E.g function call or branch label
         int    label_id;      // E.g id of a block
     };
@@ -273,7 +330,7 @@ int bcg_array_access(BytecodeGenerator *bcg, AstArrayAccess *array_ac, bool lval
 int bcg_expression(BytecodeGenerator *bcg, AstExpr *expr);
 
 #define REG(i)   ((Operand){ .kind = OPERAND_REG,       .vreg = (i) })
-#define MEM(o)   ((Operand){ .kind = OPERAND_MEM,       .offset = (o) })
+#define MEM(s)  ((Operand){ .kind = OPERAND_MEM,       .slot = (s) })
 #define LABEL(s) ((Operand){ .kind = OPERAND_LABEL,     .label = (s) })
 #define LABEL_ID(id) ((Operand){ .kind = OPEARND_LABEL_ID, .label_id = (id) })
 #define NO_OP    ((Operand){ .kind = OPERAND_NONE })
@@ -459,7 +516,7 @@ void dump_operand_to_string(StringBuilder *sb, Operand op) {
         break;
     }
     case OPERAND_MEM: {
-        sb_append(sb, "[%d]", op.offset);
+        sb_append(sb, "[%d]", op.slot);
         break;
     }
     case OPERAND_LABEL: {
@@ -523,10 +580,10 @@ void bcg_dump_block_liveness_info(StringBuilder *sb, BasicBlock *bb) {
 void bcg_dump_live_intervals(StringBuilder *sb, BytecodeFunction *func) {
 
     sb_append(sb, "; Live-intervals\n");
-    for (int i = 0; i < func->live_ranges.count; i++) {
-        LiveInterval *interval = da_get(func->live_ranges, i);
+    for (int i = 0; i < func->live_intervals.count; i++) {
+        LiveInterval *interval = da_get(func->live_intervals, i);
 
-        sb_append(sb, "; v%d = [%d, %d]\n", interval->vreg, interval->start, interval->end);
+        sb_append(sb, "; v%d = [%d, %d], r%d\n", interval->vreg, interval->start, interval->end, interval->assigned_reg);
     }
 }
 
@@ -542,7 +599,7 @@ void bcg_dump_function_defn(StringBuilder *sb, BytecodeFunction *func) {
 
         sb_append(sb, "\n");
 
-        #if SHOW_IR_USE_DEFS
+        #if SHOW_IR_DEF_USE
             bcg_dump_block_liveness_info(sb, bb);
         #endif
 
@@ -827,7 +884,7 @@ int bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *call) {
     }
     sb_append(&bcg->temporary_strings, ")\0");
 
-    // add_comment(bcg, arg_list_string);
+    add_comment(bcg, arg_list_string);
     add_instruction(bcg, call_instruction);
 
     return ret_vreg;
@@ -1059,7 +1116,7 @@ void bcg_maybe_add_use(BasicBlock *bb, int vreg) {
     }
 }
 
-void bcg_compute_def_uses_in_basic_block(BytecodeGenerator *bcg, BasicBlock *bb) {
+void compute_def_uses_in_basic_block(BasicBlock *bb) {
     for (int i = 0; i < bb->instructions.count; i++) {
         Inst *inst = da_get(bb->instructions, i);
 
@@ -1084,7 +1141,7 @@ void bcg_compute_def_uses_in_basic_block(BytecodeGenerator *bcg, BasicBlock *bb)
     }
 }
 
-void bcg_compute_live_in_out(DynamicArray basic_blocks) {
+void compute_live_in_out(DynamicArray basic_blocks) {
     // live_out[B] = ∪ live_in[S]   for every successor S of B
     // live_in[B]  = use[B] ∪ (live_out[B] − def[B])
 
@@ -1140,11 +1197,11 @@ void bcg_widen_live_interval(DynamicArray *intervals, int vreg, int index) {
     }
 }
 
-void bcg_compute_live_intervals(BytecodeFunction *func) {
+void compute_live_intervals(BytecodeFunction *func) {
     int num_vregs = func->next_vreg;
 
-    func->live_ranges = da_init(num_vregs, sizeof(LiveInterval));
-    func->live_ranges.count = num_vregs;
+    func->live_intervals = da_init(num_vregs, sizeof(LiveInterval));
+    func->live_intervals.count = num_vregs;
 
     bool *is_live = calloc(num_vregs, sizeof(bool));
 
@@ -1162,13 +1219,13 @@ void bcg_compute_live_intervals(BytecodeFunction *func) {
             int v = *(int *)da_get(bb->live_out, j);
             is_live[v] = true;
             // bcg_widen_live_interval(&func->live_ranges, v, low);
-            bcg_widen_live_interval(&func->live_ranges, v, high);
+            bcg_widen_live_interval(&func->live_intervals, v, high);
         }
 
         if (bb->terminator.kind == TERMINATOR_COND_JUMP) {
             int v = bb->terminator.condition_vreg;
             is_live[v] = true;
-            bcg_widen_live_interval(&func->live_ranges, v, high);
+            bcg_widen_live_interval(&func->live_intervals, v, high);
         }
 
         for (int j = bb->instructions.count - 1; j >= 0; j--) {
@@ -1181,11 +1238,11 @@ void bcg_compute_live_intervals(BytecodeFunction *func) {
 
                     if (k == 0) {
                         // Defs end a range (going backward): record, then mark not-live above.
-                        bcg_widen_live_interval(&func->live_ranges, op.vreg, inst->index);
+                        bcg_widen_live_interval(&func->live_intervals, op.vreg, inst->index);
                         is_live[op.vreg] = false;
                     } else {
                         // Uses start/extend a range (going backward).
-                        bcg_widen_live_interval(&func->live_ranges, op.vreg, inst->index);
+                        bcg_widen_live_interval(&func->live_intervals, op.vreg, inst->index);
                         is_live[op.vreg] = true;
                     }
                 }
@@ -1194,8 +1251,94 @@ void bcg_compute_live_intervals(BytecodeFunction *func) {
 
         for (int v = 0; v < num_vregs; v++) {
             if (is_live[v]) {
-                bcg_widen_live_interval(&func->live_ranges, v, low);
+                bcg_widen_live_interval(&func->live_intervals, v, low);
             }
+        }
+    }
+}
+
+int bcg_get_next_free_reg(DynamicArray free_regs) {
+    for (int i = 0; i < free_regs.count; i++) {
+        bool *is_free = da_get(free_regs, i);
+        if (*is_free) {
+            return i;
+        }
+    }
+
+    // No free slot
+    return -1;
+}
+
+void spill_at_interval(BytecodeFunction *func, LiveInterval *interval, int *next_spill_slot) {
+    LiveInterval *spill = NULL;
+    for (int j = 0; j < func->live_intervals.count; j++) {
+        LiveInterval *act = da_get(func->live_intervals, j);
+        if (!act->has_reg) continue;
+        if (spill == NULL || act->end > spill->end) {
+            spill = act;
+        }
+    }
+
+    if (spill != NULL && spill->end > interval->end) {
+        // evict spill: give its register to the new interval
+        interval->assigned_reg = spill->assigned_reg;
+        interval->has_reg = true;
+        interval->spill_slot = -1;
+
+        spill->assigned_reg = -1;
+        spill->has_reg = false;
+        spill->spill_slot = (*next_spill_slot)++;
+    } else {
+        // new interval lives longest: spill it
+        interval->assigned_reg = -1;
+        interval->has_reg = false;
+        interval->spill_slot = (*next_spill_slot)++;
+    }
+}
+
+void compute_register_allocation(BytecodeFunction *func) {
+    // Assigned_reg of -1 = spill
+
+    DynamicArray free_regs = da_init(MAX_FREE_REGISTERS, sizeof(bool));
+    free_regs.count = MAX_FREE_REGISTERS;
+    memset(free_regs.items, 1, free_regs.capacity);
+
+    int next_spill_slot = 0;   // bump-allocated stack slots
+
+    for (int i = 0; i < func->live_intervals.count; i++) {
+        LiveInterval *interval = da_get(func->live_intervals, i);
+
+        // Skip dead vregs (never live during construction)
+        if (!interval->is_active) {
+            interval->assigned_reg = -1;
+            interval->has_reg = false;
+            continue;
+        }
+
+        // --- ExpireOldIntervals ---
+        // scan everything currently holding a register; free the expired ones
+        for (int j = 0; j < func->live_intervals.count; j++) {
+            LiveInterval *act = da_get(func->live_intervals, j);
+            if (!act->has_reg) continue;
+
+            if (act->end < interval->start) {
+                bool *slot = da_get(free_regs, act->assigned_reg);
+                *slot = true;
+                act->has_reg = false;   // no longer holds a register
+            }
+        }
+
+        // --- Assign or spill ---
+        int free_reg = bcg_get_next_free_reg(free_regs);
+        if (free_reg != -1) {
+            interval->assigned_reg = free_reg;
+            interval->has_reg = true;
+            bool *slot = da_get(free_regs, free_reg);
+            *slot = false;
+        } else {
+            // --- SpillAtInterval ---
+            // find the register-holding interval with the furthest end
+            spill_at_interval(func, interval, &next_spill_slot);
         }
     }
 }
@@ -1209,7 +1352,7 @@ void bcg_compute_liveness(BytecodeGenerator *bcg) {
         for (int j = 0; j < func->basic_blocks.count; j++) {
             BasicBlock *bb = da_get_deref(func->basic_blocks, j);
 
-            bcg_compute_def_uses_in_basic_block(bcg, bb);
+            compute_def_uses_in_basic_block(bb);
         }
     }
 
@@ -1217,15 +1360,135 @@ void bcg_compute_liveness(BytecodeGenerator *bcg) {
     for (int i = 0; i < bcg->bytecode_functions.count; i++) {
         BytecodeFunction *func = da_get_deref(bcg->bytecode_functions, i);
         
-        bcg_compute_live_in_out(func->basic_blocks);
+        compute_live_in_out(func->basic_blocks);
     }
 
     // Compute live-intervals
     for (int i = 0; i < bcg->bytecode_functions.count; i++) {
         BytecodeFunction *func = da_get_deref(bcg->bytecode_functions, i);
         
-        bcg_compute_live_intervals(func);
+        compute_live_intervals(func);
     }
 
+    // Compute register allocation
+    for (int i = 0; i < bcg->bytecode_functions.count; i++) {
+        BytecodeFunction *func = da_get_deref(bcg->bytecode_functions, i);
+        
+        compute_register_allocation(func);
+    }
+}
 
+int reg_of(BytecodeFunction *func, int vreg) {
+    LiveInterval *li = da_get(func->live_intervals, vreg);
+    return li->assigned_reg;
+}
+
+int slot_of(BytecodeFunction *func, int vreg) {
+    LiveInterval *li = da_get(func->live_intervals, vreg);
+    return li->spill_slot;
+}
+
+bool instruction_has_destination(Inst *inst) {
+    if (inst->op_count > 0) return true;
+
+    return false;
+}
+
+void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *func, BasicBlock *bb) {
+    DynamicArray rewritten_instructions = da_init(bb->instructions.count, sizeof(Inst));
+
+    for (int i = 0; i < bb->instructions.count; i++) {
+        Inst *inst = da_get(bb->instructions, i);
+        Inst out = *inst;
+
+        int next_scratch_reg = 0;
+        int scratch_registers[] = {SCRATCH_REGISTER_1, SCRATCH_REGISTER_2};
+
+        // For every read operand that spilled, insert a load instruction
+        for (int j = 1; j < inst->op_count; j++) {
+            Operand op = inst->operands[j];
+
+            if (op.kind == OPERAND_REG) {
+                int reg = reg_of(func, op.vreg);
+
+                if (reg == -1) {
+                    // Spilled
+                    int scratch_reg = scratch_registers[next_scratch_reg++];
+                    int spill_slot = slot_of(func, op.vreg);
+
+                    Inst load_inst = make_instruction_2(
+                        bcg,
+                        INST_LOAD,
+                        make_sized_register(scratch_reg, 8),
+                        MEM(spill_slot)
+                    );
+                    da_append(&rewritten_instructions, load_inst);
+
+                    out.operands[j].reg = scratch_reg;
+                } else {
+                    out.operands[j].reg = reg;
+                }
+            }
+        }
+
+        bool dst_spilled = false;
+        int  dst_scratch_reg = 0;
+        int  dst_spill_slot = 0;
+        if (instruction_has_destination(inst)) {
+            Operand op = inst->operands[0];
+            int reg = reg_of(func, op.vreg);
+
+            if (reg == -1) {
+                // Spilled
+                dst_spilled = true;
+                dst_scratch_reg = scratch_registers[next_scratch_reg++];
+                dst_spill_slot  = slot_of(func, op.vreg);
+
+                out.operands[0].reg = dst_scratch_reg;
+            } else {
+                out.operands[0].reg = reg;
+            }
+        }
+
+        // Check for a redundant move to the same register (copy coalescing)
+        bool is_noop = false;
+        if (out.kind == INST_MOV && out.op1.kind == OPERAND_REG && out.op2.kind == OPERAND_REG) {
+            if (out.op1.reg == out.op2.reg) {
+                is_noop = true;
+            }
+        }
+
+        if (!is_noop) {
+            da_append(&rewritten_instructions, out);
+        }
+
+        if (dst_spilled) {
+            Inst store_inst = make_instruction_2(
+                bcg,
+                INST_STORE,
+                MEM(dst_spill_slot),
+                make_sized_register(dst_scratch_reg, 8)
+            );
+
+            da_append(&rewritten_instructions, store_inst);
+        }
+    }
+
+    // Swap in the rewritten instructions
+    bb->instructions = rewritten_instructions;
+}
+
+void bcg_rewrite_function_spills(BytecodeGenerator *bcg, BytecodeFunction *func) {
+    for (int i = 0; i < func->basic_blocks.count; i++) {
+        BasicBlock *bb = da_get_deref(func->basic_blocks, i);
+
+        bcg_rewrite_basic_block_spills(bcg, func, bb);
+    }
+}
+
+void bcg_rewrite_entire_ir(BytecodeGenerator *bcg) {
+    for (int i = 0; i < bcg->bytecode_functions.count; i++) {
+        BytecodeFunction *func = da_get_deref(bcg->bytecode_functions, i);
+        bcg_rewrite_function_spills(bcg, func);
+    }
 }
