@@ -21,7 +21,7 @@ typedef struct OffsetOrRegister {
 } OffsetOrRegister;
 
 void x64_emit_basic_block(X64Converter *conv, BasicBlock *bb);
-void x64_emit_bytecode_function(X64Converter *conv, BytecodeFunction *func);
+void x64_emit_function(X64Converter *conv, BytecodeFunction *func);
 void x64_emit_instruction(X64Converter *conv, Inst *inst);
 
 X64Converter x64_converter_init(BytecodeGenerator *bcg) {
@@ -97,7 +97,7 @@ void x64_begin_convert(X64Converter *conv) {
 
     for (int i = 0; i < conv->bytecode_functions->count; i++) {
         BytecodeFunction *func = da_get_deref(*conv->bytecode_functions, i);
-        x64_emit_bytecode_function(conv, func);
+        x64_emit_function(conv, func);
     }
 
 }
@@ -164,28 +164,21 @@ void x64_compute_function_stack_frame(X64Converter *conv, BytecodeFunction *func
         spill_vreg(conv, param->vreg);
     }
 
-    // Get the stack size by the number of register spills in the function
-    int num_register_spills = 0;
-    for (int i = func->live_intervals.count - 1; i >= 0; i--) {
-        LiveInterval *interval = da_get(func->live_intervals, i);
-        if (interval->assigned_reg == -1) {
-            num_register_spills = interval->spill_slot + 1;
-            break;
-        }
-    }
-
-    func->local_stack_size += num_register_spills * 8;
+    func->local_stack_size += func->num_spill_slots * 8;
 
     // Shadow space
     func->local_stack_size += 32;
 }
 
-void x64_emit_bytecode_function(X64Converter *conv, BytecodeFunction *func) {
+void x64_emit_function(X64Converter *conv, BytecodeFunction *func) {
     conv->current_bytecode_function = func;
 
     // Compute frame size
     x64_compute_function_stack_frame(conv, func);
 
+    //
+    // Prolog
+    //
     sb_append(&conv->code, "%s:\n", func->symbol_name);
     sb_append(&conv->code, "\tpush\t\trbp\n");
     sb_append(&conv->code, "\tmov\t\trbp, rsp\n");
@@ -211,14 +204,14 @@ void x64_emit_bytecode_function(X64Converter *conv, BytecodeFunction *func) {
                 }  
             }
         } else {
-            XXX;
+            // XXX;
         }
 
         if (param->type->size <= 8) {
             sb_append(&conv->code, "   mov\t\t%d[rbp], %s\n", param_offset, register_to_str(input_reg, param->type->size));
         } else {
             // We have the source pointer in rax
-            XXX;
+            // XXX;
             // sb_append(&cg->code, "   lea\t\trbx, %d[rbp]\n", param->stack_offset);
             // emit_memcpy(cg, 0, 0, param->type->size);
         }
@@ -231,6 +224,9 @@ void x64_emit_bytecode_function(X64Converter *conv, BytecodeFunction *func) {
         x64_emit_basic_block(conv, bb);
     }
 
+    //
+    // Epilog
+    //
     sb_append(&conv->code, "\tadd\t\trsp, %d\n", func->local_stack_size);
     sb_append(&conv->code, "\tpop\t\trbp\n");
     sb_append(&conv->code, "\tret\n");
@@ -244,39 +240,179 @@ Register x64_get_argument_register_from_index(int index) {
     return REG_NONE;
 }
 
+#define X64_CALL_SHUFFLE_SCRATCH "rax"
+
+typedef struct ArgRegMove {
+    char *dst;
+    char *src;
+    bool  done;
+} ArgRegMove;
+
+void x64_sequence_arg_moves(X64Converter *conv, ArgRegMove *moves, int count) {
+    bool pending = true;
+
+    while (pending) {
+        pending = false;
+        bool progressed = false;
+
+        for (int i = 0; i < count; i++) {
+            if (moves[i].done) continue;
+            pending = true;
+
+            bool needed_as_src_elsewhere = false;
+            for (int j = 0; j < count; j++) {
+                if (j == i || moves[j].done) continue;
+                if (strcmp(moves[j].src, moves[i].dst) == 0) {
+                    needed_as_src_elsewhere = true;
+                    break;
+                }
+            }
+
+            if (!needed_as_src_elsewhere) {
+                if (strcmp(moves[i].dst, moves[i].src) != 0) {
+                    sb_append(&conv->code, "\tmov\t\t%s, %s\n", moves[i].dst, moves[i].src);
+                }
+                moves[i].done = true;
+                progressed = true;
+            }
+        }
+
+        if (pending && !progressed) {
+            // Everything left is one cycle. Stash one destination's current
+            // value, then redirect whichever move depended on reading it.
+            for (int i = 0; i < count; i++) {
+                if (moves[i].done) continue;
+
+                sb_append(&conv->code, "\tmov\t\t%s, %s\n", X64_CALL_SHUFFLE_SCRATCH, moves[i].dst);
+
+                for (int j = 0; j < count; j++) {
+                    if (j == i || moves[j].done) continue;
+                    if (strcmp(moves[j].src, moves[i].dst) == 0) {
+                        moves[j].src = X64_CALL_SHUFFLE_SCRATCH;
+                    }
+                }
+                break; // only break one cycle per outer pass
+            }
+        }
+    }
+}
+
 void x64_emit_call_instruction(X64Converter *conv, Inst *inst) {
     InstFunctionCall *call = inst->data;
 
+    ArgRegMove reg_moves[4] = {0};
+    int        reg_move_count = 0;
+
     for (int i = 0; i < call->arg_vregs.count; i++) {
-        int *arg_vreg = da_get(call->arg_vregs, i);
-        int arg_offset = get_vreg_stack_offset(conv, *arg_vreg);
+        int *arg_reg = da_get(call->arg_vregs, i);
+        char *src_str = register_index_to_string(*arg_reg, 8);
 
-        Register reg = x64_get_argument_register_from_index(i);
+        Register abi_reg = x64_get_argument_register_from_index(i);
+        if (abi_reg == REG_NONE) {
+            // Needs to be moved to the stack
+            int stack_offset = 32 + (i - 4) * 8;
+            sb_append(&conv->code, "\tmov\t\t%d[rsp], %s\n", stack_offset, src_str);
+            continue;
+        }
 
-        sb_append(&conv->code, "\tmov\t\t%s, %d[rbp]\n", register_to_str(reg, 8), arg_offset);
+        reg_moves[reg_move_count].dst = register_to_str(abi_reg, 8);
+        reg_moves[reg_move_count].src = src_str;
+        reg_move_count++;
     }
 
-    sb_append(&conv->code, "\tcall\t\t%s\n", inst->op2.label);
+    x64_sequence_arg_moves(conv, reg_moves, reg_move_count);
+
+    sb_append(&conv->code, "\tcall\t\t%s\n", inst->op1.label);
+}
+
+void x64_emit_terminator(X64Converter *conv, BasicBlock *bb) {
+    switch (bb->terminator.kind) {
+        case TERMINATOR_NONE: break;
+        case TERMINATOR_JUMP: {
+            sb_append(&conv->code, "   jmp\t\tL%d\n", bb->terminator.target1->id);
+            break;
+        }
+        case TERMINATOR_COND_JUMP: {
+            char *cmp_reg = register_index_to_string(bb->terminator.condition_reg, 1);
+            sb_append(&conv->code, "   cmp\t\t%s, 0\n", cmp_reg);
+            sb_append(&conv->code, "   jz\t\t\tL%d\n", bb->terminator.target2->id);
+            sb_append(&conv->code, "   jmp\t\tL%d\n", bb->terminator.target1->id);
+            break;
+        }
+        case TERMINATOR_RETURN: {
+            break;
+        }
+    }
 }
 
 void x64_emit_basic_block(X64Converter *conv, BasicBlock *bb) {
 
     arena_clear(&conv->temp_string_arena);
 
+    sb_append(&conv->code, "L%d:\n", bb->id);
     for (int i = 0; i < bb->instructions.count; i++) {
         Inst *inst = da_get(bb->instructions, i);
         x64_emit_instruction(conv, inst);
     }
+
+    x64_emit_terminator(conv, bb);
 }
 
+void x64_emit_comparrison_instruction(X64Converter *conv, Inst *inst) {
+    char *dst = register_index_to_string(inst->op1.reg, 1);
+    char *a   = register_index_to_string(inst->op2.reg, 8);
+    char *b   = register_index_to_string(inst->op3.reg, 8);
 
+    /*
+    INST_LESS_THAN
+    INST_GREATER_THAN
+    INST_GREATER_THAN_EQUAL
+    INST_LESS_THAN_EQUAL
+    INST_DOUBLE_EQUAL
+    */
+
+    /*
+    if (do_signed_comparison) {
+        if (op == '<')                 return "setl";
+        if (op == '>')                 return "setg";
+        if (op == TOKEN_GREATER_EQUAL) return "setge";
+        if (op == TOKEN_LESS_EQUAL)    return "setle";
+        if (op == TOKEN_DOUBLE_EQUAL)  return "sete";
+        if (op == TOKEN_NOT_EQUAL)     return "setne";
+    }
+    */
+
+    // if (a != dst) {
+    //     sb_append(&conv->code, "   mov\t\t%s, %s\n", dst, a);
+    // }
+
+    bool do_signed_comparison = true;
+
+    if (do_signed_comparison) {
+        char *set_inst = "";
+        if (inst->kind == INST_LESS_THAN)            set_inst = "setl";
+        if (inst->kind == INST_GREATER_THAN)         set_inst = "setg";
+        if (inst->kind == INST_GREATER_THAN_EQUAL)   set_inst = "setge";
+        if (inst->kind == INST_LESS_THAN_EQUAL)      set_inst = "setle";
+        if (inst->kind == INST_DOUBLE_EQUAL)         set_inst = "sete";
+        if (inst->kind == INST_NOT_EQUAL)            set_inst = "setne";
+
+        sb_append(&conv->code, "   cmp\t\t%s, %s\n", a, b);
+        sb_append(&conv->code, "   %s\t\t%s\n", set_inst, dst);
+
+        return;
+    }
+
+}
 
 void x64_emit_arithmetic_instruction(X64Converter *conv, Inst *inst) {
     char *dst = register_index_to_string(inst->op1.reg, 8);
     char *a   = register_index_to_string(inst->op2.reg, 8);
     char *b   = register_index_to_string(inst->op3.reg, 8);
 
-    sb_append(&conv->code, "   mov\t\t%s, %s\n", dst, a);
+    if (a != dst) {
+        sb_append(&conv->code, "   mov\t\t%s, %s\n", dst, a);
+    }
 
     if (inst->kind == INST_ADD_INT) {
         sb_append(&conv->code, "   add\t\t%s, %s\n", dst, b);
@@ -288,6 +424,7 @@ void x64_emit_arithmetic_instruction(X64Converter *conv, Inst *inst) {
         return;
     }
 
+    XXX;
 }
 
 int slot_index_to_stack_offset(int slot) {
@@ -359,6 +496,15 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
         x64_emit_arithmetic_instruction(conv, inst);
         break;
     }
+    case INST_LESS_THAN:
+    case INST_GREATER_THAN:
+    case INST_GREATER_THAN_EQUAL:
+    case INST_LESS_THAN_EQUAL:
+    case INST_DOUBLE_EQUAL: {
+        x64_emit_comparrison_instruction(conv, inst);
+        break;
+    }
+
     default: {
         break;
     }

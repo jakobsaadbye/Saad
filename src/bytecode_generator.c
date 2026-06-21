@@ -1,12 +1,12 @@
 #include "typer.c"
 
-#define SHOW_IR_LINE_NUMBERS 0
+#define SHOW_IR_LINE_NUMBERS 1
 #define SHOW_IR_LIVE_INTERVALS 1
 #define SHOW_IR_DEF_USE 0
 
 #define MAX_FREE_REGISTERS 3
-#define SCRATCH_REGISTER_1 (MAX_FREE_REGISTERS - 1)
-#define SCRATCH_REGISTER_2 (MAX_FREE_REGISTERS - 2)
+#define SCRATCH_REGISTER_1 (MAX_FREE_REGISTERS)
+#define SCRATCH_REGISTER_2 (MAX_FREE_REGISTERS + 1)
 
 typedef struct BasicBlock BasicBlock;
 
@@ -19,7 +19,7 @@ typedef enum TerminatorKind {
 
 typedef struct Terminator {
     TerminatorKind kind;
-    int            condition_vreg;
+    int            condition_reg;
     int            index;
     u8             target_count;
     union {
@@ -75,11 +75,11 @@ typedef struct BytecodeFunction {
     DynamicArray live_intervals; // of LiveInterval
 
     // Emission stage
-    int          num_spills;    // Number of registers that were spilled to the stack. Used to calculate the stack size
     int          local_stack_size;
     int          temporary_stack_size;
     int          base_ptr;
     int          temp_ptr;
+    int          num_spill_slots;
 
     DynamicArray vreg_to_stack_slot; // of int
 
@@ -88,7 +88,6 @@ typedef struct BytecodeFunction {
 typedef struct InstFunctionCall {
     char *function_symbol; // in case of a named function
 
-    DynamicArray arg_offsets; // of int
     DynamicArray arg_vregs;   // of int
     int          ret_vreg;
 } InstFunctionCall;
@@ -377,15 +376,16 @@ static Inst make_instruction_2(BytecodeGenerator *bcg, InstKind kind, Operand op
     };
 }
 
-// static Inst make_instruction_1(InstKind kind, Operand op1) {
-//     return (Inst) {
-//         .kind = kind,
-//         .op_count = 1,
-//         .op1 = op1,
-//         .op2 = NO_OP,
-//         .op3 = NO_OP,
-//     };
-// }
+static Inst make_instruction_1(BytecodeGenerator *bcg, InstKind kind, Operand op1) {
+    return (Inst) {
+        .kind = kind,
+        .index = get_next_instruction_index(bcg),
+        .op_count = 1,
+        .op1 = op1,
+        .op2 = NO_OP,
+        .op3 = NO_OP,
+    };
+}
 
 static Inst make_instruction_0(BytecodeGenerator *bcg, InstKind kind) {
     return (Inst) {
@@ -627,7 +627,7 @@ void bcg_dump_function_defn(StringBuilder *sb, BytecodeFunction *func) {
                 break;
             }
             case TERMINATOR_COND_JUMP: {
-                sb_append(sb, "jmp_if\tv%d, L%d, L%d\n", bb->terminator.condition_vreg, bb->terminator.target1->id, bb->terminator.target2->id);
+                sb_append(sb, "jmp_if\tv%d, L%d, L%d\n", bb->terminator.condition_reg, bb->terminator.target1->id, bb->terminator.target2->id);
                 break;
             }
             case TERMINATOR_RETURN: {
@@ -728,7 +728,7 @@ void terminate_with_cond_jump(BytecodeGenerator *bcg, int cond_vreg, BasicBlock 
     bcg->current_basic_block->terminator = (Terminator){ 
         .kind = TERMINATOR_COND_JUMP,
         .index = get_next_instruction_index(bcg),
-        .condition_vreg = cond_vreg,
+        .condition_reg = cond_vreg,
         .target_count = 2,
         .target1 = true_bb,
         .target2 = false_bb,
@@ -808,6 +808,10 @@ void bcg_assignment(BytecodeGenerator *bcg, AstAssignment *assign) {
     add_instruction(bcg, result);
 }
 
+// void bcg_print(BytecodeGenerator *bcg, AstPrint *ast_print) {
+//     XXX;
+// }
+
 void bcg_statement(BytecodeGenerator *bcg, Ast *node) {
     switch (node->kind) {
     case AST_DECLARATION: {
@@ -828,6 +832,10 @@ void bcg_statement(BytecodeGenerator *bcg, Ast *node) {
         bcg_block(bcg, (AstBlock *) node);
         return;
     }
+    // case AST_PRINT: {
+    //     bcg_print(bcg, (AstPrint *) node);
+    //     return;
+    // }
     case AST_IF: {
         BasicBlock *merge = create_basic_block(bcg, "after_if");
         bcg_if(bcg, (AstIf *)node, merge);
@@ -844,35 +852,14 @@ int bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *call) {
     InstFunctionCall *call_metadata = bytecode_allocate(bcg, sizeof(InstFunctionCall));
 
     call_metadata->arg_vregs   = da_init(call->arguments.count, sizeof(int));
-    call_metadata->arg_offsets = da_init(call->arguments.count, sizeof(int));
-
-    // int callee_vreg = bcg_expression(bcg, call->expression);
-    int ret_vreg = fresh_register(bcg);
-
-    Inst call_instruction = {0};
-    if (call->func_defn->is_lambda) {
-        XXX;
-    } else {
-        call_instruction = make_instruction_2(
-            bcg,
-            INST_CALL, 
-            make_sized_register(ret_vreg, 8), 
-            LABEL(call->func_defn->identifier->name)
-        );
-    }
-    
-    call_instruction.data = call_metadata;
     
     for (int i = 0; i < call->arguments.count; i++) {
         AstArgument *arg = da_get_deref(call->arguments, i);
-        
         int arg_vreg = bcg_expression(bcg, arg->value);
         da_append(&call_metadata->arg_vregs, arg_vreg);
     }
 
-
     char *arg_list_string = &bcg->temporary_strings.buffer[bcg->temporary_strings.cursor];
-
     sb_append(&bcg->temporary_strings, "%s(", call->func_defn->symbol_name);
     for (int i = 0; i < call_metadata->arg_vregs.count; i++) {
         int *arg_vreg = da_get(call_metadata->arg_vregs, i);
@@ -883,11 +870,25 @@ int bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *call) {
         }
     }
     sb_append(&bcg->temporary_strings, ")\0");
-
     add_comment(bcg, arg_list_string);
+
+    // Emit the call instruction
+    Inst call_instruction = {0};
+    if (call->func_defn->is_lambda) {
+        XXX;
+    } else {
+        call_instruction = make_instruction_1(
+            bcg,
+            INST_CALL, 
+            LABEL(call->func_defn->identifier->name)
+        );
+    }
+    
+    call_instruction.data = call_metadata;
+
     add_instruction(bcg, call_instruction);
 
-    return ret_vreg;
+    return -1;
 }
 
 void bcg_function_defn(BytecodeGenerator *bcg, AstFunctionDefn *func_defn) {
@@ -988,6 +989,7 @@ int bcg_comparison_operator(BytecodeGenerator *bcg, AstBinary *bin) {
     else if (op == TOKEN_GREATER_EQUAL) result.kind = INST_GREATER_THAN_EQUAL;
     else if (op == TOKEN_LESS_EQUAL)    result.kind = INST_LESS_THAN_EQUAL;
     else if (op == TOKEN_DOUBLE_EQUAL)  result.kind = INST_DOUBLE_EQUAL;
+    else if (op == TOKEN_NOT_EQUAL)     result.kind = INST_NOT_EQUAL;
     else {
         XXX;
     }
@@ -1120,6 +1122,18 @@ void compute_def_uses_in_basic_block(BasicBlock *bb) {
     for (int i = 0; i < bb->instructions.count; i++) {
         Inst *inst = da_get(bb->instructions, i);
 
+        // Special case: Function call
+        if (inst->kind == INST_CALL) {
+            InstFunctionCall *call = (InstFunctionCall *) inst->data;
+
+            for (int j = 0; j < call->arg_vregs.count; j++) {
+                int *vreg = da_get(call->arg_vregs, j);
+                bcg_maybe_add_use(bb, *vreg);
+            }
+
+            continue;
+        }
+
         for (int j = 0; j < inst->op_count; j++) {
             Operand op = inst->operands[j];
 
@@ -1137,7 +1151,7 @@ void compute_def_uses_in_basic_block(BasicBlock *bb) {
     }
 
     if (bb->terminator.kind == TERMINATOR_COND_JUMP) {
-        bcg_maybe_add_use(bb, bb->terminator.condition_vreg);
+        bcg_maybe_add_use(bb, bb->terminator.condition_reg);
     }
 }
 
@@ -1223,13 +1237,29 @@ void compute_live_intervals(BytecodeFunction *func) {
         }
 
         if (bb->terminator.kind == TERMINATOR_COND_JUMP) {
-            int v = bb->terminator.condition_vreg;
+            int v = bb->terminator.condition_reg;
             is_live[v] = true;
             bcg_widen_live_interval(&func->live_intervals, v, high);
         }
 
         for (int j = bb->instructions.count - 1; j >= 0; j--) {
             Inst *inst = da_get(bb->instructions, j);
+
+            // Special case: Function calls
+            if (inst->kind == INST_CALL) {
+                InstFunctionCall *call = (InstFunctionCall *) inst->data;
+
+                for (int k = 0; k < call->arg_vregs.count; k++) {
+                    int *vreg_ptr = da_get(call->arg_vregs, k);
+                    int vreg = *vreg_ptr;
+
+                    // Mark as a use
+                    bcg_widen_live_interval(&func->live_intervals, vreg, inst->index);
+                    is_live[vreg] = true;
+                }
+
+                continue;
+            }
 
             for (int k = 0; k < inst->op_count; k++) {
                 Operand op = inst->operands[k];
@@ -1293,6 +1323,10 @@ void spill_at_interval(BytecodeFunction *func, LiveInterval *interval, int *next
         interval->assigned_reg = -1;
         interval->has_reg = false;
         interval->spill_slot = (*next_spill_slot)++;
+    }
+
+    if (*next_spill_slot > func->num_spill_slots) {
+        func->num_spill_slots = *next_spill_slot;
     }
 }
 
@@ -1394,40 +1428,59 @@ bool instruction_has_destination(Inst *inst) {
     return false;
 }
 
+static int scratch_registers[] = {SCRATCH_REGISTER_1, SCRATCH_REGISTER_2};
+
+void bcg_rewrite_vreg(BytecodeGenerator *bcg, BytecodeFunction *func, DynamicArray *rewritten_instructions, int vreg, int *out_vreg, int *next_scratch_reg) {
+    int reg = reg_of(func, vreg);
+    
+    if (reg == -1) {
+        // Spilled
+        int scratch_reg = scratch_registers[(*next_scratch_reg)++];
+        int spill_slot = slot_of(func, vreg);
+
+        Inst load_inst = make_instruction_2(
+            bcg,
+            INST_LOAD,
+            make_sized_register(scratch_reg, 8),
+            MEM(spill_slot)
+        );
+        da_append(rewritten_instructions, load_inst);
+
+        *out_vreg = scratch_reg;
+    } else {
+        *out_vreg = reg;
+    }
+}
+
 void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *func, BasicBlock *bb) {
     DynamicArray rewritten_instructions = da_init(bb->instructions.count, sizeof(Inst));
+
+    int next_scratch_reg = 0;
 
     for (int i = 0; i < bb->instructions.count; i++) {
         Inst *inst = da_get(bb->instructions, i);
         Inst out = *inst;
 
-        int next_scratch_reg = 0;
-        int scratch_registers[] = {SCRATCH_REGISTER_1, SCRATCH_REGISTER_2};
+        next_scratch_reg = 0;
+
+        // Special case: Function call
+        if (inst->kind == INST_CALL) {
+            InstFunctionCall *call = (InstFunctionCall *) inst->data;
+            for (int j = 0; j < call->arg_vregs.count; j++) {
+                int *vreg_ptr = da_get(call->arg_vregs, j);
+                bcg_rewrite_vreg(bcg, func, &rewritten_instructions, *vreg_ptr, vreg_ptr, &next_scratch_reg);
+            }
+
+            da_append(&rewritten_instructions, out);
+            continue;
+        }
 
         // For every read operand that spilled, insert a load instruction
         for (int j = 1; j < inst->op_count; j++) {
             Operand op = inst->operands[j];
 
             if (op.kind == OPERAND_REG) {
-                int reg = reg_of(func, op.vreg);
-
-                if (reg == -1) {
-                    // Spilled
-                    int scratch_reg = scratch_registers[next_scratch_reg++];
-                    int spill_slot = slot_of(func, op.vreg);
-
-                    Inst load_inst = make_instruction_2(
-                        bcg,
-                        INST_LOAD,
-                        make_sized_register(scratch_reg, 8),
-                        MEM(spill_slot)
-                    );
-                    da_append(&rewritten_instructions, load_inst);
-
-                    out.operands[j].reg = scratch_reg;
-                } else {
-                    out.operands[j].reg = reg;
-                }
+                bcg_rewrite_vreg(bcg, func, &rewritten_instructions, op.vreg, &out.operands[j].reg, &next_scratch_reg);
             }
         }
 
@@ -1471,6 +1524,33 @@ void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *fu
             );
 
             da_append(&rewritten_instructions, store_inst);
+        }
+    }
+
+    // Reset scratch registers
+    next_scratch_reg = 0;
+
+    // Rewrite the terminator
+    if (bb->terminator.kind == TERMINATOR_COND_JUMP) {
+        int reg = reg_of(func, bb->terminator.condition_reg);
+
+        if (reg == -1) {
+            // Spilled
+            int scratch_reg = scratch_registers[next_scratch_reg++];
+            int spill_slot = slot_of(func, bb->terminator.condition_reg);
+
+            Inst load_inst = make_instruction_2(
+                bcg,
+                INST_LOAD,
+                make_sized_register(scratch_reg, 8),
+                MEM(spill_slot)
+            );
+
+            da_append(&rewritten_instructions, load_inst);
+
+            bb->terminator.condition_reg = scratch_reg;
+        } else {
+            bb->terminator.condition_reg = reg;
         }
     }
 
