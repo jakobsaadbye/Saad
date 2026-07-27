@@ -10,6 +10,8 @@ segment .data
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
    enum_to_int_buffer times 20 DB 0
+   CF0 DD 3.5000000
+   CF1 DD 4.5000000
 segment .rdata
 segment .rdata
    TypeKind.name.data DB "TypeKind", 0
@@ -741,229 +743,48 @@ L37:
    pop		rbp
    ret
 
-; bytes locals   : 112
+; bytes locals   : 32
 ; bytes temp     : 0
-; bytes total    : 144
-; (v1: int, v2: int, v3: int, v4: int, v5: int, v6: int)
-foo:
-   push		rbp
-   mov		rbp, rsp
-   sub		rsp, 144
-   ; Param v1
-   mov		-4[rbp], ecx
-   ; Param v2
-   mov		-8[rbp], edx
-   ; Param v3
-   mov		-12[rbp], r8d
-   ; Param v4
-   mov		-16[rbp], r9d
-   ; Param v5
-   mov		rax, 48[rbp]
-   mov		-20[rbp], eax
-   ; Param v6
-   mov		rax, 56[rbp]
-   mov		-24[rbp], eax
-   ; Ln 2: $a : int = -28[rbp]
-   mov		eax, DWORD -4[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 5
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		DWORD -28[rbp], eax
-   ; Ln 3: $b : int = -32[rbp]
-   mov		eax, DWORD -8[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 42
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		DWORD -32[rbp], eax
-L41:
-   mov		rax, 0
-   add		rsp, 144
-   pop		rbp
-   ret
-
-; bytes locals   : 40
-; bytes temp     : 88
-; bytes total    : 160
+; bytes total    : 64
 ; ()
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 160
-   ; Ln 7: $a : int = -4[rbp]
-   mov		rax, 3
-   push		rax
-   mov		rax, 5
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
+   sub		rsp, 64
+   ; Ln 2: $d : int = -4[rbp]
+   mov		rax, 0
    push		rax
    pop		rax
    mov		DWORD -4[rbp], eax
-   ; Ln 8: $c : int = -8[rbp]
-   mov		eax, DWORD -4[rbp]
-   movsx		rax, eax
+   ; Ln 3: $a : float = -8[rbp]
+   movss		xmm0, [CF0]
+   movd		eax, xmm0
    push		rax
-   mov		rax, 10
+   pop		rax
+   mov		-8[rbp], eax
+   ; Ln 4: $b : float = -12[rbp]
+   movss		xmm0, [CF1]
+   movd		eax, xmm0
+   push		rax
+   pop		rax
+   mov		-12[rbp], eax
+   ; Ln 6: $c : float = -16[rbp]
+   mov		eax, -8[rbp]
+   push		rax
+   mov		eax, -12[rbp]
    push		rax
    pop		rbx
    pop		rax
-   imul		rax, rbx
+   movd		xmm1, ebx
+   movd		xmm0, eax
+   addss		xmm0, xmm1
+   movd		eax, xmm0
    push		rax
    pop		rax
-   mov		DWORD -8[rbp], eax
-   ; Ln 9: $d : int = -12[rbp]
-   mov		eax, DWORD -4[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		eax, DWORD -8[rbp]
-   movsx		rax, eax
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   pop		rax
-   mov		DWORD -12[rbp], eax
-   mov		eax, DWORD -12[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 10
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   setl		al
-   push		rax
-   pop		rax
-   cmp		al, 0
-   jz			L44
-   ; block of if
-   ; Ln 11: $e : int = -16[rbp]
-   mov		rax, 2
-   push		rax
-   pop		rax
-   mov		DWORD -16[rbp], eax
-   jmp L43
-;#1 else if
-L44:
-   mov		eax, DWORD -12[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 5
-   push		rax
-   pop		rbx
-   pop		rax
-   cmp		rax, rbx
-   setl		al
-   push		rax
-   pop		rax
-   cmp		al, 0
-   jz			L45
-   ; Ln 13: $f : int = -20[rbp]
-   mov		eax, DWORD -4[rbp]
-   movsx		rax, eax
-   push		rax
-   pop		rax
-   mov		DWORD -20[rbp], eax
-   jmp L43
-; else
-L45:
-   ; Ln 16: Assignment
-   mov		eax, DWORD -4[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 5
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   lea		rax, -4[rbp]
-   push		rax
-   pop		rbx
-   pop		rax
-   mov		DWORD [rbx], eax
-   jmp L43
-; done
-L43:
-   ; Ln 18: Assignment
-   mov		rax, 69
-   push		rax
-   lea		rax, -8[rbp]
-   push		rax
-   pop		rbx
-   pop		rax
-   mov		DWORD [rbx], eax
-   lea		rax, foo
-   push		rax
-   pop		rax
-   mov		-48[rbp], rax
-   mov		eax, DWORD -8[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 42
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   mov		eax, DWORD -12[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 3
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   mov		eax, DWORD -4[rbp]
-   movsx		rax, eax
-   push		rax
-   mov		rax, 6
-   push		rax
-   pop		rbx
-   pop		rax
-   add		rax, rbx
-   push		rax
-   mov		rax, 69
-   push		rax
-   mov		rax, 420
-   push		rax
-   mov		rax, 1337
-   push		rax
-   pop		rax
-   mov		-56[rbp], rax
-   pop		rax
-   mov		-64[rbp], rax
-   pop		r9 
-   pop		r8 
-   pop		rdx
-   pop		rcx
-   sub		rsp, 32
-   mov		rax, -64[rbp]
-   mov		32[rsp], rax
-   mov		rax, -56[rbp]
-   mov		40[rsp], rax
-   mov		rax, -48[rbp]
-   ; foo(int, int, int, int, int, int) 
-   call		rax
-   add		rsp, 32
-L42:
+   mov		-16[rbp], eax
+L41:
    mov		rax, 0
-   add		rsp, 160
+   add		rsp, 64
    pop		rbp
    ret
 

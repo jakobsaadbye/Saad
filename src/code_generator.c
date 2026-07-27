@@ -1620,21 +1620,21 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
         int tmp_offset = -1;
 
         // Only copy the pointer to the array for fixed sized arrays
-        if (cast->expr->type->kind == TYPE_ARRAY) {
-            TypeArray *type_array = (TypeArray *) cast->expr->type;
+        if (from->kind == TYPE_ARRAY) {
+            TypeArray *type_array = (TypeArray *) from;
             if (type_array->array_kind == ARRAY_FIXED) {
                 // Only allocate 8 bytes for the pointer
                 tmp_offset = allocate_variable(cg, 8);
                 POP(RAX);
                 sb_append(&cg->code, "   mov\t\t%d[rbp], rax\n", tmp_offset);
             } else {
-                tmp_offset = allocate_variable(cg, cast->expr->type->size);
-                emit_simple_initialization(cg, tmp_offset, false, false, cast->expr->type, cast->expr->type);
+                tmp_offset = allocate_variable(cg, from->size);
+                emit_simple_initialization(cg, tmp_offset, false, false, from, from);
             }
         } 
         else {
-            tmp_offset = allocate_variable(cg, cast->expr->type->size);
-            emit_simple_initialization(cg, tmp_offset, false, false, cast->expr->type, cast->expr->type);
+            tmp_offset = allocate_variable(cg, from->size);
+            emit_simple_initialization(cg, tmp_offset, false, false, from, from);
         }
 
         // Allocate the Any type
@@ -1647,7 +1647,7 @@ void emit_cast(CodeGenerator *cg, AstCast *cast) {
 
         // Get a pointer to the type descriptor. Pointer to *value is carried in rbx
         sb_append(&cg->code, "   mov\t\tQWORD rbx, %d[rbp]\n", any_offset);
-        emit_type_descriptor(cg,  cast->expr->type);
+        emit_type_descriptor(cg,  from);
         POP(RCX);
 
         // Store the pointer to the type

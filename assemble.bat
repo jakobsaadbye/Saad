@@ -1,4 +1,4 @@
-set ASM_FILE=./build/out.asm
+set ASM_FILE=./build/outV2.asm
 
 nasm -fwin64 -g %ASM_FILE% -o ./build/out.obj
 

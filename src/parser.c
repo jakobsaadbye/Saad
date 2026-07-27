@@ -1778,7 +1778,7 @@ AstExpr *parse_array_access(Parser *parser, Token open_bracket, AstExpr *left) {
 }
 
 AstFunctionCall *parse_function_call(Parser *parser, AstExpr *lhs) {
-    AstFunctionCall *call = (AstFunctionCall *)(ast_allocate(parser, sizeof(AstFunctionCall)));
+    AstFunctionCall *call = ast_allocate(parser, sizeof(AstFunctionCall));
     call->arguments       = da_init(2, sizeof(AstArgument *));
 
     if (lhs == NULL || (lhs->head.kind != AST_LITERAL && lhs->head.kind != AST_MEMBER_ACCESS)) {

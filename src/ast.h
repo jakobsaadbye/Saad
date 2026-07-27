@@ -26,6 +26,11 @@ typedef int16_t   i16;
 typedef int32_t   i32;
 typedef int64_t   i64;
 
+typedef struct String {
+    char *data;
+    i64   len;
+} String;
+
 typedef enum AstKind {
     AST_ERR,
     AST_FILE,
@@ -363,10 +368,10 @@ typedef struct AstFunctionCall {
 } AstFunctionCall;
 
 typedef struct AstPrint {
-    Ast           head;
-    DynamicArray  arguments;    // of *AstExpr
-    char         *c_string;     // Generated c string in typer
-    int           c_args;       // Number of arguments that needs to be supplied to the c_string
+    Ast              head;
+    DynamicArray     arguments;    // of *AstExpr
+    char            *c_string;     // Generated c string in typer
+    int              c_args;       // Number of arguments that needs to be supplied to the c_string
 } AstPrint;
 
 typedef struct AstExprStmt {
@@ -733,8 +738,10 @@ Type     *type_add_user_defined(TypeTable *tt, Type *type);
 void     *type_alloc(TypeTable *tt, size_t size);
 char     *type_to_str(Type *type);
 bool is_primitive_type(TypeKind kind);
+bool is_integral_type(Type *type);
 bool is_signed_integer(Type *type);
 bool is_unsigned_integer(Type *type);
+bool is_unsigned_integer_ish(Type *type);
 
 
 

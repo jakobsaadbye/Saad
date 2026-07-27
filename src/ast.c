@@ -279,6 +279,13 @@ bool is_primitive_type(TypeKind kind) {
     return false;
 }
 
+bool is_integral_type(Type *type) {
+    if (type->kind == TYPE_INTEGER) return true;
+    if (type->kind == TYPE_BOOL)    return true;
+    if (type->kind == TYPE_ENUM)    return true;
+
+    return false;
+}
 
 bool is_signed_integer(Type *type) {
     if (type->kind != TYPE_INTEGER) return false;
@@ -311,4 +318,14 @@ bool is_unsigned_integer(Type *type) {
     default:
         return false;
     }
+}
+
+bool is_unsigned_integer_ish(Type *type) {
+    if (type->kind == TYPE_BOOL) return true;   // treat as u8
+    if (type->kind == TYPE_ENUM) {
+        TypeEnum *type_enum = (TypeEnum *) type;
+        return is_unsigned_integer(type_enum->backing_type);
+    }
+
+    return is_unsigned_integer(type);
 }

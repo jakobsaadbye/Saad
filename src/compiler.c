@@ -244,7 +244,8 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     
     // Link and generate executeable
     report.asm_and_link_time_start = clock();
-    system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
+    system("nasm -fwin64 -g ./build/outV2.asm -o ./build/out.obj");
+    // system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
     int exit_code = system(
         "gcc -o ./build/out.exe ./build/out.obj "
         "-LC:/Saad/packages/runtime/lib "
