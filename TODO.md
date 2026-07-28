@@ -1,6 +1,14 @@
 Todo list:
 -------------------
 
+
+[]: Disallow integer and floating point arithmetic
+a := 3;
+b := 4.5 as f64;
+c := a + b;
+
+
+
 Functions as values:
 
 []: Figure out what the hell to do with annonymous methods? Maybe just don't allow them

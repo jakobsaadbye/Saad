@@ -19,6 +19,7 @@ typedef struct StringBuilder {
 StringBuilder  sb_init(size_t init_capicity);
 StringBuilder *sb_new(int init_capicity);
 void           sb_append(StringBuilder *sb, const char *template, ...);
+void           sb_vappend(StringBuilder *sb, const char *template, va_list args);
 void           sb_copy(StringBuilder *sb, char *src, int length);
 void           sb_copy_string(StringBuilder *sb, char *src);
 void           sb_free(StringBuilder *sb);
@@ -49,13 +50,9 @@ StringBuilder *sb_new(int init_capicity) {
     return sb;
 }
 
-void sb_append(StringBuilder *sb, const char *template, ...) {
-    va_list args;
-    va_start(args, template);
-
+void sb_vappend(StringBuilder *sb, const char *template, va_list args) {
     char *string = (char *)(malloc(MAX_STRING_LEN));
     int   string_len = vsprintf(string, template, args);
-    va_end(args);
 
     if ((sb->cursor + string_len) < sb->capacity) {
         char *dst = &sb->buffer[sb->cursor];
@@ -88,6 +85,13 @@ void sb_append(StringBuilder *sb, const char *template, ...) {
 
         free(string);
     }
+}
+
+void sb_append(StringBuilder *sb, const char *template, ...) {
+    va_list args;
+    va_start(args, template);
+    sb_vappend(sb, template, args);
+    va_end(args);
 }
 
 // Copies length amount of characters from src to the builder

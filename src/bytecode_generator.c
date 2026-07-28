@@ -87,7 +87,8 @@ typedef struct BytecodeFunction {
     int          num_spill_slots;
 
     DynamicArray vreg_to_stack_slot; // of int
-    DynamicArray vreg_is_sse; // of bool
+    DynamicArray vreg_is_sse;        // of bool
+    DynamicArray vreg_to_type;       // of *Type
 
 } BytecodeFunction;
 
@@ -324,10 +325,11 @@ char *operand_kind_to_string(OperandKind kind) {
 }
 
 typedef struct Operand {
-    u8   kind;
-    u16  flags;
-    u8   size; // 1, 2, 4, 8 bytes in case of immediate values. 
-    bool is_sse;  // Weather this operand needs to be in SSE registers (xmm0, etc. ...) instead of general purpose registers
+    u8    kind;
+    u16   flags;
+    u8    size; // 1, 2, 4, 8 bytes in case of immediate values. 
+    bool  is_sse;  // Weather this operand needs to be in SSE registers (xmm0, etc. ...) instead of general purpose registers
+    Type *type;
     union {
         i64    imm_int;       // Immediate signed integer value
         u64    imm_uint;      // Immediate unsigned integer value
@@ -369,6 +371,7 @@ BytecodeFunction *new_bytecode_function(BytecodeGenerator *bcg, AstFunctionDefn 
     func->vreg_to_stack_slot = da_init(128, sizeof(int));
     func->vreg_to_stack_slot.count = 128;
     func->vreg_is_sse = da_init(128, sizeof(int));
+    func->vreg_to_type = da_init(128, sizeof(Type *));
     func->is_extern = func_defn->is_extern;
 
     da_append(&bcg->bytecode_functions, func);
@@ -427,10 +430,12 @@ void begin_bytecode_generation(BytecodeGenerator *bcg, AstFile *file) {
 }
 
 
-int fresh_register(BytecodeGenerator *bcg, bool is_sse) {
+int fresh_register(BytecodeGenerator *bcg, Type *type) {
     int vreg = bcg->current_function->next_vreg++;
 
+    bool is_sse = type->kind == TYPE_FLOAT;
     da_append(&bcg->current_function->vreg_is_sse, is_sse);
+    da_append(&bcg->current_function->vreg_to_type, type);
 
     return vreg;
 }
@@ -498,15 +503,17 @@ static Operand make_sized_register(Value value) {
         .size = value.type->size,
         .vreg = value.vreg,
         .is_sse = value.type->kind == TYPE_FLOAT,
+        .type = value.type,
     };
 }
 
-static Operand make_sized_register_2(int vreg, int size, bool is_sse) {
+static Operand make_sized_register_2(int vreg, int size, bool is_sse, Type *type) {
     return (Operand) {
         .kind = OPERAND_REG,
         .size = size,
         .vreg = vreg,
         .is_sse = is_sse,
+        .type = type,
     };
 }
 
@@ -846,7 +853,7 @@ void bcg_declaration(BytecodeGenerator *bcg, AstDeclaration *decl) {
             AstExpr       *value = da_get_deref(decl->values, i);
 
             Value src = bcg_expression(bcg, value);
-            ident->virtual_register = fresh_register(bcg, type_uses_sse(ident->type));
+            ident->virtual_register = fresh_register(bcg, ident->type);
             Value dst = make_value(ident->virtual_register, ident->type);
 
             add_instruction(bcg, make_instruction_2(bcg,
@@ -1047,7 +1054,7 @@ Value bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *ast_call) {
 
     // TODO: Right now we assume only 1 return value
     Type *return_type = da_get_deref(ast_call->func_defn->return_types, 0); 
-    Value dst = make_value(fresh_register(bcg, type_uses_sse(return_type)), return_type);
+    Value dst = make_value(fresh_register(bcg, return_type), return_type);
 
     // Emit the call instruction
     Inst call_instruction = {0};
@@ -1093,7 +1100,7 @@ void bcg_function_defn(BytecodeGenerator *bcg, AstFunctionDefn *func_defn) {
     // Bind each parameter to a fresh vreg, in order.
     for (int i = 0; i < func_defn->lowered_params.count; i++) {
         AstIdentifier *param = da_get_deref(func_defn->lowered_params, i);
-        param->virtual_register = fresh_register(bcg, type_uses_sse(param->type));
+        param->virtual_register = fresh_register(bcg, param->type);
 
         BytecodeFunctionParameter bc_param = {
             .vreg = param->virtual_register,
@@ -1115,20 +1122,55 @@ void bcg_function_defn(BytecodeGenerator *bcg, AstFunctionDefn *func_defn) {
     bcg->enclosing_function = NULL;
 }
 
+Value bcg_emit_arithmetic_conversion(BytecodeGenerator *bcg, Value src, Type *to) {
+    Type *from = src.type;
+    if (from->kind == to->kind && from->size == to->size) {
+        return src;
+    }
+
+    InstKind kind;
+    if (is_integral_type(from) && is_integral_type(to)) {
+        if (from->size < to->size) {
+            kind = is_unsigned_integer_ish(from) ? INST_ZEXT : INST_SEXT;
+        } else {
+            return src; // equal size, mixed-sign reinterpret needs no instruction
+        }
+    } else if (is_integral_type(from) && to->kind == TYPE_FLOAT) {
+        kind = is_unsigned_integer_ish(from) ? INST_UITOFP : INST_SITOFP;
+    } else { // float -> float
+        kind = (from->size < to->size) ? INST_FPEXT : INST_FPTRUNC;
+    }
+
+    Value dst = make_value(fresh_register(bcg, to), to);
+    add_instruction(bcg, make_instruction_2(
+        bcg, 
+        kind,
+        make_sized_register(dst), 
+        make_sized_register(src))
+    );
+    return dst;
+}
+
 Value bcg_arithmetic_operator(BytecodeGenerator *bcg, AstBinary *bin) {
     TokenType op = bin->operator;
 
+    Type *result_type = bin->head.type;
+
     Value lhs = bcg_expression(bcg, bin->left);
     Value rhs = bcg_expression(bcg, bin->right);
-    Value dst = make_value(fresh_register(bcg, type_uses_sse(bin->head.type)), bin->head.type);
+
+    // Insert any necessary truncation / widening or type conversion
+    lhs = bcg_emit_arithmetic_conversion(bcg, lhs, result_type);
+    rhs = bcg_emit_arithmetic_conversion(bcg, rhs, result_type);
+
+
+    Value dst = make_value(fresh_register(bcg, bin->head.type), bin->head.type);
 
     Inst result = make_instruction_3(bcg, INST_NOOP, 
         make_sized_register(dst),
         make_sized_register(lhs),
         make_sized_register(rhs)
     );
-
-    // TODO: Insert conversion instructions if needed
 
     if (bin->head.type->kind == TYPE_FLOAT) {
         if (op == '+') {
@@ -1168,7 +1210,7 @@ Value bcg_comparison_operator(BytecodeGenerator *bcg, AstBinary *bin) {
 
     Value lhs = bcg_expression(bcg, bin->left);
     Value rhs = bcg_expression(bcg, bin->right);
-    Value dst = make_value(fresh_register(bcg, type_uses_sse(bin->head.type)), bin->head.type);
+    Value dst = make_value(fresh_register(bcg, bin->head.type), bin->head.type);
 
     Inst result = make_instruction_3(bcg, INST_NOOP, 
         make_sized_register(dst),
@@ -1306,14 +1348,16 @@ Value bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
     else if (from->kind == TYPE_FLOAT && to->kind == TYPE_FLOAT) {
         if (from->size < to->size) {
             inst_kind = INST_FPEXT;
-        } else {
+        } else if (from->size > to->size) {
             inst_kind = INST_FPTRUNC;
+        } else {
+            return src;
         }
     }
     else if (from->kind == TYPE_STRING && to->kind == TYPE_POINTER) {
 
         // Produce a pointer dereference of .data
-        Value dst = make_value(fresh_register(bcg, type_uses_sse(to)), to);
+        Value dst = make_value(fresh_register(bcg, to), to);
 
         add_instruction(bcg, make_instruction_2(
             bcg,
@@ -1329,7 +1373,7 @@ Value bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
         return src;
     }
 
-    Value dst = make_value(fresh_register(bcg, type_uses_sse(to)), to);
+    Value dst = make_value(fresh_register(bcg, to), to);
 
     Inst inst = make_instruction_2(
         bcg,
@@ -1404,7 +1448,7 @@ Value bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
             }
         }
         
-        Value dst = make_value(fresh_register(bcg, type_uses_sse(expr->type)), expr->type);
+        Value dst = make_value(fresh_register(bcg, expr->type), expr->type);
         add_instruction(bcg, make_instruction_2(
             bcg,
             INST_MOV, 
@@ -1782,6 +1826,10 @@ bool is_sse_of(BytecodeFunction *func, int vreg) {
     return li->is_sse;
 }
 
+Type *get_type_of_vreg(BytecodeFunction *func, int vreg) {
+    return da_get_deref(func->vreg_to_type, vreg);
+}
+
 bool instruction_has_destination(Inst *inst) {
     if (inst->op_count > 0) return true;
 
@@ -1796,6 +1844,7 @@ void bcg_rewrite_vreg(BytecodeGenerator *bcg, BytecodeFunction *func, DynamicArr
     
     if (reg == -1) {
         // Spilled
+        Type *type = get_type_of_vreg(func, vreg);
         bool is_sse = is_sse_of(func, vreg);
         int spill_slot = slot_of(func, vreg);
         int scratch_reg = is_sse 
@@ -1805,7 +1854,7 @@ void bcg_rewrite_vreg(BytecodeGenerator *bcg, BytecodeFunction *func, DynamicArr
         Inst load_inst = make_instruction_2(
             bcg,
             is_sse ? INST_LOADF : INST_LOAD,
-            make_sized_register_2(scratch_reg, 8, is_sse),
+            make_sized_register_2(scratch_reg, 8, is_sse, type),
             MEM(spill_slot)
         );
         da_append(rewritten_instructions, load_inst);
@@ -1851,16 +1900,18 @@ void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *fu
             }
         }
 
-        bool dst_spilled = false;
-        bool dst_is_sse = false;
-        int  dst_scratch_reg = 0;
-        int  dst_spill_slot = 0;
+        Type *dst_type = NULL;
+        bool  dst_spilled = false;
+        bool  dst_is_sse = false;
+        int   dst_scratch_reg = 0;
+        int   dst_spill_slot = 0;
         if (instruction_has_destination(inst)) {
             Operand op = inst->operands[0];
             int reg = reg_of(func, op.vreg);
 
             if (reg == -1) {
                 // Spilled
+                dst_type = get_type_of_vreg(func, op.vreg);
                 dst_is_sse = is_sse_of(func, op.vreg);
                 dst_spilled = true;
                 dst_scratch_reg = dst_is_sse 
@@ -1892,7 +1943,7 @@ void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *fu
                 bcg,
                 dst_is_sse ? INST_STOREF : INST_STORE,
                 MEM(dst_spill_slot),
-                make_sized_register_2(dst_scratch_reg, 8, dst_is_sse)
+                make_sized_register_2(dst_scratch_reg, 8, dst_is_sse, dst_type)
             );
 
             da_append(&rewritten_instructions, store_inst);
@@ -1911,11 +1962,12 @@ void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *fu
             // Spilled
             int scratch_reg = gpr_scratch_registers[next_gpr_scratch++];
             int spill_slot = slot_of(func, bb->terminator.condition_reg);
+            Type *cond_type = get_type_of_vreg(func, bb->terminator.condition_reg);
 
             Inst load_inst = make_instruction_2(
                 bcg,
                 INST_LOAD,
-                make_sized_register_2(scratch_reg, 8, false),
+                make_sized_register_2(scratch_reg, 8, false, cond_type),
                 MEM(spill_slot)
             );
 
