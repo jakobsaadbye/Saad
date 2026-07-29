@@ -43,7 +43,7 @@ X64Converter x64_converter_init(BytecodeGenerator *bcg) {
     conv.rdata_string = sb_init(1024);
     conv.code = sb_init(1024);
     conv.code_header = sb_init(1024);
-    conv.temp_string_arena = arena_init(1024);
+    conv.temp_string_arena = arena_init(40000);
     
     conv.constant_pool = &bcg->constant_pool;
 
@@ -220,16 +220,6 @@ char *get_register_string(Operand op) {
     return get_register_string_sized(op, op.size);
 }
 
-
-int allocate_local_variable(X64Converter *conv, int size) {
-    assert(conv->current_bytecode_function);
-
-    conv->current_bytecode_function->base_ptr -= size;
-    conv->current_bytecode_function->base_ptr = align_value(conv->current_bytecode_function->base_ptr, size > 8 ? 8 : size);
-
-    return conv->current_bytecode_function->base_ptr;
-}
-
 int get_vreg_stack_offset(X64Converter *conv, int vreg) {
    int *stack_slot = da_get(conv->current_bytecode_function->vreg_to_stack_slot, vreg);
    return *stack_slot;
@@ -255,6 +245,8 @@ int spill_vreg(X64Converter *conv, int vreg) {
 }
 
 void x64_compute_function_stack_frame(X64Converter *conv, BytecodeFunction *func) {
+    // Local variables comes first
+    func->local_stack_size += -func->base_ptr;
 
     for (int i = 0; i < func->params.count; i++) {
         BytecodeFunctionParameter *param = da_get(func->params, i);
@@ -265,6 +257,8 @@ void x64_compute_function_stack_frame(X64Converter *conv, BytecodeFunction *func
 
     // Shadow space
     func->local_stack_size += 32;
+
+    func->local_stack_size = align_up(func->local_stack_size, 16);
 }
 
 void x64_emit_function_defn(X64Converter *conv, BytecodeFunction *func) {
@@ -827,6 +821,21 @@ void x64_load_constant(X64Converter *conv, int dst_reg, Constant *constant) {
     }
 }
 
+char *x64_make_memory_operand_string(X64Converter *conv, Operand op) {
+    char *buf = arena_allocate(&conv->temp_string_arena, 32);
+    if (op.kind == OPERAND_MEMORY_SLOT) {
+        int stack_offset = slot_index_to_stack_offset(op.slot);
+        sprintf(buf, "%d[rbp]", stack_offset);
+    } else if (op.kind == OPERAND_MEMORY_OFFSET) {
+        int stack_offset = op.offset;
+        sprintf(buf, "%d[rbp]", stack_offset);
+    } else {
+        XXX;
+    }
+
+    return buf;
+}
+
 void x64_emit_instruction(X64Converter *conv, Inst *inst) {
     Operand op1 = inst->op1;
     Operand op2 = inst->op2;
@@ -865,7 +874,7 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
     case INST_LOAD: 
     case INST_LOADF: {
         char *dst = get_register_string(op1);
-        int stack_offset = slot_index_to_stack_offset(op2.slot);
+        char *src = x64_make_memory_operand_string(conv, op2);
 
         if (!op1.is_sse && op1.size < 4) {
             // Widen to be in eax / rax
@@ -873,19 +882,19 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
             char *dst64 = get_register_string_sized(op1, 8);
             char *width = word_size(op1.type);
 
-            x64_code(conv, mov_string, "%s, %s %d[rbp]", dst64, width, stack_offset);
+            x64_code(conv, mov_string, "%s, %s %s", dst64, width, src);
         } else {
-            x64_code(conv, get_mov_string(op1), "%s, %d[rbp]", dst, stack_offset);
+            x64_code(conv, get_mov_string(op1), "%s, %s", dst, src);
         }
 
         break;
     }
     case INST_STORE:
     case INST_STOREF: {
-        int stack_offset = slot_index_to_stack_offset(op1.slot);
+        char *dst = x64_make_memory_operand_string(conv, op1);
         char *src = get_register_string(op2);
         char *mov_string = get_mov_string(op2);
-        x64_code(conv, mov_string, "%d[rbp], %s", stack_offset, src);
+        x64_code(conv, mov_string, "%s, %s", dst, src);
 
         break;
     }

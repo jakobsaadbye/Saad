@@ -3,7 +3,10 @@ extern "C" {
 }
 
 main :: () {
-    a := 3.0;
-    printf(xx "%f\n", a);
-    printf(xx "%f\n", a);
+    a : f64 = 3.14159123;
+    b : f64 = 2.0;
+
+    c := a * b;
+
+    printf(xx "%lf %lf %lf", a, b, c);
 }

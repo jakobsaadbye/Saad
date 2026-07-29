@@ -201,7 +201,8 @@ typedef enum OperandKind {
     OPERAND_IMM_UINT,       // Immediate value:  ADD r0, 42
     OPERAND_BIG_CONSTANT,   // Constant value
     OPERAND_REG,            // Virtual register: ADD r0, r1
-    OPERAND_MEM,            // Memory address:   ADD r0, [rbp-8]
+    OPERAND_MEMORY_SLOT,    // Memory slot that will be translated to an offset relative to rbp
+    OPERAND_MEMORY_OFFSET,  // Memory offset relative to rbp
     OPERAND_LABEL,          // Branch label
     OPEARND_LABEL_ID,       // Branch label id only
 } OperandKind;
@@ -324,7 +325,7 @@ char *operand_kind_to_string(OperandKind kind) {
     case OPERAND_IMM_UINT: return "imm_uint";
     case OPERAND_BIG_CONSTANT: return "big_constant";
     case OPERAND_REG: return "reg";
-    case OPERAND_MEM: return "mem";
+    case OPERAND_MEMORY_SLOT: return "mem";
     case OPERAND_LABEL: return "label";
     case OPEARND_LABEL_ID: return "label_id";
     default: return "unknown";
@@ -349,6 +350,7 @@ typedef struct Operand {
         int    vreg;          // Virtual register index
         int    reg;           // Physical register index set after it has gone through IR rewrite
         int    slot;          // Memory offset (e.g. from rbp)
+        int    offset;          // Memory offset (e.g. from rbp)
         char  *label;         // E.g function call or branch label
         int    label_id;      // E.g id of a block
     };
@@ -428,7 +430,6 @@ Value bcg_array_access(BytecodeGenerator *bcg, AstArrayAccess *array_ac, bool lv
 Value bcg_expression(BytecodeGenerator *bcg, AstExpr *expr);
 
 #define REG(i)   ((Operand){ .kind = OPERAND_REG,       .vreg = (i) })
-#define MEM(s)  ((Operand){ .kind = OPERAND_MEM,       .slot = (s) })
 #define LABEL(s) ((Operand){ .kind = OPERAND_LABEL,     .label = (s) })
 #define LABEL_ID(id) ((Operand){ .kind = OPEARND_LABEL_ID, .label_id = (id) })
 #define NO_OP    ((Operand){ .kind = OPERAND_NONE })
@@ -492,16 +493,16 @@ static Inst make_instruction_2(BytecodeGenerator *bcg, InstKind kind, Operand op
     };
 }
 
-static Inst make_instruction_1(BytecodeGenerator *bcg, InstKind kind, Operand op1) {
-    return (Inst) {
-        .kind = kind,
-        .index = get_next_instruction_index(bcg),
-        .op_count = 1,
-        .op1 = op1,
-        .op2 = NO_OP,
-        .op3 = NO_OP,
-    };
-}
+// static Inst make_instruction_1(BytecodeGenerator *bcg, InstKind kind, Operand op1) {
+//     return (Inst) {
+//         .kind = kind,
+//         .index = get_next_instruction_index(bcg),
+//         .op_count = 1,
+//         .op1 = op1,
+//         .op2 = NO_OP,
+//         .op3 = NO_OP,
+//     };
+// }
 
 static Inst make_instruction_0(BytecodeGenerator *bcg, InstKind kind) {
     return (Inst) {
@@ -555,6 +556,22 @@ Operand make_constant_operand(Constant *constant) {
     return (Operand){
         .kind = OPERAND_BIG_CONSTANT,
         .constant = constant,
+    };
+}
+
+// A fixed offset from rbp. E.g `%d[rbp]` 
+static inline Operand make_op_memory_offset(int offset, Type *type) {
+    return (Operand) {
+        .kind = OPERAND_MEMORY_OFFSET,
+        .slot = offset,
+        .type = type,
+    };
+}
+
+static inline Operand make_op_memory_slot(int slot) {
+    return (Operand) {
+        .kind = OPERAND_MEMORY_SLOT,
+        .slot = slot,
     };
 }
 
@@ -634,11 +651,11 @@ void bcg_dump_operand(StringBuilder *sb, Operand op) {
     switch (op.kind) {
     case OPERAND_NONE: {
         sb_append(sb, "noop");
-        break;
+        return;
     }
     case OPERAND_IMM_INT: {
         sb_append(sb, "%lld", op.imm_int);
-        break;
+        return;
     }
     case OPERAND_IMM_UINT: {
         if (op.flags & OPERAND_FLAG_IMM_UINT_IS_BOOLEAN) {
@@ -647,42 +664,48 @@ void bcg_dump_operand(StringBuilder *sb, Operand op) {
             } else {
                 sb_append(sb, "false");
             }
-            break;
+            return;
         }
         
         sb_append(sb, "%lld", op.imm_int);
-        break;
+        return;
     }
     case OPERAND_BIG_CONSTANT: {
         switch (op.constant->kind) {
         case CONSTANT_STRING: {
             sb_append(sb, "\"%s\"", op.constant->as.value_string.data);
-            break;
+            return;
         }
         case CONSTANT_FLOAT: {
             sb_append(sb, "%llf", op.constant->as.value_float);
-            break;
+            return;
         }
         default: {
             sb_append(sb, "constant %d", op.constant->id);
-            break;
+            return;
         }
         }
-        break;
+        return;
     }
     case OPERAND_REG: {
         sb_append(sb, "v%d", op.vreg);
-        break;
+        return;
     }
-    case OPERAND_MEM: {
+    case OPERAND_MEMORY_SLOT: {
         sb_append(sb, "[%d]", op.slot);
-        break;
+        return;
+    }
+    case OPERAND_MEMORY_OFFSET: {
+        sb_append(sb, "%d[rbp]", op.offset);
+        return;
     }
     case OPERAND_LABEL: {
         sb_append(sb, "%s", op.label);
-        break;
+        return;
     }
     }
+
+    sb_append(sb, "???");
 }
 
 char *generate_function_call_string(BytecodeGenerator *bcg, InstFunctionCall *call) {
@@ -853,6 +876,19 @@ void bcg_block(BytecodeGenerator *bcg, AstBlock *block) {
     }
 }
 
+int bc_allocate_local(BytecodeGenerator *bcg, int size) {
+    assert(bcg->current_function);
+
+    bcg->current_function->base_ptr -= size;
+    bcg->current_function->base_ptr = align_value(bcg->current_function->base_ptr, size > 8 ? 8 : size);
+
+    if (bcg->current_function->base_ptr == 0) {
+        report_error_ast(bcg->parser, LABEL_WARNING, NULL, "Compiler Error: Suspicious 0 local offset in bc_allocate_local");
+    }
+
+    return bcg->current_function->base_ptr;
+}
+
 void bcg_declaration(BytecodeGenerator *bcg, AstDeclaration *decl) {
 
     if (decl->flags & DECLARATION_CONSTANT) {
@@ -865,12 +901,14 @@ void bcg_declaration(BytecodeGenerator *bcg, AstDeclaration *decl) {
             AstExpr       *value = da_get_deref(decl->values, i);
 
             Value src = bcg_expression(bcg, value);
-            Value dst = fresh_register(bcg, ident->type);
-            ident->virtual_register = dst.vreg;
+            // Value dst = fresh_register(bcg, ident->type);
+            // ident->virtual_register = dst.vreg;
+
+            ident->stack_offset = bc_allocate_local(bcg, ident->type->size);
 
             add_instruction(bcg, make_instruction_2(bcg,
-                INST_MOV, 
-                make_op_register(dst),
+                INST_STORE, 
+                make_op_memory_offset(ident->stack_offset, ident->type),
                 make_op_register(src)
             ));
         }
@@ -997,10 +1035,6 @@ void bcg_assignment(BytecodeGenerator *bcg, AstAssignment *assign) {
     add_instruction(bcg, result);
 }
 
-// void bcg_print(BytecodeGenerator *bcg, AstPrint *ast_print) {
-//     XXX;
-// }
-
 void bcg_statement(BytecodeGenerator *bcg, Ast *node) {
     switch (node->kind) {
     case AST_DECLARATION: {
@@ -1021,10 +1055,10 @@ void bcg_statement(BytecodeGenerator *bcg, Ast *node) {
         bcg_block(bcg, (AstBlock *) node);
         return;
     }
-    case AST_PRINT: {
-        bcg_print(bcg, (AstPrint *) node);
-        return;
-    }
+    // case AST_PRINT: {
+    //     bcg_print(bcg, (AstPrint *) node);
+    //     return;
+    // }
     case AST_IF: {
         BasicBlock *merge = create_basic_block(bcg, "after_if");
         bcg_if(bcg, (AstIf *)node, merge);
@@ -1035,10 +1069,6 @@ void bcg_statement(BytecodeGenerator *bcg, Ast *node) {
     default:
         return;
     }
-}
-
-void bcg_print(BytecodeGenerator *bcg, AstPrint *ast_print) {
-    XXX;
 }
 
 Value bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *ast_call) {
@@ -1501,15 +1531,22 @@ Value bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
             }
             case LITERAL_IDENTIFIER: {
                 AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
-                assert(ident);
+                assert(ident && ident->stack_offset < 0);
 
                 if (ident->ident_override) {
                     ident = ident;
                 }
 
-                Value value = make_value(ident->virtual_register, ident->type);
+                Value dst = fresh_register(bcg, expr->type);
 
-                return value;
+                add_instruction(bcg, make_instruction_2(
+                    bcg, 
+                    INST_LOAD, 
+                    make_op_register(dst),
+                    make_op_memory_offset(ident->stack_offset, ident->type)
+                ));
+
+                return dst;
             }
         }
         
@@ -1803,27 +1840,6 @@ void spill_at_interval(BytecodeFunction *func, LiveInterval *interval, int *next
     }
 }
 
-static Register x64_callee_saved_sse_register[] = {
-    REG_XMM6,
-    REG_XMM7,
-    REG_XMM8,
-    REG_XMM9,
-    REG_XMM10,
-    REG_XMM11,
-    REG_XMM12,
-    REG_XMM13,
-    REG_XMM14,
-    REG_XMM15,
-};
-
-static Register x64_callee_saved_gpr_register[] = {
-    REG_RBX,
-    REG_R12,
-    REG_R13,
-    REG_R14,
-    REG_R15,
-};
-
 void compute_register_allocation(BytecodeFunction *func) {
     // Assigned_reg of -1 = spill
     DynamicArray free_gpr = da_init(MAX_FREE_GPR_REGISTERS, sizeof(bool));
@@ -1942,7 +1958,11 @@ Type *get_type_of_vreg(BytecodeFunction *func, int vreg) {
 }
 
 bool instruction_has_destination(Inst *inst) {
-    if (inst->op_count > 0) return true;
+    if (inst->op_count > 0) {
+        if (inst->op1.kind == OPERAND_REG) {
+            return true;
+        }
+    }
 
     return false;
 }
@@ -1966,7 +1986,7 @@ void bcg_rewrite_vreg(BytecodeGenerator *bcg, BytecodeFunction *func, DynamicArr
             bcg,
             is_sse ? INST_LOADF : INST_LOAD,
             make_register_ex(scratch_reg, 8, is_sse, type),
-            MEM(spill_slot)
+            make_op_memory_slot(spill_slot)
         );
         da_append(rewritten_instructions, load_inst);
 
@@ -2053,7 +2073,7 @@ void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *fu
             Inst store_inst = make_instruction_2(
                 bcg,
                 dst_is_sse ? INST_STOREF : INST_STORE,
-                MEM(dst_spill_slot),
+                make_op_memory_slot(dst_spill_slot),
                 make_register_ex(dst_scratch_reg, 8, dst_is_sse, dst_type)
             );
 
@@ -2079,7 +2099,7 @@ void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *fu
                 bcg,
                 INST_LOAD,
                 make_register_ex(scratch_reg, 8, false, cond_type),
-                MEM(spill_slot)
+                make_op_memory_slot(spill_slot)
             );
 
             da_append(&rewritten_instructions, load_inst);

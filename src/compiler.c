@@ -12,20 +12,29 @@
 
 #define MAX_RESOLVED_IMPORT_PATH_LENGTH 256
 
+typedef enum CodegenBackend {
+    BACKEND_X64_OLD,
+    BACKEND_X64_NEW,
+} CodegenBackend;
+
 typedef struct CompilerConfig {
-    char *compiler_path;
-    char *stdlib_path;
-    char *working_directory;
-    char *file_extension;
+    char          *compiler_path;
+    char          *stdlib_path;
+    char          *working_directory;
+    char          *file_extension;
+    CodegenBackend backend;
 } CompilerConfig;
 
 typedef struct CompilerReport {
+    CompilerConfig *config;
     clock_t lex_time_start;
     clock_t lex_time_end;
     clock_t parse_time_start;
     clock_t parse_time_end;
     clock_t typer_time_start;
     clock_t typer_time_end;
+    clock_t bytecode_time_start;
+    clock_t bytecode_time_end;
     clock_t codegen_time_start;
     clock_t codegen_time_end;
     clock_t asm_and_link_time_start;
@@ -40,6 +49,7 @@ CompilerConfig get_standard_compiler_config() {
     config.stdlib_path    = "C:\\Saad\\std"; // @Hardcoded
     config.working_directory = get_current_directory();
     config.file_extension = "sd";
+    config.backend = BACKEND_X64_NEW;
 
     return config;
 }
@@ -57,21 +67,30 @@ void print_compiler_report(CompilerReport cr) {
     double dt_lex      = (double)(cr.lex_time_end - cr.lex_time_start) / CLOCKS_PER_SEC;
     double dt_parse    = (double)(cr.parse_time_end - cr.parse_time_start) / CLOCKS_PER_SEC;
     double dt_typer    = (double)(cr.typer_time_end - cr.typer_time_start) / CLOCKS_PER_SEC;
+    double dt_bcgen    = (double)(cr.bytecode_time_end - cr.bytecode_time_start) / CLOCKS_PER_SEC;
     double dt_codegen  = (double)(cr.codegen_time_end - cr.codegen_time_start) / CLOCKS_PER_SEC;
     double dt_asm_link = (double)(cr.asm_and_link_time_end - cr.asm_and_link_time_start) / CLOCKS_PER_SEC;
 
+    double dt_frontend = dt_lex + dt_parse + dt_typer;
+    double dt_backend = dt_codegen + dt_asm_link;
     double dt_total = dt_lex + dt_parse + dt_typer + dt_codegen + dt_asm_link;
 
     printf("\nFront-end time:\n");
     printf("   Lexer:\t %.3lf s.\n", dt_lex);
     printf("   Parser:\t %.3lf s.\n", dt_parse);
-    printf("   Total:\t %.3lf s.\n", dt_lex + dt_parse);
-    printf("Backend-end time:\n");
     printf("   Typing:\t %.3lf s.\n", dt_typer);
+    printf("   Total:\t %.3lf s.\n", dt_frontend);
+
+    printf("Backend-end time:\n");
+    if (cr.config->backend == BACKEND_X64_NEW) {
+        dt_backend += dt_bcgen;
+        dt_total += dt_bcgen;
+        printf("   Byte-codegen: %.3f s.\n", dt_bcgen);
+    }
     printf("   X86-codegen:\t %.3f s.\n", dt_codegen);
     printf("   Asm + Link:\t %.3f s.\n", dt_asm_link);
-    printf("   Total:\t %.3lf s.\n", dt_typer+ dt_codegen);
-    printf("\nTotal time: %.3lf s.\n", dt_total);
+    printf("   Total:\t %.3lf s.\n", dt_backend);
+    printf("Total time: %.3lf s.\n\n", dt_total);
 }
 
 int old_stdout = -1;
@@ -115,7 +134,9 @@ bool resolve_import(CompilerConfig *config, Parser *parser, AstImport *import, A
 }
 
 bool compile_program(CompilerConfig *config, const char *main_path, bool output_to_console) {
-    CompilerReport report = {0};
+    CompilerReport report = {
+        .config = config
+    };
 
     old_stdout = dup(1);
     if (!output_to_console) {
@@ -225,27 +246,41 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     }
     report.typer_time_end = clock();
 
-    // ----------- Bytecode generation -----------------
-    begin_bytecode_generation(&bcg, main_file);
-    bcg_compute_liveness(&bcg);
-    bcg_dump_bytecode_to_file(&bcg, "./build/out.ir");
-    bcg_rewrite_entire_ir(&bcg);
-    bcg_dump_bytecode_to_file(&bcg, "./build/out_optimized.ir");
-    x64_begin_convert(&x64conv);
-    x64_output_generated_x64_to_file(&x64conv, "./build/outV2.asm");
-    // -------------------------------------
-
     // Codegen
-    report.codegen_time_start = clock();
-    begin_emit_code(&codegen, main_file);
     make_directory("build");
-    emit_generated_code_to_file(&codegen, "./build/out.asm");
+
+    
+    if (config->backend == BACKEND_X64_NEW) {
+
+        // ----------- Bytecode generation -----------------
+        report.bytecode_time_start = clock();
+        begin_bytecode_generation(&bcg, main_file);
+        bcg_compute_liveness(&bcg);
+        bcg_dump_bytecode_to_file(&bcg, "./build/out.ir");
+        bcg_rewrite_entire_ir(&bcg);
+        bcg_dump_bytecode_to_file(&bcg, "./build/out_optimized.ir");
+        report.bytecode_time_end = clock();
+        // -------------------------------------
+
+        // X64 emission
+        report.codegen_time_start = clock();
+        x64_begin_convert(&x64conv);
+        x64_output_generated_x64_to_file(&x64conv, "./build/out.asm");
+
+    }
+    else if (config->backend == BACKEND_X64_OLD) {
+        report.codegen_time_start = clock();
+        begin_emit_code(&codegen, main_file);
+        emit_generated_code_to_file(&codegen, "./build/out.asm");
+    } else {
+        XXX;
+    }
     report.codegen_time_end = clock();
+
     
     // Link and generate executeable
     report.asm_and_link_time_start = clock();
-    system("nasm -fwin64 -g ./build/outV2.asm -o ./build/out.obj");
-    // system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
+    system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
     int exit_code = system(
         "gcc -o ./build/out.exe ./build/out.obj "
         "-LC:/Saad/packages/runtime/lib "
