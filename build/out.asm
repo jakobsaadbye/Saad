@@ -11,12 +11,8 @@ segment .data
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
    enum_to_int_buffer times 20 DB 0
    CF0 DD 3.0000000
-   CF1 DD 4.5000000
-   CS2 DB `%f %f %f\n`, 0 
-   CF3 DD 128.0000000
-   CF4 DD 8.0000000
-   CF5 DD 8.0000000
-   CS6 DB `%u-%u-%u-%u-%f-%f`, 0 
+   CS1 DB `%f\n`, 0 
+   CS2 DB `%f\n`, 0 
 segment .rdata
 segment .rdata
    TypeKind.name.data DB "TypeKind", 0
@@ -2524,66 +2520,32 @@ L86:
    pop		rbp
    ret
 
-; bytes locals   : 72
-; bytes temp     : 120
-; bytes total    : 224
+; bytes locals   : 8
+; bytes temp     : 64
+; bytes total    : 112
 ; ()
 main:
    push		rbp
    mov		rbp, rsp
-   sub		rsp, 224
-   ; Ln 8: $a : float = -4[rbp]
+   sub		rsp, 112
+   ; Ln 6: $a : float = -4[rbp]
    movss		xmm0, [CF0]
    movd		eax, xmm0
    push		rax
    pop		rax
    mov		-4[rbp], eax
-   ; Ln 9: $b : float = -8[rbp]
-   movss		xmm0, [CF1]
-   movd		eax, xmm0
-   push		rax
-   pop		rax
-   mov		-8[rbp], eax
-   ; Ln 10: $c : float = -12[rbp]
-   mov		eax, -4[rbp]
-   push		rax
-   mov		eax, -8[rbp]
-   push		rax
-   pop		rbx
-   pop		rax
-   movd		xmm1, ebx
-   movd		xmm0, eax
-   addss		xmm0, xmm1
-   movd		eax, xmm0
-   push		rax
-   pop		rax
-   mov		-12[rbp], eax
    lea		rax, printf
    push		rax
    pop		rax
-   mov		-80[rbp], rax
-   mov		rax, CS2
-   mov		-96[rbp], rax
-   mov		QWORD -88[rbp], 10
-   lea		rax, -96[rbp]
+   mov		-16[rbp], rax
+   mov		rax, CS1
+   mov		-32[rbp], rax
+   mov		QWORD -24[rbp], 4
+   lea		rax, -32[rbp]
    push		rax
    pop		rax
    mov	rax, [rax]
    push		rax
-   mov		eax, -12[rbp]
-   push		rax
-   pop		rax
-   movd		xmm0, eax
-   cvtss2sd	xmm0, xmm0
-   movq		rax, xmm0
-   push		rax
-   mov		eax, -8[rbp]
-   push		rax
-   pop		rax
-   movd		xmm0, eax
-   cvtss2sd	xmm0, xmm0
-   movq		rax, xmm0
-   push		rax
    mov		eax, -4[rbp]
    push		rax
    pop		rax
@@ -2591,143 +2553,42 @@ main:
    cvtss2sd	xmm0, xmm0
    movq		rax, xmm0
    push		rax
-   pop		r9
-   pop		r8
    pop		rdx
    pop		rcx
    sub		rsp, 32
-   mov		rax, -80[rbp]
-   ; printf(*u8, float, float, float) 
+   mov		rax, -16[rbp]
+   ; printf(*u8, float) 
    call		rax
    add		rsp, 32
-   ; Ln 16: $a : u8 = -13[rbp]
-   mov		rax, 8
-   push		rax
-   pop		rax
-   movzx		eax, al
-   push		rax
-   pop		rax
-   mov		BYTE -13[rbp], al
-   ; Ln 17: $b : u32 = -20[rbp]
-   mov		rax, 8
-   push		rax
-   pop		rax
-   mov		DWORD -20[rbp], eax
-   ; Ln 18: $c : u32 = -24[rbp]
-   movzx		eax, BYTE -13[rbp]
-   push		rax
-   mov		eax, DWORD -20[rbp]
-   push		rax
-   pop		rbx
-   pop		rax
-   imul		rax, rbx
-   push		rax
-   pop		rax
-   mov		DWORD -24[rbp], eax
-   ; Ln 19: $d : u32 = -28[rbp]
-   mov		eax, DWORD -24[rbp]
-   push		rax
-   mov		rax, 8
-   push		rax
-   pop		rbx
-   pop		rax
-   cqo
-   idiv		rbx
-   push		rax
-   pop		rax
-   mov		DWORD -28[rbp], eax
-   ; Ln 21: $e : float = -32[rbp]
-   movss		xmm0, [CF3]
-   movd		eax, xmm0
-   push		rax
-   movss		xmm0, [CF4]
-   movd		eax, xmm0
-   push		rax
-   pop		rbx
-   pop		rax
-   movd		xmm1, ebx
-   movd		xmm0, eax
-   divss		xmm0, xmm1
-   movd		eax, xmm0
-   push		rax
-   pop		rax
-   mov		-32[rbp], eax
-   ; Ln 22: $f : float = -36[rbp]
-   mov		eax, -32[rbp]
-   push		rax
-   movss		xmm0, [CF5]
-   movd		eax, xmm0
-   push		rax
-   pop		rbx
-   pop		rax
-   movd		xmm1, ebx
-   movd		xmm0, eax
-   mulss		xmm0, xmm1
-   movd		eax, xmm0
-   push		rax
-   pop		rax
-   mov		-36[rbp], eax
    lea		rax, printf
    push		rax
    pop		rax
-   mov		-80[rbp], rax
-   mov		rax, CS6
-   mov		-96[rbp], rax
-   mov		QWORD -88[rbp], 17
-   lea		rax, -96[rbp]
+   mov		-16[rbp], rax
+   mov		rax, CS2
+   mov		-32[rbp], rax
+   mov		QWORD -24[rbp], 4
+   lea		rax, -32[rbp]
    push		rax
    pop		rax
    mov	rax, [rax]
    push		rax
-   movzx		eax, BYTE -13[rbp]
-   push		rax
-   pop		rax
-   mov		eax, eax
-   push		rax
-   mov		eax, DWORD -20[rbp]
-   push		rax
-   mov		eax, DWORD -24[rbp]
-   push		rax
-   mov		eax, DWORD -28[rbp]
-   push		rax
-   mov		eax, -32[rbp]
+   mov		eax, -4[rbp]
    push		rax
    pop		rax
    movd		xmm0, eax
    cvtss2sd	xmm0, xmm0
    movq		rax, xmm0
    push		rax
-   mov		eax, -36[rbp]
-   push		rax
-   pop		rax
-   movd		xmm0, eax
-   cvtss2sd	xmm0, xmm0
-   movq		rax, xmm0
-   push		rax
-   pop		rax
-   mov		-104[rbp], rax
-   pop		rax
-   mov		-112[rbp], rax
-   pop		rax
-   mov		-120[rbp], rax
-   pop		r9
-   pop		r8
    pop		rdx
    pop		rcx
    sub		rsp, 32
-   mov		rax, -120[rbp]
-   mov		32[rsp], rax
-   mov		rax, -112[rbp]
-   mov		40[rsp], rax
-   mov		rax, -104[rbp]
-   mov		48[rsp], rax
-   mov		rax, -80[rbp]
-   ; printf(*u8, u8, u32, u32, u32, float, float) 
+   mov		rax, -16[rbp]
+   ; printf(*u8, float) 
    call		rax
    add		rsp, 32
 L90:
    mov		rax, 0
-   add		rsp, 224
+   add		rsp, 112
    pop		rbp
    ret
 

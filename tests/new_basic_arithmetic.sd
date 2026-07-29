@@ -1,0 +1,23 @@
+extern "C" {
+    printf :: (format: *u8, args: ...any);
+}
+
+main :: () {
+    {
+        // Floating point arithmetic
+        a := 3.0;
+        b := 4.5;
+        c := a + b;
+
+        printf(xx "%f %f %f\n", c, b, a);
+    }
+    {
+        // Integer arithmetic
+        a := 8 as u8;
+        b := 8 as u32;
+        c := a * b;
+        d := c / 8;
+
+        printf(xx "%u-%u-%u-%u-%f-%f", a, b, c, d, e, f);
+    }
+}

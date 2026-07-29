@@ -3574,7 +3574,11 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
     }
 
     if (is_comparison_operator(binary->operator)) {
-        if (lhs == TYPE_BOOL    && rhs == TYPE_BOOL)    return primitive_type(PRIMITIVE_BOOL);
+        if (lhs == TYPE_BOOL && rhs == TYPE_BOOL) {
+            if (binary->operator == TOKEN_DOUBLE_EQUAL || binary->operator == TOKEN_NOT_EQUAL) {
+                return primitive_type(PRIMITIVE_BOOL);   
+            }
+        }
 
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_INTEGER && rhs == TYPE_FLOAT)   return primitive_type(PRIMITIVE_BOOL);
@@ -3592,7 +3596,7 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
 
         if (lhs == TYPE_STRING && rhs == TYPE_STRING)   return primitive_type(PRIMITIVE_BOOL);
 
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Type '%s' and '%s' are not comparable", type_to_str(ti_lhs), type_to_str(ti_rhs));
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Type '%s' and '%s' are not comparable with operator '%s'", type_to_str(ti_lhs), type_to_str(ti_rhs), token_type_to_str(binary->operator));
         return NULL;
     }
 
@@ -4016,6 +4020,7 @@ bool is_bitwise_operator(TokenType op) {
 bool is_boolean_operator(TokenType op) {
     if (op == TOKEN_LOGICAL_AND)   return true;
     if (op == TOKEN_LOGICAL_OR)    return true;
+    if (op == '!')                 return true;
     return false;
 }
 

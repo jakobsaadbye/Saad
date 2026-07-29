@@ -30,6 +30,7 @@ void x64_emit_basic_block(X64Converter *conv, BasicBlock *bb);
 void x64_emit_function_defn(X64Converter *conv, BytecodeFunction *func);
 void x64_emit_instruction(X64Converter *conv, Inst *inst);
 void x64_code(X64Converter *conv, char *inst, char *format, ...);
+void x64_emit_mov_into(X64Converter *conv, Operand dst_op, Operand src_op);
 
 
 
@@ -508,27 +509,95 @@ void x64_emit_basic_block(X64Converter *conv, BasicBlock *bb) {
 }
 
 void x64_emit_comparrison_instruction(X64Converter *conv, Inst *inst) {
-    char *dst = register_index_to_string(inst->op1.reg, 1);
-    char *a   = register_index_to_string(inst->op2.reg, 8);
-    char *b   = register_index_to_string(inst->op3.reg, 8);
+    bool is_float = inst->op2.is_sse;
+    int  size     = inst->op2.size;
 
-    bool do_signed_comparison = true;
+    char *a = get_register_string_sized(inst->op2, size);
+    char *b = get_register_string_sized(inst->op3, size);
 
-    if (do_signed_comparison) {
-        char *set_inst = "";
-        if (inst->kind == INST_LESS_THAN)            set_inst = "setl";
-        if (inst->kind == INST_GREATER_THAN)         set_inst = "setg";
-        if (inst->kind == INST_GREATER_THAN_EQUAL)   set_inst = "setge";
-        if (inst->kind == INST_LESS_THAN_EQUAL)      set_inst = "setle";
-        if (inst->kind == INST_DOUBLE_EQUAL)         set_inst = "sete";
-        if (inst->kind == INST_NOT_EQUAL)            set_inst = "setne";
+    char *set_inst = "";
 
-        x64_code(conv, "   cmp", "%s, %s", a, b);
-        x64_code(conv, "   %s", "%s", set_inst, dst);
+    if (is_float) {
+        // ucomiss/ucomisd set flags like an unsigned compare (CF/ZF)
+        if (inst->kind == INST_LESS_THAN)          set_inst = "setb";
+        if (inst->kind == INST_GREATER_THAN)       set_inst = "seta";
+        if (inst->kind == INST_GREATER_THAN_EQUAL) set_inst = "setae";
+        if (inst->kind == INST_LESS_THAN_EQUAL)    set_inst = "setbe";
+        if (inst->kind == INST_DOUBLE_EQUAL)       set_inst = "sete";
+        if (inst->kind == INST_NOT_EQUAL)          set_inst = "setne";
 
-        return;
+        x64_code(conv, size == 8 ? "ucomisd" : "ucomiss", "%s, %s", a, b);
+    } else {
+        bool is_signed = is_signed_integer(inst->op2.type);
+
+        if (is_signed) {
+            if (inst->kind == INST_LESS_THAN)          set_inst = "setl";
+            if (inst->kind == INST_GREATER_THAN)       set_inst = "setg";
+            if (inst->kind == INST_GREATER_THAN_EQUAL) set_inst = "setge";
+            if (inst->kind == INST_LESS_THAN_EQUAL)    set_inst = "setle";
+        } else {
+            if (inst->kind == INST_LESS_THAN)          set_inst = "setb";
+            if (inst->kind == INST_GREATER_THAN)       set_inst = "seta";
+            if (inst->kind == INST_GREATER_THAN_EQUAL) set_inst = "setae";
+            if (inst->kind == INST_LESS_THAN_EQUAL)    set_inst = "setbe";
+        }
+        if (inst->kind == INST_DOUBLE_EQUAL) set_inst = "sete";
+        if (inst->kind == INST_NOT_EQUAL)    set_inst = "setne";
+
+        x64_code(conv, "cmp", "%s, %s", a, b);
     }
 
+    char *dst8  = register_index_to_string(inst->op1.reg, 1);
+    char *dst32 = get_register_string_sized(inst->op1, 4);
+
+    x64_code(conv, set_inst, "%s", dst8);
+    x64_code(conv, "movzx", "%s, %s", dst32, dst8);
+}
+
+bool is_same_physical_register(Operand a, Operand b) {
+    if (a.is_sse != b.is_sse) return false;
+    return (a.reg == b.reg);
+}
+
+void x64_emit_logical_instruction(X64Converter *conv, Inst *inst) {
+    Operand dst_op = inst->op1;
+
+    dst_op.size = 8;
+
+    char *dst = get_register_string(inst->op1);
+    char *a   = get_register_string(inst->op2);
+
+    if (inst->kind == INST_NOT) {
+        char *src8 = get_register_string_sized(inst->op2, 1);
+        char *dst64 = get_register_string_sized(dst_op, 8);
+
+        if (!is_same_physical_register(dst_op, inst->op2)) {
+            x64_code(conv, "test", "%s, %s", a, a);
+        } else {
+            x64_code(conv, "test", "%s, %s", dst, dst);
+        }
+        
+        x64_code(conv, "sete", "%s", src8);
+        x64_code(conv, "movzx", "%s, %s", dst64, src8);
+        return;
+    }
+    
+    if (!is_same_physical_register(dst_op, inst->op2)) {
+        x64_code(conv, "mov", "%s, %s", dst, a);
+    }
+    
+    char *b   = get_register_string(inst->op3);
+    
+    char *logical_inst = "";
+    if      (inst->kind == INST_LOGICAL_AND) logical_inst = "and";
+    else if (inst->kind == INST_LOGICAL_OR)  logical_inst = "or";
+    else {
+        XXX;
+    }
+
+    x64_code(conv, logical_inst, "%s, %s", dst, b);
+
+    return;
 }
 
 char *get_mov_string(Operand op) {
@@ -694,13 +763,13 @@ void x64_emit_cast_instruction(X64Converter *conv, Inst *inst) {
         }
         case INST_SITOFP: {
             char *cvt = (to_size == 4) ? "cvtsi2ss" : "cvtsi2sd";
-            x64_code(conv, "%s", "%s, %s", cvt, dst, src);
+            x64_code(conv, cvt, "%s, %s", dst, src);
             break;
         }
         case INST_UITOFP: {
             char *cvt = (to_size == 4) ? "cvtsi2ss" : "cvtsi2sd";
             if (from_size < 8) {
-                x64_code(conv, "%s", "%s, %s", cvt, dst, src);
+                x64_code(conv, cvt, "%s, %s", dst, src);
             } else {
                 XXX;
             }
@@ -708,7 +777,7 @@ void x64_emit_cast_instruction(X64Converter *conv, Inst *inst) {
         }
         case INST_FPTOSI: {
             char *cvt = (from_size == 4) ? "cvttss2si" : "cvttsd2si";
-            x64_code(conv, "%s", "%s, %s", cvt, dst, src);
+            x64_code(conv, cvt, "%s, %s", dst, src);
             break;
         }
         case INST_FPTOUI: {
@@ -716,7 +785,7 @@ void x64_emit_cast_instruction(X64Converter *conv, Inst *inst) {
                 XXX;
             }
             char *cvt = (from_size == 4) ? "cvttss2si" : "cvttsd2si";
-            x64_code(conv, "%s", "%s, %s", cvt, dst, src);
+            x64_code(conv, cvt, "%s, %s", dst, src);
             break;
         }
         case INST_FPEXT: {
@@ -774,6 +843,11 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
         else if (op1.kind == OPERAND_REG && op2.kind == OPERAND_IMM_INT) {
             char *dst = register_index_to_string(op1.reg, 8);
             x64_code(conv, "mov", "%s, %lld", dst, op2.imm_int);
+            return;
+        }
+        else if (op1.kind == OPERAND_REG && op2.kind == OPERAND_IMM_UINT) {
+            char *dst = register_index_to_string(op1.reg, 8);
+            x64_code(conv, "mov", "%s, %zu", dst, op2.imm_uint);
             return;
         }
         else if (op1.kind == OPERAND_REG && op2.kind == OPERAND_BIG_CONSTANT) {
@@ -857,10 +931,18 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
     case INST_GREATER_THAN:
     case INST_GREATER_THAN_EQUAL:
     case INST_LESS_THAN_EQUAL:
-    case INST_DOUBLE_EQUAL: {
+    case INST_DOUBLE_EQUAL: 
+    case INST_NOT_EQUAL: {
         x64_emit_comparrison_instruction(conv, inst);
         break;
     }
+    case INST_LOGICAL_AND:
+    case INST_LOGICAL_OR:
+    case INST_NOT: {
+        x64_emit_logical_instruction(conv, inst);
+        break;
+    }
+
     case INST_SEXT:
     case INST_ZEXT:
     case INST_TRUNC:
