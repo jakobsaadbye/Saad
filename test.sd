@@ -14,7 +14,7 @@ main :: () {
     e := 5.0;
     f := 6.0;
     g := 7.0;
-    // c := foo();
+    foo();
 
-    printf(xx "%f-%f-%f-%f-%f-%f-%f\n", a, a, a, a, a, a, a);
+    printf(xx "%f-%f-%f-%f-%f-%f-%f\n", a, b, c, d, e, f, g);
 }

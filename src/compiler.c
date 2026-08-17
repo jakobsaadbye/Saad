@@ -37,7 +37,7 @@ CompilerConfig get_standard_compiler_config() {
     config.working_directory = get_current_directory();
     config.file_extension = "sd";
     config.backend = BACKEND_X64_NEW;
-    config.optimization_level = OPTIMIZATION_LEVEL_O1;
+    config.optimization_level = OPTIMIZATION_LEVEL_O0;
 
     return config;
 }

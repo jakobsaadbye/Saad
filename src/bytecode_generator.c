@@ -208,14 +208,14 @@ static int      x64_callee_saved_registers_gpr_count = 5;
 static Register x64_callee_saved_registers_sse[] = {REG_XMM6, REG_XMM7, REG_XMM8, REG_XMM9, REG_XMM10, REG_XMM11, REG_XMM12, REG_XMM13, REG_XMM14, REG_XMM15};
 static int      x64_callee_saved_registers_sse_count = 10;
 
-static Register x64_usable_registers_sse[] = {REG_XMM0, REG_XMM1, REG_XMM2, REG_XMM3, REG_XMM6, REG_XMM7, REG_XMM8, REG_XMM9, REG_XMM10, REG_XMM11, REG_XMM12, REG_XMM13, REG_XMM14, REG_XMM15};
-static int      x64_usable_registers_sse_count = 14;
+static Register x64_usable_registers_sse[] = {REG_XMM0, REG_XMM1, REG_XMM2, REG_XMM3, REG_XMM4, REG_XMM6, REG_XMM7, REG_XMM8, REG_XMM9, REG_XMM10, REG_XMM11, REG_XMM12, REG_XMM13, REG_XMM14, REG_XMM15};
+static int      x64_usable_registers_sse_count = 15;
 
-static Register x64_usable_registers_gpr[] = {REG_RAX, REG_RCX, REG_RDX, REG_R8, REG_R9, REG_RBX, REG_R12, REG_R13, REG_R14, REG_R15};
-static int      x64_usable_registers_gpr_count = 10;
+static Register x64_usable_registers_gpr[] = {REG_RAX, REG_RCX, REG_RDX, REG_R8, REG_R9, REG_R10, REG_RBX, REG_R12, REG_R13, REG_R14, REG_R15};
+static int      x64_usable_registers_gpr_count = 11;
 
-static Register x64_scratch_registers_gpr[] = {REG_R10, REG_R11};
-static Register x64_scratch_registers_sse[] = {REG_XMM4, REG_XMM5};
+static Register x64_scratch_registers_gpr[] = {REG_R11};
+static Register x64_scratch_registers_sse[] = {REG_XMM5};
 
 char *gpr_register_names[17][4] = {
     { "non", "non",  "non",  "non"  },

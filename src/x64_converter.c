@@ -153,34 +153,12 @@ void x64_begin_convert(X64Converter *conv) {
 
 }
 
-// static char *gpr_scatch_register[] = {
-//     "rax",
-//     "r13",
-//     "r14",
-//     "r15",
-// };
-
-// static char *xmm_scratch_registers[] = {
-//     "xmm8",
-//     "xmm9",
-//     "xmm10",
-//     "xmm11",
-// };
-
-char *register_index_to_string(int reg_index, int size) {
-    return register_to_str(reg_index, size);
-}
-
-char *sse_register_index_to_string(int reg_index, int size) {
-    return register_to_str(reg_index, size);
-}
-
 char *get_register_string_sized(Operand op, int size) {
     return register_to_str(op.reg, size);
 }
 
 char *get_register_string(Operand op) {
-    return get_register_string_sized(op, op.size);
+    return register_to_str(op.reg, op.size);
 }
 
 int get_vreg_stack_offset(X64Converter *conv, int vreg) {
@@ -381,8 +359,8 @@ typedef struct ArgMove {
 } ArgMove;
 
 void x64_emit_argument_move(X64Converter *conv, ArgMove *move, bool is_xmm_pool) {
-    char *dst = register_index_to_string(move->dst, 8);
-    char *src = register_index_to_string(move->src, 8);
+    char *dst = register_to_str(move->dst, 8);
+    char *src = register_to_str(move->src, 8);
 
     switch (move->kind) {
         case ARG_MOVE_BITCAST_SSE:
@@ -427,8 +405,8 @@ void x64_sequence_moves(X64Converter *conv, ArgMove *moves, int count, bool is_x
 
                 Register scratch = is_xmm_pool ? x64_scratch_registers_sse[0]
                                                 : x64_scratch_registers_gpr[0];
-                char *dst_str     = register_index_to_string(moves[i].dst, 8);
-                char *scratch_str = register_index_to_string(scratch, 8);
+                char *dst_str     = register_to_str(moves[i].dst, 8);
+                char *scratch_str = register_to_str(scratch, 8);
 
                 x64_code(conv, is_xmm_pool ? "movaps" : "mov", "%s, %s", scratch_str, dst_str);
 
@@ -468,13 +446,13 @@ void x64_emit_function_call(X64Converter *conv, Inst *inst) {
                 if (needs_promote) {
                     Register scratch = x64_scratch_registers_sse[0];
                     x64_code(conv, "cvtss2sd", "%s, %s",
-                        register_index_to_string(scratch, 8),
-                        register_index_to_string(src, 8));
+                        register_to_str(scratch, 8),
+                        register_to_str(src, 8));
                     src = scratch;
                 }
-                x64_code(conv, "movsd", "[rsp+%d], %s", stack_offset, register_index_to_string(src, 8));
+                x64_code(conv, "movsd", "[rsp+%d], %s", stack_offset, register_to_str(src, 8));
             } else {
-                x64_code(conv, "mov", "[rsp+%d], %s", stack_offset, register_index_to_string(src, 8));
+                x64_code(conv, "mov", "[rsp+%d], %s", stack_offset, register_to_str(src, 8));
             }
             continue;
         }
@@ -516,7 +494,7 @@ void x64_emit_terminator(X64Converter *conv, BasicBlock *bb) {
             break;
         }
         case TERMINATOR_COND_JUMP: {
-            char *cmp_reg = register_index_to_string(bb->terminator.condition_reg, 1);
+            char *cmp_reg = register_to_str(bb->terminator.condition_reg, 1);
             x64_code(conv, "   cmp", "%s, 0", cmp_reg);
             x64_code(conv, "   jz", "L%d", bb->terminator.target2->id);
             x64_code(conv, "   jmp", "L%d", bb->terminator.target1->id);
@@ -580,7 +558,7 @@ void x64_emit_comparrison_instruction(X64Converter *conv, Inst *inst) {
         x64_code(conv, "cmp", "%s, %s", a, b);
     }
 
-    char *dst8  = register_index_to_string(inst->op1.reg, 1);
+    char *dst8  = register_to_str(inst->op1.reg, 1);
     char *dst32 = get_register_string_sized(inst->op1, 4);
 
     x64_code(conv, set_inst, "%s", dst8);
@@ -844,12 +822,12 @@ void x64_emit_cast_instruction(X64Converter *conv, Inst *inst) {
 void x64_load_constant(X64Converter *conv, int dst_reg, Constant *constant) {
     switch (constant->kind) {
     case CONSTANT_STRING: {
-        char *dst = register_index_to_string(dst_reg, 8);
+        char *dst = register_to_str(dst_reg, 8);
         x64_code(conv, "mov", "%s, STRING_%d", dst, constant->id);
         break;
     }
     case CONSTANT_FLOAT: {
-        char *dst = sse_register_index_to_string(dst_reg, 8);
+        char *dst = register_to_str(dst_reg, 8);
         assert(constant->type->kind == TYPE_FLOAT);
         x64_code(conv, constant->type->size == 8 ? "movsd" : "movss", "%s, [rel FLOAT_%d]", dst, constant->id);
         break;
@@ -889,12 +867,12 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
             return;
         }
         else if (op1.kind == OPERAND_REG && op2.kind == OPERAND_IMM_INT) {
-            char *dst = register_index_to_string(op1.reg, 8);
+            char *dst = register_to_str(op1.reg, 8);
             x64_code(conv, "mov", "%s, %lld", dst, op2.imm_int);
             return;
         }
         else if (op1.kind == OPERAND_REG && op2.kind == OPERAND_IMM_UINT) {
-            char *dst = register_index_to_string(op1.reg, 8);
+            char *dst = register_to_str(op1.reg, 8);
             x64_code(conv, "mov", "%s, %zu", dst, op2.imm_uint);
             return;
         }
@@ -955,8 +933,8 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
         break;
     }
     case INST_DEREF: {
-        char *dst = register_index_to_string(op1.reg, 8);
-        char *src = register_index_to_string(op2.reg, 8);
+        char *dst = register_to_str(op1.reg, 8);
+        char *src = register_to_str(op2.reg, 8);
 
         x64_code(conv, "mov", "%s, [%s]", dst, src);
         break;

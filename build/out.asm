@@ -80,41 +80,53 @@ L0:
 main:
 	push        rbp
 	mov         rbp, rsp
-	sub         rsp, 80
+	sub         rsp, 144
+	movaps      -16[rbp], xmm6
+	movaps      -32[rbp], xmm7
 L1:
 	movss       xmm0, [rel FLOAT_0]
-	movss       xmm1, xmm0
+	movss       -4[rbp], xmm0
 	movss       xmm0, [rel FLOAT_1]
-	movss       xmm2, xmm0
+	movss       -8[rbp], xmm0
 	movss       xmm0, [rel FLOAT_2]
-	movss       xmm2, xmm0
+	movss       -12[rbp], xmm0
 	movss       xmm0, [rel FLOAT_3]
-	movss       xmm2, xmm0
+	movss       -16[rbp], xmm0
 	movss       xmm0, [rel FLOAT_4]
-	movss       xmm2, xmm0
+	movss       -20[rbp], xmm0
 	movss       xmm0, [rel FLOAT_5]
-	movss       xmm2, xmm0
+	movss       -24[rbp], xmm0
 	movss       xmm0, [rel FLOAT_6]
-	movss       xmm2, xmm0
+	movss       -28[rbp], xmm0
+	call        foo
 	mov         rax, STRING_7
 	mov         rcx, [rax]
-	cvtss2sd    xmm4, xmm1
-	movsd       [rsp+32], xmm4
-	cvtss2sd    xmm4, xmm1
-	movsd       [rsp+40], xmm4
-	cvtss2sd    xmm4, xmm1
-	movsd       [rsp+48], xmm4
-	cvtss2sd    xmm4, xmm1
-	movsd       [rsp+56], xmm4
+	movss       xmm0, -4[rbp]
+	movss       xmm1, -8[rbp]
+	movss       xmm2, -12[rbp]
+	movss       xmm3, -16[rbp]
+	movss       xmm4, -20[rbp]
+	movss       xmm6, -24[rbp]
+	movss       xmm7, -28[rbp]
+	cvtss2sd    xmm5, xmm3
+	movsd       [rsp+32], xmm5
+	cvtss2sd    xmm5, xmm4
+	movsd       [rsp+40], xmm5
+	cvtss2sd    xmm5, xmm6
+	movsd       [rsp+48], xmm5
+	cvtss2sd    xmm5, xmm7
+	movsd       [rsp+56], xmm5
+	cvtss2sd    xmm3, xmm2
 	cvtss2sd    xmm2, xmm1
-	cvtss2sd    xmm3, xmm1
-	cvtss2sd    xmm1, xmm1
+	cvtss2sd    xmm1, xmm0
 	movq        rdx, xmm1
 	movq        r8, xmm2
 	movq        r9, xmm3
 	call        printf
 	mov         rax, 0
-	add         rsp, 80
+	movaps      xmm7, -32[rbp]
+	movaps      xmm6, -16[rbp]
+	add         rsp, 144
 	pop         rbp
 	ret         
 
