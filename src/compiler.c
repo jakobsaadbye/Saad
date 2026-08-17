@@ -12,19 +12,6 @@
 
 #define MAX_RESOLVED_IMPORT_PATH_LENGTH 256
 
-typedef enum CodegenBackend {
-    BACKEND_X64_OLD,
-    BACKEND_X64_NEW,
-} CodegenBackend;
-
-typedef struct CompilerConfig {
-    char          *compiler_path;
-    char          *stdlib_path;
-    char          *working_directory;
-    char          *file_extension;
-    CodegenBackend backend;
-} CompilerConfig;
-
 typedef struct CompilerReport {
     CompilerConfig *config;
     clock_t lex_time_start;
@@ -50,6 +37,7 @@ CompilerConfig get_standard_compiler_config() {
     config.working_directory = get_current_directory();
     config.file_extension = "sd";
     config.backend = BACKEND_X64_NEW;
+    config.optimization_level = OPTIMIZATION_LEVEL_O1;
 
     return config;
 }
@@ -147,7 +135,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     Parser parser         = parser_init(&lexer);
     ConstEvaluator ce     = const_evaluator_init(&parser);
     Typer typer           = typer_init(&parser, &ce);
-    BytecodeGenerator bcg = bytecode_generator_init(&parser);
+    BytecodeGenerator bcg = bytecode_generator_init(config, &parser);
     X64Converter x64conv  = x64_converter_init(&bcg);
     CodeGenerator codegen = code_generator_init(&parser);
 
@@ -257,6 +245,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
         begin_bytecode_generation(&bcg, main_file);
         bcg_compute_liveness(&bcg);
         bcg_dump_bytecode_to_file(&bcg, "./build/out.ir");
+        bcg_compute_last_stages(&bcg);
         bcg_rewrite_entire_ir(&bcg);
         bcg_dump_bytecode_to_file(&bcg, "./build/out_optimized.ir");
         report.bytecode_time_end = clock();

@@ -2,11 +2,13 @@ extern "C" {
     printf :: (format: *u8, args: ...any);
 }
 
+foo :: () -> int {
+    return 69;
+}
+
 main :: () {
-    a : f64 = 3.14159123;
-    b : f64 = 2.0;
+    a := 5.0;
+    // c := foo();
 
-    c := a * b;
-
-    printf(xx "%lf %lf %lf", a, b, c);
+    printf(xx "%f-%f-%f-%f-%f-%f\n", a, a, a, a, a, a);
 }

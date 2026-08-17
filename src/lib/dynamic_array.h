@@ -25,21 +25,33 @@ void *da_pop_deref(DynamicArray *da);
 void da_remove(DynamicArray *da, int index);
 void da_free(DynamicArray *da);
 
+int round_up_to_nearest_power_of_two(int value);
+
 #endif 
 
 #ifdef DYNAMIC_ARRAY_IMPLEMENTATION
 
+int round_up_to_nearest_power_of_two(int value) {
+    if (value <= 1) return 2;
+    value--;
+    value |= value >> 1;
+    value |= value >> 2;
+    value |= value >> 4;
+    value |= value >> 8;
+    value |= value >> 16;
+    return value + 1;
+}
+
 DynamicArray da_init(unsigned int init_cap, unsigned int item_size) {
     DynamicArray da = {0};
-    da.capacity = init_cap;
+    da.capacity = round_up_to_nearest_power_of_two(init_cap);
     da.item_size = item_size;
     da.count = 0;
-    da.items = (unsigned char *) malloc(item_size * init_cap);
+    da.items = (unsigned char *) calloc(da.capacity, item_size);
     if (da.items == NULL) {
-        printf("Buy more ram!\n");
-        exit(1);
+        printf("da_init: Failed to allocate initial memory\n");
+        return da;
     }
-    memset(da.items, 0, init_cap);
 
     return da;
 }
@@ -49,8 +61,8 @@ void _da_append(DynamicArray *da, void *item) {
         // Reallocate memory
         da->items = realloc(da->items, da->capacity * 2 * da->item_size);
         if (da->items == NULL) {
-            printf("Buy more ram!\n");
-            exit(1);
+            printf("_da_append: Failed to allocate more memory\n");
+            return;
         }
         da->capacity *= 2;
     }
@@ -69,8 +81,8 @@ void _da_insert(DynamicArray *da, void *item, int index) {
     if (da->count + 1 > da->capacity) {
         da->items = realloc(da->items, da->capacity * 2 * da->item_size);
         if (da->items == NULL) {
-            printf("Buy more ram!\n");
-            exit(1);
+            printf("_da_insert: Failed to allocate more memory\n");
+            return;
         }
         da->capacity *= 2;
     }

@@ -4,13 +4,6 @@
 #define SHOW_IR_LIVE_INTERVALS 1
 #define SHOW_IR_DEF_USE 0
 
-#define MAX_FREE_GPR_REGISTERS 3
-#define GPR_SCRATCH_1 (MAX_FREE_GPR_REGISTERS)
-#define GPR_SCRATCH_2 (MAX_FREE_GPR_REGISTERS + 1)
-#define MAX_FREE_SSE_REGISTERS 3
-#define SSE_SCRATCH_1 (MAX_FREE_SSE_REGISTERS + 1)
-#define SSE_SCRATCH_2 (MAX_FREE_SSE_REGISTERS + 1)
-
 typedef struct BasicBlock BasicBlock;
 
 typedef enum TerminatorKind {
@@ -65,6 +58,7 @@ typedef struct LiveInterval {
     bool is_sse;
     bool has_reg;
     bool crosses_call; // Weather it crosses a function call
+    bool has_gone_through_register_allocation;
 } LiveInterval;
 
 typedef struct BytecodeFunction {
@@ -90,6 +84,9 @@ typedef struct BytecodeFunction {
     DynamicArray vreg_to_stack_slot; // of int
     DynamicArray vreg_is_sse;        // of bool
     DynamicArray vreg_to_type;       // of *Type
+    DynamicArray used_gpr_callee_saved_registers; // of Register
+    DynamicArray used_sse_callee_saved_registers; // of Register
+
 
 } BytecodeFunction;
 
@@ -126,12 +123,12 @@ typedef struct ConstantPool {
     DynamicArray constants; // of Constant
 } ConstantPool;
 
-typedef struct Value {
+typedef struct IrValue {
     int   vreg;
     Type *type;
-} Value;
+} IrValue;
 
-static Value InvalidValue = {
+static IrValue InvalidValue = {
     .vreg = -1,
     .type = NULL,
 };
@@ -155,17 +152,17 @@ typedef struct BytecodeGenerator {
     AstFile         *current_file;
     AstBlock        *current_scope;
     AstFunctionDefn *enclosing_function;  // Current enclosing function
+
+    bool optimization_use_ir_values_for_identifiers;
 } BytecodeGenerator;
 
 typedef enum Register {
+    REG_NONE,
+
     REG_RAX,
     REG_RBX,
     REG_RCX,
     REG_RDX,
-    REG_RSI,
-    REG_RDI,
-    REG_RBP,
-    REG_RSP,
     REG_R8,
     REG_R9,
     REG_R10,
@@ -174,6 +171,10 @@ typedef enum Register {
     REG_R13,
     REG_R14,
     REG_R15,
+    REG_RSI,
+    REG_RDI,
+    REG_RBP,
+    REG_RSP,
 
     REG_XMM0,
     REG_XMM1,
@@ -192,8 +193,92 @@ typedef enum Register {
     REG_XMM14,
     REG_XMM15,
 
-    REG_NONE,
+    REG_COUNT,
 } Register;
+
+// static Register x64_caller_saved_registers_gpr[] = {REG_RAX, REG_RCX, REG_RDX, REG_R8, REG_R9, REG_R10, REG_R11};
+// static int      x64_caller_saved_registers_gpr_count = 7;
+
+// static Register x64_caller_saved_registers_sse[] = {REG_XMM0, REG_XMM1, REG_XMM2, REG_XMM3, REG_XMM4, REG_XMM5};
+// static int      x64_caller_saved_registers_sse_count = 6;
+
+static Register x64_callee_saved_registers_gpr[] = {REG_RBX, REG_R12, REG_R13, REG_R14, REG_R15};
+static int      x64_callee_saved_registers_gpr_count = 5;
+
+static Register x64_callee_saved_registers_sse[] = {REG_XMM6, REG_XMM7, REG_XMM8, REG_XMM9, REG_XMM10, REG_XMM11, REG_XMM12, REG_XMM13, REG_XMM14, REG_XMM15};
+static int      x64_callee_saved_registers_sse_count = 10;
+
+static Register x64_usable_registers_sse[] = {REG_XMM0, REG_XMM1, REG_XMM2, REG_XMM3, REG_XMM6, REG_XMM7, REG_XMM8, REG_XMM9, REG_XMM10, REG_XMM11, REG_XMM12, REG_XMM13, REG_XMM14, REG_XMM15};
+static int      x64_usable_registers_sse_count = 14;
+
+static Register x64_usable_registers_gpr[] = {REG_RAX, REG_RCX, REG_RDX, REG_R8, REG_R9, REG_RBX, REG_R12, REG_R13, REG_R14, REG_R15};
+static int      x64_usable_registers_gpr_count = 10;
+
+static Register x64_scratch_registers_gpr[] = {REG_R10, REG_R11};
+static Register x64_scratch_registers_sse[] = {REG_XMM4, REG_XMM5};
+
+char *gpr_register_names[17][4] = {
+    { "non", "non",  "non",  "non"  },
+    { "rax", "eax",  "ax",   "al"   },
+    { "rbx", "ebx",  "bx",   "bl"   },
+    { "rcx", "ecx",  "cx",   "cl"   },
+    { "rdx", "edx",  "dx",   "dl"   },
+    { "r8",  "r8d",  "r8w",  "r8b"  },
+    { "r9",  "r9d",  "r9w",  "r9b"  },
+    { "r10", "r10d", "r10w", "r10b" },
+    { "r11", "r11d", "r11w", "r11b" },
+    { "r12", "r12d", "r12w", "r12b" },
+    { "r13", "r13d", "r13w", "r13b" },
+    { "r14", "r14d", "r14w", "r14b" },
+    { "r15", "r15d", "r15w", "r15b" },
+    { "rsi", "esi",  "si",   "sil"  },
+    { "rdi", "edi",  "di",   "dil"  },
+    { "rbp", "ebp",  "bp",   "bpl"  },
+    { "rsp", "esp",  "sp",   "spl"  },
+};
+
+char *sse_register_names[16] = {
+    "xmm0",
+    "xmm1",
+    "xmm2",
+    "xmm3",
+    "xmm4",
+    "xmm5",
+    "xmm6",
+    "xmm7",
+    "xmm8",
+    "xmm9",
+    "xmm10",
+    "xmm11",
+    "xmm12",
+    "xmm13",
+    "xmm14",
+    "xmm15",
+};
+
+char *register_to_str(Register reg, int width) {
+    if (width > 8) width = 8;
+
+    if (reg <= REG_R15) {
+        int i = -1;
+        if (width == 8) i = 0;
+        if (width == 4) i = 1;
+        if (width == 2) i = 2;
+        if (width == 1) i = 3;
+        if (i == -1) {
+            assert(false && "Got unexpected register width");
+        }
+
+        return gpr_register_names[reg][i];
+    } 
+    else if (reg <= REG_XMM15) {
+        int i = reg - REG_XMM0;
+        return sse_register_names[i];
+    }
+    else {
+        XXX;
+    }
+}
 
 typedef enum OperandKind {
     OPERAND_NONE,
@@ -385,6 +470,8 @@ BytecodeFunction *new_bytecode_function(BytecodeGenerator *bcg, AstFunctionDefn 
     func->vreg_to_stack_slot.count = 128;
     func->vreg_is_sse = da_init(128, sizeof(int));
     func->vreg_to_type = da_init(128, sizeof(Type *));
+    func->used_gpr_callee_saved_registers = da_init(8, sizeof(Register));
+    func->used_sse_callee_saved_registers = da_init(16, sizeof(Register));
     func->is_extern = func_defn->is_extern;
 
     da_append(&bcg->bytecode_functions, func);
@@ -393,7 +480,7 @@ BytecodeFunction *new_bytecode_function(BytecodeGenerator *bcg, AstFunctionDefn 
     return func;
 }
 
-BytecodeGenerator bytecode_generator_init(Parser *parser) {
+BytecodeGenerator bytecode_generator_init(CompilerConfig *config, Parser *parser) {
     BytecodeGenerator bcg = {0};
     bcg.parser = parser;
 
@@ -402,15 +489,19 @@ BytecodeGenerator bytecode_generator_init(Parser *parser) {
     bcg.bytecode_functions = da_init(32, sizeof(BytecodeFunction*));
     bcg.temporary_strings = sb_init(40000);
 
+    if (config->optimization_level == OPTIMIZATION_LEVEL_O1) {
+        bcg.optimization_use_ir_values_for_identifiers = true;
+    }
+
     return bcg;
 }
 
 void bcg_file(BytecodeGenerator *bcg, AstFile *code);
 void bcg_block(BytecodeGenerator *bcg, AstBlock *block);
 void bcg_statement(BytecodeGenerator *bcg, Ast *node);
-Value bcg_binary(BytecodeGenerator *bcg, AstBinary *bin);
-Value bcg_unary(BytecodeGenerator *bcg, AstUnary *unary);
-Value bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *call);
+IrValue bcg_binary(BytecodeGenerator *bcg, AstBinary *bin);
+IrValue bcg_unary(BytecodeGenerator *bcg, AstUnary *unary);
+IrValue bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *call);
 void bcg_function_defn(BytecodeGenerator *bcg, AstFunctionDefn *func_defn);
 void bcg_return(BytecodeGenerator *bcg, AstReturn *ast_return);
 void bcg_print(BytecodeGenerator *bcg, AstPrint *print_stmt);
@@ -422,12 +513,12 @@ void bcg_while(BytecodeGenerator *bcg, AstWhile *ast_while);
 void bcg_break_or_continue(BytecodeGenerator *bcg, AstBreakOrContinue *boc);
 void bcg_enum_defn(BytecodeGenerator *bcg, AstEnum *ast_enum);
 void bcg_struct_defn(BytecodeGenerator *bcg, AstStruct *ast_struct);
-Value bcg_array_literal(BytecodeGenerator *bcg, AstArrayLiteral *array_lit);
+IrValue bcg_array_literal(BytecodeGenerator *bcg, AstArrayLiteral *array_lit);
 void bcg_struct_literal(BytecodeGenerator *bcg, AstStructLiteral *struct_lit);
 void bcg_declaration(BytecodeGenerator *bcg, AstDeclaration *decl);
 void bcg_assignment(BytecodeGenerator *bcg, AstAssignment *assign);
-Value bcg_array_access(BytecodeGenerator *bcg, AstArrayAccess *array_ac, bool lvalue);
-Value bcg_expression(BytecodeGenerator *bcg, AstExpr *expr);
+IrValue bcg_array_access(BytecodeGenerator *bcg, AstArrayAccess *array_ac, bool lvalue);
+IrValue bcg_expression(BytecodeGenerator *bcg, AstExpr *expr);
 
 #define REG(i)   ((Operand){ .kind = OPERAND_REG,       .vreg = (i) })
 #define LABEL(s) ((Operand){ .kind = OPERAND_LABEL,     .label = (s) })
@@ -441,14 +532,14 @@ void begin_bytecode_generation(BytecodeGenerator *bcg, AstFile *file) {
     }
 }
 
-Value make_value(int vreg, Type *type) {
-    Value result = {0};
+IrValue make_value(int vreg, Type *type) {
+    IrValue result = {0};
     result.vreg = vreg;
     result.type = type;
     return result;
 }
 
-Value fresh_register(BytecodeGenerator *bcg, Type *type) {
+IrValue fresh_register(BytecodeGenerator *bcg, Type *type) {
     int vreg = bcg->current_function->next_vreg++;
 
     bool is_sse = type->kind == TYPE_FLOAT;
@@ -515,7 +606,7 @@ static Inst make_instruction_0(BytecodeGenerator *bcg, InstKind kind) {
     };
 }
 
-static Operand make_op_register(Value value) {
+static Operand make_op_register(IrValue value) {
     return (Operand) {
         .kind = OPERAND_REG,
         .size = value.type->size,
@@ -788,7 +879,23 @@ void bcg_dump_live_intervals(StringBuilder *sb, BytecodeFunction *func) {
     for (int i = 0; i < func->live_intervals.count; i++) {
         LiveInterval *interval = da_get(func->live_intervals, i);
 
-        sb_append(sb, "; v%d = [%d, %d], r%d\n", interval->vreg, interval->start, interval->end, interval->assigned_reg);
+        sb_append(sb, "; v%d = [%d, %d] %s", interval->vreg, interval->start, interval->end, interval->crosses_call ? "X" : "O");
+
+        if (interval->has_gone_through_register_allocation) {
+            sb_append(sb, ", ");
+            if (interval->assigned_reg == -1) {
+                sb_append(sb, "S[%d]", interval->spill_slot);
+            } else {
+                sb_append(sb, "p%d", interval->assigned_reg);
+            }
+
+            if (interval->assigned_reg != -1) {
+                sb_append(sb, ", %s", register_to_str((Register) interval->assigned_reg, 8));
+            }
+        }
+
+
+        sb_append(sb, "\n");
     }
 }
 
@@ -867,8 +974,6 @@ void bcg_dump_bytecode_to_file(BytecodeGenerator *bcg, const char *output_path) 
     fwrite(sb.buffer, 1, sb.cursor, f);
 }
 
-
-
 void bcg_block(BytecodeGenerator *bcg, AstBlock *block) {
     for (int i = 0; i < block->statements.count; i++) {
         Ast *stmt = da_get_deref(block->statements, i);
@@ -900,17 +1005,27 @@ void bcg_declaration(BytecodeGenerator *bcg, AstDeclaration *decl) {
             AstIdentifier *ident = da_get_deref(decl->idents, i);
             AstExpr       *value = da_get_deref(decl->values, i);
 
-            Value src = bcg_expression(bcg, value);
-            // Value dst = fresh_register(bcg, ident->type);
-            // ident->virtual_register = dst.vreg;
+            IrValue src = bcg_expression(bcg, value);
 
-            ident->stack_offset = bc_allocate_local(bcg, ident->type->size);
+            if (bcg->optimization_use_ir_values_for_identifiers) {
+                IrValue dst = fresh_register(bcg, ident->type);
+                ident->virtual_register = dst.vreg;
 
-            add_instruction(bcg, make_instruction_2(bcg,
-                INST_STORE, 
-                make_op_memory_offset(ident->stack_offset, ident->type),
-                make_op_register(src)
-            ));
+                add_instruction(bcg, make_instruction_2(bcg,
+                    INST_MOV, 
+                    make_op_register(dst),
+                    make_op_register(src)
+                ));
+            } else {
+                ident->stack_offset = bc_allocate_local(bcg, ident->type->size);
+
+                add_instruction(bcg, make_instruction_2(bcg,
+                    INST_STORE, 
+                    make_op_memory_offset(ident->stack_offset, ident->type),
+                    make_op_register(src)
+                ));
+            }
+            
         }
 
         return;
@@ -987,7 +1102,7 @@ void set_current_basic_block(BytecodeGenerator *bcg, BasicBlock *basic_block) {
 
 
 void bcg_if(BytecodeGenerator *bcg, AstIf *ast_if, BasicBlock *merge) {
-    Value cond = bcg_expression(bcg, ast_if->condition);
+    IrValue cond = bcg_expression(bcg, ast_if->condition);
 
     BasicBlock *then_bb = create_basic_block(bcg, "then");
     BasicBlock *next_bb = create_basic_block(bcg, "next");
@@ -1001,7 +1116,7 @@ void bcg_if(BytecodeGenerator *bcg, AstIf *ast_if, BasicBlock *merge) {
         AstIf *else_if = da_get_deref(ast_if->else_ifs, i);
 
         set_current_basic_block(bcg, next_bb);
-        Value else_if_cond = bcg_expression(bcg, else_if->condition);
+        IrValue else_if_cond = bcg_expression(bcg, else_if->condition);
 
         BasicBlock *else_if_then = create_basic_block(bcg, "else_if_then");
         next_bb = create_basic_block(bcg, "else_if_next");
@@ -1024,8 +1139,8 @@ void bcg_if(BytecodeGenerator *bcg, AstIf *ast_if, BasicBlock *merge) {
 }
 
 void bcg_assignment(BytecodeGenerator *bcg, AstAssignment *assign) {
-    Value lhs = bcg_expression(bcg, assign->lhs);
-    Value rhs = bcg_expression(bcg, assign->expr);
+    IrValue lhs = bcg_expression(bcg, assign->lhs);
+    IrValue rhs = bcg_expression(bcg, assign->expr);
 
     Inst result = make_instruction_2(bcg, INST_MOV, 
         make_op_register(lhs), 
@@ -1071,7 +1186,7 @@ void bcg_statement(BytecodeGenerator *bcg, Ast *node) {
     }
 }
 
-Value bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *ast_call) {
+IrValue bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *ast_call) {
     InstFunctionCall *call = bytecode_allocate(bcg, sizeof(InstFunctionCall));
 
     if (!ast_call->is_lambda_call) {
@@ -1083,7 +1198,7 @@ Value bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *ast_call) {
     for (int i = 0; i < ast_call->arguments.count; i++) {
         AstArgument *arg = da_get_deref(ast_call->arguments, i);
         
-        Value value = bcg_expression(bcg, arg->value);
+        IrValue value = bcg_expression(bcg, arg->value);
         
         CallArgument ir_arg = (CallArgument) {
             .vreg = value.vreg,
@@ -1096,7 +1211,7 @@ Value bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *ast_call) {
 
     // TODO: Right now we assume only 1 return value
     Type *return_type = da_get_deref(ast_call->func_defn->return_types, 0); 
-    Value dst = fresh_register(bcg, return_type);
+    IrValue dst = fresh_register(bcg, return_type);
 
     // Emit the call instruction
     Inst call_instruction = {0};
@@ -1119,6 +1234,9 @@ Value bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *ast_call) {
 }
 
 void bcg_function_defn(BytecodeGenerator *bcg, AstFunctionDefn *func_defn) {
+    if (func_defn->head.head.flags & AST_FLAG_IS_BYTECODE_GENERATED) {
+        return;
+    }
 
     new_bytecode_function(bcg, func_defn);
 
@@ -1131,8 +1249,6 @@ void bcg_function_defn(BytecodeGenerator *bcg, AstFunctionDefn *func_defn) {
     set_current_basic_block(bcg, entry);
 
     bcg->current_function->entry = entry;
-
-
     bcg->enclosing_function = func_defn;
 
     // add_instruction(bcg, make_instruction_1(INST_LABEL, LABEL(func_defn->symbol_name)));
@@ -1142,7 +1258,7 @@ void bcg_function_defn(BytecodeGenerator *bcg, AstFunctionDefn *func_defn) {
     // Bind each parameter to a fresh vreg, in order.
     for (int i = 0; i < func_defn->lowered_params.count; i++) {
         AstIdentifier *param = da_get_deref(func_defn->lowered_params, i);
-        Value value = fresh_register(bcg, param->type);
+        IrValue value = fresh_register(bcg, param->type);
         param->virtual_register = value.vreg;
 
         BytecodeFunctionParameter bc_param = {
@@ -1162,10 +1278,14 @@ void bcg_function_defn(BytecodeGenerator *bcg, AstFunctionDefn *func_defn) {
 
     terminate_with_return(bcg);
 
+    // TODO: This should be popping from a stack rather than setting to NULL to allow inner functions
     bcg->enclosing_function = NULL;
+    bcg->current_function = NULL;
+
+    func_defn->head.head.flags |= AST_FLAG_IS_BYTECODE_GENERATED;
 }
 
-Value bcg_emit_arithmetic_conversion(BytecodeGenerator *bcg, Value src, Type *to) {
+IrValue bcg_emit_arithmetic_conversion(BytecodeGenerator *bcg, IrValue src, Type *to) {
     Type *from = src.type;
     if (from->kind == to->kind && from->size == to->size) {
         return src;
@@ -1184,7 +1304,7 @@ Value bcg_emit_arithmetic_conversion(BytecodeGenerator *bcg, Value src, Type *to
         kind = (from->size < to->size) ? INST_FPEXT : INST_FPTRUNC;
     }
 
-    Value dst = fresh_register(bcg, to);
+    IrValue dst = fresh_register(bcg, to);
     add_instruction(bcg, make_instruction_2(
         bcg, 
         kind,
@@ -1194,20 +1314,20 @@ Value bcg_emit_arithmetic_conversion(BytecodeGenerator *bcg, Value src, Type *to
     return dst;
 }
 
-Value bcg_arithmetic_operator(BytecodeGenerator *bcg, AstBinary *bin) {
+IrValue bcg_arithmetic_operator(BytecodeGenerator *bcg, AstBinary *bin) {
     TokenType op = bin->operator;
 
     Type *result_type = bin->head.type;
 
-    Value lhs = bcg_expression(bcg, bin->left);
-    Value rhs = bcg_expression(bcg, bin->right);
+    IrValue lhs = bcg_expression(bcg, bin->left);
+    IrValue rhs = bcg_expression(bcg, bin->right);
 
     // Insert any necessary truncation / widening or type conversion
     lhs = bcg_emit_arithmetic_conversion(bcg, lhs, result_type);
     rhs = bcg_emit_arithmetic_conversion(bcg, rhs, result_type);
 
 
-    Value dst = fresh_register(bcg, bin->head.type);
+    IrValue dst = fresh_register(bcg, bin->head.type);
 
     Inst result = make_instruction_3(bcg, INST_NOOP, 
         make_op_register(dst),
@@ -1248,12 +1368,12 @@ Value bcg_arithmetic_operator(BytecodeGenerator *bcg, AstBinary *bin) {
     return dst;
 }
 
-Value bcg_comparison_operator(BytecodeGenerator *bcg, AstBinary *bin) {
+IrValue bcg_comparison_operator(BytecodeGenerator *bcg, AstBinary *bin) {
     TokenType op = bin->operator;
 
-    Value lhs = bcg_expression(bcg, bin->left);
-    Value rhs = bcg_expression(bcg, bin->right);
-    Value dst = fresh_register(bcg, bin->head.type);
+    IrValue lhs = bcg_expression(bcg, bin->left);
+    IrValue rhs = bcg_expression(bcg, bin->right);
+    IrValue dst = fresh_register(bcg, bin->head.type);
 
     Inst result = make_instruction_3(bcg, INST_NOOP, 
         make_op_register(dst),
@@ -1276,12 +1396,12 @@ Value bcg_comparison_operator(BytecodeGenerator *bcg, AstBinary *bin) {
     return dst;
 }
 
-Value bcg_boolean_operator(BytecodeGenerator *bcg, AstBinary *bin) {
+IrValue bcg_boolean_operator(BytecodeGenerator *bcg, AstBinary *bin) {
     TokenType op = bin->operator;
 
-    Value lhs = bcg_expression(bcg, bin->left);
-    Value rhs = bcg_expression(bcg, bin->right);
-    Value dst = fresh_register(bcg, bin->head.type);
+    IrValue lhs = bcg_expression(bcg, bin->left);
+    IrValue rhs = bcg_expression(bcg, bin->right);
+    IrValue dst = fresh_register(bcg, bin->head.type);
 
     Inst result = make_instruction_3(bcg, INST_NOOP, 
         make_op_register(dst),
@@ -1300,7 +1420,7 @@ Value bcg_boolean_operator(BytecodeGenerator *bcg, AstBinary *bin) {
     return dst;
 }
 
-Value bcg_binary(BytecodeGenerator *bcg, AstBinary *bin) {
+IrValue bcg_binary(BytecodeGenerator *bcg, AstBinary *bin) {
     TokenType op = bin->operator;
 
     if (is_arithmetic_operator(op)) {
@@ -1319,11 +1439,11 @@ Value bcg_binary(BytecodeGenerator *bcg, AstBinary *bin) {
     return InvalidValue;
 }
 
-Value bcg_unary(BytecodeGenerator *bcg, AstUnary *unary) {
+IrValue bcg_unary(BytecodeGenerator *bcg, AstUnary *unary) {
     OperatorType op = unary->operator;
 
-    Value value = bcg_expression(bcg, unary->expr);
-    Value dst = fresh_register(bcg, unary->head.type);
+    IrValue value = bcg_expression(bcg, unary->expr);
+    IrValue dst = fresh_register(bcg, unary->head.type);
 
     if (op == OP_NOT) {
         add_instruction(bcg, make_instruction_2(
@@ -1395,12 +1515,12 @@ Constant *bcg_lower_constant(BytecodeGenerator *bcg, AstExpr *expr) {
     return NULL;
 }
 
-Value bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
+IrValue bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
 
     Type *from = cast->expr->type;
     Type *to   = cast->cast_to;
 
-    Value src = bcg_expression(bcg, cast->expr);
+    IrValue src = bcg_expression(bcg, cast->expr);
 
     InstKind inst_kind = 0;
 
@@ -1449,7 +1569,7 @@ Value bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
     else if (from->kind == TYPE_STRING && to->kind == TYPE_POINTER) {
 
         // Produce a pointer dereference of .data
-        Value dst = fresh_register(bcg, to);
+        IrValue dst = fresh_register(bcg, to);
 
         add_instruction(bcg, make_instruction_2(
             bcg,
@@ -1465,7 +1585,7 @@ Value bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
         return src;
     }
 
-    Value dst = fresh_register(bcg, to);
+    IrValue dst = fresh_register(bcg, to);
 
     Inst inst = make_instruction_2(
         bcg,
@@ -1479,7 +1599,7 @@ Value bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
     return dst;
 }
 
-Value bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
+IrValue bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
     switch (expr->head.kind) {
     case AST_UNARY: {
         return bcg_unary(bcg, (AstUnary *)expr);
@@ -1531,26 +1651,30 @@ Value bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
             }
             case LITERAL_IDENTIFIER: {
                 AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
-                assert(ident && ident->stack_offset < 0);
+                assert(ident);
 
-                if (ident->ident_override) {
-                    ident = ident;
+                if (bcg->optimization_use_ir_values_for_identifiers) {
+                    assert(ident->stack_offset == 0);
+
+                    return make_value(ident->virtual_register, ident->type);
+                } else {
+                    assert(ident->stack_offset < 0);
+
+                    IrValue dst = fresh_register(bcg, expr->type);
+                    add_instruction(bcg, make_instruction_2(
+                        bcg, 
+                        INST_LOAD, 
+                        make_op_register(dst),
+                        make_op_memory_offset(ident->stack_offset, ident->type)
+                    ));
+    
+                    return dst;
                 }
-
-                Value dst = fresh_register(bcg, expr->type);
-
-                add_instruction(bcg, make_instruction_2(
-                    bcg, 
-                    INST_LOAD, 
-                    make_op_register(dst),
-                    make_op_memory_offset(ident->stack_offset, ident->type)
-                ));
-
-                return dst;
+                
             }
         }
         
-        Value dst = fresh_register(bcg, expr->type);
+        IrValue dst = fresh_register(bcg, expr->type);
         add_instruction(bcg, make_instruction_2(
             bcg,
             INST_MOV, 
@@ -1716,7 +1840,11 @@ void compute_live_intervals(BytecodeFunction *func) {
     for (int i = func->basic_blocks.count - 1; i >= 0; i--) {
         BasicBlock *bb = da_get_deref(func->basic_blocks, i);
 
-        int low  = bb->instructions.count > 0 ? ((Inst *)da_get(bb->instructions, 0))->index : -1;
+        if (bb->instructions.count <= 0) {
+            continue;
+        }
+
+        int low  = ((Inst *)da_get(bb->instructions, 0))->index;
         int high = bb->terminator.index;
 
         for (int j = 0; j < num_vregs; j++) {
@@ -1745,12 +1873,11 @@ void compute_live_intervals(BytecodeFunction *func) {
                 for (int k = 0; k < call->arguments.count; k++) {
                     CallArgument *arg = da_get(call->arguments, k);
 
-                    // Mark as a use
+                    // Mark arg as a use
                     bcg_widen_live_interval(func, arg->vreg, inst->index);
                     is_live[arg->vreg] = true;
                 }
 
-                continue;
             }
 
             for (int k = 0; k < inst->op_count; k++) {
@@ -1779,15 +1906,15 @@ void compute_live_intervals(BytecodeFunction *func) {
     }
 }
 
-void compute_intervals_crossing_function_calls(BytecodeFunction *func) {
+void mark_intervals_crossing_function_calls(BytecodeFunction *func) {
     for (int b = 0; b < func->basic_blocks.count; b++) {
         BasicBlock *bb = da_get_deref(func->basic_blocks, b);
         for (int i = 0; i < bb->instructions.count; i++) {
             Inst *inst = da_get(bb->instructions, i);
             if (inst->kind != INST_CALL) continue;
 
-            for (int v = 0; v < func->live_intervals.count; v++) {
-                LiveInterval *interval = da_get(func->live_intervals, v);
+            for (int j = 0; j < func->live_intervals.count; j++) {
+                LiveInterval *interval = da_get(func->live_intervals, j);
                 if (interval->is_active && interval->start < inst->index && interval->end > inst->index) {
                     interval->crosses_call = true;
                 }
@@ -1796,22 +1923,12 @@ void compute_intervals_crossing_function_calls(BytecodeFunction *func) {
     }
 }
 
-int bcg_get_next_free_reg(DynamicArray free_regs) {
-    for (int i = 0; i < free_regs.count; i++) {
-        bool *is_free = da_get(free_regs, i);
-        if (*is_free) {
-            return i;
-        }
-    }
-
-    // No free slot
-    return -1;
-}
-
 void spill_at_interval(BytecodeFunction *func, LiveInterval *interval, int *next_spill_slot) {
+    // find the register-holding interval with the furthest end
+
     LiveInterval *spill = NULL;
-    for (int j = 0; j < func->live_intervals.count; j++) {
-        LiveInterval *act = da_get(func->live_intervals, j);
+    for (int i = 0; i < func->live_intervals.count; i++) {
+        LiveInterval *act = da_get(func->live_intervals, i);
         if (!act->has_reg) continue;
         if (act->is_sse != interval->is_sse) continue; // Not comparable as they use different pools
         if (spill == NULL || act->end > spill->end) {
@@ -1840,22 +1957,55 @@ void spill_at_interval(BytecodeFunction *func, LiveInterval *interval, int *next
     }
 }
 
+int bcg_get_next_free_register(DynamicArray free_regs, LiveInterval *interval) {
+    Register *pool = NULL;
+    int pool_count = 0;
+
+    if (interval->is_sse) {
+        if (interval->crosses_call) {
+            pool       = x64_callee_saved_registers_sse;
+            pool_count = x64_callee_saved_registers_sse_count;
+        } else {
+            pool       = x64_usable_registers_sse;
+            pool_count = x64_usable_registers_sse_count;
+        }
+    }
+    else {
+        if (interval->crosses_call) {
+            pool       = x64_callee_saved_registers_gpr;
+            pool_count = x64_callee_saved_registers_gpr_count;
+        } else {
+            pool       = x64_usable_registers_gpr;
+            pool_count = x64_usable_registers_gpr_count;
+        }
+    }
+
+    for (int i = 0; i < pool_count; i++) {
+        Register reg = pool[i];
+
+        bool *is_free = da_get(free_regs, reg);
+        if (*is_free) {
+            return (int) reg;
+        }
+    }
+
+    // No free register
+    return -1;
+}
+
 void compute_register_allocation(BytecodeFunction *func) {
     // Assigned_reg of -1 = spill
-    DynamicArray free_gpr = da_init(MAX_FREE_GPR_REGISTERS, sizeof(bool));
-    DynamicArray free_sse = da_init(MAX_FREE_SSE_REGISTERS, sizeof(bool));
-    free_gpr.count = MAX_FREE_GPR_REGISTERS;
-    free_sse.count = MAX_FREE_SSE_REGISTERS;
-    memset(free_gpr.items, 1, free_gpr.capacity);
-    memset(free_sse.items, 1, free_sse.capacity);
+    DynamicArray free_registers = da_init(REG_COUNT, sizeof(bool));
+    free_registers.count = REG_COUNT;
+    memset(free_registers.items, 1, free_registers.capacity);
 
     int next_spill_slot = 0;   // bump-allocated stack slots
 
     for (int i = 0; i < func->live_intervals.count; i++) {
         LiveInterval *interval = da_get(func->live_intervals, i);
-        
-        DynamicArray pool = interval->is_sse ? free_sse : free_gpr;
 
+        interval->has_gone_through_register_allocation = true;
+        
         // Skip dead vregs (never live during construction)
         if (!interval->is_active) {
             interval->assigned_reg = -1;
@@ -1870,22 +2020,21 @@ void compute_register_allocation(BytecodeFunction *func) {
             if (!act->has_reg || act->is_sse != interval->is_sse) continue;
 
             if (act->end < interval->start) {
-                bool *slot = da_get(pool, act->assigned_reg);
+                bool *slot = da_get(free_registers, act->assigned_reg);
                 *slot = true;
                 act->has_reg = false;   // no longer holds a register
             }
         }
 
         // --- Assign or spill ---
-        int free_reg = bcg_get_next_free_reg(pool);
+        int free_reg = bcg_get_next_free_register(free_registers, interval);
         if (free_reg != -1) {
             interval->assigned_reg = free_reg;
             interval->has_reg = true;
-            bool *slot = da_get(pool, free_reg);
+            bool *slot = da_get(free_registers, free_reg);
             *slot = false;
         } else {
             // --- SpillAtInterval ---
-            // find the register-holding interval with the furthest end
             spill_at_interval(func, interval, &next_spill_slot);
         }
     }
@@ -1926,15 +2075,59 @@ void bcg_compute_liveness(BytecodeGenerator *bcg) {
         BytecodeFunction *func = da_get_deref(bcg->bytecode_functions, i);
         if (func->is_extern) continue;
         
-        compute_intervals_crossing_function_calls(func);
+        mark_intervals_crossing_function_calls(func);
     }
+}
 
+bool is_sse_register(Register reg) {
+    return reg >= REG_XMM0 && reg <= REG_XMM15;
+}
+
+bool is_gpr_callee_saved_register(Register reg) {
+    if (reg == REG_RBX) return true;
+    if (reg >= REG_R12 && reg <= REG_R15) return true;
+    return false;
+}
+
+bool is_sse_callee_saved_register(Register reg) {
+    if (reg >= REG_XMM6 && reg <= REG_XMM15) return true;
+    return false;
+}
+
+bool is_callee_saved_register(Register reg) {
+    return is_gpr_callee_saved_register(reg) || is_sse_callee_saved_register(reg);
+}
+
+void mark_used_callee_saved_registers(BytecodeFunction *func) {
+    for (int i = 0; i < func->live_intervals.count; i++) {
+        LiveInterval *interval = da_get(func->live_intervals, i);
+
+        if (interval->assigned_reg != -1) {
+            if (is_gpr_callee_saved_register((Register) interval->assigned_reg)) {
+                set_int_add(&func->used_gpr_callee_saved_registers, interval->assigned_reg);
+            }
+            if (is_sse_callee_saved_register((Register) interval->assigned_reg)) {
+                set_int_add(&func->used_sse_callee_saved_registers, interval->assigned_reg);
+            }
+        }
+    }
+}
+
+void bcg_compute_last_stages(BytecodeGenerator *bcg) {
     // Compute register allocation
     for (int i = 0; i < bcg->bytecode_functions.count; i++) {
         BytecodeFunction *func = da_get_deref(bcg->bytecode_functions, i);
         if (func->is_extern) continue;
         
         compute_register_allocation(func);
+    }
+
+    // Mark used callee saved register on the function
+    for (int i = 0; i < bcg->bytecode_functions.count; i++) {
+        BytecodeFunction *func = da_get_deref(bcg->bytecode_functions, i);
+        if (func->is_extern) continue;
+        
+        mark_used_callee_saved_registers(func);
     }
 }
 
@@ -1967,9 +2160,6 @@ bool instruction_has_destination(Inst *inst) {
     return false;
 }
 
-static int gpr_scratch_registers[] = {GPR_SCRATCH_1, GPR_SCRATCH_2};
-static int sse_scratch_registers[] = {SSE_SCRATCH_1, SSE_SCRATCH_2};
-
 void bcg_rewrite_vreg(BytecodeGenerator *bcg, BytecodeFunction *func, DynamicArray *rewritten_instructions, int vreg, int *out_vreg, int *next_gpr_scratch, int *next_sse_scratch) {
     int reg = reg_of(func, vreg);
     
@@ -1979,8 +2169,8 @@ void bcg_rewrite_vreg(BytecodeGenerator *bcg, BytecodeFunction *func, DynamicArr
         bool is_sse = is_sse_of(func, vreg);
         int spill_slot = slot_of(func, vreg);
         int scratch_reg = is_sse 
-            ? sse_scratch_registers[(*next_sse_scratch)++]
-            : gpr_scratch_registers[(*next_gpr_scratch)++];
+            ? x64_scratch_registers_sse[(*next_sse_scratch)++]
+            : x64_scratch_registers_gpr[(*next_gpr_scratch)++];
 
         Inst load_inst = make_instruction_2(
             bcg,
@@ -2046,8 +2236,8 @@ void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *fu
                 dst_is_sse = is_sse_of(func, op.vreg);
                 dst_spilled = true;
                 dst_scratch_reg = dst_is_sse 
-                    ? sse_scratch_registers[next_sse_scratch++]
-                    : gpr_scratch_registers[next_gpr_scratch++];
+                    ? x64_scratch_registers_sse[next_sse_scratch++]
+                    : x64_scratch_registers_gpr[next_gpr_scratch++];
 
                 dst_spill_slot  = slot_of(func, op.vreg);
 
@@ -2091,7 +2281,7 @@ void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *fu
 
         if (reg == -1) {
             // Spilled
-            int scratch_reg = gpr_scratch_registers[next_gpr_scratch++];
+            int scratch_reg = x64_scratch_registers_gpr[next_gpr_scratch++];
             int spill_slot = slot_of(func, bb->terminator.condition_reg);
             Type *cond_type = get_type_of_vreg(func, bb->terminator.condition_reg);
 

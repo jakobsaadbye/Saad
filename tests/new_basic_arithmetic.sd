@@ -18,6 +18,6 @@ main :: () {
         c := a * b;
         d := c / 8;
 
-        printf(xx "%u-%u-%u-%u-%f-%f", a, b, c, d, e, f);
+        printf(xx "%u-%u-%u-%u", a, b, c, d);
     }
 }

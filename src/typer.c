@@ -229,17 +229,6 @@ bool check_block(Typer *typer, AstBlock *block) {
     return true;
 }
 
-int round_up_to_nearest_power_of_two(int value) {
-    if (value <= 1) return 2;
-    value--;
-    value |= value >> 1;
-    value |= value >> 2;
-    value |= value >> 4;
-    value |= value >> 8;
-    value |= value >> 16;
-    return value + 1;
-}
-
 void dump_scope_recursive(Parser *parser, AstBlock *scope) {
     if (scope == NULL) return;
 

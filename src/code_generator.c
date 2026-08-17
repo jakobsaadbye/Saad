@@ -125,36 +125,6 @@ CodeGenerator code_generator_init(Parser *parser) {
     return cg;
 }
 
-char *gpr_register_names[16][4] = {
-    { "rax", "eax",  "ax",   "al"   },
-    { "rbx", "ebx",  "bx",   "bl"   },
-    { "rcx", "ecx",  "cx",   "cl"   },
-    { "rdx", "edx",  "dx",   "dl"   },
-    { "rsi", "esi",  "si",   "sil"  },
-    { "rdi", "edi",  "di",   "dil"  },
-    { "rbp", "ebp",  "bp",   "bpl"  },
-    { "rsp", "esp",  "sp",   "spl"  },
-    { "r8",  "r8d",  "r8w",  "r8b"  },
-    { "r9",  "r9d",  "r9w",  "r9b"  },
-    { "r10", "r10d", "r10w", "r10b" },
-    { "r11", "r11d", "r11w", "r11b" },
-    { "r12", "r12d", "r12w", "r12b" },
-    { "r13", "r13d", "r13w", "r13b" },
-    { "r14", "r14d", "r14w", "r14b" },
-    { "r15", "r15d", "r15w", "r15b" },
-};
-
-char *sse_register_names[8] = {
-    "xmm0",
-    "xmm1",
-    "xmm2",
-    "xmm3",
-    "xmm4",
-    "xmm5",
-    "xmm6",
-    "xmm7",
-};
-
 #define PUSH(reg)                                  \
     sb_append(&cg->code, "   push\t\t%s\n", reg);  \
     cg->num_pushed_arguments += 1                  \
@@ -895,30 +865,6 @@ char *get_return_value_register(Type *return_type, int index) {
         if (index == 2) return "rdx";
         if (index == 3) return "r8";
         if (index == 4) return "r9";
-        XXX;
-    }
-}
-
-char *register_to_str(Register reg, int width) {
-    if (width > 8) width = 8;
-
-    if (reg <= REG_R15) {
-        int i = -1;
-        if (width == 8) i = 0;
-        if (width == 4) i = 1;
-        if (width == 2) i = 2;
-        if (width == 1) i = 3;
-        if (i == -1) {
-            assert(false && "Got unexpected register width");
-        }
-
-        return gpr_register_names[reg][i];
-    } 
-    else if (reg <= REG_XMM7) {
-        int i = reg - REG_XMM0;
-        return sse_register_names[i];
-    }
-    else {
         XXX;
     }
 }

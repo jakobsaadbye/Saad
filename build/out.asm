@@ -10,17 +10,14 @@ segment .data
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
    enum_to_int_buffer times 20 DB 0
-	align 8
+	align 4
 	FLOAT_0:
-	dq 3.141591
+	dd 5.000000
+	_data_0 DB `%f-%f-%f-%f-%f-%f\n`, 0
 	align 8
-	FLOAT_1:
-	dq 2.000000
-	_data_0 DB `%lf %lf %lf`, 0
-	align 8
-	STRING_2:
+	STRING_1:
 	dq _data_0
-	dq 11:
+	dq 19:
 segment .rdata
 segment .rdata
 segment .text
@@ -52,34 +49,40 @@ segment .text
    extern Type_untyped_int
    extern Type_untyped_float
    extern printf
+foo:
+	push        rbp
+	mov         rbp, rsp
+	sub         rsp, 48
+	mov         -8[rbp], rcx
+L0:
+	mov         rax, 0
+	add         rsp, 48
+	pop         rbp
+	ret         
 main:
 	push        rbp
 	mov         rbp, rsp
-	sub         rsp, 64
-L0:
-	movsd       xmm0, [rel FLOAT_0]
-	movsd       -8[rbp], xmm0
-	movsd       xmm0, [rel FLOAT_1]
-	movsd       -16[rbp], xmm0
-	movsd       xmm0, -8[rbp]
-	movsd       xmm1, -16[rbp]
-	movsd       xmm2, xmm0
-	mulsd       xmm2, xmm1
-	movsd       -24[rbp], xmm2
-	mov         rbx, STRING_2
-	mov         rcx, [rbx]
-	movsd       xmm0, -8[rbp]
-	movsd       xmm1, -16[rbp]
-	movsd       xmm2, -24[rbp]
-	movq        rdx, xmm0
-	movq        r8, xmm1
-	movq        r9, xmm2
-	movaps      xmm3, xmm2
-	movaps      xmm2, xmm1
-	movaps      xmm1, xmm0
+	sub         rsp, 32
+L1:
+	movss       xmm0, [rel FLOAT_0]
+	movss       xmm1, xmm0
+	mov         rax, STRING_1
+	mov         rcx, [rax]
+	cvtss2sd    xmm4, xmm1
+	movsd       [rsp+32], xmm4
+	cvtss2sd    xmm4, xmm1
+	movsd       [rsp+40], xmm4
+	cvtss2sd    xmm4, xmm1
+	movsd       [rsp+48], xmm4
+	cvtss2sd    xmm2, xmm1
+	cvtss2sd    xmm3, xmm1
+	cvtss2sd    xmm1, xmm1
+	movq        rdx, xmm1
+	movq        r8, xmm2
+	movq        r9, xmm3
 	call        printf
 	mov         rax, 0
-	add         rsp, 64
+	add         rsp, 32
 	pop         rbp
 	ret         
 

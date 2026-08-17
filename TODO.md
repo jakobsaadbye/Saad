@@ -1,6 +1,11 @@
 Todo list:
 -------------------
 
+[]: BC - Register allocator crossing calls
+[]: BC - Function calls
+[]: BC - Member access
+[]: BC - Array access
+
 
 []: Disallow integer and floating point arithmetic
 a := 3;

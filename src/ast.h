@@ -120,6 +120,7 @@ typedef enum AstFlags {
     AST_FLAG_EXPR_IS_SPREADED                      = 1 << 5, // Set if the expression has had the operator ... applied to it
     AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER           = 1 << 7, // Set on an array access on a pointer
     AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN        = 1 << 8, // Set on constant identifiers having a function as value
+    AST_FLAG_IS_BYTECODE_GENERATED                 = 1 << 9, // Set on certain nodes (e.g functions) after it has gone through bytecode generation
 } AstFlags;
 
 typedef struct Ast {
@@ -744,6 +745,24 @@ bool is_unsigned_integer(Type *type);
 bool is_unsigned_integer_ish(Type *type);
 
 
+typedef enum CodegenBackend {
+    BACKEND_X64_OLD,
+    BACKEND_X64_NEW,
+} CodegenBackend;
+
+typedef enum OptimizationLevel {
+    OPTIMIZATION_LEVEL_O0,
+    OPTIMIZATION_LEVEL_O1,
+} OptimizationLevel;
+
+typedef struct CompilerConfig {
+    char              *compiler_path;
+    char              *stdlib_path;
+    char              *working_directory;
+    char              *file_extension;
+    CodegenBackend     backend;
+    OptimizationLevel  optimization_level;
+} CompilerConfig;
 
 
 #endif

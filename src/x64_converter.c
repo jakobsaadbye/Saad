@@ -153,67 +153,30 @@ void x64_begin_convert(X64Converter *conv) {
 
 }
 
-static char *gpr_scatch_register[] = {
-    "rax",
-    "r13",
-    "r14",
-    "r15",
-};
+// static char *gpr_scatch_register[] = {
+//     "rax",
+//     "r13",
+//     "r14",
+//     "r15",
+// };
 
-static char *xmm_scratch_registers[] = {
-    "xmm8",
-    "xmm9",
-    "xmm10",
-    "xmm11",
-};
-
-Register gpr_register_index_to_x86_register(int reg_index) {
-    Register gpr_x86_registers[] = {
-        REG_RBX,
-        REG_RCX,
-        REG_R8,
-        REG_R9,
-        REG_R10,
-        REG_R11,
-        REG_R12,
-    };
-
-    return gpr_x86_registers[reg_index];
-}
-
-Register sse_register_index_to_x86_register(int reg_index) {
-    Register sse_x86_registers[] = {
-        REG_XMM0,
-        REG_XMM1,
-        REG_XMM2,
-        REG_XMM3,
-        REG_XMM4,
-        REG_XMM5,
-        REG_XMM6,
-        REG_XMM7,
-    };
-
-    return sse_x86_registers[reg_index];
-}
+// static char *xmm_scratch_registers[] = {
+//     "xmm8",
+//     "xmm9",
+//     "xmm10",
+//     "xmm11",
+// };
 
 char *register_index_to_string(int reg_index, int size) {
-    Register x86_reg = gpr_register_index_to_x86_register(reg_index);
-    return register_to_str(x86_reg, size);
+    return register_to_str(reg_index, size);
 }
 
 char *sse_register_index_to_string(int reg_index, int size) {
-    Register x86_reg = sse_register_index_to_x86_register(reg_index);
-    return register_to_str(x86_reg, size);
+    return register_to_str(reg_index, size);
 }
 
 char *get_register_string_sized(Operand op, int size) {
-    Register x86_reg;
-    if (op.is_sse) {
-        x86_reg = sse_register_index_to_x86_register(op.reg);
-    } else {
-        x86_reg = gpr_register_index_to_x86_register(op.reg);
-    }
-    return register_to_str(x86_reg, size);
+    return register_to_str(op.reg, size);
 }
 
 char *get_register_string(Operand op) {
@@ -255,10 +218,15 @@ void x64_compute_function_stack_frame(X64Converter *conv, BytecodeFunction *func
 
     func->local_stack_size += func->num_spill_slots * 8;
 
+    // Align to 16 bytes
+    func->local_stack_size = align_up(func->local_stack_size, 16);
+
+    // Reserve space for saved xmm registers
+    func->local_stack_size += func->used_sse_callee_saved_registers.count * 16;
+
     // Shadow space
     func->local_stack_size += 32;
-
-    func->local_stack_size = align_up(func->local_stack_size, 16);
+    
 }
 
 void x64_emit_function_defn(X64Converter *conv, BytecodeFunction *func) {
@@ -277,9 +245,22 @@ void x64_emit_function_defn(X64Converter *conv, BytecodeFunction *func) {
     // Prolog
     //
     sb_append(&conv->code, "%s:\n", func->symbol_name);
+    for (int i = 0; i < func->used_gpr_callee_saved_registers.count; i++) {
+        Register *reg = da_get(func->used_gpr_callee_saved_registers, i);
+        x64_code(conv, "push", "%s", register_to_str(*reg, 8));
+    }
+    if (func->used_gpr_callee_saved_registers.count % 2 == 1) {
+        x64_code(conv, "sub", "rsp, 8");
+    }
     x64_code(conv, "push", "rbp");
     x64_code(conv, "mov", "rbp, rsp");
     x64_code(conv, "sub", "rsp, %d", func->local_stack_size);
+    for (int i = 0; i < func->used_sse_callee_saved_registers.count; i++) {
+        Register *reg = da_get(func->used_sse_callee_saved_registers, i);
+        int stack_offset = (i + 1) * -16;
+        x64_code(conv, "movaps", "%d[rbp], %s", stack_offset, register_to_str(*reg, 8));
+    }
+
 
     // Check if we should save arguments to the shadow space
     bool save_arguments_in_shadow_space = false;
@@ -318,12 +299,25 @@ void x64_emit_function_defn(X64Converter *conv, BytecodeFunction *func) {
         x64_emit_basic_block(conv, bb);
     }
 
+
     //
     // Epilog
     //
     x64_code(conv, "mov", "rax, 0");
+    for (int i = func->used_sse_callee_saved_registers.count - 1; i >= 0; i--) {
+        Register *reg = da_get(func->used_sse_callee_saved_registers, i);
+        int stack_offset = (i + 1) * -16;
+        x64_code(conv, "movaps", "%s, %d[rbp]", register_to_str(*reg, 8), stack_offset);
+    }
     x64_code(conv, "add", "rsp, %d", func->local_stack_size);
+    if (func->used_gpr_callee_saved_registers.count % 2 == 1) {
+        x64_code(conv, "add", "rsp, 8");
+    }
     x64_code(conv, "pop", "rbp");
+    for (int i = func->used_gpr_callee_saved_registers.count - 1; i >= 0; i--) {
+        Register *reg = da_get(func->used_gpr_callee_saved_registers, i);
+        x64_code(conv, "pop", "%s", register_to_str(*reg, 8));
+    }
     x64_code(conv, "ret", "");
 }
 
@@ -343,12 +337,36 @@ Register x64_get_xmm_argument_register_from_index(int index) {
     return REG_NONE;
 }
 
+typedef enum ArgMoveKind {
+    ARG_MOVE_PLAIN,            // mov (gpr) / movaps (xmm)
+    ARG_MOVE_BITCAST_SSE,      // movq  dst_gpr, src_xmm   (raw bit copy across files)
+    ARG_MOVE_PROMOTE_F32_F64,  // cvtss2sd dst_xmm, src_xmm
+} ArgMoveKind;
+
 typedef struct ArgMove {
-    char *dst;
-    char *src;
-    bool  src_is_sse;   // true => emit movq (bitcast) instead of mov
-    bool  done;
+    Register    dst;
+    Register    src;
+    ArgMoveKind kind;
+    bool        done;
 } ArgMove;
+
+void x64_emit_argument_move(X64Converter *conv, ArgMove *move, bool is_xmm_pool) {
+    char *dst = register_index_to_string(move->dst, 8);
+    char *src = register_index_to_string(move->src, 8);
+
+    switch (move->kind) {
+        case ARG_MOVE_BITCAST_SSE:
+            x64_code(conv, "movq", "%s, %s", dst, src);
+            break;
+        case ARG_MOVE_PROMOTE_F32_F64:
+            x64_code(conv, "cvtss2sd", "%s, %s", dst, src);
+            break;
+        case ARG_MOVE_PLAIN:
+            if (move->dst != move->src)
+                x64_code(conv, is_xmm_pool ? "movaps" : "mov", "%s, %s", dst, src);
+            break;
+    }
+}
 
 void x64_sequence_moves(X64Converter *conv, ArgMove *moves, int count, bool is_xmm_pool) {
     bool pending = true;
@@ -363,16 +381,11 @@ void x64_sequence_moves(X64Converter *conv, ArgMove *moves, int count, bool is_x
             bool needed_elsewhere = false;
             for (int j = 0; j < count; j++) {
                 if (j == i || moves[j].done) continue;
-                if (strcmp(moves[j].src, moves[i].dst) == 0) { needed_elsewhere = true; break; }
+                if (moves[j].src == moves[i].dst) { needed_elsewhere = true; break; }
             }
 
             if (!needed_elsewhere) {
-                if (strcmp(moves[i].dst, moves[i].src) != 0) {
-                    if (moves[i].src_is_sse)
-                        x64_code(conv, "movq", "%s, %s", moves[i].dst, moves[i].src);
-                    else
-                        x64_code(conv, is_xmm_pool ? "movaps" : "mov", "%s, %s", moves[i].dst, moves[i].src);
-                }
+                x64_emit_argument_move(conv, &moves[i], is_xmm_pool);
                 moves[i].done = true;
                 progressed = true;
             }
@@ -381,12 +394,17 @@ void x64_sequence_moves(X64Converter *conv, ArgMove *moves, int count, bool is_x
         if (pending && !progressed) {
             for (int i = 0; i < count; i++) {
                 if (moves[i].done) continue;
-                char *scratch = is_xmm_pool ? xmm_scratch_registers[i] : gpr_scatch_register[i];
 
-                x64_code(conv, is_xmm_pool ? "movaps" : "mov", "%s, %s", scratch, moves[i].dst);
+                Register scratch = is_xmm_pool ? x64_scratch_registers_sse[0]
+                                                : x64_scratch_registers_gpr[0];
+                char *dst_str     = register_index_to_string(moves[i].dst, 8);
+                char *scratch_str = register_index_to_string(scratch, 8);
+
+                x64_code(conv, is_xmm_pool ? "movaps" : "mov", "%s, %s", scratch_str, dst_str);
+
                 for (int j = 0; j < count; j++) {
                     if (j == i || moves[j].done) continue;
-                    if (strcmp(moves[j].src, moves[i].dst) == 0) moves[j].src = scratch;
+                    if (moves[j].src == moves[i].dst) moves[j].src = scratch;
                 }
                 break;
             }
@@ -404,67 +422,58 @@ void x64_emit_function_call(X64Converter *conv, Inst *inst) {
 
     for (int i = 0; i < call->arguments.count; i++) {
         CallArgument *arg = da_get(call->arguments, i);
+        bool arg_is_float  = arg->type->kind == TYPE_FLOAT;
+        bool needs_promote = arg_is_float && arg->is_vararg && arg->type->size == 4;
 
-        bool arg_is_float = arg->type->kind == TYPE_FLOAT;
-
-        // @Cleanup: This could just be one call
         Register gpr_reg = x64_get_gpr_argument_register_from_index(i);
-        Register xmm_reg  = x64_get_xmm_argument_register_from_index(i);
+        Register xmm_reg = x64_get_xmm_argument_register_from_index(i);
+        Register src      = arg->vreg;
 
         if (gpr_reg == REG_NONE) {
-            // 5th+ arg: goes on the stack
+            // 5th+ arg: goes on the stack. Only one value in flight here,
+            // consumed immediately -- single scratch is genuinely fine.
             int stack_offset = 32 + (i - 4) * 8;
-            if (arg_is_float) {
-                char *src = sse_register_index_to_string(arg->vreg, 8);
 
-                if (arg->is_vararg && arg->type->size == 4) {
-                    char *scratch = xmm_scratch_registers[i % 4];
-                    x64_code(conv, "cvtss2sd", "%s, %s", scratch, src);
+            if (arg_is_float) {
+                if (needs_promote) {
+                    Register scratch = x64_scratch_registers_sse[0];
+                    x64_code(conv, "cvtss2sd", "%s, %s",
+                        register_index_to_string(scratch, 8),
+                        register_index_to_string(src, 8));
                     src = scratch;
                 }
-
-                x64_code(conv, "movsd", "[rsp+%d], %s", stack_offset, src);
+                x64_code(conv, "movsd", "[rsp+%d], %s", stack_offset, register_index_to_string(src, 8));
             } else {
-                char *src = register_index_to_string(arg->vreg, 8);
-                x64_code(conv, "mov", "[rsp+%d], %s", stack_offset, src);
+                x64_code(conv, "mov", "[rsp+%d], %s", stack_offset, register_index_to_string(src, 8));
             }
             continue;
         }
 
         if (arg_is_float) {
-            char *src = sse_register_index_to_string(arg->vreg, 8);
-            xmm_moves[xmm_count++] = (ArgMove) { 
-                .dst = register_to_str(xmm_reg, 8), 
-                .src = src 
+            xmm_moves[xmm_count++] = (ArgMove) {
+                .dst  = xmm_reg,
+                .src  = src,
+                .kind = needs_promote ? ARG_MOVE_PROMOTE_F32_F64 : ARG_MOVE_PLAIN,
             };
 
             if (arg->is_vararg) {
-
-                if (arg->type->size == 4) {
-                    // Promote f32 -> f64
-                    char *xmm_scratch_reg = xmm_scratch_registers[i];
-                    x64_code(conv, "cvtss2sd", "%s, %s", xmm_scratch_reg, src);
-                    src = xmm_scratch_reg;
-                }
-
-                // duplicate raw bits into the positional GPR, scheduled with the rest
-                gpr_moves[gpr_count++] = (ArgMove){
-                    .dst = register_to_str(gpr_reg, 8),
-                    .src = src,
-                    .src_is_sse = true
+                gpr_moves[gpr_count++] = (ArgMove) {
+                    .dst  = gpr_reg,
+                    .src  = xmm_reg,
+                    .kind = ARG_MOVE_BITCAST_SSE,
                 };
             }
         } else {
-            char *src = register_index_to_string(arg->vreg, 8);
-            gpr_moves[gpr_count++] = (ArgMove) { 
-                .dst = register_to_str(gpr_reg, 8), 
-                .src = src 
+            gpr_moves[gpr_count++] = (ArgMove) {
+                .dst  = gpr_reg,
+                .src  = src,
+                .kind = ARG_MOVE_PLAIN,
             };
         }
     }
 
-    x64_sequence_moves(conv, gpr_moves, gpr_count, false);
     x64_sequence_moves(conv, xmm_moves, xmm_count, true);
+    x64_sequence_moves(conv, gpr_moves, gpr_count, false);
 
     x64_code(conv, "call", "%s", inst->op2.label);
 }
