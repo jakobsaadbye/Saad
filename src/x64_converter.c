@@ -207,6 +207,32 @@ int spill_vreg(X64Converter *conv, int vreg) {
     return current_offset;
 }
 
+int x64_compute_temporary_storage_size(BytecodeFunction *func) {
+    int max_temp_size = 0;
+    
+    // Reserved space for function arguments spilled to the stack
+    for (int i = 0; i < func->basic_blocks.count; i++) {
+        BasicBlock *bb = da_get_deref(func->basic_blocks, i);
+        
+        for (int j = 0; j < bb->instructions.count; j++) {
+            Inst *inst = da_get(bb->instructions, j);
+
+            if (inst->kind == INST_CALL) {
+                InstFunctionCall *call = inst->data;
+
+                if (call->arguments.count > 4) {
+                    int temp_size = (1 + call->arguments.count - 4) * 8;
+
+                    if (temp_size > max_temp_size) max_temp_size = temp_size;
+                }
+            }
+        }
+
+    }
+
+    return max_temp_size;
+}
+
 void x64_compute_function_stack_frame(X64Converter *conv, BytecodeFunction *func) {
     // Local variables comes first
     func->local_stack_size += -func->base_ptr;
@@ -217,6 +243,10 @@ void x64_compute_function_stack_frame(X64Converter *conv, BytecodeFunction *func
     }
 
     func->local_stack_size += func->num_spill_slots * 8;
+
+    // Extra temporary size
+    int temporary_storage_size = x64_compute_temporary_storage_size(func);
+    func->local_stack_size += temporary_storage_size;
 
     // Align to 16 bytes
     func->local_stack_size = align_up(func->local_stack_size, 16);

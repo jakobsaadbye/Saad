@@ -7,8 +7,14 @@ foo :: () -> int {
 }
 
 main :: () {
-    a := 5.0;
+    a := 1.0;
+    b := 2.0;
+    c := 3.0;
+    d := 4.0;
+    e := 5.0;
+    f := 6.0;
+    g := 7.0;
     // c := foo();
 
-    printf(xx "%f-%f-%f-%f-%f-%f\n", a, a, a, a, a, a);
+    printf(xx "%f-%f-%f-%f-%f-%f-%f\n", a, a, a, a, a, a, a);
 }

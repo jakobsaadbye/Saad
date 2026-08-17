@@ -12,12 +12,30 @@ segment .data
    enum_to_int_buffer times 20 DB 0
 	align 4
 	FLOAT_0:
+	dd 1.000000
+	align 4
+	FLOAT_1:
+	dd 2.000000
+	align 4
+	FLOAT_2:
+	dd 3.000000
+	align 4
+	FLOAT_3:
+	dd 4.000000
+	align 4
+	FLOAT_4:
 	dd 5.000000
-	_data_0 DB `%f-%f-%f-%f-%f-%f\n`, 0
+	align 4
+	FLOAT_5:
+	dd 6.000000
+	align 4
+	FLOAT_6:
+	dd 7.000000
+	_data_0 DB `%f-%f-%f-%f-%f-%f-%f\n`, 0
 	align 8
-	STRING_1:
+	STRING_7:
 	dq _data_0
-	dq 19:
+	dq 22:
 segment .rdata
 segment .rdata
 segment .text
@@ -62,11 +80,23 @@ L0:
 main:
 	push        rbp
 	mov         rbp, rsp
-	sub         rsp, 32
+	sub         rsp, 80
 L1:
 	movss       xmm0, [rel FLOAT_0]
 	movss       xmm1, xmm0
-	mov         rax, STRING_1
+	movss       xmm0, [rel FLOAT_1]
+	movss       xmm2, xmm0
+	movss       xmm0, [rel FLOAT_2]
+	movss       xmm2, xmm0
+	movss       xmm0, [rel FLOAT_3]
+	movss       xmm2, xmm0
+	movss       xmm0, [rel FLOAT_4]
+	movss       xmm2, xmm0
+	movss       xmm0, [rel FLOAT_5]
+	movss       xmm2, xmm0
+	movss       xmm0, [rel FLOAT_6]
+	movss       xmm2, xmm0
+	mov         rax, STRING_7
 	mov         rcx, [rax]
 	cvtss2sd    xmm4, xmm1
 	movsd       [rsp+32], xmm4
@@ -74,6 +104,8 @@ L1:
 	movsd       [rsp+40], xmm4
 	cvtss2sd    xmm4, xmm1
 	movsd       [rsp+48], xmm4
+	cvtss2sd    xmm4, xmm1
+	movsd       [rsp+56], xmm4
 	cvtss2sd    xmm2, xmm1
 	cvtss2sd    xmm3, xmm1
 	cvtss2sd    xmm1, xmm1
@@ -82,7 +114,7 @@ L1:
 	movq        r9, xmm3
 	call        printf
 	mov         rax, 0
-	add         rsp, 32
+	add         rsp, 80
 	pop         rbp
 	ret         
 
