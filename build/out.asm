@@ -10,32 +10,25 @@ segment .data
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
    enum_to_int_buffer times 20 DB 0
-	align 4
-	FLOAT_0:
-	dd 1.000000
-	align 4
-	FLOAT_1:
-	dd 2.000000
+	_data_0 DB `%d-%f-%lf-%d-%lf\n`, 0
+	align 8
+	STRING_0:
+	dq _data_0
+	dq 18:
+	_data_1 DB `%d-%d\n`, 0
+	align 8
+	STRING_1:
+	dq _data_1
+	dq 7:
 	align 4
 	FLOAT_2:
-	dd 3.000000
-	align 4
-	FLOAT_3:
-	dd 4.000000
-	align 4
-	FLOAT_4:
-	dd 5.000000
-	align 4
-	FLOAT_5:
-	dd 6.000000
-	align 4
-	FLOAT_6:
-	dd 7.000000
-	_data_0 DB `%f-%f-%f-%f-%f-%f-%f\n`, 0
+	dd 2.500000
 	align 8
-	STRING_7:
-	dq _data_0
-	dq 22:
+	FLOAT_3:
+	dq 3.140000
+	align 8
+	FLOAT_4:
+	dq 6.280000
 segment .rdata
 segment .rdata
 segment .text
@@ -68,65 +61,69 @@ segment .text
    extern Type_untyped_float
    extern printf
 foo:
+	push        rbx
+	sub         rsp, 8
 	push        rbp
 	mov         rbp, rsp
-	sub         rsp, 48
-	mov         -8[rbp], rcx
+	sub         rsp, 96
+	mov         -4[rbp], ecx
+	movss       -8[rbp], xmm1
+	movsd       -16[rbp], xmm2
+	mov         -17[rbp], r9b
+	movsd       xmm5, 64[rbp]
+	movsd       -32[rbp], xmm5
 L0:
+	mov         rax, 69
+	mov         ebx, eax
+	mov         rax, STRING_0
+	mov         rcx, [rax]
+	mov         eax, -4[rbp]
+	movss       xmm0, -8[rbp]
+	movsd       xmm1, -16[rbp]
+	movzx       rdx, BYTE -17[rbp]
+	movsd       xmm2, -32[rbp]
+	mov         [rsp+32], rdx
+	movsd       [rsp+40], xmm2
+	cvtss2sd    xmm2, xmm0
+	movaps      xmm3, xmm1
+	mov         rdx, rax
+	movq        r8, xmm2
+	movq        r9, xmm3
+	call        printf
+	mov         rax, 3
+	mov         ecx, ebx
+	add         ecx, eax
+	mov         eax, ecx
+	mov         rcx, STRING_1
+	mov         rdx, [rcx]
+	mov         rcx, rdx
+	mov         rdx, rbx
+	mov         r8, rax
+	call        printf
 	mov         rax, 0
-	add         rsp, 48
+	add         rsp, 96
+	add         rsp, 8
 	pop         rbp
+	pop         rbx
 	ret         
 main:
 	push        rbp
 	mov         rbp, rsp
-	sub         rsp, 144
-	movaps      -16[rbp], xmm6
-	movaps      -32[rbp], xmm7
+	sub         rsp, 48
 L1:
-	movss       xmm0, [rel FLOAT_0]
-	movss       -4[rbp], xmm0
-	movss       xmm0, [rel FLOAT_1]
-	movss       -8[rbp], xmm0
+	mov         rax, 1
 	movss       xmm0, [rel FLOAT_2]
-	movss       -12[rbp], xmm0
-	movss       xmm0, [rel FLOAT_3]
-	movss       -16[rbp], xmm0
-	movss       xmm0, [rel FLOAT_4]
-	movss       -20[rbp], xmm0
-	movss       xmm0, [rel FLOAT_5]
-	movss       -24[rbp], xmm0
-	movss       xmm0, [rel FLOAT_6]
-	movss       -28[rbp], xmm0
+	movsd       xmm1, [rel FLOAT_3]
+	mov         rcx, 255
+	movsd       xmm2, [rel FLOAT_4]
+	movsd       [rsp+32], xmm2
+	movaps      xmm2, xmm1
+	movaps      xmm1, xmm0
+	mov         r9, rcx
+	mov         rcx, rax
 	call        foo
-	mov         rax, STRING_7
-	mov         rcx, [rax]
-	movss       xmm0, -4[rbp]
-	movss       xmm1, -8[rbp]
-	movss       xmm2, -12[rbp]
-	movss       xmm3, -16[rbp]
-	movss       xmm4, -20[rbp]
-	movss       xmm6, -24[rbp]
-	movss       xmm7, -28[rbp]
-	cvtss2sd    xmm5, xmm3
-	movsd       [rsp+32], xmm5
-	cvtss2sd    xmm5, xmm4
-	movsd       [rsp+40], xmm5
-	cvtss2sd    xmm5, xmm6
-	movsd       [rsp+48], xmm5
-	cvtss2sd    xmm5, xmm7
-	movsd       [rsp+56], xmm5
-	cvtss2sd    xmm3, xmm2
-	cvtss2sd    xmm2, xmm1
-	cvtss2sd    xmm1, xmm0
-	movq        rdx, xmm1
-	movq        r8, xmm2
-	movq        r9, xmm3
-	call        printf
 	mov         rax, 0
-	movaps      xmm7, -32[rbp]
-	movaps      xmm6, -16[rbp]
-	add         rsp, 144
+	add         rsp, 48
 	pop         rbp
 	ret         
 

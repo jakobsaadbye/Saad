@@ -161,28 +161,43 @@ char *get_register_string(Operand op) {
     return register_to_str(op.reg, op.size);
 }
 
-int get_vreg_stack_offset(X64Converter *conv, int vreg) {
-   int *stack_slot = da_get(conv->current_bytecode_function->vreg_to_stack_slot, vreg);
-   return *stack_slot;
-}
-
-void set_vreg_stack_offset(X64Converter *conv, int vreg, int offset) {
-   int *stack_slot = da_get(conv->current_bytecode_function->vreg_to_stack_slot, vreg);
-   *stack_slot = offset;
-}
-
-// Sets a stack offset for the virtual register vreg
-int spill_vreg(X64Converter *conv, int vreg) {
-    int current_offset = get_vreg_stack_offset(conv, vreg);
-    if (current_offset == 0) {
-        conv->current_bytecode_function->local_stack_size += 8;
-
-        int offset = -conv->current_bytecode_function->local_stack_size;
-        set_vreg_stack_offset(conv, vreg, offset);
-        return offset;
+char *get_store_instruction(Type *type) {
+    if (type->kind == TYPE_FLOAT) {
+        return type->size == 8 ? "movsd" : "movss";
     }
+    return "mov";
+}
 
-    return current_offset;
+void x64_emit_store(X64Converter *conv, int dst_offset, Register src_reg, Type *src_type) {
+    if (src_type->kind == TYPE_FLOAT) {
+        char *inst = src_type->size == 8 ? "movsd" : "movss";
+        char *src = register_to_str(src_reg, src_type->size);
+        x64_code(conv, inst, "%d[rbp], %s", dst_offset, src);
+    } else {
+
+        if (src_type->size <= 8) {
+            char *src = register_to_str(src_reg, src_type->size);
+            x64_code(conv, "mov", "%d[rbp], %s", dst_offset, src);
+        } else {
+            // TODO: Maybe perform a memcpy?
+            XXX;
+        }
+    }
+}
+
+void x64_emit_load(X64Converter *conv, Register dst_reg, Type *dst_type, int src_offset) {
+    if (dst_type->kind != TYPE_FLOAT && dst_type->size < 4) {
+        // Widen to be in eax / rax
+        char *mov_string = is_unsigned_integer_ish(dst_type) ? "movzx" : "movsx";
+        char *dst64 = register_to_str(dst_reg, 8);
+        char *width = word_size(dst_type);
+
+        x64_code(conv, mov_string, "%s, %s %d[rbp]", dst64, width, src_offset);
+    } else {
+        char *dst = register_to_str(dst_reg, dst_type->size);
+        char *inst = get_store_instruction(dst_type);
+        x64_code(conv, inst, "%s, %d[rbp]", dst, src_offset);
+    }
 }
 
 int x64_compute_temporary_storage_size(BytecodeFunction *func) {
@@ -211,16 +226,21 @@ int x64_compute_temporary_storage_size(BytecodeFunction *func) {
     return max_temp_size;
 }
 
-void x64_compute_function_stack_frame(X64Converter *conv, BytecodeFunction *func) {
+void x64_compute_function_stack_frame(BytecodeFunction *func) {
     // Local variables comes first
-    func->local_stack_size += -func->base_ptr;
+    // func->local_stack_size += -func->base_ptr;
 
-    for (int i = 0; i < func->params.count; i++) {
-        BytecodeFunctionParameter *param = da_get(func->params, i);
-        spill_vreg(conv, param->vreg);
+    // Reserve space for saved xmm registers
+    func->local_stack_size += func->used_sse_callee_saved_registers.count * 16;
+
+    // Reserve space for locals and rewrite the stack slots
+    for (int i = 0; i < func->stack_slots.count; i++) {
+        StackSlot *slot = da_get(func->stack_slots, i);
+        func->local_stack_size += slot->size;
+        func->local_stack_size = align_up(func->local_stack_size, slot->size > 8 ? 8 : slot->size);
+
+        slot->assigned_offset = -func->local_stack_size;
     }
-
-    func->local_stack_size += func->num_spill_slots * 8;
 
     // Extra temporary size
     int temporary_storage_size = x64_compute_temporary_storage_size(func);
@@ -229,12 +249,22 @@ void x64_compute_function_stack_frame(X64Converter *conv, BytecodeFunction *func
     // Align to 16 bytes
     func->local_stack_size = align_up(func->local_stack_size, 16);
 
-    // Reserve space for saved xmm registers
-    func->local_stack_size += func->used_sse_callee_saved_registers.count * 16;
-
     // Shadow space
     func->local_stack_size += 32;
-    
+
+}
+
+Register x64_get_scratch_register(Type *type) {
+    if (type->kind == TYPE_FLOAT) {
+        return x64_scratch_registers_sse[0];
+    } else {
+        return x64_scratch_registers_gpr[0];
+    }
+}
+
+int x64_get_stack_slot_offset_from_index(X64Converter *conv, int slot_index) {
+    StackSlot *slot = da_get(conv->current_bytecode_function->stack_slots, slot_index);
+    return slot->assigned_offset;
 }
 
 void x64_emit_function_defn(X64Converter *conv, BytecodeFunction *func) {
@@ -247,7 +277,7 @@ void x64_emit_function_defn(X64Converter *conv, BytecodeFunction *func) {
     conv->current_bytecode_function = func;
 
     // Compute frame size
-    x64_compute_function_stack_frame(conv, func);
+    x64_compute_function_stack_frame(func);
 
     //
     // Prolog
@@ -271,34 +301,31 @@ void x64_emit_function_defn(X64Converter *conv, BytecodeFunction *func) {
 
 
     // Check if we should save arguments to the shadow space
-    bool save_arguments_in_shadow_space = false;
+    // bool save_arguments_in_shadow_space = false;
 
     // Move parameters into their home-address
     for (int i = 0; i < func->params.count; i++) {
         BytecodeFunctionParameter *param = da_get(func->params, i);
 
-        int param_offset = get_vreg_stack_offset(conv, param->vreg);
+        Register input_reg = get_argument_register_from_index(i, param->type);
 
-        Register input_reg = REG_RAX;
-        if (i < 4) {
-            if (save_arguments_in_shadow_space) {
-                XXX;
-            } else {
-                input_reg = get_argument_register_from_index(i, param->type);
-                if (param->type->size > 8) {
-                    x64_code(conv, "mov" "rax, %s", register_to_str(input_reg, 8));
-                }  
-            }
+        int home_offset = x64_get_stack_slot_offset_from_index(conv, param->stack_slot.index);
+
+        if (input_reg == REG_NONE) {
+            // Load from stack
+            int stack_offset = 32 + 16 + (i - 4) * 8;
+
+            // Account for shifted rbp from callee saved registers
+            stack_offset += func->used_gpr_callee_saved_registers.count * 8;
+            stack_offset += func->used_gpr_callee_saved_registers.count % 2 == 1 ? 8 : 0;
+
+            Register scratch_reg = x64_get_scratch_register(param->type);
+            x64_emit_load(conv, scratch_reg, param->type, stack_offset);
+            x64_emit_store(conv, home_offset, scratch_reg, param->type);
         } else {
-            // XXX;
+            x64_emit_store(conv, home_offset, input_reg, param->type);
         }
-
-        if (param->type->size <= 8) {
-            x64_code(conv, "mov", "%d[rbp], %s", param_offset, register_to_str(input_reg, param->type->size));
-        } else {
-            XXX;
-        }
-
+        
     }
 
 
@@ -611,13 +638,6 @@ void x64_emit_logical_instruction(X64Converter *conv, Inst *inst) {
     return;
 }
 
-char *get_mov_string(Operand op) {
-    if (op.is_sse) {
-        return op.size == 8 ? "movsd" : "movss";
-    }
-    return "mov";
-}
-
 void x64_emit_mov_into(X64Converter *conv, Operand dst_op, Operand src_op) {
     if (dst_op.is_sse) {
         char *inst = dst_op.size == 8 ? "movsd" : "movss";
@@ -676,6 +696,7 @@ void x64_emit_arithmetic_instruction(X64Converter *conv, Inst *inst) {
             bool is_signed = is_signed_integer(inst->op1.type);
             int size = dst_op.size;
 
+            // TODO: Are we allowed to use these registers safely?
             char *rax_str = register_to_str(REG_RAX, size);
             char *rdx_str = register_to_str(REG_RDX, size);
 
@@ -838,19 +859,16 @@ void x64_load_constant(X64Converter *conv, int dst_reg, Constant *constant) {
     }
 }
 
-char *x64_make_memory_operand_string(X64Converter *conv, Operand op) {
-    char *buf = arena_allocate(&conv->temp_string_arena, 32);
+int x64_get_memory_operand_offset(X64Converter *conv, Operand op) {
     if (op.kind == OPERAND_MEMORY_SLOT) {
-        int stack_offset = slot_index_to_stack_offset(op.slot);
-        sprintf(buf, "%d[rbp]", stack_offset);
+        return x64_get_stack_slot_offset_from_index(conv, op.slot.index);
     } else if (op.kind == OPERAND_MEMORY_OFFSET) {
-        int stack_offset = op.offset;
-        sprintf(buf, "%d[rbp]", stack_offset);
+        return op.offset;
     } else {
         XXX;
     }
 
-    return buf;
+    return -1;
 }
 
 void x64_emit_instruction(X64Converter *conv, Inst *inst) {
@@ -890,29 +908,14 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
     }
     case INST_LOAD: 
     case INST_LOADF: {
-        char *dst = get_register_string(op1);
-        char *src = x64_make_memory_operand_string(conv, op2);
-
-        if (!op1.is_sse && op1.size < 4) {
-            // Widen to be in eax / rax
-            char *mov_string = is_unsigned_integer_ish(op1.type) ? "movzx" : "movsx";
-            char *dst64 = get_register_string_sized(op1, 8);
-            char *width = word_size(op1.type);
-
-            x64_code(conv, mov_string, "%s, %s %s", dst64, width, src);
-        } else {
-            x64_code(conv, get_mov_string(op1), "%s, %s", dst, src);
-        }
-
+        int src_offset = x64_get_memory_operand_offset(conv, op2);
+        x64_emit_load(conv, op1.reg, op1.type, src_offset);
         break;
     }
     case INST_STORE:
     case INST_STOREF: {
-        char *dst = x64_make_memory_operand_string(conv, op1);
-        char *src = get_register_string(op2);
-        char *mov_string = get_mov_string(op2);
-        x64_code(conv, mov_string, "%s, %s", dst, src);
-
+        int dst_offset = x64_get_memory_operand_offset(conv, op1);
+        x64_emit_store(conv, dst_offset, op2.reg, op2.type);
         break;
     }
     case INST_CALL: {

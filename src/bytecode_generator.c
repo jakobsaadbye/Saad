@@ -45,6 +45,7 @@ typedef struct BasicBlock {
 
 typedef struct BytecodeFunctionParameter {
     int   vreg;
+    StackSlot stack_slot;
     Type *type;
 } BytecodeFunctionParameter;
 
@@ -53,7 +54,7 @@ typedef struct LiveInterval {
     int start;
     int end;
     int assigned_reg; // -1 = spilled
-    int spill_slot;
+    StackSlot spill_slot;
     bool is_active;
     bool is_sse;
     bool has_reg;
@@ -67,7 +68,9 @@ typedef struct BytecodeFunction {
     DynamicArray basic_blocks; // of *BasicBlock.
     int          next_vreg;
     int          next_instruction_index;
+    int          next_stack_slot;
 
+    DynamicArray stack_slots; // of StackSlot
     DynamicArray params; // of BytecodeFunctionParameter
     bool         is_extern;
 
@@ -79,7 +82,6 @@ typedef struct BytecodeFunction {
     int          temporary_stack_size;
     int          base_ptr;
     int          temp_ptr;
-    int          num_spill_slots;
 
     DynamicArray vreg_to_stack_slot; // of int
     DynamicArray vreg_is_sse;        // of bool
@@ -434,8 +436,8 @@ typedef struct Operand {
         Constant *constant;   // Constant value. E.g strings, structs and arrays
         int    vreg;          // Virtual register index
         int    reg;           // Physical register index set after it has gone through IR rewrite
-        int    slot;          // Memory offset (e.g. from rbp)
-        int    offset;          // Memory offset (e.g. from rbp)
+        StackSlot slot;       // Memory slot (e.g. from rbp)
+        int    offset;        // Memory offset (e.g. from rbp)
         char  *label;         // E.g function call or branch label
         int    label_id;      // E.g id of a block
     };
@@ -466,6 +468,7 @@ BytecodeFunction *new_bytecode_function(BytecodeGenerator *bcg, AstFunctionDefn 
     func->symbol_name = func_defn->symbol_name;
     func->basic_blocks = da_init(16, sizeof(BasicBlock *));
     func->params = da_init(func_defn->parameters.count, sizeof(BytecodeFunctionParameter));
+    func->stack_slots = da_init(16, sizeof(StackSlot));
     func->vreg_to_stack_slot = da_init(128, sizeof(int));
     func->vreg_to_stack_slot.count = 128;
     func->vreg_is_sse = da_init(128, sizeof(int));
@@ -654,12 +657,12 @@ Operand make_constant_operand(Constant *constant) {
 static inline Operand make_op_memory_offset(int offset, Type *type) {
     return (Operand) {
         .kind = OPERAND_MEMORY_OFFSET,
-        .slot = offset,
+        .offset = offset,
         .type = type,
     };
 }
 
-static inline Operand make_op_memory_slot(int slot) {
+static inline Operand make_op_memory_slot(StackSlot slot) {
     return (Operand) {
         .kind = OPERAND_MEMORY_SLOT,
         .slot = slot,
@@ -884,7 +887,7 @@ void bcg_dump_live_intervals(StringBuilder *sb, BytecodeFunction *func) {
         if (interval->has_gone_through_register_allocation) {
             sb_append(sb, ", ");
             if (interval->assigned_reg == -1) {
-                sb_append(sb, "S[%d]", interval->spill_slot);
+                sb_append(sb, "S[%d]", interval->spill_slot.index);
             } else {
                 sb_append(sb, "p%d", interval->assigned_reg);
             }
@@ -981,6 +984,16 @@ void bcg_block(BytecodeGenerator *bcg, AstBlock *block) {
     }
 }
 
+StackSlot bc_allocate_stack_slot(BytecodeFunction *func, int size) {
+    int slot_index = func->next_stack_slot;
+    func->next_stack_slot += 1;
+
+    StackSlot slot = {.index = slot_index, .size = size };
+    da_append(&func->stack_slots, slot);
+
+    return slot;
+}
+
 int bc_allocate_local(BytecodeGenerator *bcg, int size) {
     assert(bcg->current_function);
 
@@ -1017,11 +1030,11 @@ void bcg_declaration(BytecodeGenerator *bcg, AstDeclaration *decl) {
                     make_op_register(src)
                 ));
             } else {
-                ident->stack_offset = bc_allocate_local(bcg, ident->type->size);
+                ident->stack_slot = bc_allocate_stack_slot(bcg->current_function, ident->type->size);
 
                 add_instruction(bcg, make_instruction_2(bcg,
                     INST_STORE, 
-                    make_op_memory_offset(ident->stack_offset, ident->type),
+                    make_op_memory_slot(ident->stack_slot),
                     make_op_register(src)
                 ));
             }
@@ -1255,14 +1268,14 @@ void bcg_function_defn(BytecodeGenerator *bcg, AstFunctionDefn *func_defn) {
     // Prologue:
 
     // Function parameters
-    // Bind each parameter to a fresh vreg, in order.
     for (int i = 0; i < func_defn->lowered_params.count; i++) {
         AstIdentifier *param = da_get_deref(func_defn->lowered_params, i);
-        IrValue value = fresh_register(bcg, param->type);
-        param->virtual_register = value.vreg;
+
+        param->stack_slot = bc_allocate_stack_slot(bcg->current_function, param->type->size);
 
         BytecodeFunctionParameter bc_param = {
-            .vreg = param->virtual_register,
+            .vreg = -1,
+            .stack_slot = param->stack_slot,
             .type = param->type
         };
 
@@ -1653,19 +1666,19 @@ IrValue bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
                 AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
                 assert(ident);
 
-                if (bcg->optimization_use_ir_values_for_identifiers) {
-                    assert(ident->stack_offset == 0);
 
+                if (ident->stack_slot.size == 0) {
+                    // Assume that this identifier was assigned a virtual register
                     return make_value(ident->virtual_register, ident->type);
                 } else {
-                    assert(ident->stack_offset < 0);
+                    assert(ident->stack_slot.size > 0);
 
                     IrValue dst = fresh_register(bcg, expr->type);
                     add_instruction(bcg, make_instruction_2(
                         bcg, 
                         INST_LOAD, 
                         make_op_register(dst),
-                        make_op_memory_offset(ident->stack_offset, ident->type)
+                        make_op_memory_slot(ident->stack_slot)
                     ));
     
                     return dst;
@@ -1923,7 +1936,7 @@ void mark_intervals_crossing_function_calls(BytecodeFunction *func) {
     }
 }
 
-void spill_at_interval(BytecodeFunction *func, LiveInterval *interval, int *next_spill_slot) {
+void spill_at_interval(BytecodeFunction *func, LiveInterval *interval) {
     // find the register-holding interval with the furthest end
 
     LiveInterval *spill = NULL;
@@ -1940,20 +1953,16 @@ void spill_at_interval(BytecodeFunction *func, LiveInterval *interval, int *next
         // evict spill: give its register to the new interval
         interval->assigned_reg = spill->assigned_reg;
         interval->has_reg = true;
-        interval->spill_slot = -1;
+        interval->spill_slot = (StackSlot){0};
 
         spill->assigned_reg = -1;
         spill->has_reg = false;
-        spill->spill_slot = (*next_spill_slot)++;
+        spill->spill_slot = bc_allocate_stack_slot(func, 8);
     } else {
         // new interval lives longest: spill it
         interval->assigned_reg = -1;
         interval->has_reg = false;
-        interval->spill_slot = (*next_spill_slot)++;
-    }
-
-    if (*next_spill_slot > func->num_spill_slots) {
-        func->num_spill_slots = *next_spill_slot;
+        interval->spill_slot = bc_allocate_stack_slot(func, 8);
     }
 }
 
@@ -1999,8 +2008,6 @@ void compute_register_allocation(BytecodeFunction *func) {
     free_registers.count = REG_COUNT;
     memset(free_registers.items, 1, free_registers.capacity);
 
-    int next_spill_slot = 0;   // bump-allocated stack slots
-
     for (int i = 0; i < func->live_intervals.count; i++) {
         LiveInterval *interval = da_get(func->live_intervals, i);
 
@@ -2035,7 +2042,7 @@ void compute_register_allocation(BytecodeFunction *func) {
             *slot = false;
         } else {
             // --- SpillAtInterval ---
-            spill_at_interval(func, interval, &next_spill_slot);
+            spill_at_interval(func, interval);
         }
     }
 }
@@ -2136,7 +2143,7 @@ int reg_of(BytecodeFunction *func, int vreg) {
     return li->assigned_reg;
 }
 
-int slot_of(BytecodeFunction *func, int vreg) {
+StackSlot slot_of(BytecodeFunction *func, int vreg) {
     LiveInterval *li = da_get(func->live_intervals, vreg);
     return li->spill_slot;
 }
@@ -2167,7 +2174,7 @@ void bcg_rewrite_vreg(BytecodeGenerator *bcg, BytecodeFunction *func, DynamicArr
         // Spilled
         Type *type = get_type_of_vreg(func, vreg);
         bool is_sse = is_sse_of(func, vreg);
-        int spill_slot = slot_of(func, vreg);
+        StackSlot spill_slot = slot_of(func, vreg);
         int scratch_reg = is_sse 
             ? x64_scratch_registers_sse[(*next_sse_scratch)++]
             : x64_scratch_registers_gpr[(*next_gpr_scratch)++];
@@ -2225,7 +2232,7 @@ void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *fu
         bool  dst_spilled = false;
         bool  dst_is_sse = false;
         int   dst_scratch_reg = 0;
-        int   dst_spill_slot = 0;
+        StackSlot dst_spill_slot = {0};
         if (instruction_has_destination(inst)) {
             Operand op = inst->operands[0];
             int reg = reg_of(func, op.vreg);
@@ -2239,7 +2246,7 @@ void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *fu
                     ? x64_scratch_registers_sse[next_sse_scratch++]
                     : x64_scratch_registers_gpr[next_gpr_scratch++];
 
-                dst_spill_slot  = slot_of(func, op.vreg);
+                dst_spill_slot = slot_of(func, op.vreg);
 
                 out.operands[0].reg = dst_scratch_reg;
             } else {
@@ -2282,7 +2289,7 @@ void bcg_rewrite_basic_block_spills(BytecodeGenerator *bcg, BytecodeFunction *fu
         if (reg == -1) {
             // Spilled
             int scratch_reg = x64_scratch_registers_gpr[next_gpr_scratch++];
-            int spill_slot = slot_of(func, bb->terminator.condition_reg);
+            StackSlot spill_slot = slot_of(func, bb->terminator.condition_reg);
             Type *cond_type = get_type_of_vreg(func, bb->terminator.condition_reg);
 
             Inst load_inst = make_instruction_2(

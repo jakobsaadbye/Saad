@@ -16,6 +16,7 @@ typedef struct AstFunctionDefn AstFunctionDefn;
 typedef struct Type Type;
 typedef struct TypeTable TypeTable;
 typedef struct TypeStruct TypeStruct;
+typedef struct StackSlot StackSlot;
 
 typedef uint8_t   u8;
 typedef uint16_t  u16;
@@ -111,6 +112,12 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
     OP_AS           = TOKEN_AS,
 } OperatorType;
 
+typedef struct StackSlot {
+    int index;
+    int size;
+    int assigned_offset; // Set by during emission stage
+} StackSlot;
+
 typedef enum AstFlags {
     AST_FLAG_COMPILER_GENERATED                    = 1 << 0,
     AST_FLAG_CG_EXPR_ASSIGNED_DIRECTLY_TO_VARIABLE = 1 << 1,
@@ -186,6 +193,7 @@ typedef struct AstIdentifier {
     AstDeclaration *decl; // The declaration it belongs to
 
     int virtual_register; // Used in bytecode_generator
+    StackSlot stack_slot; // Used in bytecode_generator
 
     AstIdentifier *ident_override; // Set on certain identifiers to tell codegen to use a lowered identifier representation instead. E.g variadic parameters are overriden
     int member_index;   // Used to know the insertion order of a struct member
@@ -763,6 +771,5 @@ typedef struct CompilerConfig {
     CodegenBackend     backend;
     OptimizationLevel  optimization_level;
 } CompilerConfig;
-
 
 #endif

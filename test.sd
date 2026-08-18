@@ -2,19 +2,13 @@ extern "C" {
     printf :: (format: *u8, args: ...any);
 }
 
-foo :: () -> int {
-    return 69;
+foo :: (a: int, b: float, c: f64, d: u8, e: f64) {
+    x := 69;
+    printf(xx "%d-%f-%lf-%d-%lf\n", a, b, c, d, e);
+    y := x + 3;
+    printf(xx "%d-%d\n", x, y);
 }
 
 main :: () {
-    a := 1.0;
-    b := 2.0;
-    c := 3.0;
-    d := 4.0;
-    e := 5.0;
-    f := 6.0;
-    g := 7.0;
-    foo();
-
-    printf(xx "%f-%f-%f-%f-%f-%f-%f\n", a, b, c, d, e, f, g);
+    foo(1, 2.5, 3.14, 255, 6.28);
 }
