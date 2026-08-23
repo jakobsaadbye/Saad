@@ -1769,7 +1769,7 @@ AstExpr *parse_array_access(Parser *parser, Token open_bracket, AstExpr *left) {
     array_ac->head.head.file      = parser->current_file;
     array_ac->head.head.start     = left->head.start;
     array_ac->head.head.end       = next.end;
-    array_ac->accessing           = left;
+    array_ac->left           = left;
     array_ac->index_expr          = index_expr;
     array_ac->open_bracket        = open_bracket;
     array_ac->close_bracket       = next;

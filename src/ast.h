@@ -489,7 +489,7 @@ typedef struct AstBinary {
 
 typedef struct AstArrayAccess {
     AstExpr  head;
-    AstExpr *accessing;
+    AstExpr *left;
     AstExpr *index_expr;
     Token    open_bracket;
     Token    close_bracket;

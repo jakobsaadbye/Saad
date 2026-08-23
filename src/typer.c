@@ -2931,11 +2931,11 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
 }
 
 Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
-    Type *type_being_accessed = check_expression(typer, array_ac->accessing, NULL);
+    Type *type_being_accessed = check_expression(typer, array_ac->left, NULL);
     if (!type_being_accessed) return NULL;
 
     if (type_being_accessed->kind != TYPE_ARRAY && type_being_accessed->kind != TYPE_POINTER && type_being_accessed->kind != TYPE_VARIADIC && type_being_accessed->kind != TYPE_STRING) {
-        report_error_range(typer->parser, array_ac->accessing->head.start, array_ac->open_bracket.start, "Cannot index into expression of type %s", type_to_str(type_being_accessed));
+        report_error_range(typer->parser, array_ac->left->head.start, array_ac->open_bracket.start, "Cannot index into expression of type %s", type_to_str(type_being_accessed));
         return NULL;
     }
 
@@ -2950,13 +2950,13 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
     if (type_being_accessed->kind == TYPE_VARIADIC) {
         // Treat the variadic as a slice
         TypeVariadic *variadic = (TypeVariadic *) type_being_accessed;
-        array_ac->accessing->type = (Type *) variadic->slice;
+        array_ac->left->type = (Type *) variadic->slice;
 
         elem_type = variadic->type;
     }
 
     if (type_being_accessed->kind == TYPE_STRING) {
-        array_ac->accessing->type = (Type *) type_defn_string_as_slice;
+        array_ac->left->type = (Type *) type_defn_string_as_slice;
         elem_type = primitive_type(PRIMITIVE_CHAR);
     }
 
@@ -2971,8 +2971,8 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
 
         TypeArray *array = ast_allocate(typer->parser, sizeof(TypeArray));
         array->head.head.kind  = AST_TYPE;
-        array->head.head.start = array_ac->accessing->head.start;
-        array->head.head.end   = array_ac->accessing->head.end;
+        array->head.head.start = array_ac->left->head.start;
+        array->head.head.end   = array_ac->left->head.end;
         array->head.kind       = TYPE_ARRAY;
         array->array_kind      = ARRAY_SLICE;
         array->elem_type       = ptr->pointer_to;
@@ -2981,7 +2981,7 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
         array->capacity        = 0;
         array->count           = 0;
 
-        array_ac->accessing->type = (Type *) array;
+        array_ac->left->type = (Type *) array;
         array_ac->head.head.flags |= AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER;
 
         elem_type = ptr->pointer_to;
@@ -2997,8 +2997,8 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
 
     // Reserve temporary space for the array literal if its
     // used in a quick array lookup like:  [1, 2, 3][0];
-    if (array_ac->accessing->head.kind == AST_ARRAY_LITERAL) {
-        reserve_temporary_storage(typer->enclosing_function, array_ac->accessing->type->size);
+    if (array_ac->left->head.kind == AST_ARRAY_LITERAL) {
+        reserve_temporary_storage(typer->enclosing_function, array_ac->left->type->size);
     }
 
     return elem_type;

@@ -168,35 +168,47 @@ char *get_mov_instruction(Type *type) {
     return "mov";
 }
 
-void x64_emit_store(X64Converter *conv, int dst_offset, Register src_reg, Type *src_type) {
+void x64_emit_store(X64Converter *conv, char *dst_offset, Register src_reg, Type *src_type) {
     if (src_type->kind == TYPE_FLOAT) {
         char *inst = src_type->size == 8 ? "movsd" : "movss";
         char *src = register_to_str(src_reg, src_type->size);
-        x64_code(conv, inst, "%d[rbp], %s", dst_offset, src);
+        x64_code(conv, inst, "%s, %s", dst_offset, src);
     } else {
 
         if (src_type->size <= 8) {
             char *src = register_to_str(src_reg, src_type->size);
-            x64_code(conv, "mov", "%d[rbp], %s", dst_offset, src);
+            x64_code(conv, "mov", "%s, %s", dst_offset, src);
         } else {
             XXX;
         }
     }
 }
 
-void x64_emit_load(X64Converter *conv, Register dst_reg, Type *dst_type, int src_offset) {
+void x64_emit_store_to_static_offset(X64Converter *conv, int dst_offset, Register src_reg, Type *src_type) {
+    char *dst_str = arena_allocate(&conv->temp_string_arena, 32);
+    sprintf(dst_str, "%d[rbp]", dst_offset);
+    x64_emit_store(conv, dst_str, src_reg, src_type);
+}
+
+void x64_emit_load(X64Converter *conv, Register dst_reg, Type *dst_type, char *src_offset) {
     if (dst_type->kind != TYPE_FLOAT && dst_type->size < 4) {
         // Widen to be in eax / rax
         char *mov_string = is_unsigned_integer_ish(dst_type) ? "movzx" : "movsx";
         char *dst64 = register_to_str(dst_reg, 8);
         char *width = word_size(dst_type);
-
-        x64_code(conv, mov_string, "%s, %s %d[rbp]", dst64, width, src_offset);
+        
+        x64_code(conv, mov_string, "%s, %s %s", dst64, width, src_offset);
     } else {
         char *dst = register_to_str(dst_reg, dst_type->size);
         char *inst = get_mov_instruction(dst_type);
-        x64_code(conv, inst, "%s, %d[rbp]", dst, src_offset);
+        x64_code(conv, inst, "%s, %s", dst, src_offset);
     }
+}
+
+void x64_emit_load_from_static_offset(X64Converter *conv, Register dst_reg, Type *dst_type, int src_offset) {
+    char *src_str = arena_allocate(&conv->temp_string_arena, 32);
+    sprintf(src_str, "%d[rbp]", src_offset);
+    x64_emit_load(conv, dst_reg, dst_type, src_str);
 }
 
 int x64_compute_temporary_storage_size(BytecodeFunction *func) {
@@ -319,10 +331,10 @@ void x64_emit_function_defn(X64Converter *conv, BytecodeFunction *func) {
             stack_offset += func->used_gpr_callee_saved_registers.count % 2 == 1 ? 8 : 0;
 
             Register scratch_reg = x64_get_scratch_register(param->type);
-            x64_emit_load(conv, scratch_reg, param->type, stack_offset);
-            x64_emit_store(conv, home_offset, scratch_reg, param->type);
+            x64_emit_load_from_static_offset(conv, scratch_reg, param->type, stack_offset);
+            x64_emit_store_to_static_offset(conv, home_offset, scratch_reg, param->type);
         } else {
-            x64_emit_store(conv, home_offset, input_reg, param->type);
+            x64_emit_store_to_static_offset(conv, home_offset, input_reg, param->type);
         }
         
     }
@@ -661,6 +673,44 @@ void x64_emit_mov_into(X64Converter *conv, Operand dst_op, Operand src_op) {
     x64_code(conv, "mov", "%s, %s", dst, src);
 }
 
+char *x64_get_memory_operand_string(X64Converter *conv, Operand op) {
+    char *str = arena_allocate(&conv->temp_string_arena, 32);
+
+    if (op.kind == OPERAND_MEMORY_STATIC) {
+        int base_offset = x64_get_stack_slot_offset_from_index(conv, op.slot.index);
+        int offset = base_offset + op.offset;
+
+        sprintf(str, "%d[rbp]", offset);
+    } else if (op.kind == OPERAND_MEMORY_DYNAMIC) {
+        char *reg_str = register_to_str(op.preg, 8);
+        sprintf(str, "%d[%s]", op.offset, reg_str);
+    } else {
+        XXX;
+    }
+
+    return str;
+}
+
+char *get_operand_string(X64Converter *conv, Operand op) {
+    if (is_memory_operand(op)) {
+        return x64_get_memory_operand_string(conv, op);
+    }
+
+    if (op.kind == OPERAND_IMM_INT) {
+        char *result = arena_allocate(&conv->temp_string_arena, 32);
+        sprintf(result, "%lld", op.imm_int);
+        return result;
+    }
+
+    if (op.kind == OPERAND_IMM_UINT) {
+        char *result = arena_allocate(&conv->temp_string_arena, 32);
+        sprintf(result, "%zu", op.imm_uint);
+        return result;
+    }
+
+    return get_register_string(op);
+}
+
 void x64_emit_arithmetic_instruction(X64Converter *conv, Inst *inst) {
     int operand_size = inst->op2.size;
 
@@ -672,7 +722,7 @@ void x64_emit_arithmetic_instruction(X64Converter *conv, Inst *inst) {
 
     char *dst = get_register_string(dst_op);
     char *a   = get_register_string(inst->op2);
-    char *b   = get_register_string(inst->op3);
+    char *b   = get_operand_string(conv, inst->op3);
 
     if (a != dst) {
         x64_emit_mov_into(conv, dst_op, inst->op2);
@@ -858,21 +908,6 @@ void x64_load_constant(X64Converter *conv, int dst_reg, Constant *constant) {
     }
 }
 
-int x64_get_memory_operand_offset(X64Converter *conv, Operand op) {
-    if (op.kind == OPERAND_MEMORY_SLOT) {
-        return x64_get_stack_slot_offset_from_index(conv, op.slot.index);
-    } else if (op.kind == OPERAND_MEMORY_OFFSET) {
-        return op.offset;
-    } else if (op.kind == OPERAND_MEMORY_REL_OFFSET) {
-        int base_offset = x64_get_stack_slot_offset_from_index(conv, op.slot.index);
-        return base_offset + op.offset;
-    } else {
-        XXX;
-    }
-
-    return -1;
-}
-
 void x64_emit_instruction(X64Converter *conv, Inst *inst) {
     Operand op1 = inst->op1;
     Operand op2 = inst->op2;
@@ -911,18 +946,18 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
     }
     case INST_LEA: {
         char *dst = register_to_str(op1.preg, 8);
-        int offset = x64_get_memory_operand_offset(conv, op2);
-        x64_code(conv, "lea", "%s, %d[rbp]", dst, offset);
+        char *src = x64_get_memory_operand_string(conv, op2);
+        x64_code(conv, "lea", "%s, %s", dst, src);
         break;
     }
     case INST_LOAD: {
-        int src_offset = x64_get_memory_operand_offset(conv, op2);
-        x64_emit_load(conv, op1.preg, op1.type, src_offset);
+        char *src = x64_get_memory_operand_string(conv, op2);
+        x64_emit_load(conv, op1.preg, op1.type, src);
         break;
     }
     case INST_STORE: {
-        int dst_offset = x64_get_memory_operand_offset(conv, op1);
-        x64_emit_store(conv, dst_offset, op2.preg, op2.type);
+        char *dst = x64_get_memory_operand_string(conv, op1);
+        x64_emit_store(conv, dst, op2.preg, op2.type);
         break;
     }
     case INST_CALL: {
@@ -930,10 +965,10 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
         break;
     }
     case INST_MEMSET: {
-        int offset = x64_get_memory_operand_offset(conv, op1);
+        char *dst = x64_get_memory_operand_string(conv, op1);
         u64 value = op2.imm_uint;
         u64 size = op3.imm_uint;
-        x64_code(conv, "lea", "rcx, %d[rbp]", offset);
+        x64_code(conv, "lea", "rcx, %s", dst);
         x64_code(conv, "mov", "rdx, %zu", value);
         x64_code(conv, "mov", "r8, %zu", size);
         x64_code(conv, "call", "memset");

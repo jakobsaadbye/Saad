@@ -22,11 +22,6 @@ segment .data
 	align 4
 	FLOAT_3:
 	dd 15.000000
-	_data_0 DB `%d %d %f %f %f %f\n`, 0
-	align 8
-	STRING_4:
-	dq _data_0
-	dq 19:
 segment .rdata
 segment .rdata
 segment .text
@@ -61,49 +56,43 @@ segment .text
 main:
 	push        rbp
 	mov         rbp, rsp
-	sub         rsp, 112
+	sub         rsp, 576
 L0:
-	lea         rcx, -24[rbp]
+	lea         rcx, -264[rbp]
 	mov         rdx, 0
-	mov         r8, 24
+	mov         r8, 264
 	call        memset
 	mov         rax, 100
-	mov         -24[rbp], eax
+	mov         -264[rbp], eax
 	movss       xmm0, [rel FLOAT_0]
-	movss       -20[rbp], xmm0
+	movss       -260[rbp], xmm0
 	movss       xmm0, [rel FLOAT_1]
-	movss       -16[rbp], xmm0
+	movss       -256[rbp], xmm0
 	movss       xmm0, [rel FLOAT_2]
-	movss       -12[rbp], xmm0
+	movss       -252[rbp], xmm0
 	movss       xmm0, [rel FLOAT_3]
-	movss       -8[rbp], xmm0
-	lea         rax, -24[rbp]
-	lea         rcx, -48[rbp]
+	movss       -248[rbp], xmm0
+	lea         rax, -264[rbp]
+	lea         rcx, -528[rbp]
 	mov         rcx, rcx
 	mov         rdx, rax
-	mov         r8, 24
+	mov         r8, 264
 	call        memcpy
-	mov         rax, STRING_4
-	mov         rcx, [rax]
-	mov         eax, -48[rbp]
-	mov         edx, -28[rbp]
-	movss       xmm0, -44[rbp]
-	movss       xmm1, -40[rbp]
-	movss       xmm2, -36[rbp]
-	movss       xmm3, -32[rbp]
-	cvtss2sd    xmm5, xmm1
-	movsd       [rsp+32], xmm5
-	cvtss2sd    xmm5, xmm2
-	movsd       [rsp+40], xmm5
-	cvtss2sd    xmm5, xmm3
-	movsd       [rsp+48], xmm5
-	cvtss2sd    xmm3, xmm0
-	mov         r8, rdx
-	movq        r9, xmm3
+	lea         rax, -508[rbp]
+	mov         rcx, 1
+	mov         rdx, rcx
+	imul        rdx, 24
+	mov         rcx, rax
+	add         rcx, rdx
+	mov         rax, 2
 	mov         rdx, rax
-	call        printf
+	imul        rdx, 8
+	mov         rax, rcx
+	add         rax, rdx
+	movss       xmm0, 0[rax]
+	movss       -532[rbp], xmm0
 	mov         rax, 0
-	add         rsp, 112
+	add         rsp, 576
 	pop         rbp
 	ret         
 

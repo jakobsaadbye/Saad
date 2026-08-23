@@ -3253,12 +3253,12 @@ MemberAccessResult emit_member_access(CodeGenerator *cg, AstMemberAccess *ma) {
 
 // If lvalue is true, the returned result will be the address of the indexed element, returned in rbx, otherwise it will be the value of the indexed value returned in rax
 void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue) {
-    assert(array_ac->accessing->type->kind == TYPE_ARRAY);
+    assert(array_ac->left->type->kind == TYPE_ARRAY);
 
-    TypeArray *array_type = (TypeArray *) array_ac->accessing->type;
+    TypeArray *array_type = (TypeArray *) array_ac->left->type;
 
     // Emit the left side
-    emit_expression(cg, array_ac->accessing);
+    emit_expression(cg, array_ac->left);
 
     // Emit index expression as rvalue
     emit_expression(cg, array_ac->index_expr);
@@ -3274,7 +3274,7 @@ void emit_array_access(CodeGenerator *cg, AstArrayAccess *array_ac, bool lvalue)
     }
 
     // Add the integer result of the index expression to the lvalue
-    int elem_size = ((TypeArray *)array_ac->accessing->type)->elem_type->size;
+    int elem_size = ((TypeArray *)array_ac->left->type)->elem_type->size;
     sb_append(&cg->code, "   imul\t\trax, %d; Add index expr\n", elem_size);
     sb_append(&cg->code, "   add\t\trbx, rax\n");
 

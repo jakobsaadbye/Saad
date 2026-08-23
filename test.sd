@@ -6,9 +6,18 @@ Vector4 :: struct {
     x, y, z, w: float;
 }
 
+Vector2 :: struct {
+    x, y: float;
+}
+
+Mesh :: struct {
+    points: [3]Vector2;
+}
+
 Entity :: struct {
     health: int;
     rotation: Vector4;
+    meshes: [10]Mesh;
     mana: int;
 }
 
@@ -17,6 +26,8 @@ main :: () {
         health = 100,
         rotation = Vector4{4, 9, 13, 15},
     };
+    
+    v := e.meshes[1].points[2].x;
 
-    printf(xx "%d %d %f %f %f %f\n", e.health, e.mana, e.rotation.x, e.rotation.y, e.rotation.z, e.rotation.w);
+    // printf(xx "%d %d %f %f %f %f\n", e.health, e.mana, e.rotation.x, e.rotation.y, e.rotation.z, e.rotation.w);
 }
