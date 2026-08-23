@@ -539,8 +539,8 @@ typedef struct AstCast {
 
 typedef struct AstStructLiteral {
     AstExpr       head;
-    Type         *explicit_type;
-    DynamicArray  initializers; // of AstStructInitializer
+    Type         *explicit_type; // In `v := Vector2{4, 9}`, the explicit_type is Vector2
+    DynamicArray  initializers; // of *AstStructInitializer
 } AstStructLiteral;
 
 typedef struct AstStructInitializer {

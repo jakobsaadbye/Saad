@@ -154,14 +154,14 @@ void x64_begin_convert(X64Converter *conv) {
 }
 
 char *get_register_string_sized(Operand op, int size) {
-    return register_to_str(op.reg, size);
+    return register_to_str(op.preg, size);
 }
 
 char *get_register_string(Operand op) {
-    return register_to_str(op.reg, op.size);
+    return register_to_str(op.preg, op.size);
 }
 
-char *get_store_instruction(Type *type) {
+char *get_mov_instruction(Type *type) {
     if (type->kind == TYPE_FLOAT) {
         return type->size == 8 ? "movsd" : "movss";
     }
@@ -179,7 +179,6 @@ void x64_emit_store(X64Converter *conv, int dst_offset, Register src_reg, Type *
             char *src = register_to_str(src_reg, src_type->size);
             x64_code(conv, "mov", "%d[rbp], %s", dst_offset, src);
         } else {
-            // TODO: Maybe perform a memcpy?
             XXX;
         }
     }
@@ -195,7 +194,7 @@ void x64_emit_load(X64Converter *conv, Register dst_reg, Type *dst_type, int src
         x64_code(conv, mov_string, "%s, %s %d[rbp]", dst64, width, src_offset);
     } else {
         char *dst = register_to_str(dst_reg, dst_type->size);
-        char *inst = get_store_instruction(dst_type);
+        char *inst = get_mov_instruction(dst_type);
         x64_code(conv, inst, "%s, %d[rbp]", dst, src_offset);
     }
 }
@@ -585,7 +584,7 @@ void x64_emit_comparrison_instruction(X64Converter *conv, Inst *inst) {
         x64_code(conv, "cmp", "%s, %s", a, b);
     }
 
-    char *dst8  = register_to_str(inst->op1.reg, 1);
+    char *dst8  = register_to_str(inst->op1.preg, 1);
     char *dst32 = get_register_string_sized(inst->op1, 4);
 
     x64_code(conv, set_inst, "%s", dst8);
@@ -594,7 +593,7 @@ void x64_emit_comparrison_instruction(X64Converter *conv, Inst *inst) {
 
 bool is_same_physical_register(Operand a, Operand b) {
     if (a.is_sse != b.is_sse) return false;
-    return (a.reg == b.reg);
+    return (a.preg == b.preg);
 }
 
 void x64_emit_logical_instruction(X64Converter *conv, Inst *inst) {
@@ -782,7 +781,7 @@ void x64_emit_cast_instruction(X64Converter *conv, Inst *inst) {
             break;
         }
         case INST_TRUNC: {
-            if (inst->op1.reg != inst->op2.reg) {
+            if (inst->op1.preg != inst->op2.preg) {
                 if (to_size == 4) {
                     char *src4 = get_register_string_sized(inst->op2, 4);
                     x64_code(conv, "mov", "%s, %s", dst, src4);
@@ -864,6 +863,9 @@ int x64_get_memory_operand_offset(X64Converter *conv, Operand op) {
         return x64_get_stack_slot_offset_from_index(conv, op.slot.index);
     } else if (op.kind == OPERAND_MEMORY_OFFSET) {
         return op.offset;
+    } else if (op.kind == OPERAND_MEMORY_REL_OFFSET) {
+        int base_offset = x64_get_stack_slot_offset_from_index(conv, op.slot.index);
+        return base_offset + op.offset;
     } else {
         XXX;
     }
@@ -874,6 +876,7 @@ int x64_get_memory_operand_offset(X64Converter *conv, Operand op) {
 void x64_emit_instruction(X64Converter *conv, Inst *inst) {
     Operand op1 = inst->op1;
     Operand op2 = inst->op2;
+    Operand op3 = inst->op3;
 
     switch (inst->kind) {
     case INST_NOOP: {
@@ -885,17 +888,17 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
             return;
         }
         else if (op1.kind == OPERAND_REG && op2.kind == OPERAND_IMM_INT) {
-            char *dst = register_to_str(op1.reg, 8);
+            char *dst = register_to_str(op1.preg, 8);
             x64_code(conv, "mov", "%s, %lld", dst, op2.imm_int);
             return;
         }
         else if (op1.kind == OPERAND_REG && op2.kind == OPERAND_IMM_UINT) {
-            char *dst = register_to_str(op1.reg, 8);
+            char *dst = register_to_str(op1.preg, 8);
             x64_code(conv, "mov", "%s, %zu", dst, op2.imm_uint);
             return;
         }
         else if (op1.kind == OPERAND_REG && op2.kind == OPERAND_BIG_CONSTANT) {
-            x64_load_constant(conv, op1.reg, op2.constant);
+            x64_load_constant(conv, op1.preg, op2.constant);
             return;
         }
         else {
@@ -906,20 +909,44 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
 
         break;
     }
-    case INST_LOAD: 
-    case INST_LOADF: {
-        int src_offset = x64_get_memory_operand_offset(conv, op2);
-        x64_emit_load(conv, op1.reg, op1.type, src_offset);
+    case INST_LEA: {
+        char *dst = register_to_str(op1.preg, 8);
+        int offset = x64_get_memory_operand_offset(conv, op2);
+        x64_code(conv, "lea", "%s, %d[rbp]", dst, offset);
         break;
     }
-    case INST_STORE:
-    case INST_STOREF: {
+    case INST_LOAD: {
+        int src_offset = x64_get_memory_operand_offset(conv, op2);
+        x64_emit_load(conv, op1.preg, op1.type, src_offset);
+        break;
+    }
+    case INST_STORE: {
         int dst_offset = x64_get_memory_operand_offset(conv, op1);
-        x64_emit_store(conv, dst_offset, op2.reg, op2.type);
+        x64_emit_store(conv, dst_offset, op2.preg, op2.type);
         break;
     }
     case INST_CALL: {
         x64_emit_function_call(conv, inst);
+        break;
+    }
+    case INST_MEMSET: {
+        int offset = x64_get_memory_operand_offset(conv, op1);
+        u64 value = op2.imm_uint;
+        u64 size = op3.imm_uint;
+        x64_code(conv, "lea", "rcx, %d[rbp]", offset);
+        x64_code(conv, "mov", "rdx, %zu", value);
+        x64_code(conv, "mov", "r8, %zu", size);
+        x64_code(conv, "call", "memset");
+        break;
+    }
+    case INST_MEMCPY: {
+        char *dst = register_to_str(op1.preg, 8);
+        char *src = register_to_str(op2.preg, 8);
+        u64   size = op3.imm_uint;
+        x64_code(conv, "mov", "rcx, %s", dst);
+        x64_code(conv, "mov", "rdx, %s", src);
+        x64_code(conv, "mov", "r8, %zu", size);
+        x64_code(conv, "call", "memcpy");
         break;
     }
     case INST_PUSH: {
@@ -936,8 +963,8 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
         break;
     }
     case INST_DEREF: {
-        char *dst = register_to_str(op1.reg, 8);
-        char *src = register_to_str(op2.reg, 8);
+        char *dst = register_to_str(op1.preg, 8);
+        char *src = register_to_str(op2.preg, 8);
 
         x64_code(conv, "mov", "%s, [%s]", dst, src);
         break;

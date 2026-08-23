@@ -1,10 +1,13 @@
 Todo list:
 -------------------
 
-[]: BC - Register allocator crossing calls
-[]: BC - Function calls
-[]: BC - Member access
-[]: BC - Array access
+[]: Register allocator crossing calls
+[]: Function calls
+  []: Default arguments
+[]: Member access
+[]: Array access
+[]: While loops
+[]: For loops
 
 
 []: Disallow integer and floating point arithmetic
