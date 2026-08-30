@@ -107,8 +107,11 @@ typedef struct InstFunctionCall {
 
 typedef enum ConstantKind {
     CONSTANT_NONE,
-    CONSTANT_STRING,
+    CONSTANT_INT,
     CONSTANT_FLOAT,
+    CONSTANT_STRING,
+    CONSTANT_STRUCT,
+    CONSTANT_BLOB,
 } ConstantKind;
 
 typedef enum ConstantFlags {
@@ -121,8 +124,10 @@ typedef struct Constant {
     Type        *type;
     int          id;
     union {
-        String value_string;
+        i64    value_int;
         double value_float;
+        String value_string;
+        ConstBlob *value_const_blob;
     } as;
 } Constant;
 
@@ -347,11 +352,19 @@ typedef enum InstKind {
     INST_GREATER_THAN_EQUAL,
     INST_LESS_THAN_EQUAL,
 
+    INST_BITWISE_AND,
+    INST_BITWISE_OR,
+    INST_BITWISE_XOR,
+    INST_BITWISE_SHIFT_LEFT,
+    INST_BITWISE_SHIFT_RIGHT,
+    INST_BITWISE_NOT,
+
     // Integer arithmetic
     INST_ADD_INT,
     INST_SUB_INT,
     INST_MUL_INT,
     INST_DIV_INT,
+    INST_MOD_INT,
 
     // Float arithmetic
     INST_ADD_FLOAT,
@@ -410,10 +423,17 @@ char *inst_kind_to_string(InstKind kind) {
     case INST_LESS_THAN:            return "lt";
     case INST_GREATER_THAN_EQUAL:   return "gte";
     case INST_LESS_THAN_EQUAL:      return "lte";
+    case INST_BITWISE_AND:          return "and";
+    case INST_BITWISE_OR:           return "or";
+    case INST_BITWISE_XOR:          return "xor";
+    case INST_BITWISE_SHIFT_LEFT:   return "shl";
+    case INST_BITWISE_SHIFT_RIGHT:  return "shr";
+    case INST_BITWISE_NOT:          return "bnot";
     case INST_ADD_INT:              return "addi";
     case INST_SUB_INT:              return "subi";
     case INST_MUL_INT:              return "muli";
     case INST_DIV_INT:              return "divi";
+    case INST_MOD_INT:              return "modi";
     case INST_ADD_FLOAT:            return "addf";
     case INST_SUB_FLOAT:            return "subf";
     case INST_MUL_FLOAT:            return "mulf";
@@ -486,12 +506,12 @@ typedef struct Inst {
     };
 } Inst;
 
-void *bytecode_allocate(BytecodeGenerator *bcg, size_t size) {
+void *bcg_allocate(BytecodeGenerator *bcg, size_t size) {
     return arena_allocate(&bcg->bytecode_arena, size);
 }
 
 BytecodeFunction *new_bytecode_function(BytecodeGenerator *bcg, AstFunctionDefn *func_defn) {
-    BytecodeFunction *func = bytecode_allocate(bcg, sizeof(BytecodeFunction));
+    BytecodeFunction *func = bcg_allocate(bcg, sizeof(BytecodeFunction));
 
     func->symbol_name = func_defn->symbol_name;
     func->basic_blocks = da_init(16, sizeof(BasicBlock *));
@@ -557,6 +577,20 @@ IrValue bcg_lvalue_expression(BytecodeGenerator *bcg, AstExpr *expr);
 #define NO_OP    ((Operand){ .kind = OPERAND_NONE })
 
 void begin_bytecode_generation(BytecodeGenerator *bcg, AstFile *file) {
+
+    // File constants and variables
+    for (int i = 0; i < file->statements.count; i++) {
+        Ast *stmt = da_get_deref(file->statements, i);
+
+        if (stmt->kind != AST_DECLARATION) continue;
+
+        AstDeclaration *decl = (AstDeclaration *)stmt;
+
+        if (decl->flags & DECLARATION_CONSTANT) {
+            bcg_declaration(bcg, decl);
+        }
+    }
+
     for (int i = 0; i < file->flattened_function_defns.count; i++) {
         AstFunctionDefn *func_defn = da_get_deref(file->flattened_function_defns, i);
         bcg_function_defn(bcg, func_defn);
@@ -1069,6 +1103,22 @@ void bcg_dump_bytecode_to_file(BytecodeGenerator *bcg, const char *output_path) 
     fwrite(sb.buffer, 1, sb.cursor, f);
 }
 
+IrValue bcg_emit_multiply_static_int(BytecodeGenerator *bcg, IrValue value, int scalar) {
+    IrValue dst = fresh_register(bcg, primitive_type(PRIMITIVE_S64));
+
+    emit_instruction_3(bcg, INST_MUL_INT, make_op_register(dst), make_op_register(value), make_immediate_int(scalar, 8));
+
+    return dst;
+}
+
+IrValue bcg_emit_add_dynamic_int(BytecodeGenerator *bcg, IrValue a, IrValue b) {
+    IrValue dst = fresh_register(bcg, primitive_type(PRIMITIVE_S64));
+
+    emit_instruction_3(bcg, INST_ADD_INT, make_op_register(dst), make_op_register(a), make_op_register(b));
+
+    return dst;
+}
+
 void bcg_block(BytecodeGenerator *bcg, AstBlock *block) {
     for (int i = 0; i < block->statements.count; i++) {
         Ast *stmt = da_get_deref(block->statements, i);
@@ -1185,10 +1235,200 @@ void bcg_store(BytecodeGenerator *bcg, IrValue dst, IrValue src) {
     );
 }
 
+Constant *bcg_add_constant(BytecodeGenerator *bcg, Constant *constant) {
+    int index = bcg->constant_pool.constants.count;
+    constant->id = index;
+    da_append(&bcg->constant_pool.constants, *constant);
+    return da_get(bcg->constant_pool.constants, index);
+}
+
+Constant make_constant_string(String str) {
+    Constant constant = {0};
+    constant.kind = CONSTANT_STRING;
+    constant.type = (Type *)type_defn_string;
+    constant.as.value_string = str;
+
+    return constant;
+}
+
+void bcg_write_constant_to_blob(BytecodeGenerator *cg, ConstBlob *cb, AstExpr *expr) {
+    switch (expr->type->kind) {
+        case TYPE_BOOL: {
+            AstLiteral *lit = (AstLiteral *) expr;
+            memcpy((void *) &cb->data[cb->cursor], &lit->as.value.boolean, 1);
+            cb->cursor += 1;
+            break;
+        }
+        case TYPE_INTEGER: {
+            AstLiteral *lit = (AstLiteral *) expr;
+            long long value = lit->as.value.integer;
+            memcpy((void *) &cb->data[cb->cursor], &value, expr->type->size);
+            cb->cursor += expr->type->size;
+            break;
+        }
+        case TYPE_FLOAT: {
+            AstLiteral *lit = (AstLiteral *) expr;
+            if (expr->type->size == 4) {
+                float value = (float) lit->as.value.floating;
+                memcpy((void *) &cb->data[cb->cursor], &value, expr->type->size);
+            } else {
+                memcpy((void *) &cb->data[cb->cursor], &lit->as.value.floating, expr->type->size);
+            }
+            cb->cursor += expr->type->size;
+            break;
+        }
+        case TYPE_STRING: {
+            XXX;
+            // AstLiteral *lit = (AstLiteral *) expr;
+
+            // int const_id = ++cg->constants;
+            // sb_append(&cg->rdata_string, "   C_%d:\n", const_id);
+            // sb_append(&cg->rdata_string, "   db \"%s\", 0\n", lit->as.value.string.data);
+
+            // Relocation symbol = {
+            //     .offset = cb->cursor,
+            //     .id = const_id
+            // };
+            // da_append(&cb->relocations, symbol);
+
+            // int64_t len = (int64_t) lit->as.value.string.length;
+            // memcpy((void *) &cb->data[cb->cursor + 8], &len, 8);
+
+            // cb->cursor += 16;
+            break;
+        }
+        case TYPE_STRUCT: {
+            AstStructLiteral *lit = (AstStructLiteral *) expr;
+
+            int base_offset = cb->cursor;
+            for (int i = 0; i < lit->initializers.count; i++) {
+                AstStructInitializer *init = ((AstStructInitializer **) lit->initializers.items)[i];
+                AstIdentifier *member = init->member;
+
+                cb->cursor = base_offset + member->member_offset;
+
+                bcg_write_constant_to_blob(cg, cb, init->value);
+            }
+            break;
+        }
+        case TYPE_ARRAY: {
+            TypeArray *type_array = (TypeArray *) expr->type;
+
+            if (type_array->array_kind != ARRAY_FIXED) {
+                XXX;
+            }
+
+            AstArrayLiteral *lit = (AstArrayLiteral *) expr;
+
+            int base_offset = cb->cursor;
+            for (int i = 0; i < lit->expressions.count; i++) {
+                AstExpr *expr = ((AstExpr **) lit->expressions.items)[i];
+
+                cb->cursor = base_offset + i * type_array->elem_type->size;
+
+                bcg_write_constant_to_blob(cg, cb, expr);
+            }
+            break;
+        }
+        default: {
+            XXX;
+        }
+    }
+}
+
+Constant *bcg_put_constant(BytecodeGenerator *bcg, AstExpr *expr) {
+    switch (expr->head.kind) {
+        case AST_LITERAL: {
+            AstLiteral *lit = (AstLiteral *)expr;
+
+            switch (lit->kind) {
+                case LITERAL_BOOLEAN: {
+                    break;
+                }
+                case LITERAL_INTEGER: {
+                    Constant constant = {0};
+                    constant.kind = CONSTANT_INT;
+                    constant.type = expr->type;
+                    constant.as.value_int = lit->as.value.integer;
+
+                    return bcg_add_constant(bcg, &constant);
+                }
+                case LITERAL_FLOAT: {
+                    Constant constant = {0};
+                    constant.kind = CONSTANT_FLOAT;
+                    constant.type = expr->type;
+                    constant.as.value_float = lit->as.value.floating;
+
+                    return bcg_add_constant(bcg, &constant);
+                }
+                case LITERAL_STRING: {
+                    Constant constant = make_constant_string((String){
+                        .data = lit->as.value.string.data,
+                        .len = lit->as.value.string.length,
+                    });
+
+                    return bcg_add_constant(bcg, &constant);
+                }
+                case LITERAL_NULL: {
+                    break;
+                }
+                case LITERAL_IDENTIFIER: {
+                    AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
+                    assert(ident && ident->value);
+                    assert(ident->flags & IDENTIFIER_IS_CONSTANT);
+
+                    return bcg_put_constant(bcg, ident->value);
+                }
+            }
+
+            XXX;
+        }
+        case AST_STRUCT_LITERAL: {
+            Constant constant = {0};
+            constant.kind = CONSTANT_BLOB;
+            constant.type = expr->type;
+
+            // Allocate a zero initialized blob of memory and fill in all the members in memory
+            int blob_size = expr->type->size;
+
+            ConstBlob *cb   = bcg_allocate(bcg, sizeof(ConstBlob));
+            cb->data        = calloc(blob_size, 1);
+            cb->cursor      = 0;
+            cb->size        = blob_size;
+            cb->relocations = da_init(2, sizeof(Relocation));
+
+            bcg_write_constant_to_blob(bcg, cb, expr);
+
+            constant.as.value_const_blob = cb;
+
+            return bcg_add_constant(bcg, &constant);
+        }
+        case AST_ARRAY_LITERAL: {
+            XXX;
+        }
+        default:
+            XXX;
+    }
+
+    return NULL;
+}
+
 void bcg_declaration(BytecodeGenerator *bcg, AstDeclaration *decl) {
 
     if (decl->flags & DECLARATION_CONSTANT) {
-        XXX;
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *ident = da_get_deref(decl->idents, i);
+
+            assert(ident->flags & IDENTIFIER_IS_CONSTANT);
+
+            if (ident->flags & IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN) {
+                continue;
+            }
+
+            Constant *constant = bcg_put_constant(bcg, ident->value);
+
+            ident->constant_id = constant->id;
+        }
     }
 
     if ((decl->flags & DECLARATION_INFER) || (decl->flags & DECLARATION_TYPED)) {
@@ -1320,22 +1560,6 @@ void bcg_if(BytecodeGenerator *bcg, AstIf *ast_if, BasicBlock *merge) {
 
 }
 
-Constant make_constant_string(String str) {
-    Constant constant = {0};
-    constant.kind = CONSTANT_STRING;
-    constant.type = (Type *)type_defn_string;
-    constant.as.value_string = str;
-
-    return constant;
-}
-
-Constant *bcg_add_constant(BytecodeGenerator *bcg, Constant *constant) {
-    int index = bcg->constant_pool.constants.count;
-    constant->id = index;
-    da_append(&bcg->constant_pool.constants, *constant);
-    return da_get(bcg->constant_pool.constants, index);
-}
-
 void bcg_assignment(BytecodeGenerator *bcg, AstAssignment *assign) {
     IrValue lhs = bcg_lvalue_expression(bcg, assign->lhs);
 
@@ -1427,7 +1651,7 @@ void bcg_statement(BytecodeGenerator *bcg, Ast *node) {
 }
 
 IrValue bcg_function_call(BytecodeGenerator *bcg, AstFunctionCall *ast_call) {
-    InstFunctionCall *call = bytecode_allocate(bcg, sizeof(InstFunctionCall));
+    InstFunctionCall *call = bcg_allocate(bcg, sizeof(InstFunctionCall));
 
     if (!ast_call->is_lambda_call) {
         call->function_symbol = ast_call->func_defn->identifier->name;
@@ -1579,27 +1803,36 @@ IrValue bcg_arithmetic_operator(BytecodeGenerator *bcg, AstBinary *bin) {
         if (op == '+') {
             result.kind = INST_ADD_FLOAT;
         }
-        if (op == '-') {
+        else if (op == '-') {
             result.kind = INST_SUB_FLOAT;
         }
-        if (op == '*') {
+        else if (op == '*') {
             result.kind = INST_MUL_FLOAT;
         }
-        if (op == '/') {
+        else if (op == '/') {
             result.kind = INST_DIV_FLOAT;
+        }
+        else {
+            XXX;
         }
     } else {
         if (op == '+') {
             result.kind = INST_ADD_INT;
         }
-        if (op == '-') {
+        else if (op == '-') {
             result.kind = INST_SUB_INT;
         }
-        if (op == '*') {
+        else if (op == '*') {
             result.kind = INST_MUL_INT;
         }
-        if (op == '/') {
+        else if (op == '/') {
             result.kind = INST_DIV_INT;
+        }
+        else if (op == '%') {
+            result.kind = INST_MOD_INT;
+        }
+        else {
+            XXX;
         }
     }
 
@@ -1660,6 +1893,33 @@ IrValue bcg_boolean_operator(BytecodeGenerator *bcg, AstBinary *bin) {
     return dst;
 }
 
+IrValue bcg_bitwise_operator(BytecodeGenerator *bcg, AstBinary *bin) {
+    TokenType op = bin->operator;
+
+    IrValue lhs = bcg_expression(bcg, bin->left);
+    IrValue rhs = bcg_expression(bcg, bin->right);
+    IrValue dst = fresh_register(bcg, bin->head.type);
+
+    Inst result = make_instruction_3(bcg, INST_NOOP, 
+        make_op_register(dst),
+        make_op_register(lhs),
+        make_op_register(rhs)
+    );
+
+    if      (op == '&') result.kind = INST_BITWISE_AND;
+    else if (op == '|') result.kind = INST_BITWISE_OR;
+    else if (op == '^') result.kind = INST_BITWISE_XOR;
+    else if (op == TOKEN_BITWISE_SHIFT_LEFT)   result.kind = INST_BITWISE_SHIFT_LEFT;
+    else if (op == TOKEN_BITWISE_SHIFT_RIGHT)  result.kind = INST_BITWISE_SHIFT_RIGHT;
+    else {
+        XXX;
+    }
+
+    add_instruction(bcg, result);
+
+    return dst;
+}
+
 IrValue bcg_binary(BytecodeGenerator *bcg, AstBinary *bin) {
     TokenType op = bin->operator;
 
@@ -1675,6 +1935,10 @@ IrValue bcg_binary(BytecodeGenerator *bcg, AstBinary *bin) {
         return bcg_boolean_operator(bcg, bin);
     }
 
+    if (is_bitwise_operator(op)) {
+        return bcg_bitwise_operator(bcg, bin);
+    }
+
     XXX;
     return InvalidValue;
 }
@@ -1683,66 +1947,50 @@ IrValue bcg_unary(BytecodeGenerator *bcg, AstUnary *unary) {
     OperatorType op = unary->operator;
 
     IrValue value = bcg_expression(bcg, unary->expr);
+
+    if (op == OP_UNARY_MINUS) {
+        return bcg_emit_multiply_static_int(bcg, value, -1);
+    }
+    
+    InstKind inst_kind = 0;
+    if (op == OP_NOT) {
+        inst_kind = INST_NOT;
+    }
+    else if (op == OP_BITWISE_NOT) {
+        inst_kind = INST_BITWISE_NOT;
+    } 
+    else {
+        XXX;
+    }
+
     IrValue dst = fresh_register(bcg, unary->head.type);
 
-    if (op == OP_NOT) {
-        add_instruction(bcg, make_instruction_2(
-            bcg, 
-            INST_NOT, 
-            make_op_register(dst),
-            make_op_register(value)
-        ));
-        return dst;
-    }
+    emit_instruction_2(bcg, inst_kind, make_op_register(dst), make_op_register(value));
 
-    XXX;
-    return InvalidValue;
+    return dst;
 }
 
-Constant *bcg_lower_constant(BytecodeGenerator *bcg, AstExpr *expr) {
-    switch (expr->head.kind) {
-        case AST_LITERAL: {
-            AstLiteral *lit = (AstLiteral *)expr;
+IrValue bcg_load_constant(BytecodeGenerator *bcg, Constant *constant) {
+    Operand constant_op = make_op_constant(constant);
 
-            switch (lit->kind) {
-                case LITERAL_BOOLEAN: {
-                    break;
-                }
-                case LITERAL_INTEGER: {
-                    break;
-                }
-                case LITERAL_FLOAT: {
-                    Constant constant = {0};
-                    constant.kind = CONSTANT_FLOAT;
-                    constant.type = expr->type;
-                    constant.as.value_float = lit->as.value.floating;
+    IrValue dst = fresh_register(bcg, constant->type);
+    add_instruction(bcg, make_instruction_2(
+        bcg,
+        INST_MOV, 
+        make_op_register(dst),
+        constant_op
+    ));
 
-                    return bcg_add_constant(bcg, &constant);
-                    break;
-                }
-                case LITERAL_STRING: {
-                    Constant constant = make_constant_string((String){
-                        .data = lit->as.value.string.data,
-                        .len = lit->as.value.string.length,
-                    });
+    return dst;
+}
 
-                    return bcg_add_constant(bcg, &constant);
-                }
-                case LITERAL_NULL: {
-                    break;
-                }
-                case LITERAL_IDENTIFIER: {
-                    break;
-                }
-            }
+IrValue bcg_load_constant_identifier(BytecodeGenerator *bcg, AstIdentifier *ident) {
+    assert(ident->flags & IDENTIFIER_IS_CONSTANT);
 
-            XXX;
-        }
-        default:
-            XXX;
-    }
+    Constant *constant = da_get(bcg->constant_pool.constants, ident->constant_id);
+    assert(constant);
 
-    return NULL;
+    return bcg_load_constant(bcg, constant);
 }
 
 IrValue bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
@@ -1953,22 +2201,6 @@ IrValue bcg_member_access_lvalue(BytecodeGenerator *bcg, AstMemberAccess *ma) {
     return result;
 }
 
-IrValue bcg_emit_multiply_static_int(BytecodeGenerator *bcg, IrValue value, int scalar) {
-    IrValue dst = fresh_register(bcg, primitive_type(PRIMITIVE_S64));
-
-    emit_instruction_3(bcg, INST_MUL_INT, make_op_register(dst), make_op_register(value), make_immediate_int(scalar, 8));
-
-    return dst;
-}
-
-IrValue bcg_emit_add_dynamic_int(BytecodeGenerator *bcg, IrValue a, IrValue b) {
-    IrValue dst = fresh_register(bcg, primitive_type(PRIMITIVE_S64));
-
-    emit_instruction_3(bcg, INST_ADD_INT, make_op_register(dst), make_op_register(a), make_op_register(b));
-
-    return dst;
-}
-
 IrValue bcg_array_access_lvalue(BytecodeGenerator *bcg, AstArrayAccess *array_ac) {
     IrValue base = bcg_lvalue_expression(bcg, array_ac->left);
 
@@ -2045,10 +2277,61 @@ IrValue bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
             XXX;
         }
     }
+    case AST_ENUM_LITERAL: {
+        AstEnumLiteral *enum_lit = (AstEnumLiteral *)expr;
+
+        Operand value_op = make_immediate_int(enum_lit->enum_member->value, expr->type->size);
+
+        IrValue dst = fresh_register(bcg, enum_lit->head.type);
+
+        emit_instruction_2(
+            bcg,
+            INST_MOV,
+            make_op_register(dst),
+            value_op
+        );
+
+        return dst;
+    }
     case AST_MEMBER_ACCESS: {
         AstMemberAccess *ma = (AstMemberAccess *)expr;
-        IrValue lvalue = bcg_member_access_lvalue(bcg, ma);
-        return bcg_emit_load(bcg, lvalue);
+
+        if (ma->access_kind == MEMBER_ACCESS_STRUCT_MEMBER) {
+            IrValue lvalue = bcg_member_access_lvalue(bcg, ma);
+            IrValue rvalue = bcg_emit_load(bcg, lvalue);
+            return rvalue;
+        }
+
+        if (ma->access_kind == MEMBER_ACCESS_STATIC_STRUCT_MEMBER) {
+            return bcg_load_constant_identifier(bcg, ma->struct_member);
+        }
+
+        if (ma->access_kind == MEMBER_ACCESS_ENUM_MEMBER) {
+            AstEnumerator *enum_member = ma->enum_member;
+
+            if (enum_member->head.kind == AST_IDENTIFIER) {
+                XXX;
+            }
+
+            AstEnum *enum_defn = enum_member->parent;
+            TypeEnum *enum_type = (TypeEnum *) enum_defn->identifier->type;
+            
+            Operand value_op = make_immediate_int(enum_member->value, enum_type->backing_type->size);
+
+            IrValue dst = fresh_register(bcg, enum_type->backing_type);
+
+            emit_instruction_2(
+                bcg,
+                INST_MOV,
+                make_op_register(dst),
+                value_op
+            );
+
+            return dst;
+        }
+
+        XXX;
+        return InvalidValue;
     }
     case AST_ARRAY_ACCESS: {
         AstArrayAccess *array_ac = (AstArrayAccess *)expr;
@@ -2073,14 +2356,14 @@ IrValue bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
                 break;
             }
             case LITERAL_FLOAT: {
-                Constant *constant = bcg_lower_constant(bcg, expr);
+                Constant *constant = bcg_put_constant(bcg, expr);
                 if (!constant) XXX;
 
                 op = make_op_constant(constant);
                 break;
             }
             case LITERAL_STRING: {
-                Constant *constant = bcg_lower_constant(bcg, expr);
+                Constant *constant = bcg_put_constant(bcg, expr);
                 if (!constant) {
                     XXX;
                 }
@@ -2094,6 +2377,10 @@ IrValue bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
             case LITERAL_IDENTIFIER: {
                 AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
                 assert(ident);
+
+                if (ident->flags & IDENTIFIER_IS_CONSTANT) {
+                    return bcg_load_constant_identifier(bcg, ident);
+                }
 
                 if (ident->stack_slot.size == 0) {
                     // Assume that this identifier was assigned a virtual register
@@ -2800,5 +3087,61 @@ void bcg_rewrite_entire_ir(BytecodeGenerator *bcg) {
     for (int i = 0; i < bcg->bytecode_functions.count; i++) {
         BytecodeFunction *func = da_get_deref(bcg->bytecode_functions, i);
         bcg_rewrite_function_spills(bcg, func);
+    }
+}
+
+void x64_emit_constant_blob_to_rdata(StringBuilder *rdata, ConstBlob *cb) {
+    int zeroes = 0;
+    int relocation_cursor = 0;
+
+    for (int i = 0; i < cb->size; i++) {
+
+        if (cb->relocations.count > 0) {
+
+            // Scan forward to see if we should put a relocation here
+            Relocation *put_symbol = NULL;
+            for (int j = relocation_cursor; j < cb->relocations.count; j++) {
+                Relocation *symbol = &((Relocation *) cb->relocations.items)[j];
+
+                if (i < symbol->offset) {
+                    // Current byte offset is behind the next relocation offset
+                    break;
+                }
+
+                if (i == symbol->offset) {
+                    put_symbol = symbol;
+                    break;
+                }
+            }
+
+            if (put_symbol) {
+                if (zeroes > 0) {
+                    sb_append(rdata, "\ttimes %d db 0\n", zeroes);
+                    zeroes = 0;
+                }
+
+                sb_append(rdata, "\tdq C_%d\n", put_symbol->id);
+                relocation_cursor += 1;
+                i += 7;
+                continue;
+            }
+
+            // Fallthrough to normal byte output
+        }
+
+        unsigned char byte = cb->data[i];
+        if (byte == 0) {
+            zeroes += 1;
+        } else {
+            if (zeroes > 0) {
+                sb_append(rdata, "\ttimes %d db 0\n", zeroes);
+                zeroes = 0;
+            }
+            sb_append(rdata, "\tdb %u\n", byte);
+        }
+    }
+
+    if (zeroes > 0) {
+        sb_append(rdata, "\ttimes %d db 0\n", zeroes);
     }
 }

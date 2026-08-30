@@ -2602,19 +2602,6 @@ void emit_constant_identifier(CodeGenerator *cg, AstIdentifier *ident) {
     }
 }
 
-typedef struct Relocation {
-    int offset;
-    int id;
-    int size;
-} Relocation;
-
-typedef struct ConstBlob {
-    unsigned char *data;
-    int            cursor;
-    int            size;
-    DynamicArray   relocations;
-} ConstBlob;
-
 void emit_write_constant_to_blob(CodeGenerator *cg, ConstBlob *cb, AstExpr *expr) {
     switch (expr->type->kind) {
         case TYPE_BOOL: {
@@ -2699,62 +2686,6 @@ void emit_write_constant_to_blob(CodeGenerator *cg, ConstBlob *cb, AstExpr *expr
     }
 }
 
-void emit_constant_blob_to_rdata(CodeGenerator *cg, ConstBlob *cb) {
-    int zeroes = 0;
-    int relocation_cursor = 0;
-
-    for (int i = 0; i < cb->size; i++) {
-
-        if (cb->relocations.count > 0) {
-
-            // Scan forward to see if we should put a relocation here
-            Relocation *put_symbol = NULL;
-            for (int j = relocation_cursor; j < cb->relocations.count; j++) {
-                Relocation *symbol = &((Relocation *) cb->relocations.items)[j];
-
-                if (i < symbol->offset) {
-                    // Current byte offset is behind the next relocation offset
-                    break;
-                }
-
-                if (i == symbol->offset) {
-                    put_symbol = symbol;
-                    break;
-                }
-            }
-
-            if (put_symbol) {
-                if (zeroes > 0) {
-                    sb_append(&cg->rdata, "   times %d db 0\n", zeroes);
-                    zeroes = 0;
-                }
-
-                sb_append(&cg->rdata, "   dq C_%d\n", put_symbol->id);
-                relocation_cursor += 1;
-                i += 7;
-                continue;
-            }
-
-            // Fallthrough to normal byte output
-        }
-
-        unsigned char byte = cb->data[i];
-        if (byte == 0) {
-            zeroes += 1;
-        } else {
-            if (zeroes > 0) {
-                sb_append(&cg->rdata, "   times %d db 0\n", zeroes);
-                zeroes = 0;
-            }
-            sb_append(&cg->rdata, "   db %u\n", byte);
-        }
-    }
-
-    if (zeroes > 0) {
-        sb_append(&cg->rdata, "   times %d db 0\n", zeroes);
-    }
-}
-
 int get_constant_id(CodeGenerator *cg) {
     return ++cg->constants;
 }
@@ -2804,7 +2735,7 @@ void emit_constant_to_rdata(CodeGenerator *cg, AstIdentifier *ident) {
         emit_write_constant_to_blob(cg, &cb, ident->value);
 
         sb_append(&cg->rdata, "   %s.%d:\n", ident->name, ident->stack_offset);
-        emit_constant_blob_to_rdata(cg, &cb);
+        x64_emit_constant_blob_to_rdata(&cg->rdata, &cb);
     } 
     else {
         XXX;

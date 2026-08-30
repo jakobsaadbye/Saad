@@ -199,6 +199,8 @@ typedef struct AstIdentifier {
     int member_index;   // Used to know the insertion order of a struct member
     int member_offset;  // Relative positive offset of the member within the struct
     int stack_offset;
+
+    int constant_id; // Set to a constant id in the constant pool of the bytecode generator
 } AstIdentifier;
 
 typedef enum DeclarationFlags {
@@ -279,6 +281,7 @@ typedef struct AstStruct {
     AstBlock      *members;
     AstBlock      *static_members;
     AstBlock      *methods;
+    bool           is_static_struct; // All members in this struct are constants
 } AstStruct;
 
 typedef struct AstEnum {
@@ -771,5 +774,18 @@ typedef struct CompilerConfig {
     CodegenBackend     backend;
     OptimizationLevel  optimization_level;
 } CompilerConfig;
+
+typedef struct Relocation {
+    int offset;
+    int id;
+    int size;
+} Relocation;
+
+typedef struct ConstBlob {
+    unsigned char *data;
+    int            cursor;
+    int            size;
+    DynamicArray   relocations;
+} ConstBlob;
 
 #endif

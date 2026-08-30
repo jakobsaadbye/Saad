@@ -1351,8 +1351,9 @@ AstStruct *parse_struct_defn(Parser *parser) {
     struct_defn->methods    = make_empty_struct_scope(parser, struct_defn);
 
     if (scope->identifiers.count == 0) {
-        report_error_ast(parser, LABEL_ERROR, (Ast *)(struct_defn), "Structs must have atleast one member");
-        return NULL;
+        struct_defn->is_static_struct = true;
+        // report_error_ast(parser, LABEL_ERROR, (Ast *)(struct_defn), "Structs must have atleast one member");
+        // return NULL;
     }
 
     TypeStruct *type_struct      = ast_allocate(parser, sizeof(TypeStruct));
@@ -1369,21 +1370,6 @@ AstStruct *parse_struct_defn(Parser *parser) {
 
     ident->type = (Type *)type_struct;
     ident->flags |= IDENTIFIER_IS_RESOLVED | IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_CONSTANT;
-
-    // if (existing) {
-    //     if (existing->kind == TYPE_STRUCT) {
-    //         TypeStruct *existing_struct = (TypeStruct *)(existing);
-    //         report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct->identifier), "Struct '%s' is already defined", ast_struct->identifier->name);
-    //         report_error_ast(parser, LABEL_NOTE, (Ast *)(existing_struct->node), "Here is the previously defined struct");
-    //         return NULL;
-    //     } else {
-    //         TypeStruct *existing_enum = (TypeStruct *)(existing);
-    //         report_error_ast(parser, LABEL_ERROR, (Ast *)(ast_struct->identifier), "Struct '%s' is already defined as an enum", ast_struct->identifier->name);
-    //         report_error_ast(parser, LABEL_NOTE, (Ast *)(existing_enum->node), "Here is the previously defined enum");
-    //         return NULL;
-    //     }
-    // }
-    
 
     return struct_defn;
 }

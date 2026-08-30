@@ -3983,7 +3983,6 @@ bool is_arithmetic_operator(TokenType op) {
     if (op == '*') return true;
     if (op == '/') return true;
     if (op == '%') return true;
-    if (op == '^') return true;
     return false;
 }
 

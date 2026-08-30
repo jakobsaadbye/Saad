@@ -12,43 +12,39 @@ main :: () {
 
     x := PI;
 
-    print("--- Integer -> X casts ---");
+    // print("--- Integer -> X casts ---");
     x1: int = xx 280;
     x2: float = xx 5;
     x3: bool = xx 1;
     x4: HoldType = xx 2;
 
-    print("%", x1);
-    print("%", x2);
-    print("%", x3);
-    print("%", x4);
     assert(x1 == 280);
     assert(x2 == 5.0);
     assert(x3);
     assert(x4 == .Jug);
 
-    print("--- Float -> X casts ---");
+    // print("--- Float -> X casts ---");
     a1 : f32 = xx 69.0;
     a2 : f64 = xx a1;   // up casting
     a3 : f32 = xx a2;   // down casting
     a4 : int = xx PI;   // float32 -> int
     a5 : int = xx a2;   // float64 -> int
     a6 : bool = xx -0.1;
-    print("%", a1);
-    print("%", a2);
-    print("%", a3);
-    print("%", a4);
-    print("%", a5);
-    print("%", a6);
+    // print("%", a1);
+    // print("%", a2);
+    // print("%", a3);
+    // print("%", a4);
+    // print("%", a5);
+    // print("%", a6);
     assert(a6);
 
-    print("--- Enum -> X casts ---");
+    // print("--- Enum -> X casts ---");
     b1 := (xx HoldType.Crimp + 1);
     b2 := b1 as HoldType;
-    print("%", b1);
-    print("%", b2);
+    // print("%", b1);
+    // print("%", b2);
 
-    print("--- Boolean -> X casts ---");
+    // print("--- Boolean -> X casts ---");
     c1 : int = xx false;
     c2 : int = xx true;
     c3 : float = xx false;

@@ -292,6 +292,7 @@ bool is_signed_integer(Type *type) {
 
     TypePrimitive *prim = (TypePrimitive *)(type);
     switch (prim->kind) {
+    case PRIMITIVE_UNTYPED_INT:
     case PRIMITIVE_INT:
     case PRIMITIVE_S8:
     case PRIMITIVE_S16:

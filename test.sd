@@ -2,19 +2,29 @@ extern "C" {
     printf :: (format: *u8, args: ...any);
 }
 
-main :: () {
-    a := 10;
-    b := 7.5;
-
-    a = 5;
-    b = 10.0;
-
-    assert(a == 5);
-    assert(b == 10.0);
-
-    a += 2;
-    b += 2.5;
-
-    assert(a == 7);
-    assert(b == 12.5);
+HoldType :: struct {
+    crimp :: 0;
+    sloper :: 1;
+    jug :: 2;
+    count :: 3;
 }
+
+// HoldType :: enum {
+//     crimp,
+//     sloper,
+//     jug,
+// }
+
+Color :: struct {
+    r, g, b, a: u8;
+}
+
+Red :: Color{255, 0, 0, 255};
+Blue :: Color{0, 0, 255, 255};
+
+main :: () {
+    c := Red;
+    // z := Red;
+    printf(xx "%d", c.a);
+}
+

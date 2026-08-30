@@ -30,6 +30,8 @@ void x64_emit_basic_block(X64Converter *conv, BasicBlock *bb);
 void x64_emit_function_defn(X64Converter *conv, BytecodeFunction *func);
 void x64_emit_instruction(X64Converter *conv, Inst *inst);
 void x64_code(X64Converter *conv, char *inst, char *format, ...);
+void x64_rdata(X64Converter *conv, char *inst, char *format, ...);
+void x64_data(X64Converter *conv, char *inst, char *format, ...);
 void x64_emit_mov_into(X64Converter *conv, Operand dst_op, Operand src_op);
 
 
@@ -111,6 +113,15 @@ int x64_get_next_constant_data_id(X64Converter *conv) {
     return conv->constant_data_id++;
 }
 
+char *x64_get_data_width(int size) {
+    if (size == 8) return "dq";
+    if (size == 4) return "dd";
+    if (size == 2) return "dw";
+    if (size == 1) return "db";
+
+    return "??";
+}
+
 void x64_emit_constant_pool(X64Converter *conv) {
     for (int i = 0; i < conv->constant_pool->constants.count; i++) {
         Constant *constant = da_get(conv->constant_pool->constants, i);
@@ -118,6 +129,16 @@ void x64_emit_constant_pool(X64Converter *conv) {
         switch (constant->kind) {
             case CONSTANT_NONE: {
                 XXX;
+                break;
+            }
+            case CONSTANT_INT: {
+                // Constant integers are loaded as immediates
+                break;
+            }
+            case CONSTANT_FLOAT: {
+                sb_append(&conv->data, "\talign %d\n", constant->type->size);
+                sb_append(&conv->data, "\tFLOAT_%d:\n", constant->id);
+                sb_append(&conv->data, "\t%s %llf\n", x64_get_data_width(constant->type->size), constant->as.value_float);
                 break;
             }
             case CONSTANT_STRING: {
@@ -135,11 +156,9 @@ void x64_emit_constant_pool(X64Converter *conv) {
 
                 break;
             }
-            case CONSTANT_FLOAT: {
-                sb_append(&conv->data, "\talign %d\n", constant->type->size);
-                sb_append(&conv->data, "\tFLOAT_%d:\n", constant->id);
-                sb_append(&conv->data, "\t%s %llf\n", constant->type->size == 8 ? "dq" : "dd", constant->as.value_float);
-
+            case CONSTANT_BLOB: {
+                sb_append(&conv->rdata, "\tBLOB_%d:\n", constant->id);
+                x64_emit_constant_blob_to_rdata(&conv->rdata, constant->as.value_const_blob);
                 break;
             }
             default: {
@@ -278,6 +297,10 @@ Register x64_get_scratch_register(Type *type) {
     } else {
         return x64_scratch_registers_gpr[0];
     }
+}
+
+Register x64_get_scratch_gpr_register() {
+    return x64_scratch_registers_gpr[0];
 }
 
 int x64_get_stack_slot_offset_from_index(X64Converter *conv, int slot_index) {
@@ -656,6 +679,51 @@ void x64_emit_logical_instruction(X64Converter *conv, Inst *inst) {
     return;
 }
 
+void x64_emit_bitwise_instruction(X64Converter *conv, Inst *inst) {
+    Operand dst_op = inst->op1;
+
+    dst_op.size = 8;
+
+    char *dst = get_register_string(inst->op1);
+    char *a   = get_register_string(inst->op2);
+
+    if (!is_same_physical_register(dst_op, inst->op2)) {
+        x64_code(conv, "mov", "%s, %s", dst, a);
+    }
+
+    if (inst->kind == INST_BITWISE_NOT) {
+        char *dst64 = get_register_string_sized(dst_op, 8);
+        x64_code(conv, "not", "%s", dst64);
+        return;
+    }
+    
+    char *b   = register_to_str(inst->op3.preg, inst->op3.size);
+    
+    if (inst->kind == INST_BITWISE_AND) {
+        x64_code(conv, "and", "%s, %s", dst, b);
+    }
+    else if (inst->kind == INST_BITWISE_OR) {
+        x64_code(conv, "or", "%s, %s", dst, b);   
+    }
+    else if (inst->kind == INST_BITWISE_XOR) {
+        x64_code(conv, "xor", "%s, %s", dst, b);
+    }
+    else if (inst->kind == INST_BITWISE_SHIFT_LEFT) {
+        char *b8 = register_to_str(inst->op3.preg, 1);
+        x64_code(conv, "shl", "%s, %s", dst, b8);
+    }
+    else if (inst->kind == INST_BITWISE_SHIFT_RIGHT) {
+        char *b8 = register_to_str(inst->op3.preg, 1);
+        x64_code(conv, "shr", "%s, %s", dst, b8);
+    }
+    else {
+        XXX;
+    }
+
+
+    return;
+}
+
 void x64_emit_mov_into(X64Converter *conv, Operand dst_op, Operand src_op) {
     if (dst_op.is_sse) {
         char *inst = dst_op.size == 8 ? "movsd" : "movss";
@@ -731,6 +799,8 @@ void x64_emit_arithmetic_instruction(X64Converter *conv, Inst *inst) {
     char *a   = get_register_string(inst->op2);
     char *b   = get_operand_string(conv, inst->op3);
 
+    Register b_preg = inst->op3.preg;
+
     if (a != dst) {
         x64_emit_mov_into(conv, dst_op, inst->op2);
     }
@@ -748,13 +818,22 @@ void x64_emit_arithmetic_instruction(X64Converter *conv, Inst *inst) {
             x64_code(conv, "imul", "%s, %s", dst, b);
             break;
         }
+        case INST_MOD_INT:
         case INST_DIV_INT: {
             bool is_signed = is_signed_integer(inst->op1.type);
             int size = dst_op.size;
 
-            // TODO: Are we allowed to use these registers safely?
             char *rax_str = register_to_str(REG_RAX, size);
             char *rdx_str = register_to_str(REG_RDX, size);
+
+            // If the divisor lives in RAX or RDX, we're about to clobber it below,
+            // so copy it into a scratch register first.
+            char *divisor = b;
+            if (b_preg == REG_RAX || b_preg == REG_RDX) {
+                char *scratch_str = register_to_str(x64_get_scratch_gpr_register(), size);
+                x64_code(conv, "mov", "%s, %s", scratch_str, b);
+                divisor = scratch_str;
+            }
 
             x64_code(conv, "mov", "%s, %s", rax_str, dst);
 
@@ -764,8 +843,10 @@ void x64_emit_arithmetic_instruction(X64Converter *conv, Inst *inst) {
                 x64_code(conv, "xor", "%s, %s", rdx_str, rdx_str);
             }
 
-            x64_code(conv, is_signed ? "idiv" : "div", "%s", b);
-            x64_code(conv, "mov", "%s, %s", dst, rax_str);
+            x64_code(conv, is_signed ? "idiv" : "div", "%s", divisor);
+
+            char *result_str = (inst->kind == INST_DIV_INT) ? rax_str : rdx_str;
+            x64_code(conv, "mov", "%s, %s", dst, result_str);
 
             break;
         }
@@ -898,6 +979,11 @@ void x64_emit_cast_instruction(X64Converter *conv, Inst *inst) {
 
 void x64_load_constant(X64Converter *conv, int dst_reg, Constant *constant) {
     switch (constant->kind) {
+    case CONSTANT_INT: {
+        char *dst = register_to_str(dst_reg, constant->type->size);
+        x64_code(conv, "mov", "%s, %lld", dst, constant->as.value_int);
+        break;
+    }
     case CONSTANT_STRING: {
         char *dst = register_to_str(dst_reg, 8);
         x64_code(conv, "mov", "%s, STRING_%d", dst, constant->id);
@@ -907,6 +993,16 @@ void x64_load_constant(X64Converter *conv, int dst_reg, Constant *constant) {
         char *dst = register_to_str(dst_reg, 8);
         assert(constant->type->kind == TYPE_FLOAT);
         x64_code(conv, constant->type->size == 8 ? "movsd" : "movss", "%s, [rel FLOAT_%d]", dst, constant->id);
+        break;
+    }
+    case CONSTANT_BLOB: {
+        if (constant->type->kind == TYPE_STRUCT && constant->type->size <= 8) {
+            char *dst = register_to_str(dst_reg, constant->type->size);
+            x64_code(conv, "mov", "%s, [BLOB_%d]", dst, constant->id);
+        } else {
+            char *dst = register_to_str(dst_reg, 8);
+            x64_code(conv, "lea", "%s, BLOB_%d", dst, constant->id);
+        }
         break;
     }
     default: {
@@ -1035,6 +1131,7 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
     case INST_SUB_INT:
     case INST_MUL_INT:
     case INST_DIV_INT:
+    case INST_MOD_INT:
     case INST_ADD_FLOAT:
     case INST_SUB_FLOAT:
     case INST_MUL_FLOAT:
@@ -1055,6 +1152,15 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
     case INST_LOGICAL_OR:
     case INST_NOT: {
         x64_emit_logical_instruction(conv, inst);
+        break;
+    }
+    case INST_BITWISE_AND:
+    case INST_BITWISE_OR:
+    case INST_BITWISE_XOR:
+    case INST_BITWISE_SHIFT_LEFT:
+    case INST_BITWISE_SHIFT_RIGHT:
+    case INST_BITWISE_NOT: {
+        x64_emit_bitwise_instruction(conv, inst);
         break;
     }
 
@@ -1098,17 +1204,19 @@ void x64_output_generated_x64_to_file(X64Converter *conv, const char *output_pat
     fclose(f);
 }
 
+void _x64_emit_line(StringBuilder *sb, char *inst, char* format, va_list args) {
+    int spacing = 12;
+
+    sb_append(sb, "\t%-*s", spacing, inst);
+    if (strlen(format) > 0) {
+        sb_vappend(sb, format, args);
+    }
+    sb_append(sb, "\n");
+}
+
 void x64_code(X64Converter *conv, char *inst, char *format, ...) {
     va_list args;
     va_start(args, format);
-
-    int spacing = 12;
-
-    sb_append(&conv->code, "\t%-*s", spacing, inst);
-    if (strlen(format) > 0) {
-        sb_vappend(&conv->code, format, args);
-    }
-    sb_append(&conv->code, "\n");
-
+    _x64_emit_line(&conv->code, inst, format, args);
     va_end(args);
 }
