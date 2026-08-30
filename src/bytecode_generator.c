@@ -111,8 +111,13 @@ typedef enum ConstantKind {
     CONSTANT_FLOAT,
 } ConstantKind;
 
+typedef enum ConstantFlags {
+    CONSTANT_FLAGS_USE_RAW_STRING_LITERAL = 1 << 0, // Weather the string uses "<string>" instead of `<string>` in the generated assembly, causing backslashes to be ignored. Use "" for raw literals or `` for strings that should appear in printf strings
+} ConstantFlags;
+
 typedef struct Constant {
     ConstantKind kind;
+    ConstantFlags flags;
     Type        *type;
     int          id;
     union {
@@ -329,6 +334,7 @@ typedef enum InstKind {
     INST_CALLOC,
     INST_RETURN,
     INST_DEREF,
+    INST_BUILTIN_ASSERT,
 
     // Boolean operators arithmetic
     INST_LOGICAL_OR,
@@ -394,6 +400,7 @@ char *inst_kind_to_string(InstKind kind) {
     case INST_CALLOC:               return "calloc";
     case INST_RETURN:               return "ret";
     case INST_DEREF:                return "deref";
+    case INST_BUILTIN_ASSERT:       return "assert";
     case INST_LOGICAL_OR:           return "or";
     case INST_LOGICAL_AND:          return "and";
     case INST_DOUBLE_EQUAL:         return "eq";
@@ -719,7 +726,7 @@ Operand make_immediate_int(i64 value, int size) {
     };
 }
 
-Operand make_constant_operand(Constant *constant) {
+Operand make_op_constant(Constant *constant) {
     return (Operand){
         .kind = OPERAND_BIG_CONSTANT,
         .constant = constant,
@@ -1313,11 +1320,58 @@ void bcg_if(BytecodeGenerator *bcg, AstIf *ast_if, BasicBlock *merge) {
 
 }
 
+Constant make_constant_string(String str) {
+    Constant constant = {0};
+    constant.kind = CONSTANT_STRING;
+    constant.type = (Type *)type_defn_string;
+    constant.as.value_string = str;
+
+    return constant;
+}
+
+Constant *bcg_add_constant(BytecodeGenerator *bcg, Constant *constant) {
+    int index = bcg->constant_pool.constants.count;
+    constant->id = index;
+    da_append(&bcg->constant_pool.constants, *constant);
+    return da_get(bcg->constant_pool.constants, index);
+}
+
 void bcg_assignment(BytecodeGenerator *bcg, AstAssignment *assign) {
     IrValue lhs = bcg_lvalue_expression(bcg, assign->lhs);
-    IrValue rhs = bcg_expression(bcg, assign->expr);
+
+    IrValue rhs = {0};
+    if (assign->op == ASSIGN_EQUAL) {
+        rhs = bcg_expression(bcg, assign->expr);
+    } else {
+        // For all the compound assignments we do the binary operation between the expression on the left hand side as an r-value and the expression on the right
+        AstBinary bin       = {0};
+        bin.head.head.kind  = AST_BINARY;
+        bin.head.head.start = assign->head.start;
+        bin.head.head.end   = assign->head.end;
+        bin.head.type       = assign->expr->type;
+    
+        bin.left  = assign->lhs;
+        bin.right = assign->expr;
+    
+        switch (assign->op) {
+            case ASSIGN_PLUS_EQUAL:   bin.operator = '+'; break;
+            case ASSIGN_MINUS_EQUAL:  bin.operator = '-'; break;
+            case ASSIGN_TIMES_EQUAL:  bin.operator = '*'; break;
+            case ASSIGN_DIVIDE_EQUAL: bin.operator = '/'; break;
+            case ASSIGN_EQUAL:
+            default: XXX;
+        }
+
+        rhs = bcg_expression(bcg, (AstExpr *)&bin);
+    }
+
     bcg_store(bcg, lhs, rhs);
 }
+
+typedef struct BytecodeAssertData {
+    int line_number;
+    char *filename;
+} BytecodeAssertData;
 
 void bcg_statement(BytecodeGenerator *bcg, Ast *node) {
     switch (node->kind) {
@@ -1337,6 +1391,24 @@ void bcg_statement(BytecodeGenerator *bcg, Ast *node) {
     case AST_BLOCK: {
         bcg_block(bcg, (AstBlock *) node);
         return;
+    }
+    case AST_ASSERT: {
+        AstAssert *ast_assert = (AstAssert *)node;
+
+        IrValue value = bcg_expression(bcg, ast_assert->expr);
+
+        Constant filename_const = make_constant_string((String){.data = ast_assert->head.file->absolute_path, .len = strlen(ast_assert->head.file->absolute_path)});
+        filename_const.flags |= CONSTANT_FLAGS_USE_RAW_STRING_LITERAL;
+        Constant *filename_const_ptr = bcg_add_constant(bcg, &filename_const);
+        Operand filename_op = make_op_constant(filename_const_ptr);
+        IrValue filename_value = fresh_register(bcg, (Type *)type_defn_null_ptr);
+        emit_instruction_2(bcg, INST_MOV, make_op_register(filename_value), filename_op);
+
+        Operand line_number_op = make_immediate_uint(ast_assert->head.start.line, 4, 0);
+
+        emit_instruction_3(bcg, INST_BUILTIN_ASSERT, line_number_op, make_op_register(value), make_op_register(filename_value));
+
+        return;   
     }
     // case AST_PRINT: {
     //     bcg_print(bcg, (AstPrint *) node);
@@ -1627,13 +1699,6 @@ IrValue bcg_unary(BytecodeGenerator *bcg, AstUnary *unary) {
     return InvalidValue;
 }
 
-Constant *bcg_add_constant(BytecodeGenerator *bcg, Constant *constant) {
-    int index = bcg->constant_pool.constants.count;
-    constant->id = index;
-    da_append(&bcg->constant_pool.constants, *constant);
-    return da_get(bcg->constant_pool.constants, index);
-}
-
 Constant *bcg_lower_constant(BytecodeGenerator *bcg, AstExpr *expr) {
     switch (expr->head.kind) {
         case AST_LITERAL: {
@@ -1656,13 +1721,10 @@ Constant *bcg_lower_constant(BytecodeGenerator *bcg, AstExpr *expr) {
                     break;
                 }
                 case LITERAL_STRING: {
-                    Constant constant = {0};
-                    constant.kind = CONSTANT_STRING;
-                    constant.type = expr->type;
-                    constant.as.value_string = (String) {
+                    Constant constant = make_constant_string((String){
                         .data = lit->as.value.string.data,
                         .len = lit->as.value.string.length,
-                    };
+                    });
 
                     return bcg_add_constant(bcg, &constant);
                 }
@@ -1832,7 +1894,7 @@ void bcg_struct_literal(BytecodeGenerator *bcg, AstStructLiteral *struct_lit, St
             bcg_array_literal(bcg, (AstArrayLiteral *)init->value, base_slot, offset);
             continue;
         }
-        
+
         IrValue value = bcg_expression(bcg, init->value);
         
         Operand dst = make_op_memory_static(base_slot, offset, init->member->type);
@@ -2014,7 +2076,7 @@ IrValue bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
                 Constant *constant = bcg_lower_constant(bcg, expr);
                 if (!constant) XXX;
 
-                op = make_constant_operand(constant);
+                op = make_op_constant(constant);
                 break;
             }
             case LITERAL_STRING: {
@@ -2023,7 +2085,7 @@ IrValue bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
                     XXX;
                 }
 
-                op = make_constant_operand(constant);
+                op = make_op_constant(constant);
                 break;
             }
             case LITERAL_NULL: {
@@ -2326,6 +2388,7 @@ bool is_instruction_containing_function_call(Inst inst) {
     if (inst.kind == INST_MEMCPY) return true;
     if (inst.kind == INST_MALLOC) return true;
     if (inst.kind == INST_CALLOC) return true;
+    if (inst.kind == INST_BUILTIN_ASSERT) return true;
 
     return false;
 }

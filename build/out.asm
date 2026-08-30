@@ -12,33 +12,39 @@ segment .data
    enum_to_int_buffer times 20 DB 0
 	align 4
 	FLOAT_0:
-	dd 4.000000
+	dd 7.500000
 	align 4
 	FLOAT_1:
-	dd 9.000000
-	align 4
-	FLOAT_2:
-	dd 13.000000
+	dd 10.000000
+	_data_0 DB ".\test.sd", 0
+	align 8
+	STRING_2:
+	dq _data_0
+	dq 9:
 	align 4
 	FLOAT_3:
-	dd 15.000000
-	align 4
-	FLOAT_4:
-	dd 1.000000
+	dd 10.000000
+	_data_1 DB ".\test.sd", 0
+	align 8
+	STRING_4:
+	dq _data_1
+	dq 9:
 	align 4
 	FLOAT_5:
-	dd 2.000000
-	align 4
-	FLOAT_6:
-	dd 3.000000
+	dd 2.500000
+	_data_2 DB ".\test.sd", 0
+	align 8
+	STRING_6:
+	dq _data_2
+	dq 9:
 	align 4
 	FLOAT_7:
-	dd 4.000000
-	_data_0 DB `%lf`, 0
+	dd 12.500000
+	_data_3 DB ".\test.sd", 0
 	align 8
 	STRING_8:
-	dq _data_0
-	dq 3:
+	dq _data_3
+	dq 9:
 segment .rdata
 segment .rdata
 segment .text
@@ -51,6 +57,7 @@ segment .text
    extern free
    extern memset
    extern memcpy
+   extern runtime_builtin_assert
    extern Type_uint
    extern Type_u8
    extern Type_u16
@@ -73,52 +80,70 @@ segment .text
 main:
 	push        rbp
 	mov         rbp, rsp
-	sub         rsp, 256
+	sub         rsp, 48
 L0:
-	lea         rcx, -104[rbp]
-	mov         rdx, 0
-	mov         r8, 104
-	call        memset
-	mov         rax, 100
-	mov         -104[rbp], eax
+	mov         rax, 10
+	mov         -4[rbp], eax
 	movss       xmm0, [rel FLOAT_0]
-	movss       -100[rbp], xmm0
+	movss       -8[rbp], xmm0
+	mov         rax, 5
+	mov         -4[rbp], eax
 	movss       xmm0, [rel FLOAT_1]
-	movss       -96[rbp], xmm0
-	movss       xmm0, [rel FLOAT_2]
-	movss       -92[rbp], xmm0
-	movss       xmm0, [rel FLOAT_3]
-	movss       -88[rbp], xmm0
-	movss       xmm0, [rel FLOAT_4]
-	movss       -84[rbp], xmm0
-	movss       xmm0, [rel FLOAT_5]
-	movss       -80[rbp], xmm0
-	movss       xmm0, [rel FLOAT_6]
-	movss       -76[rbp], xmm0
-	movss       xmm0, [rel FLOAT_7]
-	movss       -72[rbp], xmm0
-	lea         rax, -104[rbp]
-	lea         rcx, -208[rbp]
-	mov         rcx, rcx
+	movss       -8[rbp], xmm0
+	mov         eax, -4[rbp]
+	mov         rcx, 5
+	cmp         eax, ecx
+	sete        dl
+	movzx       edx, dl
+	mov         rax, STRING_2
+	mov         cl, dl
 	mov         rdx, rax
-	mov         r8, 104
-	call        memcpy
-	lea         rax, -188[rbp]
-	mov         rcx, 1
-	mov         rdx, rcx
-	imul        rdx, 8
-	mov         rcx, rax
-	add         rcx, rdx
-	movss       xmm0, 0[rcx]
-	movss       -212[rbp], xmm0
-	mov         rax, STRING_8
-	mov         rcx, [rax]
-	movss       xmm0, -212[rbp]
-	cvtss2sd    xmm1, xmm0
-	movq        rdx, xmm1
-	call        printf
+	mov         r8, 12
+	call        runtime_builtin_assert
+	movss       xmm0, -8[rbp]
+	movss       xmm1, [rel FLOAT_3]
+	ucomiss     xmm0, xmm1
+	sete        al
+	movzx       eax, al
+	mov         rcx, STRING_4
+	mov         r11, rcx
+	mov         cl, al
+	mov         rdx, r11
+	mov         r8, 13
+	call        runtime_builtin_assert
+	mov         eax, -4[rbp]
+	mov         rcx, 2
+	mov         edx, eax
+	add         edx, ecx
+	mov         -4[rbp], edx
+	movss       xmm0, -8[rbp]
+	movss       xmm1, [rel FLOAT_5]
+	movss       xmm2, xmm0
+	addss       xmm2, xmm1
+	movss       -8[rbp], xmm2
+	mov         eax, -4[rbp]
+	mov         rcx, 7
+	cmp         eax, ecx
+	sete        dl
+	movzx       edx, dl
+	mov         rax, STRING_6
+	mov         cl, dl
+	mov         rdx, rax
+	mov         r8, 18
+	call        runtime_builtin_assert
+	movss       xmm0, -8[rbp]
+	movss       xmm1, [rel FLOAT_7]
+	ucomiss     xmm0, xmm1
+	sete        al
+	movzx       eax, al
+	mov         rcx, STRING_8
+	mov         r11, rcx
+	mov         cl, al
+	mov         rdx, r11
+	mov         r8, 19
+	call        runtime_builtin_assert
 	mov         rax, 0
-	add         rsp, 256
+	add         rsp, 48
 	pop         rbp
 	ret         
 

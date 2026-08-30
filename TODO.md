@@ -1,11 +1,9 @@
 Todo list:
 -------------------
 
-[]: Register allocator crossing calls
 []: Function calls
   []: Default arguments
-[]: Member access
-[]: Array access
+[]: Address-of / Dereference
 []: While loops
 []: For loops
 

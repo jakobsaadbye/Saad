@@ -83,6 +83,9 @@ void x64_emit_header(X64Converter *conv) {
     sb_append(&conv->code_header, "   extern memset\n");
     sb_append(&conv->code_header, "   extern memcpy\n");
 
+    // Builtin functions
+    sb_append(&conv->code_header, "   extern runtime_builtin_assert\n");
+
     // Runtime_Support types
     sb_append(&conv->code_header, "   extern Type_uint\n");
     sb_append(&conv->code_header, "   extern Type_u8\n");
@@ -120,7 +123,11 @@ void x64_emit_constant_pool(X64Converter *conv) {
             case CONSTANT_STRING: {
                 int str_data_id = x64_get_next_constant_data_id(conv);
 
-                sb_append(&conv->data, "\t_data_%d DB `%s`, 0\n", str_data_id, constant->as.value_string.data);
+                if (CONSTANT_FLAGS_USE_RAW_STRING_LITERAL) {
+                    sb_append(&conv->data, "\t_data_%d DB \"%s\", 0\n", str_data_id, constant->as.value_string.data);
+                } else {
+                    sb_append(&conv->data, "\t_data_%d DB `%s`, 0\n", str_data_id, constant->as.value_string.data);
+                }
                 sb_append(&conv->data, "\talign 8\n");
                 sb_append(&conv->data, "\tSTRING_%d:\n", constant->id);
                 sb_append(&conv->data, "\tdq _data_%d\n", str_data_id);
@@ -1002,6 +1009,23 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
         char *src = register_to_str(op2.preg, 8);
 
         x64_code(conv, "mov", "%s, [%s]", dst, src);
+        break;
+    }
+    case INST_BUILTIN_ASSERT: {
+        u64 linenumber = op1.imm_uint;
+        char *value_reg = register_to_str(op2.preg, op2.type->size);
+        char *filename_reg = register_to_str(op3.preg, op3.type->size);
+
+        if (op3.preg == REG_RCX) {
+            char *scratch = register_to_str(x64_get_scratch_register(op3.type), 8);
+            x64_code(conv, "mov", "%s, %s", scratch, filename_reg);
+            filename_reg = scratch;
+        }
+
+        x64_code(conv, "mov", "cl, %s", value_reg);
+        x64_code(conv, "mov", "rdx, %s", filename_reg);
+        x64_code(conv, "mov", "r8, %zu", linenumber);
+        x64_code(conv, "call", "runtime_builtin_assert");
         break;
     }
     case INST_COMMENT: {

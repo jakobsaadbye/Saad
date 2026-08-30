@@ -181,6 +181,19 @@ TypePrimitive *Type_void          = &primitive_types[PRIMITIVE_VOID];
 TypePrimitive *Type_untyped_int   = &primitive_types[PRIMITIVE_UNTYPED_INT];
 TypePrimitive *Type_untyped_float = &primitive_types[PRIMITIVE_UNTYPED_FLOAT];
 
+
+
+
+TypePointer *runtime_get_type_pointer(RawString name, Type *pointer_to);
+TypeArray *runtime_get_type_array(RawString name, int kind, Type *elem_type, int64_t count);
+TypeEnum *runtime_get_type_enum(RawString name, RawString *value_name, Type *backing_type, int min_value, int max_value);
+TypeStruct *runtime_get_type_struct(RawString name, StructMember *members, int members_count, int size, int alignment);
+TypeAny *runtime_get_type_any();
+void runtime_builtin_append(RawDynamicArray *da, void *item, bool by_value);
+int runtime_compare_strings(RawString *str1, RawString *str2);
+
+
+
 TypeString *Type_string = &(TypeString){
     .head = {
         .kind = TYPE_STRING, 
@@ -320,5 +333,12 @@ int runtime_compare_strings(RawString *str1, RawString *str2) {
 
         return +1;
 
+    }
+}
+
+void runtime_builtin_assert(bool condition, RawString filename, uint64_t linenumber) {
+    if (!condition) {
+        printf("%s:%zu Assertion failed!\n", filename.data, linenumber);
+        exit(EXIT_FAILURE);
     }
 }
