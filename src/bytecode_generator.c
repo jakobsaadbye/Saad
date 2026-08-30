@@ -537,7 +537,7 @@ void bcg_while(BytecodeGenerator *bcg, AstWhile *ast_while);
 void bcg_break_or_continue(BytecodeGenerator *bcg, AstBreakOrContinue *boc);
 void bcg_enum_defn(BytecodeGenerator *bcg, AstEnum *ast_enum);
 void bcg_struct_defn(BytecodeGenerator *bcg, AstStruct *ast_struct);
-IrValue bcg_array_literal(BytecodeGenerator *bcg, AstArrayLiteral *array_lit);
+void bcg_array_literal(BytecodeGenerator *bcg, AstArrayLiteral *array_lit, StackSlot base_slot, int base_offset);
 void bcg_struct_literal(BytecodeGenerator *bcg, AstStructLiteral *struct_lit, StackSlot base_slot, int base_offset);
 void bcg_declaration(BytecodeGenerator *bcg, AstDeclaration *decl);
 void bcg_assignment(BytecodeGenerator *bcg, AstAssignment *assign);
@@ -1822,19 +1822,59 @@ void bcg_struct_literal(BytecodeGenerator *bcg, AstStructLiteral *struct_lit, St
     for (int i = 0; i < struct_lit->initializers.count; i++) {
         AstStructInitializer *init = da_get_deref(struct_lit->initializers, i);
         
+        int offset = base_offset + init->member->member_offset;
+
         if (init->value->head.kind == AST_STRUCT_LITERAL) {
-            bcg_struct_literal(bcg, (AstStructLiteral *)init->value, base_slot, base_offset + init->member->member_offset);
+            bcg_struct_literal(bcg, (AstStructLiteral *)init->value, base_slot, offset);
+            continue;
+        }
+        if (init->value->head.kind == AST_ARRAY_LITERAL) {
+            bcg_array_literal(bcg, (AstArrayLiteral *)init->value, base_slot, offset);
+            continue;
+        }
+        
+        IrValue value = bcg_expression(bcg, init->value);
+        
+        Operand dst = make_op_memory_static(base_slot, offset, init->member->type);
+        Operand src = make_op_register(value);
+
+        bcg_emit_store(bcg, dst, src);
+    }
+}
+
+void zero_initialize_array_literal(BytecodeGenerator *bcg, AstArrayLiteral *array_lit, StackSlot stack_slot) {
+    TypeArray *array_type = (TypeArray *) array_lit->head.type;
+
+    if (array_type->array_kind == ARRAY_FIXED) {
+        // @Speed: We could be smarter about zero initializing. Only zero initialize if not all the array slots are set
+        emit_memset(bcg, stack_slot, 0, stack_slot.size);
+    } else {
+        XXX;
+    }
+}
+
+void bcg_array_literal(BytecodeGenerator *bcg, AstArrayLiteral *array_lit, StackSlot base_slot, int base_offset) {
+    TypeArray *array_type = (TypeArray *) array_lit->head.type;
+    Type *element_type = array_type->elem_type;
+
+    for (int i = 0; i < array_lit->expressions.count; i++) {
+        AstExpr *expr = da_get_deref(array_lit->expressions, i);
+        
+        int offset = base_offset + (i * element_type->size);
+
+        if (expr->head.kind == AST_STRUCT_LITERAL) {
+            bcg_struct_literal(bcg, (AstStructLiteral *)expr, base_slot, offset);
+            continue;
+        }
+        if (expr->head.kind == AST_ARRAY_LITERAL) {
+            bcg_array_literal(bcg, (AstArrayLiteral *)expr, base_slot, offset);
             continue;
         }
 
-        IrValue value = bcg_expression(bcg, init->value);
+        IrValue value = bcg_expression(bcg, expr);
         
-        Operand dst = make_op_memory_static(base_slot, base_offset + init->member->member_offset, init->member->type);
+        Operand dst = make_op_memory_static(base_slot, offset, element_type);
         Operand src = make_op_register(value);
-
-        if (dst.type->size >= 8) {
-            int k = 0;
-        }
 
         bcg_emit_store(bcg, dst, src);
     }
@@ -1872,12 +1912,6 @@ IrValue bcg_array_access_lvalue(BytecodeGenerator *bcg, AstArrayAccess *array_ac
 
     Type *element_type = array_ac->head.type;
 
-    bool is_constant_index_expr = false;
-
-    if (is_constant_index_expr) {
-        return base;
-    }
-
     // v[i] -> base + index * element_size
     IrValue base_reg = bcg_materialize_address(bcg, base);
     IrValue index = bcg_expression(bcg, array_ac->index_expr);
@@ -1909,7 +1943,7 @@ IrValue bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
         StackSlot base_slot = bc_allocate_stack_slot(bcg->current_function, struct_lit->head.type->size);
 
         zero_initialize_struct_literal(bcg, struct_lit, base_slot);
-        bcg_struct_literal(bcg, (AstStructLiteral*)expr, base_slot, 0);
+        bcg_struct_literal(bcg, struct_lit, base_slot, 0);
 
         IrValue dst = fresh_register(bcg, struct_lit->head.type);
 
@@ -1921,6 +1955,33 @@ IrValue bcg_expression(BytecodeGenerator *bcg, AstExpr *expr) {
         );
 
         return dst;
+    }
+    case AST_ARRAY_LITERAL: {
+        AstArrayLiteral *array_lit = (AstArrayLiteral *)expr;
+        assert(array_lit->head.type->kind == TYPE_ARRAY);
+
+        TypeArray *array_type = (TypeArray *) array_lit->head.type;
+
+        if (array_type->array_kind == ARRAY_FIXED) {
+            int array_size = array_type->head.size;
+            StackSlot base_slot = bc_allocate_stack_slot(bcg->current_function, array_size);
+
+            zero_initialize_array_literal(bcg, array_lit, base_slot);
+            bcg_array_literal(bcg, array_lit, base_slot, 0);
+
+            IrValue dst = fresh_register(bcg, array_lit->head.type);
+
+            emit_instruction_2(
+                bcg,
+                INST_LEA,
+                make_op_register(dst),
+                make_op_memory_static_from_slot(base_slot)
+            );
+
+            return dst;
+        } else {
+            XXX;
+        }
     }
     case AST_MEMBER_ACCESS: {
         AstMemberAccess *ma = (AstMemberAccess *)expr;

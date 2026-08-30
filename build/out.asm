@@ -22,6 +22,23 @@ segment .data
 	align 4
 	FLOAT_3:
 	dd 15.000000
+	align 4
+	FLOAT_4:
+	dd 1.000000
+	align 4
+	FLOAT_5:
+	dd 2.000000
+	align 4
+	FLOAT_6:
+	dd 3.000000
+	align 4
+	FLOAT_7:
+	dd 4.000000
+	_data_0 DB `%lf`, 0
+	align 8
+	STRING_8:
+	dq _data_0
+	dq 3:
 segment .rdata
 segment .rdata
 segment .text
@@ -56,43 +73,52 @@ segment .text
 main:
 	push        rbp
 	mov         rbp, rsp
-	sub         rsp, 576
+	sub         rsp, 256
 L0:
-	lea         rcx, -264[rbp]
+	lea         rcx, -104[rbp]
 	mov         rdx, 0
-	mov         r8, 264
+	mov         r8, 104
 	call        memset
 	mov         rax, 100
-	mov         -264[rbp], eax
+	mov         -104[rbp], eax
 	movss       xmm0, [rel FLOAT_0]
-	movss       -260[rbp], xmm0
+	movss       -100[rbp], xmm0
 	movss       xmm0, [rel FLOAT_1]
-	movss       -256[rbp], xmm0
+	movss       -96[rbp], xmm0
 	movss       xmm0, [rel FLOAT_2]
-	movss       -252[rbp], xmm0
+	movss       -92[rbp], xmm0
 	movss       xmm0, [rel FLOAT_3]
-	movss       -248[rbp], xmm0
-	lea         rax, -264[rbp]
-	lea         rcx, -528[rbp]
+	movss       -88[rbp], xmm0
+	movss       xmm0, [rel FLOAT_4]
+	movss       -84[rbp], xmm0
+	movss       xmm0, [rel FLOAT_5]
+	movss       -80[rbp], xmm0
+	movss       xmm0, [rel FLOAT_6]
+	movss       -76[rbp], xmm0
+	movss       xmm0, [rel FLOAT_7]
+	movss       -72[rbp], xmm0
+	lea         rax, -104[rbp]
+	lea         rcx, -208[rbp]
 	mov         rcx, rcx
 	mov         rdx, rax
-	mov         r8, 264
+	mov         r8, 104
 	call        memcpy
-	lea         rax, -508[rbp]
+	lea         rax, -188[rbp]
 	mov         rcx, 1
 	mov         rdx, rcx
-	imul        rdx, 24
+	imul        rdx, 8
 	mov         rcx, rax
 	add         rcx, rdx
-	mov         rax, 2
-	mov         rdx, rax
-	imul        rdx, 8
-	mov         rax, rcx
-	add         rax, rdx
-	movss       xmm0, 0[rax]
-	movss       -532[rbp], xmm0
+	movss       xmm0, 0[rcx]
+	movss       -212[rbp], xmm0
+	mov         rax, STRING_8
+	mov         rcx, [rax]
+	movss       xmm0, -212[rbp]
+	cvtss2sd    xmm1, xmm0
+	movq        rdx, xmm1
+	call        printf
 	mov         rax, 0
-	add         rsp, 576
+	add         rsp, 256
 	pop         rbp
 	ret         
 
