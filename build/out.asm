@@ -10,21 +10,16 @@ segment .data
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
    enum_to_int_buffer times 20 DB 0
-	_data_0 DB "%d", 0
+	align 4
+	FLOAT_0:
+	dd 0.100000
+	_data_0 DB ".\test.sd", 0
 	align 8
-	STRING_2:
+	STRING_1:
 	dq _data_0
-	dq 2:
+	dq 9:
 segment .rdata
 segment .rdata
-	BLOB_0:
-	db 255
-	times 2 db 0
-	db 255
-	BLOB_1:
-	times 2 db 0
-	db 255
-	db 255
 segment .text
    global main
    extern ExitProcess
@@ -54,19 +49,24 @@ segment .text
    extern Type_void
    extern Type_untyped_int
    extern Type_untyped_float
-   extern printf
 main:
 	push        rbp
 	mov         rbp, rsp
 	sub         rsp, 48
 L0:
-	mov         eax, [BLOB_0]
-	mov         -4[rbp], eax
-	mov         rax, STRING_2
-	mov         rcx, [rax]
+	movss       xmm0, [rel FLOAT_0]
+	mov         rax, xmm0
+	imul        rax, -1
+	cmp         rax, 0
+	setne       cl
+	mov         -1[rbp], cl
 	movzx       rax, BYTE -1[rbp]
-	mov         rdx, rax
-	call        printf
+	mov         rcx, STRING_1
+	mov         r11, rcx
+	mov         cl, al
+	mov         rdx, r11
+	mov         r8, 8
+	call        runtime_builtin_assert
 	mov         rax, 0
 	add         rsp, 48
 	pop         rbp

@@ -592,7 +592,6 @@ void x64_emit_comparrison_instruction(X64Converter *conv, Inst *inst) {
     int  size     = inst->op2.size;
 
     char *a = get_register_string_sized(inst->op2, size);
-    char *b = get_register_string_sized(inst->op3, size);
 
     char *set_inst = "";
 
@@ -605,6 +604,7 @@ void x64_emit_comparrison_instruction(X64Converter *conv, Inst *inst) {
         if (inst->kind == INST_DOUBLE_EQUAL)       set_inst = "sete";
         if (inst->kind == INST_NOT_EQUAL)          set_inst = "setne";
 
+        char *b = get_register_string_sized(inst->op3, size);
         x64_code(conv, size == 8 ? "ucomisd" : "ucomiss", "%s, %s", a, b);
     } else {
         bool is_signed = is_signed_integer(inst->op2.type);
@@ -623,14 +623,23 @@ void x64_emit_comparrison_instruction(X64Converter *conv, Inst *inst) {
         if (inst->kind == INST_DOUBLE_EQUAL) set_inst = "sete";
         if (inst->kind == INST_NOT_EQUAL)    set_inst = "setne";
 
-        x64_code(conv, "cmp", "%s, %s", a, b);
+        if (inst->op3.kind == OPERAND_REG) {
+            char *b = get_register_string_sized(inst->op3, size);
+            x64_code(conv, "cmp", "%s, %s", a, b);
+        }
+        else if (inst->op3.kind == OPERAND_IMM_UINT) {
+            x64_code(conv, "cmp", "%s, %llu", a, inst->op3.imm_uint);
+        }
+        else if (inst->op3.kind == OPERAND_IMM_INT) {
+            x64_code(conv, "cmp", "%s, %lld", a, inst->op3.imm_int);
+        }
+        else {
+            XXX;
+        }
     }
 
     char *dst8  = register_to_str(inst->op1.preg, 1);
-    char *dst32 = get_register_string_sized(inst->op1, 4);
-
     x64_code(conv, set_inst, "%s", dst8);
-    x64_code(conv, "movzx", "%s, %s", dst32, dst8);
 }
 
 bool is_same_physical_register(Operand a, Operand b) {
@@ -920,13 +929,8 @@ void x64_emit_cast_instruction(X64Converter *conv, Inst *inst) {
         }
         case INST_TRUNC: {
             if (inst->op1.preg != inst->op2.preg) {
-                if (to_size == 4) {
-                    char *src4 = get_register_string_sized(inst->op2, 4);
-                    x64_code(conv, "mov", "%s, %s", dst, src4);
-                } else {
-                    char *src_matched = get_register_string_sized(inst->op2, to_size);
-                    x64_code(conv, "mov", "%s, %s", dst, src_matched);
-                }
+                char *src_matched = get_register_string_sized(inst->op2, to_size);
+                x64_code(conv, "mov", "%s, %s", dst, src_matched);
             }
             break;
         }

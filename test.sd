@@ -1,30 +1,21 @@
-extern "C" {
-    printf :: (format: *u8, args: ...any);
-}
-
-HoldType :: struct {
-    crimp :: 0;
-    sloper :: 1;
-    jug :: 2;
-    count :: 3;
-}
-
-// HoldType :: enum {
-//     crimp,
-//     sloper,
-//     jug,
-// }
-
-Color :: struct {
-    r, g, b, a: u8;
-}
-
-Red :: Color{255, 0, 0, 255};
-Blue :: Color{0, 0, 255, 255};
-
 main :: () {
-    c := Red;
-    // z := Red;
-    printf(xx "%d", c.a);
+
+    // print("--- Integer -> X casts ---");
+    // x3: bool = xx 255;
+    // assert(x3);
+
+    a6 : bool = xx -0.1;
+    assert(a6);
+
+
+    // print("--- Boolean -> X casts ---");
+    // c1 : int = xx false;
+    // c2 : int = xx true;
+    // c3 : float = xx false;
+    // c4 : f64 = xx true;
+    // assert(c1 == 0);
+    // assert(c2 == 1);
+    // assert(c3 == 0.0);
+    // assert(c4 == 1.0);
 }
 

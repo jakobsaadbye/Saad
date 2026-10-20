@@ -1,8 +1,12 @@
-Todo list:
--------------------
+Todo list for the new register based codegenerator:
+-----------------------------------------------
 
 []: Function calls
   []: Default arguments
+[]: Array initialization
+  []: Dynamic arrays
+  []: Slices
+[]: Runtime type information (RTTI & any type)
 []: Address-of / Dereference
 []: While loops
 []: For loops
@@ -20,6 +24,23 @@ Functions as values:
 []: Figure out what the hell to do with annonymous methods? Maybe just don't allow them
 []: Functions inside constant arrays
   - e.g functionInArray :: [() -> void {}]
+
+
+Passing tests:
+---------------
+
+[x]: .\tests\array_index.sd
+[x]: .\tests\assignment.sd
+[x]: .\tests\basic_arrithmetic.sd
+[x]: .\tests\bit_operations.sd
+[x]: .\tests\bools_advanced.sd
+[-]: .\tests\builtin_string_test.sd (skip this)
+[-]: .\tests\casting_rules.sd
+
+
+
+
+
 
 
 

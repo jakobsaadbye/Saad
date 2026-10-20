@@ -2014,6 +2014,22 @@ IrValue bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
                 inst_kind = INST_SEXT;
             }
         } else if (from->size > to->size) {
+
+            if (to->kind == TYPE_BOOL) {
+                // Perform a boolean cast (compare against 0)
+                IrValue dst = fresh_register(bcg, to);
+
+                add_instruction(bcg, make_instruction_3(
+                    bcg,
+                    INST_NOT_EQUAL,
+                    make_op_register(dst),
+                    make_op_register(src),
+                    make_immediate_uint(0, 8, 0)
+                ));
+
+                return dst;
+            }
+
             // Truncate
             inst_kind = INST_TRUNC;
         } else {
@@ -2030,6 +2046,24 @@ IrValue bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
     }
     else if (from->kind == TYPE_FLOAT && is_integral_type(to)) {
         if (is_unsigned_integer_ish(to)) {
+
+            if (to->kind == TYPE_BOOL) {
+                // Perform a boolean cast (compare against 0.0)
+
+                // @TODO Populate a zeroed sse register to compare src against
+                IrValue dst = fresh_register(bcg, to);
+
+                add_instruction(bcg, make_instruction_3(
+                    bcg,
+                    INST_NOT_EQUAL,
+                    make_op_register(dst),
+                    make_op_register(src),
+                    make_immediate_uint(0, 8, 0)
+                ));
+
+                return dst;
+            }
+
             inst_kind = INST_FPTOUI;
         } else {
             inst_kind = INST_FPTOSI;
