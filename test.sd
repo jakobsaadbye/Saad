@@ -1,11 +1,17 @@
+extern "C" {
+    printf :: (format: *u8, args: ...any) -> void;
+}
+
 main :: () {
 
     // print("--- Integer -> X casts ---");
     // x3: bool = xx 255;
     // assert(x3);
 
-    a6 : bool = xx -0.1;
+    a6 : bool = xx 0.0;
     assert(a6);
+
+    printf(xx "%d", a6);
 
 
     // print("--- Boolean -> X casts ---");

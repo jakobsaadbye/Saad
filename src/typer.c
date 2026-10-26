@@ -3708,7 +3708,7 @@ bool can_cast_explicitly(Type *from, Type *to) {
     }
 
     if (from->kind == TYPE_BOOL    && to->kind == TYPE_INTEGER) return true;
-    if (from->kind == TYPE_BOOL    && to->kind == TYPE_FLOAT) return true;  
+    // Note: bool -> float is intentionally not allowed. Cast to an integer first
 
     if (from->kind == TYPE_POINTER && to->kind == TYPE_INTEGER) return true;    // address to a u64 number
     if (from->kind == TYPE_POINTER && to->kind == TYPE_BOOL) return true;       // null pointer = false, otherwise = true
@@ -3772,6 +3772,9 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
 
     if (!can_cast_explicitly(expr_type, wanted_type)) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "Invalid Cast: Type %s can not be casted to %s", type_to_str(expr_type), type_to_str(wanted_type));
+        if (expr_type->kind == TYPE_BOOL && wanted_type->kind == TYPE_FLOAT) {
+            report_error_ast(typer->parser, LABEL_NOTE, NULL, "Booleans can not be casted directly to floats. Cast to an integer first, e.g. `(value as int) as %s`", type_to_str(wanted_type));
+        }
         return NULL;
     }
 

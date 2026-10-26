@@ -123,7 +123,7 @@ AstFile *parse_file(Parser *parser, char *file_path) {
     parser->current_scope = file->scope;
 
     // Add import to the runtime library
-    if (strcmp(parser->current_file->absolute_path, "C:\\Saad\\std\\runtime.sd") != 0) {
+    if (parser->runtime_file_path == NULL || strcmp(parser->current_file->absolute_path, parser->runtime_file_path) != 0) {
         ok = generate_and_add_import(parser, "runtime");
         if (!ok) return NULL;
     }
@@ -2527,7 +2527,7 @@ AstExpr *parse_leaf(Parser *parser) {
     }
 
     if (t.type == TOKEN_LITERAL_STRING) {
-        if (!parser->current_file->has_imported_builtin_string && strcmp(parser->current_file->absolute_path, "C:\\Saad\\std\\builtin_string.sd") != 0) {
+        if (!parser->current_file->has_imported_builtin_string && (parser->builtin_string_file_path == NULL || strcmp(parser->current_file->absolute_path, parser->builtin_string_file_path) != 0)) {
             bool ok = generate_and_add_import(parser, "builtin_string");
             if (!ok) return NULL;
             parser->current_file->has_imported_builtin_string = true;

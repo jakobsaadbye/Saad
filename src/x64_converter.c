@@ -16,6 +16,7 @@ typedef struct X64Converter {
     BytecodeFunction *current_bytecode_function;
 
     Arena temp_string_arena;
+    int   next_local_label_id; // For unique local labels (e.g. NaN checks in float compares)
 } X64Converter;
 
 typedef struct OffsetOrRegister {
@@ -33,6 +34,7 @@ void x64_code(X64Converter *conv, char *inst, char *format, ...);
 void x64_rdata(X64Converter *conv, char *inst, char *format, ...);
 void x64_data(X64Converter *conv, char *inst, char *format, ...);
 void x64_emit_mov_into(X64Converter *conv, Operand dst_op, Operand src_op);
+bool is_same_physical_register(Operand a, Operand b);
 
 
 
@@ -68,6 +70,11 @@ void x64_emit_header(X64Converter *conv) {
     sb_append(&conv->data, "   string_true  DB \"true\", 0\n");
     sb_append(&conv->data, "   string_assert_fail  DB \"Assertion failed at line %s\", 10, 0\n", "%d");
     sb_append(&conv->data, "   enum_to_int_buffer times 20 DB 0\n"); // 20 is the length of the largest integer number 2^64
+
+    // Sign bit masks used for float negation (xorps requires 16 byte aligned memory operands)
+    sb_append(&conv->data, "   align 16\n");
+    sb_append(&conv->data, "   SIGN_MASK_F32 dd 0x80000000, 0, 0, 0\n");
+    sb_append(&conv->data, "   SIGN_MASK_F64 dq 0x8000000000000000, 0\n");
 
     sb_append(&conv->rdata_string, "segment .rdata\n");
 
@@ -138,7 +145,8 @@ void x64_emit_constant_pool(X64Converter *conv) {
             case CONSTANT_FLOAT: {
                 sb_append(&conv->data, "\talign %d\n", constant->type->size);
                 sb_append(&conv->data, "\tFLOAT_%d:\n", constant->id);
-                sb_append(&conv->data, "\t%s %llf\n", x64_get_data_width(constant->type->size), constant->as.value_float);
+                // %.17e round-trips doubles exactly and always produces a float literal for nasm (never e.g. `dd 1`, which would be an integer)
+                sb_append(&conv->data, "\t%s %.17e\n", x64_get_data_width(constant->type->size), constant->as.value_float);
                 break;
             }
             case CONSTANT_STRING: {
@@ -640,6 +648,39 @@ void x64_emit_comparrison_instruction(X64Converter *conv, Inst *inst) {
 
     char *dst8  = register_to_str(inst->op1.preg, 1);
     x64_code(conv, set_inst, "%s", dst8);
+
+    if (is_float && (inst->kind == INST_DOUBLE_EQUAL || inst->kind == INST_NOT_EQUAL)) {
+        // An unordered compare (NaN) sets ZF=1 and PF=1, so sete/setne alone gives the wrong answer.
+        // NaN == x is always false and NaN != x is always true
+        int id = conv->next_local_label_id++;
+        x64_code(conv, "jnp", ".ordered_%d", id);
+        x64_code(conv, "mov", "%s, %d", dst8, inst->kind == INST_NOT_EQUAL ? 1 : 0);
+        sb_append(&conv->code, ".ordered_%d:\n", id);
+    }
+}
+
+void x64_emit_negate_instruction(X64Converter *conv, Inst *inst) {
+    Operand dst_op = inst->op1;
+    Operand src_op = inst->op2;
+
+    if (dst_op.is_sse) {
+        if (!is_same_physical_register(dst_op, src_op)) {
+            x64_emit_mov_into(conv, dst_op, src_op);
+        }
+
+        char *dst  = get_register_string(dst_op);
+        char *mask = dst_op.size == 8 ? "SIGN_MASK_F64" : "SIGN_MASK_F32";
+        x64_code(conv, "xorps", "%s, [rel %s]", dst, mask);
+        return;
+    }
+
+    if (!is_same_physical_register(dst_op, src_op)) {
+        x64_emit_mov_into(conv, dst_op, src_op);
+    }
+
+    // Small integers are kept widened in the full register
+    int size = dst_op.size < 4 ? 8 : dst_op.size;
+    x64_code(conv, "neg", "%s", get_register_string_sized(dst_op, size));
 }
 
 bool is_same_physical_register(Operand a, Operand b) {
@@ -934,18 +975,31 @@ void x64_emit_cast_instruction(X64Converter *conv, Inst *inst) {
             }
             break;
         }
-        case INST_SITOFP: {
-            char *cvt = (to_size == 4) ? "cvtsi2ss" : "cvtsi2sd";
-            x64_code(conv, cvt, "%s, %s", dst, src);
-            break;
-        }
+        case INST_SITOFP:
         case INST_UITOFP: {
             char *cvt = (to_size == 4) ? "cvtsi2ss" : "cvtsi2sd";
-            if (from_size < 8) {
-                x64_code(conv, cvt, "%s, %s", dst, src);
-            } else {
-                XXX;
+            bool is_unsigned = inst->kind == INST_UITOFP;
+
+            if (is_unsigned && from_size == 8) {
+                XXX; // @Todo: u64 -> float needs special handling for values >= 2^63
             }
+
+            if (from_size < 4) {
+                // cvtsi2ss/sd only takes 32/64-bit sources, and narrow values (e.g. bools from setcc)
+                // only have their low bits set, so widen into the scratch register first.
+                // Safe to use: the destination is an xmm register, so no gpr scratch is taken by it.
+                char *scratch32 = register_to_str(x64_get_scratch_gpr_register(), 4);
+                x64_code(conv, is_unsigned ? "movzx" : "movsx", "%s, %s", scratch32, src);
+                src = scratch32;
+            } else if (is_unsigned && from_size == 4) {
+                // Zero-extend into 64 bits so values >= 2^31 aren't treated as negative
+                char *src32 = get_register_string_sized(inst->op2, 4);
+                char *scratch32 = register_to_str(x64_get_scratch_gpr_register(), 4);
+                x64_code(conv, "mov", "%s, %s", scratch32, src32); // 32-bit mov zero-extends
+                src = register_to_str(x64_get_scratch_gpr_register(), 8);
+            }
+
+            x64_code(conv, cvt, "%s, %s", dst, src);
             break;
         }
         case INST_FPTOSI: {
@@ -1150,6 +1204,10 @@ void x64_emit_instruction(X64Converter *conv, Inst *inst) {
     case INST_DOUBLE_EQUAL: 
     case INST_NOT_EQUAL: {
         x64_emit_comparrison_instruction(conv, inst);
+        break;
+    }
+    case INST_NEG: {
+        x64_emit_negate_instruction(conv, inst);
         break;
     }
     case INST_LOGICAL_AND:

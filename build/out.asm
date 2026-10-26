@@ -10,14 +10,25 @@ segment .data
    string_true  DB "true", 0
    string_assert_fail  DB "Assertion failed at line %d", 10, 0
    enum_to_int_buffer times 20 DB 0
+   align 16
+   SIGN_MASK_F32 dd 0x80000000, 0, 0, 0
+   SIGN_MASK_F64 dq 0x8000000000000000, 0
 	align 4
 	FLOAT_0:
-	dd 0.100000
+	dd 0.00000000000000000e+00
+	align 4
+	FLOAT_1:
+	dd 0.00000000000000000e+00
 	_data_0 DB ".\test.sd", 0
 	align 8
-	STRING_1:
+	STRING_2:
 	dq _data_0
 	dq 9:
+	_data_1 DB "%d", 0
+	align 8
+	STRING_3:
+	dq _data_1
+	dq 2:
 segment .rdata
 segment .rdata
 segment .text
@@ -49,24 +60,32 @@ segment .text
    extern Type_void
    extern Type_untyped_int
    extern Type_untyped_float
+   extern printf
 main:
 	push        rbp
 	mov         rbp, rsp
 	sub         rsp, 48
 L0:
 	movss       xmm0, [rel FLOAT_0]
-	mov         rax, xmm0
-	imul        rax, -1
-	cmp         rax, 0
-	setne       cl
-	mov         -1[rbp], cl
+	movss       xmm1, [rel FLOAT_1]
+	ucomiss     xmm0, xmm1
+	setne       al
+	jnp         .ordered_0
+	mov         al, 1
+.ordered_0:
+	mov         -1[rbp], al
 	movzx       rax, BYTE -1[rbp]
-	mov         rcx, STRING_1
+	mov         rcx, STRING_2
 	mov         r11, rcx
 	mov         cl, al
 	mov         rdx, r11
-	mov         r8, 8
+	mov         r8, 12
 	call        runtime_builtin_assert
+	mov         rax, STRING_3
+	mov         rcx, [rax]
+	movzx       rax, BYTE -1[rbp]
+	mov         rdx, rax
+	call        printf
 	mov         rax, 0
 	add         rsp, 48
 	pop         rbp

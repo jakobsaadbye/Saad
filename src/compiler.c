@@ -2,15 +2,12 @@
 #include <stdio.h>
 #include "x64_converter.c"
 
-#ifdef __APPLE__
-    #include <sys/uio.h>
-    #include <fcntl.h> 
-    #include <unistd.h>
-#else
+#ifdef _WIN32
     #include <io.h>
+#else
+    #include <fcntl.h>
+    #include <unistd.h>
 #endif
-
-#define MAX_RESOLVED_IMPORT_PATH_LENGTH 256
 
 typedef struct CompilerReport {
     CompilerConfig *config;
@@ -29,15 +26,47 @@ typedef struct CompilerReport {
 } CompilerReport;
 
 
+// Finds the root folder of the compiler (the folder containing std/runtime.sd).
+// Uses the SAAD_ROOT environment variable if set, otherwise searches upwards from the executable's location
+char *find_compiler_root() {
+    char *env_root = getenv("SAAD_ROOT");
+    if (env_root != NULL && env_root[0] != '\0') {
+        return env_root;
+    }
+
+    char *exe_path = get_executable_path();
+    if (exe_path != NULL) {
+        char *dir = get_directory_from_path(exe_path);
+
+        for (int depth = 0; depth < 4; depth++) {
+            char *std_dir      = join_path(dir, "std");
+            char *runtime_path = join_path(std_dir, "runtime.sd");
+            bool found = check_file_exists(runtime_path);
+            free(std_dir);
+            free(runtime_path);
+
+            if (found) return dir;
+
+            // Go one folder up
+            char *last_slash = strrchr(dir, PATH_SEPARATOR);
+            if (last_slash == NULL) break;
+            *last_slash = '\0';
+        }
+    }
+
+    return "C:\\Saad"; // Fallback to the default install location
+}
+
 CompilerConfig get_standard_compiler_config() {
     CompilerConfig config = {0};
 
-    config.compiler_path  = "C:\\Saad";      // @Hardcoded
-    config.stdlib_path    = "C:\\Saad\\std"; // @Hardcoded
+    config.compiler_path  = find_compiler_root();
+    config.stdlib_path    = join_path(config.compiler_path, "std");
     config.working_directory = get_current_directory();
     config.file_extension = "sd";
     config.backend = BACKEND_X64_NEW;
     config.optimization_level = OPTIMIZATION_LEVEL_O0;
+    config.run_program = true;
 
     return config;
 }
@@ -106,8 +135,7 @@ bool resolve_import(CompilerConfig *config, Parser *parser, AstImport *import, A
         // Check in the stdlib folder
         change_directory(config->stdlib_path);
         if (check_file_exists(import_path)) {
-            import->resolved_path = malloc(MAX_RESOLVED_IMPORT_PATH_LENGTH);
-            sprintf(import->resolved_path, "%s\\%s", config->stdlib_path, import_path);
+            import->resolved_path = join_path(config->stdlib_path, import_path);
         }
         change_directory(config->working_directory);
     }
@@ -128,11 +156,13 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
 
     old_stdout = dup(1);
     if (!output_to_console) {
-        freopen("nul", "w", stdout);
+        freopen(NULL_DEVICE, "w", stdout);
     }
     
     Lexer lexer           = lexer_init();
     Parser parser         = parser_init(&lexer);
+    parser.runtime_file_path        = join_path(config->stdlib_path, "runtime.sd");
+    parser.builtin_string_file_path = join_path(config->stdlib_path, "builtin_string.sd");
     ConstEvaluator ce     = const_evaluator_init(&parser);
     Typer typer           = typer_init(&parser, &ce);
     BytecodeGenerator bcg = bytecode_generator_init(config, &parser);
@@ -267,29 +297,57 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     report.codegen_time_end = clock();
 
     
-    // Link and generate executeable
+    // Assemble
     report.asm_and_link_time_start = clock();
-    system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
-    int exit_code = system(
+    int exit_code = system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
+    if (exit_code != 0) {
+        printf("error: Failed to assemble ./build/out.asm\n");
+        cleanup();
+        return false;
+    }
+
+    // Link and generate executeable
+#ifdef _WIN32
+    char link_command[2048];
+    snprintf(link_command, sizeof(link_command),
         "gcc -o ./build/out.exe ./build/out.obj "
-        "-LC:/Saad/packages/runtime/lib "
-        "-LC:/Saad/packages/raylib/lib "
+        "-L\"%s/packages/runtime/lib\" "
+        "-L\"%s/packages/raylib/lib\" "
         "-lruntime_support -lraylib "
-        "-lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid"
+        "-lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid",
+        config->compiler_path, config->compiler_path
     );
+    exit_code = system(link_command);
     if (exit_code != 0) {
         cleanup();
         return false;
     }
+#else
+    // The x64 backend targets Win64, so we can only assemble (not link or run) on other platforms
+    printf("note: Skipping linking. The Win64 target can only be linked on Windows\n");
+#endif
     report.asm_and_link_time_end = clock();
 
-    // Run the program
     if (output_to_console) {
         print_compiler_report(report);
+    }
+
+    if (!config->run_program) {
+        reset_stdout();
+        return true;
+    }
+
+    // Run the program
+#ifdef _WIN32
+    if (output_to_console) {
         exit_code = system(".\\build\\out.exe");
     } else {
         exit_code = system(".\\build\\out.exe >nul");
     }
+#else
+    printf("error: Running programs is only supported on Windows. Use 'build' instead\n");
+    exit_code = 1;
+#endif
     
     if (exit_code != 0) {
         cleanup();

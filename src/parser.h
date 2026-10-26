@@ -19,6 +19,9 @@ typedef struct Parser {
     bool inside_argument_list;
     bool inside_extern_block;
     bool reported_error;
+
+    char *runtime_file_path;
+    char *builtin_string_file_path;
 } Parser;
 
 Parser   parser_init(Lexer *lexer);

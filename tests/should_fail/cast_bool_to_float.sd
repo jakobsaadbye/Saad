@@ -1,0 +1,4 @@
+main :: () {
+    b := true;
+    f := b as float; // bool -> float is not allowed. Should be `(b as int) as float`
+}

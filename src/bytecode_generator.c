@@ -347,6 +347,7 @@ typedef enum InstKind {
     INST_DOUBLE_EQUAL,
     INST_NOT_EQUAL,
     INST_NOT,
+    INST_NEG,      // Arithmetic negation (integer or float)
     INST_GREATER_THAN,
     INST_LESS_THAN,
     INST_GREATER_THAN_EQUAL,
@@ -419,6 +420,7 @@ char *inst_kind_to_string(InstKind kind) {
     case INST_DOUBLE_EQUAL:         return "eq";
     case INST_NOT_EQUAL:            return "noteq";
     case INST_NOT:                  return "not";
+    case INST_NEG:                  return "neg";
     case INST_GREATER_THAN:         return "gt";
     case INST_LESS_THAN:            return "lt";
     case INST_GREATER_THAN_EQUAL:   return "gte";
@@ -897,7 +899,7 @@ void bcg_dump_operand(StringBuilder *sb, Operand op) {
             return;
         }
         case CONSTANT_FLOAT: {
-            sb_append(sb, "%llf", op.constant->as.value_float);
+            sb_append(sb, "%g", op.constant->as.value_float);
             return;
         }
         default: {
@@ -1948,12 +1950,11 @@ IrValue bcg_unary(BytecodeGenerator *bcg, AstUnary *unary) {
 
     IrValue value = bcg_expression(bcg, unary->expr);
 
-    if (op == OP_UNARY_MINUS) {
-        return bcg_emit_multiply_static_int(bcg, value, -1);
-    }
-    
     InstKind inst_kind = 0;
-    if (op == OP_NOT) {
+    if (op == OP_UNARY_MINUS) {
+        inst_kind = INST_NEG;
+    }
+    else if (op == OP_NOT) {
         inst_kind = INST_NOT;
     }
     else if (op == OP_BITWISE_NOT) {
@@ -1993,12 +1994,50 @@ IrValue bcg_load_constant_identifier(BytecodeGenerator *bcg, AstIdentifier *iden
     return bcg_load_constant(bcg, constant);
 }
 
+// Converts any scalar value to a bool by comparing it against zero (x != 0)
+IrValue bcg_emit_bool_conversion(BytecodeGenerator *bcg, IrValue src, Type *to) {
+    Type *from = src.type;
+
+    if (from->kind == TYPE_BOOL) {
+        return src;
+    }
+
+    IrValue dst = fresh_register(bcg, to);
+    Operand zero_op = {0};
+
+    if (from->kind == TYPE_FLOAT) {
+        // Compare against a 0.0 of the same width in an SSE register
+        Constant zero = {0};
+        zero.kind = CONSTANT_FLOAT;
+        zero.type = from;
+        zero.as.value_float = 0.0;
+
+        IrValue zero_value = bcg_load_constant(bcg, bcg_add_constant(bcg, &zero));
+        zero_op = make_op_register(zero_value);
+    }
+    else if (is_integral_type(from) || from->kind == TYPE_POINTER) {
+        zero_op = make_immediate_uint(0, from->size, 0);
+    }
+    else {
+        report_error_ast(bcg->parser, LABEL_ERROR, NULL, "Compiler Error: Cannot convert type '%s' to bool", type_to_str(from));
+        XXX;
+    }
+
+    emit_instruction_3(bcg, INST_NOT_EQUAL, make_op_register(dst), make_op_register(src), zero_op);
+
+    return dst;
+}
+
 IrValue bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
 
     Type *from = cast->expr->type;
     Type *to   = cast->cast_to;
 
     IrValue src = bcg_expression(bcg, cast->expr);
+
+    if (to->kind == TYPE_BOOL) {
+        return bcg_emit_bool_conversion(bcg, src, to);
+    }
 
     InstKind inst_kind = 0;
 
@@ -2014,22 +2053,6 @@ IrValue bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
                 inst_kind = INST_SEXT;
             }
         } else if (from->size > to->size) {
-
-            if (to->kind == TYPE_BOOL) {
-                // Perform a boolean cast (compare against 0)
-                IrValue dst = fresh_register(bcg, to);
-
-                add_instruction(bcg, make_instruction_3(
-                    bcg,
-                    INST_NOT_EQUAL,
-                    make_op_register(dst),
-                    make_op_register(src),
-                    make_immediate_uint(0, 8, 0)
-                ));
-
-                return dst;
-            }
-
             // Truncate
             inst_kind = INST_TRUNC;
         } else {
@@ -2046,24 +2069,6 @@ IrValue bcg_cast(BytecodeGenerator *bcg, AstCast *cast) {
     }
     else if (from->kind == TYPE_FLOAT && is_integral_type(to)) {
         if (is_unsigned_integer_ish(to)) {
-
-            if (to->kind == TYPE_BOOL) {
-                // Perform a boolean cast (compare against 0.0)
-
-                // @TODO Populate a zeroed sse register to compare src against
-                IrValue dst = fresh_register(bcg, to);
-
-                add_instruction(bcg, make_instruction_3(
-                    bcg,
-                    INST_NOT_EQUAL,
-                    make_op_register(dst),
-                    make_op_register(src),
-                    make_immediate_uint(0, 8, 0)
-                ));
-
-                return dst;
-            }
-
             inst_kind = INST_FPTOUI;
         } else {
             inst_kind = INST_FPTOSI;

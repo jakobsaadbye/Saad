@@ -773,6 +773,7 @@ typedef struct CompilerConfig {
     char              *file_extension;
     CodegenBackend     backend;
     OptimizationLevel  optimization_level;
+    bool               run_program;        // Run the executable after a successful build
 } CompilerConfig;
 
 typedef struct Relocation {
