@@ -435,11 +435,11 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
     switch(token_type) {
     case TOKEN_LITERAL_INTEGER: {
         const char *src = &lexer->file_text[pos_start.input_idx];
-        char val_str[MAX_DIGITS];
-        memset(val_str, '\0', MAX_DIGITS);
-
-        strncpy(val_str, src, pos_end.input_idx - pos_start.input_idx);
+        int len = pos_end.input_idx - pos_start.input_idx;
+        char *val_str = calloc(len + 1, 1); // Literals can be longer than any fixed buffer
+        memcpy(val_str, src, len);
         unsigned long long val = strtoull(val_str, NULL, 0);
+        free(val_str);
 
         result.type = token_type;
         if (val > S64_MAX) {
@@ -452,11 +452,11 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
     }
     case TOKEN_LITERAL_FLOAT : {
         const char *src = &lexer->file_text[pos_start.input_idx];
-        char val_str[MAX_DIGITS];
-        memset(val_str, '\0', MAX_DIGITS);
-
-        strncpy(val_str, src, pos_end.input_idx - pos_start.input_idx);
+        int len = pos_end.input_idx - pos_start.input_idx;
+        char *val_str = calloc(len + 1, 1); // Literals can be longer than any fixed buffer
+        memcpy(val_str, src, len);
         double val = atof(val_str);
+        free(val_str);
 
         result.type = token_type;
         result.as_value.value.floating = val;
@@ -509,6 +509,10 @@ void eat_character(Lexer *lexer) {
 }
 
 char peek_char(Lexer *lexer, int lookahead) {
+    // Never read past the terminating NUL (e.g looking 2 characters ahead from the last character of a file)
+    for (int i = 0; i < lookahead; i++) {
+        if (lexer->file_text[lexer->char_idx + i] == '\0') return '\0';
+    }
     return lexer->file_text[lexer->char_idx + lookahead];
 }
 

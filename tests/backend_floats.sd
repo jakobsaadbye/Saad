@@ -1,0 +1,48 @@
+// Float semantics: NaN comparisons, negative zero, mixed widths, conversions.
+
+zero :: () -> f64 { return 0.0; }
+
+main :: () {
+    nan := zero() / zero();
+    assert(nan != nan);
+    assert(!(nan == nan));
+    assert(!(nan < 1.0));
+    assert(!(nan > 1.0));
+    assert(!(nan <= 1.0));
+    assert(!(nan >= 1.0));
+    nan_is_true: bool = xx nan;
+    assert(nan_is_true);
+
+    nz := -0.0;
+    assert(nz == 0.0);
+    negated := -nz;
+    assert(negated == 0.0);
+
+    // Mixed widths: the literal and the f32 are converted before comparing
+    d: f64 = 1.0;
+    assert(d == 1.0);
+    f: f32 = 2.5;
+    assert(f == 2.5);
+    assert(d < f);
+    df: f64 = xx f;
+    assert(df == 2.5);
+
+    // Conversions
+    i: int = xx 3.99;
+    assert(i == 3);
+    j: int = xx -3.99;
+    assert(j == -3);
+    k: f32 = xx 7;
+    assert(k == 7.0);
+    u: u32 = 4000000000;
+    uf: f64 = xx u;
+    assert(uf == 4000000000.0);
+
+    // Arithmetic
+    a := 1.5;
+    b := 0.25;
+    assert(a * b == 0.375);
+    assert(a / b == 6.0);
+    assert(a - b == 1.25);
+    assert(-a == -1.5);
+}

@@ -1,0 +1,80 @@
+// Integer semantics the backend has to get right: wrap-around of narrow types, signedness of
+// division, remainder, shifts and comparisons, and conversions.
+
+div :: (a: int, b: int) -> int { return a / b; }
+rem :: (a: int, b: int) -> int { return a % b; }
+
+main :: () {
+    // Narrow types wrap around
+    a: u8 = 200;
+    b: u8 = 100;
+    c: u8 = a + b;
+    assert(c == 44);
+
+    s: s8 = 127;
+    s = s + 1;
+    assert(s == -128);
+
+    w: u16 = 65535;
+    w += 1;
+    assert(w == 0);
+
+    // Signed and unsigned division / remainder
+    assert(div(-7, 2) == -3);
+    assert(rem(-7, 2) == -1);
+    assert(div(7, -2) == -3);
+    x: u32 = 4000000000;
+    y: u32 = 3;
+    assert(x / y == 1333333333);
+    assert(x % y == 1);
+    n8: s8 = -100;
+    d8: s8 = 7;
+    assert(n8 / d8 == -14);
+    assert(n8 % d8 == -2);
+
+    // Shifts by a variable amount
+    one := 1;
+    amount := 10;
+    assert(one << amount == 1024);
+    neg := -1024;
+    assert(neg >> 3 == -128);         // arithmetic shift for signed
+    big: u32 = 4294967295;
+    four: u32 = 4;
+    assert(big >> four == 268435455); // logical shift for unsigned
+    small: u8 = 255;
+    sh: u8 = 4;
+    assert(small >> sh == 15);
+
+    // Unsigned vs signed comparisons
+    ub: u32 = 3000000000;
+    us: u32 = 5;
+    assert(ub > us);
+    sb: int = -5;
+    ss: int = 5;
+    assert(sb < ss);
+
+    // Conversions
+    m: s8 = -3;
+    wide: s64 = m;
+    assert(wide == -3);
+    um: u8 = 253;
+    uwide: u64 = um;
+    assert(uwide == 253);
+    t: s64 = 4294967298;
+    tt: s32 = xx t;
+    assert(tt == 2);
+
+    huge: u64 = 18446744073709551615;
+    hf: f64 = xx huge;
+    assert(hf > 18446744073709000000.0);
+    big_float: f64 = 16000000000000000000.0; // Untyped float literals are f32, so be explicit
+    back: u64 = xx big_float;
+    assert(back == 16000000000000000000);
+
+    // Bit operations on narrow values
+    bits: u8 = 240;
+    assert(~bits == 15);
+    assert((bits & 60) == 48);
+    assert((bits | 15) == 255);
+    assert((bits ^ 255) == 15);
+}

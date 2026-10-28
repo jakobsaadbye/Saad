@@ -1,0 +1,81 @@
+// Aggregates: small structs (passed in a register), big structs (passed by reference to a copy),
+// copy semantics, aliasing in assignments and struct returns.
+
+Small :: struct { a, b: s32; }
+Color :: struct { r, g, b, a: u8; }
+Big   :: struct { x, y, z, w: s64; }
+
+modify_big :: (big: Big) -> s64 {
+    big.x = 1000; // Must not change the caller's value
+    return big.x + big.y;
+}
+
+modify_small :: (small: Small) -> s32 {
+    small.a = 99;
+    return small.a + small.b;
+}
+
+make_big :: (v: s64) -> Big {
+    return Big{v, v + 1, v + 2, v + 3};
+}
+
+make_color :: () -> Color {
+    return Color{1, 2, 3, 4};
+}
+
+swap :: (a: *Small) {
+    tmp := a.a;
+    a.a = a.b;
+    a.b = tmp;
+}
+
+main :: () {
+    c := Color{10, 20, 30, 40};
+    assert(c.r == 10 && c.g == 20 && c.b == 30 && c.a == 40);
+
+    s := Small{1, 2};
+    assert(modify_small(s) == 101);
+    assert(s.a == 1);
+
+    big := Big{1, 2, 3, 4};
+    assert(modify_big(big) == 1002);
+    assert(big.x == 1);
+
+    copy := big;
+    copy.y = 50;
+    assert(big.y == 2);
+    assert(copy.y == 50);
+
+    made := make_big(10);
+    assert(made.x == 10 && made.w == 13);
+    assert(make_big(5).z == 7);
+
+    mc := make_color();
+    assert(mc.b == 3);
+
+    // The right hand side reads the destination before it is overwritten
+    s = Small{s.b, s.a};
+    assert(s.a == 2 && s.b == 1);
+
+    swap(&s);
+    assert(s.a == 1 && s.b == 2);
+
+    // Arrays of structs
+    smalls := [Small{1, 2}, Small{3, 4}, Small{5, 6}];
+    sum := 0;
+    for it in smalls { sum += it.a * it.b; }
+    assert(sum == 44);
+    for *it in smalls { it.a = 0; }
+    assert(smalls[2].a == 0 && smalls[2].b == 6);
+
+    // Uninitialized declarations are zeroed
+    z: Big;
+    assert(z.x == 0 && z.w == 0);
+    zi: int;
+    assert(zi == 0);
+
+    // A frame bigger than a page needs stack probing on Windows
+    lots: [3000]s64;
+    lots[2999] = 7;
+    assert(lots[0] == 0 && lots[2999] == 7);
+}

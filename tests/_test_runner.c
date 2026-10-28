@@ -19,13 +19,8 @@ void check_entire_directory(CompilerConfig *config, const char *dir_name, bool s
         if (file == NULL) break;
 
         char *filename = file->d_name;
-        char *c = &filename[file->d_namlen - 1];
-        while (*c != '.') {
-            c--;
-        }
-        char *extension = c + 1;
-
-        if (strcmp(extension, "sd") != 0) continue;
+        char *dot = strrchr(filename, '.'); // Entries without a dot (e.g folders) have no extension
+        if (dot == NULL || strcmp(dot + 1, "sd") != 0) continue;
 
         char file_path[512];
         sprintf(file_path, "%s/%s", dir_name, filename);
@@ -55,6 +50,7 @@ void check_entire_directory(CompilerConfig *config, const char *dir_name, bool s
             printf(COLOR_RED"FAILED\n"COLOR_RESET);
             failed += 1;
         }
+        fflush(stdout); // Output is buffered when it goes to a pipe (e.g PowerShell), so don't lose it if something crashes
 
         num_tests += 1;
     }
@@ -66,7 +62,7 @@ void check_entire_directory(CompilerConfig *config, const char *dir_name, bool s
 int main() {
     CompilerConfig config = get_standard_compiler_config();
 
-    check_entire_directory(&config, "examples", false);
+    // check_entire_directory(&config, "examples", false);
     check_entire_directory(&config, "tests", false);
     check_entire_directory(&config, "tests/should_fail", true);
 

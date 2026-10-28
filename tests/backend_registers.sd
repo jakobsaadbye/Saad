@@ -1,0 +1,68 @@
+// Exercises the register allocator: high register pressure, spills, values living across calls,
+// stack arguments and parallel moves between argument registers.
+
+identity :: (x: int) -> int {
+    return x;
+}
+
+sum8 :: (a: int, b: int, c: int, d: int, e: int, f: int, g: int, h: int) -> int {
+    return a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6 + g * 7 + h * 8;
+}
+
+mixed :: (a: f64, b: int, c: f32, d: s64, e: f64, f: u8) -> f64 {
+    return a + xx b + xx c + xx d + e + xx f;
+}
+
+fidentity :: (x: f64) -> f64 {
+    return x;
+}
+
+swap_args :: (a: int, b: int, c: int, d: int) -> int {
+    // Called with the arguments rotated, so the argument registers form a cycle
+    return a * 1000 + b * 100 + c * 10 + d;
+}
+
+main :: () {
+    // More live values than allocatable registers, all needed after a call
+    a := identity(1);  b := identity(2);  c := identity(3);  d := identity(4);
+    e := identity(5);  f := identity(6);  g := identity(7);  h := identity(8);
+    i := identity(9);  j := identity(10); k := identity(11); l := identity(12);
+    m := identity(13); n := identity(14); o := identity(15); p := identity(16);
+    total := a + b + c + d + e + f + g + h + i + j + k + l + m + n + o + p;
+    assert(total == 136);
+    assert(a * b * c * d == 24);
+    assert(p - o - n == -13);
+
+    // Stack arguments (5th and up)
+    assert(sum8(1, 2, 3, 4, 5, 6, 7, 8) == 204);
+    assert(sum8(identity(1), identity(2), identity(3), identity(4), identity(5), identity(6), identity(7), identity(8)) == 204);
+
+    // Mixed int and float arguments in the same positions
+    r := mixed(1.5, 2, 3.5 as f32, 4, 5.25, 6);
+    assert(r == 22.25);
+
+    // Rotated arguments
+    w := 1; x := 2; y := 3; z := 4;
+    assert(swap_args(w, x, y, z) == 1234);
+    assert(swap_args(z, w, x, y) == 4123);
+    assert(swap_args(y, z, w, x) == 3412);
+
+    // Floats live across calls (callee-saved xmm registers)
+    f1 := 1.25; f2 := 2.5; f3 := 3.75; f4 := 5.0; f5 := 6.25; f6 := 7.5; f7 := 8.75; f8 := 10.0;
+    f9 := 11.25; f10 := 12.5; f11 := 13.75; f12 := 15.0; f13 := 16.25; f14 := 17.5; f15 := 18.75; f16 := 20.0;
+    identity(0);
+    fsum := f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8 + f9 + f10 + f11 + f12 + f13 + f14 + f15 + f16;
+    assert(fsum == 170.0);
+
+    // Deeply nested expressions keep every left operand alive while the right side (with a call)
+    // is evaluated. This forces callee-saved registers and spill slots.
+    nested := a + (b + (c + (d + (e + (f + (g + (h + (i + (j + (k + (l + (m + (n + (o + identity(p)))))))))))))));
+    assert(nested == 136);
+    nested_mul := a * (b + (c * (d + (e * (f + (g * (h + (i * (j + (k * (l + (m * (n + (o * identity(p)))))))))))))));
+    assert(nested_mul == 34459424);
+
+    g1: f64 = 1.0; g2: f64 = 2.0; g3: f64 = 3.0; g4: f64 = 4.0; g5: f64 = 5.0; g6: f64 = 6.0; g7: f64 = 7.0; g8: f64 = 8.0;
+    g9: f64 = 9.0; g10: f64 = 10.0; g11: f64 = 11.0; g12: f64 = 12.0;
+    fnested := g1 + (g2 + (g3 + (g4 + (g5 + (g6 + (g7 + (g8 + (g9 + (g10 + (g11 + fidentity(g12)))))))))));
+    assert(fnested == 78.0);
+}

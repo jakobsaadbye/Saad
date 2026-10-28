@@ -1,15 +1,30 @@
-Todo list for the new register based codegenerator:
+IR backend (ir.c, ir_lower.c, regalloc.c, x64_emit.c)
 -----------------------------------------------
 
-[]: Function calls
-  []: Default arguments
-[]: Array initialization
-  []: Dynamic arrays
-  []: Slices
-[]: Runtime type information (RTTI & any type)
-[]: Address-of / Dereference
-[]: While loops
-[]: For loops
+Done:
+[x]: Portable IR with own types, single-definition vregs, verifier (ir_verify_module)
+[x]: Memory model: locals in stack slots, aggregates by address, copies are memcpy
+[x]: Function calls (Saad + C ABI), return values, default arguments, variadics, methods
+[x]: Array initialization: fixed arrays, slices, dynamic arrays (+ append)
+[x]: Runtime type information (RTTI & any type), typeof, builtin print
+[x]: Address-of / Dereference
+[x]: While loops, for loops, break / continue
+[x]: Short-circuit && and ||
+[x]: Linear scan register allocation with spilling, callee-saved registers for values living across calls
+[x]: Stack probing for frames >= 4 KB (Windows)
+
+Not supported yet (reported as "Not implemented in the IR backend yet: ..."):
+[]: Global variables
+[]: C functions returning structs of size 3, 5, 6 or 7 bytes
+[]: `return foo()` where foo returns multiple values
+[]: Names of enums with a value range above 4096 (print / any)
+[]: Runtime type information for function, tuple and variadic types
+
+Next steps:
+[]: ARM64 backend: a TargetDesc + arm64_emit.c (the IR and regalloc are target independent)
+[]: LLVM backend: IR maps almost 1:1 (vreg -> SSA value, slot -> alloca, ptradd -> getelementptr i8)
+[]: Optimizations: promote slots to vregs (mem2reg), constant folding, use immediates and memory operands in x64_emit.c
+[]: Compile-time interpreter on top of the IR
 
 
 []: Disallow integer and floating point arithmetic
@@ -29,17 +44,7 @@ Functions as values:
 Passing tests:
 ---------------
 
-[x]: .\tests\array_index.sd
-[x]: .\tests\assignment.sd
-[x]: .\tests\basic_arrithmetic.sd
-[x]: .\tests\bit_operations.sd
-[x]: .\tests\bools_advanced.sd
-[-]: .\tests\builtin_string_test.sd (skip this)
-[-]: .\tests\casting_rules.sd
-
-
-
-
+All tests in .\tests (including tests\backend_*.sd for the IR backend) pass with the IR backend.
 
 
 

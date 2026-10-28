@@ -1,6 +1,13 @@
 #include <time.h>
 #include <stdio.h>
-#include "x64_converter.c"
+#include "typer.c"
+
+// Backend: AST -> IR -> register allocation -> x64
+#include <math.h>
+#include "ir.c"
+#include "ir_lower.c"
+#include "regalloc.c"
+#include "x64_emit.c"
 
 #ifdef _WIN32
     #include <io.h>
@@ -17,8 +24,8 @@ typedef struct CompilerReport {
     clock_t parse_time_end;
     clock_t typer_time_start;
     clock_t typer_time_end;
-    clock_t bytecode_time_start;
-    clock_t bytecode_time_end;
+    clock_t ir_time_start;
+    clock_t ir_time_end;
     clock_t codegen_time_start;
     clock_t codegen_time_end;
     clock_t asm_and_link_time_start;
@@ -64,7 +71,7 @@ CompilerConfig get_standard_compiler_config() {
     config.stdlib_path    = join_path(config.compiler_path, "std");
     config.working_directory = get_current_directory();
     config.file_extension = "sd";
-    config.backend = BACKEND_X64_NEW;
+    config.backend = BACKEND_X64;
     config.optimization_level = OPTIMIZATION_LEVEL_O0;
     config.run_program = true;
 
@@ -84,13 +91,13 @@ void print_compiler_report(CompilerReport cr) {
     double dt_lex      = (double)(cr.lex_time_end - cr.lex_time_start) / CLOCKS_PER_SEC;
     double dt_parse    = (double)(cr.parse_time_end - cr.parse_time_start) / CLOCKS_PER_SEC;
     double dt_typer    = (double)(cr.typer_time_end - cr.typer_time_start) / CLOCKS_PER_SEC;
-    double dt_bcgen    = (double)(cr.bytecode_time_end - cr.bytecode_time_start) / CLOCKS_PER_SEC;
+    double dt_ir       = (double)(cr.ir_time_end - cr.ir_time_start) / CLOCKS_PER_SEC;
     double dt_codegen  = (double)(cr.codegen_time_end - cr.codegen_time_start) / CLOCKS_PER_SEC;
     double dt_asm_link = (double)(cr.asm_and_link_time_end - cr.asm_and_link_time_start) / CLOCKS_PER_SEC;
 
     double dt_frontend = dt_lex + dt_parse + dt_typer;
-    double dt_backend = dt_codegen + dt_asm_link;
-    double dt_total = dt_lex + dt_parse + dt_typer + dt_codegen + dt_asm_link;
+    double dt_backend = dt_ir + dt_codegen + dt_asm_link;
+    double dt_total = dt_frontend + dt_backend;
 
     printf("\nFront-end time:\n");
     printf("   Lexer:\t %.3lf s.\n", dt_lex);
@@ -99,12 +106,8 @@ void print_compiler_report(CompilerReport cr) {
     printf("   Total:\t %.3lf s.\n", dt_frontend);
 
     printf("Backend-end time:\n");
-    if (cr.config->backend == BACKEND_X64_NEW) {
-        dt_backend += dt_bcgen;
-        dt_total += dt_bcgen;
-        printf("   Byte-codegen: %.3f s.\n", dt_bcgen);
-    }
-    printf("   X86-codegen:\t %.3f s.\n", dt_codegen);
+    printf("   IR:\t\t %.3f s.\n", dt_ir);
+    printf("   x64 codegen:\t %.3f s.\n", dt_codegen);
     printf("   Asm + Link:\t %.3f s.\n", dt_asm_link);
     printf("   Total:\t %.3lf s.\n", dt_backend);
     printf("Total time: %.3lf s.\n\n", dt_total);
@@ -149,6 +152,118 @@ bool resolve_import(CompilerConfig *config, Parser *parser, AstImport *import, A
     return true;
 }
 
+void write_text_file(const char *path, StringBuilder sb) {
+    FILE *f = fopen(path, "wb");
+    if (f == NULL) {
+        printf("%s:%d: error: Failed to open file '%s'\n", __FILE__, __LINE__, path);
+        exit(1);
+    }
+    fwrite(sb.buffer, 1, sb.cursor, f);
+    fclose(f);
+}
+
+// Parses the main file and every file it imports (directly or indirectly). The main file is parsed_files[0]
+static bool parse_all_files(CompilerConfig *config, Parser *parser, const char *main_path, DynamicArray *parsed_files) {
+    DynamicArray paths_to_visit = da_init(8, sizeof(char *));
+    da_append(&paths_to_visit, main_path);
+
+    for (int cursor = 0; cursor < paths_to_visit.count; cursor++) {
+        char *path = ((char **)paths_to_visit.items)[cursor];
+
+        // Skip files that have already been parsed
+        // @Speed: Optimize this O(N2) to a lookup
+        bool is_visited = false;
+        for (int i = 0; i < parsed_files->count; i++) {
+            AstFile *file = ((AstFile **)parsed_files->items)[i];
+            if (strcmp(path, file->absolute_path) == 0) {
+                is_visited = true;
+                break;
+            }
+        }
+        if (is_visited) continue;
+
+        AstFile *file = parse_file(parser, path);
+        if (file == NULL) return false;
+        da_append(parsed_files, file);
+
+        // Visit the imported files next
+        for (int i = 0; i < file->imports.count; i++) {
+            AstImport *import = ((AstImport **)file->imports.items)[i];
+
+            // @Improve: These error messages when we get a proper module system
+            if (!resolve_import(config, parser, import, file)) return false;
+
+            da_append(&paths_to_visit, import->resolved_path);
+        }
+    }
+
+    da_free(&paths_to_visit);
+    return true;
+}
+
+// Points every import at the parsed file it refers to
+static bool link_imports(Parser *parser, DynamicArray parsed_files) {
+    for (int i = 0; i < parsed_files.count; i++) {
+        AstFile *file = ((AstFile **)parsed_files.items)[i];
+
+        for (int j = 0; j < file->imports.count; j++) {
+            AstImport *import = ((AstImport **)file->imports.items)[j];
+
+            for (int k = 0; k < parsed_files.count; k++) {
+                AstFile *other_file = ((AstFile **)parsed_files.items)[k];
+                if (strcmp(import->resolved_path, other_file->absolute_path) == 0) {
+                    import->imported_file = other_file;
+                    break;
+                }
+            }
+
+            if (import->imported_file == NULL) {
+                report_error_ast(parser, LABEL_ERROR, (Ast *)import, "Compiler Error: Failed to link the following import");
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+// Assembles ./build/out.asm and links it into ./build/out.exe
+static bool assemble_and_link(CompilerConfig *config) {
+    if (system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj") != 0) {
+        printf("error: Failed to assemble ./build/out.asm\n");
+        return false;
+    }
+
+#ifdef _WIN32
+    char link_command[2048];
+    snprintf(link_command, sizeof(link_command),
+        "gcc -o ./build/out.exe ./build/out.obj "
+        "-L\"%s/packages/runtime/lib\" "
+        "-L\"%s/packages/raylib/lib\" "
+        "-lruntime_support -lraylib "
+        "-lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid",
+        config->compiler_path, config->compiler_path
+    );
+    return system(link_command) == 0;
+#else
+    // The x64 backend targets Win64, so we can only assemble (not link or run) on other platforms
+    (void) config;
+    printf("note: Skipping linking. The Win64 target can only be linked on Windows\n");
+    return true;
+#endif
+}
+
+// Runs ./build/out.exe. Returns true if the program exited with code 0
+static bool run_executable(bool output_to_console) {
+#ifdef _WIN32
+    int exit_code = system(output_to_console ? ".\\build\\out.exe" : ".\\build\\out.exe >nul");
+    return exit_code == 0;
+#else
+    (void) output_to_console;
+    printf("error: Running programs is only supported on Windows. Use 'build' instead\n");
+    return false;
+#endif
+}
+
 bool compile_program(CompilerConfig *config, const char *main_path, bool output_to_console) {
     CompilerReport report = {
         .config = config
@@ -165,194 +280,69 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     parser.builtin_string_file_path = join_path(config->stdlib_path, "builtin_string.sd");
     ConstEvaluator ce     = const_evaluator_init(&parser);
     Typer typer           = typer_init(&parser, &ce);
-    BytecodeGenerator bcg = bytecode_generator_init(config, &parser);
-    X64Converter x64conv  = x64_converter_init(&bcg);
-    CodeGenerator codegen = code_generator_init(&parser);
 
-    DynamicArray  parsed_files = da_init(8, sizeof(AstFile *));
-    DynamicArray  file_paths_to_visit = da_init(2, sizeof(char *));
-    int           file_path_cursor = 0;
-    AstFile       *current_file = NULL;
-    char          *current_file_path = NULL;
-
-    da_append(&file_paths_to_visit, main_path);
-
-    //
-    // Parse all the files
-    //
+    // ----------- Parse -----------
     report.parse_time_start = clock();
-    while (true) {
-        current_file_path = ((char **)file_paths_to_visit.items)[file_path_cursor];
-
-        // Check if we've already parsed this file
-        // @Speed: Optimize this O(N2) to a lookup
-        bool is_visited = false;
-        for (int i = 0; i < parsed_files.count; i++) {
-            AstFile *file = ((AstFile **)parsed_files.items)[i];
-
-            if (strcmp(current_file_path, file->absolute_path) == 0) {
-                is_visited = true;
-                break;
-            }
-        }
-        if (is_visited) {
-            file_path_cursor += 1;
-            if (file_paths_to_visit.count == file_path_cursor) {
-                break;
-            }
-            continue;
-        }
-
-        // Parse file
-        current_file = (AstFile *) parse_file(&parser, current_file_path);
-        if (current_file == NULL) {
-            cleanup();
-            return false;
-        }
-        da_append(&parsed_files, current_file);
-
-        // Add any file imports as file paths to visit next
-        for (int i = 0; i < current_file->imports.count; i++) {
-            AstImport *import = ((AstImport **)current_file->imports.items)[i];
-
-            // @Improve: These error messages when we get a proper module system
-            bool resolved = resolve_import(config, &parser, import, current_file);
-            if (!resolved) return false;
-
-            da_append(&file_paths_to_visit, import->resolved_path);
-        }
-
-        file_path_cursor += 1;
-        if (file_paths_to_visit.count == file_path_cursor) {
-            break;
-        }
+    DynamicArray parsed_files = da_init(8, sizeof(AstFile *));
+    if (!parse_all_files(config, &parser, main_path, &parsed_files) || !link_imports(&parser, parsed_files)) {
+        cleanup();
+        return false;
     }
-
-    // Link all the parsed files together via their imports
-    for (int i = 0; i < parsed_files.count; i++) {
-        AstFile *file = ((AstFile **)parsed_files.items)[i];
-        for (int j = 0; j < file->imports.count; j++) {
-            AstImport *import = ((AstImport **)file->imports.items)[j];
-            
-            // Do a linear scan to find the corresponding AstFile *
-            bool found = false;
-            for (int k = 0; k < parsed_files.count; k++) {
-                AstFile *other_file = ((AstFile **)parsed_files.items)[k];
-
-                if (strcmp(import->resolved_path, other_file->absolute_path) == 0) {
-                    import->imported_file = other_file;
-                    found = true;
-                }
-            }
-
-            if (!found) {
-                report_error_ast(&parser, LABEL_ERROR, (Ast *)import, "Compiler Error: Failed to link the following import");
-                return false;
-            }
-        }
-    }
+    AstFile *main_file = ((AstFile **)parsed_files.items)[0];
     report.parse_time_end = clock();
 
-    AstFile *main_file = ((AstFile **)parsed_files.items)[0];
-
-    // Typecheck
+    // ----------- Typecheck -----------
     report.typer_time_start = clock();
-    bool typecheck_ok = check_file(&typer, main_file);
-    if (!typecheck_ok) {
+    if (!check_file(&typer, main_file)) {
         cleanup();
         return false;
     }
     report.typer_time_end = clock();
 
-    // Codegen
     make_directory("build");
 
-    
-    if (config->backend == BACKEND_X64_NEW) {
-
-        // ----------- Bytecode generation -----------------
-        report.bytecode_time_start = clock();
-        begin_bytecode_generation(&bcg, main_file);
-        bcg_compute_liveness(&bcg);
-        bcg_dump_bytecode_to_file(&bcg, "./build/out.ir");
-        bcg_compute_last_stages(&bcg);
-        bcg_rewrite_entire_ir(&bcg);
-        bcg_dump_bytecode_to_file(&bcg, "./build/out_optimized.ir");
-        report.bytecode_time_end = clock();
-        // -------------------------------------
-
-        // X64 emission
-        report.codegen_time_start = clock();
-        x64_begin_convert(&x64conv);
-        x64_output_generated_x64_to_file(&x64conv, "./build/out.asm");
-
+    // ----------- IR -----------
+    report.ir_time_start = clock();
+    IrModule *module = lower_program(&parser, main_file);
+    if (module == NULL) {
+        cleanup();
+        return false;
     }
-    else if (config->backend == BACKEND_X64_OLD) {
-        report.codegen_time_start = clock();
-        begin_emit_code(&codegen, main_file);
-        emit_generated_code_to_file(&codegen, "./build/out.asm");
-    } else {
-        XXX;
+
+    StringBuilder ir_text = sb_init(1 << 14);
+    ir_dump_module(module, &ir_text);
+    write_text_file("./build/out.ir", ir_text);
+
+    if (!ir_verify_module(module)) {
+        printf("Compiler Error: The generated IR is invalid. See ./build/out.ir\n");
+        cleanup();
+        return false;
     }
+    report.ir_time_end = clock();
+
+    // ----------- x64 -----------
+    report.codegen_time_start = clock();
+    X64Output x64 = x64_emit_module(module);
+    write_text_file("./build/out.regalloc.txt", x64.regalloc_dump);
+    write_text_file("./build/out.asm", x64.assembly);
     report.codegen_time_end = clock();
 
-    
-    // Assemble
+    // ----------- Assemble + link -----------
     report.asm_and_link_time_start = clock();
-    int exit_code = system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj");
-    if (exit_code != 0) {
-        printf("error: Failed to assemble ./build/out.asm\n");
+    if (!assemble_and_link(config)) {
         cleanup();
         return false;
     }
-
-    // Link and generate executeable
-#ifdef _WIN32
-    char link_command[2048];
-    snprintf(link_command, sizeof(link_command),
-        "gcc -o ./build/out.exe ./build/out.obj "
-        "-L\"%s/packages/runtime/lib\" "
-        "-L\"%s/packages/raylib/lib\" "
-        "-lruntime_support -lraylib "
-        "-lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid",
-        config->compiler_path, config->compiler_path
-    );
-    exit_code = system(link_command);
-    if (exit_code != 0) {
-        cleanup();
-        return false;
-    }
-#else
-    // The x64 backend targets Win64, so we can only assemble (not link or run) on other platforms
-    printf("note: Skipping linking. The Win64 target can only be linked on Windows\n");
-#endif
     report.asm_and_link_time_end = clock();
 
     if (output_to_console) {
         print_compiler_report(report);
     }
 
-    if (!config->run_program) {
-        reset_stdout();
-        return true;
-    }
-
-    // Run the program
-#ifdef _WIN32
-    if (output_to_console) {
-        exit_code = system(".\\build\\out.exe");
-    } else {
-        exit_code = system(".\\build\\out.exe >nul");
-    }
-#else
-    printf("error: Running programs is only supported on Windows. Use 'build' instead\n");
-    exit_code = 1;
-#endif
-    
-    if (exit_code != 0) {
+    if (config->run_program && !run_executable(output_to_console)) {
         cleanup();
         return false;
-    } 
+    }
 
     reset_stdout();
     return true;

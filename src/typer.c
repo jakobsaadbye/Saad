@@ -1381,6 +1381,7 @@ char *generate_c_printf_string(Typer *typer, AstPrint *print) {
             arg_index += 1;
             chars_to_copy = 0;
             c += 1;
+            continue; // Without this, a '%' at the end of the string makes the loop step over the terminating NUL
         }
 
         chars_to_copy += 1;
@@ -1875,7 +1876,7 @@ Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
     // Pass the dynamic array as a ptr
     arg0->value = (AstExpr *) generate_address_of_value(typer, arg0->value);
 
-    // Try reduce the value argument to a literal to know weather its going to be passed by value or reference
+    // Try reduce the value argument to a literal to know whether its going to be passed by value or reference
     bool pass_by_value = false;
 
     if (arg1->value->type->size <= 8) {

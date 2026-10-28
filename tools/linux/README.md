@@ -1,0 +1,33 @@
+# Running Saad programs on Linux
+
+The x64 backend targets Windows (Win64 ABI, linked against msvcrt). These scripts let you
+(or Claude) compile **and run** Saad programs on Linux anyway, which is handy for testing
+the backend without a Windows machine.
+
+```sh
+./build.sh                                  # builds bin/saad
+tools/linux/run.sh tests/structs.sd         # compile + run one program
+tools/linux/runtests.sh                     # run the whole test suite
+```
+
+Requirements: `gcc` and `nasm`.
+
+## How it works
+
+1. `bin/saad build file.sd` produces `build/out.asm` (Win64 code, NASM syntax).
+2. The assembly is assembled as ELF instead of COFF with `nasm -felf64 --prefix ms_`, so every
+   global and extern symbol gets an `ms_` prefix (`main` becomes `ms_main`, `printf` becomes `ms_printf`, ...).
+3. `shim.c` defines those `ms_` symbols as `__attribute__((ms_abi))` wrappers around the real
+   libc functions and `src/runtime_support.c`. gcc handles the Win64 calling convention at the
+   boundary, so the generated code runs unchanged. A real `main` calls `ms_main`.
+
+Because gcc's `ms_abi` code relies on the Win64 rules (16 byte stack alignment, shadow space,
+callee-saved registers), ABI mistakes in the backend usually show up as crashes here too.
+
+## Limitations
+
+- Only the C functions wrapped in `shim.c` can be called. A missing one shows up as a link
+  error like `undefined reference to ms_sinf`: add a wrapper to `shim.c`.
+- raylib and Windows APIs are not available.
+- `printf` is reimplemented in the shim (it walks the format string and reads each argument
+  from the Win64 `va_list`), so exotic format specifiers may not be supported.

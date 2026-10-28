@@ -16,7 +16,6 @@ typedef struct AstFunctionDefn AstFunctionDefn;
 typedef struct Type Type;
 typedef struct TypeTable TypeTable;
 typedef struct TypeStruct TypeStruct;
-typedef struct StackSlot StackSlot;
 
 typedef uint8_t   u8;
 typedef uint16_t  u16;
@@ -112,12 +111,6 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
     OP_AS           = TOKEN_AS,
 } OperatorType;
 
-typedef struct StackSlot {
-    int index;
-    int size;
-    int assigned_offset; // Set by during emission stage
-} StackSlot;
-
 typedef enum AstFlags {
     AST_FLAG_COMPILER_GENERATED                    = 1 << 0,
     AST_FLAG_CG_EXPR_ASSIGNED_DIRECTLY_TO_VARIABLE = 1 << 1,
@@ -127,7 +120,6 @@ typedef enum AstFlags {
     AST_FLAG_EXPR_IS_SPREADED                      = 1 << 5, // Set if the expression has had the operator ... applied to it
     AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER           = 1 << 7, // Set on an array access on a pointer
     AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN        = 1 << 8, // Set on constant identifiers having a function as value
-    AST_FLAG_IS_BYTECODE_GENERATED                 = 1 << 9, // Set on certain nodes (e.g functions) after it has gone through bytecode generation
 } AstFlags;
 
 typedef struct Ast {
@@ -192,15 +184,10 @@ typedef struct AstIdentifier {
     AstBlock       *scope; // The scope this identifier was declared in
     AstDeclaration *decl; // The declaration it belongs to
 
-    int virtual_register; // Used in bytecode_generator
-    StackSlot stack_slot; // Used in bytecode_generator
-
     AstIdentifier *ident_override; // Set on certain identifiers to tell codegen to use a lowered identifier representation instead. E.g variadic parameters are overriden
     int member_index;   // Used to know the insertion order of a struct member
     int member_offset;  // Relative positive offset of the member within the struct
     int stack_offset;
-
-    int constant_id; // Set to a constant id in the constant pool of the bytecode generator
 } AstIdentifier;
 
 typedef enum DeclarationFlags {
@@ -536,7 +523,7 @@ typedef struct AstCast {
     AstExpr  head;
     AstExpr *expr;
     Type    *cast_to;     // Explicit type cast e.g "x as f64"
-    bool     is_auto;     // Weather its an auto-cast "xx 2 / 4.0"
+    bool     is_auto;     // Whether its an auto-cast "xx 2 / 4.0"
     bool     is_as_cast;  // E.g `a := 5 as int`
 } AstCast;
 
@@ -757,8 +744,7 @@ bool is_unsigned_integer_ish(Type *type);
 
 
 typedef enum CodegenBackend {
-    BACKEND_X64_OLD,
-    BACKEND_X64_NEW,
+    BACKEND_X64,
 } CodegenBackend;
 
 typedef enum OptimizationLevel {

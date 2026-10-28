@@ -1,3 +1,9 @@
+//////////////////////////////////////////////////////////////////////////////////////////
+// NOTE: This is the old AST -> x64 backend. It is NOT compiled anymore and is only kept as
+// a reference for the semantics of the language. The compiler uses the IR backend:
+//     ir_lower.c (AST -> IR), regalloc.c (register allocation), x64_emit.c (x64 assembly)
+//////////////////////////////////////////////////////////////////////////////////////////
+
 #include "bytecode_generator.c"
 
 #define DEBUG_OUTPUT_EMITTED_STATEMENTS 0
