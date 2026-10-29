@@ -1,0 +1,86 @@
+// Any struct with the right methods gets the syntax of a collection: c[k], for x in c, [a, b, c] literals and passing it as a slice
+
+import "c_stdlib";
+
+Stack :: struct <T> {
+    data:     *T;
+    count:    i64;
+    capacity: i64;
+
+    add :: method * (value: T) {
+        if self.count == self.capacity {
+            self.reserve(self.capacity * 2 + 4);
+        }
+        self.data[self.count] = value;
+        self.count += 1;
+    }
+
+    reserve :: method * (capacity: i64) {
+        if capacity <= self.capacity { return; }
+        self.data = realloc(self.data, (capacity * sizeof(T)) as int) as *T;
+        self.capacity = capacity;
+    }
+
+    indexRef :: method (i: i64) -> *T {
+        assert(i >= 0 && i < self.count);
+        return &self.data[i];
+    }
+
+    elements :: method () -> []T {
+        result: []T;
+        result.data  = self.data;
+        result.count = self.count;
+        return result;
+    }
+}
+
+Point :: struct { x: int; y: int; }
+
+sum :: (values: []int) -> int {
+    total := 0;
+    for v in values { total += v; }
+    return total;
+}
+
+makeStack :: () -> Stack<int> {
+    return [7, 8, 9];
+}
+
+main :: () {
+    s: Stack<int> = [1, 2, 3];
+    assert(s.count == 3);
+    assert(s[0] == 1 && s[2] == 3);
+
+    s[1] = 20;
+    s[2] += 5;
+    assert(s[1] == 20 && s[2] == 8);
+
+    p := &s[0];
+    *p = 100;
+    assert(s[0] == 100);
+
+    total := 0;
+    for v in s { total += v; }
+    assert(total == 128);
+
+    for v, i in s { assert(s[i] == v); }
+    for *v in s { *v += 1; }
+    assert(s[0] == 101);
+
+    assert(sum(s) == 131);
+    view: []int = s;
+    assert(view.count == 3);
+
+    points: Stack<Point> = [{1, 2}, {3, 4}];
+    points[1].x = 30;
+    assert(points[1].x == 30);
+    points.add(Point{5, 6});
+    assert(points.count == 3 && points[2].y == 6);
+
+    m := makeStack();
+    assert(m[2] == 9);
+
+    big: Stack<int>;
+    for i in 0..100 { big.add(i); }
+    assert(big.count == 100 && big[99] == 99);
+}

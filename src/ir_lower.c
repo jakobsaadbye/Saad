@@ -797,6 +797,7 @@ static int declare_local(Lowerer *L, AstIdentifier *ident) {
 
 static Value lower_expr(Lowerer *L, AstExpr *expr);
 static Value lower_place(Lowerer *L, AstExpr *expr);
+static void  lower_declaration(Lowerer *L, AstDeclaration *decl);
 static int   lower_scalar_as(Lowerer *L, AstExpr *expr, Type *target);
 static void  lower_condition(Lowerer *L, AstExpr *expr, IrBlock *on_true, IrBlock *on_false);
 static void  lower_block(Lowerer *L, AstBlock *block);
@@ -1012,7 +1013,9 @@ static void lower_array_literal_into(Lowerer *L, AstArrayLiteral *lit, IrAddr ds
 // Lowers aggregate literals directly into their destination. Returns false if 'expr' is not such a literal.
 // Only safe when the destination is fresh memory that the expression can not refer to.
 static bool lower_into(Lowerer *L, AstExpr *expr, IrAddr dst, Type *dst_type) {
+    if (expr->replacement) return false;
     if (expr->type != dst_type) return false;
+    if (expr->head.kind == AST_ARRAY_LITERAL && ((AstArrayLiteral *) expr)->collection_decl) return false;
     if (expr->head.kind == AST_STRUCT_LITERAL) {
         lower_struct_literal_into(L, (AstStructLiteral *) expr, dst);
         return true;
@@ -1985,6 +1988,8 @@ static Value lower_call(Lowerer *L, AstFunctionCall *call, int *ret_slots, int m
 //////////////////////////////////////////////////////////////////////////////////////////
 
 static Value lower_expr(Lowerer *L, AstExpr *expr) {
+    if (expr->replacement) return lower_expr(L, expr->replacement); // e.g xs[i] on a collection means *xs.indexRef(i)
+
     switch (expr->head.kind) {
     case AST_LITERAL: {
         AstLiteral *lit = (AstLiteral *) expr;
@@ -2015,8 +2020,18 @@ static Value lower_expr(Lowerer *L, AstExpr *expr) {
         return place;
     }
     case AST_ARRAY_LITERAL: {
+        AstArrayLiteral *lit = (AstArrayLiteral *) expr;
+        if (lit->collection_decl) {
+            // A collection literal is built in its hidden local by calling add() or set() for each element
+            lower_declaration(L, lit->collection_decl);
+            for (int i = 0; i < lit->collection_calls.count; i++) {
+                lower_call(L, da_get_deref(lit->collection_calls, i), NULL, 0);
+            }
+            return lower_expr(L, lit->collection_value);
+        }
+
         Value place = temp_place(L, expr->type, "array literal");
-        lower_array_literal_into(L, (AstArrayLiteral *) expr, place.addr);
+        lower_array_literal_into(L, lit, place.addr);
         return place;
     }
     case AST_SIZEOF: {

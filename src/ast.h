@@ -134,6 +134,7 @@ typedef struct Ast {
 typedef struct AstExpr {
     Ast   head;
     Type *type;
+    struct AstExpr *replacement; // Set by the typer when the expression means another expression e.g xs[i] means *xs.indexRef(i) when xs is a collection. The backend lowers the replacement instead
 } AstExpr;
 
 typedef struct AstFile {
@@ -568,8 +569,15 @@ typedef struct AstStructInitializer {
 
 typedef struct AstArrayLiteral {
     AstExpr head;
-    DynamicArray expressions; // of *AstExpression
+    DynamicArray expressions; // of *AstExpression. The values of a map literal
+    DynamicArray keys;        // of *AstExpression. Set for a map literal e.g ["alice": 31, "bob": 27]
+    bool         is_map_literal;
     int base_offset;          // used in CodeGenerator
+
+    // A literal of a collection type e.g 'xs: [..]int = [1, 2, 3];' builds the collection in a hidden local by calling its methods
+    AstDeclaration *collection_decl;  // The hidden local
+    DynamicArray    collection_calls; // of *AstFunctionCall e.g tmp.reserve(3), tmp.add(1), ...
+    AstExpr        *collection_value; // The hidden local as an expression
 } AstArrayLiteral;
 
 typedef enum LiteralKind {
@@ -748,8 +756,9 @@ typedef struct TypeVariadic {
 } TypeVariadic;
 
 typedef struct TypeGenericInstance {
-    Type         head;      // head.name is the name of the generic struct
-    DynamicArray type_args; // of *Type
+    Type         head;        // head.name is the name of the generic struct
+    DynamicArray type_args;   // of *Type
+    bool         is_standard; // The generic struct is from the standard collections e.g [..]T is List<T>. It is looked up there, not where the type is written
 } TypeGenericInstance;
 
 typedef struct TypeAny {

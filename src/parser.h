@@ -24,6 +24,8 @@ typedef struct Parser {
     AstStruct *reparse_self_struct; // Set when parsing an instance of a generic method that was declared inside this struct
 
     char *runtime_file_path;
+    char *collections_file_path;
+    AstFile *collections_file; // std/collections.sd, holding List and Map. Every other file imports it
     char *builtin_string_file_path;
 } Parser;
 

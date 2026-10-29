@@ -35,6 +35,10 @@ typedef struct Typer {
     int  struct_check_depth;          // How many struct definitions are currently being checked inside each other
 
     TypeStruct *primitive_method_holders[PRIMITIVE_COUNT]; // Holds the methods declared on each primitive type e.g 'hash :: method (x: int) -> u64'. See method_holder_of()
+
+    bool checking_place; // Set before checking an expression that is used as a place e.g the left side of an assignment, so that xs[i] uses indexRef()
+    bool current_place;  // The value of checking_place for the expression being checked right now
+    int  next_hidden_local_id;
 } Typer;
 
 #define GENERIC_DEPTH_LIMIT 64
@@ -83,6 +87,13 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
 bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver_struct);
 TypeStruct *method_holder_of(Typer *typer, Type *type);
 PrimitiveKind canonical_primitive_kind(PrimitiveKind kind);
+AstIdentifier *find_method(TypeStruct *struct_type, char *name);
+AstFunctionCall *generate_method_call(Typer *typer, AstExpr *receiver, char *name, AstExpr **args, int arg_count);
+Type *check_collection_index(Typer *typer, AstArrayAccess *array_ac, TypeStruct *collection, bool place);
+Type *check_collection_literal(Typer *typer, AstArrayLiteral *lit, TypeStruct *collection);
+AstExpr *collection_as_slice(Typer *typer, AstExpr *expr, Type *wanted);
+TypeStruct *instantiate_standard_collection(Typer *typer, char *name, Type *arg0, Type *arg1, Ast *site);
+AstArgument *generate_argument_from_expr(Typer *typer, AstExpr *expr);
 bool struct_is_comparable(TypeStruct *struct_type, AstIdentifier **bad_member);
 bool register_generic_method(Typer *typer, AstFunctionDefn *generic);
 bool register_methods_early(Typer *typer, AstFile *file);
@@ -347,7 +358,17 @@ Type *copy_type(Typer *typer, Type *type) {
 TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instance) {
     Parser *parser = typer->parser;
 
-    AstIdentifier *ident = lookup_from_scope(parser, typer->current_scope, instance->head.name);
+    // The standard collections e.g [..]T is List<T> are looked up in the standard library, even if a file has its own List
+    AstBlock *scope = typer->current_scope;
+    if (instance->is_standard) {
+        if (parser->collections_file == NULL) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)(instance), "Compiler Error: The standard collections are not loaded");
+            return NULL;
+        }
+        scope = parser->collections_file->scope;
+    }
+
+    AstIdentifier *ident = lookup_from_scope(parser, scope, instance->head.name);
     if (ident == NULL) {
         report_error_ast(parser, LABEL_ERROR, (Ast *)(instance), "Unknown type '%s'", instance->head.name);
         return NULL;
@@ -1136,6 +1157,21 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
         if (param == NULL || param->type == NULL) continue;
         if (!type_mentions_any_type_param(param->type, generic->type_params)) continue;
 
+        // An argument that needs to know its type e.g the struct literal in points.add({1, 2}), is checked against the instance instead,
+        // if its type parameters are already known e.g the T of add(value: T) from the receiver
+        AstExpr *value = arg->value;
+        bool needs_type = (value->head.kind == AST_STRUCT_LITERAL && ((AstStructLiteral *)value)->explicit_type == NULL) ||
+                          value->head.kind == AST_ARRAY_LITERAL || value->head.kind == AST_ENUM_LITERAL;
+        bool all_bound = needs_type;
+        for (int j = 0; j < generic->type_params.count; j++) {
+            AstIdentifier *type_param = ((AstIdentifier **)generic->type_params.items)[j];
+            if (!all_bound) break;
+            if (type_mentions_name(param->type, type_param->name) && bindings[j].kind != BINDING_TYPED) {
+                all_bound = false;
+            }
+        }
+        if (all_bound) continue;
+
         Type *arg_type = check_expression(typer, arg->value, NULL);
         if (!arg_type) return NULL;
 
@@ -1776,6 +1812,14 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
             Type *resolved = check_expression(typer, value, decl->type);
             if (!resolved) return false;
 
+            if (!types_are_equal(decl->type, value->type)) {
+                AstExpr *slice = collection_as_slice(typer, value, decl->type);
+                if (slice) {
+                    *value_ptr = slice;
+                    value = slice;
+                }
+            }
+
             if (decl->type->kind == TYPE_ANY && value->type->kind != TYPE_ANY) {
                 AstCast *any_cast = generate_cast_to_any(typer, value);
                 if (!any_cast) return false;
@@ -2142,6 +2186,7 @@ bool types_are_equal(Type *lhs, Type *rhs) {
 }
 
 bool check_assignment(Typer *typer, AstAssignment *assign) {
+    typer->checking_place = true;
     Type *lhs_type  = check_expression(typer, assign->lhs, NULL);
     if (!lhs_type) return false;
 
@@ -2154,6 +2199,14 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
 
     Type *expr_type = check_expression(typer, assign->expr, lhs_type);
     if (!expr_type) return false;
+
+    if (!types_are_equal(lhs_type, expr_type)) {
+        AstExpr *slice = collection_as_slice(typer, assign->expr, lhs_type);
+        if (slice) {
+            assign->expr = slice;
+            expr_type    = slice->type;
+        }
+    }
 
     readonly = readonly_self_method(typer, assign->expr);
     if (readonly && expr_type->kind == TYPE_POINTER) {
@@ -2441,6 +2494,21 @@ bool check_for(Typer *typer, AstFor *ast_for) {
         Type *type = check_expression(typer, (AstExpr *)ast_for->iterable, NULL);
         if (!type) return NULL;
 
+        // A collection is iterated through the slice its elements() method gives e.g for x in xs
+        if (type->kind == TYPE_STRUCT || (type->kind == TYPE_POINTER && ((TypePointer *)type)->pointer_to->kind == TYPE_STRUCT)) {
+            TypeStruct *collection = (TypeStruct *)(type->kind == TYPE_POINTER ? ((TypePointer *)type)->pointer_to : type);
+            if (!find_method(collection, "elements")) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_for->iterable), "Cannot iterate through expression of type %s", type_to_str(type));
+                report_error_ast(typer->parser, LABEL_HINT, NULL, "Give %s a method 'elements :: method () -> []T' to make it iterable", collection->head.name);
+                return NULL;
+            }
+
+            AstFunctionCall *call = generate_method_call(typer, ast_for->iterable, "elements", NULL, 0);
+            type = check_expression(typer, (AstExpr *)call, NULL);
+            if (!type) return NULL;
+            ast_for->iterable = (AstExpr *)call;
+        }
+
         if (type->kind != TYPE_ARRAY && type->kind != TYPE_VARIADIC && type->kind != TYPE_STRING) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_for->iterable), "Cannot iterate through expression of type %s", type_to_str(type));
             return NULL;
@@ -2668,6 +2736,14 @@ bool check_print(Typer *typer, AstPrint *print) {
         AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
         Type *arg_type = check_expression(typer, arg, NULL);
         if (!arg_type) return false;
+
+        // A collection is printed as its elements
+        AstExpr *slice = i > 0 ? collection_as_slice(typer, arg, NULL) : NULL;
+        if (slice) {
+            ((AstExpr **)print->arguments.items)[i] = slice;
+            arg      = slice;
+            arg_type = slice->type;
+        }
         if (i == 0) {
             if (arg_type->kind != TYPE_STRING) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Print expects the first argument to have type string, but argument is of type %s", type_to_str(arg_type));
@@ -2742,6 +2818,14 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
 
         Type *ok = check_expression(typer, return_value, wanted_type);
         if (!ok) return false;
+
+        if (!types_are_equal(wanted_type, return_value->type)) {
+            AstExpr *slice = collection_as_slice(typer, return_value, wanted_type);
+            if (slice) {
+                ((AstExpr **)ast_return->values.items)[i] = slice;
+                return_value = slice;
+            }
+        }
 
         AstFunctionDefn *readonly = readonly_self_method(typer, return_value);
         if (readonly && return_value->type->kind == TYPE_POINTER) {
@@ -2910,6 +2994,10 @@ AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "Compiler Error: Global type 'Any' was not set during typechecking while doing an any cast");
         return NULL;
     }
+
+    // A collection is passed as its elements e.g to Print("%", xs)
+    AstExpr *slice = collection_as_slice(typer, expr, NULL);
+    if (slice) expr = slice;
 
     AstCast *any_cast = ast_allocate(typer->parser, sizeof(AstCast));
     any_cast->head.head.kind      = AST_CAST;
@@ -3424,6 +3512,14 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             Type *given_type = check_expression(typer, arg->value, ctx_type);
             if (!given_type) return NULL;
 
+            if (!types_are_equal(given_type, ctx_type) && ctx_type->kind != TYPE_ANY) {
+                AstExpr *slice = collection_as_slice(typer, arg->value, ctx_type);
+                if (slice) {
+                    arg->value = slice;
+                    given_type = slice->type;
+                }
+            }
+
             if (wanted_type->kind == TYPE_VARIADIC) {
                 // Unwrap the variadic to match against its type
                 wanted_type = ((TypeVariadic *)wanted_type)->type;
@@ -3459,7 +3555,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                 }
             }
 
-            if (!types_are_equal(given_type, wanted_type)) {
+            if (!types_are_equal(wanted_type, given_type) && !types_are_equal(given_type, wanted_type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(wanted_type)), text_bold(type_to_str(given_type)));
                 if (given_type->kind == TYPE_VARIADIC && ((TypeVariadic *)given_type)->type->kind == wanted_type->kind) {
                     report_error_ast(typer->parser, LABEL_HINT, (Ast *)(arg), "Use ... to spread the variadic argument into the parameter");
@@ -3572,13 +3668,19 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             Type *resolved = check_expression(typer, arg->value, param->type);
             if (!resolved) return NULL;
 
+            if (!types_are_equal(arg->value->type, param->type)) {
+                AstExpr *slice = collection_as_slice(typer, arg->value, param->type); // e.g passing a [..]int where a []int is wanted
+                if (slice) arg->value = slice;
+            }
+
             if (!func_defn->is_extern && arg->value->type->kind != TYPE_ANY && param->type->kind == TYPE_ANY) {
                 AstCast *any_cast = generate_cast_to_any(typer, arg->value);
                 if (!any_cast) return NULL;
                 arg->value = (AstExpr *) any_cast;
             }
 
-            if (!types_are_equal(arg->value->type, param->type)) {
+            // @Incomplete: Arguments are allowed to both widen (i32 to i64) and narrow (i64 to i32), as existing code depends on narrowing
+            if (!types_are_equal(param->type, arg->value->type) && !types_are_equal(arg->value->type, param->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg->value->type)));
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param->decl), "Here is the definition of '%s'", param->name);
                 return NULL;
@@ -4044,10 +4146,259 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) 
     return lhs_type;
 }
 
+//
+// Collection protocol
+//
+// The syntax for collections works for any struct that has these methods, so collections like List and Map are written in Saad:
+//
+//   c[k]                    c.index(k) if c has it and c[k] is read, otherwise *c.indexRef(k)
+//   c[k] = v, &c[k], ...    *c.indexRef(k)
+//   for x in c              for x in c.elements(), where elements() returns a slice
+//   c where a []T is wanted c.elements()
+//   [a, b, c]               c.reserve(3), c.add(a), c.add(b), ... when a collection type is wanted
+//   [k1: v1, k2: v2]        c.reserve(2), c.set(k1, v1), ... The type is Map<K, V> from the standard library if no collection type is wanted
+//
+
+// Finds a method on a struct, also on the generic struct of an instance
+AstIdentifier *find_method(TypeStruct *struct_type, char *name) {
+    AstIdentifier *method = get_struct_method(struct_type->node, name);
+    if (!method && struct_type->node->generic_struct) {
+        method = get_struct_method(struct_type->node->generic_struct, name);
+    }
+    return method;
+}
+
+// Makes the AST of a call 'receiver.name(args...)', as if it was written where the receiver is
+AstFunctionCall *generate_method_call(Typer *typer, AstExpr *receiver, char *name, AstExpr **args, int arg_count) {
+    Parser *parser = typer->parser;
+
+    AstLiteral *method_name = ast_allocate(parser, sizeof(AstLiteral));
+    method_name->head.head      = receiver->head;
+    method_name->head.head.kind = AST_LITERAL;
+    method_name->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    method_name->kind           = LITERAL_IDENTIFIER;
+    method_name->as.value.identifier.name   = name;
+    method_name->as.value.identifier.length = (int)strlen(name);
+
+    AstMemberAccess *ma = ast_allocate(parser, sizeof(AstMemberAccess));
+    ma->head.head       = receiver->head;
+    ma->head.head.kind  = AST_MEMBER_ACCESS;
+    ma->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    ma->left            = receiver;
+    ma->right           = (AstExpr *)method_name;
+
+    AstFunctionCall *call = ast_allocate(parser, sizeof(AstFunctionCall));
+    call->head.head       = receiver->head;
+    call->head.head.kind  = AST_FUNCTION_CALL;
+    call->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    call->expression      = (AstExpr *)ma;
+    call->arguments       = da_init(arg_count > 0 ? arg_count : 1, sizeof(AstArgument *));
+    call->paren_start_token.start = receiver->head.end;
+    call->paren_start_token.end   = receiver->head.end;
+    for (int i = 0; i < arg_count; i++) {
+        AstArgument *arg = generate_argument_from_expr(typer, args[i]);
+        da_append(&call->arguments, arg);
+    }
+    return call;
+}
+
+// c[k] on a collection
+Type *check_collection_index(Typer *typer, AstArrayAccess *array_ac, TypeStruct *collection, bool place) {
+    AstIdentifier *index     = find_method(collection, "index");
+    AstIdentifier *index_ref = find_method(collection, "indexRef");
+
+    if (!index && !index_ref) {
+        report_error_range(typer->parser, array_ac->left->head.start, array_ac->open_bracket.start, "Cannot index into expression of type %s", type_to_str((Type *)collection));
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Give %s a method 'index :: method (key: K) -> V' to read with c[k], or 'indexRef :: method (key: K) -> *V' to also change c[k]", collection->head.name);
+        return NULL;
+    }
+    if (place && !index_ref) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)array_ac, "Cannot change %s[...], as %s only has an 'index' method to read it", collection->head.name, collection->head.name);
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Give it a method 'indexRef :: method (key: K) -> *V' to be able to change c[k]");
+        return NULL;
+    }
+
+    bool use_ref = place || !index;
+    AstFunctionCall *call = generate_method_call(typer, array_ac->left, use_ref ? "indexRef" : "index", &array_ac->index_expr, 1);
+
+    AstExpr *replacement = (AstExpr *)call;
+    if (use_ref) {
+        AstUnary *deref        = ast_allocate(typer->parser, sizeof(AstUnary));
+        deref->head.head       = array_ac->head.head;
+        deref->head.head.kind  = AST_UNARY;
+        deref->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+        deref->operator        = OP_POINTER_DEREFERENCE;
+        deref->expr            = (AstExpr *)call;
+        replacement = (AstExpr *)deref;
+    }
+
+    Type *type = check_expression(typer, replacement, NULL);
+    if (!type) return NULL;
+
+    array_ac->head.replacement = replacement;
+    return type;
+}
+
+// Returns the call c.elements() if 'expr' is a collection and its elements are wanted as the slice 'wanted', otherwise NULL
+AstExpr *collection_as_slice(Typer *typer, AstExpr *expr, Type *wanted) {
+    if (expr->type == NULL || expr->type->kind != TYPE_STRUCT) return NULL;
+    if (wanted && !(wanted->kind == TYPE_ARRAY && ((TypeArray *)wanted)->array_kind == ARRAY_SLICE) && wanted->kind != TYPE_ANY) return NULL;
+    if (!find_method((TypeStruct *)expr->type, "elements")) return NULL;
+
+    AstFunctionCall *call = generate_method_call(typer, expr, "elements", NULL, 0);
+    Type *type = check_expression(typer, (AstExpr *)call, NULL);
+    if (!type) return NULL;
+    if (wanted && wanted->kind != TYPE_ANY && !types_are_equal(wanted, type)) return NULL;
+    return (AstExpr *)call;
+}
+
+// Returns an instance of a collection from the standard library e.g Map<string, int>
+TypeStruct *instantiate_standard_collection(Typer *typer, char *name, Type *arg0, Type *arg1, Ast *site) {
+    Parser *parser = typer->parser;
+    if (parser->collections_file == NULL) {
+        report_error_ast(parser, LABEL_ERROR, site, "Compiler Error: The standard collections are not loaded");
+        return NULL;
+    }
+
+    TypeGenericInstance *instance = type_alloc(&parser->type_table, sizeof(TypeGenericInstance));
+    instance->head.head      = *site;
+    instance->head.head.kind = AST_TYPE;
+    instance->head.kind      = TYPE_GENERIC_INSTANCE;
+    instance->head.name      = name;
+    instance->is_standard    = true;
+    instance->type_args      = da_init(2, sizeof(Type *));
+    da_append(&instance->type_args, arg0);
+    if (arg1) da_append(&instance->type_args, arg1);
+
+    return instantiate_generic_struct(typer, instance);
+}
+
+// [a, b, c] or [k: v, ...] as a collection, built in a hidden local by calling the collection's add() or set() method for each element
+Type *check_collection_literal(Typer *typer, AstArrayLiteral *lit, TypeStruct *collection) {
+    Parser *parser = typer->parser;
+
+    if (typer->enclosing_function == NULL) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)lit, "Collection literals can only be used inside functions");
+        return NULL;
+    }
+
+    if (collection == NULL) {
+        // A map literal without a wanted type is a Map<K, V> from the standard library, with K and V from the first entry
+        if (lit->keys.count == 0) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)lit, "Cannot infer the type of the empty map literal [:]");
+            report_error_ast(parser, LABEL_HINT, NULL, "Give the variable a type e.g ages: Map<string, int> = [:];");
+            return NULL;
+        }
+
+        Type *key_type   = check_expression(typer, ((AstExpr **)lit->keys.items)[0], NULL);
+        Type *value_type = check_expression(typer, ((AstExpr **)lit->expressions.items)[0], NULL);
+        if (!key_type || !value_type) return NULL;
+        if (is_untyped_type(key_type))   key_type   = solidify_untyped_type(key_type);
+        if (is_untyped_type(value_type)) value_type = solidify_untyped_type(value_type);
+
+        collection = instantiate_standard_collection(typer, "Map", key_type, value_type, (Ast *)lit);
+        if (!collection) return NULL;
+    }
+
+    char *add_name = lit->is_map_literal ? "set" : "add";
+    if (!find_method(collection, add_name)) {
+        if (lit->is_map_literal) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)lit, "A map literal cannot be a %s", type_to_str((Type *)collection));
+            report_error_ast(parser, LABEL_HINT, NULL, "Give %s a method 'set :: method * (key: K, value: V)' to be able to make it from a literal like [k: v]", collection->head.name);
+        } else {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)lit, "An array literal cannot be a %s", type_to_str((Type *)collection));
+            report_error_ast(parser, LABEL_HINT, NULL, "Give %s a method 'add :: method * (value: T)' to be able to make it from a literal like [a, b, c]", collection->head.name);
+        }
+        return NULL;
+    }
+
+    // The hidden local holding the collection
+    char *name = malloc(32);
+    snprintf(name, 32, "$collection%d", typer->next_hidden_local_id++);
+
+    AstIdentifier *ident = ast_allocate(parser, sizeof(AstIdentifier));
+    ident->head.kind  = AST_IDENTIFIER;
+    ident->head.file  = lit->head.head.file;
+    ident->head.start = lit->head.head.start;
+    ident->head.end   = lit->head.head.start;
+    ident->name       = name;
+    ident->type       = (Type *)collection;
+    ident->scope      = typer->current_scope;
+    ident->flags      = IDENTIFIER_IS_RESOLVED;
+
+    AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
+    decl->head.kind  = AST_DECLARATION;
+    decl->head.file  = lit->head.head.file;
+    decl->head.start = lit->head.head.start;
+    decl->head.end   = lit->head.head.start;
+    decl->head.flags = AST_FLAG_COMPILER_GENERATED | AST_FLAG_IS_TYPE_CHECKED;
+    decl->idents     = da_init(1, sizeof(AstIdentifier *));
+    decl->values     = da_init(1, sizeof(AstExpr *));
+    decl->type       = (Type *)collection;
+    decl->flags      = DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_COMPILER_GENERATED;
+    da_append(&decl->idents, ident);
+    ident->decl = decl;
+    da_append(&typer->current_scope->identifiers, ident);
+
+    AstLiteral *value = ast_allocate(parser, sizeof(AstLiteral));
+    value->head.head      = lit->head.head;
+    value->head.head.kind = AST_LITERAL;
+    value->head.head.start = lit->head.head.start;
+    value->head.head.end   = lit->head.head.start;
+    value->kind           = LITERAL_IDENTIFIER;
+    value->as.value.identifier.name   = name;
+    value->as.value.identifier.length = (int)strlen(name);
+
+    lit->collection_decl  = decl;
+    lit->collection_value = (AstExpr *)value;
+    lit->collection_calls = da_init(lit->expressions.count + 1, sizeof(AstFunctionCall *));
+
+    Type *type = check_expression(typer, (AstExpr *)value, NULL);
+    if (!type) return NULL;
+
+    if (lit->expressions.count > 0 && find_method(collection, "reserve")) {
+        AstLiteral *count = ast_allocate(parser, sizeof(AstLiteral));
+        count->head.head      = lit->head.head;
+        count->head.head.kind = AST_LITERAL;
+        count->kind           = LITERAL_INTEGER;
+        count->as.value.integer = lit->expressions.count;
+
+        AstExpr *args[1] = { (AstExpr *)count };
+        AstFunctionCall *call = generate_method_call(typer, (AstExpr *)value, "reserve", args, 1);
+        if (!check_expression(typer, (AstExpr *)call, NULL)) return NULL;
+        da_append(&lit->collection_calls, call);
+    }
+
+    for (int i = 0; i < lit->expressions.count; i++) {
+        AstExpr *element = ((AstExpr **)lit->expressions.items)[i];
+
+        AstFunctionCall *call = NULL;
+        if (lit->is_map_literal) {
+            AstExpr *args[2] = { ((AstExpr **)lit->keys.items)[i], element };
+            call = generate_method_call(typer, (AstExpr *)value, "set", args, 2);
+        } else {
+            AstExpr *args[1] = { element };
+            call = generate_method_call(typer, (AstExpr *)value, "add", args, 1);
+        }
+        if (!check_expression(typer, (AstExpr *)call, NULL)) return NULL;
+        da_append(&lit->collection_calls, call);
+    }
+
+    return (Type *)collection;
+}
+
 Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_type) {
     if (ctx_type && ctx_type->kind == TYPE_ANY) {
         // Strip the context type
         ctx_type = NULL;
+    }
+
+    // A literal of a collection type e.g 'xs: [..]int = [1, 2, 3];' or 'ages: Map<string, int> = ["alice": 31];'
+    if (ctx_type && ctx_type->kind == TYPE_STRUCT) {
+        return check_collection_literal(typer, array_lit, (TypeStruct *)ctx_type);
+    }
+    if (array_lit->is_map_literal) {
+        return check_collection_literal(typer, array_lit, NULL);
     }
 
     if(ctx_type && ctx_type->kind != TYPE_ARRAY) {
@@ -4171,8 +4522,15 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
 }
 
 Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
+    bool place = typer->current_place;
+
+    typer->checking_place = place;
     Type *type_being_accessed = check_expression(typer, array_ac->left, NULL);
     if (!type_being_accessed) return NULL;
+
+    if (type_being_accessed->kind == TYPE_STRUCT) {
+        return check_collection_index(typer, array_ac, (TypeStruct *)type_being_accessed, place);
+    }
 
     if (type_being_accessed->kind != TYPE_ARRAY && type_being_accessed->kind != TYPE_POINTER && type_being_accessed->kind != TYPE_VARIADIC && type_being_accessed->kind != TYPE_STRING) {
         report_error_range(typer->parser, array_ac->left->head.start, array_ac->open_bracket.start, "Cannot index into expression of type %s", type_to_str(type_being_accessed));
@@ -4283,6 +4641,11 @@ Type *check_new(Typer *typer, AstNew *ast_new, Type *ctx_type) {
 
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     Type *result = NULL;
+
+    // Only array and member accesses care about being used as a place. Everything below them is checked as a value, unless they say otherwise
+    typer->current_place  = typer->checking_place;
+    typer->checking_place = false;
+
     if      (expr->head.kind == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr), ctx_type);
     else if (expr->head.kind == AST_BINARY)         result = check_binary(typer, (AstBinary *)(expr), ctx_type);
     else if (expr->head.kind == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
@@ -4313,6 +4676,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
 }
 
 Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
+    typer->checking_place = typer->current_place; // e.g xs[i].x = 5 changes the element in the collection, so xs[i] is a place too
     Type *type_lhs = check_expression(typer, ma->left, NULL);
     if (!type_lhs) return NULL;
 
@@ -4872,6 +5236,7 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
 }
 
 Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
+    typer->checking_place = unary->operator == OP_ADDRESS_OF; // &xs[i] is the address of the element in the collection
     Type *expr_type = check_expression(typer, unary->expr, ctx_type);
     if (!expr_type) return NULL;
 
