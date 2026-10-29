@@ -29,19 +29,6 @@ swap :: (a: *Small) {
     a.b = tmp;
 }
 
-
-Vector3 :: struct {
-    x, y, z: f32;
-}
-
-extend Vector3 {
-    length :: (v: Vector3) -> f32 {}
-    dot :: (v: Vector3) -> f32 {}
-    scale :: (v: *Vector3) -> void {}
-}
-
-
-
 main :: () {
     c := Color{10, 20, 30, 40};
     assert(c.r == 10 && c.g == 20 && c.b == 30 && c.a == 40);
