@@ -82,6 +82,10 @@ bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver
 bool register_generic_method(Typer *typer, AstFunctionDefn *generic);
 bool register_methods_early(Typer *typer, AstFile *file);
 bool check_struct_statement(Typer *typer, AstStruct *ast_struct);
+AstFunctionDefn *readonly_self_method(Typer *typer, AstExpr *expr);
+AstFunctionDefn *readonly_self_place(Typer *typer, AstExpr *expr);
+void report_readonly_self(Typer *typer, Ast *at, AstFunctionDefn *method, const char *action, AstExpr *place);
+void append_place_text(StringBuilder *sb, AstExpr *expr);
 bool check_declaration(Typer *typer, AstDeclaration *decl);
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 
@@ -1476,6 +1480,105 @@ void reserve_space_for_runtime_any_value(Typer *typer, Type *value_type) {
     }
 }
 
+//
+// Read-only self
+//
+// In a 'method' declared inside a struct (not a 'method *'), 'self' is a pointer under the hood, but nothing may be changed through it.
+// It is shallow: only the struct itself is read-only, not what its members point to, e.g the elements of a dynamic array member
+//
+
+// Returns the method if the expression is its read-only 'self'
+AstFunctionDefn *readonly_self_method(Typer *typer, AstExpr *expr) {
+    if (!is_literal_identifier(expr)) return NULL;
+
+    AstIdentifier *ident = ((AstLiteral *)expr)->as.value.identifier.resolved_identifier;
+    if (ident == NULL) return NULL;
+
+    AstFunctionDefn *func = typer->enclosing_function;
+    if (func && func->self_struct && !func->self_is_mutable && func->parameters.count > 0 && ((AstIdentifier **)func->parameters.items)[0] == ident) {
+        return func;
+    }
+    return NULL;
+}
+
+// Returns the method if the place is a part of its read-only 'self' e.g self.count, self.pos.x, *self or self.items[i] when items is a fixed size array.
+// Places reached through a pointer, like self.next.value or the elements of a dynamic array, are not a part of self
+AstFunctionDefn *readonly_self_place(Typer *typer, AstExpr *expr) {
+    switch (expr->head.kind) {
+    case AST_MEMBER_ACCESS: {
+        AstMemberAccess *ma = (AstMemberAccess *)expr;
+        if (ma->access_kind != MEMBER_ACCESS_STRUCT_MEMBER) return NULL;
+
+        AstFunctionDefn *method = readonly_self_method(typer, ma->left);
+        if (method) return method; // e.g self.count
+
+        if (ma->left->type && ma->left->type->kind == TYPE_POINTER) return NULL; // e.g self.next.value
+        return readonly_self_place(typer, ma->left);                           // e.g self.pos.x or self.items.count
+    }
+    case AST_ARRAY_ACCESS: {
+        AstArrayAccess *access = (AstArrayAccess *)expr;
+        Type *type = access->left->type;
+        if (type && type->kind == TYPE_ARRAY && ((TypeArray *)type)->array_kind == ARRAY_FIXED) {
+            return readonly_self_place(typer, access->left); // The elements of a fixed size array are inside the struct
+        }
+        return NULL;
+    }
+    case AST_UNARY: {
+        AstUnary *unary = (AstUnary *)expr;
+        if (unary->operator == OP_POINTER_DEREFERENCE) return readonly_self_method(typer, unary->expr); // *self
+        return NULL;
+    }
+    default:
+        return NULL;
+    }
+}
+
+void append_place_text(StringBuilder *sb, AstExpr *expr) {
+    switch (expr->head.kind) {
+    case AST_LITERAL:
+        if (is_literal_identifier(expr)) sb_append(sb, "%s", ((AstLiteral *)expr)->as.value.identifier.name);
+        else                             sb_append(sb, "...");
+        return;
+    case AST_MEMBER_ACCESS: {
+        AstMemberAccess *ma = (AstMemberAccess *)expr;
+        append_place_text(sb, ma->left);
+        sb_append(sb, ".");
+        append_place_text(sb, ma->right);
+        return;
+    }
+    case AST_ARRAY_ACCESS:
+        append_place_text(sb, ((AstArrayAccess *)expr)->left);
+        sb_append(sb, "[...]");
+        return;
+    case AST_UNARY:
+        sb_append(sb, ((AstUnary *)expr)->operator == OP_ADDRESS_OF ? "&" : "*");
+        append_place_text(sb, ((AstUnary *)expr)->expr);
+        return;
+    default:
+        sb_append(sb, "...");
+        return;
+    }
+}
+
+void report_readonly_self(Typer *typer, Ast *at, AstFunctionDefn *method, const char *action, AstExpr *place) {
+    StringBuilder sb = sb_init(32);
+    append_place_text(&sb, place);
+    char *place_text = sb_to_string(&sb);
+
+    char *struct_name = method->self_struct->identifier->name;
+    char *method_name = method->identifier->name;
+    report_error_ast(typer->parser, LABEL_ERROR, at, "Cannot %s %s in the non-mutating method %s.%s", action, place_text, struct_name, method_name);
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "self is read-only in a 'method'. Declare it as 'method *' to be able to change self e.g %s :: method * (...)", method_name);
+}
+
+// Returns true if calling the method can change its receiver
+bool method_can_change_receiver(AstFunctionDefn *method) {
+    if (method->self_struct) return method->self_is_mutable;
+
+    AstIdentifier *receiver = method->receiver ? method->receiver : ((AstIdentifier **)method->parameters.items)[0];
+    return receiver->type && receiver->type->kind == TYPE_POINTER;
+}
+
 bool check_declaration(Typer *typer, AstDeclaration *decl) {
     if (decl->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return true;
@@ -1607,6 +1710,18 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
             decl->type = (Type *) make_tuple_type_from_expression_list(typer, decl->values);
         } else {
             decl->type = ((AstExpr **)decl->values.items)[0]->type;
+        }
+    }
+
+    // A read-only self cannot be stored, as the pointer could be used to change self
+    for (int i = 0; i < decl->values.count; i++) {
+        AstExpr *value = ((AstExpr **)decl->values.items)[i];
+
+        AstFunctionDefn *readonly = readonly_self_method(typer, value);
+        if (readonly && value->type && value->type->kind == TYPE_POINTER) {
+            report_readonly_self(typer, (Ast *)value, readonly, "store the pointer", value);
+            report_error_ast(typer->parser, LABEL_NOTE, NULL, "It could be used to change self. Copy it with *self instead");
+            return false;
         }
     }
 
@@ -1858,8 +1973,22 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     Type *lhs_type  = check_expression(typer, assign->lhs, NULL);
     if (!lhs_type) return false;
 
+    AstFunctionDefn *readonly = readonly_self_place(typer, assign->lhs);
+    if (!readonly) readonly = readonly_self_method(typer, assign->lhs);
+    if (readonly) {
+        report_readonly_self(typer, (Ast *)assign->lhs, readonly, "assign to", assign->lhs);
+        return false;
+    }
+
     Type *expr_type = check_expression(typer, assign->expr, lhs_type);
     if (!expr_type) return false;
+
+    readonly = readonly_self_method(typer, assign->expr);
+    if (readonly && expr_type->kind == TYPE_POINTER) {
+        report_readonly_self(typer, (Ast *)assign->expr, readonly, "store the pointer", assign->expr);
+        report_error_ast(typer->parser, LABEL_NOTE, NULL, "It could be used to change self. Copy it with *self instead");
+        return false;
+    }
 
 
     bool lhs_is_constant = false;
@@ -2143,6 +2272,15 @@ bool check_for(Typer *typer, AstFor *ast_for) {
         if (type->kind != TYPE_ARRAY && type->kind != TYPE_VARIADIC && type->kind != TYPE_STRING) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_for->iterable), "Cannot iterate through expression of type %s", type_to_str(type));
             return NULL;
+        }
+
+        if (ast_for->is_by_pointer && type->kind == TYPE_ARRAY && ((TypeArray *)type)->array_kind == ARRAY_FIXED) {
+            AstFunctionDefn *readonly = readonly_self_place(typer, ast_for->iterable);
+            if (readonly) {
+                report_readonly_self(typer, (Ast *)ast_for->iterable, readonly, "iterate by pointer over", ast_for->iterable);
+                report_error_ast(typer->parser, LABEL_NOTE, NULL, "The elements are inside self, so the pointers could be used to change self. Iterate by value instead e.g for v in ...");
+                return NULL;
+            }
         }
 
         Type *iterator_type = NULL;
@@ -2432,6 +2570,13 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
 
         Type *ok = check_expression(typer, return_value, wanted_type);
         if (!ok) return false;
+
+        AstFunctionDefn *readonly = readonly_self_method(typer, return_value);
+        if (readonly && return_value->type->kind == TYPE_POINTER) {
+            report_readonly_self(typer, (Ast *)return_value, readonly, "return the pointer", return_value);
+            report_error_ast(typer->parser, LABEL_NOTE, NULL, "It could be used to change self. Return a copy with *self instead");
+            return false;
+        }
     }
 
     TypeTuple *returning_tuple   = make_tuple_type_from_expression_list(typer, ast_return->values);
@@ -2725,6 +2870,12 @@ Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
         return NULL;
     }
 
+    AstFunctionDefn *readonly = readonly_self_place(typer, arg0->value);
+    if (readonly) {
+        report_readonly_self(typer, (Ast *)arg0->value, readonly, "append to", arg0->value);
+        return NULL;
+    }
+
     TypeArray *da_type = (TypeArray *) arg0->value->type;
     if (da_type->array_kind != ARRAY_DYNAMIC) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg0->value), "Type mismatch. Wanted type [..]%s, got type %s", type_to_str(da_type->elem_type), type_to_str((Type *)da_type));
@@ -2821,6 +2972,15 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         if (func_defn->is_method) {
             // We are indeed a method call
             call->is_method_call = true;
+
+            AstFunctionDefn *readonly = readonly_self_method(typer, ma->left);
+            if (!readonly) readonly = readonly_self_place(typer, ma->left);
+            if (readonly && method_can_change_receiver(func_defn)) {
+                StringBuilder sb = sb_init(32);
+                sb_append(&sb, "call the method '%s', which can change its receiver, on", func_defn->identifier->name);
+                report_readonly_self(typer, (Ast *)ma, readonly, sb_to_string(&sb), ma->left);
+                return NULL;
+            }
 
             // Rewrite the method call into a plain function call, with the 0'th
             // argument being the left-hand side of the member access
@@ -3256,6 +3416,23 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         }
     }
     
+
+    // A read-only self cannot be passed where a pointer is wanted, as it could be used to change self
+    for (int i = call->is_method_call ? 1 : 0; i < call->arguments.count; i++) {
+        AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
+
+        AstFunctionDefn *readonly = readonly_self_method(typer, arg->value);
+        if (!readonly || arg->value->type == NULL || arg->value->type->kind != TYPE_POINTER) continue;
+        if (arg->param_index < 0 || arg->param_index >= func_defn->parameters.count) continue;
+
+        Type *param_type = ((AstIdentifier **)func_defn->parameters.items)[arg->param_index]->type;
+        if (param_type->kind == TYPE_VARIADIC) param_type = ((TypeVariadic *)param_type)->type;
+        if (param_type->kind != TYPE_POINTER) continue;
+
+        report_readonly_self(typer, (Ast *)arg->value, readonly, "pass the pointer", arg->value);
+        report_error_ast(typer->parser, LABEL_NOTE, NULL, "It could be used to change self. Pass a copy with *self instead");
+        return NULL;
+    }
 
     if (func_defn->return_types.count > 1) {
         call->head.type = (Type *) make_tuple_type_from_type_list(typer, func_defn->return_types);
@@ -4571,6 +4748,19 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
         else if (unary->head.head.flags & AST_FLAG_COMPILER_GENERATED) {
             // e.g the receiver of make_map().set(k, v). The value is put in a temporary, and its address is passed
             lvalue = true;
+        }
+
+        if (!(unary->head.head.flags & AST_FLAG_COMPILER_GENERATED)) {
+            AstFunctionDefn *readonly = readonly_self_place(typer, unary->expr);
+            if (!readonly) readonly = readonly_self_method(typer, unary->expr);
+            if (readonly) {
+                StringBuilder sb = sb_init(32);
+                append_place_text(&sb, unary->expr);
+
+                report_readonly_self(typer, (Ast *)unary, readonly, "take the address of", unary->expr);
+                report_error_ast(typer->parser, LABEL_NOTE, NULL, "The pointer could be used to change self. Copy the value into a local instead e.g copy := %s", sb_to_string(&sb));
+                return NULL;
+            }
         }
 
         if (!lvalue) {

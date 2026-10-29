@@ -1,0 +1,49 @@
+Vec2 :: struct {
+    x: int;
+    y: int;
+}
+
+Body :: struct {
+    pos:   Vec2;
+    speed: int;
+
+    // Reading self and copying out of it is fine in a non-mutating method. The copies can be changed freely
+    next_pos :: method () -> Vec2 {
+        copy := self.pos;
+        copy.x += self.speed;
+        copy.y += self.speed;
+        return copy;
+    }
+
+    moved :: method (by: int) -> Body {
+        copy := *self;
+        copy.pos.x += by;
+        return copy;
+    }
+
+    // Calling other non-mutating methods on self is fine
+    distance_moved :: method () -> int {
+        next := self.next_pos();
+        return (next.x - self.pos.x) + (next.y - self.pos.y);
+    }
+
+    step :: method * () {
+        self.pos = self.next_pos();
+    }
+}
+
+main :: () {
+    b := Body{{1, 2}, 3};
+    n := b.next_pos();
+    assert(n.x == 4 && n.y == 5);
+    assert(b.pos.x == 1 && b.pos.y == 2); // Unchanged
+
+    m := b.moved(10);
+    assert(m.pos.x == 11);
+    assert(b.pos.x == 1);
+
+    assert(b.distance_moved() == 6);
+
+    b.step();
+    assert(b.pos.x == 4 && b.pos.y == 5);
+}

@@ -1,0 +1,22 @@
+// expect-error: Cannot take the address of self.pos in the non-mutating method Body.recenter
+
+Vec2 :: struct {
+    x: int;
+    y: int;
+}
+
+zero :: (v: *Vec2) {
+    v.x = 0;
+    v.y = 0;
+}
+
+Body :: struct {
+    pos: Vec2;
+
+    recenter :: method () {
+        zero(&self.pos);
+    }
+}
+
+main :: () {
+}

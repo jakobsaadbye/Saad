@@ -1,0 +1,18 @@
+// expect-error: Cannot call the method 'clear', which can change its receiver, on self in the non-mutating method Counter.get_and_clear
+
+Counter :: struct {
+    count: int;
+
+    clear :: method * () {
+        self.count = 0;
+    }
+
+    get_and_clear :: method () -> int {
+        value := self.count;
+        self.clear();
+        return value;
+    }
+}
+
+main :: () {
+}

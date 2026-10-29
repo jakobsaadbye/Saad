@@ -4,6 +4,87 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.3.0 - 29. Oct 2026
+
+* Generic functions
+
+Functions can take type parameters, written in angle brackets after `::`. The types are inferred from the
+arguments of each call, and each distinct set of types gets its own copy of the function.
+
+```odin
+max :: <T>(elements: ...T) -> T {
+    best := elements[0];
+    for e in elements {
+        if e > best { best = e; }
+    }
+    return best;
+}
+
+main :: () {
+    a := max(3, 9, 4);   // T = int
+    b := max(1, 2.5);    // T = float, a float literal wins over an integer literal
+    x: s64 = 1;
+    c := max(x, 10);     // T = s64, literals take the type of a typed argument
+}
+```
+
+Typed arguments must agree: `max(a, b)` with an `s32` and an `s64` is an error, nothing is widened.
+Every type parameter has to be used by a parameter, as there is no syntax to give the types explicitly yet.
+
+* Methods on generic structs
+
+Methods declared outside a struct declare the type parameters of the receiver:
+
+```odin
+set :: method <K, V>(m: *Map<K, V>, key: K, value: V) {
+    append(m.keys, key);
+    append(m.values, value);
+}
+```
+
+The receiver must use each type parameter exactly once, e.g `Map<K, V>`. `Map<string, V>` is an error, as methods
+cannot be specialized for some types.
+
+* Methods declared inside structs
+
+Methods can be declared inside a struct, where they get an implicit `self`. `method` gives a read-only `self`,
+and `method *` a `self` that can be changed:
+
+```odin
+Map :: struct <K, V> {
+    keys:   [..]K;
+    values: [..]V;
+
+    get :: method (key: K) -> V {
+        for i in 0..self.keys.count {
+            if self.keys[i] == key { return self.values[i]; }
+        }
+        empty: V;
+        return empty;
+    }
+
+    set :: method * (key: K, value: V) {
+        append(self.keys, key);
+        append(self.values, value);
+    }
+}
+```
+
+Members are only reached through `self`, e.g `self.keys`. Methods don't change the size or members of the struct.
+
+In a `method`, nothing in `self` can be changed: assigning to `self.count`, taking `&self.pos`, calling a
+`method *` on `self` and `for *` over a fixed size array member are errors. Copy it into a local first if you
+want to change a copy (`copy := self.pos`). Read-only is shallow: what the members point to can still be changed,
+e.g the elements of a dynamic array member.
+
+* Methods can now be called before they are declared, and on values that are not variables, e.g `make_map().set(k, v)`
+  (the value is put in a temporary, so the change is lost)
+
+Bug fixes:
+
+* Fixed untyped literals passed as varargs not taking the type of the variadic parameter e.g `f(a, 100)` with `f :: (xs: ...s64)`
+* Fixed a struct declared after a variable of its type not having its members resolved
+
 ## Update v0.2.9 - 29. Oct 2026
 
 * Generic structs

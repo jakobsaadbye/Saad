@@ -1,0 +1,14 @@
+// expect-error: Cannot iterate by pointer over self.items in the non-mutating method Grid.clear
+
+Grid :: struct {
+    items: [4]int;
+
+    clear :: method () {
+        for * item in self.items {
+            *item = 0;
+        }
+    }
+}
+
+main :: () {
+}

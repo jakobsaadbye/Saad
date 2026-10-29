@@ -1,0 +1,38 @@
+Node :: struct {
+    value: int;
+}
+
+Holder :: struct {
+    node:  *Node;
+    items: [..]int;
+
+    // self is only read-only one level deep. What the members point to can still be changed
+    bump_node :: method () {
+        self.node.value += 1;
+    }
+
+    // The elements of a dynamic array live outside the struct
+    double_items :: method () {
+        for i in 0..self.items.count {
+            self.items[i] *= 2;
+        }
+        for * item in self.items {
+            *item += 1;
+        }
+    }
+}
+
+main :: () {
+    node := Node{1};
+    h: Holder;
+    h.node = &node;
+    append(h.items, 1);
+    append(h.items, 2);
+
+    h.bump_node();
+    assert(node.value == 2);
+
+    h.double_items();
+    assert(h.items[0] == 3);
+    assert(h.items[1] == 5);
+}
