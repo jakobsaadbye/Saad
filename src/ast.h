@@ -709,6 +709,8 @@ typedef struct TypeEnum {
     int            min_value;
     int            max_value;
 
+    TypeStruct    *method_holder; // Holds the methods declared on the enum. See method_holder_of() in typer.c
+
     // Static enum definition members
     AstIdentifier *count;
     AstIdentifier *names;

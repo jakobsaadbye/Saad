@@ -33,6 +33,8 @@ typedef struct Typer {
     bool generic_depth_limit_reached; // Set when generic_depth hits GENERIC_DEPTH_LIMIT, so that the error is not followed by a note for every level
     bool checking_callee;             // Set while checking the function expression of a call. Generic functions may only be used as a callee
     int  struct_check_depth;          // How many struct definitions are currently being checked inside each other
+
+    TypeStruct *primitive_method_holders[PRIMITIVE_COUNT]; // Holds the methods declared on each primitive type e.g 'hash :: method (x: int) -> u64'. See method_holder_of()
 } Typer;
 
 #define GENERIC_DEPTH_LIMIT 64
@@ -79,6 +81,8 @@ Type *solidify_untyped_type(Type *untyped_type);
 Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic);
 AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall *call, AstFunctionDefn *generic);
 bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver_struct);
+TypeStruct *method_holder_of(Typer *typer, Type *type);
+PrimitiveKind canonical_primitive_kind(PrimitiveKind kind);
 bool register_generic_method(Typer *typer, AstFunctionDefn *generic);
 bool register_methods_early(Typer *typer, AstFile *file);
 bool check_struct_statement(Typer *typer, AstStruct *ast_struct);
@@ -744,6 +748,40 @@ bool unify_types(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindings, 
     }
 }
 
+// Returns the struct that holds the methods of a type. Primitive types and enums don't have members, so they get a struct without
+// members just to hold their methods e.g 'hash :: method (x: int) -> u64'. Returns NULL for types that cannot have methods
+TypeStruct *method_holder_of(Typer *typer, Type *type) {
+    switch (type->kind) {
+    case TYPE_STRUCT: return (TypeStruct *)type;
+    case TYPE_STRING: {
+        if (typer->type_string == NULL) {
+            if (!resolve_type(typer, type)) return NULL;
+        }
+        return typer->type_string ? typer->type_string->struct_defn : ((TypeString *)type)->struct_defn;
+    }
+    case TYPE_BOOL:
+    case TYPE_INTEGER:
+    case TYPE_FLOAT: {
+        PrimitiveKind kind = canonical_primitive_kind(((TypePrimitive *)type)->kind);
+        if (kind == PRIMITIVE_UNTYPED_INT || kind == PRIMITIVE_UNTYPED_FLOAT || kind == PRIMITIVE_VOID) return NULL;
+
+        if (typer->primitive_method_holders[kind] == NULL) {
+            typer->primitive_method_holders[kind] = generate_empty_struct_type(typer->parser, primitive_types[kind].name);
+        }
+        return typer->primitive_method_holders[kind];
+    }
+    case TYPE_ENUM: {
+        TypeEnum *enum_type = (TypeEnum *)type;
+        if (enum_type->method_holder == NULL) {
+            enum_type->method_holder = generate_empty_struct_type(typer->parser, enum_type->identifier->name);
+        }
+        return enum_type->method_holder;
+    }
+    default:
+        return NULL;
+    }
+}
+
 // Adds a method to the methods of its receiver struct, so that it can be called as x.method(...)
 bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver_struct) {
     if (method->is_registered_method) return true;
@@ -863,14 +901,34 @@ bool register_method_early(Typer *typer, AstFile *file, AstDeclaration *decl) {
         if (receiver_type && receiver_type->kind == TYPE_POINTER) {
             receiver_type = ((TypePointer *)receiver_type)->pointer_to;
         }
-        if (receiver_type == NULL || receiver_type->kind != TYPE_NAME) continue;
+        if (receiver_type == NULL) continue;
 
-        AstIdentifier *struct_ident = lookup_from_scope(typer->parser, file->scope, receiver_type->name);
-        if (struct_ident == NULL || !(struct_ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT)) continue;
-        if (struct_ident->type == NULL || struct_ident->type->kind != TYPE_STRUCT) continue;
-        if (((TypeStruct *)struct_ident->type)->node->type_params.count > 0) continue; // Reported as missing type arguments when checked
+        // Methods on primitive types e.g 'hash :: method (x: int) -> u64'
+        if (receiver_type->kind == TYPE_BOOL || receiver_type->kind == TYPE_INTEGER || receiver_type->kind == TYPE_FLOAT) {
+            TypeStruct *holder = method_holder_of(typer, receiver_type);
+            if (holder == NULL) continue;
 
-        bool ok = register_method(typer, method, (TypeStruct *)struct_ident->type);
+            bool ok = register_method(typer, method, holder);
+            if (!ok) return false;
+            continue;
+        }
+
+        if (receiver_type->kind != TYPE_NAME) continue;
+
+        AstIdentifier *type_ident = lookup_from_scope(typer->parser, file->scope, receiver_type->name);
+        if (type_ident == NULL || type_ident->type == NULL) continue;
+
+        TypeStruct *holder = NULL;
+        if ((type_ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT) && type_ident->type->kind == TYPE_STRUCT) {
+            if (((TypeStruct *)type_ident->type)->node->type_params.count > 0) continue; // Reported as missing type arguments when checked
+            holder = (TypeStruct *)type_ident->type;
+        }
+        else if ((type_ident->flags & IDENTIFIER_IS_NAME_OF_ENUM) && type_ident->type->kind == TYPE_ENUM) {
+            holder = method_holder_of(typer, type_ident->type);
+        }
+        if (holder == NULL) continue;
+
+        bool ok = register_method(typer, method, holder);
         if (!ok) return false;
     }
     return true;
@@ -3666,37 +3724,12 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         func_defn->receiver = ((AstIdentifier**)func_defn->parameters.items)[0];
         Type *receiver_type = func_defn->receiver->type;
 
-        // For now we only allow the receiver type to be a struct or a pointer to a struct
-        TypeStruct *receiver_struct = NULL;
-
-        if (receiver_type->kind == TYPE_POINTER) {
-            TypePointer *pointer_type = (TypePointer *) receiver_type;
-
-            if (pointer_type->pointer_to->kind == TYPE_STRUCT) {
-                receiver_struct = (TypeStruct *) pointer_type->pointer_to;
-            }
-            else if (pointer_type->pointer_to->kind == TYPE_STRING) {
-                TypeString *str = (TypeString *) receiver_type;
-                assert(str->struct_defn && "Compiler Error: String was unresolved during method resolution");
-                receiver_struct = str->struct_defn;
-            }
-            else {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must be a struct or a pointer to a struct. Got type %s", text_bold(type_to_str(receiver_type)));
-                report_error_ast(typer->parser, LABEL_NOTE, NULL, "Methods on arbitrary types is still unsupported");
-                return NULL;
-            }
-        }
-        else if (receiver_type->kind == TYPE_STRUCT) {
-            receiver_struct = (TypeStruct *) receiver_type;
-        }
-        else if (receiver_type->kind == TYPE_STRING) {
-            TypeString *str = (TypeString *) receiver_type;
-            assert(str->struct_defn && "Compiler Error: String was unresolved during method resolution");
-            receiver_struct = str->struct_defn;
-        }
-        else {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must be a struct or a pointer to a struct. Got type %s", text_bold(type_to_str(receiver_type)));
-            report_error_ast(typer->parser, LABEL_NOTE, NULL, "Methods on arbitrary types is still unsupported");
+        // The receiver is a struct, a string, a primitive or an enum, or a pointer to one of those
+        Type *receiver_value_type = receiver_type->kind == TYPE_POINTER ? ((TypePointer *)receiver_type)->pointer_to : receiver_type;
+        TypeStruct *receiver_struct = method_holder_of(typer, receiver_value_type);
+        if (receiver_struct == NULL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must be a struct, a string, a primitive type or an enum, or a pointer to one of those. Got type %s", text_bold(type_to_str(receiver_type)));
+            report_error_ast(typer->parser, LABEL_NOTE, NULL, "Methods on arrays and pointers to pointers are not supported yet");
             return NULL;
         }
 
@@ -4352,6 +4385,23 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     }
 
     if (!valid_lhs) {
+        // Methods on primitive types and enums e.g x.hash() with 'hash :: method (x: int) -> u64'
+        Type *value_type = type_lhs->kind == TYPE_POINTER ? ((TypePointer *)type_lhs)->pointer_to : type_lhs;
+        TypeStruct *holder = method_holder_of(typer, value_type);
+        if (holder && is_literal_identifier(ma->right)) {
+            char *name = ((AstLiteral *)ma->right)->as.value.identifier.name;
+            AstIdentifier *method = get_struct_method(holder->node, name);
+            if (method) {
+                ma->struct_type   = holder;
+                ma->access_kind   = MEMBER_ACCESS_STRUCT_MEMBER;
+                ma->struct_member = method;
+                return method->type;
+            }
+
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->right), "Type %s has no method '%s'", type_to_str(type_lhs), name);
+            return NULL;
+        }
+
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->left), "Cannot access into expression of type %s", type_to_str(type_lhs));
         return NULL;
     }

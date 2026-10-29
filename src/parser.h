@@ -35,6 +35,7 @@ TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *t
 TypeStruct     *generate_struct_for_dynamic_array(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
 AstFunctionDefn *reparse_generic_function(Parser *parser, AstFunctionDefn *generic, AstBlock *scope);
+TypeStruct     *generate_empty_struct_type(Parser *parser, char *name);
 TypePointer    *generate_pointer_to_type(Parser *parser, Type *type);
 TypeArray      *generate_slice_of(Parser *parser, Type *type);
 AstIdentifier  *add_member_to_struct_scope(Parser *parser, AstStruct *struct_defn, AstIdentifier *member);
