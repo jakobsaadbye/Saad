@@ -59,10 +59,14 @@ Bug backlog:
 Future development
 -----------------
 
-* Better dynamic arrays
-  [] Able to create them with an initial capacity
-  [] More methods on them
-  [] Able to specify an allocator
+* Collections (see docs/collections.md)
+  [x] Dynamic arrays as List<T> in std/collections.sd, with an initial capacity (reserve), more methods and allocators
+  [x] Map<K, V> with [k: v] literals
+  [] for key, value in m (the second name of a for loop is the index today)
+  [] map / filter (needs methods with type parameters of their own)
+  [] Hashing pointers and enums without writing a hash method
+  [] Map.remove in O(1) while keeping the order (tombstones)
+  [] Decide on implicit narrowing of arguments and return values (i64 to i32 is allowed today)
 
 * Better structs
   [x] Constant members
@@ -80,7 +84,8 @@ Future development
   [] Higher order functions (passing functions as values)
   [x] Able to call methods defined later (methods on a struct name or a generic struct)
   [] Able to call methods on *List<int> style receivers defined later
-  [] Methods on any type (including arrays and primitives)
+  [x] Methods on primitive types and enums
+  [] Methods on arrays and pointers
 
 * Import system
   [] Detect circular dependencies
