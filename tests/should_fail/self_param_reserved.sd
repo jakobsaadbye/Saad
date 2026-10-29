@@ -1,0 +1,11 @@
+// expect-error: 'self' is reserved inside methods declared in a struct
+
+Counter :: struct {
+    count: int;
+
+    add :: method * (self: int) {
+    }
+}
+
+main :: () {
+}

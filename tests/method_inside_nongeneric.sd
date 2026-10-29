@@ -1,0 +1,35 @@
+main :: () {
+    // The struct and its methods are declared after main
+    v := Vec2{3, 4};
+    assert(v.length_squared() == 25);
+
+    v.scale(2);
+    assert(v.x == 6 && v.y == 8);
+
+    w := v.added(Vec2{1, 1});
+    assert(w.x == 7 && w.y == 9);
+    assert(v.x == 6); // added() does not change v
+
+    p := &v;
+    p.scale(-1);
+    assert(v.x == -6 && v.y == -8);
+    assert(p.length_squared() == 100);
+}
+
+Vec2 :: struct {
+    x: int;
+    y: int;
+
+    length_squared :: method () -> int {
+        return self.x * self.x + self.y * self.y;
+    }
+
+    added :: method (other: Vec2) -> Vec2 {
+        return Vec2{self.x + other.x, self.y + other.y};
+    }
+
+    scale :: method * (by: int) {
+        self.x *= by;
+        self.y *= by;
+    }
+}

@@ -81,6 +81,8 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
 bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver_struct);
 bool register_generic_method(Typer *typer, AstFunctionDefn *generic);
 bool register_methods_early(Typer *typer, AstFile *file);
+bool check_struct_statement(Typer *typer, AstStruct *ast_struct);
+bool check_declaration(Typer *typer, AstDeclaration *decl);
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 
 AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr);
@@ -836,40 +838,72 @@ bool register_generic_method(Typer *typer, AstFunctionDefn *generic) {
 
 // Adds the methods declared at the top-level of a file to their receiver structs before anything is checked, so that methods can
 // be called before they are declared. Methods on other receivers than a struct name, like *List<int>, are added when they are checked
+bool register_method_early(Typer *typer, AstFile *file, AstDeclaration *decl) {
+    for (int j = 0; j < decl->values.count; j++) {
+        AstExpr *value = ((AstExpr **)decl->values.items)[j];
+        if (value->head.kind != AST_FUNCTION_DEFN) continue;
+
+        AstFunctionDefn *method = (AstFunctionDefn *)value;
+        if (!method->is_method || method->is_extern || method->parameters.count == 0) continue;
+
+        if (is_generic_function(method)) {
+            bool ok = register_generic_method(typer, method);
+            if (!ok) return false;
+            continue;
+        }
+
+        AstIdentifier *receiver = ((AstIdentifier **)method->parameters.items)[0];
+        Type *receiver_type = receiver->type;
+        if (receiver_type && receiver_type->kind == TYPE_POINTER) {
+            receiver_type = ((TypePointer *)receiver_type)->pointer_to;
+        }
+        if (receiver_type == NULL || receiver_type->kind != TYPE_NAME) continue;
+
+        AstIdentifier *struct_ident = lookup_from_scope(typer->parser, file->scope, receiver_type->name);
+        if (struct_ident == NULL || !(struct_ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT)) continue;
+        if (struct_ident->type == NULL || struct_ident->type->kind != TYPE_STRUCT) continue;
+        if (((TypeStruct *)struct_ident->type)->node->type_params.count > 0) continue; // Reported as missing type arguments when checked
+
+        bool ok = register_method(typer, method, (TypeStruct *)struct_ident->type);
+        if (!ok) return false;
+    }
+    return true;
+}
+
 bool register_methods_early(Typer *typer, AstFile *file) {
     for (int i = 0; i < file->statements.count; i++) {
         Ast *stmt = ((Ast **)file->statements.items)[i];
+
+        if (stmt->kind == AST_STRUCT) {
+            AstStruct *ast_struct = (AstStruct *)stmt;
+            for (int j = 0; j < ast_struct->inside_methods.count; j++) {
+                bool ok = register_method_early(typer, file, ((AstDeclaration **)ast_struct->inside_methods.items)[j]);
+                if (!ok) return false;
+            }
+            continue;
+        }
+
         if (stmt->kind != AST_DECLARATION || !(stmt->flags & AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN)) continue;
 
-        AstDeclaration *decl = (AstDeclaration *)stmt;
-        for (int j = 0; j < decl->values.count; j++) {
-            AstExpr *value = ((AstExpr **)decl->values.items)[j];
-            if (value->head.kind != AST_FUNCTION_DEFN) continue;
+        bool ok = register_method_early(typer, file, (AstDeclaration *)stmt);
+        if (!ok) return false;
+    }
+    return true;
+}
 
-            AstFunctionDefn *method = (AstFunctionDefn *)value;
-            if (!method->is_method || method->is_extern || method->parameters.count == 0) continue;
+// The methods declared inside a struct are checked as if they were declared right after it
+bool check_struct_statement(Typer *typer, AstStruct *ast_struct) {
+    bool ok = check_struct_defn(typer, ast_struct);
+    if (!ok) return false;
 
-            if (is_generic_function(method)) {
-                bool ok = register_generic_method(typer, method);
-                if (!ok) return false;
-                continue;
-            }
+    AstBlock *scope = typer->current_scope;
+    for (int i = 0; i < ast_struct->inside_methods.count; i++) {
+        AstDeclaration *decl = ((AstDeclaration **)ast_struct->inside_methods.items)[i];
 
-            AstIdentifier *receiver = ((AstIdentifier **)method->parameters.items)[0];
-            Type *receiver_type = receiver->type;
-            if (receiver_type && receiver_type->kind == TYPE_POINTER) {
-                receiver_type = ((TypePointer *)receiver_type)->pointer_to;
-            }
-            if (receiver_type == NULL || receiver_type->kind != TYPE_NAME) continue;
-
-            AstIdentifier *struct_ident = lookup_from_scope(typer->parser, file->scope, receiver_type->name);
-            if (struct_ident == NULL || !(struct_ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT)) continue;
-            if (struct_ident->type == NULL || struct_ident->type->kind != TYPE_STRUCT) continue;
-            if (((TypeStruct *)struct_ident->type)->node->type_params.count > 0) continue; // Reported as missing type arguments when checked
-
-            bool ok = register_method(typer, method, (TypeStruct *)struct_ident->type);
-            if (!ok) return false;
-        }
+        typer->current_scope = ast_struct->members->parent;
+        ok = check_declaration(typer, decl);
+        typer->current_scope = scope;
+        if (!ok) return false;
     }
     return true;
 }
@@ -2509,7 +2543,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_BLOCK:             return check_block(typer, (AstBlock *)(stmt));
     case AST_DECLARATION:       return check_declaration(typer, (AstDeclaration *)(stmt));
     case AST_ASSIGNMENT:        return check_assignment(typer, (AstAssignment *)(stmt));
-    case AST_STRUCT:            return check_struct_defn(typer, (AstStruct *)(stmt));
+    case AST_STRUCT:            return check_struct_statement(typer, (AstStruct *)(stmt));
     case AST_ENUM:              return check_enum_defn(typer, (AstEnum *)stmt);
     case AST_FOR:               return check_for(typer, (AstFor *)(stmt));
     case AST_WHILE:             return check_while(typer, (AstWhile *)(stmt));
@@ -4759,6 +4793,14 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 
         if (ident == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared identifier '%s'", ident_name);
+
+            // Inside a method declared in a struct, the members are only reached through self
+            for (AstFunctionDefn *func = typer->enclosing_function; func; func = func->parent_function) {
+                if (func->self_struct && get_struct_member(func->self_struct, ident_name)) {
+                    report_error_ast(typer->parser, LABEL_HINT, NULL, "'%s' is a member of '%s'. Members are reached through self, e.g self.%s", ident_name, func->self_struct->identifier->name, ident_name);
+                    break;
+                }
+            }
             return NULL;
         }
 

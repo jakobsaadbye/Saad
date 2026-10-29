@@ -21,6 +21,7 @@ typedef struct Parser {
     bool reported_error;
 
     int split_shift_right_token; // Index + 1 of a '>>' token whose first '>' has been eaten as the end of a list of type arguments e.g List<List<int>>. 0 if none
+    AstStruct *reparse_self_struct; // Set when parsing an instance of a generic method that was declared inside this struct
 
     char *runtime_file_path;
     char *builtin_string_file_path;
