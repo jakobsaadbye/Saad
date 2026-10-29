@@ -1,0 +1,10 @@
+// expect-error: Generic function 'max' can only be called, not used as a value
+
+max :: <T>(a: T, b: T) -> T {
+    if a > b { return a; }
+    return b;
+}
+
+main :: () {
+    f := max;
+}

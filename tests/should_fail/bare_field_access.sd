@@ -1,0 +1,16 @@
+// Inside a method, the members are only reached through self
+// expect-error: Undeclared identifier 'count'
+// expect-error: 'count' is a member of 'Counter'. Members are reached through self, e.g self.count
+
+Counter :: struct {
+    count: int;
+
+    get :: method () -> int {
+        return count;
+    }
+}
+
+main :: () {
+    c: Counter;
+    x := c.get();
+}

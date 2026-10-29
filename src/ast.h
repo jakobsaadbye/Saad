@@ -275,6 +275,8 @@ typedef struct AstStruct {
     DynamicArray   instances;        // of *TypeStruct. All the instantiations of this generic struct, e.g List<int>, List<float>
     AstStruct     *generic_struct;   // Set on an instance to the generic struct it was instantiated from
     DynamicArray   type_args;        // of *Type. Set on an instance to the (resolved) types it was instantiated with
+
+    DynamicArray   inside_methods;   // of *AstDeclaration. The methods declared inside the struct. They are not members of the struct
 } AstStruct;
 
 typedef struct AstEnum {
@@ -345,6 +347,21 @@ typedef struct AstFunctionDefn {
     
     DynamicArray    lowered_return_params;  // of *AstIdentifier
     DynamicArray    lowered_params;         // of *AstIdentifier. A lowered representation of the parameter list with hidden return parameters / methods and all
+
+    // Generics
+    DynamicArray     type_params;       // of *AstIdentifier. Set if this is a generic function e.g max :: <T>(...). Generic functions are never checked or lowered themselves, only their instances are
+    int              first_token_index; // Index of the first token of the function. Each instance of a generic function is made by parsing the function again from here
+    DynamicArray     instances;         // of *AstFunctionDefn. All the instantiations of this generic function
+    AstFunctionDefn *generic_function;  // Set on an instance to the generic function it was instantiated from
+    DynamicArray     type_args;         // of *Type. Set on an instance to the types it was instantiated with
+    char            *instance_name;     // Set on an instance to a readable name e.g "max<int>"
+
+    bool             is_registered_method; // Set when the method has been added to the methods of its receiver struct
+
+    // Methods declared inside a struct e.g 'get :: method (key: K) -> V' inside Map :: struct <K, V> {...}. They are turned into the same
+    // as a method declared outside the struct with an implicit 'self' receiver e.g 'get :: method <K, V>(self: *Map<K, V>, key: K) -> V'
+    AstStruct       *self_struct;     // The struct the method is declared inside. Set if the method has an implicit 'self'
+    bool             self_is_mutable; // Declared as 'method *'. Otherwise 'self' is read-only
 } AstFunctionDefn;
 
 typedef struct AstArgument {

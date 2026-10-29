@@ -78,7 +78,8 @@ Future development
 
 * Functions:
   [] Higher order functions (passing functions as values)
-  [] Able to call methods defined later
+  [x] Able to call methods defined later (methods on a struct name or a generic struct)
+  [] Able to call methods on *List<int> style receivers defined later
   [] Methods on any type (including arrays and primitives)
 
 * Import system
@@ -90,10 +91,16 @@ Future development
   [] Hex values
   [] Binary values
 
-* Generics
-  [] For functions
+* Generics (see docs/generics.md)
+  [x] For functions (type arguments inferred from the call)
   [x] For structs
-  [] Methods on generic types
+  [x] Methods on generic types (outside the struct with explicit type parameters, or inside the struct with an implicit self)
+  [] Generic methods with type parameters of their own e.g map :: method <U>(f: (V) -> U) -> Map<K, U>
+  [] Explicit type arguments at call sites e.g max<f64>(a, b)
+  [] Generic functions as values (needs explicit type arguments)
+  [] Constraints on type parameters
+  [] Constants and function type members in generic structs
+  [] Type aliases for instances e.g MyList :: List<int>
 
 * For-loops
   [] Able to iterate backwards

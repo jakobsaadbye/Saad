@@ -1,0 +1,33 @@
+max :: <T>(elements: ...T) -> T {
+    best := elements[0];
+    for e in elements {
+        if e > best {
+            best = e;
+        }
+    }
+    return best;
+}
+
+main :: () {
+    // Untyped integer literals give T the default integer type, the same as 'x := 3'
+    biggest := max(3, 9, 4);
+    assert(biggest == 9);
+    assert(typeof(biggest) == "int");
+
+    // A single argument works too
+    assert(max(7) == 7);
+
+    // Typed arguments decide the type
+    a: s64 = 5;
+    b: s64 = -2;
+    assert(max(a, b) == 5);
+    assert(typeof(max(a, b)) == "s64");
+
+    // Untyped literals take the type of a typed argument
+    assert(max(a, 100, 3) == 100);
+    assert(typeof(max(a, 100, 3)) == "s64");
+
+    // Spreading a slice into the variadic parameter
+    numbers := [4, 8, 15, 16, 23, 42];
+    assert(max(...numbers) == 42);
+}

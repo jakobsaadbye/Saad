@@ -1,0 +1,39 @@
+Counter :: struct <T> {
+    value: T;
+}
+
+bump :: method <T>(c: *Counter<T>, by: T) {
+    c.value += by;
+}
+
+Plain :: struct { n: int; }
+
+increment :: method (p: *Plain) {
+    p.n += 1;
+}
+
+main :: () {
+    // A value calling a method that wants a pointer passes the address of the value, so the original is changed
+    c := Counter<int>{1};
+    c.bump(2);
+    c.bump(3);
+    assert(c.value == 6);
+
+    f := Counter<float>{0.5};
+    f.bump(0.25);
+    assert(f.value == 0.75);
+
+    // Also through members
+    holder: struct_with_counter;
+    holder.counter.bump(10);
+    assert(holder.counter.value == 10);
+
+    p := Plain{0};
+    p.increment();
+    p.increment();
+    assert(p.n == 2);
+}
+
+struct_with_counter :: struct {
+    counter: Counter<int>;
+}

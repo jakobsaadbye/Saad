@@ -1,0 +1,13 @@
+// expect-error: Cannot assign to self.count in the non-mutating method Counter.reset
+// expect-error: Declare it as 'method *' to be able to change self
+
+Counter :: struct {
+    count: int;
+
+    reset :: method () {
+        self.count = 0;
+    }
+}
+
+main :: () {
+}

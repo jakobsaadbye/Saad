@@ -1,0 +1,9 @@
+// expect-error: Cannot infer the type parameter 'T' of 'max', as no argument gives it a type
+
+max :: <T>(elements: ...T) -> T {
+    return elements[0];
+}
+
+main :: () {
+    x := max();
+}

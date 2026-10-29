@@ -1,0 +1,49 @@
+Map :: struct <K, V> {
+    keys:   [..]K;
+    values: [..]V;
+    count:  int;
+}
+
+main :: () {
+    // The methods are declared after main, and are instantiated for each instance of Map they are called on
+    ages: Map<string, int>;
+    ages.set("alice", 31);
+    ages.set("bob", 27);
+    assert(ages.count == 2);
+    assert(ages.get("bob", -1) == 27);
+    assert(ages.get("carol", -1) == -1);
+    assert(ages.has("alice"));
+
+    squares: Map<int, f64>;
+    for i in 1..4 {
+        squares.set(i, (i * i) as f64);
+    }
+    assert(squares.count == 3);
+    assert(squares.get(3, 0) == 9);
+    assert(!squares.has(10));
+}
+
+set :: method <K, V>(m: *Map<K, V>, key: K, value: V) {
+    append(m.keys, key);
+    append(m.values, value);
+    m.count += 1;
+}
+
+get :: method <K, V>(m: Map<K, V>, key: K, fallback: V) -> V {
+    for i in 0..m.keys.count {
+        if m.keys[i] == key {
+            return m.values[i];
+        }
+    }
+    return fallback;
+}
+
+// The type parameters may be given in any order, as long as each is used once
+has :: method <V, K>(m: *Map<K, V>, key: K) -> bool {
+    for k in m.keys {
+        if k == key {
+            return true;
+        }
+    }
+    return false;
+}

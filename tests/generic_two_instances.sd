@@ -1,0 +1,31 @@
+sum :: <T>(values: ...T) -> T {
+    total: T;
+    for v in values {
+        total += v;
+    }
+    return total;
+}
+
+swap :: <T>(a: *T, b: *T) {
+    tmp := *a;
+    *a = *b;
+    *b = tmp;
+}
+
+main :: () {
+    // Both instances live in the same program and are called more than once
+    assert(sum(1, 2, 3) == 6);
+    assert(sum(0.5, 0.25) == 0.75);
+    assert(sum(10, 20) == 30);
+    assert(sum(1.5, 1.5) == 3);
+
+    a := 1;
+    b := 2;
+    swap(&a, &b);
+    assert(a == 2 && b == 1);
+
+    s := "first";
+    t := "second";
+    swap(&s, &t);
+    assert(s == "second" && t == "first");
+}

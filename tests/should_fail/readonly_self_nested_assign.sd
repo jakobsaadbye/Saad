@@ -1,0 +1,17 @@
+// expect-error: Cannot assign to self.pos.x in the non-mutating method Body.nudge
+
+Vec2 :: struct {
+    x: int;
+    y: int;
+}
+
+Body :: struct {
+    pos: Vec2;
+
+    nudge :: method () {
+        self.pos.x += 1;
+    }
+}
+
+main :: () {
+}

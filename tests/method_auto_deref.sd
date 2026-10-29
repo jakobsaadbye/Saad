@@ -1,0 +1,21 @@
+Box :: struct <T> {
+    value: T;
+}
+
+// Takes the receiver by value, so it gets a copy
+doubled :: method <T>(b: Box<T>) -> T {
+    b.value *= 2; // Only changes the copy
+    return b.value;
+}
+
+main :: () {
+    box := Box<int>{21};
+    ptr := &box;
+
+    // A pointer calling a method that wants a value passes a copy of what it points to
+    assert(ptr.doubled() == 42);
+    assert(box.value == 21);
+
+    assert(box.doubled() == 42);
+    assert(box.value == 21);
+}

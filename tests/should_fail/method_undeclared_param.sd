@@ -1,0 +1,16 @@
+// The type parameters must be declared on the method, they are not bound implicitly by the receiver
+// expect-error: Unknown type 'K'
+
+Map :: struct <K, V> {
+    keys:   [..]K;
+    values: [..]V;
+}
+
+size :: method (m: *Map<K, V>) -> s64 {
+    return m.keys.count;
+}
+
+main :: () {
+    m: Map<int, int>;
+    m.size();
+}

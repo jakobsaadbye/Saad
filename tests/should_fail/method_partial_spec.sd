@@ -1,0 +1,14 @@
+// expect-error: Type argument 'string' of the receiver must be one of the type parameters of the method 'get'
+// expect-error: cannot be specialized for some type arguments
+
+Map :: struct <K, V> {
+    keys:   [..]K;
+    values: [..]V;
+}
+
+get :: method <V>(m: *Map<string, V>, key: string) -> V {
+    return m.values[0];
+}
+
+main :: () {
+}

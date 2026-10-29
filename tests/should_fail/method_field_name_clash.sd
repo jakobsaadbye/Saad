@@ -1,0 +1,14 @@
+// expect-error: Method 'count' has the same name as a member of 'Map'
+
+Map :: struct <K, V> {
+    keys:   [..]K;
+    values: [..]V;
+    count:  int;
+}
+
+count :: method <K, V>(m: *Map<K, V>) -> int {
+    return m.count;
+}
+
+main :: () {
+}

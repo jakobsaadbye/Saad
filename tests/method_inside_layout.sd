@@ -1,0 +1,44 @@
+Plain :: struct {
+    a: int;
+    b: u8;
+}
+
+WithMethods :: struct {
+    a: int;
+    b: u8;
+
+    sum :: method () -> int {
+        return self.a + self.b;
+    }
+
+    clear :: method * () {
+        self.a = 0;
+        self.b = 0;
+    }
+}
+
+Pair :: struct <A, B> {
+    first:  A;
+    second: B;
+
+    swap_values :: method * () {}
+    first_of    :: method () -> A { return self.first; }
+}
+
+main :: () {
+    // Methods are not members, so the struct has the same size, alignment and members as without them
+    assert(sizeof(WithMethods) == sizeof(Plain));
+    assert(sizeof(Pair<s64, u8>) == 16);
+    assert(sizeof(Pair<u8, u8>) == 2);
+
+    w := WithMethods{2, 3};
+    assert(w.sum() == 5);
+    w.clear();
+    assert(w.sum() == 0);
+
+    // Printing walks the members of the struct, which does not include the methods
+    print("%\n", w);
+
+    p := Pair<u8, u8>{1, 2};
+    assert(p.first_of() == 1);
+}

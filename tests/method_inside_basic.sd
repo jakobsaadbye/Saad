@@ -1,0 +1,61 @@
+Map :: struct <K, V> {
+    keys:   [..]K;
+    values: [..]V;
+    count:  int;
+
+    get :: method (key: K, fallback: V) -> V {
+        for i in 0..self.keys.count {
+            if self.keys[i] == key {
+                return self.values[i];
+            }
+        }
+        return fallback;
+    }
+
+    has :: method (key: K) -> bool {
+        return self.index_of(key) != -1;
+    }
+
+    index_of :: method (key: K) -> int {
+        for i in 0..self.keys.count {
+            if self.keys[i] == key {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    set :: method * (key: K, value: V) {
+        index := self.index_of(key);
+        if index != -1 {
+            self.values[index] = value;
+            return;
+        }
+        append(self.keys, key);
+        append(self.values, value);
+        self.count += 1;
+    }
+}
+
+main :: () {
+    ages: Map<string, int>;
+    ages.set("alice", 31);
+    ages.set("bob", 27);
+    ages.set("alice", 32);
+
+    assert(ages.count == 2);
+    assert(ages.get("alice", -1) == 32);
+    assert(ages.get("carol", -1) == -1);
+    assert(ages.has("bob"));
+    assert(!ages.has("carol"));
+
+    // Through a pointer
+    ptr := &ages;
+    ptr.set("carol", 40);
+    assert(ptr.get("carol", -1) == 40);
+    assert(ages.count == 3);
+
+    scores: Map<int, f64>;
+    scores.set(7, 0.5);
+    assert(scores.get(7, 0) == 0.5);
+}

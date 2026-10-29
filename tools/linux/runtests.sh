@@ -33,17 +33,32 @@ for f in tests/*.sd; do
     fi
 done
 
+# A should_fail test can require the error output to contain some text with lines like:
+#   // expect-error: Conflicting types for type parameter 'T'
 for f in tests/should_fail/*.sd; do
     printf "%-56s " "$f"
-    ./bin/saad build "$f" > /dev/null 2>&1
+    output=$(./bin/saad build "$f" 2>&1)
     code=$?
+    output=$(printf '%s' "$output" | sed 's/\x1b\[[0-9;]*m//g') # Without colors
+    missing=""
+    while IFS= read -r expected; do
+        if ! printf '%s' "$output" | grep -qF -- "$expected"; then
+            missing="$expected"
+            break
+        fi
+    done < <(sed -n 's|^[[:space:]]*// expect-error: ||p' "$f")
     # A crash (signal) is not the same as rejecting the program
-    if [ $code -ne 0 ] && [ $code -lt 128 -o $code -eq 255 ]; then
-        echo "${GREEN}OK (rejected)${RESET}"
-        passed=$((passed + 1))
-    else
+    if [ $code -eq 0 ] || [ $code -ge 128 -a $code -ne 255 ]; then
         echo "${RED}FAILED (exit code $code)${RESET}"
         failed=$((failed + 1))
+    elif [ -n "$missing" ]; then
+        echo "${RED}FAILED (wrong error)${RESET}"
+        echo "    expected the error to contain: $missing"
+        echo "$output" | grep -E 'error' | head -3 | sed 's/^/    /'
+        failed=$((failed + 1))
+    else
+        echo "${GREEN}OK (rejected)${RESET}"
+        passed=$((passed + 1))
     fi
 done
 

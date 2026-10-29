@@ -28,7 +28,14 @@ typedef struct Typer {
     
     int next_unique_symbol_id;
     int array_literal_depth;
+
+    int  generic_depth;               // How many generic function instances are currently being checked inside each other
+    bool generic_depth_limit_reached; // Set when generic_depth hits GENERIC_DEPTH_LIMIT, so that the error is not followed by a note for every level
+    bool checking_callee;             // Set while checking the function expression of a call. Generic functions may only be used as a callee
+    int  struct_check_depth;          // How many struct definitions are currently being checked inside each other
 } Typer;
+
+#define GENERIC_DEPTH_LIMIT 64
 
 bool  check_block(Typer *typer, AstBlock *block);
 bool  check_statement(Typer *typer, Ast *stmt);
@@ -66,6 +73,20 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct);
 TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instance);
 Type *copy_type(Typer *typer, Type *type);
 Type *resolve_type(Typer *typer, Type *type);
+bool is_generic_function(AstFunctionDefn *func_defn);
+void append_mangled_name(StringBuilder *sb, char *name);
+Type *solidify_untyped_type(Type *untyped_type);
+Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic);
+AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall *call, AstFunctionDefn *generic);
+bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver_struct);
+bool register_generic_method(Typer *typer, AstFunctionDefn *generic);
+bool register_methods_early(Typer *typer, AstFile *file);
+bool check_struct_statement(Typer *typer, AstStruct *ast_struct);
+AstFunctionDefn *readonly_self_method(Typer *typer, AstExpr *expr);
+AstFunctionDefn *readonly_self_place(Typer *typer, AstExpr *expr);
+void report_readonly_self(Typer *typer, Ast *at, AstFunctionDefn *method, const char *action, AstExpr *place);
+void append_place_text(StringBuilder *sb, AstExpr *expr);
+bool check_declaration(Typer *typer, AstDeclaration *decl);
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 
 AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr);
@@ -115,6 +136,9 @@ bool check_file(Typer *typer, AstFile *ast_file) {
     // @Cleanup @CopyPasta :CopyPasteCurrentFile 
     typer->parser->current_file  = ast_file;
     typer->parser->current_scope = ast_file->scope;
+
+    bool ok = register_methods_early(typer, ast_file);
+    if (!ok) return false;
 
     for (int i = 0; i < ast_file->statements.count; i++) {
         Ast *stmt = ((Ast **)(ast_file->statements.items))[i];
@@ -473,6 +497,594 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
     return struct_type;
 }
 
+bool is_generic_function(AstFunctionDefn *func_defn) {
+    return func_defn->type_params.count > 0 && func_defn->generic_function == NULL;
+}
+
+// Appends a type name as something that is valid in an asm symbol e.g Map<string, *int> becomes Map$string$Pint.
+// The backend makes the symbol unique if two different names end up the same
+void append_mangled_name(StringBuilder *sb, char *name) {
+    for (char *c = name; *c != '\0'; c++) {
+        if (starts_identifier(*c) || is_digit(*c)) sb_append(sb, "%c", *c);
+        else if (*c == '*')                        sb_append(sb, "P");
+        else if (*c == '[')                        sb_append(sb, "A");
+        else if (*c == '<' || *c == ',')           sb_append(sb, "$");
+        else if (*c == '.')                        sb_append(sb, "D");
+        else if (*c != ' ' && *c != '>' && *c != ']') sb_append(sb, "_");
+    }
+}
+
+int type_param_index(DynamicArray type_params, char *name) {
+    for (int i = 0; i < type_params.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)type_params.items)[i];
+        if (strcmp(param->name, name) == 0) return i;
+    }
+    return -1;
+}
+
+// Returns true if the (unresolved) type mentions the type parameter with the given name
+bool type_mentions_name(Type *type, char *name) {
+    if (type == NULL) return false;
+
+    switch (type->kind) {
+    case TYPE_NAME:     return strcmp(type->name, name) == 0;
+    case TYPE_POINTER:  return type_mentions_name(((TypePointer *)type)->pointer_to, name);
+    case TYPE_ARRAY:    return type_mentions_name(((TypeArray *)type)->elem_type, name);
+    case TYPE_VARIADIC: return type_mentions_name(((TypeVariadic *)type)->type, name);
+    case TYPE_GENERIC_INSTANCE: {
+        TypeGenericInstance *instance = (TypeGenericInstance *)type;
+        for (int i = 0; i < instance->type_args.count; i++) {
+            if (type_mentions_name(((Type **)instance->type_args.items)[i], name)) return true;
+        }
+        return false;
+    }
+    case TYPE_FUNCTION: {
+        AstFunctionDefn *func = ((TypeFunction *)type)->node;
+        for (int i = 0; i < func->parameters.count; i++) {
+            if (type_mentions_name(((AstIdentifier **)func->parameters.items)[i]->type, name)) return true;
+        }
+        for (int i = 0; i < func->return_types.count; i++) {
+            if (type_mentions_name(((Type **)func->return_types.items)[i], name)) return true;
+        }
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
+bool type_mentions_any_type_param(Type *type, DynamicArray type_params) {
+    for (int i = 0; i < type_params.count; i++) {
+        if (type_mentions_name(type, ((AstIdentifier **)type_params.items)[i]->name)) return true;
+    }
+    return false;
+}
+
+// A generic function is not checked itself, only its instances are. Here we only check what can be checked without knowing the type arguments
+Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic) {
+    Parser *parser = typer->parser;
+
+    if (generic->is_lambda) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)generic, "Generic functions must be declared as constants e.g max :: <T>(a, b: T) -> T {...}");
+        return NULL;
+    }
+
+    for (int i = 0; i < generic->type_params.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)generic->type_params.items)[i];
+
+        AstIdentifier *existing = lookup_from_scope(parser, generic->body->parent, param->name);
+        if (existing && (existing->flags & (IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_NAME_OF_ENUM))) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)param, "Type parameter '%s' shadows the type '%s'", param->name, existing->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the declaration of '%s'", existing->name);
+            return NULL;
+        }
+
+        // There is no syntax to give the type arguments explicitly, so each type parameter has to be inferable from the arguments
+        bool used_by_parameter = false;
+        for (int j = 0; j < generic->parameters.count; j++) {
+            AstIdentifier *func_param = ((AstIdentifier **)generic->parameters.items)[j];
+            if (type_mentions_name(func_param->type, param->name)) {
+                used_by_parameter = true;
+                break;
+            }
+        }
+        if (!used_by_parameter) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)param, "Type parameter '%s' of '%s' is not used by any parameter, so its type can never be inferred", param->name, generic->identifier->name);
+            report_error_ast(parser, LABEL_HINT, NULL, "Type parameters are inferred from the arguments of a call, so '%s' must appear in the type of a parameter", param->name);
+            return NULL;
+        }
+    }
+
+    if (generic->is_method) {
+        bool ok = register_generic_method(typer, generic);
+        if (!ok) return NULL;
+    }
+
+    TypeFunction *func_type    = ast_allocate(parser, sizeof(TypeFunction));
+    func_type->head.head.kind  = AST_TYPE;
+    func_type->head.head.start = generic->head.head.start;
+    func_type->head.head.end   = generic->head.head.end;
+    func_type->head.kind       = TYPE_FUNCTION;
+    func_type->head.size       = 8;
+    func_type->node            = generic;
+
+    generic->head.head.flags |= AST_FLAG_IS_TYPE_CHECKED;
+    generic->head.type = (Type *) func_type;
+
+    return (Type *) func_type;
+}
+
+PrimitiveKind canonical_primitive_kind(PrimitiveKind kind) {
+    switch (kind) {
+    case PRIMITIVE_UINT:  return PRIMITIVE_U32;
+    case PRIMITIVE_INT:   return PRIMITIVE_S32;
+    case PRIMITIVE_FLOAT: return PRIMITIVE_F32;
+    case PRIMITIVE_CHAR:  return PRIMITIVE_U8;
+    default:              return kind;
+    }
+}
+
+// Strict type equality used when inferring type parameters. Unlike types_are_equal(), nothing converts implicitly, but aliases like int and s32 are the same type
+bool types_are_identical(Type *a, Type *b) {
+    if (is_primitive_type(a->kind) && is_primitive_type(b->kind)) {
+        return canonical_primitive_kind(((TypePrimitive *)a)->kind) == canonical_primitive_kind(((TypePrimitive *)b)->kind);
+    }
+    if (a->kind != b->kind) return false;
+
+    switch (a->kind) {
+    case TYPE_POINTER:
+        return types_are_identical(((TypePointer *)a)->pointer_to, ((TypePointer *)b)->pointer_to);
+    case TYPE_ARRAY: {
+        TypeArray *array_a = (TypeArray *)a;
+        TypeArray *array_b = (TypeArray *)b;
+        if (array_a->array_kind != array_b->array_kind) return false;
+        if (array_a->array_kind == ARRAY_FIXED && array_a->capacity != array_b->capacity) return false;
+        return types_are_identical(array_a->elem_type, array_b->elem_type);
+    }
+    case TYPE_STRING:
+    case TYPE_ANY:
+        return true;
+    default:
+        return strcmp(type_to_str(a), type_to_str(b)) == 0;
+    }
+}
+
+typedef enum BindingKind {
+    BINDING_NONE,
+    BINDING_TYPED,
+    BINDING_UNTYPED_INT,   // Only bound by untyped integer literals so far
+    BINDING_UNTYPED_FLOAT, // Only bound by untyped literals with atleast one float literal so far
+} BindingKind;
+
+typedef struct TypeBinding {
+    Type       *type;
+    BindingKind kind;
+    Ast        *source; // The argument that gave the binding its type
+} TypeBinding;
+
+bool bind_type_param(Typer *typer, AstFunctionDefn *generic, TypeBinding *binding, AstIdentifier *type_param, Type *type, AstExpr *arg, AstIdentifier *param) {
+    BindingKind kind = BINDING_TYPED;
+    if (is_untyped_type(type)) {
+        kind = BINDING_UNTYPED_INT;
+    } else if (arg->head.kind == AST_LITERAL && ((AstLiteral *)arg)->kind == LITERAL_FLOAT && arg->type == type) {
+        kind = BINDING_UNTYPED_FLOAT;
+    }
+
+    if (binding->kind == BINDING_NONE) {
+        binding->type   = type;
+        binding->kind   = kind;
+        binding->source = (Ast *)arg;
+        return true;
+    }
+
+    if (binding->kind == BINDING_TYPED && kind == BINDING_TYPED) {
+        if (!types_are_identical(binding->type, type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Conflicting types for type parameter '%s' of '%s'. This argument to '%s' is of type %s, but an earlier argument made '%s' of type %s",
+                type_param->name, generic->identifier->name, param->name, text_bold(type_to_str(type)), type_param->name, text_bold(type_to_str(binding->type)));
+            report_error_ast(typer->parser, LABEL_NOTE, binding->source, "Here '%s' got the type %s", type_param->name, type_to_str(binding->type));
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Types are not widened when inferring type parameters. Cast the arguments to the same type e.g x as %s", type_to_str(binding->type));
+            return false;
+        }
+        return true;
+    }
+
+    // A typed argument decides the type over untyped literals. Between untyped literals a float wins over an integer e.g max(1, 2.5)
+    if (kind == BINDING_TYPED || (binding->kind == BINDING_UNTYPED_INT && kind == BINDING_UNTYPED_FLOAT)) {
+        binding->type   = type;
+        binding->kind   = kind;
+        binding->source = (Ast *)arg;
+    }
+    return true;
+}
+
+// Infers the type parameters of a generic function by matching the type of a parameter as written e.g *Map<K, V>, against the type of an argument e.g *Map<int, string>
+bool unify_types(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindings, Type *param_type, Type *arg_type, AstExpr *arg, AstIdentifier *param) {
+    switch (param_type->kind) {
+    case TYPE_NAME: {
+        int index = type_param_index(generic->type_params, param_type->name);
+        if (index == -1) return true; // Not a type parameter
+
+        AstIdentifier *type_param = ((AstIdentifier **)generic->type_params.items)[index];
+        return bind_type_param(typer, generic, &bindings[index], type_param, arg_type, arg, param);
+    }
+    case TYPE_POINTER: {
+        if (arg_type->kind != TYPE_POINTER) return true; // The mismatch is reported when checking the arguments of the instance
+        Type *pointer_to = ((TypePointer *)arg_type)->pointer_to;
+        if (pointer_to->kind == TYPE_VOID) return true;  // e.g null
+        return unify_types(typer, generic, bindings, ((TypePointer *)param_type)->pointer_to, pointer_to, arg, param);
+    }
+    case TYPE_ARRAY: {
+        if (arg_type->kind != TYPE_ARRAY) return true;
+        return unify_types(typer, generic, bindings, ((TypeArray *)param_type)->elem_type, ((TypeArray *)arg_type)->elem_type, arg, param);
+    }
+    case TYPE_VARIADIC: {
+        return unify_types(typer, generic, bindings, ((TypeVariadic *)param_type)->type, arg_type, arg, param);
+    }
+    case TYPE_GENERIC_INSTANCE: {
+        if (arg_type->kind != TYPE_STRUCT) return true;
+
+        AstStruct *instance = ((TypeStruct *)arg_type)->node;
+        if (instance->generic_struct == NULL || strcmp(instance->generic_struct->identifier->name, param_type->name) != 0) return true;
+
+        TypeGenericInstance *param_instance = (TypeGenericInstance *)param_type;
+        if (param_instance->type_args.count != instance->type_args.count) return true;
+
+        for (int i = 0; i < param_instance->type_args.count; i++) {
+            Type *param_arg = ((Type **)param_instance->type_args.items)[i];
+            Type *given_arg = ((Type **)instance->type_args.items)[i];
+            bool ok = unify_types(typer, generic, bindings, param_arg, given_arg, arg, param);
+            if (!ok) return false;
+        }
+        return true;
+    }
+    default:
+        return true;
+    }
+}
+
+// Adds a method to the methods of its receiver struct, so that it can be called as x.method(...)
+bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver_struct) {
+    if (method->is_registered_method) return true;
+
+    Parser        *parser = typer->parser;
+    AstIdentifier *ident  = method->identifier;
+
+    AstIdentifier *member = get_struct_member(receiver_struct->node, ident->name);
+    if (member) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Method '%s' has the same name as a member of '%s'", ident->name, receiver_struct->head.name);
+        report_error_ast(parser, LABEL_NOTE, (Ast *)member, "Here is the member '%s'", member->name);
+        return false;
+    }
+
+    ident->flags |= IDENTIFIER_IS_STRUCT_MEMBER | IDENTIFIER_IS_STRUCT_METHOD;
+    AstIdentifier *existing = add_identifier_to_scope(parser, receiver_struct->node->methods, ident);
+    if (existing != NULL) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of method '%s' on '%s'", ident->name, receiver_struct->head.name);
+        report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the previous declaration");
+        return false;
+    }
+
+    method->receiver             = ((AstIdentifier **)method->parameters.items)[0];
+    method->receiver_struct      = receiver_struct;
+    method->is_registered_method = true;
+    return true;
+}
+
+// A generic method e.g 'set :: method <K, V>(m: *Map<K, V>, key: K, value: V)' is added to the methods of the generic struct.
+// Its receiver must be the generic struct with exactly the type parameters of the method as type arguments
+bool register_generic_method(Typer *typer, AstFunctionDefn *generic) {
+    if (generic->is_registered_method) return true;
+
+    Parser        *parser   = typer->parser;
+    AstIdentifier *receiver = ((AstIdentifier **)generic->parameters.items)[0];
+
+    Type *receiver_type = receiver->type;
+    if (receiver_type && receiver_type->kind == TYPE_POINTER) {
+        receiver_type = ((TypePointer *)receiver_type)->pointer_to;
+    }
+
+    if (receiver_type == NULL || receiver_type->kind != TYPE_GENERIC_INSTANCE) {
+        report_error_ast(parser, LABEL_ERROR, receiver_type ? (Ast *)receiver_type : (Ast *)receiver, "The receiver of a generic method must be a generic struct, with the type parameters of the method as its type arguments");
+        report_error_ast(parser, LABEL_HINT, NULL, "e.g set :: method <K, V>(m: *Map<K, V>, key: K, value: V)");
+        return false;
+    }
+
+    TypeGenericInstance *instance = (TypeGenericInstance *)receiver_type;
+
+    AstIdentifier *struct_ident = lookup_from_scope(parser, generic->body->parent, instance->head.name);
+    if (struct_ident == NULL) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)instance, "Unknown type '%s'", instance->head.name);
+        return false;
+    }
+    if (struct_ident->type == NULL || struct_ident->type->kind != TYPE_STRUCT || ((TypeStruct *)struct_ident->type)->node->type_params.count == 0) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)instance, "'%s' is not a generic struct, so it cannot be given type arguments", instance->head.name);
+        return false;
+    }
+
+    TypeStruct *generic_struct = (TypeStruct *)struct_ident->type;
+    if (instance->type_args.count != generic_struct->node->type_params.count) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)instance, "Generic struct '%s' takes %d type argument%s, but %d %s given", instance->head.name,
+            generic_struct->node->type_params.count, generic_struct->node->type_params.count == 1 ? "" : "s",
+            instance->type_args.count, instance->type_args.count == 1 ? "was" : "were");
+        return false;
+    }
+
+    // Each type argument of the receiver is a different type parameter of the method, as methods apply to every instance of the struct
+    bool *used = calloc(generic->type_params.count, sizeof(bool));
+    for (int i = 0; i < instance->type_args.count; i++) {
+        Type *arg = ((Type **)instance->type_args.items)[i];
+
+        int index = arg->kind == TYPE_NAME ? type_param_index(generic->type_params, arg->name) : -1;
+        if (index == -1) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)arg, "Type argument '%s' of the receiver must be one of the type parameters of the method '%s'", type_to_str(arg), generic->identifier->name);
+            report_error_ast(parser, LABEL_HINT, NULL, "A method applies to every instance of '%s', so it cannot be specialized for some type arguments (no partial specialization)", instance->head.name);
+            return false;
+        }
+        if (used[index]) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)arg, "Type parameter '%s' is used more than once as a type argument of the receiver", arg->name);
+            report_error_ast(parser, LABEL_HINT, NULL, "A method applies to every instance of '%s', so each type argument of the receiver must be a different type parameter", instance->head.name);
+            return false;
+        }
+        used[index] = true;
+    }
+    for (int i = 0; i < generic->type_params.count; i++) {
+        if (!used[i]) {
+            AstIdentifier *param = ((AstIdentifier **)generic->type_params.items)[i];
+            report_error_ast(parser, LABEL_ERROR, (Ast *)param, "Type parameter '%s' of method '%s' is not a type argument of the receiver", param->name, generic->identifier->name);
+            report_error_ast(parser, LABEL_NOTE, NULL, "Methods with type parameters of their own are not supported yet");
+            return false;
+        }
+    }
+    free(used);
+
+    return register_method(typer, generic, generic_struct);
+}
+
+// Adds the methods declared at the top-level of a file to their receiver structs before anything is checked, so that methods can
+// be called before they are declared. Methods on other receivers than a struct name, like *List<int>, are added when they are checked
+bool register_method_early(Typer *typer, AstFile *file, AstDeclaration *decl) {
+    for (int j = 0; j < decl->values.count; j++) {
+        AstExpr *value = ((AstExpr **)decl->values.items)[j];
+        if (value->head.kind != AST_FUNCTION_DEFN) continue;
+
+        AstFunctionDefn *method = (AstFunctionDefn *)value;
+        if (!method->is_method || method->is_extern || method->parameters.count == 0) continue;
+
+        if (is_generic_function(method)) {
+            bool ok = register_generic_method(typer, method);
+            if (!ok) return false;
+            continue;
+        }
+
+        AstIdentifier *receiver = ((AstIdentifier **)method->parameters.items)[0];
+        Type *receiver_type = receiver->type;
+        if (receiver_type && receiver_type->kind == TYPE_POINTER) {
+            receiver_type = ((TypePointer *)receiver_type)->pointer_to;
+        }
+        if (receiver_type == NULL || receiver_type->kind != TYPE_NAME) continue;
+
+        AstIdentifier *struct_ident = lookup_from_scope(typer->parser, file->scope, receiver_type->name);
+        if (struct_ident == NULL || !(struct_ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT)) continue;
+        if (struct_ident->type == NULL || struct_ident->type->kind != TYPE_STRUCT) continue;
+        if (((TypeStruct *)struct_ident->type)->node->type_params.count > 0) continue; // Reported as missing type arguments when checked
+
+        bool ok = register_method(typer, method, (TypeStruct *)struct_ident->type);
+        if (!ok) return false;
+    }
+    return true;
+}
+
+bool register_methods_early(Typer *typer, AstFile *file) {
+    for (int i = 0; i < file->statements.count; i++) {
+        Ast *stmt = ((Ast **)file->statements.items)[i];
+
+        if (stmt->kind == AST_STRUCT) {
+            AstStruct *ast_struct = (AstStruct *)stmt;
+            for (int j = 0; j < ast_struct->inside_methods.count; j++) {
+                bool ok = register_method_early(typer, file, ((AstDeclaration **)ast_struct->inside_methods.items)[j]);
+                if (!ok) return false;
+            }
+            continue;
+        }
+
+        if (stmt->kind != AST_DECLARATION || !(stmt->flags & AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN)) continue;
+
+        bool ok = register_method_early(typer, file, (AstDeclaration *)stmt);
+        if (!ok) return false;
+    }
+    return true;
+}
+
+// The methods declared inside a struct are checked as if they were declared right after it
+bool check_struct_statement(Typer *typer, AstStruct *ast_struct) {
+    bool ok = check_struct_defn(typer, ast_struct);
+    if (!ok) return false;
+
+    AstBlock *scope = typer->current_scope;
+    for (int i = 0; i < ast_struct->inside_methods.count; i++) {
+        AstDeclaration *decl = ((AstDeclaration **)ast_struct->inside_methods.items)[i];
+
+        typer->current_scope = ast_struct->members->parent;
+        ok = check_declaration(typer, decl);
+        typer->current_scope = scope;
+        if (!ok) return false;
+    }
+    return true;
+}
+
+// Returns the instance of a generic function for the given type arguments, making and checking it the first time
+AstFunctionDefn *instantiate_generic_function(Typer *typer, AstFunctionDefn *generic, DynamicArray type_args, Ast *site) {
+    Parser *parser = typer->parser;
+
+    // A readable name of the instance e.g "max<int>". Instances with the same name are the same instance
+    StringBuilder sb = sb_init(32);
+    sb_append(&sb, "%s<", generic->identifier->name);
+    for (int i = 0; i < type_args.count; i++) {
+        sb_append(&sb, "%s", type_to_str(((Type **)type_args.items)[i]));
+        if (i + 1 < type_args.count) sb_append(&sb, ", ");
+    }
+    sb_append(&sb, ">");
+    char *name = sb_to_string(&sb);
+
+    for (int i = 0; i < generic->instances.count; i++) {
+        AstFunctionDefn *existing = ((AstFunctionDefn **)generic->instances.items)[i];
+        if (strcmp(existing->instance_name, name) == 0) {
+            return existing;
+        }
+    }
+
+    if (typer->generic_depth >= GENERIC_DEPTH_LIMIT) {
+        report_error_ast(parser, LABEL_ERROR, site, "Too many nested instantiations of generic functions (the limit is %d) while instantiating '%s'", GENERIC_DEPTH_LIMIT, name);
+        report_error_ast(parser, LABEL_HINT, NULL, "A generic function that calls itself with a new type e.g f<T> calling f<[]T> never stops making new instances");
+        typer->generic_depth_limit_reached = true;
+        return NULL;
+    }
+
+    // Scope binding the type parameters to the type arguments, put between the instance and the scope the generic function is declared in
+    AstBlock *scope    = ast_allocate(parser, sizeof(AstBlock));
+    scope->head        = generic->body->head;
+    scope->kind        = BLOCK_IMPERATIVE;
+    scope->parent      = generic->body->parent;
+    scope->statements  = da_init(1, sizeof(Ast *));
+    scope->identifiers = da_init(type_args.count, sizeof(AstIdentifier *));
+    scope->enclosing_function = generic->body->parent ? generic->body->parent->enclosing_function : NULL;
+
+    for (int i = 0; i < generic->type_params.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)generic->type_params.items)[i];
+
+        AstIdentifier *bound = ast_allocate(parser, sizeof(AstIdentifier));
+        memcpy(bound, param, sizeof(AstIdentifier));
+        bound->type   = ((Type **)type_args.items)[i];
+        bound->scope  = scope;
+        bound->flags |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_RESOLVED;
+        da_append(&scope->identifiers, bound);
+    }
+
+    AstFunctionDefn *instance = reparse_generic_function(parser, generic, scope);
+    if (!instance) return NULL;
+
+    AstIdentifier *ident = ast_allocate(parser, sizeof(AstIdentifier));
+    memcpy(ident, generic->identifier, sizeof(AstIdentifier));
+    ident->type = NULL; // Set when the instance is checked
+
+    instance->identifier       = ident;
+    instance->is_lambda        = generic->is_lambda;
+    instance->generic_function = generic;
+    instance->type_args        = type_args;
+    instance->instance_name    = name;
+
+    // Add the instance before it is checked, so that recursive calls with the same type arguments find it
+    da_append(&generic->instances, instance);
+
+    Typer saved_state = *typer;
+    typer->current_file        = generic->head.head.file;
+    typer->current_scope       = scope;
+    typer->enclosing_loop      = NULL;
+    typer->inside_declaration  = NULL;
+    typer->array_literal_depth = 0;
+    typer->generic_depth      += 1;
+
+    Type *ok = check_function_defn(typer, instance);
+
+    DynamicArray stack = typer->enclosing_function_stack; // Might have been reallocated while checking
+    typer_restore_state(typer, saved_state);
+    typer->enclosing_function_stack = stack;
+    typer->inside_declaration       = saved_state.inside_declaration;
+    typer->generic_depth            = saved_state.generic_depth;
+
+    if (!ok) {
+        // When the depth limit is reached, only the outermost instantiation gets a note
+        if (!typer->generic_depth_limit_reached || typer->generic_depth == 0) {
+            report_error_ast(parser, LABEL_NOTE, site, "... in %s, instantiated here", name);
+        }
+        return NULL;
+    }
+
+    ident->type = instance->head.type;
+    return instance;
+}
+
+// Infers the type arguments of a call to a generic function from the arguments and returns the instance to call
+AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall *call, AstFunctionDefn *generic) {
+    Parser *parser = typer->parser;
+
+    Type *ok = check_function_defn(typer, generic);
+    if (!ok) return NULL;
+
+    int variadic_index = -1;
+    for (int i = 0; i < generic->parameters.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)generic->parameters.items)[i];
+        if (param->type && param->type->kind == TYPE_VARIADIC) {
+            variadic_index = i;
+            break;
+        }
+    }
+
+    TypeBinding *bindings = calloc(generic->type_params.count, sizeof(TypeBinding));
+
+    for (int i = 0; i < call->arguments.count; i++) {
+        AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
+
+        AstIdentifier *param = NULL;
+        if (arg->ident) {
+            for (int j = 0; j < generic->parameters.count; j++) {
+                AstIdentifier *candidate = ((AstIdentifier **)generic->parameters.items)[j];
+                if (strcmp(candidate->name, arg->ident->name) == 0) {
+                    param = candidate;
+                    break;
+                }
+            }
+        } else if (variadic_index != -1 && i >= variadic_index) {
+            param = ((AstIdentifier **)generic->parameters.items)[variadic_index];
+        } else if (i < generic->parameters.count) {
+            param = ((AstIdentifier **)generic->parameters.items)[i];
+        }
+
+        // Arguments that don't match a parameter are reported when checking the call against the instance
+        if (param == NULL || param->type == NULL) continue;
+        if (!type_mentions_any_type_param(param->type, generic->type_params)) continue;
+
+        Type *arg_type = check_expression(typer, arg->value, NULL);
+        if (!arg_type) return NULL;
+
+        // A spreaded slice or variadic gives the type of its elements to a variadic parameter
+        if (arg->value->head.flags & AST_FLAG_EXPR_IS_SPREADED) {
+            if (arg_type->kind == TYPE_ARRAY)    arg_type = ((TypeArray *)arg_type)->elem_type;
+            if (arg_type->kind == TYPE_VARIADIC) arg_type = ((TypeVariadic *)arg_type)->type;
+        }
+
+        bool unified = unify_types(typer, generic, bindings, param->type, arg_type, arg->value, param);
+        if (!unified) return NULL;
+    }
+
+    DynamicArray type_args = da_init(generic->type_params.count, sizeof(Type *));
+    for (int i = 0; i < generic->type_params.count; i++) {
+        AstIdentifier *type_param = ((AstIdentifier **)generic->type_params.items)[i];
+        TypeBinding binding = bindings[i];
+
+        if (binding.kind == BINDING_NONE) {
+            report_error_token(parser, LABEL_ERROR, call->paren_start_token, "Cannot infer the type parameter '%s' of '%s', as no argument gives it a type", type_param->name, generic->identifier->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)generic->identifier, "Here is the definition of '%s'", generic->identifier->name);
+            return NULL;
+        }
+
+        // Untyped literals get the same type they get everywhere else e.g x := 1
+        Type *type = binding.type;
+        if (binding.kind == BINDING_UNTYPED_INT)   type = solidify_untyped_type(type);
+        if (binding.kind == BINDING_UNTYPED_FLOAT) type = primitive_type(PRIMITIVE_FLOAT);
+
+        if (type->kind == TYPE_VOID) {
+            report_error_ast(parser, LABEL_ERROR, binding.source, "Type parameter '%s' of '%s' cannot be void", type_param->name, generic->identifier->name);
+            return NULL;
+        }
+
+        da_append(&type_args, type);
+    }
+    free(bindings);
+
+    return instantiate_generic_function(typer, generic, type_args, (Ast *)call);
+}
+
 Type *resolve_type(Typer *typer, Type *type) {
     if (is_primitive_type(type->kind)) {
         return type;
@@ -576,6 +1188,19 @@ Type *resolve_type(Typer *typer, Type *type) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Generic struct '%s' is missing its type arguments", type->name);
             report_error_ast(typer->parser, LABEL_HINT, NULL, "Give it a type for '%s', e.g %s<int>", param->name, type->name);
             return NULL;
+        }
+
+        // A struct declared further down is checked now, so that its members are known e.g 'holder: Outer' before 'Outer :: struct {...}'.
+        // While sizing structs, the sizing itself takes care of the order
+        if (ident->type && ident->type->kind == TYPE_STRUCT && typer->struct_check_depth == 0) {
+            AstStruct *node = ((TypeStruct *)ident->type)->node;
+            if (node && !(node->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
+                Typer saved_state = *typer;
+                bool ok = check_struct_defn(typer, node);
+                typer_restore_state(typer, saved_state);
+                typer->inside_declaration = saved_state.inside_declaration;
+                if (!ok) return NULL;
+            }
         }
 
         return ident->type;
@@ -855,6 +1480,105 @@ void reserve_space_for_runtime_any_value(Typer *typer, Type *value_type) {
     }
 }
 
+//
+// Read-only self
+//
+// In a 'method' declared inside a struct (not a 'method *'), 'self' is a pointer under the hood, but nothing may be changed through it.
+// It is shallow: only the struct itself is read-only, not what its members point to, e.g the elements of a dynamic array member
+//
+
+// Returns the method if the expression is its read-only 'self'
+AstFunctionDefn *readonly_self_method(Typer *typer, AstExpr *expr) {
+    if (!is_literal_identifier(expr)) return NULL;
+
+    AstIdentifier *ident = ((AstLiteral *)expr)->as.value.identifier.resolved_identifier;
+    if (ident == NULL) return NULL;
+
+    AstFunctionDefn *func = typer->enclosing_function;
+    if (func && func->self_struct && !func->self_is_mutable && func->parameters.count > 0 && ((AstIdentifier **)func->parameters.items)[0] == ident) {
+        return func;
+    }
+    return NULL;
+}
+
+// Returns the method if the place is a part of its read-only 'self' e.g self.count, self.pos.x, *self or self.items[i] when items is a fixed size array.
+// Places reached through a pointer, like self.next.value or the elements of a dynamic array, are not a part of self
+AstFunctionDefn *readonly_self_place(Typer *typer, AstExpr *expr) {
+    switch (expr->head.kind) {
+    case AST_MEMBER_ACCESS: {
+        AstMemberAccess *ma = (AstMemberAccess *)expr;
+        if (ma->access_kind != MEMBER_ACCESS_STRUCT_MEMBER) return NULL;
+
+        AstFunctionDefn *method = readonly_self_method(typer, ma->left);
+        if (method) return method; // e.g self.count
+
+        if (ma->left->type && ma->left->type->kind == TYPE_POINTER) return NULL; // e.g self.next.value
+        return readonly_self_place(typer, ma->left);                           // e.g self.pos.x or self.items.count
+    }
+    case AST_ARRAY_ACCESS: {
+        AstArrayAccess *access = (AstArrayAccess *)expr;
+        Type *type = access->left->type;
+        if (type && type->kind == TYPE_ARRAY && ((TypeArray *)type)->array_kind == ARRAY_FIXED) {
+            return readonly_self_place(typer, access->left); // The elements of a fixed size array are inside the struct
+        }
+        return NULL;
+    }
+    case AST_UNARY: {
+        AstUnary *unary = (AstUnary *)expr;
+        if (unary->operator == OP_POINTER_DEREFERENCE) return readonly_self_method(typer, unary->expr); // *self
+        return NULL;
+    }
+    default:
+        return NULL;
+    }
+}
+
+void append_place_text(StringBuilder *sb, AstExpr *expr) {
+    switch (expr->head.kind) {
+    case AST_LITERAL:
+        if (is_literal_identifier(expr)) sb_append(sb, "%s", ((AstLiteral *)expr)->as.value.identifier.name);
+        else                             sb_append(sb, "...");
+        return;
+    case AST_MEMBER_ACCESS: {
+        AstMemberAccess *ma = (AstMemberAccess *)expr;
+        append_place_text(sb, ma->left);
+        sb_append(sb, ".");
+        append_place_text(sb, ma->right);
+        return;
+    }
+    case AST_ARRAY_ACCESS:
+        append_place_text(sb, ((AstArrayAccess *)expr)->left);
+        sb_append(sb, "[...]");
+        return;
+    case AST_UNARY:
+        sb_append(sb, ((AstUnary *)expr)->operator == OP_ADDRESS_OF ? "&" : "*");
+        append_place_text(sb, ((AstUnary *)expr)->expr);
+        return;
+    default:
+        sb_append(sb, "...");
+        return;
+    }
+}
+
+void report_readonly_self(Typer *typer, Ast *at, AstFunctionDefn *method, const char *action, AstExpr *place) {
+    StringBuilder sb = sb_init(32);
+    append_place_text(&sb, place);
+    char *place_text = sb_to_string(&sb);
+
+    char *struct_name = method->self_struct->identifier->name;
+    char *method_name = method->identifier->name;
+    report_error_ast(typer->parser, LABEL_ERROR, at, "Cannot %s %s in the non-mutating method %s.%s", action, place_text, struct_name, method_name);
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "self is read-only in a 'method'. Declare it as 'method *' to be able to change self e.g %s :: method * (...)", method_name);
+}
+
+// Returns true if calling the method can change its receiver
+bool method_can_change_receiver(AstFunctionDefn *method) {
+    if (method->self_struct) return method->self_is_mutable;
+
+    AstIdentifier *receiver = method->receiver ? method->receiver : ((AstIdentifier **)method->parameters.items)[0];
+    return receiver->type && receiver->type->kind == TYPE_POINTER;
+}
+
 bool check_declaration(Typer *typer, AstDeclaration *decl) {
     if (decl->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return true;
@@ -986,6 +1710,18 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
             decl->type = (Type *) make_tuple_type_from_expression_list(typer, decl->values);
         } else {
             decl->type = ((AstExpr **)decl->values.items)[0]->type;
+        }
+    }
+
+    // A read-only self cannot be stored, as the pointer could be used to change self
+    for (int i = 0; i < decl->values.count; i++) {
+        AstExpr *value = ((AstExpr **)decl->values.items)[i];
+
+        AstFunctionDefn *readonly = readonly_self_method(typer, value);
+        if (readonly && value->type && value->type->kind == TYPE_POINTER) {
+            report_readonly_self(typer, (Ast *)value, readonly, "store the pointer", value);
+            report_error_ast(typer->parser, LABEL_NOTE, NULL, "It could be used to change self. Copy it with *self instead");
+            return false;
         }
     }
 
@@ -1237,8 +1973,22 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     Type *lhs_type  = check_expression(typer, assign->lhs, NULL);
     if (!lhs_type) return false;
 
+    AstFunctionDefn *readonly = readonly_self_place(typer, assign->lhs);
+    if (!readonly) readonly = readonly_self_method(typer, assign->lhs);
+    if (readonly) {
+        report_readonly_self(typer, (Ast *)assign->lhs, readonly, "assign to", assign->lhs);
+        return false;
+    }
+
     Type *expr_type = check_expression(typer, assign->expr, lhs_type);
     if (!expr_type) return false;
+
+    readonly = readonly_self_method(typer, assign->expr);
+    if (readonly && expr_type->kind == TYPE_POINTER) {
+        report_readonly_self(typer, (Ast *)assign->expr, readonly, "store the pointer", assign->expr);
+        report_error_ast(typer->parser, LABEL_NOTE, NULL, "It could be used to change self. Copy it with *self instead");
+        return false;
+    }
 
 
     bool lhs_is_constant = false;
@@ -1334,7 +2084,16 @@ int get_alignment_of_type(Type *type) {
     }
 }
 
+bool check_struct_members(Typer *typer, AstStruct *ast_struct);
+
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
+    typer->struct_check_depth += 1;
+    bool ok = check_struct_members(typer, ast_struct);
+    typer->struct_check_depth -= 1;
+    return ok;
+}
+
+bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
     if (ast_struct->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return true;
     }
@@ -1513,6 +2272,15 @@ bool check_for(Typer *typer, AstFor *ast_for) {
         if (type->kind != TYPE_ARRAY && type->kind != TYPE_VARIADIC && type->kind != TYPE_STRING) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_for->iterable), "Cannot iterate through expression of type %s", type_to_str(type));
             return NULL;
+        }
+
+        if (ast_for->is_by_pointer && type->kind == TYPE_ARRAY && ((TypeArray *)type)->array_kind == ARRAY_FIXED) {
+            AstFunctionDefn *readonly = readonly_self_place(typer, ast_for->iterable);
+            if (readonly) {
+                report_readonly_self(typer, (Ast *)ast_for->iterable, readonly, "iterate by pointer over", ast_for->iterable);
+                report_error_ast(typer->parser, LABEL_NOTE, NULL, "The elements are inside self, so the pointers could be used to change self. Iterate by value instead e.g for v in ...");
+                return NULL;
+            }
         }
 
         Type *iterator_type = NULL;
@@ -1802,6 +2570,13 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
 
         Type *ok = check_expression(typer, return_value, wanted_type);
         if (!ok) return false;
+
+        AstFunctionDefn *readonly = readonly_self_method(typer, return_value);
+        if (readonly && return_value->type->kind == TYPE_POINTER) {
+            report_readonly_self(typer, (Ast *)return_value, readonly, "return the pointer", return_value);
+            report_error_ast(typer->parser, LABEL_NOTE, NULL, "It could be used to change self. Return a copy with *self instead");
+            return false;
+        }
     }
 
     TypeTuple *returning_tuple   = make_tuple_type_from_expression_list(typer, ast_return->values);
@@ -1913,7 +2688,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_BLOCK:             return check_block(typer, (AstBlock *)(stmt));
     case AST_DECLARATION:       return check_declaration(typer, (AstDeclaration *)(stmt));
     case AST_ASSIGNMENT:        return check_assignment(typer, (AstAssignment *)(stmt));
-    case AST_STRUCT:            return check_struct_defn(typer, (AstStruct *)(stmt));
+    case AST_STRUCT:            return check_struct_statement(typer, (AstStruct *)(stmt));
     case AST_ENUM:              return check_enum_defn(typer, (AstEnum *)stmt);
     case AST_FOR:               return check_for(typer, (AstFor *)(stmt));
     case AST_WHILE:             return check_while(typer, (AstWhile *)(stmt));
@@ -2095,6 +2870,12 @@ Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
         return NULL;
     }
 
+    AstFunctionDefn *readonly = readonly_self_place(typer, arg0->value);
+    if (readonly) {
+        report_readonly_self(typer, (Ast *)arg0->value, readonly, "append to", arg0->value);
+        return NULL;
+    }
+
     TypeArray *da_type = (TypeArray *) arg0->value->type;
     if (da_type->array_kind != ARRAY_DYNAMIC) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg0->value), "Type mismatch. Wanted type [..]%s, got type %s", type_to_str(da_type->elem_type), type_to_str((Type *)da_type));
@@ -2163,7 +2944,9 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         return call->head.type;
     }
 
+    typer->checking_callee = is_literal_identifier(call->expression);
     Type *expr_type = check_expression(typer, call->expression, NULL);
+    typer->checking_callee = false;
     if (!expr_type) return NULL;
 
     // Check for builtin functions
@@ -2189,6 +2972,15 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         if (func_defn->is_method) {
             // We are indeed a method call
             call->is_method_call = true;
+
+            AstFunctionDefn *readonly = readonly_self_method(typer, ma->left);
+            if (!readonly) readonly = readonly_self_place(typer, ma->left);
+            if (readonly && method_can_change_receiver(func_defn)) {
+                StringBuilder sb = sb_init(32);
+                sb_append(&sb, "call the method '%s', which can change its receiver, on", func_defn->identifier->name);
+                report_readonly_self(typer, (Ast *)ma, readonly, sb_to_string(&sb), ma->left);
+                return NULL;
+            }
 
             // Rewrite the method call into a plain function call, with the 0'th
             // argument being the left-hand side of the member access
@@ -2245,6 +3037,15 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     //     return NULL;
     // }
 
+
+    if (is_generic_function(func_defn)) {
+        AstFunctionDefn *instance = instantiate_generic_function_call(typer, call, func_defn);
+        if (!instance) return NULL;
+
+        func_defn              = instance;
+        call->func_defn        = instance;
+        call->expression->type = instance->head.type;
+    }
 
     // Make sure that the function definition is fully resolved
     if (!(func_defn->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
@@ -2441,7 +3242,14 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
             Type *wanted_type = param->type;
 
-            Type *given_type = check_expression(typer, arg->value, wanted_type);
+            // A vararg is checked against the type of the variadic so that untyped literals take that type e.g 100 in f(a, 100)
+            Type *ctx_type = wanted_type;
+            bool  is_spread = arg->value->head.kind == AST_UNARY && ((AstUnary *)arg->value)->operator == OP_SPREAD;
+            if (wanted_type->kind == TYPE_VARIADIC && !is_spread) {
+                ctx_type = ((TypeVariadic *)wanted_type)->type;
+            }
+
+            Type *given_type = check_expression(typer, arg->value, ctx_type);
             if (!given_type) return NULL;
 
             if (wanted_type->kind == TYPE_VARIADIC) {
@@ -2609,6 +3417,23 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     }
     
 
+    // A read-only self cannot be passed where a pointer is wanted, as it could be used to change self
+    for (int i = call->is_method_call ? 1 : 0; i < call->arguments.count; i++) {
+        AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
+
+        AstFunctionDefn *readonly = readonly_self_method(typer, arg->value);
+        if (!readonly || arg->value->type == NULL || arg->value->type->kind != TYPE_POINTER) continue;
+        if (arg->param_index < 0 || arg->param_index >= func_defn->parameters.count) continue;
+
+        Type *param_type = ((AstIdentifier **)func_defn->parameters.items)[arg->param_index]->type;
+        if (param_type->kind == TYPE_VARIADIC) param_type = ((TypeVariadic *)param_type)->type;
+        if (param_type->kind != TYPE_POINTER) continue;
+
+        report_readonly_self(typer, (Ast *)arg->value, readonly, "pass the pointer", arg->value);
+        report_error_ast(typer->parser, LABEL_NOTE, NULL, "It could be used to change self. Pass a copy with *self instead");
+        return NULL;
+    }
+
     if (func_defn->return_types.count > 1) {
         call->head.type = (Type *) make_tuple_type_from_type_list(typer, func_defn->return_types);
     } else {
@@ -2672,6 +3497,10 @@ int get_unique_symbol_id(Typer *typer) {
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     if (func_defn->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return func_defn->head.type;
+    }
+
+    if (is_generic_function(func_defn)) {
+        return check_generic_function_defn(typer, func_defn);
     }
 
     // Check the parameters
@@ -2790,12 +3619,9 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         }
 
         // Add the function as a member of the receiver struct
-        func_defn->identifier->flags |= IDENTIFIER_IS_STRUCT_MEMBER | IDENTIFIER_IS_STRUCT_METHOD;
-        AstIdentifier *existing = add_identifier_to_scope(typer->parser, receiver_struct->node->methods, func_defn->identifier);
-        if (existing != NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)func_defn->identifier, "Redeclaration of method '%s'", func_defn->identifier->name);
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)existing, "Here is the previous declaration");
-            return NULL;
+        if (!func_defn->is_registered_method) {
+            bool ok = register_method(typer, func_defn, receiver_struct);
+            if (!ok) return NULL;
         }
 
         func_defn->receiver_struct = receiver_struct;
@@ -2836,18 +3662,25 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
     } else {
         if (func_defn->is_method) {
-            // @Cleanup @Speed: Use a string buffer located in Parser to allocate the strings instead of malloc
-            func_defn->symbol_name = malloc(strlen(func_defn->receiver_struct->identifier->name) + 8 + strlen(func_defn->identifier->name));
-            sprintf(func_defn->symbol_name, "%s.%s", func_defn->receiver_struct->identifier->name, func_defn->identifier->name);
-
-            // Instances of generic structs have names like 'Pair<int, *float>' that are not valid asm symbols, so replace
-            // the invalid characters. The backend makes the symbol unique if two methods end up with the same symbol
-            for (char *c = func_defn->symbol_name; *c != '\0'; c++) {
-                if (!starts_identifier(*c) && !is_digit(*c) && *c != '.') *c = '_';
-            }
+            // Instances of generic structs have names like 'Pair<int, *float>' that are not valid asm symbols, so they are mangled e.g Pair$int$Pfloat.foo
+            StringBuilder sb = sb_init(32);
+            append_mangled_name(&sb, func_defn->receiver_struct->identifier->name);
+            sb_append(&sb, ".%s", func_defn->identifier->name);
+            func_defn->symbol_name = sb_to_string(&sb);
         } else {
             func_defn->symbol_name = func_defn->identifier->name;
         }
+    }
+
+    if (func_defn->generic_function && !func_defn->is_method) {
+        // Instances get a symbol named after their type arguments e.g max$s64 or set$s32$string. Methods are already named after their receiver
+        StringBuilder sb = sb_init(32);
+        sb_append(&sb, "%s", func_defn->symbol_name);
+        for (int i = 0; i < func_defn->type_args.count; i++) {
+            sb_append(&sb, "$");
+            append_mangled_name(&sb, type_to_str(((Type **)func_defn->type_args.items)[i]));
+        }
+        func_defn->symbol_name = sb_to_string(&sb);
     }
 
     // Build up the lowered representation of the parameter list for the function (to simplify codegen)
@@ -3451,8 +4284,11 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         AstLiteral *ident = (AstLiteral *) rhs;
         member_name = ident->as.value.identifier.name;
 
-        // Check if its a method
+        // Check if its a method. Instances of generic structs also have the methods of their generic struct
         AstIdentifier *method = get_struct_method(struct_type->node, member_name);
+        if (!method && struct_type->node->generic_struct) {
+            method = get_struct_method(struct_type->node->generic_struct, member_name);
+        }
         if (method) {
             member = method;
 
@@ -3909,6 +4745,23 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
         else if (unary->expr->head.kind == AST_MEMBER_ACCESS) {
             lvalue = true;
         }
+        else if (unary->head.head.flags & AST_FLAG_COMPILER_GENERATED) {
+            // e.g the receiver of make_map().set(k, v). The value is put in a temporary, and its address is passed
+            lvalue = true;
+        }
+
+        if (!(unary->head.head.flags & AST_FLAG_COMPILER_GENERATED)) {
+            AstFunctionDefn *readonly = readonly_self_place(typer, unary->expr);
+            if (!readonly) readonly = readonly_self_method(typer, unary->expr);
+            if (readonly) {
+                StringBuilder sb = sb_init(32);
+                append_place_text(&sb, unary->expr);
+
+                report_readonly_self(typer, (Ast *)unary, readonly, "take the address of", unary->expr);
+                report_error_ast(typer->parser, LABEL_NOTE, NULL, "The pointer could be used to change self. Copy the value into a local instead e.g copy := %s", sb_to_string(&sb));
+                return NULL;
+            }
+        }
 
         if (!lvalue) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Expression is not an addressable value (lvalue)");
@@ -4130,6 +4983,14 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 
         if (ident == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared identifier '%s'", ident_name);
+
+            // Inside a method declared in a struct, the members are only reached through self
+            for (AstFunctionDefn *func = typer->enclosing_function; func; func = func->parent_function) {
+                if (func->self_struct && get_struct_member(func->self_struct, ident_name)) {
+                    report_error_ast(typer->parser, LABEL_HINT, NULL, "'%s' is a member of '%s'. Members are reached through self, e.g self.%s", ident_name, func->self_struct->identifier->name, ident_name);
+                    break;
+                }
+            }
             return NULL;
         }
 
@@ -4158,6 +5019,13 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Compiler Error: '%s' is unresolved", ident->name);
             return NULL;
         }
+
+        if (ident->type->kind == TYPE_FUNCTION && is_generic_function(((TypeFunction *)ident->type)->node) && !typer->checking_callee) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Generic function '%s' can only be called, not used as a value", ident->name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Wrap it in a non-generic function that calls it with the types you need, e.g (a, b: int) -> int { return %s(a, b); }", ident->name);
+            return NULL;
+        }
+        typer->checking_callee = false;
 
         // Save the resolved identifier on the literal
         literal->as.value.identifier.resolved_identifier = ident;
