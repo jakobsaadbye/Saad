@@ -15,6 +15,30 @@ b := 100 as i64;
 
 `int` is still an alias for `i32`.
 
+* Type aliases
+
+A constant declaration whose value is a type declares a type alias. It works for every kind of type,
+including instances of generic structs:
+
+```odin
+Byte     :: u8;
+IntPtr   :: *int;
+Ints     :: []int;
+IntList  :: List<int>;
+Hue      :: Color;
+Callback :: (x: int) -> int;
+
+main :: () {
+    b: Byte = 255;
+    numbers := IntList{};
+    numbers.push(1);    // Methods of List<int> work through the alias
+    h: Hue = .Red;
+}
+```
+
+An alias is the same type as the type it names, so an `IntList` can be passed where a `List<int>` is wanted,
+and `typeof` gives the name of the aliased type. Aliases can be used before they are declared.
+
 ## Update v0.3.0 - 29. Oct 2026
 
 * Generic functions

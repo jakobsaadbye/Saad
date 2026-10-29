@@ -86,5 +86,13 @@ Map :: struct <K, V> {
 ## Not supported yet
 
 Generic methods with type parameters of their own, explicit type arguments at call sites (`max<f64>(...)`),
-generic functions as values, constraints, constants and function type members in generic structs, and type
-aliases like `MyList :: List<int>`.
+generic functions as values, constraints, constants and function type members in generic structs, and
+generic type aliases like `Pair2<T> :: Pair<T, T>`.
+
+## Type aliases
+
+`IntList :: List<int>;` is a type alias (`DECLARATION_TYPE_ALIAS`, `IDENTIFIER_IS_TYPE_ALIAS`). The parser
+recognises a right-hand side that can only be a type (`starts_type_alias()`). A single name like
+`Alias :: Point;` could also be a constant, so `check_declaration()` turns it into an alias when the name is a
+type. An alias resolves to exactly the type it names. The type parameters bound in an instance of a generic
+are aliases too, which is how `T` resolves inside an instance.

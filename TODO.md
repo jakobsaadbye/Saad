@@ -100,7 +100,8 @@ Future development
   [] Generic functions as values (needs explicit type arguments)
   [] Constraints on type parameters
   [] Constants and function type members in generic structs
-  [] Type aliases for instances e.g MyList :: List<int>
+  [x] Type aliases e.g Byte :: u8; MyList :: List<int>
+  [] Generic type aliases e.g Pair2<T> :: Pair<T, T>
 
 * For-loops
   [] Able to iterate backwards

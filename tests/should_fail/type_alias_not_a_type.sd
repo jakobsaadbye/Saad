@@ -1,0 +1,8 @@
+// MaxLen is a constant, not a type alias
+// expect-error: 'MaxLen' is not a type
+
+MaxLen :: 100;
+
+main :: () {
+    x: MaxLen;
+}

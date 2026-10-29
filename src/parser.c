@@ -47,6 +47,8 @@ bool            generate_and_add_import(Parser *parser, char *path);
 bool starts_array_literal(Parser *parser);
 bool starts_struct_literal(Parser *parser);
 int  scan_type_arguments(Parser *parser, int lookahead);
+bool starts_type_alias(Parser *parser, int lookahead);
+bool starts_function_defn_at(Parser *parser, int cursor);
 bool parse_type_parameters(Parser *parser, DynamicArray *type_params);
 bool add_implicit_self(Parser *parser, AstFunctionDefn *method, AstStruct *self_struct);
 bool parse_type_arguments(Parser *parser, DynamicArray *type_args);
@@ -433,8 +435,10 @@ bool starts_declaration(Parser *parser, Token token, int start_lookahead) {
 // foo :: (a: int) -> void {}
 // bar :: () {}
 bool starts_function_defn(Parser *parser) {
-    int cursor = 0;
+    return starts_function_defn_at(parser, 0);
+}
 
+bool starts_function_defn_at(Parser *parser, int cursor) {
     if (peek_token(parser, cursor).type == TOKEN_METHOD) {
         cursor += 1;
         if (peek_token(parser, cursor).type == '*') cursor += 1; // method *
@@ -1106,6 +1110,58 @@ Type *parse_type(Parser *parser) {
 
     report_error_token(parser, LABEL_ERROR, next, "Expected a type");
     return NULL;
+}
+
+// Returns true if the tokens from the lookahead can only be a type, making 'Name :: <tokens>' a type alias e.g Byte :: u8; IntPtr :: *int;
+// Ints :: []int; IntList :: List<int>; Callback :: (x: int) -> int;
+// A single name e.g 'Alias :: Point;' could also be a constant, so the typer decides what that is
+bool starts_type_alias(Parser *parser, int lookahead) {
+    Token token = peek_token(parser, lookahead);
+
+    if (is_primitive_type_token(token))                       return true;
+    if (token.type == TOKEN_STRING || token.type == TOKEN_ANY) return true;
+    if (token.type == '*')                                    return true; // Dereferencing is never constant, so this is a pointer type
+
+    if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, lookahead + 1).type == '<') {
+        int end = scan_type_arguments(parser, lookahead + 1);
+        return end != -1 && peek_token(parser, end).type == ';';
+    }
+
+    if (token.type == '[') {
+        // []int and [..]int, or [4]int unlike the array literal [4]
+        Token next = peek_token(parser, lookahead + 1);
+        if (next.type == ']' || next.type == TOKEN_DOUBLE_DOT) return true;
+
+        int depth = 0;
+        for (int i = lookahead; ; i++) {
+            Token t = peek_token(parser, i);
+            if (t.type == TOKEN_END || t.type == ';') return false;
+            if (t.type == '[') depth += 1;
+            if (t.type == ']') {
+                depth -= 1;
+                if (depth == 0) {
+                    Token after = peek_token(parser, i + 1);
+                    return after.type == TOKEN_LITERAL_IDENTIFIER || after.type == '*' || after.type == '[' ||
+                           after.type == TOKEN_STRING || after.type == TOKEN_ANY || is_primitive_type_token(after);
+                }
+            }
+        }
+    }
+
+    if (token.type == '(' && !parser->inside_extern_block && starts_function_defn_at(parser, lookahead)) {
+        // A function signature without a body e.g Callback :: (x: int) -> int; In an extern block, that is a declaration of a C function
+        int depth = 0;
+        for (int i = lookahead; ; i++) {
+            Token t = peek_token(parser, i);
+            if (t.type == TOKEN_END) return false;
+            if (t.type == '(' || t.type == '[') depth += 1;
+            if (t.type == ')' || t.type == ']') depth -= 1;
+            if (depth == 0 && t.type == '{') return false; // The body of a function
+            if (depth == 0 && t.type == ';') return true;
+        }
+    }
+
+    return false;
 }
 
 // Looks ahead from the '<' at the given lookahead and returns the lookahead just after its matching '>',
@@ -2627,6 +2683,24 @@ AstDeclaration *parse_declaration(Parser *parser) {
             AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
             ident->type = type;
         }
+    }
+
+    // Type alias. e.g. Byte :: u8; or IntList :: List<int>;
+    else if (next.type == TOKEN_DOUBLE_COLON && decl->idents.count == 1 && starts_type_alias(parser, 1)) {
+        eat_token(parser);
+
+        AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[0];
+        if (parser->current_scope->belongs_to_struct) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Type aliases inside structs are not supported yet");
+            return NULL;
+        }
+
+        Type *type = parse_type(parser);
+        if (type == NULL) return NULL;
+
+        decl->flags |= DECLARATION_CONSTANT | DECLARATION_TYPE_ALIAS;
+        decl->type   = type;
+        ident->flags |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_TYPE_ALIAS;
     }
 
     // Constant. e.g. A :: 5;
