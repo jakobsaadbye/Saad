@@ -1,0 +1,5 @@
+// expect-error: Cannot infer the type of the empty map literal [:]
+
+main :: () {
+    m := [:];
+}

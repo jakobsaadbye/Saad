@@ -3155,6 +3155,17 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             // We are indeed a method call
             call->is_method_call = true;
 
+            // A method that can change its receiver, called on an element of a collection e.g groups["a"].add(1), changes the element
+            // in the collection. So the element is a place (indexRef), not a copy of it (index)
+            if (ma->left->head.kind == AST_ARRAY_ACCESS && ma->left->replacement && method_can_change_receiver(func_defn)) {
+                AstArrayAccess *element = (AstArrayAccess *)ma->left;
+                if (element->head.replacement->head.kind == AST_FUNCTION_CALL) {
+                    Type *collection = element->left->type;
+                    if (!check_collection_index(typer, element, (TypeStruct *)collection, true)) return NULL;
+                    element->head.type = element->head.replacement->type;
+                }
+            }
+
             AstFunctionDefn *readonly = readonly_self_method(typer, ma->left);
             if (!readonly) readonly = readonly_self_place(typer, ma->left);
             if (readonly && method_can_change_receiver(func_defn)) {

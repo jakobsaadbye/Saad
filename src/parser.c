@@ -1955,11 +1955,39 @@ AstArrayLiteral *parse_array_literal(Parser *parser) {
 
     AstArrayLiteral *array_lit = ast_allocate(parser, sizeof(AstArrayLiteral));
     array_lit->expressions     = da_init(4, sizeof(AstExpr *));
+    array_lit->keys            = da_init(1, sizeof(AstExpr *));
 
     Token next = peek_next_token(parser);
+
+    // The empty map literal [:]
+    if (next.type == ':' && peek_token(parser, 1).type == ']') {
+        eat_token(parser);
+        next = peek_next_token(parser);
+        array_lit->is_map_literal = true;
+    }
+
     while (next.type != ']' && next.type != TOKEN_END) {
         AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
         if (!expr) return NULL;
+
+        // A map literal e.g ["alice": 31, "bob": 27]. ':' is never a part of an expression, so the first entry decides
+        next = peek_next_token(parser);
+        if (array_lit->expressions.count == 0 && next.type == ':') {
+            array_lit->is_map_literal = true;
+        }
+        if (array_lit->is_map_literal) {
+            if (next.type != ':') {
+                report_error_token(parser, LABEL_ERROR, next, "Expected a ':' between the key and the value of the map entry");
+                return NULL;
+            }
+            eat_token(parser);
+
+            AstExpr *value = parse_expression(parser, MIN_PRECEDENCE);
+            if (!value) return NULL;
+
+            da_append(&array_lit->keys, expr);
+            expr = value;
+        }
 
         da_append(&array_lit->expressions, expr);
 

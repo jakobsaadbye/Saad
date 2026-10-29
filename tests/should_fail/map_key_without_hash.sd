@@ -1,0 +1,10 @@
+// A key type needs a hash method
+// expect-error: Type Color has no method 'hash'
+// expect-error: in set<Color, int>, instantiated here
+
+Color :: enum { Red, Green }
+
+main :: () {
+    m: Map<Color, int>;
+    m.set(.Red, 1);
+}

@@ -1,0 +1,148 @@
+// Map<K, V> from std/collections.sd, a hash table written in Saad
+
+Point :: struct {
+    x: int;
+    y: int;
+
+    // A struct can be a key once it has a hash method. == compares the members
+    hash :: method () -> u64 {
+        return hashCombine(self.x.hash(), self.y.hash());
+    }
+}
+
+Suit :: enum { Hearts, Spades }
+
+hash :: method (s: Suit) -> u64 {
+    return (s as i64).hash();
+}
+
+Account :: struct {
+    owner:   string;
+    balance: int;
+}
+
+totalAge :: (ages: Map<string, int>) -> int {
+    total := 0;
+    for entry in ages { total += entry.value; }
+    return total;
+}
+
+main :: () {
+    {
+        // A literal gives a Map<string, int>
+        ages := ["alice": 31, "bob": 27];
+        assert(ages.count == 2);
+        assert(typeof(ages) == "Map<string, int>");
+        assert(ages["alice"] == 31 && ages["bob"] == 27);
+
+        // m[k] = v adds or changes
+        ages["carol"] = 40;
+        ages["alice"] = 32;
+        assert(ages.count == 3);
+        assert(ages["alice"] == 32 && ages["carol"] == 40);
+
+        // Reading keys that might not be there
+        assert(ages.get("dave", -1) == -1);
+        age, found := ages.tryGet("bob");
+        assert(found && age == 27);
+        missing, there := ages.tryGet("dave");
+        assert(!there);
+        assert(ages.has("carol") && !ages.has("dave"));
+
+        assert(totalAge(ages) == 99);
+    }
+    {
+        // Counting with m[k] += 1. A missing key starts at 0
+        words: [..]string = ["a", "b", "a", "c", "a", "b"];
+        counts: Map<string, int> = [:];
+        for word in words {
+            counts[word] += 1;
+        }
+        assert(counts.count == 3);
+        assert(counts["a"] == 3 && counts["b"] == 2 && counts["c"] == 1);
+    }
+    {
+        // The entries are kept in the order they were added, also after removing
+        m: Map<int, string>;
+        m.set(30, "thirty");
+        m.set(10, "ten");
+        m.set(20, "twenty");
+        assert(m.remove(10));
+        assert(!m.remove(10));
+        m.set(5, "five");
+
+        keys := m.keys();
+        assert(keys.count == 3);
+        assert(keys[0] == 30 && keys[1] == 20 && keys[2] == 5);
+        values := m.values();
+        assert(values[0] == "thirty" && values[2] == "five");
+
+        order: [..]int;
+        for entry, i in m {
+            assert(entry.key == keys[i]);
+            order.add(entry.key);
+        }
+        assert(order.count == 3);
+    }
+    {
+        // Growing past many resizes, and removing half
+        squares: Map<i64, i64>;
+        for i in 0..2000 {
+            n := i as i64;
+            squares[n] = n * n;
+        }
+        assert(squares.count == 2000);
+        for i in 0..2000 {
+            n := i as i64;
+            assert(squares[n] == n * n);
+        }
+
+        for i in 0..1000 {
+            assert(squares.remove((i * 2) as i64));
+        }
+        assert(squares.count == 1000);
+        assert(!squares.has(4) && squares.has(5));
+        assert(squares[1999] == 1999 * 1999);
+    }
+    {
+        // Struct keys, enum keys and float keys
+        grid: Map<Point, string>;
+        grid[Point{1, 2}] = "tree";
+        grid[Point{3, 4}] = "rock";
+        assert(grid[Point{1, 2}] == "tree");
+        assert(!grid.has(Point{2, 1}));
+
+        cards := [Suit.Hearts: 13, Suit.Spades: 12];
+        assert(cards[.Spades] == 12);
+
+        weights := [0.5: "half", 0.25: "quarter"];
+        assert(weights[0.25] == "quarter");
+    }
+    {
+        // Struct values can be changed in place, and so can lists in a map
+        accounts: Map<string, Account>;
+        accounts["ada"] = Account{"ada", 100};
+        accounts["ada"].balance -= 30;
+        assert(accounts["ada"].balance == 70);
+
+        groups: Map<string, [..]int>;
+        groups["odd"].add(1);
+        groups["odd"].add(3);
+        groups["even"].add(2);
+        assert(groups["odd"].count == 2 && groups["odd"][1] == 3);
+        assert(groups["even"].first() == 2);
+    }
+    {
+        // A literal with a wanted type
+        names: Map<i64, string> = [1: "one", 2: "two"];
+        assert(names[2] == "two");
+
+        // Clear and free
+        names.clear();
+        assert(names.count == 0 && !names.has(1));
+        names[3] = "three";
+        assert(names[3] == "three");
+        names.free();
+        assert(names.isEmpty());
+    }
+}
