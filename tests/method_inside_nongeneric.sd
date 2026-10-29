@@ -1,7 +1,7 @@
 main :: () {
     // The struct and its methods are declared after main
     v := Vec2{3, 4};
-    assert(v.length_squared() == 25);
+    assert(v.lengthSquared() == 25);
 
     v.scale(2);
     assert(v.x == 6 && v.y == 8);
@@ -13,14 +13,14 @@ main :: () {
     p := &v;
     p.scale(-1);
     assert(v.x == -6 && v.y == -8);
-    assert(p.length_squared() == 100);
+    assert(p.lengthSquared() == 100);
 }
 
 Vec2 :: struct {
     x: int;
     y: int;
 
-    length_squared :: method () -> int {
+    lengthSquared :: method () -> int {
         return self.x * self.x + self.y * self.y;
     }
 

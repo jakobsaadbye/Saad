@@ -1,25 +1,25 @@
 Point :: struct { x: int; y: int; }
 
-type_name :: <T>(value: T) -> string {
+typeName :: <T>(value: T) -> string {
     return typeof(value);
 }
 
-element_type :: <T>(values: []T) -> string {
+elementType :: <T>(values: []T) -> string {
     first: T;
     return typeof(first);
 }
 
 main :: () {
-    assert(type_name(1) == "int");
-    assert(type_name(1.5) == "float");
-    assert(type_name(true) == "bool");
-    assert(type_name("hi") == "string");
-    assert(type_name(Point{1, 2}) == "Point");
+    assert(typeName(1) == "int");
+    assert(typeName(1.5) == "float");
+    assert(typeName(true) == "bool");
+    assert(typeName("hi") == "string");
+    assert(typeName(Point{1, 2}) == "Point");
 
     p := Point{1, 2};
-    assert(type_name(&p) == "*Point");
+    assert(typeName(&p) == "*Point");
 
     numbers: [..]u8;
     append(numbers, 1);
-    assert(element_type(numbers) == "u8");
+    assert(elementType(numbers) == "u8");
 }

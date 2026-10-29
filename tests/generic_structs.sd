@@ -25,7 +25,7 @@ Line :: struct {
     points: Pair<Vector3, Vector3>;
 }
 
-sum_pair :: (pair: Pair<int, int>) -> int {
+sumPair :: (pair: Pair<int, int>) -> int {
     return pair.first + pair.second;
 }
 
@@ -49,8 +49,8 @@ main :: () {
         assert(a.second == 2.5);
 
         b: Pair<int, int> = {3, 4};
-        assert(sum_pair(b) == 7);
-        assert(sum_pair({5, 6}) == 11);
+        assert(sumPair(b) == 7);
+        assert(sumPair({5, 6}) == 11);
     }
     {
         // The same instance is the same type wherever it is written

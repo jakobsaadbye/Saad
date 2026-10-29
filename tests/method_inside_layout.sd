@@ -21,8 +21,8 @@ Pair :: struct <A, B> {
     first:  A;
     second: B;
 
-    swap_values :: method * () {}
-    first_of    :: method () -> A { return self.first; }
+    swapValues :: method * () {}
+    firstOf    :: method () -> A { return self.first; }
 }
 
 main :: () {
@@ -40,5 +40,5 @@ main :: () {
     print("%\n", w);
 
     p := Pair<u8, u8>{1, 2};
-    assert(p.first_of() == 1);
+    assert(p.firstOf() == 1);
 }

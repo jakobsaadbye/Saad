@@ -17,7 +17,7 @@ lookup :: <K, V>(m: Map<K, V>, key: K, fallback: V) -> V {
     return fallback;
 }
 
-key_type_of :: <K, V>(m: *Map<K, V>) -> string {
+keyTypeOf :: <K, V>(m: *Map<K, V>) -> string {
     k: K;
     return typeof(k);
 }
@@ -29,10 +29,10 @@ main :: () {
 
     assert(lookup(ages, "bob", -1) == 27);
     assert(lookup(ages, "carol", -1) == -1);
-    assert(key_type_of(&ages) == "string");
+    assert(keyTypeOf(&ages) == "string");
 
     squares: Map<int, f64>;
     put(&squares, 3, 9.0);
     assert(lookup(squares, 3, 0.0) == 9);
-    assert(key_type_of(&squares) == "int");
+    assert(keyTypeOf(&squares) == "int");
 }

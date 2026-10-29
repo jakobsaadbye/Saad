@@ -28,28 +28,28 @@ Entity :: struct {
 	color: 		 Vector3;
 }
 
-large_return :: () -> Vector4 {
+largeReturn :: () -> Vector4 {
 	r := Vector4{1, 4, 9, 11};
 	return r;
 }
 
-small_return :: () -> Vector2 {
+smallReturn :: () -> Vector2 {
 	r := Vector2{420, 69};
 	return r;
 }
 
-args_and_large_return_value :: (x: float, y: float, z: float) -> Vector3 {
+argsAndLargeReturnValue :: (x: float, y: float, z: float) -> Vector3 {
 	r := Vector3{x, y, z};
 	return r;
 }
 
 main :: () {
-	v1 := large_return();
+	v1 := largeReturn();
 	print("%", v1);
 
-	v2 := small_return();
+	v2 := smallReturn();
 	print("%", v2);
 
-	v3 := args_and_large_return_value(27, 11, 98);
+	v3 := argsAndLargeReturnValue(27, 11, 98);
 	print("%", v3);
 }
