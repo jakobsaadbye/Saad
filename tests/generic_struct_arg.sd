@@ -1,0 +1,38 @@
+Map :: struct <K, V> {
+    keys:   [..]K;
+    values: [..]V;
+}
+
+put :: <K, V>(m: *Map<K, V>, key: K, value: V) {
+    append(m.keys, key);
+    append(m.values, value);
+}
+
+lookup :: <K, V>(m: Map<K, V>, key: K, fallback: V) -> V {
+    for i in 0..m.keys.count {
+        if m.keys[i] == key {
+            return m.values[i];
+        }
+    }
+    return fallback;
+}
+
+key_type_of :: <K, V>(m: *Map<K, V>) -> string {
+    k: K;
+    return typeof(k);
+}
+
+main :: () {
+    ages: Map<string, int>;
+    put(&ages, "alice", 31);
+    put(&ages, "bob", 27);
+
+    assert(lookup(ages, "bob", -1) == 27);
+    assert(lookup(ages, "carol", -1) == -1);
+    assert(key_type_of(&ages) == "string");
+
+    squares: Map<int, f64>;
+    put(&squares, 3, 9.0);
+    assert(lookup(squares, 3, 0.0) == 9);
+    assert(key_type_of(&squares) == "int");
+}

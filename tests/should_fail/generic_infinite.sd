@@ -1,0 +1,11 @@
+// Every instance of f makes a new instance with a deeper slice type, so instantiation never ends
+// expect-error: Too many nested instantiations of generic functions (the limit is 64)
+
+f :: <T>(value: T) {
+    values: []T;
+    f(values);
+}
+
+main :: () {
+    f(1);
+}

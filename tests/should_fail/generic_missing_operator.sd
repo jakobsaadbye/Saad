@@ -1,0 +1,18 @@
+// The error inside the body of max is reported together with the instance and where it was instantiated
+// expect-error: Binary operation between two structs
+// expect-error: note: ... in max<Point>, instantiated here
+
+Point :: struct { x: int; y: int; }
+
+max :: <T>(a: T, b: T) -> T {
+    if a > b { return a; }
+    return b;
+}
+
+main :: () {
+    a := Point{1, 2};
+    b := Point{3, 4};
+
+    assert(max(1, 2) == 2); // Fine for ints
+    c := max(a, b);
+}

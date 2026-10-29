@@ -20,6 +20,8 @@ typedef struct Parser {
     bool inside_extern_block;
     bool reported_error;
 
+    int split_shift_right_token; // Index + 1 of a '>>' token whose first '>' has been eaten as the end of a list of type arguments e.g List<List<int>>. 0 if none
+
     char *runtime_file_path;
     char *builtin_string_file_path;
 } Parser;
@@ -31,6 +33,7 @@ AstIdentifier  *generate_identifier(Parser *parser, char *ident_name, Type *type
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_pointed_to_by_data, char *struct_name);
 TypeStruct     *generate_struct_for_dynamic_array(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
+AstFunctionDefn *reparse_generic_function(Parser *parser, AstFunctionDefn *generic, AstBlock *scope);
 TypePointer    *generate_pointer_to_type(Parser *parser, Type *type);
 TypeArray      *generate_slice_of(Parser *parser, Type *type);
 AstIdentifier  *add_member_to_struct_scope(Parser *parser, AstStruct *struct_defn, AstIdentifier *member);

@@ -1,0 +1,17 @@
+Point :: struct { x: int; y: int; }
+
+// The body only makes sense for structs with an 'x' member. Calling it with an int would be an error,
+// but generic functions are only checked for the types they are actually called with
+get_x :: <T>(value: T) -> int {
+    return value.x;
+}
+
+// Never called, so its body is never checked
+never_called :: <T>(value: T) -> T {
+    return value.this_member_does_not_exist;
+}
+
+main :: () {
+    p := Point{3, 4};
+    assert(get_x(p) == 3);
+}

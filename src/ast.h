@@ -345,6 +345,14 @@ typedef struct AstFunctionDefn {
     
     DynamicArray    lowered_return_params;  // of *AstIdentifier
     DynamicArray    lowered_params;         // of *AstIdentifier. A lowered representation of the parameter list with hidden return parameters / methods and all
+
+    // Generics
+    DynamicArray     type_params;       // of *AstIdentifier. Set if this is a generic function e.g max :: <T>(...). Generic functions are never checked or lowered themselves, only their instances are
+    int              first_token_index; // Index of the first token of the function. Each instance of a generic function is made by parsing the function again from here
+    DynamicArray     instances;         // of *AstFunctionDefn. All the instantiations of this generic function
+    AstFunctionDefn *generic_function;  // Set on an instance to the generic function it was instantiated from
+    DynamicArray     type_args;         // of *Type. Set on an instance to the types it was instantiated with
+    char            *instance_name;     // Set on an instance to a readable name e.g "max<int>"
 } AstFunctionDefn;
 
 typedef struct AstArgument {

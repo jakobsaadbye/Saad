@@ -47,6 +47,7 @@ bool            generate_and_add_import(Parser *parser, char *path);
 bool starts_array_literal(Parser *parser);
 bool starts_struct_literal(Parser *parser);
 int  scan_type_arguments(Parser *parser, int lookahead);
+bool parse_type_parameters(Parser *parser, DynamicArray *type_params);
 bool parse_type_arguments(Parser *parser, DynamicArray *type_args);
 
 void *ast_allocate(Parser *parser, size_t size);
@@ -435,6 +436,18 @@ bool starts_function_defn(Parser *parser) {
 
     if (peek_token(parser, cursor).type == TOKEN_METHOD) {
         cursor += 1;
+    }
+
+    if (peek_token(parser, cursor).type == '<') {
+        // Type parameters of a generic function e.g max :: <T>(...)
+        cursor += 1;
+        while (peek_token(parser, cursor).type == TOKEN_LITERAL_IDENTIFIER || peek_token(parser, cursor).type == ',') {
+            cursor += 1;
+        }
+        if (peek_token(parser, cursor).type != '>') return false;
+        cursor += 1;
+
+        return peek_token(parser, cursor).type == '(';
     }
 
     if (peek_token(parser, cursor).type == '(') {
@@ -1125,6 +1138,44 @@ int scan_type_arguments(Parser *parser, int lookahead) {
     }
 }
 
+// Parses the type parameters of a generic struct or function e.g the '<K, V>' in Map :: struct <K, V> {...}
+bool parse_type_parameters(Parser *parser, DynamicArray *type_params) {
+    Token open = peek_next_token(parser);
+    expect(parser, open, '<');
+    eat_token(parser);
+
+    while (true) {
+        Token param_token = peek_next_token(parser);
+        if (param_token.type != TOKEN_LITERAL_IDENTIFIER) {
+            report_error_token(parser, LABEL_ERROR, param_token, "Expected the name of a type parameter");
+            return false;
+        }
+        eat_token(parser);
+
+        AstIdentifier *param = make_identifier_from_token(parser, param_token, NULL);
+        for (int i = 0; i < type_params->count; i++) {
+            AstIdentifier *existing = ((AstIdentifier **)type_params->items)[i];
+            if (strcmp(existing->name, param->name) == 0) {
+                report_error_ast(parser, LABEL_ERROR, (Ast *)param, "Redeclaration of type parameter '%s'", param->name);
+                return false;
+            }
+        }
+        da_append(type_params, param);
+
+        Token next = peek_next_token(parser);
+        if (next.type == ',') {
+            eat_token(parser);
+            continue;
+        }
+        if (next.type != '>') {
+            report_error_token(parser, LABEL_ERROR, next, "Expected a ',' or '>' in the list of type parameters");
+            return false;
+        }
+        eat_token(parser);
+        return true;
+    }
+}
+
 // Parses the type arguments of a generic struct e.g the '<int, *float>' in Pair<int, *float>
 bool parse_type_arguments(Parser *parser, DynamicArray *type_args) {
     Token open = peek_next_token(parser);
@@ -1147,11 +1198,13 @@ bool parse_type_arguments(Parser *parser, DynamicArray *type_args) {
         }
         if (next.type == TOKEN_BITWISE_SHIFT_RIGHT) {
             // The '>>' closes both this and an outer list of type arguments e.g List<List<int>>.
-            // Eat the first '>' by turning the token into a single '>' that the outer list then eats
-            Token *token = &((Token *)parser->lexer->tokens.items)[parser->current_token_index];
-            token->type             = '>';
-            token->start.input_idx += 1;
-            token->start.col       += 1;
+            // The inner list eats the first '>' and the outer list eats the token. The token itself is left untouched, as generic functions are parsed more than once
+            if (parser->split_shift_right_token == parser->current_token_index + 1) {
+                parser->split_shift_right_token = 0;
+                eat_token(parser);
+            } else {
+                parser->split_shift_right_token = parser->current_token_index + 1;
+            }
             return true;
         }
 
@@ -1429,33 +1482,8 @@ AstStruct *parse_struct_defn(Parser *parser) {
     // Type parameters of a generic struct e.g List :: struct <T> {...}
     next = peek_next_token(parser);
     if (next.type == '<') {
-        eat_token(parser);
-
-        while (true) {
-            Token param_token = peek_next_token(parser);
-            expect(parser, param_token, TOKEN_LITERAL_IDENTIFIER);
-            eat_token(parser);
-
-            AstIdentifier *param = make_identifier_from_token(parser, param_token, NULL);
-            for (int i = 0; i < struct_defn->type_params.count; i++) {
-                AstIdentifier *existing = ((AstIdentifier **)struct_defn->type_params.items)[i];
-                if (strcmp(existing->name, param->name) == 0) {
-                    report_error_ast(parser, LABEL_ERROR, (Ast *)param, "Redeclaration of type parameter '%s'", param->name);
-                    return NULL;
-                }
-            }
-            da_append(&struct_defn->type_params, param);
-
-            next = peek_next_token(parser);
-            if (next.type == ',') {
-                eat_token(parser);
-                continue;
-            }
-
-            expect(parser, next, '>');
-            eat_token(parser);
-            break;
-        }
+        bool ok = parse_type_parameters(parser, &struct_defn->type_params);
+        if (!ok) return NULL;
     }
 
     AstBlock *scope = new_block(parser, BLOCK_DECLARATIVE);
@@ -1982,6 +2010,9 @@ AstFunctionCall *parse_function_call(Parser *parser, AstExpr *lhs) {
 AstFunctionDefn *parse_function_defn(Parser *parser) {
     AstFunctionDefn *func_defn = new_function_defn(parser);
     func_defn->is_lambda = true;
+    func_defn->first_token_index = parser->current_token_index;
+    func_defn->type_params = da_init(1, sizeof(AstIdentifier *));
+    func_defn->instances   = da_init(1, sizeof(AstFunctionDefn *));
 
     Token next = peek_next_token(parser);
 
@@ -1991,6 +2022,17 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         func_is_method = true;
         eat_token(parser);
         next = peek_next_token(parser);
+    }
+
+    // Type parameters of a generic function e.g max :: <T>(...)
+    if (next.type == '<') {
+        bool ok = parse_type_parameters(parser, &func_defn->type_params);
+        if (!ok) return NULL;
+
+        if (parser->inside_extern_block) {
+            report_error_token(parser, LABEL_ERROR, next, "External C functions cannot be generic");
+            return NULL;
+        }
     }
 
     parser->enclosing_function = func_defn;
@@ -2049,6 +2091,44 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     ident->type = (Type *)func_type;
 
     return func_defn;
+}
+
+// Parses a generic function again from its first token, giving a new copy of it to use as an instance. The type parameters
+// of the instance are bound in 'scope', which must have the scope of the generic function as its parent
+AstFunctionDefn *reparse_generic_function(Parser *parser, AstFunctionDefn *generic, AstBlock *scope) {
+    int              saved_token_index        = parser->current_token_index;
+    AstBlock        *saved_scope              = parser->current_scope;
+    AstFile         *saved_file               = parser->current_file;
+    AstFunctionDefn *saved_enclosing_function = parser->enclosing_function;
+    bool             saved_statement_header   = parser->inside_statement_header;
+    bool             saved_parameter_list     = parser->inside_parameter_list;
+    bool             saved_argument_list      = parser->inside_argument_list;
+    bool             saved_extern_block       = parser->inside_extern_block;
+    int              saved_split_token        = parser->split_shift_right_token;
+
+    parser->current_token_index     = generic->first_token_index;
+    parser->current_scope           = scope;
+    parser->current_file            = generic->head.head.file;
+    parser->enclosing_function      = generic->parent_function;
+    parser->inside_statement_header = false;
+    parser->inside_parameter_list   = false;
+    parser->inside_argument_list    = false;
+    parser->inside_extern_block     = false;
+    parser->split_shift_right_token = 0;
+
+    AstFunctionDefn *instance = parse_function_defn(parser);
+
+    parser->current_token_index     = saved_token_index;
+    parser->current_scope           = saved_scope;
+    parser->current_file            = saved_file;
+    parser->enclosing_function      = saved_enclosing_function;
+    parser->inside_statement_header = saved_statement_header;
+    parser->inside_parameter_list   = saved_parameter_list;
+    parser->inside_argument_list    = saved_argument_list;
+    parser->inside_extern_block     = saved_extern_block;
+    parser->split_shift_right_token = saved_split_token;
+
+    return instance;
 }
 
 AstIf *parse_if(Parser *parser) {

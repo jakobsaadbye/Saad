@@ -1,0 +1,19 @@
+larger :: <T>(a: T, b: T) -> T {
+    if a > b { return a; }
+    return b;
+}
+
+main :: () {
+    // A float literal wins over an integer literal, and untyped float literals give T the default float type
+    x := larger(1, 2.5);
+    assert(x == 2.5);
+    assert(typeof(x) == "float");
+
+    y := larger(3, 0.5);
+    assert(y == 3);
+    assert(typeof(y) == "float");
+
+    d: f64 = 1.25;
+    assert(typeof(larger(d, 2)) == "f64");
+    assert(larger(d, 2) == 2);
+}
