@@ -5,21 +5,21 @@ Small :: struct { a, b: s32; }
 Color :: struct { r, g, b, a: u8; }
 Big   :: struct { x, y, z, w: s64; }
 
-modify_big :: (big: Big) -> s64 {
+modifyBig :: (big: Big) -> s64 {
     big.x = 1000; // Must not change the caller's value
     return big.x + big.y;
 }
 
-modify_small :: (small: Small) -> s32 {
+modifySmall :: (small: Small) -> s32 {
     small.a = 99;
     return small.a + small.b;
 }
 
-make_big :: (v: s64) -> Big {
+makeBig :: (v: s64) -> Big {
     return Big{v, v + 1, v + 2, v + 3};
 }
 
-make_color :: () -> Color {
+makeColor :: () -> Color {
     return Color{1, 2, 3, 4};
 }
 
@@ -29,16 +29,29 @@ swap :: (a: *Small) {
     a.b = tmp;
 }
 
+
+Vector3 :: struct {
+    x, y, z: f32;
+}
+
+extend Vector3 {
+    length :: (v: Vector3) -> f32 {}
+    dot :: (v: Vector3) -> f32 {}
+    scale :: (v: *Vector3) -> void {}
+}
+
+
+
 main :: () {
     c := Color{10, 20, 30, 40};
     assert(c.r == 10 && c.g == 20 && c.b == 30 && c.a == 40);
 
     s := Small{1, 2};
-    assert(modify_small(s) == 101);
+    assert(modifySmall(s) == 101);
     assert(s.a == 1);
 
     big := Big{1, 2, 3, 4};
-    assert(modify_big(big) == 1002);
+    assert(modifyBig(big) == 1002);
     assert(big.x == 1);
 
     copy := big;
@@ -46,11 +59,11 @@ main :: () {
     assert(big.y == 2);
     assert(copy.y == 50);
 
-    made := make_big(10);
+    made := makeBig(10);
     assert(made.x == 10 && made.w == 13);
-    assert(make_big(5).z == 7);
+    assert(makeBig(5).z == 7);
 
-    mc := make_color();
+    mc := makeColor();
     assert(mc.b == 3);
 
     // The right hand side reads the destination before it is overwritten

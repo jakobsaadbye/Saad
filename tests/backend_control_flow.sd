@@ -1,7 +1,7 @@
 // Control flow: short-circuit evaluation, nested loops with break/continue, recursion,
 // early returns and function pointers.
 
-side_effect :: (result: bool, counter: *int) -> bool {
+sideEffect :: (result: bool, counter: *int) -> bool {
     *counter = *counter + 1;
     return result;
 }
@@ -11,7 +11,7 @@ fib :: (n: int) -> int {
     return fib(n - 1) + fib(n - 2);
 }
 
-first_even :: (xs: []int) -> int {
+firstEven :: (xs: []int) -> int {
     for x in xs {
         if x % 2 == 0 { return x; }
     }
@@ -23,11 +23,11 @@ apply :: (f: (value: int) -> int, x: int) -> int {
 }
 
 // Inner functions with the same name in different scopes get distinct symbols
-inner_one :: () -> int {
+innerOne :: () -> int {
     helper :: () -> int { return 1; }
     return helper();
 }
-inner_two :: () -> int {
+innerTwo :: () -> int {
     helper :: () -> int { return 2; }
     return helper();
 }
@@ -38,14 +38,14 @@ square :: (x: int) -> int { return x * x; }
 main :: () {
     // Short-circuit: the right side must not run
     count := 0;
-    if side_effect(false, &count) && side_effect(true, &count) { assert(false); }
+    if sideEffect(false, &count) && sideEffect(true, &count) { assert(false); }
     assert(count == 1);
-    if side_effect(true, &count) || side_effect(true, &count) { } else { assert(false); }
+    if sideEffect(true, &count) || sideEffect(true, &count) { } else { assert(false); }
     assert(count == 2);
-    value := side_effect(false, &count) && side_effect(true, &count);
+    value := sideEffect(false, &count) && sideEffect(true, &count);
     assert(!value);
     assert(count == 3);
-    value = side_effect(false, &count) || side_effect(true, &count);
+    value = sideEffect(false, &count) || sideEffect(true, &count);
     assert(value);
     assert(count == 5);
 
@@ -73,8 +73,8 @@ main :: () {
     assert(fib(20) == 6765);
 
     // Early return from inside a loop
-    assert(first_even([1, 3, 5, 8, 9]) == 8);
-    assert(first_even([1, 3]) == -1);
+    assert(firstEven([1, 3, 5, 8, 9]) == 8);
+    assert(firstEven([1, 3]) == -1);
 
     // Function pointers
     assert(apply(double, 21) == 42);
@@ -84,6 +84,6 @@ main :: () {
     f = square;
     assert(f(5) == 25);
 
-    assert(inner_one() == 1);
-    assert(inner_two() == 2);
+    assert(innerOne() == 1);
+    assert(innerTwo() == 2);
 }
