@@ -37,9 +37,9 @@ main :: () {
     {
         // Instances are sized with their type arguments
         assert(sizeof(Pair<u8, u8>)    == 2);
-        assert(sizeof(Pair<u8, s64>)   == 16);
-        assert(sizeof(Pair<s32, s32>)  == 8);
-        assert(sizeof(Node<s64>)       == 16);
+        assert(sizeof(Pair<u8, i64>)   == 16);
+        assert(sizeof(Pair<i32, i32>)  == 8);
+        assert(sizeof(Node<i64>)       == 16);
         assert(sizeof(Pair<Vector3, bool>) == 16);
     }
     {
@@ -68,7 +68,7 @@ main :: () {
         p.second       = 3;
         assert(p.first.first + p.first.second + p.second == 6);
 
-        q := Pair<int, Pair<s64, u8>>{1, {2, 3}};
+        q := Pair<int, Pair<i64, u8>>{1, {2, 3}};
         assert(q.second.first == 2);
         assert(q.second.second == 3);
     }

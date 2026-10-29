@@ -623,7 +623,7 @@ static int string_data_global_cstr(Lowerer *L, const char *text) {
     return data->index;
 }
 
-// Creates a global holding a Saad 'string' value ({ data: *u8, len: s64 }) for a literal
+// Creates a global holding a Saad 'string' value ({ data: *u8, len: i64 }) for a literal
 static int string_global(Lowerer *L, const char *raw, int raw_len) {
     int len = 0;
     int data = string_data_global(L, raw, raw_len, &len);
@@ -1230,7 +1230,7 @@ static IrAddr array_access_addr(Lowerer *L, AstArrayAccess *aa) {
         data = emit_load(L, IR_PTR, lower_place(L, aa->left).addr);
     }
 
-    int index  = lower_scalar_as(L, aa->index_expr, primitive_type(PRIMITIVE_S64));
+    int index  = lower_scalar_as(L, aa->index_expr, primitive_type(PRIMITIVE_I64));
     int offset = emit_binop(L, IR_MUL, IR_I64, index, emit_const(L, IR_I64, elem_type->size));
     return addr_vreg(emit_ptr_add(L, data, offset), 0);
 }
@@ -1523,7 +1523,7 @@ static int enum_value_name(Lowerer *L, int value, TypeEnum *enum_type) {
     }
 
     Type *backing = enum_type->backing_type;
-    int value64 = convert_scalar(L, value, backing, primitive_type(PRIMITIVE_S64));
+    int value64 = convert_scalar(L, value, backing, primitive_type(PRIMITIVE_I64));
     int index   = emit_binop(L, IR_SUB, IR_I64, value64, emit_const(L, IR_I64, min));
     int in_range = emit_cmp(L, IR_ICMP, IR_CMP_ULT, IR_I64, index, emit_const(L, IR_I64, range));
     int entry   = emit_ptr_add(L, emit_global_addr(L, table), emit_binop(L, IR_MUL, IR_I64, index, emit_const(L, IR_I64, 16)));
@@ -1588,7 +1588,7 @@ static int type_descriptor(Lowerer *L, Type *type, int value_ptr, Ast *site) {
         TypeStruct *struct_type = (TypeStruct *) type;
         DynamicArray members = struct_type->node->members->identifiers;
 
-        // StructMember :: struct { name: string; type: *Type; value: *void; index: s64; offset: s64; }   (48 bytes)
+        // StructMember :: struct { name: string; type: *Type; value: *void; index: i64; offset: i64; }   (48 bytes)
         int count = 0;
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = da_get_deref(members, i);
@@ -1683,7 +1683,7 @@ static void print_value(Lowerer *L, StringBuilder *format, VregList *args, Value
         }
         bool is_signed = type_is_signed(type);
         sb_append(format, is_signed ? "%%lld" : "%%llu");
-        ir_array_push(*args, convert_scalar(L, v, type, primitive_type(is_signed ? PRIMITIVE_S64 : PRIMITIVE_U64)));
+        ir_array_push(*args, convert_scalar(L, v, type, primitive_type(is_signed ? PRIMITIVE_I64 : PRIMITIVE_U64)));
         return;
     }
     case TYPE_FLOAT: {
@@ -2335,7 +2335,7 @@ static void lower_for(Lowerer *L, AstFor *ast_for) {
         }
         if (index_slot >= 0) {
             Type *index_type = resolve_override(ast_for->index)->type;
-            emit_store(L, ir_type_of(index_type), addr_slot(index_slot, 0), convert_scalar(L, i, primitive_type(PRIMITIVE_S64), index_type));
+            emit_store(L, ir_type_of(index_type), addr_slot(index_slot, 0), convert_scalar(L, i, primitive_type(PRIMITIVE_I64), index_type));
         }
     }
     push_loop(L, ast_for, done, post);

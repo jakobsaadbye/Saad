@@ -617,14 +617,14 @@ Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic) {
 PrimitiveKind canonical_primitive_kind(PrimitiveKind kind) {
     switch (kind) {
     case PRIMITIVE_UINT:  return PRIMITIVE_U32;
-    case PRIMITIVE_INT:   return PRIMITIVE_S32;
+    case PRIMITIVE_INT:   return PRIMITIVE_I32;
     case PRIMITIVE_FLOAT: return PRIMITIVE_F32;
     case PRIMITIVE_CHAR:  return PRIMITIVE_U8;
     default:              return kind;
     }
 }
 
-// Strict type equality used when inferring type parameters. Unlike types_are_equal(), nothing converts implicitly, but aliases like int and s32 are the same type
+// Strict type equality used when inferring type parameters. Unlike types_are_equal(), nothing converts implicitly, but aliases like int and i32 are the same type
 bool types_are_identical(Type *a, Type *b) {
     if (is_primitive_type(a->kind) && is_primitive_type(b->kind)) {
         return canonical_primitive_kind(((TypePrimitive *)a)->kind) == canonical_primitive_kind(((TypePrimitive *)b)->kind);
@@ -1340,10 +1340,10 @@ unsigned long long max_integer_value(TypePrimitive *type) {
     case PRIMITIVE_U16: return U16_MAX;
     case PRIMITIVE_U32: return U32_MAX;
     case PRIMITIVE_U64: return U64_MAX;
-    case PRIMITIVE_S8:  return S8_MAX;
-    case PRIMITIVE_S16: return S16_MAX;
-    case PRIMITIVE_S32: return S32_MAX;
-    case PRIMITIVE_S64: return S64_MAX;
+    case PRIMITIVE_I8:  return S8_MAX;
+    case PRIMITIVE_I16: return S16_MAX;
+    case PRIMITIVE_I32: return S32_MAX;
+    case PRIMITIVE_I64: return S64_MAX;
     case PRIMITIVE_UNTYPED_INT: return U64_MAX;
     default:
         printf("Internal compiler error: Unknown type kind %d in max_integer_value()", type->kind);
@@ -2248,11 +2248,11 @@ bool check_for(Typer *typer, AstFor *ast_for) {
             return NULL;
         }
 
-        ast_for->iterator->type = primitive_type(PRIMITIVE_S32);
+        ast_for->iterator->type = primitive_type(PRIMITIVE_I32);
         ast_for->iterator->flags |= IDENTIFIER_IS_RESOLVED;
 
         if (ast_for->index) {
-            ast_for->index->type = primitive_type(PRIMITIVE_S32);
+            ast_for->index->type = primitive_type(PRIMITIVE_I32);
             ast_for->index->flags |= IDENTIFIER_IS_RESOLVED;
         }
 
@@ -2305,7 +2305,7 @@ bool check_for(Typer *typer, AstFor *ast_for) {
         ast_for->iterator->flags |= IDENTIFIER_IS_RESOLVED;
 
         if (ast_for->index) {
-            ast_for->index->type = primitive_type(PRIMITIVE_S32);
+            ast_for->index->type = primitive_type(PRIMITIVE_I32);
             ast_for->index->flags |= IDENTIFIER_IS_RESOLVED;
         }
 
@@ -3673,7 +3673,7 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     }
 
     if (func_defn->generic_function && !func_defn->is_method) {
-        // Instances get a symbol named after their type arguments e.g max$s64 or set$s32$string. Methods are already named after their receiver
+        // Instances get a symbol named after their type arguments e.g max$i64 or set$i32$string. Methods are already named after their receiver
         StringBuilder sb = sb_init(32);
         sb_append(&sb, "%s", func_defn->symbol_name);
         for (int i = 0; i < func_defn->type_args.count; i++) {
@@ -4150,7 +4150,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_TYPEOF)         result = check_typeof(typer, (AstTypeof *)(expr));
     else if (expr->head.kind == AST_SIZEOF)         result = check_sizeof(typer, (AstSizeof *)(expr));
     else if (expr->head.kind == AST_NEW)            result = check_new(typer, (AstNew *)(expr), ctx_type);
-    else if (expr->head.kind == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_S64); // @Investigate - Shouldn't this be checked for both sides being integers???
+    else if (expr->head.kind == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_I64); // @Investigate - Shouldn't this be checked for both sides being integers???
     else if (expr->head.kind == AST_SEMICOLON_EXPR) result = primitive_type(PRIMITIVE_VOID);
     else {
         printf("%s:%d: compiler-error: Unhandled cases in 'check_expression()'. Expression was of type %s", __FILE__, __LINE__, ast_to_str((Ast *)expr));

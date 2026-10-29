@@ -15,7 +15,7 @@ manyLargeParameters :: (a, b, c, d, e: Vector4) -> Vector4, Vector4, Vector4, Ve
     return a, b, c, d, e;
 }
 
-manyMixedParameters :: (a: u8, b: f32, c: Vector4, d: f64, e: bool, f: Vector2, g: string, h: *Vector4, i: s64) -> u8, f32, Vector4, f64, bool, Vector2, string, *Vector4, s64 {
+manyMixedParameters :: (a: u8, b: f32, c: Vector4, d: f64, e: bool, f: Vector2, g: string, h: *Vector4, i: i64) -> u8, f32, Vector4, f64, bool, Vector2, string, *Vector4, i64 {
     print("%\n%\n%\n%\n%\n%\n%\n%\n%\n", a, b, c, d, e, f, g, h, i);
     return a, b, c, d, e, f, g, h, i;
 }
@@ -46,7 +46,7 @@ main :: () {
         g: string = "This feels like a good mix";
         hv := Vector4{1337, 7, 9, 13};
         h: *Vector4 = &hv;
-        i: s64 = -5;
+        i: i64 = -5;
 
         a_0, b_0, c_0, d_0, e_0, f_0, g_0, h_0, i_0 := manyMixedParameters(a, b, c, d, e, f, g, h, i);
 

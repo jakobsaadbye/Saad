@@ -71,8 +71,8 @@ MS TypeAny *ms_runtime_get_type_any(void) { return runtime_get_type_any(); }
 
 // ---- data symbols: plain aliases ----
 #define ALIAS(sym) __asm__(".globl ms_" #sym "\n.set ms_" #sym ", " #sym);
-ALIAS(Type_uint) ALIAS(Type_u8) ALIAS(Type_u16) ALIAS(Type_u32) ALIAS(Type_u64) ALIAS(Type_int) ALIAS(Type_s8)
-ALIAS(Type_s16) ALIAS(Type_s32) ALIAS(Type_s64) ALIAS(Type_float) ALIAS(Type_f32) ALIAS(Type_f64) ALIAS(Type_char)
+ALIAS(Type_uint) ALIAS(Type_u8) ALIAS(Type_u16) ALIAS(Type_u32) ALIAS(Type_u64) ALIAS(Type_int) ALIAS(Type_i8)
+ALIAS(Type_i16) ALIAS(Type_i32) ALIAS(Type_i64) ALIAS(Type_float) ALIAS(Type_f32) ALIAS(Type_f64) ALIAS(Type_char)
 ALIAS(Type_bool) ALIAS(Type_void) ALIAS(Type_untyped_int) ALIAS(Type_untyped_float) ALIAS(Type_string)
 
 // ---- entry ----

@@ -37,7 +37,7 @@ max(3, 9, 4);   // instance max<int>
 * At a call, `instantiate_generic_function_call()` infers the type arguments: `unify_types()` matches each
   parameter type as written (e.g `*Map<K, V>`) against the type of the argument (e.g `*Map<int, string>`)
   through pointers, arrays, variadics and generic struct instances.
-  * Typed arguments must agree exactly (aliases like `int` and `s32` are the same type). Nothing is widened.
+  * Typed arguments must agree exactly (aliases like `int` and `i32` are the same type). Nothing is widened.
   * Untyped literals give way to typed arguments. Between untyped literals a float wins over an integer.
     Only untyped literals give the same type as `x := 1` and `x := 2.5`, which is `int` and `float`.
 * `instantiate_generic_function()` makes an instance by **parsing the function again** from its tokens

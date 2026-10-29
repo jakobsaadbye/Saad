@@ -9,7 +9,7 @@ sum8 :: (a: int, b: int, c: int, d: int, e: int, f: int, g: int, h: int) -> int 
     return a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6 + g * 7 + h * 8;
 }
 
-mixed :: (a: f64, b: int, c: f32, d: s64, e: f64, f: u8) -> f64 {
+mixed :: (a: f64, b: int, c: f32, d: i64, e: f64, f: u8) -> f64 {
     return a + xx b + xx c + xx d + e + xx f;
 }
 

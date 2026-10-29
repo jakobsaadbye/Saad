@@ -91,7 +91,7 @@ addFloat64 :: method (sb: *StringBuilder, v: f64) {
     sb.internalAdd(str.data, str.len);
 }
 
-addInt64 :: method (sb: *StringBuilder, v: s64) {
+addInt64 :: method (sb: *StringBuilder, v: i64) {
     if v == 0 {
         sb.addChar(48); // 0
         return;
@@ -170,20 +170,20 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
             value := *(arg.data as *u64);
             sb.addUInt64(value);
         }
-        else if prim.kind == .S8 {
-            value := *(arg.data as *s8);
-            sb.addInt64(value as s64);
+        else if prim.kind == .I8 {
+            value := *(arg.data as *i8);
+            sb.addInt64(value as i64);
         }
-        else if prim.kind == .S16 {
-            value := *(arg.data as *s16);
-            sb.addInt64(value as s64);
+        else if prim.kind == .I16 {
+            value := *(arg.data as *i16);
+            sb.addInt64(value as i64);
         }
-        else if prim.kind == .S32 || prim.kind == .Int {
-            value := *(arg.data as *s32);
-            sb.addInt64(value as s64);
+        else if prim.kind == .I32 || prim.kind == .Int {
+            value := *(arg.data as *i32);
+            sb.addInt64(value as i64);
         }
-        else if prim.kind == .S64 {
-            value := *(arg.data as *s64);
+        else if prim.kind == .I64 {
+            value := *(arg.data as *i64);
             sb.addInt64(value);
         } else {
             // Unhandled

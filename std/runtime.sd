@@ -6,7 +6,7 @@
 
 String :: struct {
     data: *char;
-    len:   s64;
+    len:   i64;
 }
 
 TypeKind :: enum {
@@ -31,11 +31,11 @@ TypePrimitiveKind :: enum {
     U16,
     U32,
     U64,
-    Int, // alias for s32
-    S8,
-    S16,
-    S32,
-    S64,
+    Int, // alias for i32
+    I8,
+    I16,
+    I32,
+    I64,
     Float, // alias for f32
     F32,
     F64,
@@ -73,7 +73,7 @@ TypeArray :: struct {
     head:      Type;
     kind:      TypeArrayKind;
     elemType: *Type;
-    count:     s64;
+    count:     i64;
 }
 
 TypeEnum :: struct {
@@ -88,8 +88,8 @@ StructMember :: struct {
     name:  string;
     type:  *Type;
     value: *void;
-    index:  s64;
-    offset: s64;
+    index:  i64;
+    offset: i64;
 }
 
 TypeStruct :: struct {
@@ -115,9 +115,9 @@ Any :: struct {
 
 RawDynamicArray :: struct {
     data:     *u8;
-    count:    s64;
-    cap:      s64;
-    elemSize: s64;
+    count:    i64;
+    cap:      i64;
+    elemSize: i64;
 }
 
 //////////////////////////////////
@@ -130,7 +130,7 @@ RawDynamicArray :: struct {
 
 extern "C" {
     runtime_get_type_pointer :: (name: string, pointerTo: *Type) -> *TypePointer;
-    runtime_get_type_array   :: (name: string, kind: TypeArrayKind, elem_type: *Type, count: s64) -> *TypeArray;
+    runtime_get_type_array   :: (name: string, kind: TypeArrayKind, elem_type: *Type, count: i64) -> *TypeArray;
     runtime_get_type_enum    :: (name: string, valueName: string, backingType: *Type, minValue: int, maxValue: int) -> *TypeEnum;
     runtime_get_type_struct  :: (name: string, members: *StructMember, members_count: int, size: int, alignment: int) -> *TypeStruct;
     runtime_get_type_any     :: () -> *TypeAny;

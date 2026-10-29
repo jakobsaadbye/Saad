@@ -945,7 +945,7 @@ UnloadDirectoryFiles    :: (files: FilePathList); // Unload filepaths
 IsFileDropped           :: () -> bool; // Check if a file has been dropped into window
 LoadDroppedFiles        :: () -> FilePathList; // Load dropped filepaths
 UnloadDroppedFiles      :: (files: FilePathList); // Unload dropped filepaths
-GetFileModTime          :: (fileName: *u8) -> s64; // Get file modification time (last write time)
+GetFileModTime          :: (fileName: *u8) -> i64; // Get file modification time (last write time)
 
 // Compression/Encoding functionality
 CompressData                  :: (data: *u8, dataSize: int, compDataSize: *int) -> *u8; // Compress data (DEFLATE algorithm), memory must be MemFree()

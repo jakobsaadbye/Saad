@@ -1258,10 +1258,10 @@ TypeStruct *generate_struct_for_dynamic_array(Parser *parser, Type *type_data) {
 
     dynamic_array->head.size = 32;
 
-    AstIdentifier *capacity = generate_identifier(parser, "capacity", primitive_type(PRIMITIVE_S64), IDENTIFIER_IS_STRUCT_MEMBER);
+    AstIdentifier *capacity = generate_identifier(parser, "capacity", primitive_type(PRIMITIVE_I64), IDENTIFIER_IS_STRUCT_MEMBER);
     capacity->member_index   = 2;
     capacity->member_offset  = 16;
-    AstIdentifier *elem_size = generate_identifier(parser, "elemSize", primitive_type(PRIMITIVE_S64), IDENTIFIER_IS_STRUCT_MEMBER);
+    AstIdentifier *elem_size = generate_identifier(parser, "elemSize", primitive_type(PRIMITIVE_I64), IDENTIFIER_IS_STRUCT_MEMBER);
     elem_size->member_index   = 3;
     elem_size->member_offset  = 24;
 
@@ -1305,7 +1305,7 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     type_ptr_data->pointer_to      = type_data;
 
     AstIdentifier *data  = generate_identifier(parser, "data", (Type *) type_ptr_data,         IDENTIFIER_IS_STRUCT_MEMBER);
-    AstIdentifier *count = generate_identifier(parser, "count", primitive_type(PRIMITIVE_S64), IDENTIFIER_IS_STRUCT_MEMBER);
+    AstIdentifier *count = generate_identifier(parser, "count", primitive_type(PRIMITIVE_I64), IDENTIFIER_IS_STRUCT_MEMBER);
 
     data->member_index   = 0;
     data->member_offset  = 0;
@@ -1435,7 +1435,7 @@ AstEnum *parse_enum_defn(Parser *parser) {
     type_enum->identifier      = ast_enum->identifier;
     type_enum->backing_type    = primitive_type(PRIMITIVE_INT); // @Improvement - Support for having a backing integer type
 
-    type_enum->count = generate_identifier(parser, "count", primitive_type(PRIMITIVE_S64), IDENTIFIER_IS_CONSTANT);
+    type_enum->count = generate_identifier(parser, "count", primitive_type(PRIMITIVE_I64), IDENTIFIER_IS_CONSTANT);
     type_enum->count->decl = (AstDeclaration *) ast_enum;
     type_enum->names = generate_identifier(parser, "names", (Type *) generate_slice_of(parser, (Type *) type_defn_string), IDENTIFIER_IS_CONSTANT);
     type_enum->names->decl = (AstDeclaration *) ast_enum;

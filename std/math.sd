@@ -12,8 +12,8 @@ extern "C" {
 
     round  :: (value: f64) -> f64;
     roundf :: (value: f32) -> f32;
-    lround :: (value: f64) -> s64;
-    llround :: (value: f64) -> s64;
+    lround :: (value: f64) -> i64;
+    llround :: (value: f64) -> i64;
 
     floor  :: (value: f64) -> f64;
     floorf :: (value: f32) -> f32;
@@ -136,24 +136,24 @@ extern "C" {
     fmaf :: (x: f32, y: f32, z: f32) -> f32;
 
     // Decompose floating-point number into significand and exponent
-    frexp  :: (value: f64, exp: *s32) -> f64;
-    frexpf :: (value: f32, exp: *s32) -> f32;
+    frexp  :: (value: f64, exp: *i32) -> f64;
+    frexpf :: (value: f32, exp: *i32) -> f32;
 
     // Multiply by power of 2
-    ldexp  :: (value: f64, exp: s32) -> f64;
-    ldexpf :: (value: f32, exp: s32) -> f32;
+    ldexp  :: (value: f64, exp: i32) -> f64;
+    ldexpf :: (value: f32, exp: i32) -> f32;
 
     // Decompose into integer and fractional parts
     modf  :: (value: f64, iptr: *f64) -> f64;
     modff :: (value: f32, iptr: *f32) -> f32;
 
     // Scale by FLT_RADIX power
-    scalbn  :: (value: f64, exp: s32) -> f64;
-    scalbnf :: (value: f32, exp: s32) -> f32;
+    scalbn  :: (value: f64, exp: i32) -> f64;
+    scalbnf :: (value: f32, exp: i32) -> f32;
 
     // Extract exponent
-    ilogb  :: (value: f64) -> s32;
-    ilogbf :: (value: f32) -> s32;
+    ilogb  :: (value: f64) -> i32;
+    ilogbf :: (value: f32) -> i32;
 
     logb  :: (value: f64) -> f64;
     logbf :: (value: f32) -> f32;
@@ -167,13 +167,13 @@ extern "C" {
     nextafterf :: (x: f32, y: f32) -> f32;
 
     //////////////////////////////////////////////////////////////////////////////////////
-    //  Classification (return s32: non-zero = true)
+    //  Classification (return i32: non-zero = true)
     //////////////////////////////////////////////////////////////////////////////////////
-    isnan    :: (value: f64) -> s32;
-    isinf    :: (value: f64) -> s32;
-    isfinite :: (value: f64) -> s32;
-    isnormal :: (value: f64) -> s32;
-    signbit  :: (value: f64) -> s32;
+    isnan    :: (value: f64) -> i32;
+    isinf    :: (value: f64) -> i32;
+    isfinite :: (value: f64) -> i32;
+    isnormal :: (value: f64) -> i32;
+    signbit  :: (value: f64) -> i32;
 
     //////////////////////////////////////////////////////////////////////////////////////
     //  Error & Gamma

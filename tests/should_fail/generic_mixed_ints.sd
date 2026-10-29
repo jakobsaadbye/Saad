@@ -1,6 +1,6 @@
 // Typed integers are not widened when inferring a type parameter
 // expect-error: Conflicting types for type parameter 'T' of 'max'
-// expect-error: This argument to 'b' is of type s64, but an earlier argument made 'T' of type s32
+// expect-error: This argument to 'b' is of type i64, but an earlier argument made 'T' of type i32
 
 max :: <T>(a: T, b: T) -> T {
     if a > b { return a; }
@@ -8,7 +8,7 @@ max :: <T>(a: T, b: T) -> T {
 }
 
 main :: () {
-    a: s32 = 1;
-    b: s64 = 2;
+    a: i32 = 1;
+    b: i64 = 2;
     c := max(a, b);
 }

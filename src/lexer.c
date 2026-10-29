@@ -87,10 +87,10 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_TYPE_U32:              return "TYPE_U32";
         case TOKEN_TYPE_U64:              return "TYPE_U64";
         case TOKEN_TYPE_INT:              return "TYPE_INT";
-        case TOKEN_TYPE_S8:               return "TYPE_S8";
-        case TOKEN_TYPE_S16:              return "TYPE_S16";
-        case TOKEN_TYPE_S32:              return "TYPE_S32";
-        case TOKEN_TYPE_S64:              return "TYPE_S64";
+        case TOKEN_TYPE_I8:               return "TYPE_I8";
+        case TOKEN_TYPE_I16:              return "TYPE_I16";
+        case TOKEN_TYPE_I32:              return "TYPE_I32";
+        case TOKEN_TYPE_I64:              return "TYPE_I64";
         case TOKEN_TYPE_FLOAT:            return "TYPE_FLOAT";
         case TOKEN_TYPE_F32:              return "TYPE_F32";
         case TOKEN_TYPE_F64:              return "TYPE_F64";
@@ -303,7 +303,7 @@ KeywordMatch match_keyword(Lexer *lexer) {
         if (strcmp(text, "as") == 0) token = TOKEN_AS;
         if (strcmp(text, "in") == 0) token = TOKEN_IN;
         if (strcmp(text, "u8") == 0) token = TOKEN_TYPE_U8;
-        if (strcmp(text, "s8") == 0) token = TOKEN_TYPE_S8;
+        if (strcmp(text, "i8") == 0) token = TOKEN_TYPE_I8;
         if (strcmp(text, "xx") == 0) token = TOKEN_XX;
     }
     if (keyword_len == 3) {
@@ -313,9 +313,9 @@ KeywordMatch match_keyword(Lexer *lexer) {
         if (strcmp(text, "u16") == 0) token = TOKEN_TYPE_U16;
         if (strcmp(text, "u32") == 0) token = TOKEN_TYPE_U32;
         if (strcmp(text, "u64") == 0) token = TOKEN_TYPE_U64;
-        if (strcmp(text, "s16") == 0) token = TOKEN_TYPE_S16;
-        if (strcmp(text, "s32") == 0) token = TOKEN_TYPE_S32;
-        if (strcmp(text, "s64") == 0) token = TOKEN_TYPE_S64;
+        if (strcmp(text, "i16") == 0) token = TOKEN_TYPE_I16;
+        if (strcmp(text, "i32") == 0) token = TOKEN_TYPE_I32;
+        if (strcmp(text, "i64") == 0) token = TOKEN_TYPE_I64;
         if (strcmp(text, "f32") == 0) token = TOKEN_TYPE_F32;
         if (strcmp(text, "f64") == 0) token = TOKEN_TYPE_F64;
         if (strcmp(text, "any") == 0) token = TOKEN_ANY;

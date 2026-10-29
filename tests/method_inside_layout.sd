@@ -28,7 +28,7 @@ Pair :: struct <A, B> {
 main :: () {
     // Methods are not members, so the struct has the same size, alignment and members as without them
     assert(sizeof(WithMethods) == sizeof(Plain));
-    assert(sizeof(Pair<s64, u8>) == 16);
+    assert(sizeof(Pair<i64, u8>) == 16);
     assert(sizeof(Pair<u8, u8>) == 2);
 
     w := WithMethods{2, 3};

@@ -633,11 +633,11 @@ typedef enum PrimitiveKind {
     PRIMITIVE_U16,
     PRIMITIVE_U32,
     PRIMITIVE_U64,
-    PRIMITIVE_INT, // alias for s32
-    PRIMITIVE_S8,
-    PRIMITIVE_S16,
-    PRIMITIVE_S32,
-    PRIMITIVE_S64,
+    PRIMITIVE_INT, // alias for i32
+    PRIMITIVE_I8,
+    PRIMITIVE_I16,
+    PRIMITIVE_I32,
+    PRIMITIVE_I64,
 
     PRIMITIVE_FLOAT, // alias for f32
     PRIMITIVE_F32,

@@ -67,10 +67,10 @@ printTest :: () {
     print("\n------------ Print integer values --------------\n");
     {
         {
-            a: s8  = -1;
-            b: s16 = -2;
-            c: s32 = -3;
-            d: s64 = -4;
+            a: i8  = -1;
+            b: i16 = -2;
+            c: i32 = -3;
+            d: i64 = -4;
             Print("Signed = (% % % %)", a, b, c, d);
         }
         {

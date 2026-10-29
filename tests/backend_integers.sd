@@ -11,7 +11,7 @@ main :: () {
     c: u8 = a + b;
     assert(c == 44);
 
-    s: s8 = 127;
+    s: i8 = 127;
     s = s + 1;
     assert(s == -128);
 
@@ -27,8 +27,8 @@ main :: () {
     y: u32 = 3;
     assert(x / y == 1333333333);
     assert(x % y == 1);
-    n8: s8 = -100;
-    d8: s8 = 7;
+    n8: i8 = -100;
+    d8: i8 = 7;
     assert(n8 / d8 == -14);
     assert(n8 % d8 == -2);
 
@@ -54,14 +54,14 @@ main :: () {
     assert(sb < ss);
 
     // Conversions
-    m: s8 = -3;
-    wide: s64 = m;
+    m: i8 = -3;
+    wide: i64 = m;
     assert(wide == -3);
     um: u8 = 253;
     uwide: u64 = um;
     assert(uwide == 253);
-    t: s64 = 4294967298;
-    tt: s32 = xx t;
+    t: i64 = 4294967298;
+    tt: i32 = xx t;
     assert(tt == 2);
 
     huge: u64 = 18446744073709551615;

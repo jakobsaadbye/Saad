@@ -66,10 +66,10 @@ TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.kind = PRIMITIVE_U32,     .name = "u32",       .head = {.kind = TYPE_INTEGER, .size = 4}},
     {.kind = PRIMITIVE_U64,     .name = "u64",       .head = {.kind = TYPE_INTEGER, .size = 8}},
     {.kind = PRIMITIVE_INT,     .name = "int",       .head = {.kind = TYPE_INTEGER, .size = 4}},
-    {.kind = PRIMITIVE_S8,      .name = "s8",        .head = {.kind = TYPE_INTEGER, .size = 1}},
-    {.kind = PRIMITIVE_S16,     .name = "s16",       .head = {.kind = TYPE_INTEGER, .size = 2}},
-    {.kind = PRIMITIVE_S32,     .name = "s32",       .head = {.kind = TYPE_INTEGER, .size = 4}},
-    {.kind = PRIMITIVE_S64,     .name = "s64",       .head = {.kind = TYPE_INTEGER, .size = 8}},
+    {.kind = PRIMITIVE_I8,      .name = "i8",        .head = {.kind = TYPE_INTEGER, .size = 1}},
+    {.kind = PRIMITIVE_I16,     .name = "i16",       .head = {.kind = TYPE_INTEGER, .size = 2}},
+    {.kind = PRIMITIVE_I32,     .name = "i32",       .head = {.kind = TYPE_INTEGER, .size = 4}},
+    {.kind = PRIMITIVE_I64,     .name = "i64",       .head = {.kind = TYPE_INTEGER, .size = 8}},
     {.kind = PRIMITIVE_FLOAT,   .name = "float",     .head = {.kind = TYPE_FLOAT,   .size = 4}},
     {.kind = PRIMITIVE_F32,     .name = "f32",       .head = {.kind = TYPE_FLOAT,   .size = 4}},
     {.kind = PRIMITIVE_F64,     .name = "f64",       .head = {.kind = TYPE_FLOAT,   .size = 8}},
@@ -310,10 +310,10 @@ bool is_signed_integer(Type *type) {
     switch (prim->kind) {
     case PRIMITIVE_UNTYPED_INT:
     case PRIMITIVE_INT:
-    case PRIMITIVE_S8:
-    case PRIMITIVE_S16:
-    case PRIMITIVE_S32:
-    case PRIMITIVE_S64:
+    case PRIMITIVE_I8:
+    case PRIMITIVE_I16:
+    case PRIMITIVE_I32:
+    case PRIMITIVE_I64:
         return true;
     default:
         return false;
