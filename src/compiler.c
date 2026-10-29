@@ -278,6 +278,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     Parser parser         = parser_init(&lexer);
     parser.runtime_file_path        = join_path(config->stdlib_path, "runtime.sd");
     parser.builtin_string_file_path = join_path(config->stdlib_path, "builtin_string.sd");
+    parser.collections_file_path    = join_path(config->stdlib_path, "collections.sd");
     ConstEvaluator ce     = const_evaluator_init(&parser);
     Typer typer           = typer_init(&parser, &ce);
 

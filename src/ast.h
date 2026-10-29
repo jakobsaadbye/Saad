@@ -155,6 +155,7 @@ typedef struct AstImport {
     char    *string;
     char    *resolved_path;
     AstFile *imported_file;
+    bool     is_prelude; // The import of std/collections.sd that every file gets. A file's own declarations win over the ones it imports
 } AstImport;
 
 typedef struct AstExtern {

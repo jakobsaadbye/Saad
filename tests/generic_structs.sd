@@ -89,8 +89,8 @@ main :: () {
     {
         // Dynamic arrays of the type parameter
         list: List<int>;
-        append(list.elements, 10);
-        append(list.elements, 20);
+        list.elements.add(10);
+        list.elements.add(20);
         list.count = 2;
 
         assert(list.elements[0] == 10);
@@ -98,7 +98,7 @@ main :: () {
         assert(list.length() == 2);
 
         names: List<string>;
-        append(names.elements, "hello");
+        names.elements.add("hello");
         assert(names.elements.count == 1);
     }
     {

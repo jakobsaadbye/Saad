@@ -61,7 +61,6 @@ MS long long ms_llround(double x) { return llround(x); }
 
 // ---- runtime_support.c ----
 MS void ms_runtime_builtin_assert(bool c, RawString f, uint64_t l) { fflush(stdout); runtime_builtin_assert(c, f, l); }
-MS void ms_runtime_builtin_append(RawDynamicArray *da, void *item, bool by_value) { runtime_builtin_append(da, item, by_value); }
 MS int  ms_runtime_compare_strings(RawString *a, RawString *b) { return runtime_compare_strings(a, b); }
 MS TypePointer *ms_runtime_get_type_pointer(RawString n, Type *p) { return runtime_get_type_pointer(n, p); }
 MS TypeArray *ms_runtime_get_type_array(RawString n, int k, Type *e, int64_t c) { return runtime_get_type_array(n, k, e, c); }

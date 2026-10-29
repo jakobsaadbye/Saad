@@ -838,53 +838,9 @@ static int64_t fixed_array_count(TypeArray *array) {
     return array->capacity;
 }
 
-static int64_t dynamic_array_initial_capacity(TypeArray *array, int64_t count) {
-    int64_t capacity = array->capacity > count ? array->capacity : count;
-    return capacity > 0 ? capacity : 8; // The runtime grows by doubling, so it must never start at 0
-}
-
-// Writes the header of an empty dynamic array: { data = calloc(capacity, elem_size), count = 0, capacity, elem_size }
-static void emit_new_dynamic_array(Lowerer *L, IrAddr dst, TypeArray *array, int64_t count, int *out_data_ptr) {
-    int64_t capacity = dynamic_array_initial_capacity(array, count);
-    int args[2] = { emit_const(L, IR_I64, capacity), emit_const(L, IR_I64, array->elem_type->size) };
-    int data_ptr = emit_c_call(L, "calloc", IR_PTR, 2, args);
-    emit_store(L, IR_PTR, dst, data_ptr);
-    emit_store(L, IR_I64, addr_add(dst, 8),  emit_const(L, IR_I64, count));
-    emit_store(L, IR_I64, addr_add(dst, 16), emit_const(L, IR_I64, capacity));
-    emit_store(L, IR_I64, addr_add(dst, 24), emit_const(L, IR_I64, array->elem_type->size));
-    if (out_data_ptr) *out_data_ptr = data_ptr;
-}
-
-// Dynamic arrays are the only type whose default value is not all zeros. Initializes the ones inside 'type'
-static void emit_init_dynamic_arrays(Lowerer *L, IrAddr addr, Type *type) {
-    if (type->kind == TYPE_ARRAY) {
-        TypeArray *array = (TypeArray *) type;
-        if (array->array_kind == ARRAY_DYNAMIC) {
-            emit_new_dynamic_array(L, addr, array, 0, NULL);
-        } else if (array->array_kind == ARRAY_FIXED) {
-            Type *elem = array->elem_type;
-            bool contains = elem->kind == TYPE_STRUCT || (elem->kind == TYPE_ARRAY && ((TypeArray *) elem)->array_kind != ARRAY_SLICE);
-            if (contains) {
-                int64_t count = fixed_array_count(array);
-                for (int64_t i = 0; i < count && i < 256; i++) emit_init_dynamic_arrays(L, addr_add(addr, (int)(i * elem->size)), elem);
-            }
-        }
-        return;
-    }
-    if (type->kind == TYPE_STRUCT) {
-        DynamicArray members = ((TypeStruct *) type)->node->members->identifiers;
-        for (int i = 0; i < members.count; i++) {
-            AstIdentifier *member = da_get_deref(members, i);
-            if (member->flags & IDENTIFIER_IS_CONSTANT) continue;
-            emit_init_dynamic_arrays(L, addr_add(addr, member->member_offset), member->type);
-        }
-    }
-}
-
 // The value of a variable declared without an initializer
 static void emit_default_init(Lowerer *L, IrAddr addr, Type *type) {
     emit_zero(L, addr, type_storage_size(type));
-    emit_init_dynamic_arrays(L, addr, type);
 }
 
 static void copy_aggregate(Lowerer *L, IrAddr dst, Value src, int size) {
@@ -958,7 +914,7 @@ static void lower_struct_literal_into(Lowerer *L, AstStructLiteral *lit, IrAddr 
             AstStructInitializer *init = da_get_deref(lit->initializers, i);
             if (init->member == member) { initialized = true; break; }
         }
-        if (!initialized) emit_init_dynamic_arrays(L, addr_add(dst, member->member_offset), member->type);
+        if (!initialized) emit_zero(L, addr_add(dst, member->member_offset), type_storage_size(member->type));
     }
 
     for (int i = 0; i < lit->initializers.count; i++) {
@@ -1000,13 +956,9 @@ static void lower_array_literal_into(Lowerer *L, AstArrayLiteral *lit, IrAddr ds
         emit_store(L, IR_I64, addr_add(dst, 8), emit_const(L, IR_I64, count));
         return;
     }
-    case ARRAY_DYNAMIC: {
-        // { data, count, capacity, elem_size } with the data allocated on the heap
-        int data_ptr;
-        emit_new_dynamic_array(L, dst, array_type, count, &data_ptr);
-        lower_array_elements_into(L, lit, addr_vreg(data_ptr, 0), elem_type);
+    case ARRAY_DYNAMIC:
+        lower_fail(L, (Ast *) lit, "Compiler Error: Dynamic arrays are List<T> from the standard collections");
         return;
-    }
     }
 }
 
@@ -1877,35 +1829,9 @@ static int lower_argument(Lowerer *L, AstExpr *arg, Type *param_type, bool is_c_
     }
 }
 
-static Value lower_append_call(Lowerer *L, AstFunctionCall *call) {
-    // runtime_builtin_append(arr: *RawDynamicArray, elem: *void, byValue: bool)
-    // The typer already turned the first argument into an address-of. We always pass the element
-    // by reference (a pointer to a copy of it), which works for every element type.
-    AstExpr *array_ptr = da_get_deref(call->lowered_arguments, 0);
-    AstExpr *item      = da_get_deref(call->lowered_arguments, 1);
-
-    TypeArray *array_type = (TypeArray *) ((TypePointer *) array_ptr->type)->pointer_to;
-    Type      *elem_type  = array_type->elem_type;
-
-    int args[3];
-    args[0] = value_to_scalar(L, lower_expr(L, array_ptr));
-
-    Value item_copy = temp_place(L, elem_type, "append item");
-    store_expr(L, item_copy.addr, elem_type, item, true);
-    args[1] = addr_to_ptr(L, item_copy.addr);
-    args[2] = emit_const(L, IR_I8, 0);
-
-    emit_c_call(L, "runtime_builtin_append", IR_VOID, 3, args);
-    return value_none();
-}
-
 static Value lower_call(Lowerer *L, AstFunctionCall *call, int *ret_slots, int max_ret_slots) {
     AstFunctionDefn *func_defn = call->func_defn;
     if (func_defn == NULL) lower_fail(L, (Ast *) call, "Compiler Error: Call without a resolved function");
-
-    if (func_defn->is_extern && strcmp(func_defn->symbol_name, "runtime_builtin_append") == 0) {
-        return lower_append_call(L, call);
-    }
 
     bool is_c = func_defn->is_extern || func_defn->calling_convention == CALLING_CONV_MSVC;
 

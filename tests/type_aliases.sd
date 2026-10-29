@@ -5,7 +5,7 @@ List :: struct <T> {
     count: int;
 
     push :: method * (value: T) {
-        append(self.elements, value);
+        self.elements.add(value);
         self.count += 1;
     }
 }
@@ -52,7 +52,7 @@ main :: () {
     assert(sumAll(xs) == 6);
 
     g: Grow;
-    append(g, 1.5);
+    g.add(1.5);
     assert(g.count == 1);
 
     f: Four;

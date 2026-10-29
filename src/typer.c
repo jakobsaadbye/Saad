@@ -207,6 +207,11 @@ bool import_declarations(Parser *parser, AstImport *import, AstFile *to_file) {
             continue;
         }
 
+        // A file's own declarations win over the standard collections it imports, so a file can have its own List
+        if (import->is_prelude && find_identifier_in_scope(to_file->scope, src_ident->name)) {
+            continue;
+        }
+
         AstIdentifier *existing = add_identifier_to_scope(parser, to_file->scope, src_ident);
 
         if (existing == src_ident) {
@@ -336,11 +341,7 @@ Type *copy_type(Typer *typer, Type *type) {
         copy->elem_type = copy_type(typer, ((TypeArray *)(type))->elem_type);
         if (!copy->elem_type) return NULL;
 
-        if (copy->array_kind == ARRAY_DYNAMIC) {
-            copy->struct_defn = generate_struct_for_dynamic_array(parser, copy->elem_type);
-        } else {
-            copy->struct_defn = generate_struct_for_slice(parser, copy->elem_type);
-        }
+        copy->struct_defn = generate_struct_for_slice(parser, copy->elem_type);
         return (Type *)(copy);
     }
     case TYPE_FUNCTION: {
@@ -1174,6 +1175,13 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
 
         Type *arg_type = check_expression(typer, arg->value, NULL);
         if (!arg_type) return NULL;
+
+        // A collection passed where a slice is wanted is passed as its elements e.g a [..]int for a []T
+        Type *param_value_type = param->type->kind == TYPE_VARIADIC ? ((TypeVariadic *)param->type)->type : param->type;
+        if (arg_type->kind == TYPE_STRUCT && param_value_type->kind == TYPE_ARRAY) {
+            AstExpr *slice = collection_as_slice(typer, arg->value, NULL);
+            if (slice) arg_type = slice->type;
+        }
 
         // A spreaded slice or variadic gives the type of its elements to a variadic parameter
         if (arg->value->head.flags & AST_FLAG_EXPR_IS_SPREADED) {
@@ -2854,7 +2862,8 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
         Type *given  = ((Type **)returning_tuple->types.items)[i];
         Type *wanted = ((Type **)ef->return_types.items)[i];
 
-        if (!types_are_equal(given, wanted)) {
+        // @Incomplete: Like arguments, return values may both widen (i32 to i64) and narrow (i64 to i32), as existing code depends on narrowing
+        if (!types_are_equal(given, wanted) && !types_are_equal(wanted, given)) {
             // Seek to find the corresponding return value that causes the type mismatch
             int      type_index = -1;
             AstExpr *failing_return_value = NULL;
@@ -3113,86 +3122,6 @@ bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberA
     return true;
 }
 
-Type *check_builtin_function_call_append(Typer *typer, AstFunctionCall *call) {
-    if (call->arguments.count != 2) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Type mismatch. Wanted type ([..]T, T), Got type ()");
-        return NULL;
-    }
-
-    AstArgument *arg0 = ((AstArgument **)call->arguments.items)[0];
-    AstArgument *arg1 = ((AstArgument **)call->arguments.items)[1];
-
-    Type *resolved0 = check_expression(typer, arg0->value, NULL);
-    if (!resolved0) return NULL;
-
-    if (arg0->value->type->kind != TYPE_ARRAY) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg0->value), "Type mismatch. Wanted type [..]T, got type %s", type_to_str(arg0->value->type));
-        return NULL;
-    }
-
-    AstFunctionDefn *readonly = readonly_self_place(typer, arg0->value);
-    if (readonly) {
-        report_readonly_self(typer, (Ast *)arg0->value, readonly, "append to", arg0->value);
-        return NULL;
-    }
-
-    TypeArray *da_type = (TypeArray *) arg0->value->type;
-    if (da_type->array_kind != ARRAY_DYNAMIC) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg0->value), "Type mismatch. Wanted type [..]%s, got type %s", type_to_str(da_type->elem_type), type_to_str((Type *)da_type));
-        return NULL;
-    }
-
-    Type *resolved1 = check_expression(typer, arg1->value, da_type->elem_type);
-    if (!resolved1) return NULL;
-    
-    if (!types_are_equal(da_type->elem_type, arg1->value->type)) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg1->value), "Type mismatch. Wanted type %s, got type %s", type_to_str(da_type->elem_type), type_to_str(arg1->value->type));
-        return NULL;
-    }
-    
-    AstIdentifier *func_defn_ident = lookup_from_scope(typer->parser, typer->current_file->scope, "runtime_builtin_append");
-    if (func_defn_ident == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Compiler Error: Failed to find builtin function 'runtime_builtin_append'");
-        return NULL;
-    }
-    if (func_defn_ident->type == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Compiler Error: 'runtime_builtin_append' was not typechecked before being called");
-        return NULL;
-    }
-    if (func_defn_ident->type->kind != TYPE_FUNCTION) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(func_defn_ident), "Compiler Error: 'runtime_builtin_append' identifier found, but it was not a function");
-        return NULL;
-    }
-
-    call->func_defn = ((TypeFunction *)func_defn_ident->type)->node;
-    call->head.type = ((Type **)call->func_defn->return_types.items)[0];
-
-    // Pass the dynamic array as a ptr
-    arg0->value = (AstExpr *) generate_address_of_value(typer, arg0->value);
-
-    // Try reduce the value argument to a literal to know whether its going to be passed by value or reference
-    bool pass_by_value = false;
-
-    if (arg1->value->type->size <= 8) {
-        if (arg1->value->type->kind != TYPE_POINTER) {
-            pass_by_value = true;
-        }
-    }
-
-    AstExpr *arg2_value = generate_literal_bool(typer->parser, pass_by_value);
-    AstArgument *arg2   = generate_argument_from_expr(typer, arg2_value);
-    arg2->ident         = generate_identifier(typer->parser, "by_value", arg2_value->type, 0);
-    da_append(&call->arguments, arg2);
-
-    // Build up the lowered argument list
-    call->lowered_arguments = da_init(call->arguments.count, sizeof(AstExpr *));
-    for (int i = 0; i < call->arguments.count; i++) {
-        AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
-        da_append(&call->lowered_arguments, arg->value);
-    }
-
-    return call->head.type;
-}
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     if (typer->enclosing_function == NULL) {
@@ -3208,13 +3137,6 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     Type *expr_type = check_expression(typer, call->expression, NULL);
     typer->checking_callee = false;
     if (!expr_type) return NULL;
-
-    // Check for builtin functions
-    if (is_literal_identifier(call->expression)) {
-        AstIdentifier *call_ident = ((AstLiteral *)call->expression)->as.value.identifier.resolved_identifier;
-
-        if (strcmp(call_ident->name, "runtime_builtin_append") == 0) return check_builtin_function_call_append(typer, call);
-    }
 
     if (call->expression->type->kind != TYPE_FUNCTION) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call->expression), "Expression is not a callable function. Type of expression is %s", type_to_str(call->expression->type));
@@ -4628,11 +4550,9 @@ Type *check_new(Typer *typer, AstNew *ast_new, Type *ctx_type) {
     }
 
     if (expr_type->kind == TYPE_ARRAY) {
-        // Modify the array to be a dynamic array
-        TypeArray *array = (TypeArray *)expr_type;
-        array->array_kind = ARRAY_DYNAMIC;
-
-        return (Type *) array;
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_new->expr, "Arrays cannot be newed. A dynamic array is a list");
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Make a list from a literal instead e.g xs: [..]int = [1, 2, 3];");
+        return NULL;
     }
 
     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_new->expr, "Invalid expression to new. Only arrays and structs can be newed");
@@ -5515,17 +5435,6 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             ident = lookup_from_scope(typer->parser, typer->current_scope->belongs_to_struct->static_members, ident_name);
         } else {
             ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
-        }
-
-        if (ident == NULL) {
-            // Check if its an alias for a builtin function
-            if (strcmp(ident_name, "append") == 0) {
-                ident = lookup_from_scope(typer->parser, typer->current_file->scope, "runtime_builtin_append");
-            }
-
-            if (ident != NULL) {
-                ident->flags |= IDENTIFIER_IS_BUILTIN_FUNCTION;
-            }
         }
 
         if (ident == NULL) {

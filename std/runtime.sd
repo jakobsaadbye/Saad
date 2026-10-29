@@ -113,12 +113,6 @@ Any :: struct {
     type: *Type;
 }
 
-RawDynamicArray :: struct {
-    data:     *u8;
-    count:    i64;
-    cap:      i64;
-    elemSize: i64;
-}
 
 //////////////////////////////////
 // Builtin functions that are filled out by the compiler
@@ -134,7 +128,6 @@ extern "C" {
     runtime_get_type_enum    :: (name: string, valueName: string, backingType: *Type, minValue: int, maxValue: int) -> *TypeEnum;
     runtime_get_type_struct  :: (name: string, members: *StructMember, members_count: int, size: int, alignment: int) -> *TypeStruct;
     runtime_get_type_any     :: () -> *TypeAny;
-    runtime_builtin_append   :: (arr: *RawDynamicArray, elem: *void, byValue: bool) -> void;
     runtime_compare_strings  :: (str1: *string, str2: *string) -> int;
 }
 

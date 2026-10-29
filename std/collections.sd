@@ -1,0 +1,217 @@
+//////////////////////////////////
+// Collections
+//
+// Every file imports this file. [..]T is another way to write List<T>.
+//
+// The syntax for collections comes from methods, so any struct can have it:
+//   c[k]                     index(k) to read, or indexRef(k) which gives a pointer to the element
+//   for x in c               elements(), which gives a slice of the elements
+//   [a, b, c]                reserve(n) and add(x) when a collection is wanted
+//   [k1: v1, k2: v2]         reserve(n) and set(k, v)
+//////////////////////////////////
+
+import "c_stdlib";
+
+//
+// Allocators
+//
+
+// Where a collection gets its memory from. A null allocator means the heap (realloc and free)
+Allocator :: struct {
+    context: *void;
+
+    // Changes the size of a block of memory, like realloc. A null 'memory' gives a new block and a 'size' of 0 frees the block
+    resize: (context: *void, memory: *void, size: i64) -> *void;
+}
+
+resizeMemory :: (allocator: *Allocator, memory: *void, size: i64) -> *void {
+    if allocator != null {
+        return allocator.resize(allocator.context, memory, size);
+    }
+    if size == 0 {
+        free(memory);
+        return null;
+    }
+    return realloc(memory, size);
+}
+
+//
+// List
+//
+
+// A growable array. [..]T is the same as List<T>
+List :: struct <T> {
+    data:      *T;
+    count:     i64;
+    capacity:  i64;
+    allocator: *Allocator; // Null means the heap
+
+    // Adds a value at the end
+    add :: method * (value: T) {
+        if self.count == self.capacity {
+            self.grow();
+        }
+        self.data[self.count] = value;
+        self.count += 1;
+    }
+
+    // Adds a value at the index, moving the values from the index one place up
+    insertAt :: method * (index: i64, value: T) {
+        assert(index >= 0 && index <= self.count);
+        if self.count == self.capacity {
+            self.grow();
+        }
+
+        i := self.count;
+        while i > index {
+            self.data[i] = self.data[i - 1];
+            i -= 1;
+        }
+        self.data[index] = value;
+        self.count += 1;
+    }
+
+    // Removes the value at the index and returns it. The values after it move one place down, so the order is kept
+    removeAt :: method * (index: i64) -> T {
+        assert(index >= 0 && index < self.count);
+        value := self.data[index];
+
+        i := index;
+        while i < self.count - 1 {
+            self.data[i] = self.data[i + 1];
+            i += 1;
+        }
+        self.count -= 1;
+        return value;
+    }
+
+    // Removes the value at the index and returns it, by moving the last value into its place. Faster than removeAt(), but changes the order
+    swapRemoveAt :: method * (index: i64) -> T {
+        assert(index >= 0 && index < self.count);
+        value := self.data[index];
+        self.data[index] = self.data[self.count - 1];
+        self.count -= 1;
+        return value;
+    }
+
+    // Removes the last value and returns it
+    removeLast :: method * () -> T {
+        assert(self.count > 0);
+        self.count -= 1;
+        return self.data[self.count];
+    }
+
+    first :: method () -> T {
+        assert(self.count > 0);
+        return self.data[0];
+    }
+
+    last :: method () -> T {
+        assert(self.count > 0);
+        return self.data[self.count - 1];
+    }
+
+    // The first value and true, or false if the list is empty
+    tryFirst :: method () -> (T, bool) {
+        if self.count == 0 {
+            empty: T;
+            return empty, false;
+        }
+        return self.data[0], true;
+    }
+
+    // The last value and true, or false if the list is empty
+    tryLast :: method () -> (T, bool) {
+        if self.count == 0 {
+            empty: T;
+            return empty, false;
+        }
+        return self.data[self.count - 1], true;
+    }
+
+    isEmpty :: method () -> bool {
+        return self.count == 0;
+    }
+
+    // The index of the first value equal to 'value', or -1
+    indexOf :: method (value: T) -> i64 {
+        for i in 0..self.count {
+            if self.data[i] == value {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    contains :: method (value: T) -> bool {
+        return self.indexOf(value) != -1;
+    }
+
+    reverse :: method * () {
+        i: i64 = 0;
+        j := self.count - 1;
+        while i < j {
+            tmp := self.data[i];
+            self.data[i] = self.data[j];
+            self.data[j] = tmp;
+            i += 1;
+            j -= 1;
+        }
+    }
+
+    // Makes room for 'capacity' values, so that adding them doesn't need to allocate
+    reserve :: method * (capacity: i64) {
+        if capacity <= self.capacity {
+            return;
+        }
+        self.data     = resizeMemory(self.allocator, self.data, capacity * sizeof(T)) as *T;
+        self.capacity = capacity;
+    }
+
+    // Removes all the values, but keeps the memory
+    clear :: method * () {
+        self.count = 0;
+    }
+
+    // Gives back the memory of the list. The list is empty afterwards
+    free :: method * () {
+        if self.data != null {
+            resizeMemory(self.allocator, self.data, 0);
+        }
+        self.data     = null;
+        self.count    = 0;
+        self.capacity = 0;
+    }
+
+    // A new list with the same values
+    copy :: method () -> List<T> {
+        result: List<T>;
+        result.allocator = self.allocator;
+        result.reserve(self.count);
+        for i in 0..self.count {
+            result.add(self.data[i]);
+        }
+        return result;
+    }
+
+    // The collection protocol
+    indexRef :: method (index: i64) -> *T {
+        assert(index >= 0 && index < self.count);
+        return &self.data[index];
+    }
+
+    elements :: method () -> []T {
+        result: []T;
+        result.data  = self.data;
+        result.count = self.count;
+        return result;
+    }
+
+    grow :: method * () {
+        capacity := self.capacity * 2;
+        if capacity < 4 {
+            capacity = 4;
+        }
+        self.reserve(capacity);
+    }
+}

@@ -24,8 +24,8 @@ main :: () {
 }
 
 set :: method <K, V>(m: *Map<K, V>, key: K, value: V) {
-    append(m.keys, key);
-    append(m.values, value);
+    m.keys.add(key);
+    m.values.add(value);
     m.count += 1;
 }
 

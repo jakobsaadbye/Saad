@@ -18,11 +18,11 @@ main :: () {
         // Simple numbers
         numbers: [..]u8;
         
-        append(numbers, 1 + 2);
-        append(numbers, 2);
-        append(numbers, 3);
-        append(numbers, 4);
-        append(numbers, 5);
+        numbers.add(1 + 2);
+        numbers.add(2);
+        numbers.add(3);
+        numbers.add(4);
+        numbers.add(5);
     
         for v in numbers {
             print("v = %\n", v);
@@ -35,11 +35,11 @@ main :: () {
         // Structs
         verticies: [..]Vector2;
 
-        append(verticies, {1, 2});
-        append(verticies, {3, 4});
-        append(verticies, {5, 6});
-        append(verticies, {7, 8});
-        append(verticies, {9, 10});
+        verticies.add({1, 2});
+        verticies.add({3, 4});
+        verticies.add({5, 6});
+        verticies.add({7, 8});
+        verticies.add({9, 10});
 
         for v in verticies {
             print("v = %\n", v);
@@ -50,7 +50,7 @@ main :: () {
         arr: [..]Vector2;
 
         start := Vector2{6, 9};
-        append(arr, start);
+        arr.add(start);
 
         for v in arr {
             Print("%", v);
@@ -60,11 +60,11 @@ main :: () {
         // Enums
         fruits: [..]Fruit;
 
-        append(fruits, .mango);
-        append(fruits, .kiwi);
-        append(fruits, .dragonfruit);
-        append(fruits, .apple);
-        append(fruits, .orange);
+        fruits.add(.mango);
+        fruits.add(.kiwi);
+        fruits.add(.dragonfruit);
+        fruits.add(.apple);
+        fruits.add(.orange);
 
         for v in fruits {
             print("v = %\n", v);

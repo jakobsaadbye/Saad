@@ -1,0 +1,173 @@
+// [..]T is List<T> from std/collections.sd, which is written in Saad
+
+import "fmt";
+import "c_stdlib";
+
+Point :: struct { x: int; y: int; }
+
+sum :: (values: []int) -> int {
+    total := 0;
+    for v in values { total += v; }
+    return total;
+}
+
+firstOf :: <T>(values: []T) -> T {
+    return values[0];
+}
+
+// An allocator that counts how much memory is in use
+Counter :: struct {
+    bytes: i64;
+    calls: int;
+}
+
+countingResize :: (context: *void, memory: *void, size: i64) -> *void {
+    counter := context as *Counter;
+    counter.calls += 1;
+    if size == 0 {
+        free(memory);
+        return null;
+    }
+    return realloc(memory, size);
+}
+
+main :: () {
+    {
+        // Adding and reading
+        xs: [..]int;
+        assert(xs.isEmpty());
+        xs.add(1);
+        xs.add(2);
+        xs.add(3);
+        assert(xs.count == 3);
+        assert(xs[0] == 1 && xs[2] == 3);
+        assert(xs.first() == 1);
+        assert(xs.last() == 3);
+        assert(!xs.isEmpty());
+
+        xs[1] = 20;
+        xs[2] += 1;
+        assert(xs[1] == 20 && xs[2] == 4);
+
+        // A literal
+        ys: [..]int = [5, 6, 7];
+        assert(ys.count == 3 && ys[1] == 6);
+
+        // [..]T and List<T> are the same type
+        zs: List<int> = ys;
+        assert(zs.last() == 7);
+        assert(typeof(ys) == "List<int>");
+    }
+    {
+        // Inserting and removing
+        xs: [..]int = [1, 2, 3, 4, 5];
+        xs.insertAt(0, 0);
+        xs.insertAt(6, 6);
+        xs.insertAt(3, 99);
+        assert(xs.count == 8);
+        assert(xs[0] == 0 && xs[3] == 99 && xs[7] == 6);
+
+        assert(xs.removeAt(3) == 99);
+        assert(xs.count == 7 && xs[3] == 3);
+
+        assert(xs.removeLast() == 6);
+        assert(xs.count == 6 && xs.last() == 5);
+
+        assert(xs.swapRemoveAt(0) == 0);
+        assert(xs[0] == 5 && xs.count == 5);
+
+        xs.clear();
+        assert(xs.count == 0 && xs.capacity > 0);
+
+        v, ok := xs.tryLast();
+        assert(!ok);
+        xs.add(42);
+        first, found := xs.tryFirst();
+        assert(found && first == 42);
+    }
+    {
+        // Searching
+        names: [..]string = ["ada", "bob", "cy"];
+        assert(names.indexOf("bob") == 1);
+        assert(names.indexOf("dan") == -1);
+        assert(names.contains("cy"));
+
+        points: [..]Point = [{1, 2}, {3, 4}];
+        assert(points.contains(Point{3, 4}));
+        assert(!points.contains(Point{4, 3}));
+    }
+    {
+        // Iterating
+        xs: [..]int = [1, 2, 3];
+        total := 0;
+        for x in xs { total += x; }
+        assert(total == 6);
+
+        for x, i in xs { assert(xs[i] == x); }
+        for *x in xs { *x *= 10; }
+        assert(xs[0] == 10 && xs[2] == 30);
+
+        // A list is passed as a slice where one is wanted
+        assert(sum(xs) == 60);
+        assert(firstOf(xs) == 10);
+        view: []int = xs;
+        assert(view.count == 3);
+    }
+    {
+        // Reverse and copy
+        xs: [..]int = [1, 2, 3, 4];
+        xs.reverse();
+        assert(xs[0] == 4 && xs[3] == 1);
+
+        copy := xs.copy();
+        copy[0] = 100;
+        assert(xs[0] == 4 && copy[0] == 100);
+        assert(copy.count == 4);
+    }
+    {
+        // Lists of structs and lists of lists
+        points: [..]Point;
+        points.add({1, 2});
+        points[0].x = 10;
+        p := &points[0];
+        p.y = 20;
+        assert(points[0] == Point{10, 20});
+
+        grid: [..][..]int;
+        grid.add([1, 2]);
+        grid.add([3, 4, 5]);
+        grid[1].add(6);
+        assert(grid.count == 2 && grid[1].count == 4 && grid[1][3] == 6);
+    }
+    {
+        // Growing
+        xs: [..]int;
+        for i in 0..1000 { xs.add(i); }
+        assert(xs.count == 1000 && xs[999] == 999);
+        assert(xs.capacity >= 1000);
+
+        ys: [..]int;
+        ys.reserve(64);
+        assert(ys.capacity == 64 && ys.count == 0);
+        xs.free();
+        assert(xs.count == 0 && xs.capacity == 0);
+    }
+    {
+        // A list with its own allocator
+        counter: Counter;
+        allocator := Allocator{&counter, countingResize};
+
+        xs: [..]int;
+        xs.allocator = &allocator;
+        for i in 0..10 { xs.add(i); }
+        assert(counter.calls == 3); // Capacity 4, then 8, then 16
+        assert(xs[9] == 9);
+        xs.free();
+        assert(counter.calls == 4);
+    }
+    {
+        // Printing shows the elements
+        xs: [..]int = [1, 2, 3];
+        Print("%", xs);
+    }
+}
