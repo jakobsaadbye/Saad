@@ -190,6 +190,22 @@ char *type_to_str(Type *type) {
         return sb_to_string(&sb); // @Leak
     }
     case TYPE_NAME:      return type->name;
+    case TYPE_GENERIC_INSTANCE: {
+        TypeGenericInstance *instance = (TypeGenericInstance *)(type);
+        StringBuilder sb = sb_init(32);
+
+        sb_append(&sb, "%s<", type->name);
+        for (int i = 0; i < instance->type_args.count; i++) {
+            Type *arg = ((Type **)instance->type_args.items)[i];
+            sb_append(&sb, "%s", type_to_str(arg));
+            if (i + 1 < instance->type_args.count) {
+                sb_append(&sb, ", ");
+            }
+        }
+        sb_append(&sb, ">");
+
+        return sb_to_string(&sb); // @Leak
+    }
     case TYPE_STRUCT:    return type->name;
     case TYPE_ENUM:      return type->name; // "enum";
     case TYPE_FUNCTION: {

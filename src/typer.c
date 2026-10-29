@@ -62,6 +62,10 @@ void reserve_local_storage(AstFunctionDefn *func_defn, int size);
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size);
 void reset_temporary_storage(AstFunctionDefn *func_defn);
 AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name);
+bool check_struct_defn(Typer *typer, AstStruct *ast_struct);
+TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instance);
+Type *copy_type(Typer *typer, Type *type);
+Type *resolve_type(Typer *typer, Type *type);
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 
 AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr);
@@ -241,6 +245,234 @@ void dump_scope_recursive(Parser *parser, AstBlock *scope) {
     dump_scope_recursive(parser, scope->parent);
 }
 
+// Deep copies a type that has not been resolved yet. resolve_type() resolves types in place, so every
+// instance of a generic struct needs its own copy of the member types written in the generic struct
+Type *copy_type(Typer *typer, Type *type) {
+    Parser *parser = typer->parser;
+
+    switch (type->kind) {
+    case TYPE_NAME: {
+        Type *copy = type_alloc(&parser->type_table, sizeof(Type));
+        memcpy(copy, type, sizeof(Type));
+        return copy;
+    }
+    case TYPE_GENERIC_INSTANCE: {
+        TypeGenericInstance *instance = (TypeGenericInstance *)(type);
+        TypeGenericInstance *copy     = type_alloc(&parser->type_table, sizeof(TypeGenericInstance));
+        memcpy(copy, instance, sizeof(TypeGenericInstance));
+
+        copy->type_args = da_init(instance->type_args.count, sizeof(Type *));
+        for (int i = 0; i < instance->type_args.count; i++) {
+            Type *arg = copy_type(typer, ((Type **)instance->type_args.items)[i]);
+            if (!arg) return NULL;
+            da_append(&copy->type_args, arg);
+        }
+        return (Type *)(copy);
+    }
+    case TYPE_STRING: {
+        TypeString *copy = ast_allocate(parser, sizeof(TypeString));
+        memcpy(copy, type, sizeof(TypeString));
+        return (Type *)(copy);
+    }
+    case TYPE_ANY: {
+        TypeAny *copy = ast_allocate(parser, sizeof(TypeAny));
+        memcpy(copy, type, sizeof(TypeAny));
+        return (Type *)(copy);
+    }
+    case TYPE_POINTER: {
+        TypePointer *copy = type_alloc(&parser->type_table, sizeof(TypePointer));
+        memcpy(copy, type, sizeof(TypePointer));
+
+        copy->pointer_to = copy_type(typer, ((TypePointer *)(type))->pointer_to);
+        if (!copy->pointer_to) return NULL;
+        return (Type *)(copy);
+    }
+    case TYPE_ARRAY: {
+        TypeArray *copy = ast_allocate(parser, sizeof(TypeArray));
+        memcpy(copy, type, sizeof(TypeArray));
+
+        copy->elem_type = copy_type(typer, ((TypeArray *)(type))->elem_type);
+        if (!copy->elem_type) return NULL;
+
+        if (copy->array_kind == ARRAY_DYNAMIC) {
+            copy->struct_defn = generate_struct_for_dynamic_array(parser, copy->elem_type);
+        } else {
+            copy->struct_defn = generate_struct_for_slice(parser, copy->elem_type);
+        }
+        return (Type *)(copy);
+    }
+    case TYPE_FUNCTION: {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)(type), "Function types inside generic structs are not yet supported");
+        return NULL;
+    }
+    default:
+        // Primitives are never changed when resolved, so they can be shared
+        return type;
+    }
+}
+
+// Returns the struct for an instance of a generic struct e.g List<int>. The first time an instance is seen, a new
+// struct is made by copying the members of the generic struct into a scope where the type parameters are bound to the type arguments
+TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instance) {
+    Parser *parser = typer->parser;
+
+    AstIdentifier *ident = lookup_from_scope(parser, typer->current_scope, instance->head.name);
+    if (ident == NULL) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)(instance), "Unknown type '%s'", instance->head.name);
+        return NULL;
+    }
+
+    if (ident->type == NULL || ident->type->kind != TYPE_STRUCT || ((TypeStruct *)ident->type)->node->type_params.count == 0) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)(instance), "'%s' is not a generic struct, so it cannot be given type arguments", instance->head.name);
+        return NULL;
+    }
+
+    TypeStruct *generic_type = (TypeStruct *)(ident->type);
+    AstStruct  *generic      = generic_type->node;
+
+    if (instance->type_args.count != generic->type_params.count) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)(instance), "Generic struct '%s' takes %d type argument%s, but %d %s given", instance->head.name,
+            generic->type_params.count, generic->type_params.count == 1 ? "" : "s",
+            instance->type_args.count, instance->type_args.count == 1 ? "was" : "were");
+        report_error_ast(parser, LABEL_NOTE, (Ast *)(generic->identifier), "Here is the definition of '%s'", instance->head.name);
+        return NULL;
+    }
+
+    // Resolve the type arguments where they are written. They are resolved into a new list, so that the type arguments of
+    // the instance are left untouched and can be resolved again
+    DynamicArray type_args = da_init(instance->type_args.count, sizeof(Type *));
+    for (int i = 0; i < instance->type_args.count; i++) {
+        Type *arg = ((Type **)instance->type_args.items)[i];
+
+        Type *resolved = resolve_type(typer, arg);
+        if (!resolved) return NULL;
+
+        if (resolved->kind == TYPE_VOID) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)(arg), "Type argument cannot be void");
+            return NULL;
+        }
+
+        da_append(&type_args, resolved);
+    }
+
+    // The name of the instance e.g "List<int>". Structs are compared by name, so instances with the same name are the same type
+    StringBuilder sb = sb_init(32);
+    sb_append(&sb, "%s<", instance->head.name);
+    for (int i = 0; i < type_args.count; i++) {
+        sb_append(&sb, "%s", type_to_str(((Type **)type_args.items)[i]));
+        if (i + 1 < type_args.count) {
+            sb_append(&sb, ", ");
+        }
+    }
+    sb_append(&sb, ">");
+    char *name = sb_to_string(&sb);
+
+    for (int i = 0; i < generic->instances.count; i++) {
+        TypeStruct *existing = ((TypeStruct **)generic->instances.items)[i];
+        if (strcmp(existing->head.name, name) == 0) {
+            da_free(&type_args);
+            return existing;
+        }
+    }
+
+    // Make the instance
+    AstStruct *node      = ast_allocate(parser, sizeof(AstStruct));
+    node->head           = generic->head;
+    node->head.flags     = 0;
+    node->static_members = make_empty_struct_scope(parser, node);
+    node->methods        = make_empty_struct_scope(parser, node);
+    node->generic_struct = generic;
+    node->type_args      = type_args;
+
+    TypeStruct *struct_type      = ast_allocate(parser, sizeof(TypeStruct));
+    struct_type->head.head       = generic_type->head.head;
+    struct_type->head.kind       = TYPE_STRUCT;
+    struct_type->head.name       = name;
+    struct_type->node            = node;
+
+    AstIdentifier *struct_ident  = ast_allocate(parser, sizeof(AstIdentifier));
+    memcpy(struct_ident, generic->identifier, sizeof(AstIdentifier));
+    struct_ident->name           = name;
+    struct_ident->type           = (Type *)(struct_type);
+    struct_type->identifier      = struct_ident;
+    node->identifier             = struct_ident;
+
+    // Scope binding the type parameters to the type arguments. Its parent is the scope of the generic struct, so that other names are looked up from where the generic struct is defined
+    AstBlock *params_scope    = ast_allocate(parser, sizeof(AstBlock));
+    params_scope->head        = generic->members->head;
+    params_scope->kind        = BLOCK_DECLARATIVE;
+    params_scope->parent      = generic->members->parent;
+    params_scope->statements  = da_init(1, sizeof(Ast *));
+    params_scope->identifiers = da_init(generic->type_params.count, sizeof(AstIdentifier *));
+    params_scope->enclosing_function = generic->members->enclosing_function;
+
+    for (int i = 0; i < generic->type_params.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)generic->type_params.items)[i];
+
+        AstIdentifier *bound = ast_allocate(parser, sizeof(AstIdentifier));
+        memcpy(bound, param, sizeof(AstIdentifier));
+        bound->type   = ((Type **)type_args.items)[i];
+        bound->flags |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_RESOLVED;
+        da_append(&params_scope->identifiers, bound);
+    }
+
+    // Copy the members
+    AstBlock *members          = ast_allocate(parser, sizeof(AstBlock));
+    members->head              = generic->members->head;
+    members->kind              = BLOCK_DECLARATIVE;
+    members->parent            = params_scope;
+    members->statements        = da_init(1, sizeof(Ast *));
+    members->identifiers       = da_init(generic->members->identifiers.count, sizeof(AstIdentifier *));
+    members->enclosing_function = generic->members->enclosing_function;
+    members->belongs_to_struct = node;
+    node->members              = members;
+
+    AstDeclaration *generic_decl = NULL; // Members declared together e.g 'a, b: T' share a declaration
+    AstDeclaration *decl         = NULL;
+    for (int i = 0; i < generic->members->identifiers.count; i++) {
+        AstIdentifier *generic_member = ((AstIdentifier **)generic->members->identifiers.items)[i];
+
+        if (generic_member->decl != generic_decl) {
+            generic_decl = generic_member->decl;
+
+            decl = ast_allocate(parser, sizeof(AstDeclaration));
+            memcpy(decl, generic_decl, sizeof(AstDeclaration));
+            decl->idents = da_init(generic_decl->idents.count, sizeof(AstIdentifier *));
+            decl->values = da_init(1, sizeof(AstExpr *)); // Struct members cannot have default values, so there are no values to copy
+            decl->type   = copy_type(typer, generic_decl->type);
+            if (!decl->type) return NULL;
+        }
+
+        AstIdentifier *member = ast_allocate(parser, sizeof(AstIdentifier));
+        memcpy(member, generic_member, sizeof(AstIdentifier));
+        member->decl          = decl;
+        member->type          = decl->type;
+        member->member_offset = 0;
+        da_append(&decl->idents, member);
+
+        add_identifier_to_scope(parser, members, member);
+    }
+
+    // Add the instance before it is checked, so that members referring to the instance itself e.g 'next: *Node<T>' find it
+    da_append(&generic->instances, struct_type);
+
+    Typer saved_state = *typer;
+    typer->current_file         = generic->head.file;
+    typer->parser->current_file = generic->head.file;
+
+    bool ok = check_struct_defn(typer, node);
+
+    typer_restore_state(typer, saved_state);
+    typer->inside_declaration = saved_state.inside_declaration;
+
+    if (!ok) {
+        report_error_ast(parser, LABEL_NOTE, (Ast *)(instance), "... while instantiating '%s' here", name);
+        return NULL;
+    }
+
+    return struct_type;
+}
+
 Type *resolve_type(Typer *typer, Type *type) {
     if (is_primitive_type(type->kind)) {
         return type;
@@ -338,7 +570,22 @@ Type *resolve_type(Typer *typer, Type *type) {
             return NULL;
         }
 
+        if (ident->type && ident->type->kind == TYPE_STRUCT && ((TypeStruct *)ident->type)->node->type_params.count > 0) {
+            AstStruct *generic = ((TypeStruct *)ident->type)->node;
+            AstIdentifier *param = ((AstIdentifier **)generic->type_params.items)[0];
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Generic struct '%s' is missing its type arguments", type->name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Give it a type for '%s', e.g %s<int>", param->name, type->name);
+            return NULL;
+        }
+
         return ident->type;
+    }
+
+    if (type->kind == TYPE_GENERIC_INSTANCE) {
+        TypeStruct *instance = instantiate_generic_struct(typer, (TypeGenericInstance *)(type));
+        if (!instance) return NULL;
+
+        return (Type *)(instance);
     }
 
     if (type->kind == TYPE_POINTER) {
@@ -1089,6 +1336,12 @@ int get_alignment_of_type(Type *type) {
 
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     if (ast_struct->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
+        return true;
+    }
+
+    if (ast_struct->type_params.count > 0) {
+        // Generic structs are not checked themselves, only their instances are. See instantiate_generic_struct()
+        ast_struct->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
         return true;
     }
 
@@ -2586,6 +2839,12 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
             // @Cleanup @Speed: Use a string buffer located in Parser to allocate the strings instead of malloc
             func_defn->symbol_name = malloc(strlen(func_defn->receiver_struct->identifier->name) + 8 + strlen(func_defn->identifier->name));
             sprintf(func_defn->symbol_name, "%s.%s", func_defn->receiver_struct->identifier->name, func_defn->identifier->name);
+
+            // Instances of generic structs have names like 'Pair<int, *float>' that are not valid asm symbols, so replace
+            // the invalid characters. The backend makes the symbol unique if two methods end up with the same symbol
+            for (char *c = func_defn->symbol_name; *c != '\0'; c++) {
+                if (!starts_identifier(*c) && !is_digit(*c) && *c != '.') *c = '_';
+            }
         } else {
             func_defn->symbol_name = func_defn->identifier->name;
         }
@@ -3337,7 +3596,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
             return literal->explicit_type;
         }
 
-        if (type->kind == TYPE_NAME) {
+        if (type->kind == TYPE_NAME || type->kind == TYPE_GENERIC_INSTANCE) {
             Type *resolved = resolve_type(typer, type);
             if (!resolved) return NULL;
 
