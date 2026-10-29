@@ -269,6 +269,12 @@ typedef struct AstStruct {
     AstBlock      *static_members;
     AstBlock      *methods;
     bool           is_static_struct; // All members in this struct are constants
+
+    // Generics
+    DynamicArray   type_params;      // of *AstIdentifier. Set if this is a generic struct e.g List :: struct <T> {...}. Generic structs are never sized themselves, only their instances are
+    DynamicArray   instances;        // of *TypeStruct. All the instantiations of this generic struct, e.g List<int>, List<float>
+    AstStruct     *generic_struct;   // Set on an instance to the generic struct it was instantiated from
+    DynamicArray   type_args;        // of *Type. Set on an instance to the (resolved) types it was instantiated with
 } AstStruct;
 
 typedef struct AstEnum {
@@ -587,6 +593,7 @@ typedef enum TypeKind {
     TYPE_TUPLE,
     TYPE_VARIADIC,
     TYPE_ANY,
+    TYPE_GENERIC_INSTANCE, // Like TYPE_NAME, but with type arguments e.g List<int>. Is replaced by the instantiated struct in the typing phase
 } TypeKind;
 
 typedef enum TypeFlags {
@@ -717,6 +724,11 @@ typedef struct TypeVariadic {
     Type      *type;  // of *Type
     TypeArray *slice;
 } TypeVariadic;
+
+typedef struct TypeGenericInstance {
+    Type         head;      // head.name is the name of the generic struct
+    DynamicArray type_args; // of *Type
+} TypeGenericInstance;
 
 typedef struct TypeAny {
     Type        head;

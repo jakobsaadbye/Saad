@@ -92,7 +92,7 @@ Future development
 
 * Generics
   [] For functions
-  [] For structs
+  [x] For structs
   [] Methods on generic types
 
 * For-loops

@@ -1,0 +1,12 @@
+Box :: struct <T> {
+    value: T;
+}
+
+// A cannot be sized, as Box<A> needs the size of A
+A :: struct {
+    box: Box<A>;
+}
+
+main :: () {
+    a: A;
+}
