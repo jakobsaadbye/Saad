@@ -353,6 +353,8 @@ typedef struct AstFunctionDefn {
     AstFunctionDefn *generic_function;  // Set on an instance to the generic function it was instantiated from
     DynamicArray     type_args;         // of *Type. Set on an instance to the types it was instantiated with
     char            *instance_name;     // Set on an instance to a readable name e.g "max<int>"
+
+    bool             is_registered_method; // Set when the method has been added to the methods of its receiver struct
 } AstFunctionDefn;
 
 typedef struct AstArgument {

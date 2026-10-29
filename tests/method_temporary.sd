@@ -1,0 +1,27 @@
+Counter :: struct <T> {
+    value: T;
+}
+
+make_counter :: (start: int) -> Counter<int> {
+    return Counter<int>{start};
+}
+
+bump :: method <T>(c: *Counter<T>) -> T {
+    c.value += 1;
+    return c.value;
+}
+
+get :: method <T>(c: Counter<T>) -> T {
+    return c.value;
+}
+
+main :: () {
+    // The result of make_counter() is not addressable, so it is put in a temporary whose address is passed.
+    // The mutation only changes the temporary
+    assert(make_counter(5).bump() == 6);
+    assert(make_counter(5).get() == 5);
+
+    c := make_counter(1);
+    make_counter(100).bump();
+    assert(c.value == 1);
+}

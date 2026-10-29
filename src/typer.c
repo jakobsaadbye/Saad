@@ -32,6 +32,7 @@ typedef struct Typer {
     int  generic_depth;               // How many generic function instances are currently being checked inside each other
     bool generic_depth_limit_reached; // Set when generic_depth hits GENERIC_DEPTH_LIMIT, so that the error is not followed by a note for every level
     bool checking_callee;             // Set while checking the function expression of a call. Generic functions may only be used as a callee
+    int  struct_check_depth;          // How many struct definitions are currently being checked inside each other
 } Typer;
 
 #define GENERIC_DEPTH_LIMIT 64
@@ -73,9 +74,13 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
 Type *copy_type(Typer *typer, Type *type);
 Type *resolve_type(Typer *typer, Type *type);
 bool is_generic_function(AstFunctionDefn *func_defn);
+void append_mangled_name(StringBuilder *sb, char *name);
 Type *solidify_untyped_type(Type *untyped_type);
 Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic);
 AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall *call, AstFunctionDefn *generic);
+bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver_struct);
+bool register_generic_method(Typer *typer, AstFunctionDefn *generic);
+bool register_methods_early(Typer *typer, AstFile *file);
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 
 AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr);
@@ -125,6 +130,9 @@ bool check_file(Typer *typer, AstFile *ast_file) {
     // @Cleanup @CopyPasta :CopyPasteCurrentFile 
     typer->parser->current_file  = ast_file;
     typer->parser->current_scope = ast_file->scope;
+
+    bool ok = register_methods_early(typer, ast_file);
+    if (!ok) return false;
 
     for (int i = 0; i < ast_file->statements.count; i++) {
         Ast *stmt = ((Ast **)(ast_file->statements.items))[i];
@@ -487,6 +495,19 @@ bool is_generic_function(AstFunctionDefn *func_defn) {
     return func_defn->type_params.count > 0 && func_defn->generic_function == NULL;
 }
 
+// Appends a type name as something that is valid in an asm symbol e.g Map<string, *int> becomes Map$string$Pint.
+// The backend makes the symbol unique if two different names end up the same
+void append_mangled_name(StringBuilder *sb, char *name) {
+    for (char *c = name; *c != '\0'; c++) {
+        if (starts_identifier(*c) || is_digit(*c)) sb_append(sb, "%c", *c);
+        else if (*c == '*')                        sb_append(sb, "P");
+        else if (*c == '[')                        sb_append(sb, "A");
+        else if (*c == '<' || *c == ',')           sb_append(sb, "$");
+        else if (*c == '.')                        sb_append(sb, "D");
+        else if (*c != ' ' && *c != '>' && *c != ']') sb_append(sb, "_");
+    }
+}
+
 int type_param_index(DynamicArray type_params, char *name) {
     for (int i = 0; i < type_params.count; i++) {
         AstIdentifier *param = ((AstIdentifier **)type_params.items)[i];
@@ -568,6 +589,11 @@ Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic) {
         }
     }
 
+    if (generic->is_method) {
+        bool ok = register_generic_method(typer, generic);
+        if (!ok) return NULL;
+    }
+
     TypeFunction *func_type    = ast_allocate(parser, sizeof(TypeFunction));
     func_type->head.head.kind  = AST_TYPE;
     func_type->head.head.start = generic->head.head.start;
@@ -580,6 +606,41 @@ Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic) {
     generic->head.type = (Type *) func_type;
 
     return (Type *) func_type;
+}
+
+PrimitiveKind canonical_primitive_kind(PrimitiveKind kind) {
+    switch (kind) {
+    case PRIMITIVE_UINT:  return PRIMITIVE_U32;
+    case PRIMITIVE_INT:   return PRIMITIVE_S32;
+    case PRIMITIVE_FLOAT: return PRIMITIVE_F32;
+    case PRIMITIVE_CHAR:  return PRIMITIVE_U8;
+    default:              return kind;
+    }
+}
+
+// Strict type equality used when inferring type parameters. Unlike types_are_equal(), nothing converts implicitly, but aliases like int and s32 are the same type
+bool types_are_identical(Type *a, Type *b) {
+    if (is_primitive_type(a->kind) && is_primitive_type(b->kind)) {
+        return canonical_primitive_kind(((TypePrimitive *)a)->kind) == canonical_primitive_kind(((TypePrimitive *)b)->kind);
+    }
+    if (a->kind != b->kind) return false;
+
+    switch (a->kind) {
+    case TYPE_POINTER:
+        return types_are_identical(((TypePointer *)a)->pointer_to, ((TypePointer *)b)->pointer_to);
+    case TYPE_ARRAY: {
+        TypeArray *array_a = (TypeArray *)a;
+        TypeArray *array_b = (TypeArray *)b;
+        if (array_a->array_kind != array_b->array_kind) return false;
+        if (array_a->array_kind == ARRAY_FIXED && array_a->capacity != array_b->capacity) return false;
+        return types_are_identical(array_a->elem_type, array_b->elem_type);
+    }
+    case TYPE_STRING:
+    case TYPE_ANY:
+        return true;
+    default:
+        return strcmp(type_to_str(a), type_to_str(b)) == 0;
+    }
 }
 
 typedef enum BindingKind {
@@ -611,7 +672,7 @@ bool bind_type_param(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindin
     }
 
     if (binding->kind == BINDING_TYPED && kind == BINDING_TYPED) {
-        if (strcmp(type_to_str(binding->type), type_to_str(type)) != 0) {
+        if (!types_are_identical(binding->type, type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Conflicting types for type parameter '%s' of '%s'. This argument to '%s' is of type %s, but an earlier argument made '%s' of type %s",
                 type_param->name, generic->identifier->name, param->name, text_bold(type_to_str(type)), type_param->name, text_bold(type_to_str(binding->type)));
             report_error_ast(typer->parser, LABEL_NOTE, binding->source, "Here '%s' got the type %s", type_param->name, type_to_str(binding->type));
@@ -673,6 +734,144 @@ bool unify_types(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindings, 
     default:
         return true;
     }
+}
+
+// Adds a method to the methods of its receiver struct, so that it can be called as x.method(...)
+bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver_struct) {
+    if (method->is_registered_method) return true;
+
+    Parser        *parser = typer->parser;
+    AstIdentifier *ident  = method->identifier;
+
+    AstIdentifier *member = get_struct_member(receiver_struct->node, ident->name);
+    if (member) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Method '%s' has the same name as a member of '%s'", ident->name, receiver_struct->head.name);
+        report_error_ast(parser, LABEL_NOTE, (Ast *)member, "Here is the member '%s'", member->name);
+        return false;
+    }
+
+    ident->flags |= IDENTIFIER_IS_STRUCT_MEMBER | IDENTIFIER_IS_STRUCT_METHOD;
+    AstIdentifier *existing = add_identifier_to_scope(parser, receiver_struct->node->methods, ident);
+    if (existing != NULL) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "Redeclaration of method '%s' on '%s'", ident->name, receiver_struct->head.name);
+        report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the previous declaration");
+        return false;
+    }
+
+    method->receiver             = ((AstIdentifier **)method->parameters.items)[0];
+    method->receiver_struct      = receiver_struct;
+    method->is_registered_method = true;
+    return true;
+}
+
+// A generic method e.g 'set :: method <K, V>(m: *Map<K, V>, key: K, value: V)' is added to the methods of the generic struct.
+// Its receiver must be the generic struct with exactly the type parameters of the method as type arguments
+bool register_generic_method(Typer *typer, AstFunctionDefn *generic) {
+    if (generic->is_registered_method) return true;
+
+    Parser        *parser   = typer->parser;
+    AstIdentifier *receiver = ((AstIdentifier **)generic->parameters.items)[0];
+
+    Type *receiver_type = receiver->type;
+    if (receiver_type && receiver_type->kind == TYPE_POINTER) {
+        receiver_type = ((TypePointer *)receiver_type)->pointer_to;
+    }
+
+    if (receiver_type == NULL || receiver_type->kind != TYPE_GENERIC_INSTANCE) {
+        report_error_ast(parser, LABEL_ERROR, receiver_type ? (Ast *)receiver_type : (Ast *)receiver, "The receiver of a generic method must be a generic struct, with the type parameters of the method as its type arguments");
+        report_error_ast(parser, LABEL_HINT, NULL, "e.g set :: method <K, V>(m: *Map<K, V>, key: K, value: V)");
+        return false;
+    }
+
+    TypeGenericInstance *instance = (TypeGenericInstance *)receiver_type;
+
+    AstIdentifier *struct_ident = lookup_from_scope(parser, generic->body->parent, instance->head.name);
+    if (struct_ident == NULL) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)instance, "Unknown type '%s'", instance->head.name);
+        return false;
+    }
+    if (struct_ident->type == NULL || struct_ident->type->kind != TYPE_STRUCT || ((TypeStruct *)struct_ident->type)->node->type_params.count == 0) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)instance, "'%s' is not a generic struct, so it cannot be given type arguments", instance->head.name);
+        return false;
+    }
+
+    TypeStruct *generic_struct = (TypeStruct *)struct_ident->type;
+    if (instance->type_args.count != generic_struct->node->type_params.count) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)instance, "Generic struct '%s' takes %d type argument%s, but %d %s given", instance->head.name,
+            generic_struct->node->type_params.count, generic_struct->node->type_params.count == 1 ? "" : "s",
+            instance->type_args.count, instance->type_args.count == 1 ? "was" : "were");
+        return false;
+    }
+
+    // Each type argument of the receiver is a different type parameter of the method, as methods apply to every instance of the struct
+    bool *used = calloc(generic->type_params.count, sizeof(bool));
+    for (int i = 0; i < instance->type_args.count; i++) {
+        Type *arg = ((Type **)instance->type_args.items)[i];
+
+        int index = arg->kind == TYPE_NAME ? type_param_index(generic->type_params, arg->name) : -1;
+        if (index == -1) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)arg, "Type argument '%s' of the receiver must be one of the type parameters of the method '%s'", type_to_str(arg), generic->identifier->name);
+            report_error_ast(parser, LABEL_HINT, NULL, "A method applies to every instance of '%s', so it cannot be specialized for some type arguments (no partial specialization)", instance->head.name);
+            return false;
+        }
+        if (used[index]) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)arg, "Type parameter '%s' is used more than once as a type argument of the receiver", arg->name);
+            report_error_ast(parser, LABEL_HINT, NULL, "A method applies to every instance of '%s', so each type argument of the receiver must be a different type parameter", instance->head.name);
+            return false;
+        }
+        used[index] = true;
+    }
+    for (int i = 0; i < generic->type_params.count; i++) {
+        if (!used[i]) {
+            AstIdentifier *param = ((AstIdentifier **)generic->type_params.items)[i];
+            report_error_ast(parser, LABEL_ERROR, (Ast *)param, "Type parameter '%s' of method '%s' is not a type argument of the receiver", param->name, generic->identifier->name);
+            report_error_ast(parser, LABEL_NOTE, NULL, "Methods with type parameters of their own are not supported yet");
+            return false;
+        }
+    }
+    free(used);
+
+    return register_method(typer, generic, generic_struct);
+}
+
+// Adds the methods declared at the top-level of a file to their receiver structs before anything is checked, so that methods can
+// be called before they are declared. Methods on other receivers than a struct name, like *List<int>, are added when they are checked
+bool register_methods_early(Typer *typer, AstFile *file) {
+    for (int i = 0; i < file->statements.count; i++) {
+        Ast *stmt = ((Ast **)file->statements.items)[i];
+        if (stmt->kind != AST_DECLARATION || !(stmt->flags & AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN)) continue;
+
+        AstDeclaration *decl = (AstDeclaration *)stmt;
+        for (int j = 0; j < decl->values.count; j++) {
+            AstExpr *value = ((AstExpr **)decl->values.items)[j];
+            if (value->head.kind != AST_FUNCTION_DEFN) continue;
+
+            AstFunctionDefn *method = (AstFunctionDefn *)value;
+            if (!method->is_method || method->is_extern || method->parameters.count == 0) continue;
+
+            if (is_generic_function(method)) {
+                bool ok = register_generic_method(typer, method);
+                if (!ok) return false;
+                continue;
+            }
+
+            AstIdentifier *receiver = ((AstIdentifier **)method->parameters.items)[0];
+            Type *receiver_type = receiver->type;
+            if (receiver_type && receiver_type->kind == TYPE_POINTER) {
+                receiver_type = ((TypePointer *)receiver_type)->pointer_to;
+            }
+            if (receiver_type == NULL || receiver_type->kind != TYPE_NAME) continue;
+
+            AstIdentifier *struct_ident = lookup_from_scope(typer->parser, file->scope, receiver_type->name);
+            if (struct_ident == NULL || !(struct_ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT)) continue;
+            if (struct_ident->type == NULL || struct_ident->type->kind != TYPE_STRUCT) continue;
+            if (((TypeStruct *)struct_ident->type)->node->type_params.count > 0) continue; // Reported as missing type arguments when checked
+
+            bool ok = register_method(typer, method, (TypeStruct *)struct_ident->type);
+            if (!ok) return false;
+        }
+    }
+    return true;
 }
 
 // Returns the instance of a generic function for the given type arguments, making and checking it the first time
@@ -951,6 +1150,19 @@ Type *resolve_type(Typer *typer, Type *type) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Generic struct '%s' is missing its type arguments", type->name);
             report_error_ast(typer->parser, LABEL_HINT, NULL, "Give it a type for '%s', e.g %s<int>", param->name, type->name);
             return NULL;
+        }
+
+        // A struct declared further down is checked now, so that its members are known e.g 'holder: Outer' before 'Outer :: struct {...}'.
+        // While sizing structs, the sizing itself takes care of the order
+        if (ident->type && ident->type->kind == TYPE_STRUCT && typer->struct_check_depth == 0) {
+            AstStruct *node = ((TypeStruct *)ident->type)->node;
+            if (node && !(node->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
+                Typer saved_state = *typer;
+                bool ok = check_struct_defn(typer, node);
+                typer_restore_state(typer, saved_state);
+                typer->inside_declaration = saved_state.inside_declaration;
+                if (!ok) return NULL;
+            }
         }
 
         return ident->type;
@@ -1709,7 +1921,16 @@ int get_alignment_of_type(Type *type) {
     }
 }
 
+bool check_struct_members(Typer *typer, AstStruct *ast_struct);
+
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
+    typer->struct_check_depth += 1;
+    bool ok = check_struct_members(typer, ast_struct);
+    typer->struct_check_depth -= 1;
+    return ok;
+}
+
+bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
     if (ast_struct->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return true;
     }
@@ -3187,12 +3408,9 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         }
 
         // Add the function as a member of the receiver struct
-        func_defn->identifier->flags |= IDENTIFIER_IS_STRUCT_MEMBER | IDENTIFIER_IS_STRUCT_METHOD;
-        AstIdentifier *existing = add_identifier_to_scope(typer->parser, receiver_struct->node->methods, func_defn->identifier);
-        if (existing != NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)func_defn->identifier, "Redeclaration of method '%s'", func_defn->identifier->name);
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)existing, "Here is the previous declaration");
-            return NULL;
+        if (!func_defn->is_registered_method) {
+            bool ok = register_method(typer, func_defn, receiver_struct);
+            if (!ok) return NULL;
         }
 
         func_defn->receiver_struct = receiver_struct;
@@ -3233,33 +3451,23 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
 
     } else {
         if (func_defn->is_method) {
-            // @Cleanup @Speed: Use a string buffer located in Parser to allocate the strings instead of malloc
-            func_defn->symbol_name = malloc(strlen(func_defn->receiver_struct->identifier->name) + 8 + strlen(func_defn->identifier->name));
-            sprintf(func_defn->symbol_name, "%s.%s", func_defn->receiver_struct->identifier->name, func_defn->identifier->name);
-
-            // Instances of generic structs have names like 'Pair<int, *float>' that are not valid asm symbols, so replace
-            // the invalid characters. The backend makes the symbol unique if two methods end up with the same symbol
-            for (char *c = func_defn->symbol_name; *c != '\0'; c++) {
-                if (!starts_identifier(*c) && !is_digit(*c) && *c != '.') *c = '_';
-            }
+            // Instances of generic structs have names like 'Pair<int, *float>' that are not valid asm symbols, so they are mangled e.g Pair$int$Pfloat.foo
+            StringBuilder sb = sb_init(32);
+            append_mangled_name(&sb, func_defn->receiver_struct->identifier->name);
+            sb_append(&sb, ".%s", func_defn->identifier->name);
+            func_defn->symbol_name = sb_to_string(&sb);
         } else {
             func_defn->symbol_name = func_defn->identifier->name;
         }
     }
 
-    if (func_defn->generic_function) {
-        // Instances get a symbol named after their type arguments e.g max$s64 or set$s32$string
+    if (func_defn->generic_function && !func_defn->is_method) {
+        // Instances get a symbol named after their type arguments e.g max$s64 or set$s32$string. Methods are already named after their receiver
         StringBuilder sb = sb_init(32);
         sb_append(&sb, "%s", func_defn->symbol_name);
         for (int i = 0; i < func_defn->type_args.count; i++) {
             sb_append(&sb, "$");
-            for (char *c = type_to_str(((Type **)func_defn->type_args.items)[i]); *c != '\0'; c++) {
-                if (starts_identifier(*c) || is_digit(*c)) sb_append(&sb, "%c", *c);
-                else if (*c == '*')                        sb_append(&sb, "P");
-                else if (*c == '[')                        sb_append(&sb, "A");
-                else if (*c == '<' || *c == ',')           sb_append(&sb, "$");
-                else if (*c != ' ')                        sb_append(&sb, "_");
-            }
+            append_mangled_name(&sb, type_to_str(((Type **)func_defn->type_args.items)[i]));
         }
         func_defn->symbol_name = sb_to_string(&sb);
     }
@@ -3865,8 +4073,11 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         AstLiteral *ident = (AstLiteral *) rhs;
         member_name = ident->as.value.identifier.name;
 
-        // Check if its a method
+        // Check if its a method. Instances of generic structs also have the methods of their generic struct
         AstIdentifier *method = get_struct_method(struct_type->node, member_name);
+        if (!method && struct_type->node->generic_struct) {
+            method = get_struct_method(struct_type->node->generic_struct, member_name);
+        }
         if (method) {
             member = method;
 
@@ -4321,6 +4532,10 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
             lvalue = true;
         }
         else if (unary->expr->head.kind == AST_MEMBER_ACCESS) {
+            lvalue = true;
+        }
+        else if (unary->head.head.flags & AST_FLAG_COMPILER_GENERATED) {
+            // e.g the receiver of make_map().set(k, v). The value is put in a temporary, and its address is passed
             lvalue = true;
         }
 
