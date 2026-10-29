@@ -1,0 +1,12 @@
+// An alias of a generic struct must give its type arguments
+// expect-error: Generic struct 'List' is missing its type arguments
+
+List :: struct <T> {
+    elements: [..]T;
+}
+
+Numbers :: List;
+
+main :: () {
+    n: Numbers;
+}

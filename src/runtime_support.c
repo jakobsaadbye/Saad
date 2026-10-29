@@ -49,11 +49,11 @@ typedef enum PrimitiveKind {
     PRIMITIVE_U16,
     PRIMITIVE_U32,
     PRIMITIVE_U64,
-    PRIMITIVE_INT, // alias for s32
-    PRIMITIVE_S8,
-    PRIMITIVE_S16,
-    PRIMITIVE_S32,
-    PRIMITIVE_S64,
+    PRIMITIVE_INT, // alias for i32
+    PRIMITIVE_I8,
+    PRIMITIVE_I16,
+    PRIMITIVE_I32,
+    PRIMITIVE_I64,
 
     PRIMITIVE_FLOAT, // alias for f32
     PRIMITIVE_F32,
@@ -148,10 +148,10 @@ TypePrimitive primitive_types[PRIMITIVE_COUNT] = {
     {.head = {.kind = TYPE_INTEGER, .size = 4, .name = {"u32",      3} }, .kind = PRIMITIVE_U32      },
     {.head = {.kind = TYPE_INTEGER, .size = 8, .name = {"u64",      3} }, .kind = PRIMITIVE_U64      },
     {.head = {.kind = TYPE_INTEGER, .size = 4, .name = {"int",      3} }, .kind = PRIMITIVE_INT      },
-    {.head = {.kind = TYPE_INTEGER, .size = 1, .name = {"s8",       2} }, .kind = PRIMITIVE_S8       },
-    {.head = {.kind = TYPE_INTEGER, .size = 2, .name = {"s16",      3} }, .kind = PRIMITIVE_S16      },
-    {.head = {.kind = TYPE_INTEGER, .size = 4, .name = {"s32",      3} }, .kind = PRIMITIVE_S32      },
-    {.head = {.kind = TYPE_INTEGER, .size = 8, .name = {"s64",      3} }, .kind = PRIMITIVE_S64      },
+    {.head = {.kind = TYPE_INTEGER, .size = 1, .name = {"i8",       2} }, .kind = PRIMITIVE_I8       },
+    {.head = {.kind = TYPE_INTEGER, .size = 2, .name = {"i16",      3} }, .kind = PRIMITIVE_I16      },
+    {.head = {.kind = TYPE_INTEGER, .size = 4, .name = {"i32",      3} }, .kind = PRIMITIVE_I32      },
+    {.head = {.kind = TYPE_INTEGER, .size = 8, .name = {"i64",      3} }, .kind = PRIMITIVE_I64      },
     {.head = {.kind = TYPE_FLOAT,   .size = 4, .name = {"float",    5} }, .kind = PRIMITIVE_FLOAT    },
     {.head = {.kind = TYPE_FLOAT,   .size = 4, .name = {"f32",      3} }, .kind = PRIMITIVE_F32      },
     {.head = {.kind = TYPE_FLOAT,   .size = 8, .name = {"f64",      3} }, .kind = PRIMITIVE_F64      },
@@ -168,10 +168,10 @@ TypePrimitive *Type_u16           = &primitive_types[PRIMITIVE_U16];
 TypePrimitive *Type_u32           = &primitive_types[PRIMITIVE_U32];
 TypePrimitive *Type_u64           = &primitive_types[PRIMITIVE_U64];
 TypePrimitive *Type_int           = &primitive_types[PRIMITIVE_INT];
-TypePrimitive *Type_s8            = &primitive_types[PRIMITIVE_S8];
-TypePrimitive *Type_s16           = &primitive_types[PRIMITIVE_S16];
-TypePrimitive *Type_s32           = &primitive_types[PRIMITIVE_S32];
-TypePrimitive *Type_s64           = &primitive_types[PRIMITIVE_S64];
+TypePrimitive *Type_i8            = &primitive_types[PRIMITIVE_I8];
+TypePrimitive *Type_i16           = &primitive_types[PRIMITIVE_I16];
+TypePrimitive *Type_i32           = &primitive_types[PRIMITIVE_I32];
+TypePrimitive *Type_i64           = &primitive_types[PRIMITIVE_I64];
 TypePrimitive *Type_float         = &primitive_types[PRIMITIVE_FLOAT];
 TypePrimitive *Type_f32           = &primitive_types[PRIMITIVE_F32];
 TypePrimitive *Type_f64           = &primitive_types[PRIMITIVE_F64];

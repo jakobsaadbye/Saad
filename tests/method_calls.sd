@@ -11,11 +11,11 @@ Color :: struct {
     a: u8;
 }
 
-method_receiving_struct :: method (c: Color) -> Color {
+methodReceivingStruct :: method (c: Color) -> Color {
     return {c.r - 5 , c.g - 5, c.b - 5, c.a - 5};
 }
 
-method_receiving_ptr_struct :: method (c: *Color) {
+methodReceivingPtrStruct :: method (c: *Color) {
     c.r = 1;
     c.g = 2;
     c.b = 3;
@@ -36,7 +36,7 @@ scale :: method (a: *Vector3, scalar: int) -> void {
     a.z *= scalar;
 }
 
-add_with_many_params :: method (a, b, c, d: Vector3) -> Vector3 {
+addWithManyParams :: method (a, b, c, d: Vector3) -> Vector3 {
     return a;
 }
 
@@ -46,8 +46,8 @@ main :: () {
         white_ptr := &white;
     
         // 1: Pass struct and pointer to struct into receiver of type struct
-        out1 := white.method_receiving_struct();
-        out2 := white_ptr.method_receiving_struct();
+        out1 := white.methodReceivingStruct();
+        out2 := white_ptr.methodReceivingStruct();
     
         assert(out1.r == 250);
         assert(out1.g == 250);
@@ -66,8 +66,8 @@ main :: () {
         color2 := Color{255, 255, 255, 255};
         color2ptr := &color2;
     
-        color1.method_receiving_ptr_struct();
-        color2ptr.method_receiving_ptr_struct();
+        color1.methodReceivingPtrStruct();
+        color2ptr.methodReceivingPtrStruct();
     
         assert(color1.r == 1);
         assert(color1.g == 2);
@@ -103,7 +103,7 @@ main :: () {
         c := Vector3{7, 8, 9};
         d := Vector3{10, 11, 12};
 
-        x := a.add_with_many_params(b, c, d);
+        x := a.addWithManyParams(b, c, d);
         print("%", x);
     }
 }

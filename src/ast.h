@@ -120,6 +120,7 @@ typedef enum AstFlags {
     AST_FLAG_EXPR_IS_SPREADED                      = 1 << 5, // Set if the expression has had the operator ... applied to it
     AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER           = 1 << 7, // Set on an array access on a pointer
     AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN        = 1 << 8, // Set on constant identifiers having a function as value
+    AST_FLAG_IS_BEING_CHECKED                      = 1 << 9, // Set on a type alias while its type is resolved, to find aliases that refer to themselves
 } AstFlags;
 
 typedef struct Ast {
@@ -172,6 +173,7 @@ typedef enum IdentifierFlags {
     IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN = 1 << 6,
     IDENTIFIER_IS_RESOLVED          = 1 << 7,
     IDENTIFIER_IS_BUILTIN_FUNCTION  = 1 << 8,
+    IDENTIFIER_IS_TYPE_ALIAS        = 1 << 9,  // e.g Byte :: u8; or IntList :: List<int>; Also set on the type parameters bound in an instance of a generic
 } IdentifierFlags;
 
 typedef struct AstIdentifier {
@@ -198,6 +200,7 @@ typedef enum DeclarationFlags {
     DECLARATION_IS_STRUCT_MEMBER      = 1 << 4,
     DECLARATION_IS_FUNCTION_PARAMETER = 1 << 6,
     DECLARATION_IS_COMPILER_GENERATED = 1 << 7,
+    DECLARATION_TYPE_ALIAS            = 1 << 8, // e.g Byte :: u8; The aliased type is in 'type'. Also has DECLARATION_CONSTANT
 } DeclarationFlags;
 
 typedef struct AstDeclaration {
@@ -633,11 +636,11 @@ typedef enum PrimitiveKind {
     PRIMITIVE_U16,
     PRIMITIVE_U32,
     PRIMITIVE_U64,
-    PRIMITIVE_INT, // alias for s32
-    PRIMITIVE_S8,
-    PRIMITIVE_S16,
-    PRIMITIVE_S32,
-    PRIMITIVE_S64,
+    PRIMITIVE_INT, // alias for i32
+    PRIMITIVE_I8,
+    PRIMITIVE_I16,
+    PRIMITIVE_I32,
+    PRIMITIVE_I64,
 
     PRIMITIVE_FLOAT, // alias for f32
     PRIMITIVE_F32,

@@ -4,6 +4,41 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.3.1 - 29. Oct 2026
+
+* BREAKING: The signed integer types are renamed from `s8`, `s16`, `s32`, `s64` to `i8`, `i16`, `i32`, `i64`
+
+```odin
+a: i32 = -5;
+b := 100 as i64;
+```
+
+`int` is still an alias for `i32`.
+
+* Type aliases
+
+A constant declaration whose value is a type declares a type alias. It works for every kind of type,
+including instances of generic structs:
+
+```odin
+Byte     :: u8;
+IntPtr   :: *int;
+Ints     :: []int;
+IntList  :: List<int>;
+Hue      :: Color;
+Callback :: (x: int) -> int;
+
+main :: () {
+    b: Byte = 255;
+    numbers := IntList{};
+    numbers.push(1);    // Methods of List<int> work through the alias
+    h: Hue = .Red;
+}
+```
+
+An alias is the same type as the type it names, so an `IntList` can be passed where a `List<int>` is wanted,
+and `typeof` gives the name of the aliased type. Aliases can be used before they are declared.
+
 ## Update v0.3.0 - 29. Oct 2026
 
 * Generic functions
@@ -23,12 +58,12 @@ max :: <T>(elements: ...T) -> T {
 main :: () {
     a := max(3, 9, 4);   // T = int
     b := max(1, 2.5);    // T = float, a float literal wins over an integer literal
-    x: s64 = 1;
-    c := max(x, 10);     // T = s64, literals take the type of a typed argument
+    x: i64 = 1;
+    c := max(x, 10);     // T = i64, literals take the type of a typed argument
 }
 ```
 
-Typed arguments must agree: `max(a, b)` with an `s32` and an `s64` is an error, nothing is widened.
+Typed arguments must agree: `max(a, b)` with an `i32` and an `i64` is an error, nothing is widened.
 Every type parameter has to be used by a parameter, as there is no syntax to give the types explicitly yet.
 
 * Methods on generic structs
@@ -82,7 +117,7 @@ e.g the elements of a dynamic array member.
 
 Bug fixes:
 
-* Fixed untyped literals passed as varargs not taking the type of the variadic parameter e.g `f(a, 100)` with `f :: (xs: ...s64)`
+* Fixed untyped literals passed as varargs not taking the type of the variadic parameter e.g `f(a, 100)` with `f :: (xs: ...i64)`
 * Fixed a struct declared after a variable of its type not having its members resolved
 
 ## Update v0.2.9 - 29. Oct 2026

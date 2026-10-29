@@ -6,7 +6,7 @@ Map :: struct <K, V> {
     values: [..]V;
 }
 
-size :: method (m: *Map<K, V>) -> s64 {
+size :: method (m: *Map<K, V>) -> i64 {
     return m.keys.count;
 }
 

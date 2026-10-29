@@ -1,21 +1,21 @@
 // Aggregates: small structs (passed in a register), big structs (passed by reference to a copy),
 // copy semantics, aliasing in assignments and struct returns.
 
-Small :: struct { a, b: s32; }
+Small :: struct { a, b: i32; }
 Color :: struct { r, g, b, a: u8; }
-Big   :: struct { x, y, z, w: s64; }
+Big   :: struct { x, y, z, w: i64; }
 
-modifyBig :: (big: Big) -> s64 {
+modifyBig :: (big: Big) -> i64 {
     big.x = 1000; // Must not change the caller's value
     return big.x + big.y;
 }
 
-modifySmall :: (small: Small) -> s32 {
+modifySmall :: (small: Small) -> i32 {
     small.a = 99;
     return small.a + small.b;
 }
 
-makeBig :: (v: s64) -> Big {
+makeBig :: (v: i64) -> Big {
     return Big{v, v + 1, v + 2, v + 3};
 }
 
@@ -75,7 +75,7 @@ main :: () {
     assert(zi == 0);
 
     // A frame bigger than a page needs stack probing on Windows
-    lots: [3000]s64;
+    lots: [3000]i64;
     lots[2999] = 7;
     assert(lots[0] == 0 && lots[2999] == 7);
 }

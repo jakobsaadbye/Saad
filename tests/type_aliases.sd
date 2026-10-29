@@ -1,0 +1,99 @@
+// Type aliases e.g Byte :: u8; An alias is the same type as the type it names
+
+List :: struct <T> {
+    elements: [..]T;
+    count: int;
+
+    push :: method * (value: T) {
+        append(self.elements, value);
+        self.count += 1;
+    }
+}
+
+Color :: enum { Red, Green, Blue }
+Point :: struct { x: int; y: int; }
+
+Byte     :: u8;
+Index    :: i64;
+IntPtr   :: *int;
+Ints     :: []int;
+Grow     :: [..]float;
+Four     :: [4]Byte;
+IntList  :: List<int>;
+Nested   :: List<List<int>>;
+Pt       :: Point;
+Hue      :: Color;
+Text     :: string;
+Callback :: (x: int) -> int;
+MaxLen   :: 100;
+SameMax  :: MaxLen;
+
+double :: (x: int) -> int { return x * 2; }
+
+sumAll :: (values: Ints) -> int {
+    total := 0;
+    for v in values { total += v; }
+    return total;
+}
+
+main :: () {
+    b: Byte = 255;
+    assert(b == 255);
+    assert(typeof(b) == "u8");
+    i: Index = 1;
+    assert(typeof(i) == "i64");
+
+    x := 5;
+    p: IntPtr = &x;
+    *p = 6;
+    assert(x == 6);
+
+    xs := [1, 2, 3];
+    assert(sumAll(xs) == 6);
+
+    g: Grow;
+    append(g, 1.5);
+    assert(g.count == 1);
+
+    f: Four;
+    f[3] = 7;
+    assert(sizeof(Four) == 4);
+
+    list: IntList;
+    list.push(1);
+    list.push(2);
+    assert(list.count == 2);
+
+    other := IntList{};
+    other.push(3);
+    assert(other.elements[0] == 3);
+
+    l: List<int> = list; // The alias is the same type
+    assert(l.count == 2);
+
+    n: Nested;
+    n.push(list);
+    assert(n.elements[0].count == 2);
+
+    pt := Pt{1, 2};
+    q: Point = pt;
+    assert(q.y == 2);
+
+    h: Hue = .Green;
+    assert(h == Color.Green);
+    assert(Hue.Blue == Color.Blue);
+
+    t: Text = "hi";
+    assert(t == "hi");
+
+    cb: Callback = double;
+    assert(cb(4) == 8);
+
+    assert(MaxLen == 100 && SameMax == 100);
+    later: Later = 3;
+    assert(typeof(later) == "i16");
+    // Aliases are transparent, so the printed type name is the aliased one
+    print("%\n", pt);
+}
+
+Later :: i16;

@@ -13,10 +13,10 @@ Map :: struct <K, V> {
     }
 
     has :: method (key: K) -> bool {
-        return self.index_of(key) != -1;
+        return self.indexOf(key) != -1;
     }
 
-    index_of :: method (key: K) -> int {
+    indexOf :: method (key: K) -> int {
         for i in 0..self.keys.count {
             if self.keys[i] == key {
                 return i;
@@ -26,7 +26,7 @@ Map :: struct <K, V> {
     }
 
     set :: method * (key: K, value: V) {
-        index := self.index_of(key);
+        index := self.indexOf(key);
         if index != -1 {
             self.values[index] = value;
             return;

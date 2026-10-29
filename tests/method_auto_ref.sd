@@ -24,7 +24,7 @@ main :: () {
     assert(f.value == 0.75);
 
     // Also through members
-    holder: struct_with_counter;
+    holder: CounterHolder;
     holder.counter.bump(10);
     assert(holder.counter.value == 10);
 
@@ -34,6 +34,6 @@ main :: () {
     assert(p.n == 2);
 }
 
-struct_with_counter :: struct {
+CounterHolder :: struct {
     counter: Counter<int>;
 }

@@ -1,0 +1,8 @@
+// expect-error: Type alias 'A' refers to itself
+
+A :: *B;
+B :: *A;
+
+main :: () {
+    a: A;
+}

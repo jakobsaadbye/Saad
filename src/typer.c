@@ -87,6 +87,8 @@ AstFunctionDefn *readonly_self_place(Typer *typer, AstExpr *expr);
 void report_readonly_self(Typer *typer, Ast *at, AstFunctionDefn *method, const char *action, AstExpr *place);
 void append_place_text(StringBuilder *sb, AstExpr *expr);
 bool check_declaration(Typer *typer, AstDeclaration *decl);
+bool identifier_is_type(AstIdentifier *ident);
+bool check_declaration_of(Typer *typer, AstIdentifier *ident);
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 
 AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr);
@@ -436,7 +438,7 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
         AstIdentifier *bound = ast_allocate(parser, sizeof(AstIdentifier));
         memcpy(bound, param, sizeof(AstIdentifier));
         bound->type   = ((Type **)type_args.items)[i];
-        bound->flags |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_RESOLVED;
+        bound->flags |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_RESOLVED | IDENTIFIER_IS_TYPE_ALIAS;
         da_append(&params_scope->identifiers, bound);
     }
 
@@ -617,14 +619,14 @@ Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic) {
 PrimitiveKind canonical_primitive_kind(PrimitiveKind kind) {
     switch (kind) {
     case PRIMITIVE_UINT:  return PRIMITIVE_U32;
-    case PRIMITIVE_INT:   return PRIMITIVE_S32;
+    case PRIMITIVE_INT:   return PRIMITIVE_I32;
     case PRIMITIVE_FLOAT: return PRIMITIVE_F32;
     case PRIMITIVE_CHAR:  return PRIMITIVE_U8;
     default:              return kind;
     }
 }
 
-// Strict type equality used when inferring type parameters. Unlike types_are_equal(), nothing converts implicitly, but aliases like int and s32 are the same type
+// Strict type equality used when inferring type parameters. Unlike types_are_equal(), nothing converts implicitly, but aliases like int and i32 are the same type
 bool types_are_identical(Type *a, Type *b) {
     if (is_primitive_type(a->kind) && is_primitive_type(b->kind)) {
         return canonical_primitive_kind(((TypePrimitive *)a)->kind) == canonical_primitive_kind(((TypePrimitive *)b)->kind);
@@ -956,7 +958,7 @@ AstFunctionDefn *instantiate_generic_function(Typer *typer, AstFunctionDefn *gen
         memcpy(bound, param, sizeof(AstIdentifier));
         bound->type   = ((Type **)type_args.items)[i];
         bound->scope  = scope;
-        bound->flags |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_RESOLVED;
+        bound->flags |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_RESOLVED | IDENTIFIER_IS_TYPE_ALIAS;
         da_append(&scope->identifiers, bound);
     }
 
@@ -1182,6 +1184,18 @@ Type *resolve_type(Typer *typer, Type *type) {
             return NULL;
         }
 
+        // A constant that has not been checked yet might be a type alias declared further down e.g 'b: Byte' before 'Byte :: u8;'
+        if (ident->decl && (ident->decl->flags & DECLARATION_CONSTANT) && !(ident->flags & IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN)) {
+            bool ok = check_declaration_of(typer, ident);
+            if (!ok) return NULL;
+        }
+
+        if (ident->type == NULL || !identifier_is_type(ident)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "'%s' is not a type", type->name);
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(ident), "Here is the declaration of '%s'", ident->name);
+            return NULL;
+        }
+
         if (ident->type && ident->type->kind == TYPE_STRUCT && ((TypeStruct *)ident->type)->node->type_params.count > 0) {
             AstStruct *generic = ((TypeStruct *)ident->type)->node;
             AstIdentifier *param = ((AstIdentifier **)generic->type_params.items)[0];
@@ -1340,10 +1354,10 @@ unsigned long long max_integer_value(TypePrimitive *type) {
     case PRIMITIVE_U16: return U16_MAX;
     case PRIMITIVE_U32: return U32_MAX;
     case PRIMITIVE_U64: return U64_MAX;
-    case PRIMITIVE_S8:  return S8_MAX;
-    case PRIMITIVE_S16: return S16_MAX;
-    case PRIMITIVE_S32: return S32_MAX;
-    case PRIMITIVE_S64: return S64_MAX;
+    case PRIMITIVE_I8:  return S8_MAX;
+    case PRIMITIVE_I16: return S16_MAX;
+    case PRIMITIVE_I32: return S32_MAX;
+    case PRIMITIVE_I64: return S64_MAX;
     case PRIMITIVE_UNTYPED_INT: return U64_MAX;
     default:
         printf("Internal compiler error: Unknown type kind %d in max_integer_value()", type->kind);
@@ -1579,9 +1593,77 @@ bool method_can_change_receiver(AstFunctionDefn *method) {
     return receiver->type && receiver->type->kind == TYPE_POINTER;
 }
 
+// Returns true if the identifier names a type e.g a struct, an enum, a type alias or a type parameter bound in an instance
+bool identifier_is_type(AstIdentifier *ident) {
+    return ident->flags & (IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_NAME_OF_ENUM | IDENTIFIER_IS_TYPE_ALIAS);
+}
+
+// Checks the declaration of an identifier from where it is declared, if it has not been checked yet e.g a type alias declared further down
+bool check_declaration_of(Typer *typer, AstIdentifier *ident) {
+    if (ident->decl == NULL || (ident->decl->head.flags & AST_FLAG_IS_TYPE_CHECKED)) return true;
+
+    Typer saved_state = *typer;
+    typer->current_scope = ident->scope ? ident->scope : typer->current_scope;
+    typer->current_file  = ident->head.file ? ident->head.file : typer->current_file;
+
+    bool ok = check_declaration(typer, ident->decl);
+
+    DynamicArray stack = typer->enclosing_function_stack; // Might have been reallocated while checking
+    typer_restore_state(typer, saved_state);
+    typer->enclosing_function_stack = stack;
+    typer->inside_declaration       = saved_state.inside_declaration;
+    return ok;
+}
+
+// Type aliases e.g Byte :: u8; or IntList :: List<int>; An alias is the same type as the type it names
+bool check_type_alias(Typer *typer, AstDeclaration *decl) {
+    AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[0];
+
+    if (decl->head.flags & AST_FLAG_IS_BEING_CHECKED) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ident, "Type alias '%s' refers to itself", ident->name);
+        return false;
+    }
+
+    decl->head.flags |= AST_FLAG_IS_BEING_CHECKED;
+    Type *type = resolve_type(typer, decl->type);
+    decl->head.flags &= ~AST_FLAG_IS_BEING_CHECKED;
+    if (!type) return false;
+
+    decl->type   = type;
+    ident->type  = type;
+    ident->flags |= IDENTIFIER_IS_RESOLVED | IDENTIFIER_IS_TYPE_ALIAS;
+    decl->head.flags  |= AST_FLAG_IS_TYPE_CHECKED;
+    ident->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
+    return true;
+}
+
 bool check_declaration(Typer *typer, AstDeclaration *decl) {
     if (decl->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return true;
+    }
+
+    // 'Alias :: Point;' names a type if Point is a type, otherwise it is a normal constant e.g 'B :: A;' where 'A :: 5;'
+    if ((decl->flags & DECLARATION_CONSTANT) && !(decl->flags & DECLARATION_TYPE_ALIAS) && decl->idents.count == 1 && decl->values.count == 1) {
+        AstExpr *value = ((AstExpr **)decl->values.items)[0];
+        if (is_literal_identifier(value)) {
+            AstIdentifier *named = lookup_from_scope(typer->parser, typer->current_scope, ((AstLiteral *)value)->as.value.identifier.name);
+            if (named && identifier_is_type(named)) {
+                Type *type_name = type_alloc(&typer->parser->type_table, sizeof(Type));
+                type_name->head      = value->head;
+                type_name->head.kind = AST_TYPE;
+                type_name->kind      = TYPE_NAME;
+                type_name->name      = named->name;
+
+                AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[0];
+                decl->flags |= DECLARATION_TYPE_ALIAS;
+                decl->type   = type_name;
+                ident->flags |= IDENTIFIER_IS_TYPE_ALIAS;
+            }
+        }
+    }
+
+    if (decl->flags & DECLARATION_TYPE_ALIAS) {
+        return check_type_alias(typer, decl);
     }
 
     typer->inside_declaration = decl;
@@ -2248,11 +2330,11 @@ bool check_for(Typer *typer, AstFor *ast_for) {
             return NULL;
         }
 
-        ast_for->iterator->type = primitive_type(PRIMITIVE_S32);
+        ast_for->iterator->type = primitive_type(PRIMITIVE_I32);
         ast_for->iterator->flags |= IDENTIFIER_IS_RESOLVED;
 
         if (ast_for->index) {
-            ast_for->index->type = primitive_type(PRIMITIVE_S32);
+            ast_for->index->type = primitive_type(PRIMITIVE_I32);
             ast_for->index->flags |= IDENTIFIER_IS_RESOLVED;
         }
 
@@ -2305,7 +2387,7 @@ bool check_for(Typer *typer, AstFor *ast_for) {
         ast_for->iterator->flags |= IDENTIFIER_IS_RESOLVED;
 
         if (ast_for->index) {
-            ast_for->index->type = primitive_type(PRIMITIVE_S32);
+            ast_for->index->type = primitive_type(PRIMITIVE_I32);
             ast_for->index->flags |= IDENTIFIER_IS_RESOLVED;
         }
 
@@ -3673,7 +3755,7 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     }
 
     if (func_defn->generic_function && !func_defn->is_method) {
-        // Instances get a symbol named after their type arguments e.g max$s64 or set$s32$string. Methods are already named after their receiver
+        // Instances get a symbol named after their type arguments e.g max$i64 or set$i32$string. Methods are already named after their receiver
         StringBuilder sb = sb_init(32);
         sb_append(&sb, "%s", func_defn->symbol_name);
         for (int i = 0; i < func_defn->type_args.count; i++) {
@@ -4150,7 +4232,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_TYPEOF)         result = check_typeof(typer, (AstTypeof *)(expr));
     else if (expr->head.kind == AST_SIZEOF)         result = check_sizeof(typer, (AstSizeof *)(expr));
     else if (expr->head.kind == AST_NEW)            result = check_new(typer, (AstNew *)(expr), ctx_type);
-    else if (expr->head.kind == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_S64); // @Investigate - Shouldn't this be checked for both sides being integers???
+    else if (expr->head.kind == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_I64); // @Investigate - Shouldn't this be checked for both sides being integers???
     else if (expr->head.kind == AST_SEMICOLON_EXPR) result = primitive_type(PRIMITIVE_VOID);
     else {
         printf("%s:%d: compiler-error: Unhandled cases in 'check_expression()'. Expression was of type %s", __FILE__, __LINE__, ast_to_str((Ast *)expr));
@@ -4178,7 +4260,9 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     if (type_lhs->kind == TYPE_ENUM && lhs->head.kind == AST_LITERAL && ((AstLiteral *)(lhs))->kind == LITERAL_IDENTIFIER) {
         char *ident_name    = ((AstLiteral *)(lhs))->as.value.identifier.name;
         TypeEnum *enum_defn = ((TypeEnum *)(type_lhs));
-        if (strcmp(ident_name, enum_defn->identifier->name) == 0) {
+        AstIdentifier *lhs_ident = ((AstLiteral *)(lhs))->as.value.identifier.resolved_identifier;
+        bool names_enum = strcmp(ident_name, enum_defn->identifier->name) == 0 || (lhs_ident && (lhs_ident->flags & IDENTIFIER_IS_TYPE_ALIAS)); // e.g Hue.Red with Hue :: Color;
+        if (names_enum) {
 
             AstExpr *rhs = ma->right;
             if (rhs->head.kind == AST_LITERAL && ((AstLiteral *)(rhs))->kind == LITERAL_IDENTIFIER) {
@@ -4215,7 +4299,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
         assert(ident && "Typechecked the name of a struct, but didn't find it again while resolving member access");
 
-        if (ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT) {
+        if (ident->flags & (IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_TYPE_ALIAS)) {
             is_static_member_access = true;
         }
     }
@@ -5004,6 +5088,14 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 
         if (ident->flags & IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN) {
             needs_ordering_check = false;
+        }
+
+        // Types can be used before they are declared e.g Hue.Red before 'Hue :: Color;'
+        if (ident->flags & IDENTIFIER_IS_TYPE_ALIAS) {
+            needs_ordering_check = false;
+
+            bool ok = check_declaration_of(typer, ident);
+            if (!ok) return NULL;
         }
 
         if (needs_ordering_check) {

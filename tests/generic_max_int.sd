@@ -18,14 +18,14 @@ main :: () {
     assert(max(7) == 7);
 
     // Typed arguments decide the type
-    a: s64 = 5;
-    b: s64 = -2;
+    a: i64 = 5;
+    b: i64 = -2;
     assert(max(a, b) == 5);
-    assert(typeof(max(a, b)) == "s64");
+    assert(typeof(max(a, b)) == "i64");
 
     // Untyped literals take the type of a typed argument
     assert(max(a, 100, 3) == 100);
-    assert(typeof(max(a, 100, 3)) == "s64");
+    assert(typeof(max(a, 100, 3)) == "i64");
 
     // Spreading a slice into the variadic parameter
     numbers := [4, 8, 15, 16, 23, 42];
