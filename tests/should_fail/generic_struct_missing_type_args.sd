@@ -1,0 +1,7 @@
+Box :: struct <T> {
+    value: T;
+}
+
+main :: () {
+    b: Box; // Missing the type arguments
+}

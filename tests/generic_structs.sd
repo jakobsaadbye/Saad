@@ -1,0 +1,118 @@
+List :: struct <T> {
+    elements: [..]T;
+    capacity: int;
+    count: int;
+}
+
+Pair :: struct <A, B> {
+    first:  A;
+    second: B;
+}
+
+Node :: struct <T> {
+    value: T;
+    next:  *Node<T>;
+}
+
+Vector3 :: struct {
+    x: int;
+    y: int;
+    z: int;
+}
+
+// A normal struct can hold instances of generic structs
+Line :: struct {
+    points: Pair<Vector3, Vector3>;
+}
+
+sum_pair :: (pair: Pair<int, int>) -> int {
+    return pair.first + pair.second;
+}
+
+length :: method (list: *List<int>) -> int {
+    return list.count;
+}
+
+main :: () {
+    {
+        // Instances are sized with their type arguments
+        assert(sizeof(Pair<u8, u8>)    == 2);
+        assert(sizeof(Pair<u8, s64>)   == 16);
+        assert(sizeof(Pair<s32, s32>)  == 8);
+        assert(sizeof(Node<s64>)       == 16);
+        assert(sizeof(Pair<Vector3, bool>) == 16);
+    }
+    {
+        // Struct literals with explicit and inferred types
+        a := Pair<int, float>{1, 2.5};
+        assert(a.first == 1);
+        assert(a.second == 2.5);
+
+        b: Pair<int, int> = {3, 4};
+        assert(sum_pair(b) == 7);
+        assert(sum_pair({5, 6}) == 11);
+    }
+    {
+        // The same instance is the same type wherever it is written
+        a: Pair<int, int> = {1, 2};
+        b: Pair<int, int>;
+        b = a;
+        assert(b.first == 1);
+        assert(b.second == 2);
+    }
+    {
+        // Nested type arguments
+        p: Pair<Pair<int, int>, int>;
+        p.first.first  = 1;
+        p.first.second = 2;
+        p.second       = 3;
+        assert(p.first.first + p.first.second + p.second == 6);
+
+        q := Pair<int, Pair<s64, u8>>{1, {2, 3}};
+        assert(q.second.first == 2);
+        assert(q.second.second == 3);
+    }
+    {
+        // Self referential generic struct
+        third  := Node<int>{3, null};
+        second := Node<int>{2, &third};
+        first  := Node<int>{1, &second};
+
+        total := 0;
+        node := &first;
+        while node != null {
+            total += node.value;
+            node = node.next;
+        }
+        assert(total == 6);
+    }
+    {
+        // Dynamic arrays of the type parameter
+        list: List<int>;
+        append(list.elements, 10);
+        append(list.elements, 20);
+        list.count = 2;
+
+        assert(list.elements[0] == 10);
+        assert(list.elements[1] == 20);
+        assert(list.length() == 2);
+
+        names: List<string>;
+        append(names.elements, "hello");
+        assert(names.elements.count == 1);
+    }
+    {
+        line := Line{{{1, 2, 3}, {4, 5, 6}}};
+        assert(line.points.second.z == 6);
+    }
+    {
+        // Pointers as type arguments
+        x := 5;
+        p := Pair<*int, int>{&x, 1};
+        assert(*p.first == 5);
+    }
+    {
+        pair := Pair<int, bool>{42, true};
+        print("%\n", pair);
+    }
+}

@@ -4,6 +4,42 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.2.9 - 29. Oct 2026
+
+* Generic structs
+
+Structs can now take type parameters, written in angle brackets after `struct`
+
+```odin
+List :: struct <T> {
+    elements: [..]T;
+    count: int;
+}
+
+Pair :: struct <A, B> {
+    first:  A;
+    second: B;
+}
+
+main :: () {
+    numbers: List<int>;
+    append(numbers.elements, 1);
+
+    pair  := Pair<int, float>{1, 2.5};
+    pairs := Pair<List<int>, *Pair<int, int>>{};
+}
+```
+
+Every distinct set of type arguments creates its own struct (monomorphization), so `List<int>` and `List<float>` are two
+separate types with their own sizes. Writing `List<int>` in two places refers to the same type.
+
+Not supported yet: methods on generic structs (methods on a specific instance like `*List<int>` work), constants
+inside generic structs, function types as members of generic structs and type aliases like `MyList :: List<int>`
+
+Bug fixes:
+
+* Fixed keywords directly followed by an operator e.g `int>` being lexed as identifiers
+
 ## Update v0.2.8 - 30. May 2026
 
 Big changes to functions to make them first-class citizens

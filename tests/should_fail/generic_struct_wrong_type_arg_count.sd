@@ -1,0 +1,8 @@
+Pair :: struct <A, B> {
+    first:  A;
+    second: B;
+}
+
+main :: () {
+    p: Pair<int>; // Pair takes two type arguments
+}

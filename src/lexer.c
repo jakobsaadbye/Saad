@@ -282,18 +282,9 @@ void make_keyword(Lexer *lexer, TokenType kw_type, Pos start) {
 KeywordMatch match_keyword(Lexer *lexer) {
     int i = 0;
     while (true) {
+        // A keyword ends where an identifier would, e.g 'int>' in List<int> is the keyword 'int' followed by '>'
         char c = peek_char(lexer, i);
-        if (c == ' ')  break;
-        if (c == ';')  break;
-        if (c == '(')  break;
-        if (c == ')')  break;
-        if (c == '}')  break;
-        if (c == '[')  break;
-        if (c == ']')  break;
-        if (c == ',')  break;
-        if (c == '.')  break;
-        if (c == '=')  break;
-        if (c == '\0') break;
+        if (!starts_identifier(c) && !is_digit(c)) break;
 
         i++;
     }

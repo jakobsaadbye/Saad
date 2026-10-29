@@ -1,0 +1,8 @@
+Node :: struct <T> {
+    value: T;
+    next:  Node<T>; // Must be *Node<T>
+}
+
+main :: () {
+    n: Node<int>;
+}

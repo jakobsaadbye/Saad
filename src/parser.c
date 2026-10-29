@@ -46,6 +46,8 @@ bool            generate_and_add_import(Parser *parser, char *path);
 
 bool starts_array_literal(Parser *parser);
 bool starts_struct_literal(Parser *parser);
+int  scan_type_arguments(Parser *parser, int lookahead);
+bool parse_type_arguments(Parser *parser, DynamicArray *type_args);
 
 void *ast_allocate(Parser *parser, size_t size);
 void expect(Parser *parser, Token given, TokenType expected_type);
@@ -938,6 +940,25 @@ Type *parse_type(Parser *parser) {
         return (Type *)(any);
     }
 
+    if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '<' && scan_type_arguments(parser, 1) != -1) {
+        // Instance of a generic struct e.g List<int>
+        eat_token(parser);
+
+        TypeGenericInstance *instance = type_alloc(&parser->type_table, sizeof(TypeGenericInstance));
+        instance->type_args = da_init(1, sizeof(Type *));
+
+        bool ok = parse_type_arguments(parser, &instance->type_args);
+        if (!ok) return NULL;
+
+        instance->head.head.kind  = AST_TYPE;
+        instance->head.head.file  = parser->current_file;
+        instance->head.head.start = next.start;
+        instance->head.head.end   = ((Token *)parser->lexer->tokens.items)[parser->current_token_index - 1].end;
+        instance->head.kind       = TYPE_GENERIC_INSTANCE;
+        instance->head.name       = next.as_value.value.identifier.name;
+        return (Type *)(instance);
+    }
+
     if (next.type == TOKEN_LITERAL_IDENTIFIER) {
         // Struct or enum
         eat_token(parser);
@@ -1070,6 +1091,73 @@ Type *parse_type(Parser *parser) {
 
     report_error_token(parser, LABEL_ERROR, next, "Expected a type");
     return NULL;
+}
+
+// Looks ahead from the '<' at the given lookahead and returns the lookahead just after its matching '>',
+// or -1 if the tokens cannot be a list of type arguments. Used to tell 'List<int>' apart from a less than comparison
+int scan_type_arguments(Parser *parser, int lookahead) {
+    assert(peek_token(parser, lookahead).type == '<');
+
+    int depth = 0;
+    while (true) {
+        Token token = peek_token(parser, lookahead);
+        switch ((int) token.type) {
+        case '<':                       depth += 1; break;
+        case '>':                       depth -= 1; break;
+        case TOKEN_BITWISE_SHIFT_RIGHT: depth -= 2; break; // e.g List<List<int>>
+        case TOKEN_LITERAL_IDENTIFIER:
+        case TOKEN_LITERAL_INTEGER:
+        case TOKEN_STRING:
+        case TOKEN_ANY:
+        case TOKEN_DOUBLE_DOT:
+        case '*':
+        case '[':
+        case ']':
+        case ',':
+            break;
+        default:
+            if (is_primitive_type_token(token)) break;
+            return -1;
+        }
+
+        lookahead += 1;
+        if (depth <= 0) return lookahead;
+    }
+}
+
+// Parses the type arguments of a generic struct e.g the '<int, *float>' in Pair<int, *float>
+bool parse_type_arguments(Parser *parser, DynamicArray *type_args) {
+    Token open = peek_next_token(parser);
+    expect(parser, open, '<');
+    eat_token(parser);
+
+    while (true) {
+        Type *arg = parse_type(parser);
+        if (!arg) return false;
+        da_append(type_args, arg);
+
+        Token next = peek_next_token(parser);
+        if (next.type == ',') {
+            eat_token(parser);
+            continue;
+        }
+        if (next.type == '>') {
+            eat_token(parser);
+            return true;
+        }
+        if (next.type == TOKEN_BITWISE_SHIFT_RIGHT) {
+            // The '>>' closes both this and an outer list of type arguments e.g List<List<int>>.
+            // Eat the first '>' by turning the token into a single '>' that the outer list then eats
+            Token *token = &((Token *)parser->lexer->tokens.items)[parser->current_token_index];
+            token->type             = '>';
+            token->start.input_idx += 1;
+            token->start.col       += 1;
+            return true;
+        }
+
+        report_error_token(parser, LABEL_ERROR, next, "Expected a ',' or '>' in the list of type arguments");
+        return false;
+    }
 }
 
 AstIdentifier *add_member_to_struct_scope(Parser *parser, AstStruct *struct_defn, AstIdentifier *member) {
@@ -1335,6 +1423,40 @@ AstStruct *parse_struct_defn(Parser *parser) {
     AstStruct *struct_defn = (AstStruct *)(ast_allocate(parser, sizeof(AstStruct)));
     struct_defn->static_members = make_empty_struct_scope(parser, struct_defn);
     struct_defn->static_members->parent = parser->current_scope;
+    struct_defn->type_params    = da_init(1, sizeof(AstIdentifier *));
+    struct_defn->instances      = da_init(1, sizeof(TypeStruct *));
+
+    // Type parameters of a generic struct e.g List :: struct <T> {...}
+    next = peek_next_token(parser);
+    if (next.type == '<') {
+        eat_token(parser);
+
+        while (true) {
+            Token param_token = peek_next_token(parser);
+            expect(parser, param_token, TOKEN_LITERAL_IDENTIFIER);
+            eat_token(parser);
+
+            AstIdentifier *param = make_identifier_from_token(parser, param_token, NULL);
+            for (int i = 0; i < struct_defn->type_params.count; i++) {
+                AstIdentifier *existing = ((AstIdentifier **)struct_defn->type_params.items)[i];
+                if (strcmp(existing->name, param->name) == 0) {
+                    report_error_ast(parser, LABEL_ERROR, (Ast *)param, "Redeclaration of type parameter '%s'", param->name);
+                    return NULL;
+                }
+            }
+            da_append(&struct_defn->type_params, param);
+
+            next = peek_next_token(parser);
+            if (next.type == ',') {
+                eat_token(parser);
+                continue;
+            }
+
+            expect(parser, next, '>');
+            eat_token(parser);
+            break;
+        }
+    }
 
     AstBlock *scope = new_block(parser, BLOCK_DECLARATIVE);
     scope->belongs_to_struct = struct_defn;
@@ -1349,6 +1471,12 @@ AstStruct *parse_struct_defn(Parser *parser) {
     struct_defn->identifier = ident;
     struct_defn->members    = scope;
     struct_defn->methods    = make_empty_struct_scope(parser, struct_defn);
+
+    if (struct_defn->type_params.count > 0 && struct_defn->static_members->identifiers.count > 0) {
+        AstIdentifier *constant = ((AstIdentifier **)struct_defn->static_members->identifiers.items)[0];
+        report_error_ast(parser, LABEL_ERROR, (Ast *)constant, "Constants inside generic structs are not yet supported");
+        return NULL;
+    }
 
     if (scope->identifiers.count == 0) {
         struct_defn->is_static_struct = true;
@@ -2693,6 +2821,11 @@ bool starts_struct_literal(Parser *parser) {
     Token next = peek_next_token(parser);
     if (next.type == '{') return true;
     if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '{') return true;
+    if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '<') {
+        // Instance of a generic struct e.g List<int>{...}
+        int end = scan_type_arguments(parser, 1);
+        if (end != -1 && peek_token(parser, end).type == '{') return true;
+    }
 
     return false;
 }
