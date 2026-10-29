@@ -1,0 +1,11 @@
+// expect-error: Cannot compare Bag with ==, as its member 'items' of type []int cannot be compared
+
+Bag :: struct {
+    items: []int;
+}
+
+main :: () {
+    a: Bag;
+    b: Bag;
+    same := a == b;
+}

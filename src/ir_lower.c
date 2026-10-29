@@ -1314,9 +1314,47 @@ static IrCmp comparison_predicate(int op, bool is_float, bool is_signed) {
     return IR_CMP_NONE;
 }
 
+// Compares two values of the same type in memory. Returns an i8 that is 1 if they are equal.
+// Structs are compared member by member (the typer only allows members that can be compared)
+static int emit_values_equal(Lowerer *L, IrAddr a, IrAddr b, Type *type) {
+    if (type->kind == TYPE_STRUCT) {
+        int result = emit_const(L, IR_I8, 1);
+        DynamicArray members = ((TypeStruct *) type)->node->members->identifiers;
+        for (int i = 0; i < members.count; i++) {
+            AstIdentifier *member = da_get_deref(members, i);
+            if (member->flags & IDENTIFIER_IS_CONSTANT) continue;
+
+            int equal = emit_values_equal(L, addr_add(a, member->member_offset), addr_add(b, member->member_offset), member->type);
+            result = emit_binop(L, IR_AND, IR_I8, result, equal);
+        }
+        return result;
+    }
+    if (type->kind == TYPE_STRING) {
+        int args[2] = { addr_to_ptr(L, a), addr_to_ptr(L, b) };
+        int result  = emit_c_call(L, "runtime_compare_strings", IR_I32, 2, args);
+        return emit_cmp(L, IR_ICMP, IR_CMP_EQ, IR_I32, result, emit_const(L, IR_I32, 0));
+    }
+
+    IrType ir_type = ir_type_of(type);
+    if (ir_type == IR_VOID) lower_fail(L, NULL, "Compiler Error: Cannot compare values of type %s", type_to_str(type));
+
+    int value_a = emit_load(L, ir_type, a);
+    int value_b = emit_load(L, ir_type, b);
+    if (ir_type_is_float(ir_type)) return emit_cmp(L, IR_FCMP, IR_CMP_OEQ, ir_type, value_a, value_b);
+    return emit_cmp(L, IR_ICMP, IR_CMP_EQ, ir_type, value_a, value_b);
+}
+
 static int lower_comparison(Lowerer *L, AstBinary *bin) {
     Type *left  = bin->left->type;
     Type *right = bin->right->type;
+
+    if (left->kind == TYPE_STRUCT && right->kind == TYPE_STRUCT) {
+        IrAddr a = value_to_place(L, lower_expr(L, bin->left)).addr;
+        IrAddr b = value_to_place(L, lower_expr(L, bin->right)).addr;
+        int equal = emit_values_equal(L, a, b, left);
+        if (bin->operator == TOKEN_NOT_EQUAL) return emit_binop(L, IR_XOR, IR_I8, equal, emit_const(L, IR_I8, 1));
+        return equal;
+    }
 
     if (left->kind == TYPE_STRING && right->kind == TYPE_STRING) {
         // runtime_compare_strings(*string, *string) -> int  (<0, 0, >0)

@@ -83,6 +83,7 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
 bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver_struct);
 TypeStruct *method_holder_of(Typer *typer, Type *type);
 PrimitiveKind canonical_primitive_kind(PrimitiveKind kind);
+bool struct_is_comparable(TypeStruct *struct_type, AstIdentifier **bad_member);
 bool register_generic_method(Typer *typer, AstFunctionDefn *generic);
 bool register_methods_early(Typer *typer, AstFile *file);
 bool check_struct_statement(Typer *typer, AstStruct *ast_struct);
@@ -746,6 +747,37 @@ bool unify_types(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindings, 
     default:
         return true;
     }
+}
+
+// Returns true if values of the struct can be compared member by member with ==. Otherwise 'bad_member' is set to the member that cannot be compared
+bool struct_is_comparable(TypeStruct *struct_type, AstIdentifier **bad_member) {
+    DynamicArray members = struct_type->node->members->identifiers;
+    for (int i = 0; i < members.count; i++) {
+        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+        if (member->flags & IDENTIFIER_IS_CONSTANT) continue;
+
+        switch (member->type->kind) {
+        case TYPE_BOOL:
+        case TYPE_INTEGER:
+        case TYPE_FLOAT:
+        case TYPE_ENUM:
+        case TYPE_POINTER:
+        case TYPE_STRING:
+            break;
+        case TYPE_STRUCT: {
+            AstIdentifier *inner = NULL;
+            if (!struct_is_comparable((TypeStruct *)member->type, &inner)) {
+                *bad_member = member;
+                return false;
+            }
+            break;
+        }
+        default:
+            *bad_member = member;
+            return false;
+        }
+    }
+    return true;
 }
 
 // Returns the struct that holds the methods of a type. Primitive types and enums don't have members, so they get a struct without
@@ -4753,8 +4785,24 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
     TypeKind rhs = ti_rhs->kind;
 
     if (lhs == TYPE_STRUCT && rhs == TYPE_STRUCT) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Binary operation between two structs is not yet supported!");
-        return NULL;
+        // Structs can be compared member by member with == and !=
+        if (binary->operator != TOKEN_DOUBLE_EQUAL && binary->operator != TOKEN_NOT_EQUAL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Binary operation between two structs is not yet supported! Only == and != are");
+            return NULL;
+        }
+        if (strcmp(ti_lhs->name, ti_rhs->name) != 0) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Cannot compare a %s with a %s", text_bold(type_to_str(ti_lhs)), text_bold(type_to_str(ti_rhs)));
+            return NULL;
+        }
+
+        AstIdentifier *bad_member = NULL;
+        if (!struct_is_comparable((TypeStruct *)ti_lhs, &bad_member)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Cannot compare %s with %s, as its member '%s' of type %s cannot be compared",
+                text_bold(type_to_str(ti_lhs)), binary->operator == TOKEN_DOUBLE_EQUAL ? "==" : "!=", bad_member->name, type_to_str(bad_member->type));
+            report_error_ast(typer->parser, LABEL_NOTE, NULL, "Numbers, bools, enums, pointers, strings and structs of those can be compared");
+            return NULL;
+        }
+        return primitive_type(PRIMITIVE_BOOL);
     }
 
     if (strchr("+-*/", binary->operator)) {
