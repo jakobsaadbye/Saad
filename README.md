@@ -21,12 +21,13 @@ ages := ["alice": 31, "bob": 27];   // Map<string, int>
 ages["carol"] = 40;
 counts: Map<string, int> = [:];
 counts["word"] += 1;
-for entry in ages { print("% = %\n", entry.key, entry.value); }
+for name, age in ages { print("% is %\n", name, age); }
 ```
 
 `[..]T` is another way to write `List<T>`. The syntax comes from a collection protocol that any struct
 can use: `c[k]` calls `index` or `indexRef`, `for x in c` and passing `c` as a slice call `elements`, and
-literals call `add` or `set`. Maps keep their entries in the order they were added.
+literals call `add` or `set`. Maps keep their entries in the order they were added. `for key, value in m`
+works for any collection with a `set` method whose elements have `key` and `value` members.
 
 * BREAKING: `append(xs, v)` is replaced by `xs.add(v)`
 * Methods on primitive types and enums, e.g `doubled :: method (x: int) -> int`

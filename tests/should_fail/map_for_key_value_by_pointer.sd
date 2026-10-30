@@ -1,0 +1,8 @@
+// expect-error: Cannot loop by pointer over the keys and values of a map
+// expect-error: for *entry in m { entry.value += 1; }
+
+main :: () {
+    ages := ["alice": 31];
+    for *name, age in ages {
+    }
+}

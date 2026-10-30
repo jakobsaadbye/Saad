@@ -104,6 +104,7 @@ void report_readonly_self(Typer *typer, Ast *at, AstFunctionDefn *method, const 
 void append_place_text(StringBuilder *sb, AstExpr *expr);
 bool check_declaration(Typer *typer, AstDeclaration *decl);
 bool identifier_is_type(AstIdentifier *ident);
+bool desugar_key_value_for(Typer *typer, AstFor *ast_for);
 bool check_declaration_of(Typer *typer, AstIdentifier *ident);
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 
@@ -2456,6 +2457,87 @@ EnclosingLoop *pop_enclosing_loop(Typer *typer) {
     return NULL;
 }
 
+AstExpr *generate_member_of_identifier(Typer *typer, char *ident_name, char *member_name, Ast *at) {
+    Parser *parser = typer->parser;
+
+    AstLiteral *ident = ast_allocate(parser, sizeof(AstLiteral));
+    ident->head.head       = *at;
+    ident->head.head.kind  = AST_LITERAL;
+    ident->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    ident->kind            = LITERAL_IDENTIFIER;
+    ident->as.value.identifier.name   = ident_name;
+    ident->as.value.identifier.length = (int)strlen(ident_name);
+
+    AstLiteral *member = ast_allocate(parser, sizeof(AstLiteral));
+    member->head.head       = *at;
+    member->head.head.kind  = AST_LITERAL;
+    member->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    member->kind            = LITERAL_IDENTIFIER;
+    member->as.value.identifier.name   = member_name;
+    member->as.value.identifier.length = (int)strlen(member_name);
+
+    AstMemberAccess *ma = ast_allocate(parser, sizeof(AstMemberAccess));
+    ma->head.head       = *at;
+    ma->head.head.kind  = AST_MEMBER_ACCESS;
+    ma->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    ma->left            = (AstExpr *)ident;
+    ma->right           = (AstExpr *)member;
+    return (AstExpr *)ma;
+}
+
+// Turns 'for key, value in m {...}' into 'for *entry in m.elements() { key := entry.key; value := entry.value; ... }'
+bool desugar_key_value_for(Typer *typer, AstFor *ast_for) {
+    Parser *parser = typer->parser;
+
+    if (ast_for->is_by_pointer) {
+        report_error_token(parser, LABEL_ERROR, ast_for->asterix, "Cannot loop by pointer over the keys and values of a map");
+        report_error_ast(parser, LABEL_HINT, NULL, "Loop over the entries to change the values e.g for *entry in m { entry.value += 1; }");
+        return false;
+    }
+
+    AstIdentifier *key   = ast_for->iterator;
+    AstIdentifier *value = ast_for->index;
+
+    char *entry_name = malloc(32);
+    snprintf(entry_name, 32, "$entry%d", typer->next_hidden_local_id++);
+
+    AstIdentifier *entry = ast_allocate(parser, sizeof(AstIdentifier));
+    entry->head.kind  = AST_IDENTIFIER;
+    entry->head.file  = ast_for->head.file;
+    entry->head.start = ast_for->head.start;
+    entry->head.end   = ast_for->head.start;
+    entry->name       = entry_name;
+    entry->scope      = ast_for->body;
+    da_append(&ast_for->body->identifiers, entry);
+
+    AstIdentifier *names[2] = { key, value };
+    char *members[2]        = { "key", "value" };
+    for (int i = 0; i < 2; i++) {
+        AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
+        decl->head.kind  = AST_DECLARATION;
+        decl->head.file  = names[i]->head.file;
+        decl->head.start = names[i]->head.start;
+        decl->head.end   = names[i]->head.end;
+        decl->head.flags = AST_FLAG_COMPILER_GENERATED;
+        decl->idents     = da_init(1, sizeof(AstIdentifier *));
+        decl->values     = da_init(1, sizeof(AstExpr *));
+        decl->flags      = DECLARATION_INFER | DECLARATION_IS_COMPILER_GENERATED;
+
+        AstExpr *member = generate_member_of_identifier(typer, entry_name, members[i], (Ast *)names[i]);
+        da_append(&decl->idents, names[i]);
+        da_append(&decl->values, member);
+        names[i]->decl = decl;
+
+        da_insert(&ast_for->body->statements, decl, i);
+    }
+
+    ast_for->iterator      = entry;
+    ast_for->index         = NULL;
+    ast_for->is_by_pointer = true; // The entries are not copied
+    ast_for->kind          = FOR_WITH_NAMED_ITERATOR;
+    return true;
+}
+
 bool check_for(Typer *typer, AstFor *ast_for) {
     push_enclosing_loop(typer, TOKEN_FOR, ast_for, NULL);
 
@@ -2515,6 +2597,15 @@ bool check_for(Typer *typer, AstFor *ast_for) {
             type = check_expression(typer, (AstExpr *)call, NULL);
             if (!type) return NULL;
             ast_for->iterable = (AstExpr *)call;
+
+            // A map-like collection gives a key and a value to 'for key, value in m' instead of an element and an index
+            if (ast_for->index && find_method(collection, "set") && type->kind == TYPE_ARRAY) {
+                Type *entry_type = ((TypeArray *)type)->elem_type;
+                if (entry_type->kind == TYPE_STRUCT && get_struct_member(((TypeStruct *)entry_type)->node, "key") && get_struct_member(((TypeStruct *)entry_type)->node, "value")) {
+                    bool ok = desugar_key_value_for(typer, ast_for);
+                    if (!ok) return NULL;
+                }
+            }
         }
 
         if (type->kind != TYPE_ARRAY && type->kind != TYPE_VARIADIC && type->kind != TYPE_STRING) {
