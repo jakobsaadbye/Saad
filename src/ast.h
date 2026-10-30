@@ -209,8 +209,9 @@ typedef struct AstDeclaration {
     Ast              head;
     DynamicArray     idents; // of *AstIdentifier
     Type            *type;   // type is *TypeTuple if doing a multi declaration
-    DynamicArray     values; // of *AstExpr
+    DynamicArray     values; // of *AstExpr. For a struct member, its default value
     DeclarationFlags flags;
+    int              values_token_index; // The first token of the values. Instances of generic structs parse the default values of their members again from here
 } AstDeclaration;
 
 typedef enum AssignOp {

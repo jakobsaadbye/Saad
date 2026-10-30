@@ -51,6 +51,7 @@ bool starts_function_defn_at(Parser *parser, int cursor);
 bool parse_type_parameters(Parser *parser, DynamicArray *type_params);
 bool add_implicit_self(Parser *parser, AstFunctionDefn *method, AstStruct *self_struct);
 bool parse_enumerators(Parser *parser, AstEnum *ast_enum);
+bool parse_expression_list(Parser *parser, DynamicArray *exprs);
 TypeEnum *make_enum_type(Parser *parser, AstEnum *ast_enum, AstIdentifier *ident);
 TypeStruct *parse_anonymous_struct_type(Parser *parser);
 TypeEnum *parse_anonymous_enum_type(Parser *parser);
@@ -2510,6 +2511,28 @@ AstFunctionDefn *reparse_generic_function(Parser *parser, AstFunctionDefn *gener
     return instance;
 }
 
+// Parses the default values of a member of a generic struct again for an instance of it, as checking an expression changes it.
+// The type parameters of the instance are bound in 'scope'
+bool reparse_default_values(Parser *parser, AstDeclaration *generic_decl, AstBlock *scope, DynamicArray *values) {
+    int       saved_token_index = parser->current_token_index;
+    AstBlock *saved_scope       = parser->current_scope;
+    AstFile  *saved_file        = parser->current_file;
+    int       saved_split_token = parser->split_shift_right_token;
+
+    parser->current_token_index     = generic_decl->values_token_index;
+    parser->current_scope           = scope;
+    parser->current_file            = generic_decl->head.file;
+    parser->split_shift_right_token = 0;
+
+    bool ok = parse_expression_list(parser, values);
+
+    parser->current_token_index     = saved_token_index;
+    parser->current_scope           = saved_scope;
+    parser->current_file            = saved_file;
+    parser->split_shift_right_token = saved_split_token;
+    return ok;
+}
+
 AstIf *parse_if(Parser *parser) {
     Token if_token = peek_next_token(parser);
     eat_token(parser);
@@ -2799,13 +2822,9 @@ AstDeclaration *parse_declaration(Parser *parser) {
     // Infer. e.g. a := b
     if (next.type == TOKEN_COLON_EQUAL) {
         decl->flags |= DECLARATION_INFER;
-
-        if (parser->current_scope->belongs_to_struct) {
-            report_error_token(parser, LABEL_ERROR, next, "Default struct values are not yet supported");
-            return NULL;
-        }
         eat_token(parser);
 
+        decl->values_token_index = parser->current_token_index; // Instances of generic structs parse the default values of members again
         bool ok = parse_expression_list(parser, &decl->values);
         if (!ok) return NULL;
     }
@@ -2821,13 +2840,9 @@ AstDeclaration *parse_declaration(Parser *parser) {
 
         if (next.type == '=') {
             decl->flags |= DECLARATION_TYPED;
-            if (parser->current_scope->belongs_to_struct) {
-                report_error_token(parser, LABEL_ERROR, next, "Default struct values are not yet implemented!");
-                return NULL;
-            }
-            
             eat_token(parser);
 
+            decl->values_token_index = parser->current_token_index; // Instances of generic structs parse the default values of members again
             bool ok = parse_expression_list(parser, &decl->values);
             if (!ok) return NULL;
 

@@ -838,9 +838,83 @@ static int64_t fixed_array_count(TypeArray *array) {
     return array->capacity;
 }
 
+static void store_expr(Lowerer *L, IrAddr dst, Type *dst_type, AstExpr *expr, bool dst_is_fresh);
+
+// Returns true if zeroed memory is not the default value of the type, because it has struct members with default values e.g 'age: int = 30;'
+static bool has_default_values(Type *type) {
+    if (type->kind == TYPE_STRUCT) {
+        DynamicArray members = ((TypeStruct *) type)->node->members->identifiers;
+        for (int i = 0; i < members.count; i++) {
+            AstIdentifier *member = da_get_deref(members, i);
+            if (member->flags & IDENTIFIER_IS_CONSTANT) continue;
+            if (member_default_value(member) || has_default_values(member->type)) return true;
+        }
+        return false;
+    }
+    if (type->kind == TYPE_ARRAY && ((TypeArray *) type)->array_kind == ARRAY_FIXED) {
+        return has_default_values(((TypeArray *) type)->elem_type);
+    }
+    return false;
+}
+
+// Writes the default values of the struct members in 'type' into zeroed memory
+static void emit_default_values(Lowerer *L, IrAddr addr, Type *type) {
+    if (type->kind == TYPE_STRUCT) {
+        DynamicArray members = ((TypeStruct *) type)->node->members->identifiers;
+        for (int i = 0; i < members.count; i++) {
+            AstIdentifier *member = da_get_deref(members, i);
+            if (member->flags & IDENTIFIER_IS_CONSTANT) continue;
+
+            AstExpr *value = member_default_value(member);
+            IrAddr member_addr = addr_add(addr, member->member_offset);
+            if (value) {
+                store_expr(L, member_addr, member->type, value, true);
+            } else if (has_default_values(member->type)) {
+                emit_default_values(L, member_addr, member->type);
+            }
+        }
+        return;
+    }
+
+    if (type->kind == TYPE_ARRAY && ((TypeArray *) type)->array_kind == ARRAY_FIXED) {
+        Type   *elem  = ((TypeArray *) type)->elem_type;
+        int64_t count = fixed_array_count((TypeArray *) type);
+        if (!has_default_values(elem) || count <= 0) return;
+
+        if (count <= 4) {
+            for (int64_t i = 0; i < count; i++) emit_default_values(L, addr_add(addr, (int)(i * elem->size)), elem);
+            return;
+        }
+
+        // for i := 0; i < count; i += 1 { defaults of element i }
+        int base    = addr_to_ptr(L, addr);
+        int counter = ir_new_slot(L->func, 8, 8, "default init index");
+        emit_store(L, IR_I64, addr_slot(counter, 0), emit_const(L, IR_I64, 0));
+
+        IrBlock *cond = create_block(L, "default.cond");
+        IrBlock *body = create_block(L, "default.body");
+        IrBlock *done = create_block(L, "default.done");
+        terminate_jmp(L, cond);
+
+        set_block(L, cond);
+        int index = emit_load(L, IR_I64, addr_slot(counter, 0));
+        terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_SLT, IR_I64, index, emit_const(L, IR_I64, count)), body, done);
+
+        set_block(L, body);
+        int offset  = emit_binop(L, IR_MUL, IR_I64, index, emit_const(L, IR_I64, elem->size));
+        int element = emit_ptr_add(L, base, offset);
+        emit_default_values(L, addr_vreg(element, 0), elem);
+        emit_store(L, IR_I64, addr_slot(counter, 0), emit_binop(L, IR_ADD, IR_I64, index, emit_const(L, IR_I64, 1)));
+        terminate_jmp(L, cond);
+
+        set_block(L, done);
+    }
+}
+
 // The value of a variable declared without an initializer
 static void emit_default_init(Lowerer *L, IrAddr addr, Type *type) {
     emit_zero(L, addr, type_storage_size(type));
+    if (has_default_values(type)) emit_default_values(L, addr, type);
 }
 
 static void copy_aggregate(Lowerer *L, IrAddr dst, Value src, int size) {
@@ -914,7 +988,15 @@ static void lower_struct_literal_into(Lowerer *L, AstStructLiteral *lit, IrAddr 
             AstStructInitializer *init = da_get_deref(lit->initializers, i);
             if (init->member == member) { initialized = true; break; }
         }
-        if (!initialized) emit_zero(L, addr_add(dst, member->member_offset), type_storage_size(member->type));
+        if (initialized) continue;
+
+        AstExpr *value = member_default_value(member);
+        IrAddr member_addr = addr_add(dst, member->member_offset);
+        if (value) {
+            store_expr(L, member_addr, member->type, value, true);
+        } else if (has_default_values(member->type)) {
+            emit_default_values(L, member_addr, member->type);
+        }
     }
 
     for (int i = 0; i < lit->initializers.count; i++) {

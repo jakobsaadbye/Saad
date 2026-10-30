@@ -1,0 +1,9 @@
+// expect-error: Type mismatch. 'age' is said to be of type int, but expression is of type string
+
+Person :: struct {
+    age: int = "old";
+}
+
+main :: () {
+    p: Person;
+}
