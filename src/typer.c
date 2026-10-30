@@ -39,6 +39,8 @@ typedef struct Typer {
     bool checking_place; // Set before checking an expression that is used as a place e.g the left side of an assignment, so that xs[i] uses indexRef()
     bool current_place;  // The value of checking_place for the expression being checked right now
     int  next_hidden_local_id;
+
+    DynamicArray anonymous_types; // of *Type. One anonymous struct or enum for each set of members e.g struct { age: int; }, so that the same members are the same type
 } Typer;
 
 #define GENERIC_DEPTH_LIMIT 64
@@ -104,6 +106,7 @@ void report_readonly_self(Typer *typer, Ast *at, AstFunctionDefn *method, const 
 void append_place_text(StringBuilder *sb, AstExpr *expr);
 bool check_declaration(Typer *typer, AstDeclaration *decl);
 bool identifier_is_type(AstIdentifier *ident);
+Type *resolve_anonymous_type(Typer *typer, Type *type);
 bool desugar_key_value_for(Typer *typer, AstFor *ast_for);
 bool check_declaration_of(Typer *typer, AstIdentifier *ident);
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
@@ -126,6 +129,7 @@ Typer typer_init(Parser *parser, ConstEvaluator *ce) {
     typer.enclosing_loop      = NULL;
     typer.inside_declaration  = NULL;
     typer.struct_wait_list    = da_init(8, sizeof(AstIdentifier *));
+    typer.anonymous_types     = da_init(8, sizeof(Type *));
 
     return typer;
 }
@@ -348,6 +352,13 @@ Type *copy_type(Typer *typer, Type *type) {
     case TYPE_FUNCTION: {
         report_error_ast(parser, LABEL_ERROR, (Ast *)(type), "Function types inside generic structs are not yet supported");
         return NULL;
+    }
+    case TYPE_STRUCT: {
+        if (((TypeStruct *)type)->node && ((TypeStruct *)type)->node->is_anonymous) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)(type), "Anonymous structs inside generic structs are not yet supported");
+            return NULL;
+        }
+        return type;
     }
     default:
         // Primitives are never changed when resolved, so they can be shared
@@ -1222,13 +1233,85 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
     return instantiate_generic_function(typer, generic, type_args, (Ast *)call);
 }
 
+// Checks an anonymous struct or enum e.g struct { name: string; age: int; } and gives it its name. Anonymous types with the same
+// name have the same members, so the first one with a name is the type for all of them
+Type *resolve_anonymous_type(Typer *typer, Type *type) {
+    Parser *parser = typer->parser;
+    StringBuilder sb = sb_init(64);
+
+    if (type->kind == TYPE_STRUCT) {
+        TypeStruct *struct_type = (TypeStruct *)type;
+        AstStruct  *node        = struct_type->node;
+        if (node->head.flags & AST_FLAG_IS_TYPE_CHECKED) return type;
+
+        Typer saved_state = *typer;
+        bool ok = check_struct_defn(typer, node);
+        DynamicArray stack = typer->enclosing_function_stack;
+        typer_restore_state(typer, saved_state);
+        typer->enclosing_function_stack = stack;
+        typer->inside_declaration       = saved_state.inside_declaration;
+        if (!ok) return NULL;
+
+        sb_append(&sb, "struct { ");
+        DynamicArray members = node->members->identifiers;
+        for (int i = 0; i < members.count; i++) {
+            AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+            sb_append(&sb, "%s: %s; ", member->name, type_to_str(member->type));
+        }
+        sb_append(&sb, "}");
+    } else {
+        TypeEnum *enum_type = (TypeEnum *)type;
+        AstEnum  *node      = enum_type->node;
+        if (node->head.flags & AST_FLAG_IS_TYPE_CHECKED) return type;
+
+        Type *ok = check_enum_defn(typer, node);
+        if (!ok) return NULL;
+
+        bool has_values = false;
+        for (int i = 0; i < node->enumerators.count; i++) {
+            if (((AstEnumerator **)node->enumerators.items)[i]->expr) has_values = true;
+        }
+
+        sb_append(&sb, "enum { ");
+        for (int i = 0; i < node->enumerators.count; i++) {
+            AstEnumerator *etor = ((AstEnumerator **)node->enumerators.items)[i];
+            if (has_values) sb_append(&sb, "%s = %d", etor->name, etor->value);
+            else            sb_append(&sb, "%s", etor->name);
+            if (i + 1 < node->enumerators.count) sb_append(&sb, ", ");
+        }
+        sb_append(&sb, " }");
+    }
+
+    char *name = sb_to_string(&sb);
+    for (int i = 0; i < typer->anonymous_types.count; i++) {
+        Type *existing = ((Type **)typer->anonymous_types.items)[i];
+        if (existing->kind == type->kind && strcmp(existing->name, name) == 0) {
+            return existing;
+        }
+    }
+
+    type->name = name;
+    if (type->kind == TYPE_STRUCT) ((TypeStruct *)type)->identifier->name = name;
+    else                           ((TypeEnum *)type)->identifier->name   = name;
+    da_append(&typer->anonymous_types, type);
+    (void)parser;
+    return type;
+}
+
 Type *resolve_type(Typer *typer, Type *type) {
     if (is_primitive_type(type->kind)) {
         return type;
     }
 
     if (type->kind == TYPE_ENUM) {
+        if (((TypeEnum *)type)->node && ((TypeEnum *)type)->node->is_anonymous) {
+            return resolve_anonymous_type(typer, type);
+        }
         return type;
+    }
+
+    if (type->kind == TYPE_STRUCT && ((TypeStruct *)type)->node && ((TypeStruct *)type)->node->is_anonymous) {
+        return resolve_anonymous_type(typer, type);
     }
 
     if (type->kind == TYPE_STRING) {
@@ -4131,6 +4214,14 @@ AstEnumerator *find_enum_member(AstEnum *enum_defn, char *name) {
 }
 
 Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) {
+    if (literal->explicit_type) {
+        // A value of an anonymous enum e.g enum { open, closed }.open
+        Type *resolved = resolve_type(typer, literal->explicit_type);
+        if (!resolved) return NULL;
+        literal->explicit_type = resolved;
+        lhs_type = resolved;
+    }
+
     if (lhs_type == NULL || lhs_type->kind != TYPE_ENUM) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Couldn't infer type of enum value from the context");
         return NULL;
@@ -4979,12 +5070,23 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
     if (literal->explicit_type) {
         // Explicit type is used
         Type *type = literal->explicit_type;
-        if (type->kind == TYPE_STRUCT) {
+
+        // The struct literal of an anonymous struct e.g struct { name: string; age: int; } {"ada", 36}
+        if (type->kind == TYPE_STRUCT && ((TypeStruct *)type)->node->is_anonymous && !(literal->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
+            Type *resolved = resolve_type(typer, type);
+            if (!resolved) return NULL;
+
+            literal->head.head.flags |= AST_FLAG_IS_TYPE_CHECKED;
+            literal->explicit_type    = resolved;
+            type = NULL; // Check the initializers below
+            struct_defn = (TypeStruct *)resolved;
+        }
+        else if (type->kind == TYPE_STRUCT) {
             // Explicit type have already been resolved @Note - Currently this only happens in check_array_literal where the first expression is typechecked, and then all the expressions are again typechecked against that first expression, so we might end here.
             return literal->explicit_type;
         }
 
-        if (type->kind == TYPE_NAME || type->kind == TYPE_GENERIC_INSTANCE) {
+        else if (type->kind == TYPE_NAME || type->kind == TYPE_GENERIC_INSTANCE) {
             Type *resolved = resolve_type(typer, type);
             if (!resolved) return NULL;
 

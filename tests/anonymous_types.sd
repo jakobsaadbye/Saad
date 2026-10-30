@@ -1,0 +1,69 @@
+// Anonymous structs and enums. Their type is written inline, and two with the same members are the same type
+
+older :: (p: struct { name: string; age: int; }) -> int {
+    return p.age + 1;
+}
+
+makePoint :: (x: int, y: int) -> struct { x: int; y: int; } {
+    return struct { x: int; y: int; } {x, y};
+}
+
+Shape :: struct {
+    kind: enum { circle, square };
+    size: struct { w: f64; h: f64; };
+}
+
+main :: () {
+    {
+        // A struct type followed by a struct literal makes a value
+        person := struct {
+            name: string;
+            age:  int;
+        } {"ada", 36};
+        assert(person.name == "ada" && person.age == 36);
+        person.age += 1;
+
+        // Structs with the same members are the same type, wherever they are written
+        assert(older(person) == 38);
+        other: struct { name: string; age: int; };
+        other = person;
+        assert(other == person);
+        assert(typeof(person) == "struct { name: string; age: int; }");
+
+        // Designated initializers work too
+        named := struct { name: string; age: int; } {age = 5, name = "bo"};
+        assert(named.age == 5 && named.name == "bo");
+
+        p := makePoint(3, 4);
+        assert(p.x == 3 && p.y == 4);
+    }
+    {
+        // An enum type followed by one of its enumerators makes a value
+        status := enum { open, closed }.closed;
+        assert(status == .closed);
+        status = .open;
+        assert(status == .open);
+        assert(typeof(status) == "enum { open, closed }");
+
+        same: enum { open, closed } = .closed;
+        assert(same != status);
+        same = status;
+        assert(same == .open);
+
+        level := enum { low = 1, high = 10 }.high;
+        assert(level as int == 10);
+    }
+    {
+        // As members, in lists and in maps
+        shape := Shape{.square, {2.0, 3.0}};
+        assert(shape.kind == .square && shape.size.h == 3.0);
+
+        points: [..]struct { x: int; y: int; };
+        points.add({1, 2});
+        points.add(makePoint(5, 6));
+        assert(points.count == 2 && points[1].y == 6);
+
+        nested := struct { inner: struct { v: int; }; } {{7}};
+        assert(nested.inner.v == 7);
+    }
+}

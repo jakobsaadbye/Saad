@@ -282,6 +282,7 @@ typedef struct AstStruct {
     DynamicArray   type_args;        // of *Type. Set on an instance to the (resolved) types it was instantiated with
 
     DynamicArray   inside_methods;   // of *AstDeclaration. The methods declared inside the struct. They are not members of the struct
+    bool           is_anonymous;     // e.g struct { name: string; age: int; }. Anonymous structs with the same members are the same type
 } AstStruct;
 
 typedef struct AstEnum {
@@ -289,6 +290,7 @@ typedef struct AstEnum {
 
     AstIdentifier *identifier;
     DynamicArray   enumerators; // of *AstEnumerator
+    bool           is_anonymous; // e.g enum { open, closed }. Anonymous enums with the same enumerators are the same type
 } AstEnum;
 
 typedef struct AstEnumerator {
@@ -306,6 +308,7 @@ typedef struct AstEnumLiteral {
 
     AstIdentifier *identifier;
     AstEnumerator *enum_member;
+    Type          *explicit_type; // Set for a value of an anonymous enum e.g enum { open, closed }.open
 } AstEnumLiteral;
 
 typedef enum CallingConv {
