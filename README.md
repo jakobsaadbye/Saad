@@ -4,6 +4,35 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.4.0 - 30. Oct 2026
+
+* Collections in the standard library
+
+Dynamic arrays and maps are now written in Saad, in `std/collections.sd`. See `docs/collections.md`.
+
+```odin
+names: [..]string = ["ada", "bob"];
+names.add("cy");
+names.insertAt(0, "zed");
+names.removeAt(0);
+print("% %\n", names.first(), names.last());
+
+ages := ["alice": 31, "bob": 27];   // Map<string, int>
+ages["carol"] = 40;
+counts: Map<string, int> = [:];
+counts["word"] += 1;
+for entry in ages { print("% = %\n", entry.key, entry.value); }
+```
+
+`[..]T` is another way to write `List<T>`. The syntax comes from a collection protocol that any struct
+can use: `c[k]` calls `index` or `indexRef`, `for x in c` and passing `c` as a slice call `elements`, and
+literals call `add` or `set`. Maps keep their entries in the order they were added.
+
+* BREAKING: `append(xs, v)` is replaced by `xs.add(v)`
+* Methods on primitive types and enums, e.g `doubled :: method (x: int) -> int`
+* Structs can be compared with `==` and `!=`, member by member
+* Arguments and return values can now widen, e.g pass an `i32` where an `i64` is wanted
+
 ## Update v0.3.1 - 29. Oct 2026
 
 * BREAKING: The signed integer types are renamed from `s8`, `s16`, `s32`, `s64` to `i8`, `i16`, `i32`, `i64`

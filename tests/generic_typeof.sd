@@ -20,6 +20,6 @@ main :: () {
     assert(typeName(&p) == "*Point");
 
     numbers: [..]u8;
-    append(numbers, 1);
+    numbers.add(1);
     assert(elementType(numbers) == "u8");
 }

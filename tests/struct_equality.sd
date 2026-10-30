@@ -1,0 +1,49 @@
+// Structs can be compared with == and !=, member by member
+
+Vec2 :: struct {
+    x: int;
+    y: int;
+}
+
+Color :: enum { Red, Green }
+
+Sprite :: struct {
+    name:   string;
+    pos:    Vec2;
+    scale:  f64;
+    color:  Color;
+    hidden: bool;
+    parent: *Sprite;
+}
+
+makeVec :: (x: int, y: int) -> Vec2 {
+    return Vec2{x, y};
+}
+
+main :: () {
+    a := Vec2{1, 2};
+    b := Vec2{1, 2};
+    c := Vec2{2, 1};
+    assert(a == b);
+    assert(a != c);
+    assert(!(a == c));
+    assert(makeVec(1, 2) == a);
+    assert(makeVec(3, 4) != makeVec(3, 5));
+
+    root := Sprite{"root", {0, 0}, 1.0, .Red, false, null};
+    s1 := Sprite{"player", {3, 4}, 2.5, .Green, false, &root};
+    s2 := Sprite{"player", {3, 4}, 2.5, .Green, false, &root};
+    assert(s1 == s2);
+
+    s2.name = "enemy";
+    assert(s1 != s2);
+    s2.name = "player";
+    s2.pos.y = 5;
+    assert(s1 != s2);
+    s2.pos.y = 4;
+    s2.scale = 2.25;
+    assert(s1 != s2);
+    s2.scale = 2.5;
+    s2.parent = null;
+    assert(s1 != s2);
+}

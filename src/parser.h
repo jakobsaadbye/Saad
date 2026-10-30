@@ -24,6 +24,8 @@ typedef struct Parser {
     AstStruct *reparse_self_struct; // Set when parsing an instance of a generic method that was declared inside this struct
 
     char *runtime_file_path;
+    char *collections_file_path;
+    AstFile *collections_file; // std/collections.sd, holding List and Map. Every other file imports it
     char *builtin_string_file_path;
 } Parser;
 
@@ -32,9 +34,9 @@ AstFile *parse_file(Parser *parser, char *file_path);
 
 AstIdentifier  *generate_identifier(Parser *parser, char *ident_name, Type *type, IdentifierFlags flags);
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_pointed_to_by_data, char *struct_name);
-TypeStruct     *generate_struct_for_dynamic_array(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
 AstFunctionDefn *reparse_generic_function(Parser *parser, AstFunctionDefn *generic, AstBlock *scope);
+TypeStruct     *generate_empty_struct_type(Parser *parser, char *name);
 TypePointer    *generate_pointer_to_type(Parser *parser, Type *type);
 TypeArray      *generate_slice_of(Parser *parser, Type *type);
 AstIdentifier  *add_member_to_struct_scope(Parser *parser, AstStruct *struct_defn, AstIdentifier *member);

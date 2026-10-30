@@ -26,8 +26,8 @@ main :: () {
     node := Node{1};
     h: Holder;
     h.node = &node;
-    append(h.items, 1);
-    append(h.items, 2);
+    h.items.add(1);
+    h.items.add(2);
 
     h.bumpNode();
     assert(node.value == 2);

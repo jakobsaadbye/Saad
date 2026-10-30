@@ -39,7 +39,6 @@ AstIdentifier  *make_identifier_from_token(Parser *parser, Token ident_token, Ty
 AstIdentifier  *make_identifier_from_string(Parser *parser, const char *name, Type *type);
 
 AstIdentifier  *generate_identifier(Parser *parser, char *ident_name, Type *type, IdentifierFlags flags);
-TypeStruct     *generate_struct_for_dynamic_array(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_data, char *struct_name);
 bool            generate_and_add_import(Parser *parser, char *path);
@@ -95,6 +94,21 @@ void dump_file_declarations(AstFile *file) {
     printf("\n");
 }
 
+// The files that std/collections.sd is built on don't import it, so that there are no circular imports
+bool is_file_below_collections(Parser *parser, char *file_path) {
+    const char *below[] = { "runtime.sd", "c_stdlib.sd" };
+    for (int i = 0; i < (int)(sizeof(below) / sizeof(below[0])); i++) {
+        size_t path_len = strlen(file_path), name_len = strlen(below[i]);
+        if (path_len < name_len) continue;
+        if (strcmp(file_path + path_len - name_len, below[i]) != 0) continue;
+
+        // Only the files in the standard library folder
+        size_t dir_len = strlen(parser->collections_file_path) - strlen("collections.sd");
+        if (path_len - name_len == dir_len && strncmp(file_path, parser->collections_file_path, dir_len) == 0) return true;
+    }
+    return false;
+}
+
 AstFile *parse_file(Parser *parser, char *file_path) {
 
     // printf("Parsing '%s' ...\n", file_path);
@@ -132,6 +146,18 @@ AstFile *parse_file(Parser *parser, char *file_path) {
     if (parser->runtime_file_path == NULL || strcmp(parser->current_file->absolute_path, parser->runtime_file_path) != 0) {
         ok = generate_and_add_import(parser, "runtime");
         if (!ok) return NULL;
+    }
+
+    // Every file imports the standard collections (List, Map), except the files they are built on
+    if (parser->collections_file_path && strcmp(file_path, parser->collections_file_path) == 0) {
+        parser->collections_file = file;
+    }
+    else if (parser->collections_file_path && !is_file_below_collections(parser, file_path)) {
+        ok = generate_and_add_import(parser, "collections");
+        if (!ok) return NULL;
+
+        AstImport *prelude = ((AstImport **)file->imports.items)[file->imports.count - 1];
+        prelude->is_prelude = true;
     }
 
     Token next = peek_next_token(parser);
@@ -1084,10 +1110,21 @@ Type *parse_type(Parser *parser) {
         TypeStruct *struct_defn = NULL;
 
         if (array_kind == ARRAY_DYNAMIC) {
-            struct_defn = generate_struct_for_dynamic_array(parser, elem_type);
-        } else {
-            struct_defn = generate_struct_for_slice(parser, elem_type);
+            // [..]T is List<T> from the standard collections
+            TypeGenericInstance *list = type_alloc(&parser->type_table, sizeof(TypeGenericInstance));
+            list->head.head.kind  = AST_TYPE;
+            list->head.head.file  = parser->current_file;
+            list->head.head.start = open_bracket.start;
+            list->head.head.end   = elem_type->head.end;
+            list->head.kind       = TYPE_GENERIC_INSTANCE;
+            list->head.name       = "List";
+            list->is_standard     = true;
+            list->type_args       = da_init(1, sizeof(Type *));
+            da_append(&list->type_args, elem_type);
+            return (Type *)list;
         }
+
+        struct_defn = generate_struct_for_slice(parser, elem_type);
 
 
         // The actual array type
@@ -1307,24 +1344,6 @@ TypeArray *generate_slice_of(Parser *parser, Type *type) {
 TypeStruct *generate_struct_for_slice(Parser *parser, Type *type_data) {
     TypeStruct *slice = generate_struct_type_with_data_and_count(parser, type_data, "slice");
     return slice;
-}
-
-TypeStruct *generate_struct_for_dynamic_array(Parser *parser, Type *type_data) {
-    TypeStruct *dynamic_array = generate_struct_type_with_data_and_count(parser, type_data, "dynamic array");
-
-    dynamic_array->head.size = 32;
-
-    AstIdentifier *capacity = generate_identifier(parser, "capacity", primitive_type(PRIMITIVE_I64), IDENTIFIER_IS_STRUCT_MEMBER);
-    capacity->member_index   = 2;
-    capacity->member_offset  = 16;
-    AstIdentifier *elem_size = generate_identifier(parser, "elemSize", primitive_type(PRIMITIVE_I64), IDENTIFIER_IS_STRUCT_MEMBER);
-    elem_size->member_index   = 3;
-    elem_size->member_offset  = 24;
-
-    add_member_to_struct_scope(parser, dynamic_array->node, capacity);
-    add_member_to_struct_scope(parser, dynamic_array->node, elem_size);
-
-    return dynamic_array;
 }
 
 TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_data, char *struct_name) {
@@ -1936,11 +1955,39 @@ AstArrayLiteral *parse_array_literal(Parser *parser) {
 
     AstArrayLiteral *array_lit = ast_allocate(parser, sizeof(AstArrayLiteral));
     array_lit->expressions     = da_init(4, sizeof(AstExpr *));
+    array_lit->keys            = da_init(1, sizeof(AstExpr *));
 
     Token next = peek_next_token(parser);
+
+    // The empty map literal [:]
+    if (next.type == ':' && peek_token(parser, 1).type == ']') {
+        eat_token(parser);
+        next = peek_next_token(parser);
+        array_lit->is_map_literal = true;
+    }
+
     while (next.type != ']' && next.type != TOKEN_END) {
         AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
         if (!expr) return NULL;
+
+        // A map literal e.g ["alice": 31, "bob": 27]. ':' is never a part of an expression, so the first entry decides
+        next = peek_next_token(parser);
+        if (array_lit->expressions.count == 0 && next.type == ':') {
+            array_lit->is_map_literal = true;
+        }
+        if (array_lit->is_map_literal) {
+            if (next.type != ':') {
+                report_error_token(parser, LABEL_ERROR, next, "Expected a ':' between the key and the value of the map entry");
+                return NULL;
+            }
+            eat_token(parser);
+
+            AstExpr *value = parse_expression(parser, MIN_PRECEDENCE);
+            if (!value) return NULL;
+
+            da_append(&array_lit->keys, expr);
+            expr = value;
+        }
 
         da_append(&array_lit->expressions, expr);
 

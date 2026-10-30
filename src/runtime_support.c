@@ -12,13 +12,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef struct RawDynamicArray {
-    unsigned char *data;
-    int64_t        count;
-    int64_t        capacity;
-    int64_t        elem_size;
-} RawDynamicArray;
-
 typedef struct RawString {
     char   *data;
     int64_t len;
@@ -189,7 +182,6 @@ TypeArray *runtime_get_type_array(RawString name, int kind, Type *elem_type, int
 TypeEnum *runtime_get_type_enum(RawString name, RawString *value_name, Type *backing_type, int min_value, int max_value);
 TypeStruct *runtime_get_type_struct(RawString name, StructMember *members, int members_count, int size, int alignment);
 TypeAny *runtime_get_type_any();
-void runtime_builtin_append(RawDynamicArray *da, void *item, bool by_value);
 int runtime_compare_strings(RawString *str1, RawString *str2);
 
 
@@ -268,32 +260,6 @@ TypeAny *runtime_get_type_any() {
     type_any->data          = NULL;
     type_any->type          = NULL;
     return type_any;
-}
-
-void runtime_builtin_append(RawDynamicArray *da, void *item, bool by_value) {
-    int64_t tmp;
-
-    if (by_value) {
-        tmp = (int64_t) item;
-        item = &tmp;
-    }
-
-    // printf("[Runtime]: data = %p, count = %lld, capacity = %lld, elemSize = %lld\n", da->data, da->count, da->capacity, da->elem_size);
-
-    if (da->count + 1 > da->capacity) {
-        // Reallocate memory
-        da->data = realloc(da->data, da->capacity * 2 * da->elem_size);
-        if (da->data == NULL) {
-            printf("Buy more ram!\n");
-            exit(1);
-        }
-        da->capacity *= 2;
-    }
-
-    void *dst = da->data + (da->count * da->elem_size);
-    memcpy(dst, item, da->elem_size);
-    da->count += 1;
-
 }
 
 int runtime_compare_strings(RawString *str1, RawString *str2) {

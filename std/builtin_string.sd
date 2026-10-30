@@ -140,11 +140,11 @@ split :: method (s: string, sep: string) -> [..]string {
         i := s.indexOf(sep, cursor);
         if i == -1 {
             tail := s.slice(cursor);
-            append(result, tail);
+            result.add(tail);
             break;
         } else {
             segment := s.slice(cursor, i);
-            append(result, segment);
+            result.add(segment);
             cursor = i + sep.len as int;
         }
     }

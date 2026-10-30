@@ -31,8 +31,8 @@ Map :: struct <K, V> {
             self.values[index] = value;
             return;
         }
-        append(self.keys, key);
-        append(self.values, value);
+        self.keys.add(key);
+        self.values.add(value);
         self.count += 1;
     }
 }

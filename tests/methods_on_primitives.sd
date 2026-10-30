@@ -1,0 +1,36 @@
+// Methods can be declared on primitive types and enums, not only on structs
+
+Color :: enum { Red, Green, Blue }
+
+main :: () {
+    x := 21;
+    assert(x.doubled() == 42);
+    b: i64 = 5;
+    assert(b.isOdd());
+    x.increment();
+    assert(x == 22);
+    c := Color.Green;
+    assert(c.next() == .Blue);
+    f := 1.5;
+    assert(f.half() == 0.75);
+    flag := true;
+    assert(!flag.flipped());
+    p := &x;
+    assert(p.doubled() == 44);
+
+    // int is an alias for i32, so they have the same methods
+    y: i32 = 4;
+    assert(y.doubled() == 8);
+}
+
+doubled   :: method (x: int) -> int { return x * 2; }
+increment :: method (x: *int) { *x += 1; }
+isOdd     :: method (x: i64) -> bool { return x % 2 == 1; }
+half      :: method (f: float) -> float { return f / 2; }
+flipped   :: method (b: bool) -> bool { return !b; }
+
+next :: method (c: Color) -> Color {
+    if c == .Red { return .Green; }
+    if c == .Green { return .Blue; }
+    return .Red;
+}

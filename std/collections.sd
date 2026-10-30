@@ -1,0 +1,478 @@
+//////////////////////////////////
+// Collections
+//
+// Every file imports this file. [..]T is another way to write List<T>.
+//
+// The syntax for collections comes from methods, so any struct can have it:
+//   c[k]                     index(k) to read, or indexRef(k) which gives a pointer to the element
+//   for x in c               elements(), which gives a slice of the elements
+//   [a, b, c]                reserve(n) and add(x) when a collection is wanted
+//   [k1: v1, k2: v2]         reserve(n) and set(k, v)
+//////////////////////////////////
+
+import "c_stdlib";
+
+//
+// Allocators
+//
+
+// Where a collection gets its memory from. A null allocator means the heap (realloc and free)
+Allocator :: struct {
+    context: *void;
+
+    // Changes the size of a block of memory, like realloc. A null 'memory' gives a new block and a 'size' of 0 frees the block
+    resize: (context: *void, memory: *void, size: i64) -> *void;
+}
+
+resizeMemory :: (allocator: *Allocator, memory: *void, size: i64) -> *void {
+    if allocator != null {
+        return allocator.resize(allocator.context, memory, size);
+    }
+    if size == 0 {
+        free(memory);
+        return null;
+    }
+    return realloc(memory, size);
+}
+
+//
+// List
+//
+
+// A growable array. [..]T is the same as List<T>
+List :: struct <T> {
+    data:      *T;
+    count:     i64;
+    capacity:  i64;
+    allocator: *Allocator; // Null means the heap
+
+    // Adds a value at the end
+    add :: method * (value: T) {
+        if self.count == self.capacity {
+            self.grow();
+        }
+        self.data[self.count] = value;
+        self.count += 1;
+    }
+
+    // Adds a value at the index, moving the values from the index one place up
+    insertAt :: method * (index: i64, value: T) {
+        assert(index >= 0 && index <= self.count);
+        if self.count == self.capacity {
+            self.grow();
+        }
+
+        i := self.count;
+        while i > index {
+            self.data[i] = self.data[i - 1];
+            i -= 1;
+        }
+        self.data[index] = value;
+        self.count += 1;
+    }
+
+    // Removes the value at the index and returns it. The values after it move one place down, so the order is kept
+    removeAt :: method * (index: i64) -> T {
+        assert(index >= 0 && index < self.count);
+        value := self.data[index];
+
+        i := index;
+        while i < self.count - 1 {
+            self.data[i] = self.data[i + 1];
+            i += 1;
+        }
+        self.count -= 1;
+        return value;
+    }
+
+    // Removes the value at the index and returns it, by moving the last value into its place. Faster than removeAt(), but changes the order
+    swapRemoveAt :: method * (index: i64) -> T {
+        assert(index >= 0 && index < self.count);
+        value := self.data[index];
+        self.data[index] = self.data[self.count - 1];
+        self.count -= 1;
+        return value;
+    }
+
+    // Removes the last value and returns it
+    removeLast :: method * () -> T {
+        assert(self.count > 0);
+        self.count -= 1;
+        return self.data[self.count];
+    }
+
+    first :: method () -> T {
+        assert(self.count > 0);
+        return self.data[0];
+    }
+
+    last :: method () -> T {
+        assert(self.count > 0);
+        return self.data[self.count - 1];
+    }
+
+    // The first value and true, or false if the list is empty
+    tryFirst :: method () -> (T, bool) {
+        if self.count == 0 {
+            empty: T;
+            return empty, false;
+        }
+        return self.data[0], true;
+    }
+
+    // The last value and true, or false if the list is empty
+    tryLast :: method () -> (T, bool) {
+        if self.count == 0 {
+            empty: T;
+            return empty, false;
+        }
+        return self.data[self.count - 1], true;
+    }
+
+    isEmpty :: method () -> bool {
+        return self.count == 0;
+    }
+
+    // The index of the first value equal to 'value', or -1
+    indexOf :: method (value: T) -> i64 {
+        for i in 0..self.count {
+            if self.data[i] == value {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    contains :: method (value: T) -> bool {
+        return self.indexOf(value) != -1;
+    }
+
+    reverse :: method * () {
+        i: i64 = 0;
+        j := self.count - 1;
+        while i < j {
+            tmp := self.data[i];
+            self.data[i] = self.data[j];
+            self.data[j] = tmp;
+            i += 1;
+            j -= 1;
+        }
+    }
+
+    // Makes room for 'capacity' values, so that adding them doesn't need to allocate
+    reserve :: method * (capacity: i64) {
+        if capacity <= self.capacity {
+            return;
+        }
+        self.data     = resizeMemory(self.allocator, self.data, capacity * sizeof(T)) as *T;
+        self.capacity = capacity;
+    }
+
+    // Removes all the values, but keeps the memory
+    clear :: method * () {
+        self.count = 0;
+    }
+
+    // Gives back the memory of the list. The list is empty afterwards
+    free :: method * () {
+        if self.data != null {
+            resizeMemory(self.allocator, self.data, 0);
+        }
+        self.data     = null;
+        self.count    = 0;
+        self.capacity = 0;
+    }
+
+    // A new list with the same values
+    copy :: method () -> List<T> {
+        result: List<T>;
+        result.allocator = self.allocator;
+        result.reserve(self.count);
+        for i in 0..self.count {
+            result.add(self.data[i]);
+        }
+        return result;
+    }
+
+    // The collection protocol
+    indexRef :: method (index: i64) -> *T {
+        assert(index >= 0 && index < self.count);
+        return &self.data[index];
+    }
+
+    elements :: method () -> []T {
+        result: []T;
+        result.data  = self.data;
+        result.count = self.count;
+        return result;
+    }
+
+    grow :: method * () {
+        capacity := self.capacity * 2;
+        if capacity < 4 {
+            capacity = 4;
+        }
+        self.reserve(capacity);
+    }
+}
+
+//
+// Hashing
+//
+// A Map needs its keys to have a method 'hash :: method (key: K) -> u64', and to be comparable with ==.
+// The primitive types and strings have one here. Give your own key types one too, for example with hashCombine()
+//
+
+// Mixes the bits of a number, so that numbers that are close get very different hashes
+hashU64 :: (value: u64) -> u64 {
+    x := value;
+    x = x ^ (x >> 33);
+    x *= 1099511628211;
+    x = x ^ (x >> 29);
+    x *= 6364136223846793005;
+    x = x ^ (x >> 32);
+    return x;
+}
+
+// Combines two hashes into one e.g for a struct with two members
+hashCombine :: (a: u64, b: u64) -> u64 {
+    return hashU64(a ^ (b + 2654435769 + (a << 6) + (a >> 2)));
+}
+
+hash :: method (x: u8)   -> u64 { return hashU64(x as u64); }
+hash :: method (x: u16)  -> u64 { return hashU64(x as u64); }
+hash :: method (x: u32)  -> u64 { return hashU64(x as u64); }
+hash :: method (x: u64)  -> u64 { return hashU64(x); }
+hash :: method (x: i8)   -> u64 { return hashU64(x as u64); }
+hash :: method (x: i16)  -> u64 { return hashU64(x as u64); }
+hash :: method (x: i32)  -> u64 { return hashU64(x as u64); }
+hash :: method (x: i64)  -> u64 { return hashU64(x as u64); }
+
+hash :: method (x: bool) -> u64 {
+    if x { return hashU64(1); }
+    return hashU64(0);
+}
+
+hash :: method (x: f32) -> u64 {
+    if x == 0 { return hashU64(0); } // 0.0 and -0.0 are equal, so they must have the same hash
+    bits := *((&x) as *u32);
+    return hashU64(bits as u64);
+}
+
+hash :: method (x: f64) -> u64 {
+    if x == 0 { return hashU64(0); }
+    bits := *((&x) as *u64);
+    return hashU64(bits);
+}
+
+// FNV-1a
+hash :: method (s: string) -> u64 {
+    h: u64 = 1469598103934665603;
+    for c in s {
+        h = h ^ (c as u64);
+        h *= 1099511628211;
+    }
+    return h;
+}
+
+//
+// Map
+//
+
+Entry :: struct <K, V> {
+    key:   K;
+    value: V;
+    hash:  u64;
+}
+
+// A hash table. The entries are kept in the order they were added, so iterating a map always gives the same order.
+// ages := ["alice": 31, "bob": 27]; is a Map<string, int>
+Map :: struct <K, V> {
+    entries:   [..]Entry<K, V>; // In the order they were added
+    slots:     [..]i64;         // Open addressing table. 0 is an empty slot, otherwise the index of an entry + 1. The count is a power of two
+    count:     i64;
+    allocator: *Allocator;      // Null means the heap
+
+    // Adds the key with the value, or changes the value if the key is already there
+    set :: method * (key: K, value: V) {
+        hash := key.hash();
+        slot := self.findSlot(key, hash);
+        if slot != -1 {
+            self.entries[self.slots[slot] - 1].value = value;
+            return;
+        }
+        self.addEntry(key, value, hash);
+    }
+
+    // The value of the key, or 'fallback' if the key is not there
+    get :: method (key: K, fallback: V) -> V {
+        index := self.indexOfKey(key);
+        if index == -1 {
+            return fallback;
+        }
+        return self.entries[index].value;
+    }
+
+    // The value of the key and true, or false if the key is not there
+    tryGet :: method (key: K) -> (V, bool) {
+        index := self.indexOfKey(key);
+        if index == -1 {
+            empty: V;
+            return empty, false;
+        }
+        return self.entries[index].value, true;
+    }
+
+    has :: method (key: K) -> bool {
+        return self.indexOfKey(key) != -1;
+    }
+
+    // Removes the key. Returns false if it was not there. The other entries keep their order
+    remove :: method * (key: K) -> bool {
+        index := self.indexOfKey(key);
+        if index == -1 {
+            return false;
+        }
+        self.entries.removeAt(index);
+        self.count -= 1;
+        self.rebuildSlots(self.slots.count);
+        return true;
+    }
+
+    isEmpty :: method () -> bool {
+        return self.count == 0;
+    }
+
+    keys :: method () -> [..]K {
+        result: [..]K;
+        result.reserve(self.count);
+        for entry in self.entries {
+            result.add(entry.key);
+        }
+        return result;
+    }
+
+    values :: method () -> [..]V {
+        result: [..]V;
+        result.reserve(self.count);
+        for entry in self.entries {
+            result.add(entry.value);
+        }
+        return result;
+    }
+
+    // Makes room for 'count' entries, so that adding them doesn't need to allocate
+    reserve :: method * (count: i64) {
+        capacity: i64 = 8;
+        while capacity * 7 < count * 10 {
+            capacity *= 2;
+        }
+        if capacity > self.slots.count {
+            self.rebuildSlots(capacity);
+        }
+        self.entries.allocator = self.allocator;
+        self.entries.reserve(count);
+    }
+
+    // Removes all the entries, but keeps the memory
+    clear :: method * () {
+        self.entries.clear();
+        self.count = 0;
+        for *slot in self.slots {
+            *slot = 0;
+        }
+    }
+
+    // Gives back the memory of the map. The map is empty afterwards
+    free :: method * () {
+        self.entries.free();
+        self.slots.free();
+        self.count = 0;
+    }
+
+    // The collection protocol
+    index :: method (key: K) -> V {
+        index := self.indexOfKey(key);
+        assert(index != -1); // The key is not in the map. Use get() or tryGet() for keys that might not be there
+        return self.entries[index].value;
+    }
+
+    // m[key] = value adds the key if it is not there
+    indexRef :: method * (key: K) -> *V {
+        index := self.indexOfKey(key);
+        if index == -1 {
+            empty: V;
+            index = self.addEntry(key, empty, key.hash());
+        }
+        return &self.entries[index].value;
+    }
+
+    elements :: method () -> []Entry<K, V> {
+        return self.entries.elements();
+    }
+
+    // The index of the entry with the key, or -1
+    indexOfKey :: method (key: K) -> i64 {
+        slot := self.findSlot(key, key.hash());
+        if slot == -1 {
+            return -1;
+        }
+        return self.slots[slot] - 1;
+    }
+
+    // The slot of the key, or -1 if the key is not there
+    findSlot :: method (key: K, hash: u64) -> i64 {
+        if self.slots.count == 0 {
+            return -1;
+        }
+
+        mask := (self.slots.count - 1) as u64;
+        slot := (hash & mask) as i64;
+        while self.slots[slot] != 0 {
+            entry := &self.entries[self.slots[slot] - 1];
+            if entry.hash == hash && entry.key == key {
+                return slot;
+            }
+            slot = ((slot as u64 + 1) & mask) as i64;
+        }
+        return -1;
+    }
+
+    addEntry :: method * (key: K, value: V, hash: u64) -> i64 {
+        if (self.count + 1) * 10 > self.slots.count * 7 {
+            capacity := self.slots.count * 2;
+            if capacity < 8 {
+                capacity = 8;
+            }
+            self.rebuildSlots(capacity);
+        }
+
+        self.entries.allocator = self.allocator;
+        self.entries.add(Entry<K, V>{key, value, hash});
+        self.count += 1;
+        self.placeEntry(self.entries.count - 1);
+        return self.entries.count - 1;
+    }
+
+    placeEntry :: method * (index: i64) {
+        mask := (self.slots.count - 1) as u64;
+        slot := (self.entries[index].hash & mask) as i64;
+        while self.slots[slot] != 0 {
+            slot = ((slot as u64 + 1) & mask) as i64;
+        }
+        self.slots[slot] = index + 1;
+    }
+
+    // Puts every entry in a slot again, in a table of 'capacity' slots
+    rebuildSlots :: method * (capacity: i64) {
+        self.slots.allocator = self.allocator;
+        self.slots.clear();
+        self.slots.reserve(capacity);
+        for i in 0..capacity {
+            self.slots.add(0);
+        }
+        for i in 0..self.entries.count {
+            self.placeEntry(i);
+        }
+    }
+}

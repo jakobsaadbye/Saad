@@ -1,0 +1,11 @@
+// expect-error: Cannot index into expression of type Bag
+// expect-error: Give Bag a method 'index :: method (key: K) -> V' to read with c[k]
+
+Bag :: struct {
+    count: int;
+}
+
+main :: () {
+    b: Bag;
+    x := b[0];
+}

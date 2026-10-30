@@ -1,0 +1,14 @@
+// A collection with only an index() method can be read with c[k], but not changed
+// expect-error: Cannot change Squares[...], as Squares only has an 'index' method to read it
+
+Squares :: struct {
+    index :: method (i: int) -> int {
+        return i * i;
+    }
+}
+
+main :: () {
+    s: Squares;
+    assert(s[3] == 9);
+    s[3] = 10;
+}
