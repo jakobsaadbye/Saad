@@ -225,38 +225,38 @@ main :: () {
     // Game state + variables
     //
     player := Player{
-        score = 0,
-        bricksDestroyed = 0,
-        lives = 3,
-        isHoldingBall = true,
+        score: 0,
+        bricksDestroyed: 0,
+        lives: 3,
+        isHoldingBall: true,
     };
 
     ball := Ball{
-        x = 4,
-        y = 4,
-        size = BALL_SIZE,
-        velX = INITIAL_BALL_VELOCITY,
-        velY = INITIAL_BALL_VELOCITY,
+        x: 4,
+        y: 4,
+        size: BALL_SIZE,
+        velX: INITIAL_BALL_VELOCITY,
+        velY: INITIAL_BALL_VELOCITY,
     };
 
     bar := Bar{
-        x = WINDOW_WIDTH * 0.5 - INITIAL_BAR_WIDTH * 0.5,
-        y = WINDOW_HEIGHT - 70,
-        width = INITIAL_BAR_WIDTH,
-        height = 15,
-        velX = 0,
+        x: WINDOW_WIDTH * 0.5 - INITIAL_BAR_WIDTH * 0.5,
+        y: WINDOW_HEIGHT - 70,
+        width: INITIAL_BAR_WIDTH,
+        height: 15,
+        velX: 0,
     };
 
     pickups: [16]Pickup;
-    pickupSpawner := PickupSpawner{pickups = pickups};
+    pickupSpawner := PickupSpawner{pickups: pickups};
 
     particleEmitters: [4]ParticleEmitter;
 
     game := GameState{
-        player = &player,
-        ball   = &ball,
-        bar    = &bar,
-        sounds = [
+        player: &player,
+        ball: &ball,
+        bar: &bar,
+        sounds: [
             soundBallBounce1,
             soundBallBounce2,
             soundPickup,
@@ -264,9 +264,9 @@ main :: () {
             soundLostLife,
             soundLevelComplete,
         ],
-        textures         = pickupTextures,
-        particleEmitters = particleEmitters,
-        pickupSpawner    = &pickupSpawner
+        textures: pickupTextures,
+        particleEmitters: particleEmitters,
+        pickupSpawner: &pickupSpawner
     };
 
     deadZone := Rectangle{0, WINDOW_HEIGHT - (WINDOW_HEIGHT - (bar.y + bar.height)), WINDOW_WIDTH, (WINDOW_HEIGHT - (bar.y + bar.height))};
@@ -299,10 +299,10 @@ main :: () {
             color := brickColors[row];
 
             brick := Brick{
-                x = x,
-                y = y,
-                color = color,
-                dead = false,
+                x: x,
+                y: y,
+                color: color,
+                dead: false,
             };
 
             bricks[index] = brick;
@@ -407,8 +407,8 @@ main :: () {
             theta := lerp(ANGLE_MIN, ANGLE_MAX, t);
 
             directionVector := Vector2{
-                x = - xx cos(xx theta),
-                y = - xx sin(xx theta),
+                x: - xx cos(xx theta),
+                y: - xx sin(xx theta),
             };
 
             speed := sqrt(xx (ball.velX*ball.velX + ball.velY*ball.velY)) as f32;
@@ -585,11 +585,11 @@ spawnPickup :: (ps: *PickupSpawner, pos: Vector2) {
     index := GetRandomValue(0, xx PickupType.COUNT - 1);
 
     pickup := Pickup{
-        type = index as PickupType,
-        x = pos.x,
-        y = pos.y,
-        velY = xx GetRandomValue(80, 120),
-        isShown = true,
+        type: index as PickupType,
+        x: pos.x,
+        y: pos.y,
+        velY: xx GetRandomValue(80, 120),
+        isShown: true,
     };
     
     ps.pickups[ps.freeIndex] = pickup;
@@ -611,12 +611,12 @@ handleBrickCollision :: (game: *GameState, brick: *Brick) {
 
     // Play a particle effect
     pe := ParticleEmitter{
-        pos    = {xx (brick.x + BRICK_WIDTH*0.5), xx (brick.y + BRICK_HEIGHT*0.5)},
-        vel    = {game.ball.velX * 0.3, game.ball.velY * 0.3},
-        radius = 16,
-        color  = brick.color,
-        particleLifetime = 500,
-        isActive = false,
+        pos: {xx (brick.x + BRICK_WIDTH*0.5), xx (brick.y + BRICK_HEIGHT*0.5)},
+        vel: {game.ball.velX * 0.3, game.ball.velY * 0.3},
+        radius: 16,
+        color: brick.color,
+        particleLifetime: 500,
+        isActive: false,
     };
 
     next := game.liveEmitterCount;

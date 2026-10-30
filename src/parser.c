@@ -2013,6 +2013,13 @@ AstStructLiteral *parse_struct_literal(Parser *parser) {
     AstExpr *value            = NULL;
     while (next.type != '}' && next.type != TOKEN_END) {
         if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '=') {
+            report_error_token(parser, LABEL_ERROR, peek_token(parser, 1), "Use ':' instead of '=' to give a member its value in a struct literal");
+            report_error_ast(parser, LABEL_HINT, NULL, "e.g Person{age: 18}");
+            return NULL;
+        }
+
+        // A designated member e.g Person{age: 18}
+        if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == ':') {
             eat_token(parser);
             eat_token(parser);
 
@@ -2201,6 +2208,13 @@ AstFunctionCall *parse_function_call(Parser *parser, AstExpr *lhs) {
         arg->head.file = parser->current_file;
 
         if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '=') {
+            report_error_token(parser, LABEL_ERROR, peek_token(parser, 1), "Use ':' instead of '=' to give a named argument its value");
+            report_error_ast(parser, LABEL_HINT, NULL, "e.g myFunction(foo: 10)");
+            return NULL;
+        }
+
+        // A named argument e.g myFunction(foo: 10)
+        if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == ':') {
             Token ident = next;
             eat_token(parser);
             eat_token(parser);

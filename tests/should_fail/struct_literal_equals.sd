@@ -1,0 +1,11 @@
+// Members are given their values with ':' in struct literals
+// expect-error: Use ':' instead of '=' to give a member its value in a struct literal
+// expect-error: e.g Person{age: 18}
+
+Person :: struct {
+    age: int;
+}
+
+main :: () {
+    p := Person{age = 18};
+}

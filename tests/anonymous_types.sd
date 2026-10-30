@@ -31,7 +31,7 @@ main :: () {
         assert(typeof(person) == "struct { name: string; age: int; }");
 
         // Designated initializers work too
-        named := struct { name: string; age: int; } {age = 5, name = "bo"};
+        named := struct { name: string; age: int; } {age: 5, name: "bo"};
         assert(named.age == 5 && named.name == "bo");
 
         p := makePoint(3, 4);

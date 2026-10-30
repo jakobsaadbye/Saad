@@ -45,9 +45,9 @@ Monster :: struct {
 main :: () {
     {
         Mike :: Monster{
-            firstname = "Mike",
-            lastname = "Masowski",
-            health = 100,
+            firstname: "Mike",
+            lastname: "Masowski",
+            health: 100,
         };
 
         Print("%", Mike);
@@ -63,15 +63,15 @@ main :: () {
     }
     {
         Alex :: Entity{
-            kind = .Monster,
-            name = "Alex the great",
-            position = {1, 2, 3},
-            animationFrames = [
-                { key = 1, color = {255, 0, 0, 0} },
-                { key = 2, color = {0, 255, 0, 0} },
-                { key = 3, color = {0, 0, 255, 0} },
+            kind: .Monster,
+            name: "Alex the great",
+            position: {1, 2, 3},
+            animationFrames: [
+                { key: 1, color: {255, 0, 0, 0} },
+                { key: 2, color: {0, 255, 0, 0} },
+                { key: 3, color: {0, 0, 255, 0} },
             ],
-            dead = true,
+            dead: true,
         };
 
         Print("%", Alex);

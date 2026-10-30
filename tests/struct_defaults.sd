@@ -47,14 +47,14 @@ main :: () {
     }
     {
         // Struct literals fill in the members they leave out
-        q := Person{name = "ada"};
+        q := Person{name: "ada"};
         assert(q.name == "ada" && q.age == 30 && q.pos.y == 2 && q.alive);
 
         r := Person{"bo", 7};
         assert(r.name == "bo" && r.age == 7 && r.tags == 3);
 
         // A default can be overridden with any value, also a zero one
-        s := Person{alive = false, age = 0};
+        s := Person{alive: false, age: 0};
         assert(!s.alive && s.age == 0 && s.name == "anon");
     }
     {
@@ -70,7 +70,7 @@ main :: () {
         assert(many[0].age == 30 && many[99].pos.y == 2 && many[50].name == "anon");
 
         units: [..]Unit;
-        units.add({hp = 1});
+        units.add({hp: 1});
         assert(units[0].hp == 1 && units[0].color == .Green);
     }
     {
@@ -79,12 +79,12 @@ main :: () {
         b: Box<f64>;
         assert(a.value == 1 && a.count == 2 && a.label == "box");
         assert(b.value == 1.0 && typeof(b.value) == "f64");
-        c := Box<i64>{value = 9};
+        c := Box<i64>{value: 9};
         assert(c.value == 9 && c.count == 2);
     }
     {
         // Anonymous structs, where the defaults are a part of the type
-        stats := struct { hp: int = 100; mp: int; } {mp = 5};
+        stats := struct { hp: int = 100; mp: int; } {mp: 5};
         assert(stats.hp == 100 && stats.mp == 5);
         assert(typeof(stats) == "struct { hp: int = 100; mp: int; }");
 
