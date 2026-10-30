@@ -1,0 +1,5 @@
+// expect-error: An anonymous enum in an expression must be followed by one of its enumerators to make a value of it
+
+main :: () {
+    status := enum { open, closed };
+}

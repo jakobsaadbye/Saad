@@ -70,6 +70,8 @@ Future development
 
 * Better structs
   [x] Constant members
+  [x] Anonymous structs and enums e.g struct { age: int; } {36} and enum { open, closed }.open
+  [] Anonymous structs inside generic structs
   [] Default values
   [] Defining inner structs
   [] Struct embedding (inheritence)

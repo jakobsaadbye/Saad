@@ -50,6 +50,10 @@ bool starts_type_alias(Parser *parser, int lookahead);
 bool starts_function_defn_at(Parser *parser, int cursor);
 bool parse_type_parameters(Parser *parser, DynamicArray *type_params);
 bool add_implicit_self(Parser *parser, AstFunctionDefn *method, AstStruct *self_struct);
+bool parse_enumerators(Parser *parser, AstEnum *ast_enum);
+TypeEnum *make_enum_type(Parser *parser, AstEnum *ast_enum, AstIdentifier *ident);
+TypeStruct *parse_anonymous_struct_type(Parser *parser);
+TypeEnum *parse_anonymous_enum_type(Parser *parser);
 bool parse_type_arguments(Parser *parser, DynamicArray *type_args);
 
 void *ast_allocate(Parser *parser, size_t size);
@@ -985,6 +989,9 @@ Type *parse_type(Parser *parser) {
         return (Type *)(any);
     }
 
+    if (next.type == TOKEN_STRUCT) return (Type *)parse_anonymous_struct_type(parser);
+    if (next.type == TOKEN_ENUM)   return (Type *)parse_anonymous_enum_type(parser);
+
     if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '<' && scan_type_arguments(parser, 1) != -1) {
         // Instance of a generic struct e.g List<int>
         eat_token(parser);
@@ -1393,38 +1400,12 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     return struct_defn;
 }
 
-AstEnum *parse_enum_defn(Parser *parser) {
-    Token ident_token = peek_next_token(parser);
-    expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
-    eat_token(parser);
-    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // Type of ident is set later down to refer to the enum it self
-    ident->flags |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_NAME_OF_ENUM;
-
-    // Expose the enum as an identifier so enum values can be referenced explicitly using ENUM.value
-    // @ScopeRefactoring
-    {
-        AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
-        if (existing) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *)(ident), "Type '%s' already defined", existing->name);
-            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous definition of '%s'", existing->name);
-            return NULL;
-        }
-    }
-
-
+// Parses the enumerators of an enum, from the '{' to the '}' e.g { open, closed = 5 }
+bool parse_enumerators(Parser *parser, AstEnum *ast_enum) {
     Token next = peek_next_token(parser);
-    expect(parser, next, TOKEN_DOUBLE_COLON);
-    eat_token(parser);
-
-    Token enum_token = peek_next_token(parser);
-    expect(parser, enum_token, TOKEN_ENUM);
-    eat_token(parser);
-
-    next = peek_next_token(parser);
     expect(parser, next, '{');
     eat_token(parser);
 
-    AstEnum *ast_enum = (AstEnum *)(ast_allocate(parser, sizeof(AstEnum)));
     ast_enum->enumerators = da_init(2, sizeof(AstEnumerator *));
 
     next = peek_next_token(parser);
@@ -1492,13 +1473,11 @@ AstEnum *parse_enum_defn(Parser *parser) {
     }
     expect(parser, next, '}');
     eat_token(parser);
+    return true;
+}
 
-    ast_enum->head.kind  = AST_ENUM;
-    ast_enum->head.file  = parser->current_file;
-    ast_enum->head.start = ident->head.start;
-    ast_enum->head.end   = peek_token(parser, -1).end;
-    ast_enum->identifier = ident;
-
+// Makes the type of an enum, with its static members count, names and values
+TypeEnum *make_enum_type(Parser *parser, AstEnum *ast_enum, AstIdentifier *ident) {
     TypeEnum *type_enum        = type_alloc(&parser->type_table, sizeof(TypeEnum));
     type_enum->head.head.kind  = AST_TYPE;
     type_enum->head.head.file  = parser->current_file;
@@ -1516,6 +1495,137 @@ AstEnum *parse_enum_defn(Parser *parser) {
     type_enum->names->decl = (AstDeclaration *) ast_enum;
     type_enum->values = generate_identifier(parser, "values", (Type *) generate_slice_of(parser, (Type *) type_enum), IDENTIFIER_IS_CONSTANT);
     type_enum->values->decl = (AstDeclaration *) ast_enum;
+
+    return type_enum;
+}
+
+// An anonymous struct type e.g 'struct { name: string; age: int; }'. Anonymous structs with the same members are the same type.
+// The typer gives it its name e.g "struct { name: string; age: int; }" once the members are checked
+TypeStruct *parse_anonymous_struct_type(Parser *parser) {
+    Token struct_token = peek_next_token(parser);
+    expect(parser, struct_token, TOKEN_STRUCT);
+    eat_token(parser);
+
+    if (peek_next_token(parser).type == '<') {
+        report_error_token(parser, LABEL_ERROR, peek_next_token(parser), "Anonymous structs cannot be generic");
+        return NULL;
+    }
+
+    AstStruct *struct_defn = ast_allocate(parser, sizeof(AstStruct));
+    struct_defn->static_members = make_empty_struct_scope(parser, struct_defn);
+    struct_defn->static_members->parent = parser->current_scope;
+    struct_defn->type_params    = da_init(1, sizeof(AstIdentifier *));
+    struct_defn->instances      = da_init(1, sizeof(TypeStruct *));
+    struct_defn->inside_methods = da_init(1, sizeof(AstDeclaration *));
+    struct_defn->is_anonymous   = true;
+
+    AstIdentifier *ident = make_identifier_from_string(parser, "struct {...}", NULL);
+    ident->head.start = struct_token.start;
+    ident->head.end   = struct_token.end;
+    ident->flags     |= IDENTIFIER_IS_RESOLVED | IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_CONSTANT;
+    struct_defn->identifier = ident;
+
+    AstBlock *scope = new_block(parser, BLOCK_DECLARATIVE);
+    scope->belongs_to_struct = struct_defn;
+    scope = parse_block(parser, scope);
+    if (!scope) return NULL;
+    close_block(parser);
+
+    for (int i = 0; i < scope->statements.count; i++) {
+        Ast *stmt = ((Ast **)scope->statements.items)[i];
+        if (stmt->kind == AST_DECLARATION && (((AstDeclaration *)stmt)->flags & DECLARATION_CONSTANT)) {
+            report_error_ast(parser, LABEL_ERROR, stmt, "Anonymous structs can only have members, not constants or methods");
+            report_error_ast(parser, LABEL_HINT, NULL, "Give the struct a name to give it constants or methods e.g Person :: struct {...}");
+            return NULL;
+        }
+    }
+
+    struct_defn->head.kind  = AST_STRUCT;
+    struct_defn->head.file  = parser->current_file;
+    struct_defn->head.start = struct_token.start;
+    struct_defn->head.end   = scope->head.end;
+    struct_defn->members    = scope;
+    struct_defn->methods    = make_empty_struct_scope(parser, struct_defn);
+
+    TypeStruct *type_struct      = ast_allocate(parser, sizeof(TypeStruct));
+    type_struct->head.head.kind  = AST_TYPE;
+    type_struct->head.head.file  = parser->current_file;
+    type_struct->head.head.start = struct_defn->head.start;
+    type_struct->head.head.end   = struct_defn->head.end;
+    type_struct->head.kind       = TYPE_STRUCT;
+    type_struct->head.name       = ident->name;
+    type_struct->identifier      = ident;
+    type_struct->node            = struct_defn;
+    ident->type = (Type *)type_struct;
+
+    return type_struct;
+}
+
+// An anonymous enum type e.g 'enum { open, closed }'. Anonymous enums with the same enumerators are the same type
+TypeEnum *parse_anonymous_enum_type(Parser *parser) {
+    Token enum_token = peek_next_token(parser);
+    expect(parser, enum_token, TOKEN_ENUM);
+    eat_token(parser);
+
+    AstEnum *ast_enum = ast_allocate(parser, sizeof(AstEnum));
+    bool ok = parse_enumerators(parser, ast_enum);
+    if (!ok) return NULL;
+
+    AstIdentifier *ident = make_identifier_from_string(parser, "enum {...}", NULL);
+    ident->head.start = enum_token.start;
+    ident->head.end   = enum_token.end;
+    ident->flags     |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_NAME_OF_ENUM | IDENTIFIER_IS_RESOLVED;
+
+    ast_enum->head.kind    = AST_ENUM;
+    ast_enum->head.file    = parser->current_file;
+    ast_enum->head.start   = enum_token.start;
+    ast_enum->head.end     = peek_token(parser, -1).end;
+    ast_enum->identifier   = ident;
+    ast_enum->is_anonymous = true;
+
+    TypeEnum *type_enum = make_enum_type(parser, ast_enum, ident);
+    ident->type = (Type *)type_enum;
+    return type_enum;
+}
+
+AstEnum *parse_enum_defn(Parser *parser) {
+    Token ident_token = peek_next_token(parser);
+    expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
+    eat_token(parser);
+    AstIdentifier *ident = make_identifier_from_token(parser, ident_token, NULL); // Type of ident is set later down to refer to the enum it self
+    ident->flags |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_NAME_OF_ENUM;
+
+    // Expose the enum as an identifier so enum values can be referenced explicitly using ENUM.value
+    // @ScopeRefactoring
+    {
+        AstIdentifier *existing = add_identifier_to_scope(parser, parser->current_scope, ident);
+        if (existing) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)(ident), "Type '%s' already defined", existing->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)(existing), "Here is the previous definition of '%s'", existing->name);
+            return NULL;
+        }
+    }
+
+
+    Token next = peek_next_token(parser);
+    expect(parser, next, TOKEN_DOUBLE_COLON);
+    eat_token(parser);
+
+    Token enum_token = peek_next_token(parser);
+    expect(parser, enum_token, TOKEN_ENUM);
+    eat_token(parser);
+
+    AstEnum *ast_enum = (AstEnum *)(ast_allocate(parser, sizeof(AstEnum)));
+    bool ok = parse_enumerators(parser, ast_enum);
+    if (!ok) return NULL;
+
+    ast_enum->head.kind  = AST_ENUM;
+    ast_enum->head.file  = parser->current_file;
+    ast_enum->head.start = ident->head.start;
+    ast_enum->head.end   = peek_token(parser, -1).end;
+    ast_enum->identifier = ident;
+
+    TypeEnum *type_enum = make_enum_type(parser, ast_enum, ident);
 
     Type *exists = type_add_user_defined(&parser->type_table, (Type *)(type_enum));
     if (exists) {
@@ -1884,8 +1994,9 @@ AstReturn *parse_return(Parser *parser) {
 AstStructLiteral *parse_struct_literal(Parser *parser) {
     Type *explicit_type = NULL;
     Token start_token = peek_next_token(parser);
-    if (start_token.type == TOKEN_LITERAL_IDENTIFIER) {
+    if (start_token.type == TOKEN_LITERAL_IDENTIFIER || start_token.type == TOKEN_STRUCT) {
         explicit_type = parse_type(parser);
+        if (!explicit_type) return NULL;
     }
 
     Token next = peek_next_token(parser);
@@ -3115,6 +3226,63 @@ AstExpr *parse_leaf(Parser *parser) {
         AstExpr *sub_expr = parse_expression(parser, prec); 
         if (!sub_expr) return NULL;
         return make_unary_node(parser, t, sub_expr, OP_SPREAD);
+    }
+
+    // An anonymous struct is made with a struct literal right after it e.g struct { age: int; } {36}
+    if (t.type == TOKEN_STRUCT) {
+        Token after = peek_token(parser, 1);
+        if (after.type != '{') {
+            report_error_token(parser, LABEL_ERROR, t, "Expected '{' after 'struct'");
+            return NULL;
+        }
+
+        // Find the end of the struct type, to check that a struct literal follows it
+        int depth = 0;
+        int i = 1;
+        for (;; i++) {
+            Token token = peek_token(parser, i);
+            if (token.type == TOKEN_END) break;
+            if (token.type == '{') depth += 1;
+            if (token.type == '}') {
+                depth -= 1;
+                if (depth == 0) break;
+            }
+        }
+        if (peek_token(parser, i + 1).type != '{') {
+            Token end = peek_token(parser, i);
+            report_error_range(parser, t.start, end.end, "An anonymous struct in an expression must be followed by a struct literal to make a value of it");
+            report_error_ast(parser, LABEL_HINT, NULL, "e.g person := struct { name: string; age: int; } {\"ada\", 36};");
+            return NULL;
+        }
+
+        AstStructLiteral *struct_literal = parse_struct_literal(parser);
+        if (!struct_literal) return NULL;
+        return (AstExpr *)(struct_literal);
+    }
+
+    // A value of an anonymous enum is picked right after it e.g enum { open, closed }.closed
+    if (t.type == TOKEN_ENUM) {
+        TypeEnum *enum_type = parse_anonymous_enum_type(parser);
+        if (!enum_type) return NULL;
+
+        Token dot = peek_next_token(parser);
+        Token name = peek_token(parser, 1);
+        if (dot.type != '.' || name.type != TOKEN_LITERAL_IDENTIFIER) {
+            report_error_range(parser, t.start, enum_type->head.head.end, "An anonymous enum in an expression must be followed by one of its enumerators to make a value of it");
+            report_error_ast(parser, LABEL_HINT, NULL, "e.g status := enum { open, closed }.open;");
+            return NULL;
+        }
+        eat_token(parser);
+        eat_token(parser);
+
+        AstEnumLiteral *literal  = ast_allocate(parser, sizeof(AstEnumLiteral));
+        literal->head.head.kind  = AST_ENUM_LITERAL;
+        literal->head.head.file  = parser->current_file;
+        literal->head.head.start = t.start;
+        literal->head.head.end   = name.end;
+        literal->identifier      = make_identifier_from_token(parser, name, NULL);
+        literal->explicit_type   = (Type *)enum_type;
+        return (AstExpr *)literal;
     }
 
     if (starts_struct_literal(parser)) {

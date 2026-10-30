@@ -4,6 +4,30 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.4.1 - 30. Oct 2026
+
+* Anonymous structs and enums
+
+A struct or enum type can be written inline without a name. In an expression, a struct literal or an
+enumerator right after it makes a value:
+
+```odin
+person := struct {
+    name: string;
+    age:  int;
+} {"ada", 36};
+
+status := enum { open, closed }.closed;
+
+older :: (p: struct { name: string; age: int; }) -> int {
+    return p.age + 1;
+}
+```
+
+Two anonymous structs or enums with the same members are the same type, so `person` can be passed to
+`older`. Their name is their members, e.g `struct { name: string; age: int; }`. Anonymous structs can't
+have constants or methods; give the struct a name for those.
+
 ## Update v0.4.0 - 30. Oct 2026
 
 * Collections in the standard library

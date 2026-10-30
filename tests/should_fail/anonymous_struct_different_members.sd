@@ -1,0 +1,11 @@
+// Anonymous structs are only the same type when their members are the same
+// expect-error: Type mismatch. Wanted type struct { age: int; }, got type struct { age: i64; }
+
+older :: (p: struct { age: int; }) -> int {
+    return p.age + 1;
+}
+
+main :: () {
+    q := struct { age: i64; } {1};
+    older(q);
+}

@@ -1,0 +1,7 @@
+// expect-error: An anonymous struct in an expression must be followed by a struct literal to make a value of it
+
+main :: () {
+    person := struct {
+        age: int;
+    };
+}
