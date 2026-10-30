@@ -15,6 +15,7 @@ file can still declare its own `List` or `Map`. `[..]T` always means the standar
 | `c[k]` (read) | `c.index(k)`, or `*c.indexRef(k)` if there is no `index` | `index :: method (key: K) -> V` |
 | `c[k] = v`, `c[k] += v`, `&c[k]`, `c[k].x = v`, `c[k].mutatingMethod()` | `*c.indexRef(k)` | `indexRef :: method (key: K) -> *V` |
 | `for x in c`, `for x, i in c`, `for *x in c` | loops over `c.elements()` | `elements :: method () -> []T` |
+| `for key, value in c` | loops over `c.elements()`, taking the `key` and `value` members of each element | `elements` and `set`, with elements that have `key` and `value` members |
 | `c` where a `[]T` is wanted, `print`, `any` | `c.elements()` | `elements` |
 | `[a, b, c]` where a collection is wanted | `tmp.reserve(3); tmp.add(a); ...` | `add :: method * (value: T)`, `reserve` is optional |
 | `[k1: v1, k2: v2]` | `tmp.reserve(2); tmp.set(k1, v1); ...` | `set :: method * (key: K, value: V)` |
@@ -80,8 +81,12 @@ a := ages["alice"];        // Asserts that the key is there
 b := ages.get("dave", 0);  // With a fallback
 c, ok := ages.tryGet("dave");
 counts[word] += 1;         // A missing key starts at the zero value
-for entry in ages { print("% = %\n", entry.key, entry.value); }
+for name, age in ages { print("% is %\n", name, age); }
+for *entry in ages { entry.value += 1; }   // To change the values
 ```
+
+In `for key, value in m` the key and the value are copies. On a map the second name is the value, not the
+index. A list keeps the index (`for x, i in xs`), as it has no `set` method.
 
 | Method | |
 | --- | --- |
@@ -130,8 +135,6 @@ There are no destructors, so call `free()` when a collection is no longer needed
 
 ## Not supported yet
 
-* `for key, value in m`: in a `for` loop the second name is the index, so loop over the entries with
-  `for entry in m`.
 * `map` and `filter` style methods, which need methods with type parameters of their own.
 * Hashing for pointers and enums without writing a `hash` method.
 * `remove` on a map is O(n), as it keeps the order of the entries.

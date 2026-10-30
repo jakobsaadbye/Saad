@@ -62,7 +62,7 @@ Future development
 * Collections (see docs/collections.md)
   [x] Dynamic arrays as List<T> in std/collections.sd, with an initial capacity (reserve), more methods and allocators
   [x] Map<K, V> with [k: v] literals
-  [] for key, value in m (the second name of a for loop is the index today)
+  [x] for key, value in m
   [] map / filter (needs methods with type parameters of their own)
   [] Hashing pointers and enums without writing a hash method
   [] Map.remove in O(1) while keeping the order (tombstones)

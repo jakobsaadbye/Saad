@@ -83,4 +83,33 @@ main :: () {
     big: Stack<int>;
     for i in 0..100 { big.add(i); }
     assert(big.count == 100 && big[99] == 99);
+
+    testScores();
+}
+
+// A map-like collection of your own also gets 'for key, value in c', from its set() method and the key and value members of its elements
+Pair :: struct {
+    key:   string;
+    value: int;
+}
+
+Scores :: struct {
+    pairs: [..]Pair;
+
+    set :: method * (key: string, value: int) {
+        self.pairs.add(Pair{key, value});
+    }
+
+    elements :: method () -> []Pair {
+        return self.pairs.elements();
+    }
+}
+
+testScores :: () {
+    scores: Scores = ["ada": 3, "bob": 5];
+    total := 0;
+    for name, score in scores {
+        total += score;
+    }
+    assert(total == 8);
 }
