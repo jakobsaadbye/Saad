@@ -4,6 +4,27 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.4.2 - 30. Oct 2026
+
+* Default values for struct members
+
+```odin
+Person :: struct {
+    name:  string = "anon";
+    age:   int    = 30;
+    tags   := 3;        // The type comes from the default value
+    pos:   Vec2;        // Gets the defaults of Vec2
+}
+
+p: Person;                 // name = "anon", age = 30, tags = 3
+q := Person{name = "ada"}; // age = 30, tags = 3
+```
+
+Defaults are used when a struct is declared without a value, and for the members a struct literal leaves
+out. They also work for anonymous structs, where the defaults are a part of the type, and for generic
+structs, where `value: T = 1` takes the type of each instance. A default can be a literal, a constant, an
+enum value or a struct literal, but can't call a function yet.
+
 ## Update v0.4.1 - 30. Oct 2026
 
 * Anonymous structs and enums

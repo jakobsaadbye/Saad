@@ -72,7 +72,8 @@ Future development
   [x] Constant members
   [x] Anonymous structs and enums e.g struct { age: int; } {36} and enum { open, closed }.open
   [] Anonymous structs inside generic structs
-  [] Default values
+  [x] Default values
+  [] Default values that call functions or are collection literals
   [] Defining inner structs
   [] Struct embedding (inheritence)
 

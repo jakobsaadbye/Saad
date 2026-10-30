@@ -1,0 +1,13 @@
+// expect-error: The default value of a struct member cannot call a function yet
+
+nextId :: () -> int {
+    return 1;
+}
+
+Item :: struct {
+    id: int = nextId();
+}
+
+main :: () {
+    item: Item;
+}

@@ -1,0 +1,96 @@
+// Struct members can have default values. They are used when a struct is declared without a value,
+// and for the members a struct literal leaves out
+
+MAX_HP :: 250;
+Color :: enum { Red, Green }
+
+Vec2 :: struct {
+    x: f64 = 1;
+    y: f64 = 2;
+}
+
+Person :: struct {
+    name:  string = "anon";
+    age:   int    = 30;
+    tags   := 3;           // The type comes from the default value
+    pos:   Vec2;           // Gets the defaults of Vec2
+    alive: bool = true;
+    id:    int;            // No default, so it is zero
+}
+
+Unit :: struct {
+    hp:    int   = MAX_HP;
+    color: Color = .Green;
+    pos:   Vec2  = {5, 6};
+    speed: f32   = 1.5;
+}
+
+Box :: struct <T> {
+    value: T = 1;
+    count := 2;
+    label: string = "box";
+}
+
+makePerson :: () -> Person {
+    p: Person;
+    p.name = "made";
+    return p;
+}
+
+main :: () {
+    {
+        // Declared without a value
+        p: Person;
+        assert(p.name == "anon" && p.age == 30 && p.tags == 3 && p.alive && p.id == 0);
+        assert(p.pos.x == 1 && p.pos.y == 2);
+        assert(makePerson().age == 30);
+    }
+    {
+        // Struct literals fill in the members they leave out
+        q := Person{name = "ada"};
+        assert(q.name == "ada" && q.age == 30 && q.pos.y == 2 && q.alive);
+
+        r := Person{"bo", 7};
+        assert(r.name == "bo" && r.age == 7 && r.tags == 3);
+
+        // A default can be overridden with any value, also a zero one
+        s := Person{alive = false, age = 0};
+        assert(!s.alive && s.age == 0 && s.name == "anon");
+    }
+    {
+        // Constants, enum values and struct literals as defaults
+        u: Unit;
+        assert(u.hp == 250 && u.color == .Green && u.pos.x == 5 && u.pos.y == 6 && u.speed == 1.5);
+    }
+    {
+        // Arrays and lists of structs with defaults
+        few: [3]Person;
+        assert(few[2].age == 30);
+        many: [100]Person;
+        assert(many[0].age == 30 && many[99].pos.y == 2 && many[50].name == "anon");
+
+        units: [..]Unit;
+        units.add({hp = 1});
+        assert(units[0].hp == 1 && units[0].color == .Green);
+    }
+    {
+        // Generic structs, where the default value takes the type of the instance
+        a: Box<int>;
+        b: Box<f64>;
+        assert(a.value == 1 && a.count == 2 && a.label == "box");
+        assert(b.value == 1.0 && typeof(b.value) == "f64");
+        c := Box<i64>{value = 9};
+        assert(c.value == 9 && c.count == 2);
+    }
+    {
+        // Anonymous structs, where the defaults are a part of the type
+        stats := struct { hp: int = 100; mp: int; } {mp = 5};
+        assert(stats.hp == 100 && stats.mp == 5);
+        assert(typeof(stats) == "struct { hp: int = 100; mp: int; }");
+
+        empty: struct { hp: int = 100; mp: int; };
+        assert(empty.hp == 100);
+        empty = stats;
+        assert(empty.mp == 5);
+    }
+}

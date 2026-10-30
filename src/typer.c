@@ -40,6 +40,8 @@ typedef struct Typer {
     bool current_place;  // The value of checking_place for the expression being checked right now
     int  next_hidden_local_id;
 
+    bool checking_member_default; // Set while checking the members of a struct and their default values e.g 'age: int = 30;'
+
     DynamicArray anonymous_types; // of *Type. One anonymous struct or enum for each set of members e.g struct { age: int; }, so that the same members are the same type
 } Typer;
 
@@ -107,6 +109,7 @@ void append_place_text(StringBuilder *sb, AstExpr *expr);
 bool check_declaration(Typer *typer, AstDeclaration *decl);
 bool identifier_is_type(AstIdentifier *ident);
 Type *resolve_anonymous_type(Typer *typer, Type *type);
+AstExpr *member_default_value(AstIdentifier *member);
 bool desugar_key_value_for(Typer *typer, AstFor *ast_for);
 bool check_declaration_of(Typer *typer, AstIdentifier *ident);
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
@@ -503,15 +506,26 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
             decl = ast_allocate(parser, sizeof(AstDeclaration));
             memcpy(decl, generic_decl, sizeof(AstDeclaration));
             decl->idents = da_init(generic_decl->idents.count, sizeof(AstIdentifier *));
-            decl->values = da_init(1, sizeof(AstExpr *)); // Struct members cannot have default values, so there are no values to copy
-            decl->type   = copy_type(typer, generic_decl->type);
-            if (!decl->type) return NULL;
+            decl->values = da_init(1, sizeof(AstExpr *));
+
+            // A member like 'count := 0;' gets its type from its default value
+            if (generic_decl->type) {
+                decl->type = copy_type(typer, generic_decl->type);
+                if (!decl->type) return NULL;
+            }
+
+            // Checking an expression changes it, so each instance parses the default values again e.g the 0 in 'value: T = 0'
+            if (generic_decl->values.count > 0) {
+                bool ok = reparse_default_values(parser, generic_decl, members, &decl->values);
+                if (!ok) return NULL;
+            }
         }
 
         AstIdentifier *member = ast_allocate(parser, sizeof(AstIdentifier));
         memcpy(member, generic_member, sizeof(AstIdentifier));
         member->decl          = decl;
         member->type          = decl->type;
+        member->scope         = members;
         member->member_offset = 0;
         da_append(&decl->idents, member);
 
@@ -1233,6 +1247,17 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
     return instantiate_generic_function(typer, generic, type_args, (Ast *)call);
 }
 
+// The default value of a struct member e.g the 30 in 'age: int = 30;', or NULL
+AstExpr *member_default_value(AstIdentifier *member) {
+    AstDeclaration *decl = member->decl;
+    if (decl == NULL || decl->values.count == 0) return NULL;
+
+    for (int i = 0; i < decl->idents.count && i < decl->values.count; i++) {
+        if (((AstIdentifier **)decl->idents.items)[i] == member) return ((AstExpr **)decl->values.items)[i];
+    }
+    return NULL;
+}
+
 // Checks an anonymous struct or enum e.g struct { name: string; age: int; } and gives it its name. Anonymous types with the same
 // name have the same members, so the first one with a name is the type for all of them
 Type *resolve_anonymous_type(Typer *typer, Type *type) {
@@ -1256,7 +1281,16 @@ Type *resolve_anonymous_type(Typer *typer, Type *type) {
         DynamicArray members = node->members->identifiers;
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **)members.items)[i];
-            sb_append(&sb, "%s: %s; ", member->name, type_to_str(member->type));
+            sb_append(&sb, "%s: %s", member->name, type_to_str(member->type));
+
+            // The default value is a part of the type, so structs with different defaults are different types
+            AstExpr *value = member_default_value(member);
+            if (value && value->head.file) {
+                int start = value->head.start.input_idx;
+                int end   = value->head.end.input_idx;
+                sb_append(&sb, " = %.*s", end - start, value->head.file->text + start);
+            }
+            sb_append(&sb, "; ");
         }
         sb_append(&sb, "}");
     } else {
@@ -2429,7 +2463,14 @@ bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
+        // The default values of the members are not inside a function, even if the struct is checked while checking one
+        AstFunctionDefn *enclosing_function = typer->enclosing_function;
+        bool             checking_default   = typer->checking_member_default;
+        typer->enclosing_function      = NULL;
+        typer->checking_member_default = true;
         bool ok = check_declaration(typer, member->decl);
+        typer->enclosing_function      = enclosing_function;
+        typer->checking_member_default = checking_default;
         if (!ok) return false;
 
         if (member->decl->type == (Type *) struct_type) {
@@ -3299,6 +3340,11 @@ bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberA
 
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     if (typer->enclosing_function == NULL) {
+        if (typer->checking_member_default) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "The default value of a struct member cannot call a function yet");
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Use a constant, a literal or an expression of those");
+            return NULL;
+        }
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(call), "Function calls are not allowed at top-level yet");
         return NULL;
     }
@@ -4393,6 +4439,11 @@ Type *check_collection_literal(Typer *typer, AstArrayLiteral *lit, TypeStruct *c
     Parser *parser = typer->parser;
 
     if (typer->enclosing_function == NULL) {
+        if (typer->checking_member_default) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)lit, "The default value of a struct member cannot be a collection literal yet");
+            report_error_ast(parser, LABEL_HINT, NULL, "Leave the default out to start with an empty collection");
+            return NULL;
+        }
         report_error_ast(parser, LABEL_ERROR, (Ast *)lit, "Collection literals can only be used inside functions");
         return NULL;
     }
