@@ -92,35 +92,14 @@ addFloat64 :: method (sb: *StringBuilder, v: f64) {
 }
 
 addInt64 :: method (sb: *StringBuilder, v: i64) {
-    if v == 0 {
-        sb.addChar(48); // 0
-        return;
-    }
-
     if v < 0 {
         sb.addChar(45); // -
-        v = -v;
+
+        // -v overflows for the smallest i64, so v + 1 is negated instead
+        sb.addUInt64((-(v + 1)) as u64 + 1);
+        return;
     }
-
-    tmp: [32]u8; // enough for 64-bit int
-
-    n := 0;
-    while v != 0 {
-        digit := v % 10;
-        v = v / 10;
-
-        c := (digit + 48) as u8;
-
-        tmp[n] = c;
-        n += 1;
-    }
-
-    // Add the digits in reverse order
-    for i in 0..n {
-        ri := (n - 1) - i;
-        c := tmp[ri];
-        sb.addChar(c);
-    }
+    sb.addUInt64(v as u64);
 }
 
 addUInt64 :: method (sb: *StringBuilder, v: u64) {
@@ -293,7 +272,7 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
             sb.addString(member.name);
             sb.addString(" = ");
 
-            // print("%\n", member.name);
+            // print("%", member.name);
             
             value: any;
             value.type = member.type;

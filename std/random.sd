@@ -26,9 +26,9 @@ NewRandom :: (seed: u64) -> Random {
 // The next 64 random bits
 next :: method (r: *Random) -> u64 {
     x := r.state;
-    x = x ^ (x >> 12);
-    x = x ^ (x << 25);
-    x = x ^ (x >> 27);
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
     r.state = x;
     return x * 2685821657736338717;
 }

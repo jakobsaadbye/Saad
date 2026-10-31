@@ -33,7 +33,7 @@ static int ms_vformat(char *out, size_t out_cap, FILE *f, const char *fmt, __bui
         else if (strchr("diuxXo", conv)) { spec[n++] = 'l'; spec[n++] = 'l'; spec[n++] = conv; spec[n] = 0; long long v = __builtin_va_arg(ap, long long); len = snprintf(buf, sizeof buf, spec, v); }
         else if (conv == 'c') { spec[n++] = 'c'; spec[n] = 0; long long v = __builtin_va_arg(ap, long long); len = snprintf(buf, sizeof buf, spec, (int)v); }
         else if (conv == 's') { spec[n++] = 's'; spec[n] = 0; char *s = __builtin_va_arg(ap, char *); len = snprintf(buf, sizeof buf, spec, s); }
-        else if (conv == 'p') { spec[n++] = 'p'; spec[n] = 0; void *v = __builtin_va_arg(ap, void *); len = snprintf(buf, sizeof buf, spec, v); }
+        else if (conv == 'p') { void *v = __builtin_va_arg(ap, void *); len = snprintf(buf, sizeof buf, "%016llX", (unsigned long long)(uintptr_t) v); } // Like msvcrt
         else { len = 0; }
         EMIT(buf, (size_t)len);
     }

@@ -1,5 +1,7 @@
 // std/os/os.sd and std/time.sd
 
+use fmt;
+
 import os;
 import time;
 

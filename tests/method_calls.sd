@@ -1,3 +1,5 @@
+use fmt;
+
 Vector3 :: struct {
     x: int;
     y: int;

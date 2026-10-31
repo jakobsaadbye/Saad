@@ -19,5 +19,5 @@ main :: () {
         }
     };
 
-    Print("%", movie);
+    print("%", movie);
 }

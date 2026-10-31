@@ -1,0 +1,49 @@
+// Compound assignment operators
+
+main :: () {
+    {
+        x := 10;
+        x += 5;  assert(x == 15);
+        x -= 3;  assert(x == 12);
+        x *= 2;  assert(x == 24);
+        x /= 5;  assert(x == 4);
+        x %= 3;  assert(x == 1);
+    }
+    {
+        x := 12;            // 0b1100
+        x &= 10;            // 0b1010
+        assert(x == 8);
+        x |= 3;
+        assert(x == 11);
+        x ^= 15;
+        assert(x == 4);
+        x <<= 3;
+        assert(x == 32);
+        x >>= 2;
+        assert(x == 8);
+    }
+    {
+        // >>= is a logical shift for unsigned and an arithmetic shift for signed integers
+        u: u64 = 18000000000000000000;
+        u >>= 60;
+        assert(u == 15);
+
+        s: i32 = -16;
+        s >>= 2;
+        assert(s == -4);
+    }
+    {
+        // The place is only evaluated once
+        xs := [1, 2, 3];
+        i := 0;
+        xs[i] ^= 3;
+        assert(xs[0] == 2);
+        xs[2] <<= 1;
+        assert(xs[2] == 6);
+    }
+    {
+        f := 1.5;
+        f *= 2.0;
+        assert(f == 3.0);
+    }
+}

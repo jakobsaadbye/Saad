@@ -1,3 +1,5 @@
+use fmt;
+
 main :: () {
     myInt := 10;
     a :: () {
@@ -10,7 +12,7 @@ main :: () {
     {
         // Inner inner functions can NOT be called if its not a named function
         foo := () {
-            Print("foo");
+            print("foo");
         };
 
         bar :: () {

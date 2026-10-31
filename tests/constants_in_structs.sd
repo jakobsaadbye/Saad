@@ -11,11 +11,11 @@ Color :: struct {
 }
 
 main :: () {
-    Print("%", Color.Red);
-    Print("%", Color.Green);
-    Print("%", Color.Blue);
+    print("%", Color.Red);
+    print("%", Color.Green);
+    print("%", Color.Blue);
 
     for c in Color.Rainbow {
-        Print("%", c);
+        print("%", c);
     }
 }

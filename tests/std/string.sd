@@ -1,3 +1,5 @@
+use fmt;
+
 main :: () {
     skip := false;
 
@@ -7,12 +9,12 @@ main :: () {
 
         quickBrown := text.slice(4, 15);
 
-        print("%\n", quickBrown);
-        print("%\n", quickBrown.len);
+        print("%", quickBrown);
+        print("%", quickBrown.len);
 
         fox := text.slice(16);
-        print("%\n", fox);
-        print("%\n", fox.len);
+        print("%", fox);
+        print("%", fox.len);
     }
     if !skip {
         // Copying a string
@@ -25,7 +27,7 @@ main :: () {
         text[6] = 111; // 'o'
         text[7] = 119; // 'w'
         text[8] = 32;
-        print("%\n", text);
+        print("%", text);
 
         print("%", copy);
     }
@@ -34,7 +36,7 @@ main :: () {
         text := "The quick brown fox jumps over the lazy dog";
 
         uppercased := text.toUpper();
-        print("%\n", uppercased);
+        print("%", uppercased);
     }
 
     if !skip {
@@ -42,7 +44,7 @@ main :: () {
         text := "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG";
 
         lowercase := text.toLower();
-        print("%\n", lowercase);
+        print("%", lowercase);
     }
 
     if !skip {
@@ -85,7 +87,7 @@ main :: () {
         assert(splitted.count == 9);
 
         for s in splitted {
-            print("%\n", s);
+            print("%", s);
         }
     }
 

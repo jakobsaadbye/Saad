@@ -50,16 +50,16 @@ main :: () {
             health: 100,
         };
 
-        Print("%", Mike);
+        print("%", Mike);
     }
     {
         Red :: Color{255, 0, 0, 255};
         RandomVector3 :: Vector3{69, 420, 1337};
         IdentityVector3 :: Vector3{2 + 2, 1, 1};
 
-        Print("Red = %", Red);
-        Print("RandomVector3 = %", RandomVector3);
-        Print("IdentityVector3 = %", IdentityVector3);
+        print("Red = %", Red);
+        print("RandomVector3 = %", RandomVector3);
+        print("IdentityVector3 = %", IdentityVector3);
     }
     {
         Alex :: Entity{
@@ -74,18 +74,18 @@ main :: () {
             dead: true,
         };
 
-        Print("%", Alex);
+        print("%", Alex);
 
         for frame, i in Alex.animationFrames {
-            Print("[%] = %", i, frame);
+            print("[%] = %", i, frame);
         }
     }
     {
         MyArray :: [1, 2, 3, 4, 5, 6];
-        Print("%", MyArray);
+        print("%", MyArray);
         {
             MyArray :: [69, 420, 1337];
-            Print("%", MyArray);
+            print("%", MyArray);
         }
     }
 }

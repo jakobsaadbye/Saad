@@ -49,7 +49,6 @@ typedef struct Typer {
 
 bool  check_block(Typer *typer, AstBlock *block);
 bool  check_statement(Typer *typer, Ast *stmt);
-bool  check_print(Typer *typer, AstPrint *print);
 bool  check_break_or_continue(Typer *typer, AstBreakOrContinue *boc);
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type);
 Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type);
@@ -124,7 +123,6 @@ bool check_declaration_of(Typer *typer, AstIdentifier *ident);
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 
 AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr);
-char *generate_c_format_specifier_for_type(Type *type);
 
 void push_enclosing_function(Typer *typer, AstFunctionDefn *func_defn);
 void pop_enclosing_function(Typer *typer);
@@ -2851,6 +2849,11 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     }
 
     if (assign->op != '=') {
+        bool is_integer_only = assign->op != ASSIGN_PLUS_EQUAL && assign->op != ASSIGN_MINUS_EQUAL && assign->op != ASSIGN_TIMES_EQUAL && assign->op != ASSIGN_DIVIDE_EQUAL;
+        if (is_integer_only && (lhs_type->kind != TYPE_INTEGER || expr_type->kind != TYPE_INTEGER)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Operator '%s' is only allowed for integer types. Given type was '%s'", token_type_to_str((TokenType) assign->op), type_to_str(lhs_type->kind != TYPE_INTEGER ? lhs_type : expr_type));
+            return false;
+        }
         if (expr_type->kind != TYPE_INTEGER && expr_type->kind != TYPE_FLOAT) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Compound operators are only allowed for int and float types. Given type was '%s'\n", type_to_str(expr_type));
             return false;
@@ -3295,208 +3298,6 @@ AstEnumerator *enum_value_is_unique(AstEnum *ast_enum, int value) {
     return NULL;
 }
 
-char *generate_c_printf_string(Typer *typer, AstPrint *print) {
-    assert(print->arguments.count >= 1);
-
-    AstExpr *arg0 = ((AstExpr **)print->arguments.items)[0];
-    assert(arg0->head.kind == AST_LITERAL && ((AstLiteral *)arg0)->kind == LITERAL_STRING);
-
-    StringBuilder sb = sb_init(((AstLiteral *)arg0)->as.value.string.length + 1);
-    char *head = ((AstLiteral *)arg0)->as.value.string.data;
-    char *c = head;
-    int num_specifiers = 0;
-
-    // First scan to get the number of specifiers
-    while (*c != '\0') {
-        if (*c == '%') {
-            num_specifiers += 1;
-        }
-        c += 1;
-    }
-
-    int num_arguments = print->arguments.count - 1;
-    if (num_specifiers != num_arguments) {
-        char *specifier_str = num_specifiers == 1 ? "specifier" : "specifiers";
-        char *argument_str  = num_arguments == 1  ? "argument" : "arguments";
-
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)print, "Mismatch in the number of specifiers and arguments. Got %d %s but %d %s", num_specifiers, specifier_str,  num_arguments, argument_str);
-        return NULL;
-    }
-
-    // Second scan to generate the string
-    c = head;
-    char *copied = c;
-    int chars_to_copy = 0;
-    int arg_index = 1; // Starts at 1 to skip the constant string
-    while (*c != '\0') {
-        if (*c == '%') {
-            AstExpr *arg      = ((AstExpr **)print->arguments.items)[arg_index];
-            Type    *arg_type = arg->type;
-            
-            char *format_specifier = generate_c_format_specifier_for_type(arg_type);
-
-            // Copy everything upto this point in the src string
-            sb_copy(&sb, copied, chars_to_copy);
-            copied = c + 1;
-
-            // Copy the format specifier
-            sb_copy_string(&sb, format_specifier);
-
-            arg_index += 1;
-            chars_to_copy = 0;
-            c += 1;
-            continue; // Without this, a '%' at the end of the string makes the loop step over the terminating NUL
-        }
-
-        chars_to_copy += 1;
-        c += 1;
-    }
-
-    // Copy the tail
-    sb_copy(&sb, copied, chars_to_copy);
-
-    char *str = sb_to_string(&sb);
-
-    return str;
-}
-
-char *generate_c_format_specifier_for_type(Type *type) {
-    switch (type->kind) {
-    case TYPE_BOOL:    return "%s";
-    case TYPE_FLOAT:   return type->size == 4 ? "%f" : "%lf";
-    case TYPE_STRING:  return "%s";
-    case TYPE_ENUM:    return "%s";
-    case TYPE_POINTER: return "0x%p";
-    case TYPE_ARRAY:   return "0x%p";
-    case TYPE_ANY:     return "0x%p";
-    case TYPE_INTEGER: {
-        TypePrimitive *prim = (TypePrimitive *) type;
-        if (is_unsigned_integer(type)) {
-            if (prim->kind == PRIMITIVE_CHAR) {
-                return "%c";
-            } else {
-                return type->size == 4 ? "%u" : "%llu";
-            }
-        } else {
-            return type->size == 4 ? "%d" : "%lld";
-        }
-    }
-    case TYPE_STRUCT: {
-        StringBuilder builder = sb_init(8);
-
-        TypeStruct *struct_defn = (TypeStruct *) type;
-
-        DynamicArray members = struct_defn->node->members->identifiers;
-
-        sb_append(&builder, "%s{ ", struct_defn->identifier->name);
-        for (int i = 0; i < members.count; i++) {
-            AstIdentifier *member = ((AstIdentifier **)members.items)[i];
-
-            char *format_specifier = generate_c_format_specifier_for_type(member->type);
-
-            sb_append(&builder, "%s = %s", member->name, format_specifier);
-            
-            if (i != members.count - 1) {
-                sb_append(&builder, ", ");
-            }
-        }
-        sb_append(&builder, " }");
-
-        return sb_to_string(&builder);
-    }
-    default:
-        printf("Internal Compiler Error: Got unknown argument type %s in generate_c_format_specifier_for_type()\n", type_to_str(type));
-        return NULL;
-}
-}
-
-int count_nested_sizeable_struct_members(Typer *typer, AstStruct *struct_, int count) {
-    DynamicArray members = struct_->members->identifiers;
-
-    for (int i = 0; i < members.count; i++) {
-        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
-
-        if (member->flags & IDENTIFIER_IS_CONSTANT) continue;
-
-        if (member->type->kind == TYPE_STRUCT) {
-            AstStruct *nested_struct = ((TypeStruct *)member->type)->node;
-            count += count_nested_sizeable_struct_members(typer, nested_struct, 0);
-        } else {
-            count += 1;
-        }
-    }
-
-    return count;
-}
-
-bool check_print(Typer *typer, AstPrint *print) {
-    if (print->arguments.count < 1) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)print, "Missing first argument to print");
-        return false;
-    }
-
-    for (int i = 0; i < print->arguments.count; i++) {
-        AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
-        Type *arg_type = check_expression(typer, arg, NULL);
-        if (!arg_type) return false;
-
-        // A collection is printed as its elements
-        AstExpr *slice = i > 0 ? collection_as_slice(typer, arg, NULL) : NULL;
-        if (slice) {
-            ((AstExpr **)print->arguments.items)[i] = slice;
-            arg      = slice;
-            arg_type = slice->type;
-        }
-        if (i == 0) {
-            if (arg_type->kind != TYPE_STRING) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Print expects the first argument to have type string, but argument is of type %s", type_to_str(arg_type));
-                return false;
-            }
-            if (arg->head.kind != AST_LITERAL && ((AstLiteral *)arg)->kind != LITERAL_STRING) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "First argument to printf must be a constant string");
-                return false;
-            }
-        }
-    }
-
-    //
-    //  Do sizing of the arguments
-    //
-
-    // Since we are pushing all of the arguments on the stack to later pop them,
-    // we need to allocate 8 bytes of space for each one of them.
-    // @NOTE: We reuse the stack space for arguments
-    // https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention?view=msvc-170 
-    int num_c_args = 1;
-    for (int i = 1; i < print->arguments.count; i++) {
-        AstExpr *arg = ((AstExpr **)print->arguments.items)[i];
-        Type    *arg_type = arg->type;
-
-        if (arg_type->kind == TYPE_STRUCT) {
-            AstStruct *struct_ = ((TypeStruct *)arg_type)->node;
-            num_c_args += count_nested_sizeable_struct_members(typer, struct_, 0);
-        } else {
-            num_c_args += 1;
-        }
-    }
-    print->c_args = num_c_args;
-
-    if (num_c_args > 4) {
-        int bytes_args = (num_c_args - 3) * 8;
-        reserve_temporary_storage(typer->enclosing_function, bytes_args);
-    }
-
-    // :PrintSmallStructHack
-    reserve_temporary_storage(typer->enclosing_function, 8);
-
-    char *c_string = generate_c_printf_string(typer, print);
-    if (!c_string) return false;
-
-    print->c_string = c_string;
-
-    return true;
-}
-
 bool check_expr_stmt(Typer *typer, AstExprStmt *expr_stmt) {
     Type *expr_type = check_expression(typer, expr_stmt->expr, NULL);
     if (expr_type == NULL) {
@@ -3655,7 +3456,6 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_BREAK_OR_CONTINUE: return check_break_or_continue(typer, (AstBreakOrContinue *)(stmt));
     case AST_EXPR_STMT:         return check_expr_stmt(typer, (AstExprStmt *)(stmt));
     case AST_RETURN:            return check_return(typer, (AstReturn *)(stmt));
-    case AST_PRINT:             return check_print(typer, (AstPrint *)(stmt));
     case AST_ASSERT:            return check_assert(typer, (AstAssert *)(stmt));
     case AST_IF:                return check_if(typer, (AstIf *)(stmt));
     default:
@@ -3699,7 +3499,7 @@ AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr) {
         return NULL;
     }
 
-    // A collection is passed as its elements e.g to Print("%", xs)
+    // A collection is passed as its elements e.g to fmt.print("%", xs)
     AstExpr *slice = collection_as_slice(typer, expr, NULL);
     if (slice) expr = slice;
 

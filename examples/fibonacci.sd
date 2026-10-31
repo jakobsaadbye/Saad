@@ -1,8 +1,10 @@
+use fmt;
+
 main :: () {
     N :: 20;
 
     for 0..N {
-        print("%\n", fib(it));
+        print("%", fib(it));
     }
 }
 

@@ -7,7 +7,7 @@ std/
     collections.sd  List<T> ([..]T) and Map<K, V>
     string.sd       The methods of string (slice, split, indexOf, ...)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
-  fmt/          namespace fmt: Print and StringBuilder
+  fmt/          namespace fmt: print and StringBuilder
   os/           namespace os: files, environment variables, processes
     windows.sd      namespace os.windows: the Windows API (threads, Sleep, ...)
   vendor/       Bindings for libraries the standard library doesn't own
@@ -26,8 +26,8 @@ get the prelude, as the prelude is built on them.
 ## fmt
 
 ```odin
-fmt.Print("% is % years old", name, age);          // with a newline
-fmt.Print("no newline", newline: false);
+fmt.print("% is % years old", name, age);          // with a newline
+fmt.print("no newline", newline: false);
 sb := fmt.NewStringBuilder(64);
 sb.add("% + % = %", 1, 2, 3);
 text := sb.toString();
@@ -59,7 +59,7 @@ time.sleep(100);                    // milliseconds
 
 watch := time.startStopwatch();
 ...
-fmt.Print("took % ms", watch.milliseconds());   // also seconds() and restart()
+fmt.print("took % ms", watch.milliseconds());   // also seconds() and restart()
 ```
 
 ## random

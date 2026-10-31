@@ -3,7 +3,7 @@ use c; // printf
 
 Myprint2 :: (format: string, args: ...any) {
     for arg, i in args {
-        Print("%\n", *arg.type);
+        print("%", *arg.type);
     }
 }
 
@@ -13,12 +13,12 @@ Myprint3 :: (format: string, args: ...any) {
 
 Myprint3Helper :: (format: string, args: ...any) {
     for arg, i in args {
-        Print("%\n", *arg.type);
+        print("%", *arg.type);
     }
 }
 
 functionWithAny :: (x: any) {
-    Print("%\n", *x.type);
+    print("%", *x.type);
 }
 
 MyJsonData :: struct {
@@ -31,32 +31,32 @@ Vector3 :: struct {
 }
 
 main :: () {
-    print("----------- Struct with any member -----------\n");
+    print("----------- Struct with any member -----------");
     {
         x := MyJsonData{3.14, 1};
-        Print("%\n", *x.data.type);
+        print("%", *x.data.type);
     }
-    print("----------- Array of any -----------\n");
+    print("----------- Array of any -----------");
     {
         x: []any = [3.14, 5, Vector3{1, 4, 9}, [1 as int, 2, 3]];
-        Print("%\n", *x[0].type);
-        Print("%\n", *x[1].type);
-        Print("%\n", *x[2].type);
-        Print("%\n", *x[3].type);
+        print("%", *x[0].type);
+        print("%", *x[1].type);
+        print("%", *x[2].type);
+        print("%", *x[3].type);
     }
-    print("----------- Passing argument to an any parameter -----------\n");
+    print("----------- Passing argument to an any parameter -----------");
     {
         functionWithAny(3);
     }
-    print("----------- Passing arguments to an any variadic parameter -----------\n");
+    print("----------- Passing arguments to an any variadic parameter -----------");
     {
         Myprint2("Hello %s", "World", "Hellope", 3.14);
     }
-    print("----------- Passing arguments to an any variadic parameter into another variadic parameter -----------\n");
+    print("----------- Passing arguments to an any variadic parameter into another variadic parameter -----------");
     {
         Myprint3("Hello %s", "World", "Hellope", 3.14);
     }
-    print("---------------- Passing variadic arguments to C function ----------------\n");
+    print("---------------- Passing variadic arguments to C function ----------------");
     {
         printf(xx "Passing %s arguments into %s functions is %d doable", "variadic".data, "C".data, 100);
     }
