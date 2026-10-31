@@ -1,4 +1,4 @@
-import "fmt";
+use fmt;
 
 Color :: struct {
     r, g, b, a: u8;

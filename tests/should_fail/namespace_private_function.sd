@@ -1,0 +1,7 @@
+// expect-error: 'twiceInternal' is private to the namespace 'shapes'
+
+import shapes;
+
+main :: () {
+    x := shapes.twiceInternal(2);
+}

@@ -1,4 +1,4 @@
-import "fmt";
+use fmt;
 
 Myprint2 :: (format: string, args: ...any) {
     for arg, i in args {

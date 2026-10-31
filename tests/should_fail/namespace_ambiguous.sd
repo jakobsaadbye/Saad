@@ -1,0 +1,10 @@
+// Vec2 is declared in both shapes and drawing
+// expect-error: 'Vec2' is ambiguous. It is declared in more than one of the namespaces you use
+// expect-error: Write it with its namespace e.g shapes.Vec2
+
+use shapes;
+use drawing;
+
+main :: () {
+    v: Vec2;
+}

@@ -1,0 +1,6 @@
+// expect-error: '#' is reserved for compile-time features
+
+#import "fmt"
+
+main :: () {
+}

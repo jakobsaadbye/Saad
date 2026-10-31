@@ -1,0 +1,32 @@
+// Used by tests/namespaces.sd
+namespace geometry;
+
+Vec2 :: struct {
+    x: f64;
+    y: f64;
+
+    length2 :: method () -> f64 {
+        return self.x * self.x + self.y * self.y;
+    }
+
+    @private
+    secret :: method () -> int { return 7; }
+}
+
+Shape :: enum { Circle, Square }
+
+Box :: struct <T> {
+    value: T;
+}
+
+ORIGIN :: Vec2{0, 0};
+
+add :: (a: Vec2, b: Vec2) -> Vec2 {
+    return Vec2{a.x + b.x, a.y + b.y};
+}
+
+@private
+twiceInternal :: (x: int) -> int { return x * 2; }
+
+@deprecated("use add")
+plus :: (a: Vec2, b: Vec2) -> Vec2 { return add(a, b); }

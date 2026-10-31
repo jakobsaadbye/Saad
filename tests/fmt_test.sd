@@ -1,5 +1,4 @@
-import "fmt";
-import "strings";
+use fmt;
 
 HttpStatus :: enum {
     Ok = 200,

@@ -1,0 +1,4 @@
+// Used by the namespace tests in tests/should_fail
+namespace drawing;
+
+Vec2 :: struct { x: int; y: int; }

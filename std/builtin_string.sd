@@ -1,5 +1,4 @@
-import "c_stdlib";
-import "c_string";
+use c;
 
 toCString :: method (s: string) -> *u8 {
     cstr := malloc(s.len + 1) as *u8;

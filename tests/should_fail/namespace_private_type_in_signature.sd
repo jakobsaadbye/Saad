@@ -1,0 +1,13 @@
+// expect-error: The public function 'make' returns the private type 'Hidden'
+
+@private
+Hidden :: struct { x: int; }
+
+make :: () -> Hidden {
+    h: Hidden;
+    return h;
+}
+
+main :: () {
+    h := make();
+}

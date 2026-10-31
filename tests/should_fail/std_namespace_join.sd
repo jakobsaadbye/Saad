@@ -1,0 +1,6 @@
+// expect-error: The namespace 'windows' belongs to the standard library
+
+import windows;
+
+main :: () {
+}

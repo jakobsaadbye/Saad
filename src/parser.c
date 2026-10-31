@@ -162,7 +162,7 @@ void dump_file_declarations(AstFile *file) {
 
 // The files that std/collections.sd is built on don't import it, so that there are no circular imports
 bool is_file_below_collections(Parser *parser, char *file_path) {
-    const char *below[] = { "runtime.sd", "c_stdlib.sd" };
+    const char *below[] = { "runtime.sd", "c_stdlib.sd", "c_string.sd" };
     for (int i = 0; i < (int)(sizeof(below) / sizeof(below[0])); i++) {
         size_t path_len = strlen(file_path), name_len = strlen(below[i]);
         if (path_len < name_len) continue;

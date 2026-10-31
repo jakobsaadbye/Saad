@@ -1,0 +1,6 @@
+// expect-error: Unknown namespace 'shapez'
+
+import shapez;
+
+main :: () {
+}

@@ -1,4 +1,6 @@
-import "c_stdlib";
+namespace mem;
+
+use c;
 
 Kilobyte :: 1024;
 Megabyte :: 1048576;

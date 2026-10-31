@@ -1,4 +1,4 @@
-import "fmt";
+use fmt;
 
 Vector2 :: struct {
     x, y: f32;

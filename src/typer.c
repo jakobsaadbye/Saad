@@ -107,6 +107,7 @@ AstIdentifier *resolve_qualified_name(Typer *typer, AstExpr *expr, bool *failed)
 AstIdentifier *lookup_type_identifier(Typer *typer, char *name, Ast *site);
 AstIdentifier *find_namespace_declaration(Namespace *ns, char *name);
 bool check_namespace_files(Typer *typer, Namespace *ns);
+bool is_declared_by(AstIdentifier *ident, AstFile *file);
 bool report_if_not_visible(Typer *typer, AstIdentifier *ident, Ast *site);
 void report_if_deprecated(Typer *typer, AstIdentifier *ident, Ast *site);
 AstLiteral *make_resolved_identifier_literal(Typer *typer, AstIdentifier *ident, Ast *at);
@@ -167,7 +168,7 @@ bool import_namespace_siblings(Typer *typer, AstFile *file) {
 
         for (int j = 0; j < sibling->scope->identifiers.count; j++) {
             AstIdentifier *ident = ((AstIdentifier **)sibling->scope->identifiers.items)[j];
-            if (ident->head.file != sibling) continue; // Only what the sibling declares itself
+            if (!is_declared_by(ident, sibling)) continue; // Only what the sibling declares itself
 
             AstIdentifier *existing = find_identifier_in_scope(file->scope, ident->name);
             if (existing == ident) continue;
@@ -263,7 +264,7 @@ bool import_declarations(Parser *parser, AstImport *import, AstFile *to_file) {
         AstIdentifier *src_ident = ((AstIdentifier **)from_file->scope->identifiers.items)[i];
 
         // Don't include the identifier if it does not originate from the file it self
-        if (src_ident->head.file != from_file) {
+        if (!is_declared_by(src_ident, from_file)) {
             continue;
         }
         if (src_ident->flags & IDENTIFIER_IS_PRIVATE) {
@@ -305,13 +306,19 @@ bool check_namespace_files(Typer *typer, Namespace *ns) {
     return true;
 }
 
+// Names that a file gets from its imports belong to the file, but are not its declarations e.g the 'm' of 'import math as m;'
+bool is_declared_by(AstIdentifier *ident, AstFile *file) {
+    if (ident->head.file != file) return false;
+    return !(ident->flags & (IDENTIFIER_IS_NAMESPACE | IDENTIFIER_IS_IMPORTED_NAME | IDENTIFIER_IS_AMBIGUOUS));
+}
+
 // A public declaration of a namespace (or a private one, for code in the same namespace), or NULL
 AstIdentifier *find_namespace_declaration(Namespace *ns, char *name) {
     for (int i = 0; i < ns->files.count; i++) {
         AstFile *file = ((AstFile **)ns->files.items)[i];
         for (int j = 0; j < file->scope->identifiers.count; j++) {
             AstIdentifier *ident = ((AstIdentifier **)file->scope->identifiers.items)[j];
-            if (ident->head.file == file && strcmp(ident->name, name) == 0) return ident;
+            if (is_declared_by(ident, file) && strcmp(ident->name, name) == 0) return ident;
         }
     }
     return NULL;
@@ -412,7 +419,7 @@ bool check_namespace_import(Typer *typer, AstImport *import) {
             AstFile *ns_file = ((AstFile **)ns->files.items)[i];
             for (int j = 0; j < ns_file->scope->identifiers.count; j++) {
                 AstIdentifier *ident = ((AstIdentifier **)ns_file->scope->identifiers.items)[j];
-                if (ident->head.file != ns_file) continue;
+                if (!is_declared_by(ident, ns_file)) continue;
                 if ((ident->flags & IDENTIFIER_IS_PRIVATE) && !same_namespace) continue;
                 add_used_identifier(typer, file, ident);
             }

@@ -1,3 +1,5 @@
+namespace raylib;
+
 //
 // This file contains bindings for raylib v.5.5
 //

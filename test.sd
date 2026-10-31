@@ -1,4 +1,4 @@
-import "fmt";
+use fmt;
 
 defaultArguments :: (a := 69) {
     Print("%", a);

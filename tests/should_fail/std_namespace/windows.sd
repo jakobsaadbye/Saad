@@ -1,0 +1,4 @@
+// Used by tests/should_fail/std_namespace_join.sd. A file of a project cannot join a namespace of the standard library
+namespace windows;
+
+hello :: () {}

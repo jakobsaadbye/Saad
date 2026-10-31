@@ -1,0 +1,8 @@
+// expect-error: 'secret' is private to the namespace 'shapes'
+
+use shapes;
+
+main :: () {
+    v: Vec2;
+    x := v.secret();
+}

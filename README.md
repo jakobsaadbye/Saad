@@ -4,6 +4,50 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.5.0 - 31. Oct 2026
+
+* Namespaces
+
+A file can declare its namespace at the top. Any number of files, in any folders, can be in the same
+namespace. See `docs/namespaces.md`.
+
+```odin
+// physics/body.sd
+namespace game.physics;
+
+Body :: struct { mass: f64; }
+```
+
+```odin
+use game.physics;           // every public declaration
+import fmt;                 // fmt.Print("%", x)
+import math as m;           // m.sqrt(2.0)
+import math.sin;            // a single declaration
+import math.cos as cosine;
+
+main :: () {
+    b := Body{mass: 2.0};
+    fmt.Print("% %", m.sqrt(b.mass), sin(0.0) + cosine(0.0));
+}
+```
+
+The standard library is split into the top-level namespaces `fmt`, `math`, `mem`, `c` (the C bindings),
+`raylib` and `windows`. `List`, `Map` and `string` are still always available.
+
+* Attributes: `@private` and `@deprecated`
+
+```odin
+@private
+helper :: () -> int { ... }   // Only visible inside its namespace
+
+@deprecated("use add")
+push :: method * (value: T) { ... }
+```
+
+* BREAKING: `import "fmt";` is deprecated in favour of `use fmt;` or `import fmt;`, and `std/arrays.sd`
+  (the deprecated `appendInt`) is removed. `#` is reserved for compile-time features, so the old `#import`
+  and `#extern` directives are gone. Use `extern "C" { ... }` blocks for C functions.
+
 ## Update v0.4.3 - 30. Oct 2026
 
 * BREAKING: Struct literals and named arguments use `:` instead of `=`

@@ -1,3 +1,5 @@
+namespace c;
+
 extern "C" {
     memset  :: (dest: *void, value: int, size: int) -> *void;
     memcpy  :: (dest: *void, src: *void, size: int) -> *void;

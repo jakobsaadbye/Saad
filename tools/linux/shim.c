@@ -56,6 +56,9 @@ MS void  ms_ExitProcess(unsigned c) { fflush(stdout); exit((int)c); }
 MS int   ms_abs(int x) { return abs(x); }
 #define F1(name) MS double ms_##name(double x) { return name(x); } MS float ms_##name##f(float x) { return name##f(x); }
 F1(ceil) F1(floor) F1(fabs) F1(round) F1(trunc) F1(rint) F1(nearbyint)
+F1(sin) F1(cos) F1(tan) F1(asin) F1(acos) F1(atan) F1(sinh) F1(cosh) F1(tanh) F1(sqrt) F1(exp) F1(log) F1(log10)
+MS double ms_atan2(double y, double x) { return atan2(y, x); } MS float ms_atan2f(float y, float x) { return atan2f(y, x); }
+MS double ms_pow(double x, double y) { return pow(x, y); }     MS float ms_powf(float x, float y) { return powf(x, y); }
 MS long ms_lround(double x) { return lround(x); }
 MS long long ms_llround(double x) { return llround(x); }
 

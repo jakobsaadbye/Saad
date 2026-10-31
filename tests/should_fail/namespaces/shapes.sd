@@ -1,0 +1,13 @@
+// Used by the namespace tests in tests/should_fail
+namespace shapes;
+
+Vec2 :: struct {
+    x: f64;
+    y: f64;
+
+    @private
+    secret :: method () -> int { return 7; }
+}
+
+@private
+twiceInternal :: (x: int) -> int { return x * 2; }

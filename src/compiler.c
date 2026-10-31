@@ -97,9 +97,13 @@ static void scan_namespaces(CompilerConfig *config, Parser *parser, const char *
         char *ns_name = read_namespace_declaration(path);
         if (ns_name == NULL) continue;
 
+        // The compiler later works from the folder of the main file, so the paths are made absolute now
+        char *absolute = get_absolute_path(path);
+        if (absolute == NULL) continue;
+
         Namespace *ns = add_namespace(parser, ns_name);
         if (is_standard) ns->is_standard = true;
-        da_append(&ns->paths, path);
+        da_append(&ns->paths, absolute);
     }
     closedir(d);
 }
@@ -299,22 +303,25 @@ void write_text_file(const char *path, StringBuilder sb) {
 // Parses the main file and every file it imports (directly or indirectly). The main file is parsed_files[0]
 static bool parse_all_files(CompilerConfig *config, Parser *parser, const char *main_path, DynamicArray *parsed_files) {
     DynamicArray paths_to_visit = da_init(8, sizeof(char *));
+    DynamicArray parsed_paths   = da_init(8, sizeof(char *)); // The absolute paths of the parsed files, as the same file can be reached by different paths
     da_append(&paths_to_visit, main_path);
 
     for (int cursor = 0; cursor < paths_to_visit.count; cursor++) {
         char *path = ((char **)paths_to_visit.items)[cursor];
+        char *absolute = get_absolute_path(path);
+        if (absolute == NULL) absolute = path;
 
         // Skip files that have already been parsed
         // @Speed: Optimize this O(N2) to a lookup
         bool is_visited = false;
-        for (int i = 0; i < parsed_files->count; i++) {
-            AstFile *file = ((AstFile **)parsed_files->items)[i];
-            if (strcmp(path, file->absolute_path) == 0) {
+        for (int i = 0; i < parsed_paths.count; i++) {
+            if (strcmp(absolute, ((char **)parsed_paths.items)[i]) == 0) {
                 is_visited = true;
                 break;
             }
         }
         if (is_visited) continue;
+        da_append(&parsed_paths, absolute);
 
         AstFile *file = parse_file(parser, path);
         if (file == NULL) return false;
@@ -378,7 +385,10 @@ static bool link_imports(Parser *parser, DynamicArray parsed_files) {
 
             for (int k = 0; k < parsed_files.count; k++) {
                 AstFile *other_file = ((AstFile **)parsed_files.items)[k];
-                if (strcmp(import->resolved_path, other_file->absolute_path) == 0) {
+                char *a = get_absolute_path(import->resolved_path);
+                char *b = get_absolute_path(other_file->absolute_path);
+                bool same = (a && b) ? strcmp(a, b) == 0 : strcmp(import->resolved_path, other_file->absolute_path) == 0;
+                if (same) {
                     import->imported_file = other_file;
                     break;
                 }

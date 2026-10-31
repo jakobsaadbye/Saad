@@ -90,10 +90,13 @@ Future development
   [x] Methods on primitive types and enums
   [] Methods on arrays and pointers
 
-* Import system
-  [] Detect circular dependencies
-  [] Named imports
-  [] Modules / Packages n' stuff
+* Import system (see docs/namespaces.md)
+  [x] Namespaces declared in files, import / import as / use, qualified names
+  [x] Circular uses between namespaces
+  [x] @private and @deprecated attributes
+  [] A project file to list or exclude folders
+  [] use with a list of names e.g use math.{sin, cos}
+  [] Attributes on struct members and user-defined attributes
 
 * Better constants / literals
   [] Hex values
@@ -116,7 +119,7 @@ Future development
   [] Custom iterators
 
 * Syntax
-  [] Import for named imports, `use` for loading in all identifiers. Goes together with as keyword to rename import
+  [x] Import for named imports, `use` for loading in all identifiers. Goes together with as keyword to rename import
 
 
 
