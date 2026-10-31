@@ -763,6 +763,11 @@ Ast *parse_attributed_declaration(Parser *parser) {
         AstDeclaration *decl = (AstDeclaration *)stmt;
         for (int i = 0; i < decl->idents.count && count < 16; i++) idents[count++] = ((AstIdentifier **)decl->idents.items)[i];
     }
+    else if (stmt->kind == AST_DECLARATION && !(((AstDeclaration *)stmt)->flags & DECLARATION_IS_STRUCT_MEMBER) && first_builtin.type != 0 && custom.count == 0 && !is_attribute) {
+        // A global variable e.g @private count := 0;
+        AstDeclaration *decl = (AstDeclaration *)stmt;
+        for (int i = 0; i < decl->idents.count && count < 16; i++) idents[count++] = ((AstIdentifier **)decl->idents.items)[i];
+    }
     else if (stmt->kind == AST_DECLARATION && (((AstDeclaration *)stmt)->flags & DECLARATION_IS_STRUCT_MEMBER)) {
         // A struct member only takes the values of attribute structs
         if (first_builtin.type != 0) {
@@ -778,7 +783,7 @@ Ast *parse_attributed_declaration(Parser *parser) {
         return stmt;
     }
     else {
-        report_error_token(parser, LABEL_ERROR, first, "An attribute must be followed by the declaration of a function, method, struct, enum, constant or type alias");
+        report_error_token(parser, LABEL_ERROR, first, "An attribute must be followed by the declaration of a function, method, struct, enum, constant, type alias or global variable");
         return NULL;
     }
 

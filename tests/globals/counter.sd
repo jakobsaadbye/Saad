@@ -1,0 +1,12 @@
+// Used by tests/globals.sd: a global of a namespace, private to it
+namespace counting;
+
+@private
+count := 0;
+
+total: i64 = 100; // public
+
+next :: () -> int {
+    count += 1;
+    return count;
+}

@@ -1,0 +1,56 @@
+// Global variables
+
+import counting;
+
+Point :: struct {
+    x: int = 7;
+    y: int;
+}
+
+calls := 0;
+name  := "start";
+origin: Point;           // The default values of Point
+scores: [3]int;          // Zeroed
+ratio: f64 = 1.5;
+state := State.idle;
+
+State :: enum { idle, running }
+
+bump :: () {
+    calls += 1;
+    scores[calls - 1] = calls * 10;
+    origin.y = calls;
+    state = .running;
+}
+
+main :: () {
+    assert(calls == 0 && name == "start" && ratio == 1.5 && state == .idle);
+    assert(origin.x == 7 && origin.y == 0);
+    assert(scores[0] == 0 && scores[2] == 0);
+
+    bump();
+    bump();
+    assert(calls == 2 && origin.y == 2 && scores[1] == 20 && state == .running);
+
+    name = "changed";
+    assert(name == "changed");
+
+    // A pointer to a global
+    p := &calls;
+    *p = 99;
+    assert(calls == 99);
+
+    // Declared below the function that uses it
+    assert(later == 42);
+    later += 1;
+    assert(later == 43);
+
+    // A global of a namespace
+    assert(counting.next() == 1);
+    assert(counting.next() == 2);
+    assert(counting.total == 100);
+    counting.total = 5;
+    assert(counting.total == 5);
+}
+
+later := 42;

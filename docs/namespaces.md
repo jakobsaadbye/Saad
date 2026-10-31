@@ -66,8 +66,8 @@ push :: method * (value: T) { ... }
 Slot :: struct { index: int; }
 ```
 
-* Attributes go before a function, method (also inside a struct), struct, enum, constant or type alias,
-  at the top of a file. Not inside functions.
+* Attributes go before a function, method (also inside a struct), struct, enum, constant, type alias or global
+  variable, at the top of a file. Not inside functions.
 * Unknown, repeated and misplaced attributes are errors.
 * Structs marked with `@attribute` are attributes of your own, which go on struct members and are read through
   reflection, e.g `@json.Field(name: "id")`. See `docs/reflection.md`.

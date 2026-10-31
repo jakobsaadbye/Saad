@@ -1,65 +1,108 @@
 // std/random.sd
 
-use fmt;
-
 import random;
 
 main :: () {
     {
-        // The same seed gives the same numbers
-        a := random.newRandom(42);
-        b := random.newRandom(42);
-        for 0..100 {
-            assert(a.next() == b.next());
+        // The functions, on the generator that is seeded from the clock
+        for 0..1000 {
+            dice := random.between(1, 6);
+            assert(dice >= 1 && dice <= 6);
+            f := random.random();
+            assert(f >= 0.0 && f < 1.0);
+            u := random.uniform(-2.0, 2.0);
+            assert(u >= -2.0 && u < 2.0);
         }
+        assert(random.between(3, 3) == 3);
 
-        c := random.newRandom(43);
-        assert(a.next() != c.next());
+        names := ["ada", "bob", "cy"];
+        name := random.choice(names);
+        assert(names.contains(name));
     }
     {
-        rng := random.newRandom(1);
+        // between includes both ends
         seen: [6]bool;
         for 0..1000 {
-            dice := rng.nextInt(1, 7);
-            assert(dice >= 1 && dice <= 6);
-            seen[dice - 1] = true;
+            seen[random.between(1, 6) - 1] = true;
         }
         for s in seen {
             assert(s);
         }
-
-        negative := rng.nextInt(-10, -5);
-        assert(negative >= -10 && negative < -5);
-        assert(rng.nextInt(3, 3) == 3);
+        negative := random.between(-10, -5);
+        assert(negative >= -10 && negative <= -5);
     }
     {
-        rng := random.newRandom(7);
-        sum: f64 = 0.0;
-        trues := 0;
-        for 0..1000 {
-            f := rng.nextFloat();
-            assert(f >= 0.0 && f < 1.0);
-            sum += f;
-            if rng.chance(0.25) {
-                trues += 1;
-            }
+        // seed makes the numbers repeatable
+        random.seed(42);
+        a := random.bits();
+        b := random.between(0, 1000);
+        random.seed(42);
+        assert(random.bits() == a);
+        assert(random.between(0, 1000) == b);
+    }
+    {
+        // A generator of your own has the same methods and its own sequence
+        x := random.newRandom(7);
+        y := random.newRandom(7);
+        for 0..100 {
+            assert(x.bits() == y.bits());
         }
-        assert(sum > 400.0 && sum < 600.0);
+        z := random.newRandom(8);
+        assert(x.bits() != z.bits());
+
+        rng := random.newRandom(1);
+        trues := 0;
+        sum: f64 = 0.0;
+        for 0..1000 {
+            if rng.chance(0.25) { trues += 1; }
+            sum += rng.gauss(10.0, 2.0);
+        }
         assert(trues > 150 && trues < 350);
+        assert(sum / 1000.0 > 9.5 && sum / 1000.0 < 10.5);
+
+        cards := ["a", "b", "c", "d"];
+        assert(cards.contains(rng.choice(cards)));
     }
     {
-        rng := random.newRandom(3);
+        // choices can repeat, sample can't
         xs: [..]int;
         for i in 0..50 {
             xs.add(i);
         }
-        random.shuffle(&rng, xs);
+
+        picks := random.choices(xs, 100);
+        assert(picks.count == 100);
+        for p in picks {
+            assert(p >= 0 && p < 50);
+        }
+
+        some := random.sample(xs, 20);
+        assert(some.count == 20);
+        for p, i in some {
+            for q, j in some {
+                if i != j { assert(p != q); }
+            }
+        }
+        all := random.sample(xs, 50);
+        all.sort();
+        for p, i in all {
+            assert(p == i);
+        }
+    }
+    {
+        xs: [..]int;
+        for i in 0..50 {
+            xs.add(i);
+        }
+        random.shuffle(xs);
         assert(!xs.isSorted());
         xs.sort();
         for x, i in xs {
             assert(x == i);
         }
-    }
 
-    print("ok");
+        rng := random.newRandom(3);
+        rng.shuffle(xs);
+        assert(!xs.isSorted());
+    }
 }

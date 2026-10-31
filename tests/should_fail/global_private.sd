@@ -1,0 +1,7 @@
+// expect-error: 'count' is private to the namespace 'tally'
+
+import tally;
+
+main :: () {
+    x := tally.count;
+}
