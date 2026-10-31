@@ -108,6 +108,7 @@ AstIdentifier *lookup_type_identifier(Typer *typer, char *name, Ast *site);
 AstIdentifier *find_namespace_declaration(Namespace *ns, char *name);
 bool check_namespace_files(Typer *typer, Namespace *ns);
 bool report_if_not_visible(Typer *typer, AstIdentifier *ident, Ast *site);
+void report_if_deprecated(Typer *typer, AstIdentifier *ident, Ast *site);
 AstLiteral *make_resolved_identifier_literal(Typer *typer, AstIdentifier *ident, Ast *at);
 AstFunctionDefn *readonly_self_method(Typer *typer, AstExpr *expr);
 AstFunctionDefn *readonly_self_place(Typer *typer, AstExpr *expr);
@@ -1698,6 +1699,8 @@ Type *resolve_type(Typer *typer, Type *type) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Unknown type '%s'", type_to_str(type));
             return NULL;
         }
+        report_if_deprecated(typer, ident, (Ast *)type);
+
         if (ident->flags & IDENTIFIER_IS_AMBIGUOUS) {
             AstIdentifier *first = ((AstIdentifier **)ident->ambiguous.items)[0];
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "'%s' is ambiguous. It is declared in more than one of the namespaces you use", type->name);
@@ -2131,6 +2134,69 @@ bool report_if_not_visible(Typer *typer, AstIdentifier *ident, Ast *site) {
     else                  report_error_ast(typer->parser, LABEL_ERROR, site, "'%s' is private to its file", ident->name);
     report_error_ast(typer->parser, LABEL_NOTE, (Ast *)ident, "Here is the declaration of '%s'", ident->name);
     return false;
+}
+
+// Warns about the use of a @deprecated declaration
+void report_if_deprecated(Typer *typer, AstIdentifier *ident, Ast *site) {
+    AstIdentifier *decl = ident->imported_from ? ident->imported_from : ident;
+    if (!(decl->flags & IDENTIFIER_IS_DEPRECATED)) return;
+
+    if (decl->deprecated_message) report_error_ast(typer->parser, LABEL_WARNING, site, "'%s' is deprecated: %s", decl->name, decl->deprecated_message);
+    else                          report_error_ast(typer->parser, LABEL_WARNING, site, "'%s' is deprecated", decl->name);
+}
+
+// The private struct or enum in a type e.g the Slot of *[]Slot, or NULL
+AstIdentifier *private_type_in(Type *type) {
+    switch (type->kind) {
+    case TYPE_STRUCT: {
+        AstIdentifier *ident = ((TypeStruct *)type)->identifier;
+        if (ident && (ident->flags & IDENTIFIER_IS_PRIVATE)) return ident;
+        AstStruct *node = ((TypeStruct *)type)->node;
+        if (node && node->generic_struct) {
+            for (int i = 0; i < node->type_args.count; i++) {
+                AstIdentifier *inner = private_type_in(((Type **)node->type_args.items)[i]);
+                if (inner) return inner;
+            }
+        }
+        return NULL;
+    }
+    case TYPE_ENUM: {
+        AstIdentifier *ident = ((TypeEnum *)type)->identifier;
+        return ident && (ident->flags & IDENTIFIER_IS_PRIVATE) ? ident : NULL;
+    }
+    case TYPE_POINTER:  return private_type_in(((TypePointer *)type)->pointer_to);
+    case TYPE_ARRAY:    return private_type_in(((TypeArray *)type)->elem_type);
+    case TYPE_VARIADIC: return private_type_in(((TypeVariadic *)type)->type);
+    default:            return NULL;
+    }
+}
+
+// A public function cannot take or return a private type, as the callers can't name it
+bool check_no_private_types_in_signature(Typer *typer, AstFunctionDefn *func_defn) {
+    if (func_defn->is_lambda || func_defn->identifier == NULL) return true;
+    if (func_defn->identifier->flags & IDENTIFIER_IS_PRIVATE) return true;
+
+    for (int i = func_defn->is_method ? 1 : 0; i < func_defn->parameters.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
+        AstIdentifier *hidden = private_type_in(param->type);
+        if (hidden) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)param->decl, "The public function '%s' takes the private type '%s'", func_defn->identifier->name, hidden->name);
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)hidden, "Here is the declaration of '%s'", hidden->name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Make the function @private too, or the type public");
+            return false;
+        }
+    }
+    for (int i = 0; i < func_defn->return_types.count; i++) {
+        Type *type = ((Type **)func_defn->return_types.items)[i];
+        AstIdentifier *hidden = private_type_in(type);
+        if (hidden) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)func_defn->identifier, "The public function '%s' returns the private type '%s'", func_defn->identifier->name, hidden->name);
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)hidden, "Here is the declaration of '%s'", hidden->name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Make the function @private too, or the type public");
+            return false;
+        }
+    }
+    return true;
 }
 
 // Collects the names of a qualified name e.g [game, physics, Body] for game.physics.Body. Returns false if it is not only names
@@ -3785,6 +3851,11 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             // We are indeed a method call
             call->is_method_call = true;
 
+            if (func_defn->identifier) {
+                if (!report_if_not_visible(typer, func_defn->identifier, (Ast *)ma->right)) return NULL;
+                report_if_deprecated(typer, func_defn->identifier, (Ast *)ma->right);
+            }
+
             // A method that can change its receiver, called on an element of a collection e.g groups["a"].add(1), changes the element
             // in the collection. So the element is a place (indexRef), not a copy of it (index)
             if (ma->left->head.kind == AST_ARRAY_ACCESS && ma->left->replacement && method_can_change_receiver(func_defn)) {
@@ -4439,6 +4510,8 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
         func_defn->receiver_struct = receiver_struct;
     }
 
+
+    if (!check_no_private_types_in_signature(typer, func_defn)) return NULL;
 
     // Mark the function as fully typed, when we have typechecked the function signature
     // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again
@@ -6208,6 +6281,8 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             return NULL;
         }
         typer->checking_callee = false;
+
+        report_if_deprecated(typer, ident, (Ast *)literal);
 
         // Save the resolved identifier on the literal
         literal->as.value.identifier.resolved_identifier = ident;

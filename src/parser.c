@@ -555,12 +555,123 @@ bool starts_function_defn_at(Parser *parser, int cursor) {
     return false;
 }
 
+// The attributes that exist e.g @private and @deprecated("use add instead")
+static const char *known_attributes[] = { "private", "deprecated" };
+
+// Parses the attributes in front of a declaration and the declaration, and gives the attributes to the declared identifier
+Ast *parse_attributed_declaration(Parser *parser) {
+    Token first = peek_next_token(parser);
+
+    bool  is_private = false;
+    bool  is_deprecated = false;
+    char *deprecated_message = NULL;
+
+    while (peek_next_token(parser).type == '@') {
+        Token at = peek_next_token(parser);
+        eat_token(parser);
+
+        Token name_token = peek_next_token(parser);
+        if (name_token.type != TOKEN_LITERAL_IDENTIFIER) {
+            report_error_token(parser, LABEL_ERROR, name_token, "Expected the name of an attribute after '@'");
+            return NULL;
+        }
+        eat_token(parser);
+        char *name = name_token.as_value.value.identifier.name;
+
+        bool known = false;
+        for (int i = 0; i < (int)(sizeof(known_attributes) / sizeof(known_attributes[0])); i++) {
+            if (strcmp(name, known_attributes[i]) == 0) known = true;
+        }
+        if (!known) {
+            report_error_range(parser, at.start, name_token.end, "Unknown attribute '@%s'", name);
+            report_error_ast(parser, LABEL_HINT, NULL, "The attributes are @private and @deprecated(\"message\")");
+            return NULL;
+        }
+
+        if ((strcmp(name, "private") == 0 && is_private) || (strcmp(name, "deprecated") == 0 && is_deprecated)) {
+            report_error_range(parser, at.start, name_token.end, "The attribute '@%s' is given more than once", name);
+            return NULL;
+        }
+
+        if (strcmp(name, "private") == 0) {
+            is_private = true;
+        }
+        if (strcmp(name, "deprecated") == 0) {
+            is_deprecated = true;
+            if (peek_next_token(parser).type == '(') {
+                eat_token(parser);
+                Token message = peek_next_token(parser);
+                if (message.type != TOKEN_LITERAL_STRING) {
+                    report_error_token(parser, LABEL_ERROR, message, "@deprecated takes a message as a string e.g @deprecated(\"use add instead\")");
+                    return NULL;
+                }
+                eat_token(parser);
+                deprecated_message = message.as_value.value.string.data;
+
+                Token close = peek_next_token(parser);
+                if (close.type != ')') {
+                    report_error_token(parser, LABEL_ERROR, close, "Expected a ')' after the message of @deprecated");
+                    return NULL;
+                }
+                eat_token(parser);
+            }
+        }
+        else if (peek_next_token(parser).type == '(') {
+            report_error_token(parser, LABEL_ERROR, peek_next_token(parser), "The attribute '@%s' takes no arguments", name);
+            return NULL;
+        }
+    }
+
+    if (parser->enclosing_function) {
+        report_error_token(parser, LABEL_ERROR, first, "Attributes can only be given to declarations at the top of a file or methods in a struct, not inside a function");
+        return NULL;
+    }
+
+    Ast *stmt = parse_statement(parser);
+    if (!stmt) return NULL;
+
+    // The identifiers that get the attributes
+    AstIdentifier *idents[16];
+    int count = 0;
+    if (stmt->kind == AST_STRUCT) {
+        idents[count++] = ((AstStruct *)stmt)->identifier;
+    }
+    else if (stmt->kind == AST_ENUM) {
+        idents[count++] = ((AstEnum *)stmt)->identifier;
+    }
+    else if (stmt->kind == AST_DECLARATION && (((AstDeclaration *)stmt)->flags & DECLARATION_CONSTANT)) {
+        AstDeclaration *decl = (AstDeclaration *)stmt;
+        for (int i = 0; i < decl->idents.count && count < 16; i++) idents[count++] = ((AstIdentifier **)decl->idents.items)[i];
+    }
+    else if (stmt->kind == AST_DECLARATION && (((AstDeclaration *)stmt)->flags & DECLARATION_IS_STRUCT_MEMBER)) {
+        report_error_token(parser, LABEL_ERROR, first, "Attributes on struct members are not supported yet");
+        return NULL;
+    }
+    else {
+        report_error_token(parser, LABEL_ERROR, first, "An attribute must be followed by the declaration of a function, method, struct, enum, constant or type alias");
+        return NULL;
+    }
+
+    for (int i = 0; i < count; i++) {
+        if (is_private) idents[i]->flags |= IDENTIFIER_IS_PRIVATE;
+        if (is_deprecated) {
+            idents[i]->flags |= IDENTIFIER_IS_DEPRECATED;
+            idents[i]->deprecated_message = deprecated_message;
+        }
+    }
+    return stmt;
+}
+
 Ast *parse_statement(Parser *parser) {
     Ast *stmt = NULL;
     bool statement_ends_with_semicolon = false;
     bool matched_a_statement = false;
     
     Token token = peek_next_token(parser);
+
+    if (token.type == '@') {
+        return parse_attributed_declaration(parser);
+    }
 
     if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_STRUCT) {
         stmt = (Ast *)(parse_struct_defn(parser));
