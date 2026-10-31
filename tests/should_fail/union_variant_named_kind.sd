@@ -1,0 +1,5 @@
+// expect-error: A variant can't be named 'kind'
+
+Shape :: union { kind: f32; empty; }
+
+main :: () {}

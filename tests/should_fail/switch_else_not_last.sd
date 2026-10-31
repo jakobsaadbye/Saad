@@ -1,0 +1,9 @@
+// expect-error: The else of a switch must be its last case
+
+main :: () {
+    x := 1;
+    switch x {
+        else { }
+        case 1 { }
+    }
+}

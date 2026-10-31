@@ -41,6 +41,12 @@ Response :: struct {
     maybe:       string;
 }
 
+Shape :: union {
+    circle: struct { radius: f64; };
+    label:  string;
+    empty;
+}
+
 Limits :: struct {
     small: u8;
     tiny:  i8;
@@ -230,5 +236,23 @@ main :: () {
         assert(json.decode("{\"userID\": 1, \"color\": \"red\"}", &back, strict) == "Response has no member 'color'");
         assert(json.decode("{\"userID\": 1, \"color\": \"red\"}", &back) == "");
         assert(json.decode("{\"statusCode\": \"not_found\"}", &back) == "statusCode: 'not_found' is not a value of HttpStatus");
+    }
+    {
+        // Unions: the name of a variant without a value, or an object with the name and the value
+        shapes: [..]Shape;
+        shapes.add(Shape{circle: {radius: 2.0}});
+        shapes.add(Shape{label: "hi"});
+        shapes.add(.empty);
+        text := json.encode(shapes);
+        assert(text == "[{\"circle\":{\"radius\":2}},{\"label\":\"hi\"},\"empty\"]");
+
+        back: [..]Shape;
+        assert(json.decode(text, &back) == "");
+        assert(back.count == 3);
+        assert(json.encode(back) == text);
+
+        one: Shape;
+        assert(json.decode("{\"square\": 1}", &one) == "'square' is not a variant of Shape");
+        assert(json.decode("\"circle\"", &one) == "The variant 'circle' of Shape needs a value");
     }
 }

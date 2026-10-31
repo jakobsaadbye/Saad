@@ -14,6 +14,7 @@ descriptor per type (`type_info_global()` in `ir_lower.c`), with the layouts of 
 | `.array` | `TypeArray` | `kind` (`.fixed` or `.slice`), `elemType`, `count` of a fixed array |
 | `.enum` | `TypeEnum` | `backingType`, `values: []EnumValue` (name and value), `nameOf(v)`, `readValue(data)` |
 | `.struct` | `TypeStruct` | `members: []StructMember` (name, type, offset, index, attributes), `alignment` |
+| `.struct` with `isUnion()` | `TypeStruct` | A union: the members are `$tag` (the kind, an enum) and the variants. `variantOf(data)` and `setVariant(data, variant)` |
 
 ```odin
 x: any = person;

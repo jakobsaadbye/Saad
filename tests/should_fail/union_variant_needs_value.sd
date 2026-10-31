@@ -1,0 +1,7 @@
+// expect-error: The variant 'circle' needs a value
+
+Shape :: union { circle: f32; empty; }
+
+main :: () {
+    s := Shape.circle;
+}

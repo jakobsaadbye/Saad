@@ -7,7 +7,7 @@ The standard library, the examples and the tests follow these conventions. The c
 | Functions and methods | camelCase | `newRandom`, `xs.removeAt(0)` |
 | Variables, parameters and struct members | camelCase | `playerScore`, `firstName` |
 | Types: structs, enums and type aliases | PascalCase | `StringBuilder`, `HttpStatus` |
-| Enum values | camelCase, starting lowercase | `Status :: enum { open, closed }` |
+| Enum values and union variants | camelCase, starting lowercase | `Status :: enum { open, closed }` |
 | Constants | PascalCase | `MaxIntValue :: 123456;` |
 | Namespaces | lowercase, dotted | `game.physics` |
 | Attribute structs | PascalCase | `@json.Field(name: "id")` |

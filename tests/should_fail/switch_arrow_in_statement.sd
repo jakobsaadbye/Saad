@@ -1,0 +1,8 @@
+// expect-error: Only a switch that gives a value has '=>' cases
+
+main :: () {
+    x := 1;
+    switch x {
+        case 1 => 5;
+    }
+}

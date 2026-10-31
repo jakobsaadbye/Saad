@@ -109,6 +109,10 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_STRUCT:                return "TYPE_STRUCT";
         case TOKEN_ENUM:                  return "TYPE_ENUM";
         case TOKEN_METHOD:                return "method";
+        case TOKEN_SWITCH:                return "switch";
+        case TOKEN_CASE:                  return "case";
+        case TOKEN_UNION:                 return "union";
+        case TOKEN_FAT_ARROW:             return "=>";
         case TOKEN_END:                   return "END";
     }
 
@@ -339,6 +343,7 @@ KeywordMatch match_keyword(Lexer *lexer) {
         if (strcmp(text, "bool") == 0) token = TOKEN_TYPE_BOOL;
         if (strcmp(text, "void") == 0) token = TOKEN_TYPE_VOID;
         if (strcmp(text, "true") == 0) token = TOKEN_LITERAL_TRUE;
+        if (strcmp(text, "case") == 0) token = TOKEN_CASE;
         if (strcmp(text, "else") == 0) token = TOKEN_ELSE;
         if (strcmp(text, "enum") == 0) token = TOKEN_ENUM;
     }
@@ -347,10 +352,12 @@ KeywordMatch match_keyword(Lexer *lexer) {
         if (strcmp(text, "false") == 0) token = TOKEN_LITERAL_FALSE;
         if (strcmp(text, "break") == 0) token = TOKEN_BREAK;
         if (strcmp(text, "while") == 0) token = TOKEN_WHILE;
+        if (strcmp(text, "union") == 0) token = TOKEN_UNION;
     }
     if (keyword_len == 6) {
         if (strcmp(text, "struct") == 0) token = TOKEN_STRUCT;
         if (strcmp(text, "method") == 0) token = TOKEN_METHOD;
+        if (strcmp(text, "switch") == 0) token = TOKEN_SWITCH;
         if (strcmp(text, "string") == 0) token = TOKEN_STRING;
         if (strcmp(text, "return") == 0) token = TOKEN_RETURN;
         if (strcmp(text, "assert") == 0) token = TOKEN_ASSERT;
@@ -615,6 +622,7 @@ TokenType is_double_character_token(Lexer *lexer) {
     if (c == ':' && next == '=') return TOKEN_COLON_EQUAL;
     if (c == ':' && next == ':') return TOKEN_DOUBLE_COLON;
     if (c == '-' && next == '>') return TOKEN_RIGHT_ARROW;
+    if (c == '=' && next == '>') return TOKEN_FAT_ARROW;
     if (c == '.' && next == '.') return TOKEN_DOUBLE_DOT;
     if (c == '+' && next == '=') return TOKEN_PLUS_EQUAL;
     if (c == '-' && next == '=') return TOKEN_MINUS_EQUAL;

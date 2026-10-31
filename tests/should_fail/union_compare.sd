@@ -1,0 +1,9 @@
+// expect-error: Unions can't be compared with ==
+
+Shape :: union { circle: f32; empty; }
+
+main :: () {
+    a := Shape.empty;
+    b := Shape.empty;
+    same := a == b;
+}

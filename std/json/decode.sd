@@ -183,6 +183,9 @@ assignStruct :: (v: Value, data: *void, type: *TypeStruct, path: string, options
     if name.startsWith("Map<") {
         return assignMap(v, data, type, path, options);
     }
+    if type.head.isUnion() {
+        return assignUnion(v, data, type, path, options);
+    }
 
     if v.kind != .object { return mismatch(path, "an object", v); }
 
@@ -224,6 +227,37 @@ assignStruct :: (v: Value, data: *void, type: *TypeStruct, path: string, options
     }
     keys.free();
     return err;
+}
+
+// A union from the name of a variant without a value, e.g "empty", or an object with one member, e.g {"circle": {"radius": 2}}
+@private
+assignUnion :: (v: Value, data: *void, type: *TypeStruct, path: string, options: *Options) -> string {
+    name := "";
+    if v.kind == .string {
+        name = v.text;
+    } else if v.kind == .object && v.fields.count == 1 {
+        name = v.keys()[0];
+    } else {
+        return mismatch(path, fmt.sprint("the name of a variant of %, or an object with one", type.head.name), v);
+    }
+
+    for i in 1..type.members.count {
+        variant := &type.members[i];
+        styled := styleName(variant.name, options.enumValues);
+        same := styled == name;
+        if options.enumValues != .asWritten { styled.free(); }
+        if !same { continue; }
+
+        value := type.setVariant(data, variant);
+        if variant.type.kind == .void {
+            return "";
+        }
+        if v.kind == .string {
+            return failAt(path, fmt.sprint("The variant '%' of % needs a value", name, type.head.name));
+        }
+        return assign(v.get(name), value, variant.type, memberPath(path, name), options);
+    }
+    return failAt(path, fmt.sprint("'%' is not a variant of %", name, type.head.name));
 }
 
 // Sets the data, count and capacity of a List<T>

@@ -1,0 +1,8 @@
+// expect-error: A switch needs a value to switch on
+
+main :: () {
+    x := 1;
+    switch {
+        case x > 0 { }
+    }
+}

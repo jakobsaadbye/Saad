@@ -96,11 +96,15 @@ StructMember :: struct {
     attributes: []any;  // The values of the attributes on the member e.g @json.Field(name: "id")
 }
 
+// A union is a struct with this flag. Its first member is the tag ($tag: u32), the index of the variant it holds. The other members
+// are the variants, which all start at the same offset. See variantOf()
 TypeStruct :: struct {
     head:      Type;
     members:   []StructMember;
     alignment: int;
 };
+
+UnionFlag :: 1; // In Type.flags
 
 TypeAny :: struct {
     head: Type;
@@ -173,4 +177,27 @@ attributeOf :: <T>(member: *StructMember, value: *T) -> bool {
         }
     }
     return false;
+}
+
+isUnion :: method (type: *Type) -> bool {
+    return (type.flags & UnionFlag) != 0;
+}
+
+// The variant that the union stored at data holds
+variantOf :: method (type: *TypeStruct, data: *void) -> *StructMember {
+    tag := (*(data as *u32)) as i64;
+    if tag + 1 >= type.members.count {
+        return null;
+    }
+    return &type.members[tag + 1];
+}
+
+// Makes the union stored at data hold the variant, with a zeroed value. Returns where the value goes
+setVariant :: method (type: *TypeStruct, data: *void, variant: *StructMember) -> *void {
+    bytes := data as *u8;
+    for i in 0..type.head.size {
+        bytes[i] = 0;
+    }
+    *(data as *u32) = (variant.index - 1) as u32;
+    return variant.valueIn(data);
 }

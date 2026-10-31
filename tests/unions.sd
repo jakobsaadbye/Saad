@@ -1,0 +1,171 @@
+// Tagged unions and switch on them
+
+use fmt;
+
+Circle :: struct { radius: f32; }
+
+Shape :: union {
+    circle: Circle;
+    rect:   struct { w, h: f32; };
+    label:  string;
+    empty;
+}
+
+area :: (s: Shape) -> f32 {
+    switch v in s {
+        case .circle        { return 3.0 * v.radius * v.radius; }   // v is the Circle
+        case .rect          { return v.w * v.h; }
+        case .label
+        case .empty         { return 0.0; }
+    }
+    return -1.0;
+}
+
+// Through a pointer, v points to the value in the union
+grow :: (s: *Shape) {
+    switch v in s {
+        case .circle { v.radius *= 2.0; }
+        case .rect   { v.w *= 2.0; v.h *= 2.0; }
+        else         { }
+    }
+}
+
+Option :: union <T> {
+    none;
+    some: T;
+}
+
+Result :: union <T, E> {
+    ok:  T;
+    err: E;
+}
+
+find :: (xs: []int, x: int) -> Option<int> {
+    for v, i in xs {
+        if v == x { return Option<int>{some: i}; }
+    }
+    return .none;
+}
+
+perimeter :: (s: Shape) -> f32 {
+    return switch v in s {
+        case .circle => 6.0 * v.radius;
+        case .rect   => 2.0 * (v.w + v.h);
+        else         => 0.0;
+    };
+}
+
+parse :: (text: string) -> Result<int, string> {
+    switch text {
+        case "one" { return Result<int, string>{ok: 1}; }
+        case "two" { return Result<int, string>{ok: 2}; }
+    }
+    return Result<int, string>{err: fmt.sprint("'%' is not a number", text)};
+}
+
+main :: () {
+    {
+        a := Shape{circle: Circle{2.0}};
+        b := Shape{rect: {w: 3.0, h: 4.0}};
+        c := Shape{label: "hi"};
+        d := Shape.empty;
+        e: Shape = .empty;
+        assert(area(a) == 12.0 && area(b) == 12.0 && area(c) == 0.0 && area(d) == 0.0 && area(e) == 0.0);
+
+        grow(&a);
+        grow(&b);
+        assert(area(a) == 48.0 && area(b) == 48.0);
+    }
+    {
+        // The zero value holds the first variant, with a zeroed value
+        z: Shape;
+        assert(area(z) == 0.0);
+        switch z {
+            case .circle { }
+            else         { assert(false); }
+        }
+
+        o: Option<string>;
+        switch o {
+            case .none { }
+            case .some { assert(false); }
+        }
+    }
+    {
+        // Generic unions
+        xs := [5, 6, 7];
+        found := -1;
+        switch v in find(xs, 7) {
+            case .some { found = v; }
+            case .none { }
+        }
+        assert(found == 2);
+
+        switch find(xs, 9) {
+            case .some { assert(false); }
+            case .none { }
+        }
+
+        total := 0;
+        message := "";
+        for text in ["one", "two", "three"] {
+            switch r in parse(text) {
+                case .ok  { total += r; }
+                case .err { message = r; }
+            }
+        }
+        assert(total == 3);
+        assert(message == "'three' is not a number");
+    }
+    {
+        // Printing and reflection
+        assert(fmt.sprint("%", Shape{circle: Circle{2.0}}) == ".circle(Circle{ radius = 2.000000 })");
+        assert(fmt.sprint("%", Shape.empty) == ".empty");
+
+        s: any = Shape{label: "x"};
+        assert(s.type.isUnion());
+        variant := (s.type as *TypeStruct).variantOf(s.data);
+        assert(variant.name == "label");
+        assert(sizeof(Shape) == 24); // The tag, and the largest variant: a string
+    }
+    {
+        // A union in a list, changed through a switch on a pointer
+        shapes: [..]Shape;
+        shapes.add(Shape{circle: Circle{1.0}});
+        shapes.add(.empty);
+        for *shape in shapes {
+            grow(shape);
+        }
+        assert(area(shapes[0]) == 12.0);
+    }
+    {
+        // kind: which variant a union holds, as an enum with a value for each variant
+        a := Shape{circle: Circle{1.0}};
+        b: Shape = .empty;
+        assert(a.kind == .circle);
+        assert(b.kind == .empty && b.kind != .circle);
+
+        k := a.kind;
+        assert(typeof(k) == "enum { circle, rect, label, empty }");
+        assert(fmt.sprint("%", k) == ".circle");
+
+        name := "";
+        switch b.kind {
+            case .circle { name = "circle"; }
+            case .rect
+            case .label  { name = "other"; }
+            case .empty  { name = "empty"; }
+        }
+        assert(name == "empty");
+
+        o := Option<int>{some: 3};
+        none: Option<int>;
+        assert(o.kind == .some && none.kind == .none);
+    }
+    {
+        // A switch expression on a union
+        assert(perimeter(Shape{circle: Circle{1.0}}) == 6.0);
+        assert(perimeter(Shape{rect: {w: 1.0, h: 2.0}}) == 6.0);
+        assert(perimeter(.empty) == 0.0);
+    }
+}
