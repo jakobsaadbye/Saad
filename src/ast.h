@@ -228,6 +228,7 @@ typedef struct AstIdentifier {
     DynamicArray   ambiguous;          // IDENTIFIER_IS_AMBIGUOUS: of *AstIdentifier. The declarations with this name
     AstIdentifier *imported_from;      // IDENTIFIER_IS_IMPORTED_NAME: the declaration it is a copy of
     char          *deprecated_message; // IDENTIFIER_IS_DEPRECATED
+    DynamicArray   attributes;         // of *AstStructLiteral. The values of the custom attributes of a struct member e.g @json.Field(name: "id")
 } AstIdentifier;
 
 typedef enum DeclarationFlags {
@@ -326,6 +327,7 @@ typedef struct AstStruct {
 
     DynamicArray   inside_methods;   // of *AstDeclaration. The methods declared inside the struct. They are not members of the struct
     bool           is_anonymous;     // e.g struct { name: string; age: int; }. Anonymous structs with the same members are the same type
+    bool           is_attribute;     // Marked with @attribute, so its values can be given to struct members e.g @json.Field(name: "id")
 } AstStruct;
 
 typedef struct AstEnum {
@@ -408,6 +410,7 @@ typedef struct AstFunctionDefn {
     char            *instance_key;      // Set on an instance to the name with namespaces e.g "max<raylib.Color>", which tells instances apart
 
     bool             is_registered_method; // Set when the method has been added to the methods of its receiver struct
+    bool             is_slice_method;      // A generic method on []T e.g 'sort :: method <T>(xs: []T)'. Slices, fixed arrays and collections can call it
 
     // Methods declared inside a struct e.g 'get :: method (key: K) -> V' inside Map :: struct <K, V> {...}. They are turned into the same
     // as a method declared outside the struct with an implicit 'self' receiver e.g 'get :: method <K, V>(self: *Map<K, V>, key: K) -> V'

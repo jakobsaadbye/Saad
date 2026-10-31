@@ -2,46 +2,20 @@ namespace fmt;
 
 use c; // printf
 
-PLACEHOLDER_CHARACTER :: 37;  // '%'
-
+// Prints the format with every % replaced by the next argument, e.g print("% is % years old", name, age)
 print :: (format: string, args: ...any, newline := true) {
-    // Scan the format string to find all the placeholders
-    placeholderIndicies: [..]int;
-    for c, i in format {
-        if c == PLACEHOLDER_CHARACTER {
-            placeholderIndicies.add(i);
-        }
-    }
-
-    // Build up the result string by pasting each segment of the source string
-    sb := NewStringBuilder(1024);
-
-    cursor := 0;
-    for index, i in placeholderIndicies {
-
-        // Add the static text up untill the placeholder
-        sb.addStringSlice(format, cursor, index);
-
-        // Fill in the placeholder
-        arg := args[i];
-        sb.addAnyValue(arg);
-
-        cursor = index + 1;
-    }
-
-    // Append the trailing part after the last placeholder
-    sb.addStringSlice(format, cursor, format.len);
-
-    result := sb.toString();
-
+    sb := newStringBuilder(256);
+    sb.add(format, ...args);
     if newline {
-        printf("%s\n".data, result.data);
-    } else {
-        printf("%s".data, result.data);
+        sb.addChar(10); // '\n'
     }
-
-    
+    printf("%s".data, sb.buffer);
     sb.free();
-    return;
 }
 
+// Like print, but returns the text instead of printing it. Free it with text.free()
+sprint :: (format: string, args: ...any) -> string {
+    sb := newStringBuilder(64);
+    sb.add(format, ...args);
+    return sb.toString();
+}

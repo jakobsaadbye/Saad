@@ -1,0 +1,367 @@
+namespace json;
+
+// Reads JSON text into a value through reflection, e.g
+//
+//     person: Person;
+//     err := json.decode(text, &person);
+//     if err != "" { fmt.print("Bad JSON: %", err); }
+
+import fmt;
+use c;
+
+// Reads the JSON into the value. err is empty when it worked, otherwise it tells what is wrong and where.
+//
+// * Members that are not in the JSON keep their value, so defaults stay. Members of the JSON that the struct doesn't have are skipped
+// * json.Field gives a member another name, and skip: true leaves it alone
+// * A null leaves the value as it is, except for pointers, which become null
+// * Strings, slices, lists, maps and the values of pointers are allocated with malloc
+// * Enums are read from the name of the value, e.g "open", or its number
+decode :: <T>(text: string, value: *T) -> string {
+    root, err := parse(text);
+    if err != "" {
+        return err;
+    }
+
+    boxed: any = value;
+    pointer := boxed.type as *TypePointer;
+    target  := *(boxed.data as **void);
+    err = assign(root, target, pointer.pointerTo, "");
+
+    // The strings of the parsed values are used by the decoded value, so only the arrays and objects are freed
+    root.free();
+    return err;
+}
+
+// A copy of the value with its own arrays and objects
+clone :: method (v: Value) -> Value {
+    noItems:  [..]Value;
+    noFields: Map<string, Value>;
+    copy := v;
+    copy.items  = noItems;
+    copy.fields = noFields;
+    for item in v.items {
+        copy.items.add(item.clone());
+    }
+    for entry in v.fields {
+        copy.fields.set(entry.key, entry.value.clone());
+    }
+    return copy;
+}
+
+@private
+kindName :: (kind: Kind) -> string {
+    if kind == .null   { return "null"; }
+    if kind == .bool   { return "a bool"; }
+    if kind == .number { return "a number"; }
+    if kind == .string { return "a string"; }
+    if kind == .array  { return "an array"; }
+    return "an object";
+}
+
+@private
+mismatch :: (path: string, wanted: string, v: Value) -> string {
+    if path.len == 0 {
+        return fmt.sprint("Expected %, but got %", wanted, kindName(v.kind));
+    }
+    return fmt.sprint("%: Expected %, but got %", path, wanted, kindName(v.kind));
+}
+
+@private
+failAt :: (path: string, message: string) -> string {
+    if path.len == 0 {
+        return message;
+    }
+    return fmt.sprint("%: %", path, message);
+}
+
+@private
+memberPath :: (path: string, name: string) -> string {
+    if path.len == 0 {
+        return name;
+    }
+    return fmt.sprint("%.%", path, name);
+}
+
+@private
+indexPath :: (path: string, index: i64) -> string {
+    return fmt.sprint("%[%]", path, index);
+}
+
+// Reads the value v into the memory at data, which holds a value of the type
+@private
+assign :: (v: Value, data: *void, type: *Type, path: string) -> string {
+    kind := type.kind;
+
+    // null leaves the value as it is, but a pointer becomes null
+    if v.kind == .null {
+        if kind == .pointer {
+            *(data as **void) = null;
+        }
+        return "";
+    }
+
+    if kind == .bool {
+        if v.kind != .bool { return mismatch(path, "a bool", v); }
+        *(data as *bool) = v.boolean;
+        return "";
+    }
+    if kind == .int {
+        if v.kind != .number { return mismatch(path, "a number", v); }
+        return assignInteger(v, data, type as *TypePrimitive, path);
+    }
+    if kind == .float {
+        if v.kind != .number { return mismatch(path, "a number", v); }
+        if type.size == 4 { *(data as *f32) = v.number as f32; }
+        else              { *(data as *f64) = v.number; }
+        return "";
+    }
+    if kind == .string {
+        if v.kind != .string { return mismatch(path, "a string", v); }
+        *(data as *string) = v.text;
+        return "";
+    }
+    if kind == .enum {
+        return assignEnum(v, data, type as *TypeEnum, path);
+    }
+    if kind == .pointer {
+        pointee := (type as *TypePointer).pointerTo;
+        if pointee.kind == .void {
+            return failAt(path, "Can't read JSON into a *void");
+        }
+        memory := calloc(1, pointee.size as int);
+        *(data as **void) = memory;
+        return assign(v, memory, pointee, path);
+    }
+    if kind == .array {
+        return assignArray(v, data, type as *TypeArray, path);
+    }
+    if kind == .struct {
+        return assignStruct(v, data, type as *TypeStruct, path);
+    }
+    return failAt(path, fmt.sprint("Can't read JSON into a value of type %", type.name));
+}
+
+@private
+assignArray :: (v: Value, data: *void, type: *TypeArray, path: string) -> string {
+    if v.kind != .array { return mismatch(path, "an array", v); }
+
+    count    := v.items.count;
+    elemSize := type.elemType.size;
+    elements: *u8 = null;
+
+    if type.kind == .fixed {
+        if count > type.count {
+            return failAt(path, fmt.sprint("The array has % elements, but there is room for %", count, type.count));
+        }
+        elements = data as *u8;
+    } else {
+        elements = calloc(count as int + 1, elemSize) as *u8;
+        slice := data as *[]u8;
+        slice.data  = elements;
+        slice.count = count;
+    }
+
+    for item, i in v.items {
+        err := assign(item, &elements[i * elemSize], type.elemType, indexPath(path, i));
+        if err != "" { return err; }
+    }
+    return "";
+}
+
+@private
+assignStruct :: (v: Value, data: *void, type: *TypeStruct, path: string) -> string {
+    name := type.head.name;
+
+    if name == typeof(Value) {
+        *(data as *Value) = v.clone();
+        return "";
+    }
+    if name.startsWith("List<") {
+        return assignList(v, data, type, path);
+    }
+    if name.startsWith("Map<") {
+        return assignMap(v, data, type, path);
+    }
+
+    if v.kind != .object { return mismatch(path, "an object", v); }
+
+    for i in 0..type.members.count {
+        member := &type.members[i];
+        field := fieldOf(member);
+        if field.skip || !v.has(field.name) { continue; }
+
+        err := assign(v.get(field.name), member.valueIn(data), member.type, memberPath(path, field.name));
+        if err != "" { return err; }
+    }
+    return "";
+}
+
+// Sets the data, count and capacity of a List<T>
+@private
+setList :: (data: *void, type: *TypeStruct, elements: *u8, count: i64) {
+    *(findMember(type, "data").valueIn(data) as **u8)    = elements;
+    *(findMember(type, "count").valueIn(data) as *i64)    = count;
+    *(findMember(type, "capacity").valueIn(data) as *i64) = count;
+}
+
+@private
+assignList :: (v: Value, data: *void, type: *TypeStruct, path: string) -> string {
+    if v.kind != .array { return mismatch(path, "an array", v); }
+
+    elemType := (findMember(type, "data").type as *TypePointer).pointerTo;
+    count    := v.items.count;
+    elements := calloc(count as int + 1, elemType.size) as *u8;
+    for item, i in v.items {
+        err := assign(item, &elements[i * elemType.size], elemType, indexPath(path, i));
+        if err != "" { return err; }
+    }
+
+    setList(data, type, elements, count);
+    return "";
+}
+
+// A Map<string, V> from an object. The entries and the table of slots are made like Map.set would make them
+@private
+assignMap :: (v: Value, data: *void, type: *TypeStruct, path: string) -> string {
+    if v.kind != .object { return mismatch(path, "an object", v); }
+
+    entriesMember := findMember(type, "entries");
+    slotsMember   := findMember(type, "slots");
+    entriesType   := entriesMember.type as *TypeStruct;
+    entryType     := (findMember(entriesType, "data").type as *TypePointer).pointerTo as *TypeStruct;
+    keyMember     := findMember(entryType, "key");
+    valueMember   := findMember(entryType, "value");
+    hashMember    := findMember(entryType, "hash");
+
+    if keyMember.type.kind != .string {
+        return failAt(path, fmt.sprint("Can't read an object into a % as its keys are not strings", type.head.name));
+    }
+
+    count   := v.fields.count;
+    entries := calloc(count as int + 1, entryType.head.size) as *u8;
+    i: i64 = 0;
+    for field in v.fields {
+        entry := (&entries[i * entryType.head.size]) as *void;
+        *(keyMember.valueIn(entry) as *string) = field.key;
+        *(hashMember.valueIn(entry) as *u64)   = field.key.hash();
+
+        err := assign(field.value, valueMember.valueIn(entry), valueMember.type, memberPath(path, field.key));
+        if err != "" { return err; }
+        i += 1;
+    }
+
+    // A power of two number of slots, at most 70% full
+    capacity: i64 = 8;
+    while count * 10 > capacity * 7 {
+        capacity *= 2;
+    }
+    slots := calloc(capacity as int, 8) as *i64;
+    mask  := (capacity - 1) as u64;
+    for index in 0..count {
+        entry := (&entries[index * entryType.head.size]) as *void;
+        slot := (*(hashMember.valueIn(entry) as *u64) & mask) as i64;
+        while slots[slot] != 0 {
+            slot = ((slot as u64 + 1) & mask) as i64;
+        }
+        slots[slot] = index + 1;
+    }
+
+    setList(entriesMember.valueIn(data), entriesType, entries, count);
+    setList(slotsMember.valueIn(data), slotsMember.type as *TypeStruct, slots as *u8, capacity);
+    *(findMember(type, "count").valueIn(data) as *i64) = count;
+    return "";
+}
+
+@private
+assignEnum :: (v: Value, data: *void, type: *TypeEnum, path: string) -> string {
+    value: i64 = 0;
+    if v.kind == .string {
+        found := false;
+        for option in type.values {
+            if option.name == v.text {
+                value = option.value;
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return failAt(path, fmt.sprint("'%' is not a value of %", v.text, type.head.name));
+        }
+    } else if v.kind == .number {
+        value = v.number as i64;
+        _, ok := type.nameOf(value);
+        if !ok || value as f64 != v.number {
+            return failAt(path, fmt.sprint("% is not a value of %", v.text, type.head.name));
+        }
+    } else {
+        return mismatch(path, "the name of a value of the enum", v);
+    }
+
+    writeBits(data, type.backingType.size, value as u64);
+    return "";
+}
+
+// Writes the lowest bytes of the bits
+@private
+writeBits :: (data: *void, size: int, bits: u64) {
+    if size == 1      { *(data as *u8)  = bits as u8; }
+    else if size == 2 { *(data as *u16) = bits as u16; }
+    else if size == 4 { *(data as *u32) = bits as u32; }
+    else              { *(data as *u64) = bits; }
+}
+
+// An integer is read from how the number is written, so that big numbers don't lose digits on the way through an f64
+@private
+assignInteger :: (v: Value, data: *void, type: *TypePrimitive, path: string) -> string {
+    text := v.text;
+    negative := text.len > 0 && text[0] == Minus;
+
+    magnitude: u64 = 0;
+    exact := true;
+    for i in 0..text.len {
+        ch := text[i];
+        if ch == Minus { continue; }
+        if ch < Zero || ch > Nine {
+            exact = false;
+            break;
+        }
+        digit := (ch - Zero) as u64;
+        if magnitude > (18446744073709551615 - digit) / 10 {
+            return failAt(path, fmt.sprint("% is too big for a %", text, type.head.name));
+        }
+        magnitude = magnitude * 10 + digit;
+    }
+
+    // e.g 1.0 or 2e3, which are whole numbers
+    if !exact {
+        n := v.number;
+        if n != (n as i64) as f64 {
+            return failAt(path, fmt.sprint("% is not a whole number, as a % must be", text, type.head.name));
+        }
+        negative = n < 0.0;
+        if negative { magnitude = (-n) as u64; }
+        else        { magnitude = n as u64; }
+    }
+
+    kind := type.kind;
+    unsigned := kind == .u8 || kind == .u16 || kind == .u32 || kind == .u64 || kind == .uint || kind == .char;
+    bits := (type.head.size * 8) as u64;
+
+    if unsigned {
+        biggest: u64 = 18446744073709551615;
+        if bits < 64 { biggest = ((1 as u64) << bits) - 1; }
+        if (negative && magnitude != 0) || magnitude > biggest {
+            return failAt(path, fmt.sprint("% doesn't fit in a %", text, type.head.name));
+        }
+    } else {
+        limit := (1 as u64) << (bits - 1); // The biggest negative magnitude. The biggest positive is one less
+        if (negative && magnitude > limit) || (!negative && magnitude >= limit) {
+            return failAt(path, fmt.sprint("% doesn't fit in a %", text, type.head.name));
+        }
+    }
+
+    value := magnitude;
+    if negative { value = 0 - magnitude; }
+    writeBits(data, type.head.size, value);
+    return "";
+}

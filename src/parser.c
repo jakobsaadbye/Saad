@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include "scope.h"
 
 #include <stdarg.h>
@@ -40,6 +41,7 @@ AstIdentifier  *generate_identifier(Parser *parser, char *ident_name, Type *type
 TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_data, char *struct_name);
 bool            generate_and_add_import(Parser *parser, char *name, char *resolved_path);
+AstStructLiteral *parse_struct_literal_body(Parser *parser, Type *explicit_type, Token start_token, TokenType open, TokenType close);
 
 bool starts_array_literal(Parser *parser);
 char *parse_dotted_name(Parser *parser);
@@ -163,6 +165,7 @@ void dump_file_declarations(AstFile *file) {
 // import it, so that there are no circular imports
 bool is_file_below_collections(Parser *parser, char *file_path) {
     if (parser->runtime_file_path && strcmp(file_path, parser->runtime_file_path) == 0) return true;
+    if (parser->slices_file_path && strcmp(file_path, parser->slices_file_path) == 0) return true;
     if (parser->c_bindings_path == NULL) return false;
 
     char *absolute = get_absolute_path(file_path);
@@ -228,6 +231,11 @@ AstFile *parse_file(Parser *parser, char *file_path) {
         if (!ok) return NULL;
 
         AstImport *prelude = ((AstImport **)file->imports.items)[file->imports.count - 1];
+        prelude->is_prelude = true;
+
+        ok = generate_and_add_import(parser, "slices", parser->slices_file_path);
+        if (!ok) return NULL;
+        prelude = ((AstImport **)file->imports.items)[file->imports.count - 1];
         prelude->is_prelude = true;
     }
 
@@ -561,8 +569,9 @@ bool starts_function_defn_at(Parser *parser, int cursor) {
     return false;
 }
 
-// The attributes that exist e.g @private and @deprecated("use add instead")
-static const char *known_attributes[] = { "private", "deprecated" };
+// The attributes of the language e.g @private and @deprecated("use add instead"). Any other attribute is the value of a struct
+// marked with @attribute e.g @json.Field(name: "id")
+static const char *known_attributes[] = { "private", "deprecated", "attribute" };
 
 // Parses the attributes in front of a declaration and the declaration, and gives the attributes to the declared identifier
 Ast *parse_attributed_declaration(Parser *parser) {
@@ -570,7 +579,10 @@ Ast *parse_attributed_declaration(Parser *parser) {
 
     bool  is_private = false;
     bool  is_deprecated = false;
+    bool  is_attribute = false;
     char *deprecated_message = NULL;
+    Token first_builtin = {0};
+    DynamicArray custom = da_init(1, sizeof(AstStructLiteral *));
 
     while (peek_next_token(parser).type == '@') {
         Token at = peek_next_token(parser);
@@ -581,24 +593,46 @@ Ast *parse_attributed_declaration(Parser *parser) {
             report_error_token(parser, LABEL_ERROR, name_token, "Expected the name of an attribute after '@'");
             return NULL;
         }
-        eat_token(parser);
         char *name = name_token.as_value.value.identifier.name;
 
         bool known = false;
         for (int i = 0; i < (int)(sizeof(known_attributes) / sizeof(known_attributes[0])); i++) {
             if (strcmp(name, known_attributes[i]) == 0) known = true;
         }
-        if (!known) {
-            report_error_range(parser, at.start, name_token.end, "Unknown attribute '@%s'", name);
-            report_error_ast(parser, LABEL_HINT, NULL, "The attributes are @private and @deprecated(\"message\")");
-            return NULL;
-        }
+        if (peek_token(parser, 1).type == '.') known = false;
 
-        if ((strcmp(name, "private") == 0 && is_private) || (strcmp(name, "deprecated") == 0 && is_deprecated)) {
+        if (!known) {
+            // The value of an attribute struct e.g @json.Field(name: "id") or @Skip. The arguments are like a struct literal
+            Type *type = parse_type(parser);
+            if (!type) return NULL;
+
+            AstStructLiteral *value = NULL;
+            if (peek_next_token(parser).type == '(') {
+                value = parse_struct_literal_body(parser, type, at, '(', ')');
+                if (!value) return NULL;
+            } else {
+                value = ast_allocate(parser, sizeof(AstStructLiteral));
+                value->initializers    = da_init(1, sizeof(AstStructInitializer *));
+                value->head.head.kind  = AST_STRUCT_LITERAL;
+                value->head.head.file  = parser->current_file;
+                value->head.head.start = at.start;
+                value->head.head.end   = type->head.end;
+                value->explicit_type   = type;
+            }
+            da_append(&custom, value);
+            continue;
+        }
+        eat_token(parser);
+        if (first_builtin.type == 0) first_builtin = at;
+
+        if ((strcmp(name, "private") == 0 && is_private) || (strcmp(name, "deprecated") == 0 && is_deprecated) || (strcmp(name, "attribute") == 0 && is_attribute)) {
             report_error_range(parser, at.start, name_token.end, "The attribute '@%s' is given more than once", name);
             return NULL;
         }
 
+        if (strcmp(name, "attribute") == 0) {
+            is_attribute = true;
+        }
         if (strcmp(name, "private") == 0) {
             is_private = true;
         }
@@ -650,12 +684,37 @@ Ast *parse_attributed_declaration(Parser *parser) {
         for (int i = 0; i < decl->idents.count && count < 16; i++) idents[count++] = ((AstIdentifier **)decl->idents.items)[i];
     }
     else if (stmt->kind == AST_DECLARATION && (((AstDeclaration *)stmt)->flags & DECLARATION_IS_STRUCT_MEMBER)) {
-        report_error_token(parser, LABEL_ERROR, first, "Attributes on struct members are not supported yet");
-        return NULL;
+        // A struct member only takes the values of attribute structs
+        if (first_builtin.type != 0) {
+            report_error_token(parser, LABEL_ERROR, first_builtin, "The attributes of the language can't be given to struct members yet");
+            report_error_ast(parser, LABEL_HINT, NULL, "A struct member takes the values of structs marked with @attribute e.g @json.Field(name: \"id\")");
+            return NULL;
+        }
+        AstDeclaration *decl = (AstDeclaration *)stmt;
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *member = ((AstIdentifier **)decl->idents.items)[i];
+            member->attributes = custom;
+        }
+        return stmt;
     }
     else {
         report_error_token(parser, LABEL_ERROR, first, "An attribute must be followed by the declaration of a function, method, struct, enum, constant or type alias");
         return NULL;
+    }
+
+    if (custom.count > 0) {
+        AstStructLiteral *value = ((AstStructLiteral **)custom.items)[0];
+        report_error_ast(parser, LABEL_ERROR, (Ast *)value, "Unknown attribute '@%s'", type_to_str(value->explicit_type));
+        report_error_ast(parser, LABEL_HINT, NULL, "The attributes of the language are @private, @deprecated(\"message\") and @attribute");
+        report_error_ast(parser, LABEL_NOTE, NULL, "The values of structs marked with @attribute can only be given to struct members");
+        return NULL;
+    }
+    if (is_attribute) {
+        if (stmt->kind != AST_STRUCT) {
+            report_error_token(parser, LABEL_ERROR, first, "@attribute can only be given to a struct");
+            return NULL;
+        }
+        ((AstStruct *)stmt)->is_attribute = true;
     }
 
     for (int i = 0; i < count; i++) {
@@ -1600,6 +1659,24 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     return struct_defn;
 }
 
+// The word of a keyword token e.g "int" for TOKEN_TYPE_INT, or NULL if the token is not a keyword
+char *keyword_as_name(Parser *parser, Token token) {
+    if (token.type == TOKEN_LITERAL_IDENTIFIER || parser->current_file == NULL || parser->current_file->text == NULL) return NULL;
+
+    char *text = parser->current_file->text;
+    int start  = token.start.input_idx;
+    int end    = token.end.input_idx;
+    if (end <= start || !(isalpha((unsigned char) text[start]) || text[start] == '_')) return NULL;
+    for (int i = start; i < end; i++) {
+        if (!(isalnum((unsigned char) text[i]) || text[i] == '_')) return NULL;
+    }
+
+    char *name = malloc(end - start + 1);
+    memcpy(name, &text[start], end - start);
+    name[end - start] = '\0';
+    return name;
+}
+
 // Parses the enumerators of an enum, from the '{' to the '}' e.g { open, closed = 5 }
 bool parse_enumerators(Parser *parser, AstEnum *ast_enum) {
     Token next = peek_next_token(parser);
@@ -1611,6 +1688,14 @@ bool parse_enumerators(Parser *parser, AstEnum *ast_enum) {
     next = peek_next_token(parser);
     int enum_index = 0;
     while (next.type != '}' && next.type != TOKEN_END) {
+        // A keyword can be the name of an enumerator e.g TypeKind :: enum { int, float, struct }
+        char *keyword = keyword_as_name(parser, next);
+        if (keyword) {
+            next.type = TOKEN_LITERAL_IDENTIFIER;
+            next.as_value.value.identifier.name   = keyword;
+            next.as_value.value.identifier.length = (int) strlen(keyword);
+        }
+
         if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '=') {
             // Explicit value
             eat_token(parser);
@@ -2200,9 +2285,13 @@ AstStructLiteral *parse_struct_literal(Parser *parser) {
         explicit_type = parse_type(parser);
         if (!explicit_type) return NULL;
     }
+    return parse_struct_literal_body(parser, explicit_type, start_token, '{', '}');
+}
 
+// The initializers of a struct literal between the brackets e.g {age: 18} or (name: "id") for the value of an attribute
+AstStructLiteral *parse_struct_literal_body(Parser *parser, Type *explicit_type, Token start_token, TokenType open, TokenType close) {
     Token next = peek_next_token(parser);
-    expect(parser, next, '{');
+    expect(parser, next, open);
     eat_token(parser);
 
     AstStructLiteral *struct_literal = ast_allocate(parser, sizeof(AstStructLiteral));
@@ -2212,7 +2301,7 @@ AstStructLiteral *parse_struct_literal(Parser *parser) {
     next = peek_next_token(parser);
     AstIdentifier *designator = NULL;
     AstExpr *value            = NULL;
-    while (next.type != '}' && next.type != TOKEN_END) {
+    while (next.type != close && next.type != TOKEN_END) {
         if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '=') {
             report_error_token(parser, LABEL_ERROR, peek_token(parser, 1), "Use ':' instead of '=' to give a member its value in a struct literal");
             report_error_ast(parser, LABEL_HINT, NULL, "e.g Person{age: 18}");
@@ -2244,10 +2333,10 @@ AstStructLiteral *parse_struct_literal(Parser *parser) {
 
 
         next = peek_next_token(parser);
-        if (next.type == ',' && peek_token(parser, 1).type == '}') {
+        if (next.type == ',' && peek_token(parser, 1).type == close) {
             // Allow trailing comma
             eat_token(parser);
-        } else if (next.type == '}') {
+        } else if (next.type == close) {
             // Reached end
             break;
         } else {
@@ -2256,7 +2345,7 @@ AstStructLiteral *parse_struct_literal(Parser *parser) {
         }
         next = peek_next_token(parser);
     }
-    expect(parser, next, '}');
+    expect(parser, next, close);
     eat_token(parser);
 
     struct_literal->head.head.kind  = AST_STRUCT_LITERAL;

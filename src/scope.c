@@ -1,3 +1,4 @@
+#include <string.h>
 #include "scope.h"
 
 int global_scope_counter = 0; // Only for debug purposes
@@ -97,6 +98,9 @@ AstIdentifier *add_declaration_to_scope(Parser *parser, AstBlock *scope, AstDecl
             // Skip, as the identifier will be added to the receiving struct scope in typechecking
             continue;
         }
+
+        // '_' discards a value, so it can be declared any number of times e.g _, count, _ := f();
+        if (strcmp(ident->name, "_") == 0 && find_identifier_in_scope(scope, "_")) continue;
 
         AstIdentifier *existing = add_identifier_to_scope(parser, scope, ident);
         if (existing) {

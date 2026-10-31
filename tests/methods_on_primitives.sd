@@ -1,6 +1,6 @@
 // Methods can be declared on primitive types and enums, not only on structs
 
-Color :: enum { Red, Green, Blue }
+Color :: enum { red, green, blue }
 
 main :: () {
     x := 21;
@@ -9,8 +9,8 @@ main :: () {
     assert(b.isOdd());
     x.increment();
     assert(x == 22);
-    c := Color.Green;
-    assert(c.next() == .Blue);
+    c := Color.green;
+    assert(c.next() == .blue);
     f := 1.5;
     assert(f.half() == 0.75);
     flag := true;
@@ -30,7 +30,7 @@ half      :: method (f: float) -> float { return f / 2; }
 flipped   :: method (b: bool) -> bool { return !b; }
 
 next :: method (c: Color) -> Color {
-    if c == .Red { return .Green; }
-    if c == .Green { return .Blue; }
-    return .Red;
+    if c == .red { return .green; }
+    if c == .green { return .blue; }
+    return .red;
 }

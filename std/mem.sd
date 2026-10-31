@@ -21,9 +21,9 @@ Chunk :: struct {
 // Arena
 /////////////////////////////////////////////////
 
-NewArena :: (capacity: int) -> Arena {
+newArena :: (capacity: int) -> Arena {
     arena := Arena{};
-    arena.currentChunk = NewChunk(null, capacity);
+    arena.currentChunk = newChunk(null, capacity);
     return arena;
 }
 
@@ -42,7 +42,7 @@ allocate :: method (arena: *Arena, size: int) -> *void {
         newCap *= 2;
     }
 
-    newChunk := NewChunk(chunk, newCap);
+    newChunk := newChunk(chunk, newCap);
     arena.currentChunk = newChunk;
 
     return arena.allocate(size);
@@ -66,7 +66,7 @@ clear :: method (arena: *Arena) {
     }
 }
 
-NewChunk :: (oldChunk: *Chunk, capacity: int) -> *Chunk {
+newChunk :: (oldChunk: *Chunk, capacity: int) -> *Chunk {
     newChunk: *Chunk = malloc(sizeof(Chunk));
     if (newChunk == null) {
         fmt.print("Failed to allocate a new chunk of memory for the arena");

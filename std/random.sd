@@ -3,14 +3,14 @@ namespace random;
 // Pseudo random numbers (xorshift64*). Fast and good enough for games and simulations, but not for
 // anything to do with security. The same seed always gives the same numbers, e.g
 //
-//     rng := random.NewRandom(time.unix() as u64);  // different numbers every run
+//     rng := random.newRandom(time.unix() as u64);  // different numbers every run
 //     dice := rng.nextInt(1, 7);
 
 Random :: struct {
     state: u64;
 }
 
-NewRandom :: (seed: u64) -> Random {
+newRandom :: (seed: u64) -> Random {
     r := Random{state: seed ^ 88172645463325252};
     if r.state == 0 {
         r.state = 88172645463325252;

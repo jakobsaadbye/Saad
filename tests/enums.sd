@@ -12,12 +12,12 @@ Status :: enum {
     ok = 1,
     created,
 
-    bad_request = 400,
-    permission_denied,
-    payment_required,
+    badRequest = 400,
+    permissionDenied,
+    paymentRequired,
     forbidden,
-    not_found,
-    method_not_allowed = xx (xx Status.bad_request + 5),
+    notFound,
+    methodNotAllowed = xx (xx Status.badRequest + 5),
 }
 
 main :: () {
@@ -28,8 +28,8 @@ main :: () {
     // Checking Auto-increment and const-expr inside enum
     assert(Status.ok == 1);
     assert(Status.created == 2);
-    assert(Status.bad_request == 400);
-    assert(Status.permission_denied == 401);
-    assert(Status.permission_denied == 401);
-    assert(Status.method_not_allowed == 405);
+    assert(Status.badRequest == 400);
+    assert(Status.permissionDenied == 401);
+    assert(Status.permissionDenied == 401);
+    assert(Status.methodNotAllowed == 405);
 }

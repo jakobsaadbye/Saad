@@ -19,8 +19,8 @@ Vector4 :: struct {
 }
 
 EntityKind :: enum {
-	Monster,
-	Human,
+	monster,
+	human,
 }
 
 Entity :: struct {

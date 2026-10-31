@@ -4,6 +4,49 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.6.0 - 31. Oct 2026
+
+* Custom attributes and a JSON library
+
+A struct marked with `@attribute` is an attribute. Its values go on struct members and are read through
+reflection. `std/json` uses one to name and skip members. See `docs/reflection.md` and `docs/standard_library.md`.
+
+```odin
+import json;
+
+Person :: struct {
+    @json.Field(name: "first_name")
+    firstName: string;
+    age:       int = 18;
+
+    @json.Field(skip: true)
+    cache: *void;
+}
+
+main :: () {
+    text := json.encode(Person{firstName: "Ada", age: 36});   // {"first_name":"Ada","age":36}
+
+    p: Person;
+    err := json.decode(text, &p);       // "" when it worked
+
+    value, parseErr := json.parse("{\"langs\": [\"en\", \"da\"]}");
+    first := value.get("langs").at(0).asString();
+}
+```
+
+* Reflection descriptors are constants made by the compiler, one per type. Enums have all their values,
+  struct members have their offset and attributes, and types that refer to themselves work.
+* `sort`, `isSorted`, `reverse`, `indexOf`, `contains` and `swap` are methods on every slice, array and list,
+  from the prelude: `xs.sort()`. Any generic method on `[]T` is one, e.g `sum :: method <T>(xs: []T) -> T`.
+* `fmt.sprint` returns the formatted text, and `string.free()` frees it.
+* Style: functions are camelCase (`newRandom`), enum values start lowercase (`Status.open`, `TypeKind.int`)
+  and constants are PascalCase (`MaxIntValue`). Keywords can be enum values. See `docs/style.md`.
+* Strings can have escaped quotes: `"say \"hi\""`. `_` can be used more than once in a declaration.
+* BREAKING: The `slices` namespace is gone, its functions are methods now. `random.NewRandom` is
+  `random.newRandom`, `fmt.NewStringBuilder` is `fmt.newStringBuilder` and `mem.NewArena` is `mem.newArena`.
+  The enum values of `runtime.sd` start lowercase, e.g `TypeKind.struct`. `StructMember.value` and
+  `TypeEnum.valueName` are replaced by `member.valueIn(data)` and `type.nameOf(value)`.
+
 ## Update v0.5.2 - 31. Oct 2026
 
 * BREAKING: The builtin `print` is removed. Use `fmt.print`, which was called `fmt.Print`. It adds a newline,

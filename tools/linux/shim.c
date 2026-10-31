@@ -67,6 +67,7 @@ MS int32_t ms_ftell(FILE *f) { return (int32_t) ftell(f); }
 MS int     ms_remove(const char *p) { return remove(p); }
 MS int     ms_rename(const char *a, const char *b) { return rename(a, b); }
 MS char   *ms_getenv(const char *n) { return getenv(n); }
+MS double  ms_strtod(const char *s, char **e) { return strtod(s, e); }
 MS int     ms_system(const char *c) { fflush(stdout); return system(c); }
 MS int     ms_memcmp(const void *a, const void *b, int64_t n) { return memcmp(a, b, n); }
 
@@ -88,17 +89,6 @@ MS long long ms_llround(double x) { return llround(x); }
 // ---- runtime_support.c ----
 MS void ms_runtime_builtin_assert(bool c, RawString f, uint64_t l) { fflush(stdout); runtime_builtin_assert(c, f, l); }
 MS int  ms_runtime_compare_strings(RawString *a, RawString *b) { return runtime_compare_strings(a, b); }
-MS TypePointer *ms_runtime_get_type_pointer(RawString n, Type *p) { return runtime_get_type_pointer(n, p); }
-MS TypeArray *ms_runtime_get_type_array(RawString n, int k, Type *e, int64_t c) { return runtime_get_type_array(n, k, e, c); }
-MS TypeEnum *ms_runtime_get_type_enum(RawString n, RawString *v, Type *b, int lo, int hi) { return runtime_get_type_enum(n, v, b, lo, hi); }
-MS TypeStruct *ms_runtime_get_type_struct(RawString n, StructMember *m, int c, int s, int a) { return runtime_get_type_struct(n, m, c, s, a); }
-MS TypeAny *ms_runtime_get_type_any(void) { return runtime_get_type_any(); }
-
-// ---- data symbols: plain aliases ----
-#define ALIAS(sym) __asm__(".globl ms_" #sym "\n.set ms_" #sym ", " #sym);
-ALIAS(Type_uint) ALIAS(Type_u8) ALIAS(Type_u16) ALIAS(Type_u32) ALIAS(Type_u64) ALIAS(Type_int) ALIAS(Type_i8)
-ALIAS(Type_i16) ALIAS(Type_i32) ALIAS(Type_i64) ALIAS(Type_float) ALIAS(Type_f32) ALIAS(Type_f64) ALIAS(Type_char)
-ALIAS(Type_bool) ALIAS(Type_void) ALIAS(Type_untyped_int) ALIAS(Type_untyped_float) ALIAS(Type_string)
 
 // ---- entry ----
 MS int ms_main(void);

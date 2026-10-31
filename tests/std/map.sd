@@ -10,7 +10,7 @@ Point :: struct {
     }
 }
 
-Suit :: enum { Hearts, Spades }
+Suit :: enum { hearts, spades }
 
 hash :: method (s: Suit) -> u64 {
     return (s as i64).hash();
@@ -112,8 +112,8 @@ main :: () {
         assert(grid[Point{1, 2}] == "tree");
         assert(!grid.has(Point{2, 1}));
 
-        cards := [Suit.Hearts: 13, Suit.Spades: 12];
-        assert(cards[.Spades] == 12);
+        cards := [Suit.hearts: 13, Suit.spades: 12];
+        assert(cards[.spades] == 12);
 
         weights := [0.5: "half", 0.25: "quarter"];
         assert(weights[0.25] == "quarter");

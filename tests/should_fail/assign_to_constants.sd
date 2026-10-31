@@ -1,5 +1,5 @@
-MY_STRING :: "Hello Sad Buyers!";
+MyString :: "Hello Sad Buyers!";
 
 main :: () {
-    MY_STRING = "123"; // not allowed
+    MyString = "123"; // not allowed
 }

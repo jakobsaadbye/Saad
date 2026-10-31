@@ -3,22 +3,21 @@
 use fmt;
 
 import random;
-import slices;
 
 main :: () {
     {
         // The same seed gives the same numbers
-        a := random.NewRandom(42);
-        b := random.NewRandom(42);
+        a := random.newRandom(42);
+        b := random.newRandom(42);
         for 0..100 {
             assert(a.next() == b.next());
         }
 
-        c := random.NewRandom(43);
+        c := random.newRandom(43);
         assert(a.next() != c.next());
     }
     {
-        rng := random.NewRandom(1);
+        rng := random.newRandom(1);
         seen: [6]bool;
         for 0..1000 {
             dice := rng.nextInt(1, 7);
@@ -34,7 +33,7 @@ main :: () {
         assert(rng.nextInt(3, 3) == 3);
     }
     {
-        rng := random.NewRandom(7);
+        rng := random.newRandom(7);
         sum: f64 = 0.0;
         trues := 0;
         for 0..1000 {
@@ -49,14 +48,14 @@ main :: () {
         assert(trues > 150 && trues < 350);
     }
     {
-        rng := random.NewRandom(3);
+        rng := random.newRandom(3);
         xs: [..]int;
         for i in 0..50 {
             xs.add(i);
         }
         random.shuffle(&rng, xs);
-        assert(!slices.isSorted(xs));
-        slices.sort(xs);
+        assert(!xs.isSorted());
+        xs.sort();
         for x, i in xs {
             assert(x == i);
         }

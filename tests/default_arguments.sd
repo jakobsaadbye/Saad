@@ -12,7 +12,7 @@ baz :: (a: bool, b: int, c := 8, d := "Hellope") {
     print("% % % %", a, b, c, d);
 }
 
-Myprint2 :: (format: string, args: ...any) {
+myPrint2 :: (format: string, args: ...any) {
     print(format, ...args);
 }
 
@@ -62,13 +62,13 @@ positionalArgumentsWithDefaults :: () {
 normalVariadics :: () {
     print("\n------------ Normal variadics --------------");
 
-    Myprint2("Hello % % %\n", "my", "old", "friends");
+    myPrint2("Hello % % %\n", "my", "old", "friends");
     
     myStrings: []any = ["A big house", "a dog", "a tesla"];
-    Myprint2("Three most important things in life is: % % %\n", ...myStrings);
+    myPrint2("Three most important things in life is: % % %\n", ...myStrings);
 }
 
-Myprint :: (format: string, args: ...any, newline := true, sayHello := false) {
+myPrint :: (format: string, args: ...any, newline := true, sayHello := false) {
     print(format, ...args);
 
     if sayHello {
@@ -83,10 +83,10 @@ variadicsWithDefaultArguments :: () {
     print("\n------------ Variadics with default arguments --------------");
 
     // Legal
-    Myprint("%, %, %", "A big house", "a dog", "a tesla", newline: true, sayHello: true);
+    myPrint("%, %, %", "A big house", "a dog", "a tesla", newline: true, sayHello: true);
 
     myStrings: []any = ["penge", "cigaretter"];
-    Myprint("Franke, du skylder mig % og %", ...myStrings);
+    myPrint("Franke, du skylder mig % og %", ...myStrings);
     
 }
 

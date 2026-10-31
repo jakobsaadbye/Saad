@@ -1,12 +1,12 @@
 use fmt;
 
 Fruit :: enum {
-    Mango,
-    Kiwi,
-    Watermelon,
-    Dragonfruit,
-    Pear,
-    Apple
+    mango,
+    kiwi,
+    watermelon,
+    dragonfruit,
+    pear,
+    apple
 }
 
 Vector3 :: struct {
@@ -14,9 +14,9 @@ Vector3 :: struct {
 }
 
 EntityKind :: enum {
-    Wall,
-    Monster,
-    Human,
+    wall,
+    monster,
+    human,
 }
 
 Entity :: struct {
@@ -30,7 +30,7 @@ main :: () {
     print("-------------------- Primitive types ----------------");
     if true {
         x: any = 5 as u8;
-        assert(x.type.kind == .Int);
+        assert(x.type.kind == .int);
         
         type := x.type as *TypePrimitive;
         print("TypePrimitive = %", *type);
@@ -39,7 +39,7 @@ main :: () {
     if true {
         x: any = [1, 2, 3];
 
-        assert(x.type.kind == .Array);
+        assert(x.type.kind == .array);
 
         type := x.type as *TypeArray;
         print("TypeArray = %", *type);
@@ -47,9 +47,9 @@ main :: () {
     }
     print("\n-------------------- Enum type ----------------");
     if true {
-        x: any = Fruit.Watermelon;
+        x: any = Fruit.watermelon;
 
-        assert(x.type.kind == .Enum);
+        assert(x.type.kind == .enum);
 
         type := x.type as *TypeEnum;
         print("TypeEnum = %", *type);
@@ -58,32 +58,32 @@ main :: () {
     print("\n-------------------- Struct type ----------------");
     if true {
         x: any = Entity{
-            kind: .Human,
+            kind: .human,
             position: Vector3{3, 3, 3},
             rotation: Vector3{0, 0.5, 0},
             dead: false,
         };
 
-        assert(x.type.kind == .Struct);
+        assert(x.type.kind == .struct);
         printStructType(x.type as *TypeStruct);
     }
     print("\n-------------------- Changing types at runtime ----------------");
     if true {
         x: any = 5;
         print("%", *x.type);
-        assert(x.type.kind == .Int);
+        assert(x.type.kind == .int);
 
         x = Vector3{1, 4, 9};
-        assert(x.type.kind == .Struct);
+        assert(x.type.kind == .struct);
         printStructType(x.type as *TypeStruct);
 
         x = Entity{
-            kind: .Human,
+            kind: .human,
             position: Vector3{3, 3, 3},
             rotation: Vector3{0, 0.5, 0},
             dead: false,
         };
-        assert(x.type.kind == .Struct);
+        assert(x.type.kind == .struct);
         printStructType(x.type as *TypeStruct);
     }
 }

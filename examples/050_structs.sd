@@ -3,11 +3,11 @@
 use fmt;
 
 EngineType :: enum {
-    V8,
-    V6,
+    v8,
+    v6,
 }
 
-DEFAULT_ENGINE_TYPE :: EngineType.V6;
+DefaultEngineType :: EngineType.v6;
 
 Fuel :: enum {
     electric,
@@ -33,7 +33,7 @@ main :: () {
         doors: 4,
         max_speed: 320.0,
         engine: {
-            type: DEFAULT_ENGINE_TYPE,
+            type: DefaultEngineType,
             fuel: .gasoline,
             cylinders: 8,
             capacity: 30.0

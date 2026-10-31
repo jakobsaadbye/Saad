@@ -70,6 +70,12 @@ Map :: struct <K, V> {
   Each instance of the method is added to the methods of the instance of the struct it is called on.
 * `register_methods_early()` adds the methods of a file to their structs before anything is checked, so
   methods can be called before they are declared.
+* A generic method whose receiver is `[]T` (e.g `sort :: method <T>(xs: []T)`) is a method on slices
+  (`register_slice_method()`). It goes in `Typer.slice_methods` instead of on a struct. `xs.sort()` on a slice,
+  fixed array or collection (a struct with `elements()`) is rewritten to the generic call `sort(xs)`
+  (`rewrite_slice_method_call()`), unless the type has a member or method of that name. Its instances are plain
+  functions. When a parameter `value: T` gets a fixed array, `T` is bound to the slice type, as fixed arrays are
+  passed as slices.
 * A method declared inside a struct is desugared by the parser (`add_implicit_self()`) into the outside form:
   it gets the struct's type parameters and an implicit first parameter `self: *Map<K, V>`. Its body is parsed
   in the scope around the struct, so members are only reached through `self`. The struct keeps these methods

@@ -113,7 +113,7 @@ Point :: struct {
     hash :: method () -> u64 { return hashCombine(self.x.hash(), self.y.hash()); }
 }
 
-Suit :: enum { Hearts, Spades }
+Suit :: enum { hearts, spades }
 hash :: method (s: Suit) -> u64 { return (s as i64).hash(); }
 ```
 

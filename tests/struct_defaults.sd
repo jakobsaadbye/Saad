@@ -1,8 +1,8 @@
 // Struct members can have default values. They are used when a struct is declared without a value,
 // and for the members a struct literal leaves out
 
-MAX_HP :: 250;
-Color :: enum { Red, Green }
+MaxHp :: 250;
+Color :: enum { red, green }
 
 Vec2 :: struct {
     x: f64 = 1;
@@ -19,8 +19,8 @@ Person :: struct {
 }
 
 Unit :: struct {
-    hp:    int   = MAX_HP;
-    color: Color = .Green;
+    hp:    int   = MaxHp;
+    color: Color = .green;
     pos:   Vec2  = {5, 6};
     speed: f32   = 1.5;
 }
@@ -60,7 +60,7 @@ main :: () {
     {
         // Constants, enum values and struct literals as defaults
         u: Unit;
-        assert(u.hp == 250 && u.color == .Green && u.pos.x == 5 && u.pos.y == 6 && u.speed == 1.5);
+        assert(u.hp == 250 && u.color == .green && u.pos.x == 5 && u.pos.y == 6 && u.speed == 1.5);
     }
     {
         // Arrays and lists of structs with defaults
@@ -71,7 +71,7 @@ main :: () {
 
         units: [..]Unit;
         units.add({hp: 1});
-        assert(units[0].hp == 1 && units[0].color == .Green);
+        assert(units[0].hp == 1 && units[0].color == .green);
     }
     {
         // Generic structs, where the default value takes the type of the instance

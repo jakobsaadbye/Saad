@@ -1,17 +1,17 @@
 use fmt;
 use c; // printf
 
-Myprint2 :: (format: string, args: ...any) {
+myPrint2 :: (format: string, args: ...any) {
     for arg, i in args {
         print("%", *arg.type);
     }
 }
 
-Myprint3 :: (format: string, args: ...any) {
-    Myprint3Helper(format, ...args);
+myPrint3 :: (format: string, args: ...any) {
+    myPrint3Helper(format, ...args);
 }
 
-Myprint3Helper :: (format: string, args: ...any) {
+myPrint3Helper :: (format: string, args: ...any) {
     for arg, i in args {
         print("%", *arg.type);
     }
@@ -50,11 +50,11 @@ main :: () {
     }
     print("----------- Passing arguments to an any variadic parameter -----------");
     {
-        Myprint2("Hello %s", "World", "Hellope", 3.14);
+        myPrint2("Hello %s", "World", "Hellope", 3.14);
     }
     print("----------- Passing arguments to an any variadic parameter into another variadic parameter -----------");
     {
-        Myprint3("Hello %s", "World", "Hellope", 3.14);
+        myPrint3("Hello %s", "World", "Hellope", 3.14);
     }
     print("---------------- Passing variadic arguments to C function ----------------");
     {

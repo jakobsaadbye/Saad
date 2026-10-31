@@ -1,0 +1,59 @@
+// The type descriptors are constants: one per type, also for types that refer to themselves
+
+Node :: struct {
+    value: int;
+    next:  *Node;
+    kind:  NodeKind;
+}
+
+NodeKind :: enum { leaf = 2, branch = 5 }
+
+main :: () {
+    {
+        // The same type gives the same descriptor
+        a: any = 1;
+        b: any = 2;
+        assert(a.type == b.type);
+
+        c: any = 1 as i64;
+        assert(a.type != c.type);
+    }
+    {
+        // A struct that points to itself, with a null pointer in the value
+        n: any = Node{value: 1, next: null, kind: .branch};
+        type := n.type as *TypeStruct;
+        assert(type.members.count == 3);
+
+        next := type.members[1].type as *TypePointer;
+        assert(next.head.kind == .pointer);
+        assert(next.pointerTo == n.type);
+        assert(type.members[1].offset == 8);
+    }
+    {
+        // All the values of an enum, and the name of a value
+        k: any = NodeKind.branch;
+        type := k.type as *TypeEnum;
+        assert(type.values.count == 2);
+        assert(type.values[1].name == "branch" && type.values[1].value == 5);
+
+        name, ok := type.nameOf(type.readValue(k.data));
+        assert(ok && name == "branch");
+
+        _, found := type.nameOf(3);
+        assert(!found);
+    }
+    {
+        // Reading a member of a value through its offset
+        node := Node{value: 42, kind: .leaf};
+        v: any = node;
+        type := v.type as *TypeStruct;
+        value := *(type.members[0].valueIn(v.data) as *int);
+        assert(value == 42);
+    }
+    {
+        // A fixed array is stored in the any, a slice points to its elements
+        fixed: any = [1, 2, 3];
+        assert((fixed.type as *TypeArray).count == 3);
+        assert((fixed.data as *int)[2] == 3);
+    }
+}
