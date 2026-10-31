@@ -1,0 +1,7 @@
+// expect-error: A union holds one variant, so its literal gives one variant a value
+
+Shape :: union { circle: f32; empty; }
+
+main :: () {
+    s := Shape{circle: 1.0, empty: 2};
+}

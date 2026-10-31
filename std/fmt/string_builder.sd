@@ -242,6 +242,25 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
         }
         sb.addString("]");
     }
+    else if arg.type.kind == .struct && arg.type.isUnion() {
+        // .circle(Circle{ radius = 2 }), or .empty for a variant without a value
+        unionType := arg.type as *TypeStruct;
+        variant := unionType.variantOf(arg.data);
+        sb.addString(".");
+        if variant == null {
+            sb.addString("<invalid>");
+            return;
+        }
+        sb.addString(variant.name);
+        if variant.type.kind != .void {
+            value: any;
+            value.type = variant.type;
+            value.data = variant.valueIn(arg.data);
+            sb.addString("(");
+            sb.addAnyValue(value);
+            sb.addString(")");
+        }
+    }
     else if arg.type.kind == .struct {
         structType := arg.type as *TypeStruct;
         sb.addString(structType.head.name);

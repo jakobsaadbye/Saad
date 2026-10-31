@@ -126,8 +126,9 @@ first := value.get("tags").at(0).asString("none");
 value.toJson();
 ```
 
-* `encode` and `decode` work through reflection: bool, numbers, strings, enums (by name), structs, fixed arrays,
-  slices, `List<T>`, `Map<string, V>`, pointers and `json.Value`.
+* `encode` and `decode` work through reflection: bool, numbers, strings, enums (by name), structs, unions,
+  fixed arrays, slices, `List<T>`, `Map<string, V>`, pointers and `json.Value`. A union is the name of a variant
+  without a value, e.g `"empty"`, or an object with the name and the value, e.g `{"circle": {"radius": 2}}`.
 * `json.Field` is an attribute (see `docs/reflection.md`): `name` renames a member, `skip` leaves it out, and
   `omitEmpty` leaves out 0, false, "", null and things without elements.
 * Decoding keeps members that are not in the JSON, so default values stay, and skips members it doesn't know.

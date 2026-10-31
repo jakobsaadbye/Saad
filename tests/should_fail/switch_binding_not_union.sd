@@ -1,0 +1,8 @@
+// expect-error: Only a switch on a union can give its value a name
+
+main :: () {
+    x := 1;
+    switch v in x {
+        case 1 { }
+    }
+}

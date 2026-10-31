@@ -30,6 +30,9 @@ const char *ast_to_str(Ast *ast) {
     case AST_FUNCTION_CALL:      return "AST_FUNCTION_CALL";
     case AST_ARGUMENT:           return "AST_ARGUMENT";
     case AST_IF:                 return "AST_IF";
+    case AST_SWITCH:             return "AST_SWITCH";
+    case AST_CASE:               return "AST_CASE";
+    case AST_SWITCH_ARM:         return "AST_SWITCH_ARM";
     case AST_RETURN:             return "AST_RETURN";
     case AST_FOR:                return "AST_FOR";
     case AST_WHILE:              return "AST_WHILE";

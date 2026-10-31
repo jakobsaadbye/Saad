@@ -4,6 +4,57 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.7.0 - 31. Oct 2026
+
+* switch
+
+```odin
+switch status {
+    case .open   { ... }
+    case .closed
+    case .locked { ... }
+}
+
+switch score {
+    case 90...100 { ... }
+    case 0        { ... }
+    else          { ... }
+}
+
+choice := switch x {
+    case 1 => "icecream";
+    case 2 => "coffee";
+    else   => "mango";
+};
+```
+
+A switch on an enum or union without an `else` must handle every value. There is no fallthrough. A switch
+always has a value to switch on, as `if` and `else` are for conditions.
+
+* Tagged unions
+
+```odin
+Shape :: union {
+    circle: Circle;
+    rect:   struct { w, h: f32; };
+    empty;
+}
+
+area :: (s: Shape) -> f32 {
+    switch v in s {
+        case .circle { return Pi * v.radius * v.radius; }   // v is the Circle
+        case .rect   { return v.w * v.h; }
+        case .empty  { return 0; }
+    }
+    return 0;
+}
+
+Option :: union <T> { none; some: T; }
+```
+
+`shape.kind` is which variant a union holds, as an enum: `if shape.kind == .circle { ... }`.
+See `docs/switch_and_unions.md`. Unions are printed by `fmt` and read and written by `std/json`.
+
 ## Update v0.6.1 - 31. Oct 2026
 
 * Options for `json.encode` and `json.decode`: indentation, the style of member names and enum values

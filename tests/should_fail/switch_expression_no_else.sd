@@ -1,0 +1,8 @@
+// expect-error: A switch that gives a value needs an else
+
+main :: () {
+    x := 1;
+    c := switch x {
+        case 1 => "a";
+    };
+}

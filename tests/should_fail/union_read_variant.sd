@@ -1,0 +1,8 @@
+// expect-error: The variant 'circle' of a union is read with a switch
+
+Shape :: union { circle: f32; empty; }
+
+main :: () {
+    s := Shape{circle: 1.0};
+    x := s.circle;
+}

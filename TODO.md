@@ -179,7 +179,7 @@ Roadmap:
 -------------------
 - Array types (Mostly done, multidimensional arrays + heap allocated is still missing)
 - Constants (Mostly done. Missing as struct member)
-- Switch statement
+- Switch statement (Mostly done. See docs/switch_and_unions.md)
 - Heap allocation + Allocators
 - Struct default values
 - Bit operations
