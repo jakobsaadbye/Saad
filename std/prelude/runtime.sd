@@ -10,46 +10,46 @@ String :: struct {
 }
 
 TypeKind :: enum {
-    Void,
-    Bool, 
-    Int,
-    Float,
-    String,
-    Array,
-    Pointer,
-    Struct,
-    Enum,
-    Function,
-    Tuple,
-    Variadic,
-    Any,
+    void,
+    bool, 
+    int,
+    float,
+    string,
+    array,
+    pointer,
+    struct,
+    enum,
+    function,
+    tuple,
+    variadic,
+    any,
 };
 
 TypePrimitiveKind :: enum {
-    Uint, // alias for u32
-    U8,
-    U16,
-    U32,
-    U64,
-    Int, // alias for i32
-    I8,
-    I16,
-    I32,
-    I64,
-    Float, // alias for f32
-    F32,
-    F64,
-    String,
-    Bool,
-    Void,
-    UntypedInt,
-    UntypedFloat,
+    uint, // alias for u32
+    u8,
+    u16,
+    u32,
+    u64,
+    int, // alias for i32
+    i8,
+    i16,
+    i32,
+    i64,
+    float, // alias for f32
+    f32,
+    f64,
+    string,
+    bool,
+    void,
+    untypedInt,
+    untypedFloat,
 };
 
 TypeArrayKind :: enum {
-    Fixed,
-    Slice,
-    Dynamic,
+    fixed,
+    slice,
+    dynamic,
 }
 
 Type :: struct {
@@ -132,8 +132,8 @@ extern "C" {
 }
 
 isPrimitive :: method (type: *Type) -> bool {
-    if type.kind == .Bool  { return true; } 
-    if type.kind == .Int   { return true; }
-    if type.kind == .Float { return true; }
+    if type.kind == .bool  { return true; } 
+    if type.kind == .int   { return true; }
+    if type.kind == .float { return true; }
     return false;
 }

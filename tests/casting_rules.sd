@@ -1,18 +1,18 @@
 use fmt;
 
-PI      :: 3.1415929;
-TAU     :: PI * 2;
-PI_HALF :: 1.570795;
+Pi      :: 3.1415929;
+Tau     :: Pi * 2;
+PiHalf :: 1.570795;
 
 HoldType :: enum {
-    Crimp,
-    Sloper,
-    Jug,
+    crimp,
+    sloper,
+    jug,
 }
 
 main :: () {
 
-    x := PI;
+    x := Pi;
 
     // print("--- Integer -> X casts ---");
     x1: int = xx 280;
@@ -23,19 +23,19 @@ main :: () {
     assert(x1 == 280);
     assert(x2 == 5.0);
     assert(x3);
-    assert(x4 == .Jug);
+    assert(x4 == .jug);
 
     // print("--- Float -> X casts ---");
     a1: f32 = xx 69.0;
     a2: f64 = xx a1;   // up casting
     a3: f32 = xx a2;   // down casting
-    a4: int = xx PI;   // float32 -> int
+    a4: int = xx Pi;   // float32 -> int
     a5: int = xx a2;   // float64 -> int
     a6: bool = xx -0.1;
     assert(a6);
 
     // print("--- Enum -> X casts ---");
-    b1 := (xx HoldType.Crimp + 1);
+    b1 := (xx HoldType.crimp + 1);
     b2 := b1 as HoldType;
     // print("%", b1);
     // print("%", b2);

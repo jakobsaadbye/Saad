@@ -2,9 +2,9 @@
 // expect-error: Type Color has no method 'hash'
 // expect-error: in set<Color, int>, instantiated here
 
-Color :: enum { Red, Green }
+Color :: enum { red, green }
 
 main :: () {
     m: Map<Color, int>;
-    m.set(.Red, 1);
+    m.set(.red, 1);
 }

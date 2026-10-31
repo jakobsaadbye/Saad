@@ -41,7 +41,7 @@ main :: () {
 
     if !skip {
         // To lowercase
-        text := "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG";
+        text := "THE QUICK Brown FOX JUMPS OVER THE LAZY DOG";
 
         lowercase := text.toLower();
         print("%", lowercase);

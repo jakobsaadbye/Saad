@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include "scope.h"
 
 #include <stdarg.h>
@@ -1606,6 +1607,24 @@ TypeStruct *generate_struct_type_with_data_and_count(Parser *parser, Type *type_
     return struct_defn;
 }
 
+// The word of a keyword token e.g "int" for TOKEN_TYPE_INT, or NULL if the token is not a keyword
+char *keyword_as_name(Parser *parser, Token token) {
+    if (token.type == TOKEN_LITERAL_IDENTIFIER || parser->current_file == NULL || parser->current_file->text == NULL) return NULL;
+
+    char *text = parser->current_file->text;
+    int start  = token.start.input_idx;
+    int end    = token.end.input_idx;
+    if (end <= start || !(isalpha((unsigned char) text[start]) || text[start] == '_')) return NULL;
+    for (int i = start; i < end; i++) {
+        if (!(isalnum((unsigned char) text[i]) || text[i] == '_')) return NULL;
+    }
+
+    char *name = malloc(end - start + 1);
+    memcpy(name, &text[start], end - start);
+    name[end - start] = '\0';
+    return name;
+}
+
 // Parses the enumerators of an enum, from the '{' to the '}' e.g { open, closed = 5 }
 bool parse_enumerators(Parser *parser, AstEnum *ast_enum) {
     Token next = peek_next_token(parser);
@@ -1617,6 +1636,14 @@ bool parse_enumerators(Parser *parser, AstEnum *ast_enum) {
     next = peek_next_token(parser);
     int enum_index = 0;
     while (next.type != '}' && next.type != TOKEN_END) {
+        // A keyword can be the name of an enumerator e.g TypeKind :: enum { int, float, struct }
+        char *keyword = keyword_as_name(parser, next);
+        if (keyword) {
+            next.type = TOKEN_LITERAL_IDENTIFIER;
+            next.as_value.value.identifier.name   = keyword;
+            next.as_value.value.identifier.length = (int) strlen(keyword);
+        }
+
         if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '=') {
             // Explicit value
             eat_token(parser);

@@ -13,13 +13,13 @@ Vec2 :: struct {
     secret :: method () -> int { return 7; }
 }
 
-Shape :: enum { Circle, Square }
+Shape :: enum { circle, square }
 
 Box :: struct <T> {
     value: T;
 }
 
-ORIGIN :: Vec2{0, 0};
+Origin :: Vec2{0, 0};
 
 add :: (a: Vec2, b: Vec2) -> Vec2 {
     return Vec2{a.x + b.x, a.y + b.y};

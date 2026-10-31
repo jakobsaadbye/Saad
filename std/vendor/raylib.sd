@@ -33,9 +33,9 @@ namespace raylib;
 // Some basic Defines
 //----------------------------------------------------------------------------------
 
-PI      :: 3.14159265358979323846;
-DEG2RAD :: PI/180.0;
-RAD2DEG :: 180.0/PI;
+Pi      :: 3.14159265358979323846;
+Deg2Rad :: Pi/180.0;
+Rad2Deg :: 180.0/Pi;
 
 //----------------------------------------------------------------------------------
 // Structures Definition
@@ -396,7 +396,7 @@ TraceLogLevel :: enum {
 
 // Keyboard keys (US keyboard layout)
 KeyboardKey :: enum {
-    Null            = 0,        // Key: NULL, used for no key pressed
+    null            = 0,        // Key: NULL, used for no key pressed
     // Alphanumeric keys
     apostrophe      = 39,       // Key: '
     comma           = 44,       // Key: ,
@@ -441,9 +441,9 @@ KeyboardKey :: enum {
     x               = 88,       // Key: X | x
     y               = 89,       // Key: Y | y
     z               = 90,       // Key: Z | z
-    left_bracket    = 91,       // Key: [
+    leftBracket    = 91,       // Key: [
     backslash       = 92,       // Key: '\'
-    right_bracket   = 93,       // Key: ]
+    rightBracket   = 93,       // Key: ]
     grave           = 96,       // Key: `
     // Function keys
     space           = 32,       // Key: Space
@@ -457,14 +457,14 @@ KeyboardKey :: enum {
     left            = 263,      // Key: Cursor left
     down            = 264,      // Key: Cursor down
     up              = 265,      // Key: Cursor up
-    page_up         = 266,      // Key: Page up
-    page_down       = 267,      // Key: Page down
+    pageUp         = 266,      // Key: Page up
+    pageDown       = 267,      // Key: Page down
     home            = 268,      // Key: Home
     end             = 269,      // Key: End
-    caps_lock       = 280,      // Key: Caps lock
-    scroll_lock     = 281,      // Key: Scroll down
-    num_lock        = 282,      // Key: Num lock
-    print_screen    = 283,      // Key: Print screen
+    capsLock       = 280,      // Key: Caps lock
+    scrollLock     = 281,      // Key: Scroll down
+    numLock        = 282,      // Key: Num lock
+    printScreen    = 283,      // Key: Print screen
     pause           = 284,      // Key: Pause
     f1              = 290,      // Key: F1
     f2              = 291,      // Key: F2
@@ -478,38 +478,38 @@ KeyboardKey :: enum {
     f10             = 299,      // Key: F10
     f11             = 300,      // Key: F11
     f12             = 301,      // Key: F12
-    left_shift      = 340,      // Key: Shift left
-    left_control    = 341,      // Key: Control left
-    left_alt        = 342,      // Key: Alt left
-    left_super      = 343,      // Key: Super left
-    right_shift     = 344,      // Key: Shift right
-    right_control   = 345,      // Key: Control right
-    right_alt       = 346,      // Key: Alt right
-    right_super     = 347,      // Key: Super right
-    kb_menu         = 348,      // Key: KB menu
+    leftShift      = 340,      // Key: Shift left
+    leftControl    = 341,      // Key: Control left
+    leftAlt        = 342,      // Key: Alt left
+    leftSuper      = 343,      // Key: Super left
+    rightShift     = 344,      // Key: Shift right
+    rightControl   = 345,      // Key: Control right
+    rightAlt       = 346,      // Key: Alt right
+    rightSuper     = 347,      // Key: Super right
+    kbMenu         = 348,      // Key: KB menu
     // Keypad keys
-    kp_0            = 320,      // Key: Keypad 0
-    kp_1            = 321,      // Key: Keypad 1
-    kp_2            = 322,      // Key: Keypad 2
-    kp_3            = 323,      // Key: Keypad 3
-    kp_4            = 324,      // Key: Keypad 4
-    kp_5            = 325,      // Key: Keypad 5
-    kp_6            = 326,      // Key: Keypad 6
-    kp_7            = 327,      // Key: Keypad 7
-    kp_8            = 328,      // Key: Keypad 8
-    kp_9            = 329,      // Key: Keypad 9
-    kp_decimal      = 330,      // Key: Keypad .
-    kp_divide       = 331,      // Key: Keypad /
-    kp_multiply     = 332,      // Key: Keypad *
-    kp_subtract     = 333,      // Key: Keypad -
-    kp_add          = 334,      // Key: Keypad +
-    kp_enter        = 335,      // Key: Keypad Enter
-    kp_equal        = 336,      // Key: Keypad =
+    kp0            = 320,      // Key: Keypad 0
+    kp1            = 321,      // Key: Keypad 1
+    kp2            = 322,      // Key: Keypad 2
+    kp3            = 323,      // Key: Keypad 3
+    kp4            = 324,      // Key: Keypad 4
+    kp5            = 325,      // Key: Keypad 5
+    kp6            = 326,      // Key: Keypad 6
+    kp7            = 327,      // Key: Keypad 7
+    kp8            = 328,      // Key: Keypad 8
+    kp9            = 329,      // Key: Keypad 9
+    kpDecimal      = 330,      // Key: Keypad .
+    kpDivide       = 331,      // Key: Keypad /
+    kpMultiply     = 332,      // Key: Keypad *
+    kpSubtract     = 333,      // Key: Keypad -
+    kpAdd          = 334,      // Key: Keypad +
+    kpEnter        = 335,      // Key: Keypad Enter
+    kpEqual        = 336,      // Key: Keypad =
     // Android key buttons
     back            = 4,        // Key: Android back button
     menu            = 5,        // Key: Android menu button
-    volume_up       = 24,       // Key: Android volume up button
-    volume_down     = 25        // Key: Android volume down button
+    volumeUp       = 24,       // Key: Android volume up button
+    volumeDown     = 25        // Key: Android volume down button
 }
 
 // Mouse buttons
@@ -529,142 +529,142 @@ MouseCursor :: enum {
     arrow         = 1,     // Arrow shape
     ibeam         = 2,     // Text writing cursor shape
     crosshair     = 3,     // Cross shape
-    pointing_hand = 4,     // Pointing hand cursor
-    resize_ew     = 5,     // Horizontal resize/move arrow shape
-    resize_ns     = 6,     // Vertical resize/move arrow shape
-    resize_nwse   = 7,     // Top-left to bottom-right diagonal resize/move arrow shape
-    resize_nesw   = 8,     // The top-right to bottom-left diagonal resize/move arrow shape
-    resize_all    = 9,     // The omnidirectional resize/move cursor shape
-    not_allowed   = 10     // The operation-not-allowed shape
+    pointingHand = 4,     // Pointing hand cursor
+    resizeEw     = 5,     // Horizontal resize/move arrow shape
+    resizeNs     = 6,     // Vertical resize/move arrow shape
+    resizeNwse   = 7,     // Top-left to bottom-right diagonal resize/move arrow shape
+    resizeNesw   = 8,     // The top-right to bottom-left diagonal resize/move arrow shape
+    resizeAll    = 9,     // The omnidirectional resize/move cursor shape
+    notAllowed   = 10     // The operation-not-allowed shape
 }
 
 // Gamepad buttons
 GamepadButton :: enum {
     unknown = 0,         // Unknown button, just for error checking
-    left_face_up,        // Gamepad left DPAD up button
-    left_face_right,     // Gamepad left DPAD right button
-    left_face_down,      // Gamepad left DPAD down button
-    left_face_left,      // Gamepad left DPAD left button
-    right_face_up,       // Gamepad right button up (i.e. PS3: Triangle, Xbox: Y)
-    right_face_right,    // Gamepad right button right (i.e. PS3: Circle, Xbox: B)
-    right_face_down,     // Gamepad right button down (i.e. PS3: Cross, Xbox: A)
-    right_face_left,     // Gamepad right button left (i.e. PS3: Square, Xbox: X)
-    left_trigger_1,      // Gamepad top/back trigger left (first), it could be a trailing button
-    left_trigger_2,      // Gamepad top/back trigger left (second), it could be a trailing button
-    right_trigger_1,     // Gamepad top/back trigger right (first), it could be a trailing button
-    right_trigger_2,     // Gamepad top/back trigger right (second), it could be a trailing button
-    middle_left,         // Gamepad center buttons, left one (i.e. PS3: Select)
+    leftFaceUp,        // Gamepad left DPAD up button
+    leftFaceRight,     // Gamepad left DPAD right button
+    leftFaceDown,      // Gamepad left DPAD down button
+    leftFaceLeft,      // Gamepad left DPAD left button
+    rightFaceUp,       // Gamepad right button up (i.e. PS3: Triangle, Xbox: Y)
+    rightFaceRight,    // Gamepad right button right (i.e. PS3: circle, Xbox: B)
+    rightFaceDown,     // Gamepad right button down (i.e. PS3: Cross, Xbox: A)
+    rightFaceLeft,     // Gamepad right button left (i.e. PS3: square, Xbox: X)
+    leftTrigger1,      // Gamepad top/back trigger left (first), it could be a trailing button
+    leftTrigger2,      // Gamepad top/back trigger left (second), it could be a trailing button
+    rightTrigger1,     // Gamepad top/back trigger right (first), it could be a trailing button
+    rightTrigger2,     // Gamepad top/back trigger right (second), it could be a trailing button
+    middleLeft,         // Gamepad center buttons, left one (i.e. PS3: Select)
     middle,              // Gamepad center buttons, middle one (i.e. PS3: PS, Xbox: XBOX)
-    middle_right,        // Gamepad center buttons, right one (i.e. PS3: Start)
-    left_thumb,          // Gamepad joystick pressed button left
-    right_thumb          // Gamepad joystick pressed button right
+    middleRight,        // Gamepad center buttons, right one (i.e. PS3: Start)
+    leftThumb,          // Gamepad joystick pressed button left
+    rightThumb          // Gamepad joystick pressed button right
 }
 
 // Gamepad axis
 GamepadAxis :: enum {
-    GAMEPAD_AXIS_LEFT_X        = 0,     // Gamepad left stick X axis
-    GAMEPAD_AXIS_LEFT_Y        = 1,     // Gamepad left stick Y axis
-    GAMEPAD_AXIS_RIGHT_X       = 2,     // Gamepad right stick X axis
-    GAMEPAD_AXIS_RIGHT_Y       = 3,     // Gamepad right stick Y axis
-    GAMEPAD_AXIS_LEFT_TRIGGER  = 4,     // Gamepad back trigger left, pressure level: [1..-1]
-    GAMEPAD_AXIS_RIGHT_TRIGGER = 5      // Gamepad back trigger right, pressure level: [1..-1]
+    gamepadAxisLeftX        = 0,     // Gamepad left stick X axis
+    gamepadAxisLeftY        = 1,     // Gamepad left stick Y axis
+    gamepadAxisRightX       = 2,     // Gamepad right stick X axis
+    gamepadAxisRightY       = 3,     // Gamepad right stick Y axis
+    gamepadAxisLeftTrigger  = 4,     // Gamepad back trigger left, pressure level: [1..-1]
+    gamepadAxisRightTrigger = 5      // Gamepad back trigger right, pressure level: [1..-1]
 }
 
 // Material map index
 MaterialMapIndex :: enum {
-    MATERIAL_MAP_ALBEDO = 0,        // Albedo material (same as: MATERIAL_MAP_DIFFUSE)
-    MATERIAL_MAP_METALNESS,         // Metalness material (same as: MATERIAL_MAP_SPECULAR)
-    MATERIAL_MAP_NORMAL,            // Normal material
-    MATERIAL_MAP_ROUGHNESS,         // Roughness material
-    MATERIAL_MAP_OCCLUSION,         // Ambient occlusion material
-    MATERIAL_MAP_EMISSION,          // Emission material
-    MATERIAL_MAP_HEIGHT,            // Heightmap material
-    MATERIAL_MAP_CUBEMAP,           // Cubemap material (NOTE: Uses GL_TEXTURE_CUBE_MAP)
-    MATERIAL_MAP_IRRADIANCE,        // Irradiance material (NOTE: Uses GL_TEXTURE_CUBE_MAP)
-    MATERIAL_MAP_PREFILTER,         // Prefilter material (NOTE: Uses GL_TEXTURE_CUBE_MAP)
-    MATERIAL_MAP_BRDF               // Brdf material
+    materialMapAlbedo = 0,        // Albedo material (same as: MATERIAL_MAP_DIFFUSE)
+    materialMapMetalness,         // Metalness material (same as: MATERIAL_MAP_SPECULAR)
+    materialMapNormal,            // Normal material
+    materialMapRoughness,         // Roughness material
+    materialMapOcclusion,         // Ambient occlusion material
+    materialMapEmission,          // Emission material
+    materialMapHeight,            // Heightmap material
+    materialMapCubemap,           // Cubemap material (NOTE: Uses GL_TEXTURE_CUBE_MAP)
+    materialMapIrradiance,        // Irradiance material (NOTE: Uses GL_TEXTURE_CUBE_MAP)
+    materialMapPrefilter,         // Prefilter material (NOTE: Uses GL_TEXTURE_CUBE_MAP)
+    materialMapBrdf               // Brdf material
 }
 
 // Shader location index
 ShaderLocationIndex :: enum {
-    SHADER_LOC_VERTEX_POSITION = 0, // Shader location: vertex attribute: position
-    SHADER_LOC_VERTEX_TEXCOORD01,   // Shader location: vertex attribute: texcoord01
-    SHADER_LOC_VERTEX_TEXCOORD02,   // Shader location: vertex attribute: texcoord02
-    SHADER_LOC_VERTEX_NORMAL,       // Shader location: vertex attribute: normal
-    SHADER_LOC_VERTEX_TANGENT,      // Shader location: vertex attribute: tangent
-    SHADER_LOC_VERTEX_COLOR,        // Shader location: vertex attribute: color
-    SHADER_LOC_MATRIX_MVP,          // Shader location: matrix uniform: model-view-projection
-    SHADER_LOC_MATRIX_VIEW,         // Shader location: matrix uniform: view (camera transform)
-    SHADER_LOC_MATRIX_PROJECTION,   // Shader location: matrix uniform: projection
-    SHADER_LOC_MATRIX_MODEL,        // Shader location: matrix uniform: model (transform)
-    SHADER_LOC_MATRIX_NORMAL,       // Shader location: matrix uniform: normal
-    SHADER_LOC_VECTOR_VIEW,         // Shader location: vector uniform: view
-    SHADER_LOC_COLOR_DIFFUSE,       // Shader location: vector uniform: diffuse color
-    SHADER_LOC_COLOR_SPECULAR,      // Shader location: vector uniform: specular color
-    SHADER_LOC_COLOR_AMBIENT,       // Shader location: vector uniform: ambient color
-    SHADER_LOC_MAP_ALBEDO,          // Shader location: sampler2d texture: albedo (same as: SHADER_LOC_MAP_DIFFUSE)
-    SHADER_LOC_MAP_METALNESS,       // Shader location: sampler2d texture: metalness (same as: SHADER_LOC_MAP_SPECULAR)
-    SHADER_LOC_MAP_NORMAL,          // Shader location: sampler2d texture: normal
-    SHADER_LOC_MAP_ROUGHNESS,       // Shader location: sampler2d texture: roughness
-    SHADER_LOC_MAP_OCCLUSION,       // Shader location: sampler2d texture: occlusion
-    SHADER_LOC_MAP_EMISSION,        // Shader location: sampler2d texture: emission
-    SHADER_LOC_MAP_HEIGHT,          // Shader location: sampler2d texture: height
-    SHADER_LOC_MAP_CUBEMAP,         // Shader location: samplerCube texture: cubemap
-    SHADER_LOC_MAP_IRRADIANCE,      // Shader location: samplerCube texture: irradiance
-    SHADER_LOC_MAP_PREFILTER,       // Shader location: samplerCube texture: prefilter
-    SHADER_LOC_MAP_BRDF,            // Shader location: sampler2d texture: brdf
-    SHADER_LOC_VERTEX_BONEIDS,      // Shader location: vertex attribute: boneIds
-    SHADER_LOC_VERTEX_BONEWEIGHTS,  // Shader location: vertex attribute: boneWeights
-    SHADER_LOC_BONE_MATRICES        // Shader location: array of matrices uniform: boneMatrices
+    shaderLocVertexPosition = 0, // Shader location: vertex attribute: position
+    shaderLocVertexTexcoord01,   // Shader location: vertex attribute: texcoord01
+    shaderLocVertexTexcoord02,   // Shader location: vertex attribute: texcoord02
+    shaderLocVertexNormal,       // Shader location: vertex attribute: normal
+    shaderLocVertexTangent,      // Shader location: vertex attribute: tangent
+    shaderLocVertexColor,        // Shader location: vertex attribute: color
+    shaderLocMatrixMvp,          // Shader location: matrix uniform: model-view-projection
+    shaderLocMatrixView,         // Shader location: matrix uniform: view (camera transform)
+    shaderLocMatrixProjection,   // Shader location: matrix uniform: projection
+    shaderLocMatrixModel,        // Shader location: matrix uniform: model (transform)
+    shaderLocMatrixNormal,       // Shader location: matrix uniform: normal
+    shaderLocVectorView,         // Shader location: vector uniform: view
+    shaderLocColorDiffuse,       // Shader location: vector uniform: diffuse color
+    shaderLocColorSpecular,      // Shader location: vector uniform: specular color
+    shaderLocColorAmbient,       // Shader location: vector uniform: ambient color
+    shaderLocMapAlbedo,          // Shader location: sampler2d texture: albedo (same as: SHADER_LOC_MAP_DIFFUSE)
+    shaderLocMapMetalness,       // Shader location: sampler2d texture: metalness (same as: SHADER_LOC_MAP_SPECULAR)
+    shaderLocMapNormal,          // Shader location: sampler2d texture: normal
+    shaderLocMapRoughness,       // Shader location: sampler2d texture: roughness
+    shaderLocMapOcclusion,       // Shader location: sampler2d texture: occlusion
+    shaderLocMapEmission,        // Shader location: sampler2d texture: emission
+    shaderLocMapHeight,          // Shader location: sampler2d texture: height
+    shaderLocMapCubemap,         // Shader location: samplerCube texture: cubemap
+    shaderLocMapIrradiance,      // Shader location: samplerCube texture: irradiance
+    shaderLocMapPrefilter,       // Shader location: samplerCube texture: prefilter
+    shaderLocMapBrdf,            // Shader location: sampler2d texture: brdf
+    shaderLocVertexBoneids,      // Shader location: vertex attribute: boneIds
+    shaderLocVertexBoneweights,  // Shader location: vertex attribute: boneWeights
+    shaderLocBoneMatrices        // Shader location: array of matrices uniform: boneMatrices
 }
 
 // Shader uniform data type
 ShaderUniformDataType :: enum {
-    FLOAT = 0,       // Shader uniform type: float
-    VEC2,            // Shader uniform type: vec2 (2 float)
-    VEC3,            // Shader uniform type: vec3 (3 float)
-    VEC4,            // Shader uniform type: vec4 (4 float)
-    INT,             // Shader uniform type: int
-    IVEC2,           // Shader uniform type: ivec2 (2 int)
-    IVEC3,           // Shader uniform type: ivec3 (3 int)
-    IVEC4,           // Shader uniform type: ivec4 (4 int)
-    SAMPLER2D        // Shader uniform type: sampler2d
+    float = 0,       // Shader uniform type: float
+    vec2,            // Shader uniform type: vec2 (2 float)
+    vec3,            // Shader uniform type: vec3 (3 float)
+    vec4,            // Shader uniform type: vec4 (4 float)
+    int,             // Shader uniform type: int
+    ivec2,           // Shader uniform type: ivec2 (2 int)
+    ivec3,           // Shader uniform type: ivec3 (3 int)
+    ivec4,           // Shader uniform type: ivec4 (4 int)
+    sampler2d        // Shader uniform type: sampler2d
 }
 
 // Shader attribute data types
 ShaderAttributeDataType :: enum {
-    SHADER_ATTRIB_FLOAT = 0,        // Shader attribute type: float
-    SHADER_ATTRIB_VEC2,             // Shader attribute type: vec2 (2 float)
-    SHADER_ATTRIB_VEC3,             // Shader attribute type: vec3 (3 float)
-    SHADER_ATTRIB_VEC4              // Shader attribute type: vec4 (4 float)
+    shaderAttribFloat = 0,        // Shader attribute type: float
+    shaderAttribVec2,             // Shader attribute type: vec2 (2 float)
+    shaderAttribVec3,             // Shader attribute type: vec3 (3 float)
+    shaderAttribVec4              // Shader attribute type: vec4 (4 float)
 }
 
 // Pixel formats
 PixelFormat :: enum {
-    uncompressed_grayscale = 1, // 8 bit per pixel (no alpha)
-    uncompressed_gray_alpha,    // 8*2 bpp (2 channels)
-    uncompressed_r5g6b5,        // 16 bpp
-    uncompressed_r8g8b8,        // 24 bpp
-    uncompressed_r5g5b5a1,      // 16 bpp (1 bit alpha)
-    uncompressed_r4g4b4a4,      // 16 bpp (4 bit alpha)
-    uncompressed_r8g8b8a8,      // 32 bpp
-    uncompressed_r32,           // 32 bpp (1 channel - float)
-    uncompressed_r32g32b32,     // 32*3 bpp (3 channels - float)
-    uncompressed_r32g32b32a32,  // 32*4 bpp (4 channels - float)
-    uncompressed_r16,           // 16 bpp (1 channel - half float)
-    uncompressed_r16g16b16,     // 16*3 bpp (3 channels - half float)
-    uncompressed_r16g16b16a16,  // 16*4 bpp (4 channels - half float)
-    compressed_dxt1_rgb,        // 4 bpp (no alpha)
-    compressed_dxt1_rgba,       // 4 bpp (1 bit alpha)
-    compressed_dxt3_rgba,       // 8 bpp
-    compressed_dxt5_rgba,       // 8 bpp
-    compressed_etc1_rgb,        // 4 bpp
-    compressed_etc2_rgb,        // 4 bpp
-    compressed_etc2_eac_rgba,   // 8 bpp
-    compressed_pvrt_rgb,        // 4 bpp
-    compressed_pvrt_rgba,       // 4 bpp
-    compressed_astc_4x4_rgba,   // 8 bpp
-    compressed_astc_8x8_rgba    // 2 bpp
+    uncompressedGrayscale = 1, // 8 bit per pixel (no alpha)
+    uncompressedGrayAlpha,    // 8*2 bpp (2 channels)
+    uncompressedR5g6b5,        // 16 bpp
+    uncompressedR8g8b8,        // 24 bpp
+    uncompressedR5g5b5a1,      // 16 bpp (1 bit alpha)
+    uncompressedR4g4b4a4,      // 16 bpp (4 bit alpha)
+    uncompressedR8g8b8a8,      // 32 bpp
+    uncompressedR32,           // 32 bpp (1 channel - float)
+    uncompressedR32g32b32,     // 32*3 bpp (3 channels - float)
+    uncompressedR32g32b32a32,  // 32*4 bpp (4 channels - float)
+    uncompressedR16,           // 16 bpp (1 channel - half float)
+    uncompressedR16g16b16,     // 16*3 bpp (3 channels - half float)
+    uncompressedR16g16b16a16,  // 16*4 bpp (4 channels - half float)
+    compressedDxt1Rgb,        // 4 bpp (no alpha)
+    compressedDxt1Rgba,       // 4 bpp (1 bit alpha)
+    compressedDxt3Rgba,       // 8 bpp
+    compressedDxt5Rgba,       // 8 bpp
+    compressedEtc1Rgb,        // 4 bpp
+    compressedEtc2Rgb,        // 4 bpp
+    compressedEtc2EacRgba,   // 8 bpp
+    compressedPvrtRgb,        // 4 bpp
+    compressedPvrtRgba,       // 4 bpp
+    compressedAstc4x4Rgba,   // 8 bpp
+    compressedAstc8x8Rgba    // 2 bpp
 }
 
 // Texture parameters: filter mode
@@ -672,26 +672,26 @@ TextureFilter :: enum {
     point = 0,               // No filter, just pixel approximation
     bilinear,                // Linear filtering
     trilinear,               // Trilinear filtering (linear with mipmaps)
-    anisotropic_4x,          // Anisotropic filtering 4x
-    anisotropic_8x,          // Anisotropic filtering 8x
-    anisotropic_16x,         // Anisotropic filtering 16x
+    anisotropic4x,          // Anisotropic filtering 4x
+    anisotropic8x,          // Anisotropic filtering 8x
+    anisotropic16x,         // Anisotropic filtering 16x
 }
 
 // Texture parameters: wrap mode
 TextureWrap :: enum {
     repeat = 0,                // Repeats texture in tiled mode
     clamp,                     // Clamps texture to edge pixel in tiled mode
-    mirror_repeat,             // Mirrors and repeats the texture in tiled mode
-    mirror_clamp               // Mirrors and clamps to border the texture in tiled mode
+    mirrorRepeat,             // Mirrors and repeats the texture in tiled mode
+    mirrorClamp               // Mirrors and clamps to border the texture in tiled mode
 }
 
 // Cubemap layouts
 CubemapLayout :: enum {
-    auto_detect = 0,         // Automatically detect layout type
-    line_vertical,           // Layout is defined by a vertical line with faces
-    line_horizontal,         // Layout is defined by a horizontal line with faces
-    cross_three_by_four,     // Layout is defined by a 3x4 cross with cubemap faces
-    cross_four_by_three     // Layout is defined by a 4x3 cross with cubemap faces
+    autoDetect = 0,         // Automatically detect layout type
+    lineVertical,           // Layout is defined by a vertical line with faces
+    lineHorizontal,         // Layout is defined by a horizontal line with faces
+    crossThreeByFour,     // Layout is defined by a 3x4 cross with cubemap faces
+    crossFourByThree     // Layout is defined by a 4x3 cross with cubemap faces
 }
 
 // Font type, defines generation method
@@ -706,11 +706,11 @@ BlendMode :: enum {
     alpha = 0,                // Blend textures considering alpha (default)
     additive,                 // Blend textures adding colors
     multiplied,               // Blend textures multiplying colors
-    add_colors,               // Blend textures adding colors (alternative)
-    subtract_colors,          // Blend textures subtracting colors (alternative)
-    alpha_premultiply,        // Blend premultiplied textures considering alpha
+    addColors,               // Blend textures adding colors (alternative)
+    subtractColors,          // Blend textures subtracting colors (alternative)
+    alphaPremultiply,        // Blend premultiplied textures considering alpha
     custom,                   // Blend textures using custom src/dst factors (use rlSetBlendFactors())
-    custom_separate           // Blend textures using custom rgb/alpha separate src/dst factors (use rlSetBlendFactorsSeparate())
+    customSeparate           // Blend textures using custom rgb/alpha separate src/dst factors (use rlSetBlendFactorsSeparate())
 }
 
 // Gesture
@@ -720,12 +720,12 @@ Gesture :: enum {
     doubletap   = 2,        // Double tap gesture
     hold        = 4,        // Hold gesture
     drag        = 8,        // Drag gesture
-    swipe_right = 16,       // Swipe right gesture
-    swipe_left  = 32,       // Swipe left gesture
-    swipe_up    = 64,       // Swipe up gesture
-    swipe_down  = 128,      // Swipe down gesture
-    pinch_in    = 256,      // Pinch in gesture
-    pinch_out   = 512       // Pinch out gesture
+    swipeRight = 16,       // Swipe right gesture
+    swipeLeft  = 32,       // Swipe left gesture
+    swipeUp    = 64,       // Swipe up gesture
+    swipeDown  = 128,      // Swipe down gesture
+    pinchIn    = 256,      // Pinch in gesture
+    pinchOut   = 512       // Pinch out gesture
 }
 
 // Camera system modes
@@ -733,8 +733,8 @@ CameraMode :: enum {
     custom = 0,              // Camera custom, controlled by user (UpdateCamera() does nothing)
     free,                    // Camera free mode
     orbital,                 // Camera orbital, around target, zoom supported
-    first_person,            // Camera first person
-    third_person             // Camera third person
+    firstPerson,            // Camera first person
+    thirdPerson             // Camera third person
 }
 
 // Camera projection
@@ -745,38 +745,38 @@ CameraProjection :: enum {
 
 // N-patch layout
 NPatchLayout :: enum {
-    nine_patch = 0,          // Npatch layout: 3x3 tiles
-    three_patch_vertical,    // Npatch layout: 1x3 tiles
-    three_patch_horizontal   // Npatch layout: 3x1 tiles
+    ninePatch = 0,          // Npatch layout: 3x3 tiles
+    threePatchVertical,    // Npatch layout: 1x3 tiles
+    threePatchHorizontal   // Npatch layout: 3x1 tiles
 }
 
 // Some Basic Colors
-LIGHTGRAY  :: Color{ 200, 200, 200, 255 };
-GRAY       :: Color{ 130, 130, 130, 255 };
-DARKGRAY   :: Color{ 80, 80, 80, 255 };
-YELLOW     :: Color{ 253, 249, 0, 255 };
-GOLD       :: Color{ 255, 203, 0, 255 };
-ORANGE     :: Color{ 255, 161, 0, 255 };
-PINK       :: Color{ 255, 109, 194, 255 };
-RED        :: Color{ 230, 41, 55, 255 };
-MAROON     :: Color{ 190, 33, 55, 255 };
-GREEN      :: Color{ 0, 228, 48, 255 };
-LIME       :: Color{ 0, 158, 47, 255 };
-DARKGREEN  :: Color{ 0, 117, 44, 255 };
-SKYBLUE    :: Color{ 102, 191, 255, 255 };
-BLUE       :: Color{ 0, 121, 241, 255 };
-DARKBLUE   :: Color{ 0, 82, 172, 255 };
-PURPLE     :: Color{ 200, 122, 255, 255 };
-VIOLET     :: Color{ 135, 60, 190, 255 };
-DARKPURPLE :: Color{ 112, 31, 126, 255 };
-BEIGE      :: Color{ 211, 176, 131, 255 };
-BROWN      :: Color{ 127, 106, 79, 255 };
-DARKBROWN  :: Color{ 76, 63, 47, 255 };
-WHITE      :: Color{ 255, 255, 255, 255 };
-BLACK      :: Color{ 0, 0, 0, 255 };
-BLANK      :: Color{ 0, 0, 0, 0 };
-MAGENTA    :: Color{ 255, 0, 255, 255 };
-RAYWHITE   :: Color{ 245, 245, 245, 255 };
+LightGray  :: Color{ 200, 200, 200, 255 };
+Gray       :: Color{ 130, 130, 130, 255 };
+DarkGray   :: Color{ 80, 80, 80, 255 };
+Yellow     :: Color{ 253, 249, 0, 255 };
+Gold       :: Color{ 255, 203, 0, 255 };
+Orange     :: Color{ 255, 161, 0, 255 };
+Pink       :: Color{ 255, 109, 194, 255 };
+Red        :: Color{ 230, 41, 55, 255 };
+Maroon     :: Color{ 190, 33, 55, 255 };
+Green      :: Color{ 0, 228, 48, 255 };
+Lime       :: Color{ 0, 158, 47, 255 };
+DarkGreen  :: Color{ 0, 117, 44, 255 };
+SkyBlue    :: Color{ 102, 191, 255, 255 };
+Blue       :: Color{ 0, 121, 241, 255 };
+DarkBlue   :: Color{ 0, 82, 172, 255 };
+Purple     :: Color{ 200, 122, 255, 255 };
+Violet     :: Color{ 135, 60, 190, 255 };
+DarkPurple :: Color{ 112, 31, 126, 255 };
+Beige      :: Color{ 211, 176, 131, 255 };
+Brown      :: Color{ 127, 106, 79, 255 };
+DarkBrown  :: Color{ 76, 63, 47, 255 };
+White      :: Color{ 255, 255, 255, 255 };
+Black      :: Color{ 0, 0, 0, 255 };
+Blank      :: Color{ 0, 0, 0, 0 };
+Magenta    :: Color{ 255, 0, 255, 255 };
+RayWhite   :: Color{ 245, 245, 245, 255 };
 
 extern "C" {
 

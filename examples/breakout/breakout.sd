@@ -2,21 +2,21 @@ use fmt;
 use math;
 use raylib;
 
-BALL_SIZE           :: 20;
-BRICK_WIDTH         :: 100;
-BRICK_HEIGHT        :: 30;
-BRICK_PADDING       :: 12;
-BRICK_ROWS          :: 8;
-BRICK_COLS          :: 8;
-PICKUP_SPAWN_CHANCE :: 25; // in percentage
-PICKUP_SIZE         :: 26;
+BallSize           :: 20;
+BrickWidth         :: 100;
+BrickHeight        :: 30;
+BrickPadding       :: 12;
+BrickRows          :: 8;
+BrickCols          :: 8;
+PickupSpawnChance :: 25; // in percentage
+PickupSize         :: 26;
 
-INITIAL_BAR_WIDTH     :: 100;
-INITIAL_BALL_VELOCITY :: 400.0;
+InitialBarWidth     :: 100;
+InitialBallVelocity :: 400.0;
 
-TOP_MARGIN    :: 80;
-WINDOW_WIDTH  :: 1200;
-WINDOW_HEIGHT :: 800;
+TopMargin    :: 80;
+WindowWidth  :: 1200;
+WindowHeight :: 800;
 
 
 Brick :: struct {
@@ -52,12 +52,11 @@ Player :: struct {
 }
 
 PickupType :: enum {
-    BallSpeedUp,
-    BallSlowDown,
-    BarWiden,
-    BarShorten,
-    Fireball,
-    COUNT,
+    ballSpeedUp,
+    ballSlowDown,
+    barWiden,
+    barShorten,
+    fireball,
 }
 
 Pickup :: struct {
@@ -106,8 +105,8 @@ getRect :: method (brick: Brick) -> Rectangle {
     return {
         xx brick.x,
         xx brick.y,
-        BRICK_WIDTH,
-        BRICK_HEIGHT,
+        BrickWidth,
+        BrickHeight,
     };
 }
 
@@ -181,9 +180,9 @@ draw :: method (pe: *ParticleEmitter) {
 }
 
 main :: () {
-    COLOR_WHITE :: Color{255, 255, 255, 255};
+    ColorWhite :: Color{255, 255, 255, 255};
 
-    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, xx "Super Breakout");
+    InitWindow(WindowWidth, WindowHeight, xx "Super Breakout");
     InitAudioDevice();
     SetTargetFPS(90);
 
@@ -195,7 +194,7 @@ main :: () {
     heartTexture.height = 24;
 
 
-    pickupTextures : [PickupType.COUNT]Texture = [
+    pickupTextures : [PickupType.count]Texture = [
         LoadTexture(xx "data/textures/pickups/ball_speed_up.png"),
         LoadTexture(xx "data/textures/pickups/ball_slow_down.png"),
         LoadTexture(xx "data/textures/pickups/bar_widen.png"),
@@ -206,8 +205,8 @@ main :: () {
     // Scale each pickup texture
     for 0..pickupTextures.count {
         texture := &pickupTextures[it];
-        texture.width  = PICKUP_SIZE;
-        texture.height = PICKUP_SIZE;
+        texture.width  = PickupSize;
+        texture.height = PickupSize;
     }
 
 
@@ -234,15 +233,15 @@ main :: () {
     ball := Ball{
         x: 4,
         y: 4,
-        size: BALL_SIZE,
-        velX: INITIAL_BALL_VELOCITY,
-        velY: INITIAL_BALL_VELOCITY,
+        size: BallSize,
+        velX: InitialBallVelocity,
+        velY: InitialBallVelocity,
     };
 
     bar := Bar{
-        x: WINDOW_WIDTH * 0.5 - INITIAL_BAR_WIDTH * 0.5,
-        y: WINDOW_HEIGHT - 70,
-        width: INITIAL_BAR_WIDTH,
+        x: WindowWidth * 0.5 - InitialBarWidth * 0.5,
+        y: WindowHeight - 70,
+        width: InitialBarWidth,
         height: 15,
         velX: 0,
     };
@@ -269,10 +268,10 @@ main :: () {
         pickupSpawner: &pickupSpawner
     };
 
-    deadZone := Rectangle{0, WINDOW_HEIGHT - (WINDOW_HEIGHT - (bar.y + bar.height)), WINDOW_WIDTH, (WINDOW_HEIGHT - (bar.y + bar.height))};
+    deadZone := Rectangle{0, WindowHeight - (WindowHeight - (bar.y + bar.height)), WindowWidth, (WindowHeight - (bar.y + bar.height))};
 
 
-    brickColors: [BRICK_ROWS]Color = [
+    brickColors: [BrickRows]Color = [
         {255,  55, 140, 255}, // vibrant pink/magenta
         {255,  45,  45, 255}, // bright red
         {255, 120,  20, 255}, // neon orange
@@ -284,16 +283,16 @@ main :: () {
     ];
 
     // Initiate the bricks
-    bricks: [BRICK_ROWS * BRICK_COLS] Brick;
+    bricks: [BrickRows * BrickCols] Brick;
 
-    brick_row_width := (BRICK_WIDTH + BRICK_PADDING) * BRICK_COLS - 1;
+    brick_row_width := (BrickWidth + BrickPadding) * BrickCols - 1;
 
-    for row in 0..BRICK_ROWS {
-        for col in 0..BRICK_COLS {
-            index := row * BRICK_COLS + col;
+    for row in 0..BrickRows {
+        for col in 0..BrickCols {
+            index := row * BrickCols + col;
             
-            x := (BRICK_WIDTH + BRICK_PADDING)  * col + (WINDOW_WIDTH / 2) - (brick_row_width / 2);
-            y := (BRICK_HEIGHT + BRICK_PADDING) * row + TOP_MARGIN;
+            x := (BrickWidth + BrickPadding)  * col + (WindowWidth / 2) - (brick_row_width / 2);
+            y := (BrickHeight + BrickPadding) * row + TopMargin;
 
             color := brickColors[row];
 
@@ -356,8 +355,8 @@ main :: () {
         if bar.x < 0 {
             bar.x = 0;
         }
-        if bar.x > WINDOW_WIDTH - bar.width {
-            bar.x = xx WINDOW_WIDTH - bar.width;
+        if bar.x > WindowWidth - bar.width {
+            bar.x = xx WindowWidth - bar.width;
         }
 
         if IsMouseButtonPressed(.left) {
@@ -374,12 +373,12 @@ main :: () {
         nextBall.y = ball.y + ball.velY * dt;
         
         // Collisions ball and walls
-        if nextBall.x < 0 || nextBall.x + nextBall.size > WINDOW_WIDTH {
+        if nextBall.x < 0 || nextBall.x + nextBall.size > WindowWidth {
             ball.velX = -ball.velX;
             PlaySound(soundBallBounce2);
         }
 
-        if nextBall.y < 0 || nextBall.y + nextBall.size > WINDOW_HEIGHT {
+        if nextBall.y < 0 || nextBall.y + nextBall.size > WindowHeight {
             ball.velY = -ball.velY;
             PlaySound(soundBallBounce2);
         }
@@ -421,9 +420,9 @@ main :: () {
         // Collision ball and bricks
         nextBallRect = nextBall.getRect();
 
-        for row in 0..BRICK_ROWS {
-            for col in 0..BRICK_COLS {
-                index := row * BRICK_COLS + col;
+        for row in 0..BrickRows {
+            for col in 0..BrickCols {
+                index := row * BrickCols + col;
                 brick := &bricks[index];
 
                 if brick.dead { continue; } // mehhhh
@@ -444,7 +443,7 @@ main :: () {
                 pickup := &pickups[i];
                 if !pickup.isShown { continue; }
 
-                pickupRect := Rectangle{pickup.x, pickup.y, PICKUP_SIZE, PICKUP_SIZE};
+                pickupRect := Rectangle{pickup.x, pickup.y, PickupSize, PickupSize};
 
                 if CheckCollisionRecs(barRect, pickupRect) {
                     handleOnPickup(pickup, &bar, &ball, &player, soundPickup);
@@ -467,16 +466,16 @@ main :: () {
 
                 // Reset and remove all powerup effects
                 player.hasFireballPowerup = false;
-                bar.width = INITIAL_BAR_WIDTH;
-                ball.velX = INITIAL_BALL_VELOCITY;
-                ball.velY = INITIAL_BALL_VELOCITY;
+                bar.width = InitialBarWidth;
+                ball.velX = InitialBallVelocity;
+                ball.velY = InitialBallVelocity;
             }
         }
 
         // Ball updates
         if player.isHoldingBall {
-            ball.x = bar.x + bar.width * 0.5 - BALL_SIZE * 0.5;
-            ball.y = bar.y - BALL_SIZE - 4;
+            ball.x = bar.x + bar.width * 0.5 - BallSize * 0.5;
+            ball.y = bar.y - BallSize - 4;
         } else {
             // Follow normal ball behaviour
             ball.x += ball.velX * dt;
@@ -528,19 +527,19 @@ main :: () {
                 continue;
             }
 
-            BORDER_THICKNESS :: 3;
+            BorderThickness :: 3;
             borderColor := b.color; 
             borderColor.a = 170;
 
-            borderRect := Rectangle{xx b.x, xx b.y, BRICK_WIDTH, BRICK_HEIGHT};
+            borderRect := Rectangle{xx b.x, xx b.y, BrickWidth, BrickHeight};
 
-            DrawRectangle(b.x + BORDER_THICKNESS, b.y + BORDER_THICKNESS, BRICK_WIDTH - 2 * BORDER_THICKNESS, BRICK_HEIGHT - 2 * BORDER_THICKNESS, b.color);
-            DrawRectangleLinesEx(borderRect, BORDER_THICKNESS, borderColor);
+            DrawRectangle(b.x + BorderThickness, b.y + BorderThickness, BrickWidth - 2 * BorderThickness, BrickHeight - 2 * BorderThickness, b.color);
+            DrawRectangleLinesEx(borderRect, BorderThickness, borderColor);
         }
 
         // Draw the ball
         {
-            ballColor := COLOR_WHITE;
+            ballColor := ColorWhite;
             if player.hasFireballPowerup {
                 ballColor = {255, 20, 20, 255};
             }
@@ -548,9 +547,9 @@ main :: () {
         }
         
         // Draw the bar
-        DrawRectangle(xx bar.x, xx bar.y, xx bar.width, xx bar.height, COLOR_WHITE);
+        DrawRectangle(xx bar.x, xx bar.y, xx bar.width, xx bar.height, ColorWhite);
 
-        // DrawFPS(WINDOW_WIDTH - 100, 16);
+        // DrawFPS(WindowWidth - 100, 16);
 
         // Draw lives
         for 0..player.lives {
@@ -562,7 +561,7 @@ main :: () {
 
         // Draw score
         scoreText := sprint("Score: %", player.score);
-        DrawText(scoreText.data, 105, 16, 24, COLOR_WHITE);
+        DrawText(scoreText.data, 105, 16, 24, ColorWhite);
         scoreText.free();
 
         // Draw the dead zone        
@@ -582,7 +581,7 @@ main :: () {
 }
 
 spawnPickup :: (ps: *PickupSpawner, pos: Vector2) {
-    index := GetRandomValue(0, xx PickupType.COUNT - 1);
+    index := GetRandomValue(0, xx PickupType.count - 1);
 
     pickup := Pickup{
         type: index as PickupType,
@@ -611,7 +610,7 @@ handleBrickCollision :: (game: *GameState, brick: *Brick) {
 
     // Play a particle effect
     pe := ParticleEmitter{
-        pos: {xx (brick.x + BRICK_WIDTH*0.5), xx (brick.y + BRICK_HEIGHT*0.5)},
+        pos: {xx (brick.x + BrickWidth*0.5), xx (brick.y + BrickHeight*0.5)},
         vel: {game.ball.velX * 0.3, game.ball.velY * 0.3},
         radius: 16,
         color: brick.color,
@@ -635,7 +634,7 @@ handleBrickCollision :: (game: *GameState, brick: *Brick) {
     }
 
     r := GetRandomValue(0, 100);
-    if r <= PICKUP_SPAWN_CHANCE {
+    if r <= PickupSpawnChance {
         spawnPickup(game.pickupSpawner, {xx brick.x, xx brick.y});
     }
 }
@@ -643,21 +642,21 @@ handleBrickCollision :: (game: *GameState, brick: *Brick) {
 handleOnPickup :: (pickup: *Pickup, bar: *Bar, ball: *Ball, player: *Player, pickup_sound: Sound) {
     pickup.isShown = false;
 
-    if pickup.type == .BallSpeedUp {
+    if pickup.type == .ballSpeedUp {
         ball.velX *= 1 + 0.2;
         ball.velY *= 1 + 0.2;
     }
-    else if pickup.type == .BallSlowDown {
+    else if pickup.type == .ballSlowDown {
         ball.velX *= 1 - 0.2;
         ball.velY *= 1 - 0.2;
     }
-    else if pickup.type == .BarWiden {
+    else if pickup.type == .barWiden {
         bar.width += 20;
     }
-    else if pickup.type == .BarShorten {
+    else if pickup.type == .barShorten {
         bar.width -= 20;
     }
-    else if pickup.type == .Fireball {
+    else if pickup.type == .fireball {
         player.hasFireballPowerup      = true;
         player.fireballPowerupDuration = 1500;
     }
@@ -675,7 +674,7 @@ updatePickupPositions :: (pickups: []Pickup) {
             p.y += p.velY * dt;
         }
 
-        if p.y > WINDOW_HEIGHT {
+        if p.y > WindowHeight {
             p.isShown = false;
         }
     }
@@ -722,7 +721,7 @@ bounceBall :: (ball: *Ball, b: Rectangle) {
 }
 
 degreeToRadians :: (deg: f32) -> f32 {
-    return deg * (PI / 180.0);
+    return deg * (Pi / 180.0);
 }
 
 lerp :: (a: f32, b: f32, t: f32) -> f32 {

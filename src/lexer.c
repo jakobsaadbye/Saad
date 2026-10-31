@@ -205,7 +205,10 @@ bool lex_file(Lexer *lexer) {
             // Keywords
             Pos pos_start = get_current_position(lexer);
             KeywordMatch keyword = match_keyword(lexer);
-            if (keyword.matched) {
+
+            // A word right after a '.' is a name, also when it is a keyword e.g TypeKind.int or .struct
+            bool after_dot = lexer->tokens.count > 0 && ((Token *)lexer->tokens.items)[lexer->tokens.count - 1].type == '.';
+            if (keyword.matched && !after_dot) {
                 eat_characters(lexer, keyword.length);
 
                 if (keyword.token == TOKEN_LITERAL_TRUE || keyword.token == TOKEN_LITERAL_FALSE) {

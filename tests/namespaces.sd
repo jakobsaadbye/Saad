@@ -14,9 +14,9 @@ main :: () {
         // 'use' brings in every public declaration
         a := Vec2{3, 4};
         assert(a.length2() == 25);
-        assert(add(a, ORIGIN) == a);
-        shape := Shape.Square;
-        assert(shape == .Square);
+        assert(add(a, Origin) == a);
+        shape := Shape.square;
+        assert(shape == .square);
 
         // A namespace can be spread over files in different folders, which share their private declarations
         assert(twice(5) == 10);
@@ -29,7 +29,7 @@ main :: () {
         p := geometry.Vec2{1, 2};
         q: geometry.Vec2 = geometry.add(p, p);
         assert(q.y == 4);
-        assert(geometry.Shape.Circle != geometry.Shape.Square);
+        assert(geometry.Shape.circle != geometry.Shape.square);
         b: geometry.Box<int> = {5};
         assert(b.value == 5);
 

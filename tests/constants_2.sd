@@ -18,9 +18,9 @@ Color :: struct {
 }
 
 EntityKind :: enum {
-    Human,
-    Monster,
-    Door,
+    human,
+    monster,
+    door,
 }
 
 AnimationFrame :: struct {
@@ -63,7 +63,7 @@ main :: () {
     }
     {
         Alex :: Entity{
-            kind: .Monster,
+            kind: .monster,
             name: "Alex the great",
             position: {1, 2, 3},
             animationFrames: [

@@ -5,7 +5,7 @@ Vec2 :: struct {
     y: int;
 }
 
-Color :: enum { Red, Green }
+Color :: enum { red, green }
 
 Sprite :: struct {
     name:   string;
@@ -30,9 +30,9 @@ main :: () {
     assert(makeVec(1, 2) == a);
     assert(makeVec(3, 4) != makeVec(3, 5));
 
-    root := Sprite{"root", {0, 0}, 1.0, .Red, false, null};
-    s1 := Sprite{"player", {3, 4}, 2.5, .Green, false, &root};
-    s2 := Sprite{"player", {3, 4}, 2.5, .Green, false, &root};
+    root := Sprite{"root", {0, 0}, 1.0, .red, false, null};
+    s1 := Sprite{"player", {3, 4}, 2.5, .green, false, &root};
+    s2 := Sprite{"player", {3, 4}, 2.5, .green, false, &root};
     assert(s1 == s2);
 
     s2.name = "enemy";

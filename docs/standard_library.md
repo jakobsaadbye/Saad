@@ -28,7 +28,7 @@ get the prelude, as the prelude is built on them.
 ```odin
 fmt.print("% is % years old", name, age);          // with a newline
 fmt.print("no newline", newline: false);
-sb := fmt.NewStringBuilder(64);
+sb := fmt.newStringBuilder(64);
 sb.add("% + % = %", 1, 2, 3);
 text := sb.toString();
 ```
@@ -67,7 +67,7 @@ fmt.print("took % ms", watch.milliseconds());   // also seconds() and restart()
 A seeded xorshift64* generator. Fast and good for games and simulations, not for security.
 
 ```odin
-rng := random.NewRandom(time.unix() as u64);   // the same seed gives the same numbers
+rng := random.newRandom(time.unix() as u64);   // the same seed gives the same numbers
 dice := rng.nextInt(1, 7);          // 1 to 6
 f := rng.nextFloat();               // from 0 up to but not including 1
 coin := rng.nextBool();
@@ -101,5 +101,5 @@ slices.swap(xs, 0, 1);
 * `os.args()` for the command line arguments (needs support in the runtime).
 * `strings` with `contains`, `trim`, `replace`, `join` and a `parseInt`/`parseFloat`.
 * `os.listDir` and `os.makeDir`, and a `path` namespace (`join`, `extension`, `directory`).
-* `math` functions of its own: `PI`, `clamp`, `lerp`, `min`/`max`, vectors.
+* `math` functions of its own: `Pi`, `clamp`, `lerp`, `min`/`max`, vectors.
 * `json`, `hash` (e.g fnv1a, crc32) and `threads` (a portable layer over `os.windows`).

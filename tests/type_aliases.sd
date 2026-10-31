@@ -12,7 +12,7 @@ List :: struct <T> {
     }
 }
 
-Color :: enum { Red, Green, Blue }
+Color :: enum { red, green, blue }
 Point :: struct { x: int; y: int; }
 
 Byte     :: u8;
@@ -81,9 +81,9 @@ main :: () {
     q: Point = pt;
     assert(q.y == 2);
 
-    h: Hue = .Green;
-    assert(h == Color.Green);
-    assert(Hue.Blue == Color.Blue);
+    h: Hue = .green;
+    assert(h == Color.green);
+    assert(Hue.blue == Color.blue);
 
     t: Text = "hi";
     assert(t == "hi");
