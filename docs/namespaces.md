@@ -26,7 +26,7 @@ imports or names are parsed.
 ## Imports
 
 ```odin
-import fmt;                 // fmt.Print("%", x)
+import fmt;                 // fmt.print("%", x)
 import math as m;           // m.sin(x), m.Vec2
 import math.sin;            // a single declaration: sin(x)
 import math.cos as cosine;  // a single declaration with another name

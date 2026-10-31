@@ -1,3 +1,5 @@
+use fmt;
+
 main :: () {
     // In Saad, all arrays are like slices like in Go. They store a pointer to the data
     // and the length. which both can be accessed through .data and .count.

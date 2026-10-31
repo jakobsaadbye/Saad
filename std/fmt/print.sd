@@ -4,7 +4,7 @@ use c; // printf
 
 PLACEHOLDER_CHARACTER :: 37;  // '%'
 
-Print :: (format: string, args: ...any, newline := true) {
+print :: (format: string, args: ...any, newline := true) {
     // Scan the format string to find all the placeholders
     placeholderIndicies: [..]int;
     for c, i in format {

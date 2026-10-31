@@ -2,6 +2,8 @@
 // They are mostly treated as integers and we don't go out of our way to check
 // that values assigned to enums are one of its options
 
+use fmt;
+
 CardValue :: enum {
     joker = 0,
     ace,        // 'ace' will have value 1

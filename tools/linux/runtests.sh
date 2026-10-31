@@ -15,7 +15,7 @@ bash ./build.sh > /dev/null || exit 1
 RED=$'\e[31m'; GREEN=$'\e[32m'; RESET=$'\e[0m'
 passed=0; failed=0
 
-for f in tests/*.sd; do
+for f in tests/*.sd tests/std/*.sd tests/backend/*.sd; do
     printf "%-56s " "$f"
     if ! output=$(./bin/saad build "$f" 2>&1); then
         echo "${RED}COMPILE ERROR${RESET}"
@@ -23,7 +23,7 @@ for f in tests/*.sd; do
         failed=$((failed + 1))
         continue
     fi
-    if output=$("$HERE/run.sh" "tests/build/out.asm" 2>&1); then
+    if output=$("$HERE/run.sh" "$(dirname "$f")/build/out.asm" 2>&1); then
         echo "${GREEN}OK${RESET}"
         passed=$((passed + 1))
     else

@@ -28,7 +28,7 @@ sleep :: (milliseconds: int) {
 //
 //     watch := time.startStopwatch();
 //     ...
-//     fmt.Print("Took % ms", watch.milliseconds());
+//     fmt.print("Took % ms", watch.milliseconds());
 Stopwatch :: struct {
     start: f64;
 }

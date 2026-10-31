@@ -19,7 +19,6 @@ AstIf           *parse_if(Parser *parser);
 AstFor          *parse_for(Parser *parser);
 AstWhile        *parse_while(Parser *parser);
 AstCast         *parse_auto_cast(Parser *parser);
-AstPrint        *parse_print(Parser *parser);
 AstAssert       *parse_assert(Parser *parser);
 AstNew          *parse_new(Parser *parser);
 AstTypeof       *parse_typeof(Parser *parser);
@@ -742,12 +741,6 @@ Ast *parse_statement(Parser *parser) {
         boc->token              = token;
 
         stmt = (Ast *)boc;
-        statement_ends_with_semicolon = true;
-        matched_a_statement = true;
-    }
-
-    else if (token.type == TOKEN_PRINT) {
-        stmt = (Ast *)(parse_print(parser));
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
     }
@@ -2915,57 +2908,6 @@ AstAssert *parse_assert(Parser *parser) {
     return assertion;
 }
 
-AstPrint *parse_print(Parser *parser) {
-    Token start_token = peek_next_token(parser);
-    expect(parser, start_token, TOKEN_PRINT);
-    eat_token(parser);
-
-    Token next = peek_next_token(parser);
-    expect(parser, next, '(');
-    eat_token(parser);
-
-    AstPrint *print = (AstPrint *)(ast_allocate(parser, sizeof(AstPrint)));
-    print->arguments = da_init(4, sizeof(AstExpr *));
-
-    // @Copy-n-Paste from parse_function_call
-    bool first_argument_seen = false;
-    while (true) {
-        //
-        // Parse argument list
-        //
-        next = peek_next_token(parser);
-        if (next.type == ')' || next.type == TOKEN_END) {
-            break;
-        }
-
-        if (first_argument_seen) {
-            if (next.type != ',') {
-                report_error_token(parser, LABEL_ERROR, next, "Expected a ',' between arguments");
-                exit(1);    
-            }
-            eat_token(parser);
-            next = peek_next_token(parser);
-        }
-
-        AstExpr *arg = parse_expression(parser, MIN_PRECEDENCE);
-        if (!arg) return NULL;
-
-        da_append(&print->arguments, arg);
-        first_argument_seen = true;
-    }
-
-    next = peek_next_token(parser);
-    expect(parser, next, ')');
-    eat_token(parser);
-    
-    print->head.kind  = AST_PRINT;
-    print->head.file  = parser->current_file;
-    print->head.start = start_token.start;
-    print->head.end   = next.end;
-
-    return print;
-}
-
 bool parse_expression_list(Parser *parser, DynamicArray *exprs) {
     Token next = {0};
     while (true) {
@@ -3733,6 +3675,12 @@ bool is_assignment_operator(Token token) {
     if (token.type == TOKEN_MINUS_EQUAL)  return true;
     if (token.type == TOKEN_TIMES_EQUAL)  return true;
     if (token.type == TOKEN_DIVIDE_EQUAL) return true;
+    if (token.type == TOKEN_MODULO_EQUAL) return true;
+    if (token.type == TOKEN_XOR_EQUAL)    return true;
+    if (token.type == TOKEN_OR_EQUAL)     return true;
+    if (token.type == TOKEN_AND_EQUAL)    return true;
+    if (token.type == TOKEN_SHIFT_LEFT_EQUAL)  return true;
+    if (token.type == TOKEN_SHIFT_RIGHT_EQUAL) return true;
     return false;
 }
 

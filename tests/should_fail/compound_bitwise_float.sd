@@ -1,0 +1,6 @@
+// expect-error: Operator '^=' is only allowed for integer types
+
+main :: () {
+    f := 1.5;
+    f ^= 2.0;
+}

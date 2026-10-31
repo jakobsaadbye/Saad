@@ -617,12 +617,6 @@ static int string_data_global(Lowerer *L, const char *raw, int raw_len, int *out
     return data->index;
 }
 
-// NUL terminated character data used as is (no escape sequences)
-static int string_data_global_cstr(Lowerer *L, const char *text) {
-    IrGlobal *data = ir_global_data(L->module, "str", text, (int) strlen(text) + 1, 1, true);
-    return data->index;
-}
-
 // Creates a global holding a Saad 'string' value ({ data: *u8, len: i64 }) for a literal
 static int string_global(Lowerer *L, const char *raw, int raw_len) {
     int len = 0;
@@ -802,7 +796,6 @@ static int   lower_scalar_as(Lowerer *L, AstExpr *expr, Type *target);
 static void  lower_condition(Lowerer *L, AstExpr *expr, IrBlock *on_true, IrBlock *on_false);
 static void  lower_block(Lowerer *L, AstBlock *block);
 static void  lower_statement(Lowerer *L, Ast *stmt);
-static void  lower_print(Lowerer *L, AstPrint *print);
 static int   string_global_raw(Lowerer *L, const char *text);
 static void  store_expr(Lowerer *L, IrAddr dst, Type *dst_type, AstExpr *expr, bool dst_is_fresh);
 static Value lower_call(Lowerer *L, AstFunctionCall *call, int *ret_slots, int max_ret_slots);
@@ -1735,119 +1728,6 @@ static Value unbox_any(Lowerer *L, Value any, Type *to) {
     return value_place(addr_vreg(data, 0), to);
 }
 
-typedef IrArray(int) VregList;
-
-// Appends the printf format for one value and its arguments (structs expand to one argument per member)
-static void print_value(Lowerer *L, StringBuilder *format, VregList *args, Value value, Type *type, Ast *site) {
-    switch (type->kind) {
-    case TYPE_BOOL: {
-        int cond = value_to_scalar(L, value);
-        int true_str  = emit_global_addr(L, string_data_global_cstr(L, "true"));
-        int false_str = emit_global_addr(L, string_data_global_cstr(L, "false"));
-        sb_append(format, "%%s");
-        int arg = emit_select(L, cond, true_str, false_str);
-        ir_array_push(*args, arg);
-        return;
-    }
-    case TYPE_INTEGER: {
-        int v = value_to_scalar(L, value);
-        if (!type_is_untyped_int(type) && ((TypePrimitive *) type)->kind == PRIMITIVE_CHAR) {
-            sb_append(format, "%%c");
-            ir_array_push(*args, convert_scalar(L, v, type, primitive_type(PRIMITIVE_U32)));
-            return;
-        }
-        bool is_signed = type_is_signed(type);
-        sb_append(format, is_signed ? "%%lld" : "%%llu");
-        ir_array_push(*args, convert_scalar(L, v, type, primitive_type(is_signed ? PRIMITIVE_I64 : PRIMITIVE_U64)));
-        return;
-    }
-    case TYPE_FLOAT: {
-        int v = value_to_scalar(L, value);
-        sb_append(format, "%%f");
-        if (ir_vreg_type(L->func, v) == IR_F32) v = emit_unop(L, IR_FPEXT, IR_F64, v);
-        ir_array_push(*args, v);
-        return;
-    }
-    case TYPE_STRING: {
-        // Saad strings are not NUL terminated, so print them with an explicit length
-        Value str = value_to_place(L, value);
-        sb_append(format, "%%.*s");
-        int len = emit_load(L, IR_I64, addr_add(str.addr, 8));
-        ir_array_push(*args, emit_unop(L, IR_TRUNC, IR_I32, len));
-        ir_array_push(*args, emit_load(L, IR_PTR, str.addr));
-        return;
-    }
-    case TYPE_ENUM: {
-        int name = enum_value_name(L, value_to_scalar(L, value), (TypeEnum *) type);
-        sb_append(format, "%%.*s");
-        ir_array_push(*args, emit_unop(L, IR_TRUNC, IR_I32, emit_load(L, IR_I64, addr_vreg(name, 8))));
-        ir_array_push(*args, emit_load(L, IR_PTR, addr_vreg(name, 0)));
-        return;
-    }
-    case TYPE_POINTER:
-    case TYPE_FUNCTION:
-        sb_append(format, "0x%%p");
-        ir_array_push(*args, value_to_scalar(L, value));
-        return;
-    case TYPE_ARRAY:
-    case TYPE_ANY:
-        sb_append(format, "0x%%p");
-        ir_array_push(*args, addr_to_ptr(L, value_to_place(L, value).addr));
-        return;
-    case TYPE_STRUCT: {
-        TypeStruct *struct_type = (TypeStruct *) type;
-        Value place = value_to_place(L, value);
-        DynamicArray members = struct_type->node->members->identifiers;
-        sb_append(format, "%s{ ", struct_type->identifier->name);
-        bool first = true;
-        for (int i = 0; i < members.count; i++) {
-            AstIdentifier *member = da_get_deref(members, i);
-            if (member->flags & IDENTIFIER_IS_CONSTANT) continue;
-            if (!first) sb_append(format, ", ");
-            first = false;
-            sb_append(format, "%s = ", member->name);
-            print_value(L, format, args, value_place(addr_add(place.addr, member->member_offset), member->type), member->type, site);
-        }
-        sb_append(format, " }");
-        return;
-    }
-    default:
-        lower_fail(L, site, "Not implemented in the IR backend yet: printing values of type %s", type_to_str(type));
-    }
-}
-
-static void lower_print(Lowerer *L, AstPrint *print) {
-    AstLiteral *format_lit = da_get_deref(print->arguments, 0);
-    const char *text = format_lit->as.value.string.data;
-    int text_len = (int) format_lit->as.value.string.length;
-
-    StringBuilder format = sb_init(64);
-    VregList args = {0};
-
-    int arg_index = 1;
-    for (int i = 0; i < text_len; i++) {
-        if (text[i] == '%' && arg_index < print->arguments.count) {
-            AstExpr *arg = da_get_deref(print->arguments, arg_index++);
-            print_value(L, &format, &args, lower_expr(L, arg), arg->type, (Ast *) arg);
-        } else {
-            char c[2] = { text[i], 0 };
-            sb_append(&format, "%s", c);
-        }
-    }
-
-    int len = 0;
-    int format_global = string_data_global(L, format.buffer, (int) format.cursor, &len);
-
-    int callee = ir_find_or_add_extern(L->module, "printf");
-    IrCall *call = new_call(L, IR_CALLEE_DIRECT, callee, IR_I32, args.count + 1);
-    call_add_arg(call, emit_global_addr(L, format_global), false);
-    for (int i = 0; i < args.count; i++) call_add_arg(call, args.items[i], true);
-    emit_call(L, call);
-
-    sb_free(&format);
-    free(args.items);
-}
-
 //////////////////////////////////////////////////////////////////////////////////////////
 // Calls
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -2187,6 +2067,12 @@ static void lower_assignment(Lowerer *L, AstAssignment *assign) {
     case ASSIGN_MINUS_EQUAL:  op = '-'; break;
     case ASSIGN_TIMES_EQUAL:  op = '*'; break;
     case ASSIGN_DIVIDE_EQUAL: op = '/'; break;
+    case ASSIGN_MODULO_EQUAL: op = '%'; break;
+    case ASSIGN_XOR_EQUAL:    op = '^'; break;
+    case ASSIGN_OR_EQUAL:     op = '|'; break;
+    case ASSIGN_AND_EQUAL:    op = '&'; break;
+    case ASSIGN_SHIFT_LEFT_EQUAL:  op = TOKEN_BITWISE_SHIFT_LEFT;  break;
+    case ASSIGN_SHIFT_RIGHT_EQUAL: op = TOKEN_BITWISE_SHIFT_RIGHT; break;
     default: LOWER_NOT_IMPLEMENTED(L, assign, "this assignment operator");
     }
 
@@ -2477,7 +2363,6 @@ static void lower_statement(Lowerer *L, Ast *stmt) {
     case AST_SEMICOLON_EXPR:
         return;
 
-    case AST_PRINT:         lower_print(L, (AstPrint *) stmt); return;
     default:
         lower_fail(L, stmt, "Not implemented in the IR backend yet: statement '%s'", ast_to_str(stmt));
     }

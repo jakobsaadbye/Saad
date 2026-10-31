@@ -25,7 +25,7 @@ main :: () {
         numbers.add(5);
     
         for v in numbers {
-            print("v = %\n", v);
+            print("v = %", v);
         }
     
         assert(numbers.count == 5);
@@ -42,7 +42,7 @@ main :: () {
         verticies.add({9, 10});
 
         for v in verticies {
-            print("v = %\n", v);
+            print("v = %", v);
         }
     }
     {
@@ -53,7 +53,7 @@ main :: () {
         arr.add(start);
 
         for v in arr {
-            Print("%", v);
+            print("%", v);
         }
     }
     {
@@ -67,7 +67,7 @@ main :: () {
         fruits.add(.orange);
 
         for v in fruits {
-            print("v = %\n", v);
+            print("v = %", v);
         }
     }
     

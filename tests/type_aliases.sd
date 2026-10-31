@@ -1,5 +1,7 @@
 // Type aliases e.g Byte :: u8; An alias is the same type as the type it names
 
+use fmt;
+
 List :: struct <T> {
     elements: [..]T;
     count: int;
@@ -93,7 +95,7 @@ main :: () {
     later: Later = 3;
     assert(typeof(later) == "i16");
     // Aliases are transparent, so the printed type name is the aliased one
-    print("%\n", pt);
+    print("%", pt);
 }
 
 Later :: i16;

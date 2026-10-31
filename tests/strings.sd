@@ -1,3 +1,5 @@
+use fmt;
+
 main :: () {
 
     
@@ -18,7 +20,7 @@ main :: () {
         // Indexing into strings
         text := "May the God of hope fill you with all joy and peace as you trust in him, so that you may overflow with hope by the power of the Holy Spirit.";
         d := text[3];
-        print("%\n", d);
+        print("%", d);
     }
     if true {
         // Comparing strings

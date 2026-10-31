@@ -4,6 +4,24 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.5.2 - 31. Oct 2026
+
+* BREAKING: The builtin `print` is removed. Use `fmt.print`, which was called `fmt.Print`. It adds a newline,
+  unless `newline: false` is given.
+
+```odin
+use fmt;
+
+main :: () {
+    print("% + % = %", 1, 2, 3);
+    print("no newline", newline: false);
+}
+```
+
+* The compound assignment operators `%=`, `^=`, `|=`, `&=`, `<<=` and `>>=`
+* `fmt.print` prints the smallest `i64` correctly
+* The tests of the standard library are in `tests/std/` and the tests of the backend in `tests/backend/`
+
 ## Update v0.5.1 - 31. Oct 2026
 
 * The standard library is sorted into folders, so the top of `std/` stays clean. See `docs/standard_library.md`.

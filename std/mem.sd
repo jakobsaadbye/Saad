@@ -1,6 +1,7 @@
 namespace mem;
 
 use c;
+import fmt;
 
 Kilobyte :: 1024;
 Megabyte :: 1048576;
@@ -68,7 +69,7 @@ clear :: method (arena: *Arena) {
 NewChunk :: (oldChunk: *Chunk, capacity: int) -> *Chunk {
     newChunk: *Chunk = malloc(sizeof(Chunk));
     if (newChunk == null) {
-        print("Failed to allocate a new chunk of memory for the arena");
+        fmt.print("Failed to allocate a new chunk of memory for the arena");
         exit(1);
     }
 

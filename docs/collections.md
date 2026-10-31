@@ -81,7 +81,7 @@ a := ages["alice"];        // Asserts that the key is there
 b := ages.get("dave", 0);  // With a fallback
 c, ok := ages.tryGet("dave");
 counts[word] += 1;         // A missing key starts at the zero value
-for name, age in ages { print("% is %\n", name, age); }
+for name, age in ages { print("% is %", name, age); }
 for *entry in ages { entry.value += 1; }   // To change the values
 ```
 

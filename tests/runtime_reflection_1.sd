@@ -27,35 +27,35 @@ Entity :: struct {
 }
 
 main :: () {
-    print("-------------------- Primitive types ----------------\n");
+    print("-------------------- Primitive types ----------------");
     if true {
         x: any = 5 as u8;
         assert(x.type.kind == .Int);
         
         type := x.type as *TypePrimitive;
-        Print("TypePrimitive = %", *type);
+        print("TypePrimitive = %", *type);
     }
-    print("\n-------------------- Array type ----------------\n");
+    print("\n-------------------- Array type ----------------");
     if true {
         x: any = [1, 2, 3];
 
         assert(x.type.kind == .Array);
 
         type := x.type as *TypeArray;
-        Print("TypeArray = %\n", *type);
-        Print("ElemType  = %\n", *type.elemType);
+        print("TypeArray = %", *type);
+        print("ElemType  = %", *type.elemType);
     }
-    print("\n-------------------- Enum type ----------------\n");
+    print("\n-------------------- Enum type ----------------");
     if true {
         x: any = Fruit.Watermelon;
 
         assert(x.type.kind == .Enum);
 
         type := x.type as *TypeEnum;
-        Print("TypeEnum = %\n", *type);
-        Print("BackingType = %\n", *type.backingType);
+        print("TypeEnum = %", *type);
+        print("BackingType = %", *type.backingType);
     }
-    print("\n-------------------- Struct type ----------------\n");
+    print("\n-------------------- Struct type ----------------");
     if true {
         x: any = Entity{
             kind: .Human,
@@ -67,10 +67,10 @@ main :: () {
         assert(x.type.kind == .Struct);
         printStructType(x.type as *TypeStruct);
     }
-    print("\n-------------------- Changing types at runtime ----------------\n");
+    print("\n-------------------- Changing types at runtime ----------------");
     if true {
         x: any = 5;
-        Print("%\n", *x.type);
+        print("%", *x.type);
         assert(x.type.kind == .Int);
 
         x = Vector3{1, 4, 9};
@@ -89,9 +89,9 @@ main :: () {
 }
 
 printStructType :: (structType: *TypeStruct) {
-    Print("% :: struct {\n", structType.head.name);
+    print("% :: struct {", structType.head.name);
     for member in structType.members {
-        Print("\t%: %;\n", member.name, member.type.name);
+        print("\t%: %;", member.name, member.type.name);
     }
-    Print("}\n");
+    print("}");
 }
