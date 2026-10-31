@@ -19,12 +19,6 @@ switch score {
 switch name {
     case "alice" { ... }             // anything that can be compared with ==
 }
-
-switch {                             // no value: each case is a condition, like a chain of if else
-    case x < 0  { ... }
-    case x == 0 { ... }
-    else        { ... }
-}
 ```
 
 * Each `case` has one value and goes on its own line. Cases on the lines right after each other share the block
@@ -33,12 +27,40 @@ switch {                             // no value: each case is a condition, like
   are for the loop around the switch.
 * The value is evaluated once.
 * `else` must be the last case.
+* A switch always has a value to switch on. Use `if` and `else` for conditions.
 * A switch on an enum without an `else` must handle every value of the enum. The compiler lists the ones
   that are missing.
 * A value that is handled twice is an error.
 
+### Switch expressions
+
+A switch can give a value. Each case has a `=>` and the value, and ends with `;`:
+
+```odin
+choice := switch x {
+    case 1 => "icecream";
+    case 2 => "coffee";
+    else   => "mango";
+};
+
+area :: (s: Shape) -> f32 {
+    return switch v in s {
+        case .circle => Pi * v.radius * v.radius;
+        case .rect   => v.w * v.h;
+        case .empty  => 0;
+    };
+}
+```
+
+* Every case gives a value of the same type: the type that is wanted, e.g `big: i64 = switch ...`, or else the
+  type of the first case.
+* It must have a value for every value it switches on, so it needs an `else`, unless it handles every value of
+  an enum or every variant of a union.
+* Cases right after each other share the value of the last one, like in a switch statement.
+
 The typer turns a switch into a hidden local with the value and a chain of ifs (`check_switch()`), which is
-what is lowered.
+what is lowered. In a switch expression, each case stores its value (`AstSwitchArm`) in a slot that is the
+value of the switch.
 
 ## Unions
 

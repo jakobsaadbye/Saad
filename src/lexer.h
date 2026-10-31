@@ -76,6 +76,7 @@ typedef enum TokenType {
     TOKEN_SWITCH       = 178,
     TOKEN_CASE         = 179,
     TOKEN_UNION        = 250,
+    TOKEN_FAT_ARROW    = 251, // => in a switch expression
 
     TOKEN_DOUBLE_COLON = 150,
     TOKEN_COLON_EQUAL  = 151,

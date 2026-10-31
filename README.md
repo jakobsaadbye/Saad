@@ -21,13 +21,15 @@ switch score {
     else          { ... }
 }
 
-switch {
-    case x < 0 { ... }
-    else       { ... }
-}
+choice := switch x {
+    case 1 => "icecream";
+    case 2 => "coffee";
+    else   => "mango";
+};
 ```
 
-A switch on an enum or union without an `else` must handle every value. There is no fallthrough.
+A switch on an enum or union without an `else` must handle every value. There is no fallthrough. A switch
+always has a value to switch on, as `if` and `else` are for conditions.
 
 * Tagged unions
 

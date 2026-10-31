@@ -112,6 +112,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_SWITCH:                return "switch";
         case TOKEN_CASE:                  return "case";
         case TOKEN_UNION:                 return "union";
+        case TOKEN_FAT_ARROW:             return "=>";
         case TOKEN_END:                   return "END";
     }
 
@@ -621,6 +622,7 @@ TokenType is_double_character_token(Lexer *lexer) {
     if (c == ':' && next == '=') return TOKEN_COLON_EQUAL;
     if (c == ':' && next == ':') return TOKEN_DOUBLE_COLON;
     if (c == '-' && next == '>') return TOKEN_RIGHT_ARROW;
+    if (c == '=' && next == '>') return TOKEN_FAT_ARROW;
     if (c == '.' && next == '.') return TOKEN_DOUBLE_DOT;
     if (c == '+' && next == '=') return TOKEN_PLUS_EQUAL;
     if (c == '-' && next == '=') return TOKEN_MINUS_EQUAL;

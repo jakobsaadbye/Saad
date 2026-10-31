@@ -1,4 +1,4 @@
-// switch on values, ranges, strings and conditions
+// switch on values, ranges and strings, and switch expressions
 
 Status :: enum { open, closed, locked }
 
@@ -23,13 +23,13 @@ grade :: (score: int) -> string {
     return "";
 }
 
-sign :: (x: f64) -> int {
-    switch {
-        case x < 0.0  { return -1; }
-        case x == 0.0 { return 0; }
-        else          { return 1; }
-    }
-    return 9;
+// A switch expression gives the value of the case that matches
+size :: (s: Status) -> int {
+    return switch s {
+        case .open   => 1;
+        case .closed
+        case .locked => 2;
+    };
 }
 
 next :: (n: *int) -> int {
@@ -46,7 +46,46 @@ main :: () {
     assert(grade(0) == "none" && grade(-1) == "none");
     assert(grade(50) == "C" && grade(101) == "C");
 
-    assert(sign(-2.5) == -1 && sign(0.0) == 0 && sign(3.0) == 1);
+    {
+        // Switch expressions
+        assert(size(.open) == 1 && size(.locked) == 2);
+
+        choices: [..]string;
+        for x in 0..4 {
+            choice := switch x {
+                case 1 => "icecream";
+                case 2 => "coffee";
+                else   => "mango";
+            };
+            choices.add(choice);
+        }
+        assert(choices[0] == "mango" && choices[1] == "icecream" && choices[2] == "coffee" && choices[3] == "mango");
+
+        // The wanted type is the type of the switch
+        big: i64 = switch choices.count {
+            case 4 => 5000000000;
+            else   => 0;
+        };
+        assert(big == 5000000000);
+
+        // Ranges, and a switch inside a case
+        letter := switch 85 {
+            case 90...100 => "A";
+            case 80..90   => switch 1 {
+                case 1 => "B";
+                else   => "?";
+            };
+            else          => "C";
+        };
+        assert(letter == "B");
+
+        // In an expression
+        doubled := 2 * switch Status.closed {
+            case .open => 10;
+            else       => 20;
+        };
+        assert(doubled == 40);
+    }
 
     {
         // Strings

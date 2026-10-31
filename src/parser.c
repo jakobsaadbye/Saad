@@ -42,7 +42,7 @@ TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_data, char *struct_name);
 bool            generate_and_add_import(Parser *parser, char *name, char *resolved_path);
 AstStructLiteral *parse_struct_literal_body(Parser *parser, Type *explicit_type, Token start_token, TokenType open, TokenType close);
-AstSwitch *parse_switch(Parser *parser);
+AstSwitch *parse_switch(Parser *parser, bool is_expression);
 bool make_union_kind(Parser *parser, AstStruct *union_defn, AstBlock *members, Token union_token);
 TypeEnum *make_enum_type(Parser *parser, AstEnum *ast_enum, AstIdentifier *ident);
 AstDeclaration *add_union_member(Parser *parser, AstIdentifier *ident, Type *type);
@@ -897,7 +897,7 @@ Ast *parse_statement(Parser *parser) {
     }
 
     else if (token.type == TOKEN_SWITCH) {
-        stmt = (Ast *)(parse_switch(parser));
+        stmt = (Ast *)(parse_switch(parser, false));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
@@ -2943,14 +2943,14 @@ bool starts_line(Parser *parser) {
     return peek_token(parser, -1).end.line < peek_next_token(parser).start.line;
 }
 
-AstSwitch *parse_switch(Parser *parser) {
+AstSwitch *parse_switch(Parser *parser, bool is_expression) {
     Token switch_token = peek_next_token(parser);
     eat_token(parser);
 
     AstSwitch *ast_switch  = ast_allocate(parser, sizeof(AstSwitch));
-    ast_switch->head.kind  = AST_SWITCH;
-    ast_switch->head.file  = parser->current_file;
-    ast_switch->head.start = switch_token.start;
+    ast_switch->head.head.kind  = AST_SWITCH;
+    ast_switch->head.head.file  = parser->current_file;
+    ast_switch->head.head.start = switch_token.start;
     ast_switch->cases      = da_init(4, sizeof(AstCase *));
 
     // switch v in shape {
@@ -2960,15 +2960,17 @@ AstSwitch *parse_switch(Parser *parser) {
         eat_token(parser);
     }
 
-    if (peek_next_token(parser).type != '{') {
-        parser->inside_statement_header = true;
-        ast_switch->subject = parse_expression(parser, MIN_PRECEDENCE);
-        parser->inside_statement_header = false;
-        if (!ast_switch->subject) return NULL;
-    } else if (ast_switch->binding.type != TOKEN_NONE) {
-        report_error_token(parser, LABEL_ERROR, peek_next_token(parser), "Expected the value to switch on after 'in'");
+    ast_switch->is_expression = is_expression;
+
+    if (peek_next_token(parser).type == '{') {
+        report_error_token(parser, LABEL_ERROR, switch_token, "A switch needs a value to switch on");
+        report_error_ast(parser, LABEL_HINT, NULL, "Use if and else for conditions");
         return NULL;
     }
+    parser->inside_statement_header = true;
+    ast_switch->subject = parse_expression(parser, MIN_PRECEDENCE);
+    parser->inside_statement_header = false;
+    if (!ast_switch->subject) return NULL;
 
     Token open = peek_next_token(parser);
     expect(parser, open, '{');
@@ -2978,7 +2980,7 @@ AstSwitch *parse_switch(Parser *parser) {
         Token next = peek_next_token(parser);
         if (next.type == '}') {
             eat_token(parser);
-            ast_switch->head.end = next.end;
+            ast_switch->head.head.end = next.end;
             break;
         }
 
@@ -3027,8 +3029,45 @@ AstSwitch *parse_switch(Parser *parser) {
             return NULL;
         }
 
-        ast_case->block = parse_block(parser, NULL);
-        if (!ast_case->block) return NULL;
+        if (is_expression) {
+            // case 1 => "icecream";
+            Token arrow = peek_next_token(parser);
+            if (arrow.type != TOKEN_FAT_ARROW) {
+                report_error_token(parser, LABEL_ERROR, arrow, "Expected a '=>' and the value of the case");
+                report_error_ast(parser, LABEL_HINT, NULL, "e.g choice := switch x { case 1 => \"icecream\"; else => \"mango\"; }");
+                return NULL;
+            }
+            eat_token(parser);
+
+            AstExpr *value = parse_expression(parser, MIN_PRECEDENCE);
+            if (!value) return NULL;
+
+            Token semicolon = peek_next_token(parser);
+            expect(parser, semicolon, ';');
+            eat_token(parser);
+
+            AstSwitchArm *arm = ast_allocate(parser, sizeof(AstSwitchArm));
+            arm->head.kind  = AST_SWITCH_ARM;
+            arm->head.file  = parser->current_file;
+            arm->head.start = value->head.start;
+            arm->head.end   = value->head.end;
+            arm->value      = value;
+            arm->owner      = ast_switch;
+
+            ast_case->block = new_block(parser, BLOCK_IMPERATIVE);
+            ast_case->block->head.start = arrow.start;
+            ast_case->block->head.end   = semicolon.end;
+            da_append(&ast_case->block->statements, arm);
+            close_block(parser);
+        } else {
+            if (peek_next_token(parser).type == TOKEN_FAT_ARROW) {
+                report_error_token(parser, LABEL_ERROR, peek_next_token(parser), "Only a switch that gives a value has '=>' cases");
+                report_error_ast(parser, LABEL_HINT, NULL, "Give the case a block e.g case 1 { ... }, or use the value e.g x := switch y { case 1 => ...; }");
+                return NULL;
+            }
+            ast_case->block = parse_block(parser, NULL);
+            if (!ast_case->block) return NULL;
+        }
         ast_case->head.end = ast_case->block->head.end;
         da_append(&ast_switch->cases, ast_case);
     }
@@ -3750,6 +3789,13 @@ AstExpr *parse_leaf(Parser *parser) {
         literal->identifier      = make_identifier_from_token(parser, name, NULL);
         literal->explicit_type   = (Type *)enum_type;
         return (AstExpr *)literal;
+    }
+
+    // choice := switch x { case 1 => "icecream"; else => "mango"; }
+    if (t.type == TOKEN_SWITCH) {
+        AstSwitch *ast_switch = parse_switch(parser, true);
+        if (!ast_switch) return NULL;
+        return (AstExpr *)ast_switch;
     }
 
     if (starts_struct_literal(parser)) {

@@ -1975,6 +1975,17 @@ static Value lower_expr(Lowerer *L, AstExpr *expr) {
     }
     case AST_SEMICOLON_EXPR:
         return value_none();
+    case AST_SWITCH: {
+        // A switch expression: the cases store their value in a slot, which is the value of the switch
+        AstSwitch *sw = (AstSwitch *) expr;
+        Type *type = sw->result_type;
+        int size = type_storage_size(type);
+        int slot = ir_new_slot(L->func, size > 0 ? size : 1, type_alignment(type), "switch value");
+        emit_zero(L, addr_slot(slot, 0), size);
+        sw->result_slot = slot;
+        lower_block(L, sw->lowered);
+        return value_place(addr_slot(slot, 0), type);
+    }
     case AST_TYPEOF: {
         // typeof gives the name of the static type as a string
         char *name = type_to_str(((AstTypeof *) expr)->expr->type);
@@ -2388,6 +2399,12 @@ static void lower_statement(Lowerer *L, Ast *stmt) {
     case AST_ASSERT:            lower_assert(L, (AstAssert *) stmt); return;
     case AST_IF:                lower_if(L, (AstIf *) stmt); return;
     case AST_SWITCH:            lower_block(L, ((AstSwitch *) stmt)->lowered); return;
+    case AST_SWITCH_ARM: {
+        // The value of a case of a switch expression goes in the slot of the switch
+        AstSwitchArm *arm = (AstSwitchArm *) stmt;
+        store_expr(L, addr_slot(arm->owner->result_slot, 0), arm->owner->result_type, arm->value, false);
+        return;
+    }
     case AST_WHILE:             lower_while(L, (AstWhile *) stmt); return;
     case AST_FOR:               lower_for(L, (AstFor *) stmt); return;
     case AST_BREAK_OR_CONTINUE: lower_break_or_continue(L, (AstBreakOrContinue *) stmt); return;

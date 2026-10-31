@@ -47,6 +47,14 @@ find :: (xs: []int, x: int) -> Option<int> {
     return .none;
 }
 
+perimeter :: (s: Shape) -> f32 {
+    return switch v in s {
+        case .circle => 6.0 * v.radius;
+        case .rect   => 2.0 * (v.w + v.h);
+        else         => 0.0;
+    };
+}
+
 parse :: (text: string) -> Result<int, string> {
     switch text {
         case "one" { return Result<int, string>{ok: 1}; }
@@ -153,5 +161,11 @@ main :: () {
         o := Option<int>{some: 3};
         none: Option<int>;
         assert(o.kind == .some && none.kind == .none);
+    }
+    {
+        // A switch expression on a union
+        assert(perimeter(Shape{circle: Circle{1.0}}) == 6.0);
+        assert(perimeter(Shape{rect: {w: 1.0, h: 2.0}}) == 6.0);
+        assert(perimeter(.empty) == 0.0);
     }
 }

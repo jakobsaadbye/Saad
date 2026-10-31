@@ -90,6 +90,8 @@ AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, Typ
 bool check_union_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject, TypeStruct *union_type, bool by_pointer, AstBlock *lowered, AstBlock *scope_before);
 AstBinary *make_binary(Typer *typer, TokenType op, AstExpr *left, AstExpr *right, Ast *at);
 AstUnary *generate_address_of_value(Typer *typer, AstExpr *value);
+Type *check_switch_expression(Typer *typer, AstSwitch *sw, Type *ctx_type);
+bool check_switch_arm(Typer *typer, AstSwitchArm *arm);
 bool check_switch(Typer *typer, AstSwitch *sw);
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct);
 TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instance);
@@ -3580,15 +3582,6 @@ AstBinary *make_binary(Typer *typer, TokenType op, AstExpr *left, AstExpr *right
 AstExpr *case_condition(Typer *typer, AstSwitch *sw, AstIdentifier *subject, AstExpr *value) {
     Ast *at = (Ast *)value;
 
-    // switch { case x < 0 { ... } }
-    if (subject == NULL) {
-        if (value->head.kind == AST_RANGE_EXPR) {
-            report_error_ast(typer->parser, LABEL_ERROR, at, "A switch without a value takes conditions, not ranges");
-            return NULL;
-        }
-        return value;
-    }
-
     // case 1..10 or case 1...10
     if (value->head.kind == AST_RANGE_EXPR) {
         AstRangeExpr *range = (AstRangeExpr *)value;
@@ -3658,14 +3651,14 @@ bool declare_case_binding(Typer *typer, AstSwitch *sw, AstCase *c, AstIdentifier
     }
 
     AstIdentifier *binding = make_identifier_from_string(parser, sw->binding.as_value.value.identifier.name, NULL);
-    binding->head.file  = sw->head.file;
+    binding->head.file  = sw->head.head.file;
     binding->head.start = sw->binding.start;
     binding->head.end   = sw->binding.end;
     binding->scope      = c->block;
 
     AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
     decl->head.kind  = AST_DECLARATION;
-    decl->head.file  = sw->head.file;
+    decl->head.file  = sw->head.head.file;
     decl->head.start = c->head.start;
     decl->head.end   = c->head.start;
     decl->head.flags = AST_FLAG_COMPILER_GENERATED;
@@ -3794,6 +3787,48 @@ bool check_union_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject, Typ
     return true;
 }
 
+// choice := switch x { case 1 => "icecream"; else => "mango"; }. The switch gives the type that is wanted, or the type of its first case
+Type *check_switch_expression(Typer *typer, AstSwitch *sw, Type *ctx_type) {
+    if (sw->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) return sw->result_type;
+
+    if (ctx_type && ctx_type->kind != TYPE_ANY && !is_untyped_type(ctx_type)) {
+        sw->result_type = ctx_type;
+    }
+    if (!check_switch(typer, sw)) return NULL;
+
+    sw->head.head.flags |= AST_FLAG_IS_TYPE_CHECKED;
+    sw->head.type = sw->result_type;
+    return sw->result_type;
+}
+
+// The value of a case of a switch expression has the type of the switch
+bool check_switch_arm(Typer *typer, AstSwitchArm *arm) {
+    AstSwitch *sw = arm->owner;
+
+    Type *type = check_expression(typer, arm->value, sw->result_type);
+    if (!type) return false;
+
+    if (sw->result_type == NULL) {
+        // The first case decides, like 'x := value;'
+        if (is_untyped_type(type) && type->kind == TYPE_INTEGER)    type = primitive_type(PRIMITIVE_INT);
+        else if (is_untyped_type(type) && type->kind == TYPE_FLOAT) type = primitive_type(PRIMITIVE_FLOAT);
+        if (type->kind == TYPE_VOID) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arm->value, "The case of a switch expression must give a value");
+            return false;
+        }
+        sw->result_type = type;
+        return true;
+    }
+
+    if (!leads_to_integer_overflow(typer, sw->result_type, arm->value)) return false;
+
+    if (!types_are_equal(sw->result_type, arm->value->type)) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arm->value, "This case gives a %s, but the switch gives a %s", type_to_str(arm->value->type), type_to_str(sw->result_type));
+        return false;
+    }
+    return true;
+}
+
 bool check_switch(Typer *typer, AstSwitch *sw) {
     Parser *parser = typer->parser;
 
@@ -3809,9 +3844,9 @@ bool check_switch(Typer *typer, AstSwitch *sw) {
     parser->current_scope  = typer->current_scope;
     AstBlock *lowered      = new_block(parser, BLOCK_IMPERATIVE);
     parser->current_scope  = scope_before;
-    lowered->head.file          = sw->head.file;
-    lowered->head.start         = sw->head.start;
-    lowered->head.end           = sw->head.end;
+    lowered->head.file          = sw->head.head.file;
+    lowered->head.start         = sw->head.head.start;
+    lowered->head.end           = sw->head.head.end;
     lowered->enclosing_function = scope_before->enclosing_function;
     sw->lowered = lowered;
     typer->current_scope = lowered;
@@ -3824,7 +3859,7 @@ bool check_switch(Typer *typer, AstSwitch *sw) {
 
         subject = ast_allocate(parser, sizeof(AstIdentifier));
         subject->head.kind  = AST_IDENTIFIER;
-        subject->head.file  = sw->head.file;
+        subject->head.file  = sw->head.head.file;
         subject->head.start = sw->subject->head.start;
         subject->head.end   = sw->subject->head.end;
         subject->name       = name;
@@ -3832,7 +3867,7 @@ bool check_switch(Typer *typer, AstSwitch *sw) {
 
         AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
         decl->head.kind  = AST_DECLARATION;
-        decl->head.file  = sw->head.file;
+        decl->head.file  = sw->head.head.file;
         decl->head.start = sw->subject->head.start;
         decl->head.end   = sw->subject->head.end;
         decl->head.flags = AST_FLAG_COMPILER_GENERATED;
@@ -3933,6 +3968,11 @@ bool check_switch(Typer *typer, AstSwitch *sw) {
         }
     }
 
+    if (sw->is_expression && !has_else && !(subject && subject->type->kind == TYPE_ENUM)) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)sw, "A switch that gives a value needs an else, so that it has a value when no case matches");
+        return false;
+    }
+
     if (subject && subject->type->kind == TYPE_ENUM && !has_else) {
         AstEnum *node = ((TypeEnum *)subject->type)->node;
         StringBuilder missing = sb_init(32);
@@ -4010,6 +4050,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_ASSERT:            return check_assert(typer, (AstAssert *)(stmt));
     case AST_IF:                return check_if(typer, (AstIf *)(stmt));
     case AST_SWITCH:            return check_switch(typer, (AstSwitch *)(stmt));
+    case AST_SWITCH_ARM:        return check_switch_arm(typer, (AstSwitchArm *)(stmt));
     default:
         XXX;
     }
@@ -5747,6 +5788,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
     else if (expr->head.kind == AST_FUNCTION_DEFN)  result = check_function_defn(typer, (AstFunctionDefn *)(expr));
     else if (expr->head.kind == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), ctx_type);
+    else if (expr->head.kind == AST_SWITCH) result = check_switch_expression(typer, (AstSwitch *)(expr), ctx_type);
     else if (expr->head.kind == AST_ARRAY_LITERAL)  result = check_array_literal(typer, (AstArrayLiteral *)(expr), ctx_type);
     else if (expr->head.kind == AST_ENUM_LITERAL)   result = check_enum_literal(typer, (AstEnumLiteral *)(expr), ctx_type);
     else if (expr->head.kind == AST_MEMBER_ACCESS)  result = check_member_access(typer, (AstMemberAccess *)(expr));

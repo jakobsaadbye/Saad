@@ -1,0 +1,9 @@
+// expect-error: This case gives a number, but the switch gives a string
+
+main :: () {
+    x := 1;
+    c := switch x {
+        case 1 => "a";
+        else   => 2;
+    };
+}
