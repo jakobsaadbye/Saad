@@ -10,8 +10,8 @@ namespace json;
 //         cache: *void;
 //     }
 //
-//     text := json.encode(person);           // {"first_name":"Ada"}
-//     text := json.encode(person, indent: 2) // over more lines
+//     text := json.encode(person);              // {"first_name":"Ada"}
+//     text := json.encode(person, json.Pretty); // over more lines, see options.sd
 
 import fmt;
 use c;
@@ -24,17 +24,17 @@ Field :: struct {
     omitEmpty: bool = false;  // Not written when it is empty: 0, false, "", null or no elements
 }
 
-// The value as JSON text. With an indent above 0, objects and arrays are written over more lines.
+// The value as JSON text. The options say how, e.g json.Pretty, json.SnakeCase or json.Options{indent: 4, omitEmpty: true}
 //
 //   bool, numbers and strings   as themselves
-//   enums                       the name of the value, e.g "open"
+//   enums                       the name of the value, e.g "open", or its number with enumsAsNumbers
 //   structs                     objects, with the names from json.Field
 //   arrays, slices and lists    arrays
 //   Map<string, V>              objects
 //   pointers                    the value they point to, or null
 //   json.Value                  as it is
-encode :: <T>(value: T, indent := 0) -> string {
-    w := newWriter(indent);
+encode :: <T>(value: T, options := Options{}) -> string {
+    w := newWriter(options);
     // A pointer keeps the type of a collection, which would be a slice of its elements in an any
     boxed: any = &value;
     pointer := boxed.type as *TypePointer;
@@ -48,22 +48,22 @@ encode :: <T>(value: T, indent := 0) -> string {
 
 @private
 Writer :: struct {
-    sb:     fmt.StringBuilder;
-    indent: int;
-    depth:  int;
+    sb:      fmt.StringBuilder;
+    options: Options;
+    depth:   int;
 }
 
 @private
-newWriter :: (indent: int) -> Writer {
-    return Writer{sb: fmt.newStringBuilder(64), indent: indent};
+newWriter :: (options: Options) -> Writer {
+    return Writer{sb: fmt.newStringBuilder(64), options: options};
 }
 
 // A newline and the indentation, when writing over more lines
 @private
 newline :: method (w: *Writer) {
-    if w.indent <= 0 { return; }
+    if w.options.indent <= 0 { return; }
     w.sb.addChar(Newline);
-    for 0..(w.indent * w.depth) {
+    for 0..(w.options.indent * w.depth) {
         w.sb.addChar(Space);
     }
 }
@@ -187,7 +187,17 @@ endList :: method (w: *Writer, close: u8, count: i64) {
 writeKey :: method (w: *Writer, key: string) {
     w.writeString(key);
     w.sb.addChar(Colon);
-    if w.indent > 0 { w.sb.addChar(Space); }
+    if w.options.indent > 0 { w.sb.addChar(Space); }
+}
+
+// The name of a member in the style of the options
+@private
+writeMemberName :: method (w: *Writer, name: string) {
+    w.sb.addChar(Quote);
+    addStyledName(&w.sb, name, w.options.names);
+    w.sb.addChar(Quote);
+    w.sb.addChar(Colon);
+    if w.options.indent > 0 { w.sb.addChar(Space); }
 }
 
 //
@@ -215,8 +225,13 @@ writeAny :: method (w: *Writer, data: *void, type: *Type) {
         enumType := type as *TypeEnum;
         value := enumType.readValue(data);
         name, ok := enumType.nameOf(value);
-        if ok { w.writeString(name); }
-        else  { w.sb.addInt64(value); }
+        if ok && !w.options.enumsAsNumbers {
+            w.sb.addChar(Quote);
+            addStyledName(&w.sb, name, w.options.enumValues);
+            w.sb.addChar(Quote);
+        } else {
+            w.sb.addInt64(value);
+        }
     }
     else if kind == .pointer {
         pointee := (type as *TypePointer).pointerTo;
@@ -277,14 +292,15 @@ writeStruct :: method (w: *Writer, data: *void, type: *TypeStruct) {
     written := 0;
     for i in 0..type.members.count {
         member := &type.members[i];
-        field := fieldOf(member);
+        field, named := fieldOf(member);
         if field.skip { continue; }
 
         value := member.valueIn(data);
-        if field.omitEmpty && isEmpty(value, member.type) { continue; }
+        if (field.omitEmpty || w.options.omitEmpty) && isEmpty(value, member.type) { continue; }
 
         w.nextElement(written);
-        w.writeKey(field.name);
+        if named { w.writeKey(field.name); }
+        else     { w.writeMemberName(member.name); }
         w.writeAny(value, member.type);
         written += 1;
     }
@@ -345,14 +361,15 @@ writeInteger :: (sb: *fmt.StringBuilder, data: *void, type: *TypePrimitive) {
 // Helpers for reflection, also used when decoding
 //
 
-// The json.Field of a member, with the name of the member when it has none
+// The json.Field of a member, and if it gives the member a name. Without one, the name is the name of the member
 @private
-fieldOf :: (member: *StructMember) -> Field {
+fieldOf :: (member: *StructMember) -> Field, bool {
     field: Field;
-    if !attributeOf(member, &field) || field.name.len == 0 {
+    named := attributeOf(member, &field) && field.name.len > 0;
+    if !named {
         field.name = member.name;
     }
-    return field;
+    return field, named;
 }
 
 @private

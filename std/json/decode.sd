@@ -12,11 +12,12 @@ use c;
 // Reads the JSON into the value. err is empty when it worked, otherwise it tells what is wrong and where.
 //
 // * Members that are not in the JSON keep their value, so defaults stay. Members of the JSON that the struct doesn't have are skipped
-// * json.Field gives a member another name, and skip: true leaves it alone
+// * json.Field gives a member another name, and skip: true leaves it alone. The options say how the other names are written,
+//   e.g json.SnakeCase, and if members the struct doesn't have are an error (strict)
 // * A null leaves the value as it is, except for pointers, which become null
 // * Strings, slices, lists, maps and the values of pointers are allocated with malloc
 // * Enums are read from the name of the value, e.g "open", or its number
-decode :: <T>(text: string, value: *T) -> string {
+decode :: <T>(text: string, value: *T, options := Options{}) -> string {
     root, err := parse(text);
     if err != "" {
         return err;
@@ -25,7 +26,7 @@ decode :: <T>(text: string, value: *T) -> string {
     boxed: any = value;
     pointer := boxed.type as *TypePointer;
     target  := *(boxed.data as **void);
-    err = assign(root, target, pointer.pointerTo, "");
+    err = assign(root, target, pointer.pointerTo, "", &options);
 
     // The strings of the parsed values are used by the decoded value, so only the arrays and objects are freed
     root.free();
@@ -89,7 +90,7 @@ indexPath :: (path: string, index: i64) -> string {
 
 // Reads the value v into the memory at data, which holds a value of the type
 @private
-assign :: (v: Value, data: *void, type: *Type, path: string) -> string {
+assign :: (v: Value, data: *void, type: *Type, path: string, options: *Options) -> string {
     kind := type.kind;
 
     // null leaves the value as it is, but a pointer becomes null
@@ -121,7 +122,7 @@ assign :: (v: Value, data: *void, type: *Type, path: string) -> string {
         return "";
     }
     if kind == .enum {
-        return assignEnum(v, data, type as *TypeEnum, path);
+        return assignEnum(v, data, type as *TypeEnum, path, options);
     }
     if kind == .pointer {
         pointee := (type as *TypePointer).pointerTo;
@@ -130,19 +131,19 @@ assign :: (v: Value, data: *void, type: *Type, path: string) -> string {
         }
         memory := calloc(1, pointee.size as int);
         *(data as **void) = memory;
-        return assign(v, memory, pointee, path);
+        return assign(v, memory, pointee, path, options);
     }
     if kind == .array {
-        return assignArray(v, data, type as *TypeArray, path);
+        return assignArray(v, data, type as *TypeArray, path, options);
     }
     if kind == .struct {
-        return assignStruct(v, data, type as *TypeStruct, path);
+        return assignStruct(v, data, type as *TypeStruct, path, options);
     }
     return failAt(path, fmt.sprint("Can't read JSON into a value of type %", type.name));
 }
 
 @private
-assignArray :: (v: Value, data: *void, type: *TypeArray, path: string) -> string {
+assignArray :: (v: Value, data: *void, type: *TypeArray, path: string, options: *Options) -> string {
     if v.kind != .array { return mismatch(path, "an array", v); }
 
     count    := v.items.count;
@@ -162,14 +163,14 @@ assignArray :: (v: Value, data: *void, type: *TypeArray, path: string) -> string
     }
 
     for item, i in v.items {
-        err := assign(item, &elements[i * elemSize], type.elemType, indexPath(path, i));
+        err := assign(item, &elements[i * elemSize], type.elemType, indexPath(path, i), options);
         if err != "" { return err; }
     }
     return "";
 }
 
 @private
-assignStruct :: (v: Value, data: *void, type: *TypeStruct, path: string) -> string {
+assignStruct :: (v: Value, data: *void, type: *TypeStruct, path: string, options: *Options) -> string {
     name := type.head.name;
 
     if name == typeof(Value) {
@@ -177,23 +178,52 @@ assignStruct :: (v: Value, data: *void, type: *TypeStruct, path: string) -> stri
         return "";
     }
     if name.startsWith("List<") {
-        return assignList(v, data, type, path);
+        return assignList(v, data, type, path, options);
     }
     if name.startsWith("Map<") {
-        return assignMap(v, data, type, path);
+        return assignMap(v, data, type, path, options);
     }
 
     if v.kind != .object { return mismatch(path, "an object", v); }
 
+    // The name of each member in the JSON. Empty for skipped members
+    keys: [..]string;
     for i in 0..type.members.count {
         member := &type.members[i];
-        field := fieldOf(member);
-        if field.skip || !v.has(field.name) { continue; }
-
-        err := assign(v.get(field.name), member.valueIn(data), member.type, memberPath(path, field.name));
-        if err != "" { return err; }
+        field, named := fieldOf(member);
+        key := field.name;
+        if field.skip { key = ""; }
+        else if !named { key = styleName(member.name, options.names); }
+        keys.add(key);
     }
-    return "";
+
+    err := "";
+    for i in 0..type.members.count {
+        key := keys[i];
+        if key.len == 0 || !v.has(key) { continue; }
+
+        member := &type.members[i];
+        err = assign(v.get(key), member.valueIn(data), member.type, memberPath(path, key), options);
+        if err != "" { break; }
+    }
+
+    if err == "" && options.strict {
+        for entry in v.fields {
+            if !keys.contains(entry.key) {
+                err = failAt(path, fmt.sprint("% has no member '%'", type.head.name, entry.key));
+                break;
+            }
+        }
+    }
+
+    if options.names != .asWritten {
+        for i in 0..type.members.count {
+            _, named := fieldOf(&type.members[i]);
+            if !named && keys[i].len > 0 { keys[i].free(); }
+        }
+    }
+    keys.free();
+    return err;
 }
 
 // Sets the data, count and capacity of a List<T>
@@ -205,14 +235,14 @@ setList :: (data: *void, type: *TypeStruct, elements: *u8, count: i64) {
 }
 
 @private
-assignList :: (v: Value, data: *void, type: *TypeStruct, path: string) -> string {
+assignList :: (v: Value, data: *void, type: *TypeStruct, path: string, options: *Options) -> string {
     if v.kind != .array { return mismatch(path, "an array", v); }
 
     elemType := (findMember(type, "data").type as *TypePointer).pointerTo;
     count    := v.items.count;
     elements := calloc(count as int + 1, elemType.size) as *u8;
     for item, i in v.items {
-        err := assign(item, &elements[i * elemType.size], elemType, indexPath(path, i));
+        err := assign(item, &elements[i * elemType.size], elemType, indexPath(path, i), options);
         if err != "" { return err; }
     }
 
@@ -222,7 +252,7 @@ assignList :: (v: Value, data: *void, type: *TypeStruct, path: string) -> string
 
 // A Map<string, V> from an object. The entries and the table of slots are made like Map.set would make them
 @private
-assignMap :: (v: Value, data: *void, type: *TypeStruct, path: string) -> string {
+assignMap :: (v: Value, data: *void, type: *TypeStruct, path: string, options: *Options) -> string {
     if v.kind != .object { return mismatch(path, "an object", v); }
 
     entriesMember := findMember(type, "entries");
@@ -245,7 +275,7 @@ assignMap :: (v: Value, data: *void, type: *TypeStruct, path: string) -> string 
         *(keyMember.valueIn(entry) as *string) = field.key;
         *(hashMember.valueIn(entry) as *u64)   = field.key.hash();
 
-        err := assign(field.value, valueMember.valueIn(entry), valueMember.type, memberPath(path, field.key));
+        err := assign(field.value, valueMember.valueIn(entry), valueMember.type, memberPath(path, field.key), options);
         if err != "" { return err; }
         i += 1;
     }
@@ -273,12 +303,15 @@ assignMap :: (v: Value, data: *void, type: *TypeStruct, path: string) -> string 
 }
 
 @private
-assignEnum :: (v: Value, data: *void, type: *TypeEnum, path: string) -> string {
+assignEnum :: (v: Value, data: *void, type: *TypeEnum, path: string, options: *Options) -> string {
     value: i64 = 0;
     if v.kind == .string {
         found := false;
         for option in type.values {
-            if option.name == v.text {
+            name := styleName(option.name, options.enumValues);
+            same := name == v.text;
+            if options.enumValues != .asWritten { name.free(); }
+            if same {
                 value = option.value;
                 found = true;
                 break;

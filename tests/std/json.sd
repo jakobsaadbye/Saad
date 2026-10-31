@@ -27,6 +27,20 @@ Person :: struct {
     nickname: string;
 }
 
+HttpStatus :: enum { ok, notFound, serverError }
+
+Response :: struct {
+    statusCode:  HttpStatus;
+    userID:      i64;
+    HTTPServer:  string;
+    plain_name:  bool;
+
+    @json.Field(name: "Exact")
+    renamed:     int;
+
+    maybe:       string;
+}
+
 Limits :: struct {
     small: u8;
     tiny:  i8;
@@ -76,7 +90,7 @@ main :: () {
         assert(q.cache == 99);
         assert(json.encode(q) == text);
 
-        pretty := json.encode(home, indent: 2);
+        pretty := json.encode(home, json.Pretty);
         assert(pretty == "{\n  \"street\": \"Main St\",\n  \"zip\": 2100\n}");
     }
     {
@@ -166,6 +180,55 @@ main :: () {
         list.push(json.newNull());
         v.put("list", list);
         assert(v.toJson() == "{\"name\":\"Ada\",\"list\":[1,false,null]}");
-        assert(v.toJson(indent: 1) == "{\n \"name\": \"Ada\",\n \"list\": [\n  1,\n  false,\n  null\n ]\n}");
+        assert(v.toJson(json.Options{indent: 1}) == "{\n \"name\": \"Ada\",\n \"list\": [\n  1,\n  false,\n  null\n ]\n}");
+    }
+    {
+        // Names in a style
+        assert(json.styleName("firstName", .snakeCase) == "first_name");
+        assert(json.styleName("userID", .snakeCase) == "user_id");
+        assert(json.styleName("HTTPServer", .snakeCase) == "http_server");
+        assert(json.styleName("plain_name", .camelCase) == "plainName");
+        assert(json.styleName("first-name", .pascalCase) == "FirstName");
+        assert(json.styleName("version2Beta", .kebabCase) == "version2-beta");
+        assert(json.styleName("maxSize", .upperSnake) == "MAX_SIZE");
+        assert(json.styleName("as_is", .asWritten) == "as_is");
+    }
+    {
+        // The standard options. A name from json.Field is used as it is
+        r := Response{statusCode: .notFound, userID: 7, HTTPServer: "x", plain_name: true, renamed: 1};
+
+        assert(json.encode(r) == "{\"statusCode\":\"notFound\",\"userID\":7,\"HTTPServer\":\"x\",\"plain_name\":true,\"Exact\":1,\"maybe\":\"\"}");
+
+        snake := json.encode(r, json.SnakeCase);
+        assert(snake == "{\"status_code\":\"not_found\",\"user_id\":7,\"http_server\":\"x\",\"plain_name\":true,\"Exact\":1,\"maybe\":\"\"}");
+        assert(json.encode(r, json.CamelCase) == "{\"statusCode\":\"notFound\",\"userId\":7,\"httpServer\":\"x\",\"plainName\":true,\"Exact\":1,\"maybe\":\"\"}");
+        assert(json.encode(r, json.KebabCase) == "{\"status-code\":\"not-found\",\"user-id\":7,\"http-server\":\"x\",\"plain-name\":true,\"Exact\":1,\"maybe\":\"\"}");
+
+        // Read back with the same options
+        back: Response;
+        assert(json.decode(snake, &back, json.SnakeCase) == "");
+        assert(back.statusCode == .notFound && back.userID == 7 && back.HTTPServer == "x" && back.plain_name && back.renamed == 1);
+
+        // Read with other options, the names don't match
+        other: Response;
+        assert(json.decode(snake, &other) == "");
+        assert(other.userID == 0 && other.renamed == 1);
+    }
+    {
+        // Combining options
+        r := Response{statusCode: .serverError, userID: 1};
+        options := json.Options{indent: 1, names: .snakeCase, enumsAsNumbers: true, omitEmpty: true};
+        text := json.encode(r, options);
+        assert(text == "{\n \"status_code\": 2,\n \"user_id\": 1\n}");
+
+        back: Response;
+        assert(json.decode(text, &back, options) == "");
+        assert(back.statusCode == .serverError && back.userID == 1);
+
+        // Strict decoding fails on members the struct doesn't have
+        strict := json.Options{strict: true};
+        assert(json.decode("{\"userID\": 1, \"color\": \"red\"}", &back, strict) == "Response has no member 'color'");
+        assert(json.decode("{\"userID\": 1, \"color\": \"red\"}", &back) == "");
+        assert(json.decode("{\"statusCode\": \"not_found\"}", &back) == "statusCode: 'not_found' is not a value of HttpStatus");
     }
 }

@@ -147,9 +147,9 @@ free :: method (v: *Value) {
     v.fields.free();
 }
 
-// The value as JSON text. With an indent above 0, objects and arrays are written over more lines
-toJson :: method (v: Value, indent := 0) -> string {
-    w := newWriter(indent);
+// The value as JSON text, e.g v.toJson(json.Pretty)
+toJson :: method (v: Value, options := Options{}) -> string {
+    w := newWriter(options);
     w.writeValue(v);
     return w.sb.toString();
 }

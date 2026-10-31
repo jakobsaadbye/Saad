@@ -336,6 +336,7 @@ typedef struct AstEnum {
     AstIdentifier *identifier;
     DynamicArray   enumerators; // of *AstEnumerator
     bool           is_anonymous; // e.g enum { open, closed }. Anonymous enums with the same enumerators are the same type
+    bool           is_being_checked; // Set while check_enum_defn() runs, so a value can't make the enum check itself again
 } AstEnum;
 
 typedef struct AstEnumerator {

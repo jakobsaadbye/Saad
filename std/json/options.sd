@@ -1,0 +1,128 @@
+namespace json;
+
+// How json.encode and json.decode write and read values, e.g
+//
+//     json.encode(person, json.Pretty);
+//     json.decode(text, &person, json.SnakeCase);
+//     json.encode(person, json.Options{indent: 4, names: .snakeCase, omitEmpty: true});
+
+import fmt;
+
+// How a name is written in JSON. Names are split into words where the case changes and at '_' and '-',
+// e.g firstName, FirstName, first_name and first-name are the words "first" and "name"
+NameStyle :: enum {
+    asWritten,   // firstName stays firstName
+    camelCase,   // firstName
+    pascalCase,  // FirstName
+    snakeCase,   // first_name
+    kebabCase,   // first-name
+    upperSnake,  // FIRST_NAME
+}
+
+Options :: struct {
+    // The number of spaces each level of objects and arrays is indented with. 0 writes everything on one line
+    indent: int = 0;
+
+    // How the names of struct members are written and read. A name from json.Field is used as it is
+    names: NameStyle = .asWritten;
+
+    // How the values of enums are written and read
+    enumValues: NameStyle = .asWritten;
+
+    // Enums are written as their number instead of their name. Both are read
+    enumsAsNumbers: bool = false;
+
+    // Leaves out every member that is empty (0, false, "", null or no elements), like json.Field(omitEmpty: true)
+    omitEmpty: bool = false;
+
+    // Decoding fails on a member that the struct doesn't have, instead of skipping it
+    strict: bool = false;
+}
+
+// The standard configurations
+Compact   :: Options{};
+Pretty    :: Options{indent: 2};
+CamelCase :: Options{names: .camelCase, enumValues: .camelCase};
+SnakeCase :: Options{names: .snakeCase, enumValues: .snakeCase};
+KebabCase :: Options{names: .kebabCase, enumValues: .kebabCase};
+
+// The name written in the style, e.g styleName("firstName", .snakeCase) is "first_name". The text is allocated unless the style is asWritten
+styleName :: (name: string, style: NameStyle) -> string {
+    if style == .asWritten {
+        return name;
+    }
+    sb := fmt.newStringBuilder(name.len as int + 8);
+    addStyledName(&sb, name, style);
+    return sb.toString();
+}
+
+@private Underscore :: 95;
+@private UpperZ     :: 90;
+@private LowerZ     :: 122;
+
+@private
+isUpper :: (ch: u8) -> bool { return ch >= UpperA && ch <= UpperZ; }
+
+@private
+isLower :: (ch: u8) -> bool { return ch >= LowerA && ch <= LowerZ; }
+
+@private
+toUpper :: (ch: u8) -> u8 {
+    if isLower(ch) { return ch - 32; }
+    return ch;
+}
+
+@private
+toLower :: (ch: u8) -> u8 {
+    if isUpper(ch) { return ch + 32; }
+    return ch;
+}
+
+// Adds the name in the style. A new word starts at an uppercase letter after a lowercase letter or digit (fooBar), at the last
+// uppercase letter of a run that is followed by a lowercase one (HTTPServer is HTTP and Server), and after '_' and '-'
+@private
+addStyledName :: (sb: *fmt.StringBuilder, name: string, style: NameStyle) {
+    if style == .asWritten {
+        sb.addString(name);
+        return;
+    }
+
+    separator: u8 = 0;
+    if style == .snakeCase || style == .upperSnake { separator = Underscore as u8; }
+    if style == .kebabCase                        { separator = Minus as u8; }
+
+    word := 0;         // The number of words written
+    inWord := false;   // Inside a word, so the next letter continues it
+    for i in 0..name.len {
+        ch := name[i];
+        if ch == Underscore || ch == Minus {
+            inWord = false;
+            continue;
+        }
+
+        startsWord := !inWord;
+        if inWord && isUpper(ch) && i > 0 {
+            previous := name[i - 1];
+            nextIsLower := i + 1 < name.len && isLower(name[i + 1]);
+            if !isUpper(previous) || nextIsLower {
+                startsWord = true;
+            }
+        }
+
+        if startsWord {
+            if word > 0 && separator != 0 { sb.addChar(separator); }
+            word += 1;
+        }
+        inWord = true;
+
+        // The first letter of a word
+        if startsWord {
+            capital := style == .pascalCase || style == .upperSnake || (style == .camelCase && word > 1);
+            if capital { sb.addChar(toUpper(ch)); }
+            else       { sb.addChar(toLower(ch)); }
+        } else {
+            if style == .upperSnake { sb.addChar(toUpper(ch)); }
+            else                    { sb.addChar(toLower(ch)); }
+        }
+    }
+}

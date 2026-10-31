@@ -4,6 +4,20 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.6.1 - 31. Oct 2026
+
+* Options for `json.encode` and `json.decode`: indentation, the style of member names and enum values
+  (camelCase, snake_case, kebab-case, ...), enums as numbers, omitEmpty for every member and strict decoding
+
+```odin
+json.encode(person, json.Pretty);
+json.decode(text, &person, json.SnakeCase);
+json.encode(person, json.Options{indent: 4, names: .snakeCase, omitEmpty: true});
+```
+
+* The default value of a struct member can use an enum that is declared after the struct, or in another file
+* BREAKING: `json.encode(value, indent: 2)` is `json.encode(value, json.Pretty)`, and `v.toJson(indent: 2)` is `v.toJson(json.Pretty)`
+
 ## Update v0.6.0 - 31. Oct 2026
 
 * Custom attributes and a JSON library
