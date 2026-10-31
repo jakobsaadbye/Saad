@@ -130,4 +130,28 @@ main :: () {
         }
         assert(area(shapes[0]) == 12.0);
     }
+    {
+        // kind: which variant a union holds, as an enum with a value for each variant
+        a := Shape{circle: Circle{1.0}};
+        b: Shape = .empty;
+        assert(a.kind == .circle);
+        assert(b.kind == .empty && b.kind != .circle);
+
+        k := a.kind;
+        assert(typeof(k) == "enum { circle, rect, label, empty }");
+        assert(fmt.sprint("%", k) == ".circle");
+
+        name := "";
+        switch b.kind {
+            case .circle { name = "circle"; }
+            case .rect
+            case .label  { name = "other"; }
+            case .empty  { name = "empty"; }
+        }
+        assert(name == "empty");
+
+        o := Option<int>{some: 3};
+        none: Option<int>;
+        assert(o.kind == .some && none.kind == .none);
+    }
 }

@@ -43,6 +43,8 @@ TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *t
 bool            generate_and_add_import(Parser *parser, char *name, char *resolved_path);
 AstStructLiteral *parse_struct_literal_body(Parser *parser, Type *explicit_type, Token start_token, TokenType open, TokenType close);
 AstSwitch *parse_switch(Parser *parser);
+bool make_union_kind(Parser *parser, AstStruct *union_defn, AstBlock *members, Token union_token);
+TypeEnum *make_enum_type(Parser *parser, AstEnum *ast_enum, AstIdentifier *ident);
 AstDeclaration *add_union_member(Parser *parser, AstIdentifier *ident, Type *type);
 AstExpr *parse_range_or_normal_expression(Parser *parser);
 
@@ -428,6 +430,51 @@ AstExtern *parse_extern(Parser *parser) {
     return ast_extern;
 }
 
+
+// The tag of a union is its 'kind': an anonymous enum with a value for each variant, e.g enum { circle, rect, empty }
+bool make_union_kind(Parser *parser, AstStruct *union_defn, AstBlock *members, Token union_token) {
+    AstEnum *kinds     = ast_allocate(parser, sizeof(AstEnum));
+    kinds->enumerators = da_init(members->identifiers.count, sizeof(AstEnumerator *));
+
+    for (int i = 1; i < members->identifiers.count; i++) {
+        AstIdentifier *variant = ((AstIdentifier **)members->identifiers.items)[i];
+        if (strcmp(variant->name, "kind") == 0) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)variant, "A variant can't be named 'kind', as shape.kind is which variant a union holds");
+            return false;
+        }
+
+        AstEnumerator *etor = ast_allocate(parser, sizeof(AstEnumerator));
+        etor->head.kind  = AST_ENUMERATOR;
+        etor->head.file  = parser->current_file;
+        etor->head.start = variant->head.start;
+        etor->head.end   = variant->head.end;
+        etor->parent     = kinds;
+        etor->name       = variant->name;
+        etor->index      = i - 1;
+        da_append(&kinds->enumerators, etor);
+    }
+
+    AstIdentifier *ident = make_identifier_from_string(parser, "enum {...}", NULL);
+    ident->head.start = union_token.start;
+    ident->head.end   = union_token.end;
+    ident->flags     |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_NAME_OF_ENUM | IDENTIFIER_IS_RESOLVED;
+
+    kinds->head.kind    = AST_ENUM;
+    kinds->head.file    = parser->current_file;
+    kinds->head.start   = union_token.start;
+    kinds->head.end     = union_token.end;
+    kinds->identifier   = ident;
+    kinds->is_anonymous = true;
+
+    TypeEnum *type = make_enum_type(parser, kinds, ident);
+    ident->type = (Type *)type;
+
+    AstIdentifier *tag = ((AstIdentifier **)members->identifiers.items)[0];
+    tag->type       = (Type *)type;
+    tag->decl->type = (Type *)type;
+    (void)union_defn;
+    return true;
+}
 
 // Declares a member of the union being parsed, for the members that are not written as a declaration: the tag and the variants without a value
 AstDeclaration *add_union_member(Parser *parser, AstIdentifier *ident, Type *type) {
@@ -2019,6 +2066,7 @@ AstStruct *parse_struct_defn(Parser *parser) {
         report_error_ast(parser, LABEL_HINT, NULL, "e.g Shape :: union { circle: Circle; empty; }");
         return NULL;
     }
+    if (struct_defn->is_union && !make_union_kind(parser, struct_defn, scope, struct_token)) return NULL;
 
     // Methods declared inside the struct are not members. They are checked like methods declared after the struct
     struct_defn->inside_methods = da_init(1, sizeof(AstDeclaration *));

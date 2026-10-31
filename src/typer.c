@@ -84,6 +84,7 @@ AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name);
 bool check_attribute_value(Typer *typer, AstStructLiteral *value);
 bool is_constant_value(AstExpr *expr);
 AstIdentifier *union_variant(TypeStruct *union_type, char *name);
+AstExpr *union_kind_value(Typer *typer, AstIdentifier *variant, Ast *at);
 AstStructLiteral *make_union_literal(Typer *typer, TypeStruct *union_type, AstIdentifier *variant, Ast *at);
 AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, Type *type);
 bool check_union_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject, TypeStruct *union_type, bool by_pointer, AstBlock *lowered, AstBlock *scope_before);
@@ -3739,14 +3740,8 @@ bool check_union_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject, Typ
             handled[variant->member_index] = true;
             only = variant;
 
-            AstLiteral *tag      = ast_allocate(parser, sizeof(AstLiteral));
-            tag->head.head       = value->head;
-            tag->head.head.kind  = AST_LITERAL;
-            tag->head.head.flags = AST_FLAG_COMPILER_GENERATED;
-            tag->kind            = LITERAL_INTEGER;
-            tag->as.value.integer = variant->member_index - 1;
-
-            AstExpr *test = (AstExpr *)make_binary(typer, TOKEN_DOUBLE_EQUAL, member_of_local(typer, subject, "$tag", (Ast *)value), (AstExpr *)tag, (Ast *)value);
+            AstExpr *tag  = union_kind_value(typer, variant, (Ast *)value);
+            AstExpr *test = (AstExpr *)make_binary(typer, TOKEN_DOUBLE_EQUAL, member_of_local(typer, subject, "$tag", (Ast *)value), tag, (Ast *)value);
             condition = condition ? (AstExpr *)make_binary(typer, TOKEN_LOGICAL_OR, condition, test, (Ast *)value) : test;
         }
 
@@ -5974,6 +5969,16 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
             member = find_identifier_in_scope(struct_type->node->static_members, member_name);
             ma->access_kind = MEMBER_ACCESS_STATIC_STRUCT_MEMBER;
         } 
+        else if (struct_type->node->is_union && strcmp(member_name, "kind") == 0) {
+            // shape.kind is the tag: which variant the union holds. It changes with the variant, so it can't be set
+            if (typer->current_place && !(ma->head.head.flags & AST_FLAG_COMPILER_GENERATED)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)rhs, "The kind of a union can't be set. It changes when the union is given another variant");
+                report_error_ast(typer->parser, LABEL_HINT, NULL, "e.g shape = %s{...}", type_to_str((Type *)struct_type));
+                return NULL;
+            }
+            member = ((AstIdentifier **)struct_type->node->members->identifiers.items)[0];
+            ma->access_kind = MEMBER_ACCESS_STRUCT_MEMBER;
+        }
         else {
             member = get_struct_member(struct_type->node, member_name);
             ma->access_kind = MEMBER_ACCESS_STRUCT_MEMBER;
@@ -6096,16 +6101,22 @@ AstIdentifier *union_variant(TypeStruct *union_type, char *name) {
     return member;
 }
 
-// The initializer of the hidden tag for a variant e.g $tag: 2. The first variant has the tag 0, so a zeroed union holds it
+// The value of the kind (the tag) of a union for a variant e.g .circle of enum { circle, rect, empty }
+AstExpr *union_kind_value(Typer *typer, AstIdentifier *variant, Ast *at) {
+    AstEnumLiteral *kind  = ast_allocate(typer->parser, sizeof(AstEnumLiteral));
+    kind->head.head.kind  = AST_ENUM_LITERAL;
+    kind->head.head.file  = at->file;
+    kind->head.head.start = at->start;
+    kind->head.head.end   = at->end;
+    kind->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    kind->identifier      = make_identifier_from_string(typer->parser, variant->name, NULL);
+    kind->explicit_type   = ((AstIdentifier **)variant->scope->identifiers.items)[0]->type; // The type of the tag
+    return (AstExpr *)kind;
+}
+
+// The initializer of the hidden tag for a variant e.g $tag: .circle. The first variant is 0, so a zeroed union holds it
 AstStructInitializer *union_tag_initializer(Typer *typer, AstIdentifier *variant, Ast *at) {
-    AstLiteral *tag      = ast_allocate(typer->parser, sizeof(AstLiteral));
-    tag->head.head.kind  = AST_LITERAL;
-    tag->head.head.file  = at->file;
-    tag->head.head.start = at->start;
-    tag->head.head.end   = at->end;
-    tag->head.head.flags = AST_FLAG_COMPILER_GENERATED;
-    tag->kind            = LITERAL_INTEGER;
-    tag->as.value.integer = variant->member_index - 1;
+    AstExpr *tag = union_kind_value(typer, variant, at);
 
     AstStructInitializer *init = ast_allocate(typer->parser, sizeof(AstStructInitializer));
     init->head.kind  = AST_STRUCT_INITIALIZER;

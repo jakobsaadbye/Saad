@@ -78,6 +78,18 @@ grow :: (s: *Shape) {
 }
 ```
 
+* `shape.kind` is which variant a union holds: an enum with a value for each variant, in the order they are
+  declared, e.g `enum { circle, rect, empty }` for `Shape`. It can be compared, switched on, stored and printed,
+  but not set, as it changes when the union is given another variant. A variant can't be named `kind`.
+
+  ```odin
+  if shape.kind == .circle { ... }
+  switch shape.kind {
+      case .circle { ... }
+      else         { ... }
+  }
+  ```
+
 * A switch on a union without an `else` must handle every variant.
 * In a case with more variants, e.g `case .rect` and `case .circle` on the lines right after each other, `v`
   is the union itself.
@@ -109,12 +121,12 @@ find :: (xs: []int, x: int) -> Option<int> {
 
 ### How a union is stored
 
-A union is a struct (`AstStruct.is_union`) with a hidden first member `$tag: u32`, the index of the variant
-it holds, and the variants as the other members. The variants all start at the same offset, after the tag, so
+A union is a struct (`AstStruct.is_union`) with a hidden first member `$tag`, the kind, and the variants as
+the other members. The kind is an anonymous enum the parser makes from the names of the variants
+(`make_union_kind()`), so its value is the index of the variant. `shape.kind` reads `$tag`. The variants all start at the same offset, after the tag, so
 a union is as big as the tag and its biggest variant. The descriptor of a union for reflection has
 `UnionFlag` in `Type.flags`, and `type.variantOf(data)` gives the variant a value holds.
 
 ## Not done yet
 
-* Reading the tag without a switch, e.g `shape.is(.circle)` or `shape.kind`
-* Variants of a union in `case` without a switch on a union, e.g `if shape == .empty`
+* A name for the type of the kind, e.g `Shape.Kind`. It can be written as its enum, e.g `enum { circle, rect, empty }`

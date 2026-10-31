@@ -1,0 +1,8 @@
+// expect-error: The kind of a union can't be set
+
+Shape :: union { circle: f32; empty; }
+
+main :: () {
+    s := Shape.empty;
+    s.kind = .circle;
+}

@@ -50,6 +50,7 @@ area :: (s: Shape) -> f32 {
 Option :: union <T> { none; some: T; }
 ```
 
+`shape.kind` is which variant a union holds, as an enum: `if shape.kind == .circle { ... }`.
 See `docs/switch_and_unions.md`. Unions are printed by `fmt` and read and written by `std/json`.
 
 ## Update v0.6.1 - 31. Oct 2026
