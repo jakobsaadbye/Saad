@@ -408,6 +408,7 @@ typedef struct AstFunctionDefn {
     char            *instance_key;      // Set on an instance to the name with namespaces e.g "max<raylib.Color>", which tells instances apart
 
     bool             is_registered_method; // Set when the method has been added to the methods of its receiver struct
+    bool             is_slice_method;      // A generic method on []T e.g 'sort :: method <T>(xs: []T)'. Slices, fixed arrays and collections can call it
 
     // Methods declared inside a struct e.g 'get :: method (key: K) -> V' inside Map :: struct <K, V> {...}. They are turned into the same
     // as a method declared outside the struct with an implicit 'self' receiver e.g 'get :: method <K, V>(self: *Map<K, V>, key: K) -> V'

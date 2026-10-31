@@ -1,5 +1,4 @@
 use fmt;
-use c; // sprintf
 use math;
 use raylib;
 
@@ -272,7 +271,6 @@ main :: () {
 
     deadZone := Rectangle{0, WINDOW_HEIGHT - (WINDOW_HEIGHT - (bar.y + bar.height)), WINDOW_WIDTH, (WINDOW_HEIGHT - (bar.y + bar.height))};
 
-    scoreText: [16]u8;
 
     brickColors: [BRICK_ROWS]Color = [
         {255,  55, 140, 255}, // vibrant pink/magenta
@@ -563,8 +561,9 @@ main :: () {
         }
 
         // Draw score
-        sprintf(scoreText.data, xx "Score: %d", player.score);
+        scoreText := sprint("Score: %", player.score);
         DrawText(scoreText.data, 105, 16, 24, COLOR_WHITE);
+        scoreText.free();
 
         // Draw the dead zone        
         // DrawRectangleRec(deadZone, {255, 0, 0, 30});

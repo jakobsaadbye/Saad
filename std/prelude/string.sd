@@ -28,6 +28,11 @@ slice :: method (s: string, from: int, to := -1) -> string {
     return result;
 }
 
+// Frees a string that was allocated, e.g by copy() or fmt.sprint()
+free :: method (s: string) {
+    c.free(s.data);
+}
+
 copy :: method (s: string) -> string {
     result: string;
 

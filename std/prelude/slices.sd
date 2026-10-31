@@ -1,17 +1,22 @@
-namespace slices;
-
-// Generic functions on slices. Fixed arrays and lists convert to slices, e.g
+//////////////////////////////////
+// Methods on slices
+//
+// Every file imports this file. Slices, fixed arrays and collections (structs with an elements() method, like List) can call
+// these methods, e.g
 //
 //     xs := [3, 1, 2];
-//     slices.sort(xs);
-//     if slices.contains(xs, 2) { ... }
+//     xs.sort();
+//     if xs.contains(2) { ... }
+//
+// A type's own method of the same name wins, e.g List has its own indexOf.
+//
 
 // Sorts the elements from smallest to largest with <
-sort :: <T>(elements: []T) {
+sort :: method <T>(elements: []T) {
     quickSort(elements, 0, elements.count - 1);
 }
 
-isSorted :: <T>(elements: []T) -> bool {
+isSorted :: method <T>(elements: []T) -> bool {
     for i in 1..elements.count {
         if elements[i] < elements[i - 1] {
             return false;
@@ -20,18 +25,18 @@ isSorted :: <T>(elements: []T) -> bool {
     return true;
 }
 
-reverse :: <T>(elements: []T) {
+reverse :: method <T>(elements: []T) {
     i := 0;
     j := elements.count - 1;
     while i < j {
-        swap(elements, i, j);
+        elements.swap(i, j);
         i += 1;
         j -= 1;
     }
 }
 
 // The index of the first element that is == value, or -1
-indexOf :: <T>(elements: []T, value: T) -> int {
+indexOf :: method <T>(elements: []T, value: T) -> int {
     for element, i in elements {
         if element == value {
             return i;
@@ -40,11 +45,11 @@ indexOf :: <T>(elements: []T, value: T) -> int {
     return -1;
 }
 
-contains :: <T>(elements: []T, value: T) -> bool {
-    return indexOf(elements, value) != -1;
+contains :: method <T>(elements: []T, value: T) -> bool {
+    return elements.indexOf(value) != -1;
 }
 
-swap :: <T>(elements: []T, i: int, j: int) {
+swap :: method <T>(elements: []T, i: int, j: int) {
     tmp := elements[i];
     elements[i] = elements[j];
     elements[j] = tmp;
@@ -56,9 +61,9 @@ quickSort :: <T>(elements: []T, lo: int, hi: int) {
     while hi - lo > 16 {
         // The median of three as the pivot, so sorted input isn't the worst case
         mid := lo + (hi - lo) / 2;
-        if elements[mid] < elements[lo] { swap(elements, mid, lo); }
-        if elements[hi]  < elements[lo] { swap(elements, hi, lo);  }
-        if elements[hi]  < elements[mid] { swap(elements, hi, mid); }
+        if elements[mid] < elements[lo]  { elements.swap(mid, lo);  }
+        if elements[hi]  < elements[lo]  { elements.swap(hi, lo);   }
+        if elements[hi]  < elements[mid] { elements.swap(hi, mid);  }
         pivot := elements[mid];
 
         i := lo;
@@ -67,7 +72,7 @@ quickSort :: <T>(elements: []T, lo: int, hi: int) {
             while elements[i] < pivot { i += 1; }
             while pivot < elements[j] { j -= 1; }
             if i <= j {
-                swap(elements, i, j);
+                elements.swap(i, j);
                 i += 1;
                 j -= 1;
             }

@@ -42,6 +42,8 @@ typedef struct Typer {
 
     bool checking_member_default; // Set while checking the members of a struct and their default values e.g 'age: int = 30;'
 
+    DynamicArray slice_methods; // of *AstFunctionDefn. The generic methods on []T, see register_slice_method()
+
     DynamicArray anonymous_types; // of *Type. One anonymous struct or enum for each set of members e.g struct { age: int; }, so that the same members are the same type
 } Typer;
 
@@ -98,6 +100,9 @@ AstExpr *collection_as_slice(Typer *typer, AstExpr *expr, Type *wanted);
 TypeStruct *instantiate_standard_collection(Typer *typer, char *name, Type *arg0, Type *arg1, Ast *site);
 AstArgument *generate_argument_from_expr(Typer *typer, AstExpr *expr);
 bool struct_is_comparable(TypeStruct *struct_type, AstIdentifier **bad_member);
+bool register_slice_method(Typer *typer, AstFunctionDefn *generic);
+AstFunctionDefn *find_slice_method(Typer *typer, const char *name);
+bool rewrite_slice_method_call(Typer *typer, AstFunctionCall *call);
 bool register_generic_method(Typer *typer, AstFunctionDefn *generic);
 bool register_methods_early(Typer *typer, AstFile *file);
 bool check_struct_statement(Typer *typer, AstStruct *ast_struct);
@@ -140,6 +145,7 @@ Typer typer_init(Parser *parser, ConstEvaluator *ce) {
     typer.inside_declaration  = NULL;
     typer.struct_wait_list    = da_init(8, sizeof(AstIdentifier *));
     typer.anonymous_types     = da_init(8, sizeof(Type *));
+    typer.slice_methods       = da_init(8, sizeof(AstFunctionDefn *));
 
     return typer;
 }
@@ -334,6 +340,7 @@ bool is_prelude_identifier(Typer *typer, AstIdentifier *ident) {
     if (file == parser->collections_file) return true;
     if (parser->runtime_file_path && strcmp(file->absolute_path, parser->runtime_file_path) == 0) return true;
     if (parser->builtin_string_file_path && strcmp(file->absolute_path, parser->builtin_string_file_path) == 0) return true;
+    if (parser->slices_file_path && strcmp(file->absolute_path, parser->slices_file_path) == 0) return true;
     return false;
 }
 
@@ -1143,6 +1150,43 @@ bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver
     return true;
 }
 
+// A generic method on a slice e.g 'sort :: method <T>(xs: []T)'. Slices, fixed arrays and collections (structs with elements()) can
+// call it as xs.sort(), which is the call sort(xs) of the generic function. See slice_method_call()
+bool register_slice_method(Typer *typer, AstFunctionDefn *generic) {
+    Parser        *parser   = typer->parser;
+    AstIdentifier *receiver = ((AstIdentifier **)generic->parameters.items)[0];
+    Type          *elem     = ((TypeArray *)receiver->type)->elem_type;
+
+    int index = elem->kind == TYPE_NAME ? type_param_index(generic->type_params, elem->name) : -1;
+    if (index == -1 || generic->type_params.count != 1) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)receiver->type, "The receiver of a method on slices must be []T, where T is the only type parameter of the method");
+        report_error_ast(parser, LABEL_HINT, NULL, "e.g sort :: method <T>(xs: []T)");
+        return false;
+    }
+
+    for (int i = 0; i < typer->slice_methods.count; i++) {
+        AstFunctionDefn *existing = ((AstFunctionDefn **)typer->slice_methods.items)[i];
+        if (strcmp(existing->identifier->name, generic->identifier->name) == 0) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)generic->identifier, "Redeclaration of method '%s' on slices", generic->identifier->name);
+            report_error_ast(parser, LABEL_NOTE, (Ast *)existing->identifier, "Here is the previous declaration");
+            return false;
+        }
+    }
+
+    generic->is_slice_method      = true;
+    generic->is_registered_method = true;
+    da_append(&typer->slice_methods, generic);
+    return true;
+}
+
+AstFunctionDefn *find_slice_method(Typer *typer, const char *name) {
+    for (int i = 0; i < typer->slice_methods.count; i++) {
+        AstFunctionDefn *method = ((AstFunctionDefn **)typer->slice_methods.items)[i];
+        if (strcmp(method->identifier->name, name) == 0) return method;
+    }
+    return NULL;
+}
+
 // A generic method e.g 'set :: method <K, V>(m: *Map<K, V>, key: K, value: V)' is added to the methods of the generic struct.
 // Its receiver must be the generic struct with exactly the type parameters of the method as type arguments
 bool register_generic_method(Typer *typer, AstFunctionDefn *generic) {
@@ -1156,8 +1200,13 @@ bool register_generic_method(Typer *typer, AstFunctionDefn *generic) {
         receiver_type = ((TypePointer *)receiver_type)->pointer_to;
     }
 
+    // A method on []T, e.g 'sort :: method <T>(xs: []T)'
+    if (receiver_type && receiver_type == receiver->type && receiver_type->kind == TYPE_ARRAY && ((TypeArray *)receiver_type)->array_kind == ARRAY_SLICE) {
+        return register_slice_method(typer, generic);
+    }
+
     if (receiver_type == NULL || receiver_type->kind != TYPE_GENERIC_INSTANCE) {
-        report_error_ast(parser, LABEL_ERROR, receiver_type ? (Ast *)receiver_type : (Ast *)receiver, "The receiver of a generic method must be a generic struct, with the type parameters of the method as its type arguments");
+        report_error_ast(parser, LABEL_ERROR, receiver_type ? (Ast *)receiver_type : (Ast *)receiver, "The receiver of a generic method must be a slice []T or a generic struct, with the type parameters of the method as its type arguments");
         report_error_ast(parser, LABEL_HINT, NULL, "e.g set :: method <K, V>(m: *Map<K, V>, key: K, value: V)");
         return false;
     }
@@ -1364,6 +1413,9 @@ AstFunctionDefn *instantiate_generic_function(Typer *typer, AstFunctionDefn *gen
 
     AstFunctionDefn *instance = reparse_generic_function(parser, generic, scope);
     if (!instance) return NULL;
+
+    // An instance of a method on slices is a plain function, as slices have no struct to hold methods
+    if (generic->is_slice_method) instance->is_method = false;
 
     AstIdentifier *ident = ast_allocate(parser, sizeof(AstIdentifier));
     memcpy(ident, generic->identifier, sizeof(AstIdentifier));
@@ -3618,6 +3670,38 @@ bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberA
 }
 
 
+// xs.sort() on a slice, a fixed array or a collection (a struct with elements()) is the call sort(xs) of the method on slices,
+// unless the type has a member or method of that name itself
+bool rewrite_slice_method_call(Typer *typer, AstFunctionCall *call) {
+    AstMemberAccess *ma = (AstMemberAccess *)call->expression;
+    if (!is_literal_identifier(ma->right)) return true;
+
+    char *name = ((AstLiteral *)ma->right)->as.value.identifier.name;
+    AstFunctionDefn *method = find_slice_method(typer, name);
+    if (method == NULL) return true;
+
+    Type *type = check_expression(typer, ma->left, NULL);
+    if (!type) return false;
+
+    if (type->kind == TYPE_STRUCT) {
+        AstStruct *node = ((TypeStruct *)type)->node;
+        if (get_struct_member(node, name)) return true;
+        if (get_struct_method(node, name)) return true;
+        if (node->generic_struct && get_struct_method(node->generic_struct, name)) return true;
+
+        bool is_collection = get_struct_method(node, "elements") || (node->generic_struct && get_struct_method(node->generic_struct, "elements"));
+        if (!is_collection) return true;
+    }
+    else if (type->kind != TYPE_ARRAY) {
+        return true;
+    }
+
+    call->expression = (AstExpr *)make_resolved_identifier_literal(typer, method->identifier, (Ast *)ma->right);
+    AstArgument *receiver = generate_argument_from_expr(typer, ma->left);
+    da_insert(&call->arguments, receiver, 0);
+    return true;
+}
+
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     if (typer->enclosing_function == NULL) {
         if (typer->checking_member_default) {
@@ -3639,6 +3723,10 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         AstIdentifier *qualified = resolve_qualified_name(typer, call->expression, &failed);
         if (failed) return NULL;
         if (qualified) call->expression = (AstExpr *)make_resolved_identifier_literal(typer, qualified, (Ast *)call->expression);
+    }
+
+    if (call->expression->head.kind == AST_MEMBER_ACCESS) {
+        if (!rewrite_slice_method_call(typer, call)) return NULL;
     }
 
     typer->checking_callee = is_literal_identifier(call->expression);

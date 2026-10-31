@@ -482,6 +482,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     parser.runtime_file_path        = join_path(prelude_path, "runtime.sd");
     parser.builtin_string_file_path = join_path(prelude_path, "string.sd");
     parser.collections_file_path    = join_path(prelude_path, "collections.sd");
+    parser.slices_file_path         = join_path(prelude_path, "slices.sd");
     parser.c_bindings_path          = get_absolute_path(c_bindings_path);
     ConstEvaluator ce     = const_evaluator_init(&parser);
     Typer typer           = typer_init(&parser, &ce);

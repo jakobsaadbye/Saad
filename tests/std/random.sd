@@ -3,7 +3,6 @@
 use fmt;
 
 import random;
-import slices;
 
 main :: () {
     {
@@ -55,8 +54,8 @@ main :: () {
             xs.add(i);
         }
         random.shuffle(&rng, xs);
-        assert(!slices.isSorted(xs));
-        slices.sort(xs);
+        assert(!xs.isSorted());
+        xs.sort();
         for x, i in xs {
             assert(x == i);
         }

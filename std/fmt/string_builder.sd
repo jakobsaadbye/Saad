@@ -11,7 +11,7 @@ StringBuilder :: struct {
     capacity:  int;
 }
 
-NewStringBuilder :: (initialCapacity: int) -> StringBuilder {
+newStringBuilder :: (initialCapacity: int) -> StringBuilder {
     buffer: *u8 = malloc(initialCapacity);
 
     memset(buffer, 0, initialCapacity);

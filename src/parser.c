@@ -163,6 +163,7 @@ void dump_file_declarations(AstFile *file) {
 // import it, so that there are no circular imports
 bool is_file_below_collections(Parser *parser, char *file_path) {
     if (parser->runtime_file_path && strcmp(file_path, parser->runtime_file_path) == 0) return true;
+    if (parser->slices_file_path && strcmp(file_path, parser->slices_file_path) == 0) return true;
     if (parser->c_bindings_path == NULL) return false;
 
     char *absolute = get_absolute_path(file_path);
@@ -228,6 +229,11 @@ AstFile *parse_file(Parser *parser, char *file_path) {
         if (!ok) return NULL;
 
         AstImport *prelude = ((AstImport **)file->imports.items)[file->imports.count - 1];
+        prelude->is_prelude = true;
+
+        ok = generate_and_add_import(parser, "slices", parser->slices_file_path);
+        if (!ok) return NULL;
+        prelude = ((AstImport **)file->imports.items)[file->imports.count - 1];
         prelude->is_prelude = true;
     }
 
