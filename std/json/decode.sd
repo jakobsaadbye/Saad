@@ -51,12 +51,14 @@ clone :: method (v: Value) -> Value {
 
 @private
 kindName :: (kind: Kind) -> string {
-    if kind == .null   { return "null"; }
-    if kind == .bool   { return "a bool"; }
-    if kind == .number { return "a number"; }
-    if kind == .string { return "a string"; }
-    if kind == .array  { return "an array"; }
-    return "an object";
+    return switch kind {
+        case .null   => "null";
+        case .bool   => "a bool";
+        case .number => "a number";
+        case .string => "a string";
+        case .array  => "an array";
+        case .object => "an object";
+    };
 }
 
 @private
@@ -101,45 +103,49 @@ assign :: (v: Value, data: *void, type: *Type, path: string, options: *Options) 
         return "";
     }
 
-    if kind == .bool {
-        if v.kind != .bool { return mismatch(path, "a bool", v); }
-        *(data as *bool) = v.boolean;
-        return "";
-    }
-    if kind == .int {
-        if v.kind != .number { return mismatch(path, "a number", v); }
-        return assignInteger(v, data, type as *TypePrimitive, path);
-    }
-    if kind == .float {
-        if v.kind != .number { return mismatch(path, "a number", v); }
-        if type.size == 4 { *(data as *f32) = v.number as f32; }
-        else              { *(data as *f64) = v.number; }
-        return "";
-    }
-    if kind == .string {
-        if v.kind != .string { return mismatch(path, "a string", v); }
-        *(data as *string) = v.text;
-        return "";
-    }
-    if kind == .enum {
-        return assignEnum(v, data, type as *TypeEnum, path, options);
-    }
-    if kind == .pointer {
-        pointee := (type as *TypePointer).pointerTo;
-        if pointee.kind == .void {
-            return failAt(path, "Can't read JSON into a *void");
+    switch kind {
+        case .bool {
+            if v.kind != .bool { return mismatch(path, "a bool", v); }
+            *(data as *bool) = v.boolean;
+            return "";
         }
-        memory := calloc(1, pointee.size as int);
-        *(data as **void) = memory;
-        return assign(v, memory, pointee, path, options);
+        case .int {
+            if v.kind != .number { return mismatch(path, "a number", v); }
+            return assignInteger(v, data, type as *TypePrimitive, path);
+        }
+        case .float {
+            if v.kind != .number { return mismatch(path, "a number", v); }
+            if type.size == 4 { *(data as *f32) = v.number as f32; }
+            else              { *(data as *f64) = v.number; }
+            return "";
+        }
+        case .string {
+            if v.kind != .string { return mismatch(path, "a string", v); }
+            *(data as *string) = v.text;
+            return "";
+        }
+        case .enum {
+            return assignEnum(v, data, type as *TypeEnum, path, options);
+        }
+        case .pointer {
+            pointee := (type as *TypePointer).pointerTo;
+            if pointee.kind == .void {
+                return failAt(path, "Can't read JSON into a *void");
+            }
+            memory := calloc(1, pointee.size as int);
+            *(data as **void) = memory;
+            return assign(v, memory, pointee, path, options);
+        }
+        case .array {
+            return assignArray(v, data, type as *TypeArray, path, options);
+        }
+        case .struct {
+            return assignStruct(v, data, type as *TypeStruct, path, options);
+        }
+        else {
+            return failAt(path, fmt.sprint("Can't read JSON into a value of type %", type.name));
+        }
     }
-    if kind == .array {
-        return assignArray(v, data, type as *TypeArray, path, options);
-    }
-    if kind == .struct {
-        return assignStruct(v, data, type as *TypeStruct, path, options);
-    }
-    return failAt(path, fmt.sprint("Can't read JSON into a value of type %", type.name));
 }
 
 @private
@@ -339,29 +345,33 @@ assignMap :: (v: Value, data: *void, type: *TypeStruct, path: string, options: *
 @private
 assignEnum :: (v: Value, data: *void, type: *TypeEnum, path: string, options: *Options) -> string {
     value: i64 = 0;
-    if v.kind == .string {
-        found := false;
-        for option in type.values {
-            name := styleName(option.name, options.enumValues);
-            same := name == v.text;
-            if options.enumValues != .asWritten { name.free(); }
-            if same {
-                value = option.value;
-                found = true;
-                break;
+    switch v.kind {
+        case .string {
+            found := false;
+            for option in type.values {
+                name := styleName(option.name, options.enumValues);
+                same := name == v.text;
+                if options.enumValues != .asWritten { name.free(); }
+                if same {
+                    value = option.value;
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                return failAt(path, fmt.sprint("'%' is not a value of %", v.text, type.head.name));
             }
         }
-        if !found {
-            return failAt(path, fmt.sprint("'%' is not a value of %", v.text, type.head.name));
+        case .number {
+            value = v.number as i64;
+            _, ok := type.nameOf(value);
+            if !ok || value as f64 != v.number {
+                return failAt(path, fmt.sprint("% is not a value of %", v.text, type.head.name));
+            }
         }
-    } else if v.kind == .number {
-        value = v.number as i64;
-        _, ok := type.nameOf(value);
-        if !ok || value as f64 != v.number {
-            return failAt(path, fmt.sprint("% is not a value of %", v.text, type.head.name));
+        else {
+            return mismatch(path, "the name of a value of the enum", v);
         }
-    } else {
-        return mismatch(path, "the name of a value of the enum", v);
     }
 
     writeBits(data, type.backingType.size, value as u64);
@@ -371,10 +381,12 @@ assignEnum :: (v: Value, data: *void, type: *TypeEnum, path: string, options: *O
 // Writes the lowest bytes of the bits
 @private
 writeBits :: (data: *void, size: int, bits: u64) {
-    if size == 1      { *(data as *u8)  = bits as u8; }
-    else if size == 2 { *(data as *u16) = bits as u16; }
-    else if size == 4 { *(data as *u32) = bits as u32; }
-    else              { *(data as *u64) = bits; }
+    switch size {
+        case 1 { *(data as *u8)  = bits as u8; }
+        case 2 { *(data as *u16) = bits as u16; }
+        case 4 { *(data as *u32) = bits as u32; }
+        else   { *(data as *u64) = bits; }
+    }
 }
 
 // An integer is read from how the number is written, so that big numbers don't lose digits on the way through an f64

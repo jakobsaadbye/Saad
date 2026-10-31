@@ -642,23 +642,26 @@ handleBrickCollision :: (game: *GameState, brick: *Brick) {
 handleOnPickup :: (pickup: *Pickup, bar: *Bar, ball: *Ball, player: *Player, pickup_sound: Sound) {
     pickup.isShown = false;
 
-    if pickup.type == .ballSpeedUp {
-        ball.velX *= 1 + 0.2;
-        ball.velY *= 1 + 0.2;
-    }
-    else if pickup.type == .ballSlowDown {
-        ball.velX *= 1 - 0.2;
-        ball.velY *= 1 - 0.2;
-    }
-    else if pickup.type == .barWiden {
-        bar.width += 20;
-    }
-    else if pickup.type == .barShorten {
-        bar.width -= 20;
-    }
-    else if pickup.type == .fireball {
-        player.hasFireballPowerup      = true;
-        player.fireballPowerupDuration = 1500;
+    // Every type of pickup is handled, so a new one is an error here until it is
+    switch pickup.type {
+        case .ballSpeedUp {
+            ball.velX *= 1 + 0.2;
+            ball.velY *= 1 + 0.2;
+        }
+        case .ballSlowDown {
+            ball.velX *= 1 - 0.2;
+            ball.velY *= 1 - 0.2;
+        }
+        case .barWiden {
+            bar.width += 20;
+        }
+        case .barShorten {
+            bar.width -= 20;
+        }
+        case .fireball {
+            player.hasFireballPowerup      = true;
+            player.fireballPowerupDuration = 1500;
+        }
     }
 
     PlaySound(pickup_sound);

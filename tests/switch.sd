@@ -23,6 +23,23 @@ grade :: (score: int) -> string {
     return "";
 }
 
+// Every way through these functions ends in a return, so they need no return at the end
+name :: (s: Status) -> string {
+    switch s {
+        case .open   { return "open"; }
+        case .closed { return "closed"; }
+        case .locked { return "locked"; }
+    }
+}
+
+parity :: (x: int) -> string {
+    if x % 2 == 0 {
+        return "even";
+    } else {
+        return "odd";
+    }
+}
+
 // A switch expression gives the value of the case that matches
 size :: (s: Status) -> int {
     return switch s {
@@ -38,6 +55,7 @@ next :: (n: *int) -> int {
 }
 
 main :: () {
+    assert(name(.locked) == "locked" && parity(3) == "odd" && parity(4) == "even");
     assert(describe(.open) == "open");
     assert(describe(.closed) == "shut" && describe(.locked) == "shut");
 

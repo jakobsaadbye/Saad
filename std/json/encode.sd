@@ -72,19 +72,22 @@ newline :: method (w: *Writer) {
 writeString :: method (w: *Writer, s: string) {
     w.sb.addChar(Quote);
     for ch in s {
-        if ch == Quote          { w.sb.addString("\\\""); }
-        else if ch == Backslash { w.sb.addString("\\\\"); }
-        else if ch == Newline   { w.sb.addString("\\n"); }
-        else if ch == Return    { w.sb.addString("\\r"); }
-        else if ch == Tab       { w.sb.addString("\\t"); }
-        else if ch == 8         { w.sb.addString("\\b"); }
-        else if ch == 12        { w.sb.addString("\\f"); }
-        else if ch < Space {
-            w.sb.addString("\\u00");
-            w.sb.addChar(hexChar((ch >> 4) as int));
-            w.sb.addChar(hexChar((ch & 15) as int));
+        switch ch {
+            case Quote     { w.sb.addString("\\\""); }
+            case Backslash { w.sb.addString("\\\\"); }
+            case Newline   { w.sb.addString("\\n"); }
+            case Return    { w.sb.addString("\\r"); }
+            case Tab       { w.sb.addString("\\t"); }
+            case 8         { w.sb.addString("\\b"); }
+            case 12        { w.sb.addString("\\f"); }
+            case 0..Space {
+                // The other control characters
+                w.sb.addString("\\u00");
+                w.sb.addChar(hexChar((ch >> 4) as int));
+                w.sb.addChar(hexChar((ch & 15) as int));
+            }
+            else { w.sb.addChar(ch); }
         }
-        else { w.sb.addChar(ch); }
     }
     w.sb.addChar(Quote);
 }
@@ -134,33 +137,33 @@ writeF32 :: method (w: *Writer, n: f32) {
 
 @private
 writeValue :: method (w: *Writer, v: Value) {
-    if v.kind == .null   { w.sb.addString("null"); return; }
-    if v.kind == .bool   { w.writeBool(v.boolean); return; }
-    if v.kind == .string { w.writeString(v.text); return; }
-    if v.kind == .number {
-        if v.text.len > 0 { w.sb.addString(v.text); }
-        else              { w.writeF64(v.number); }
-        return;
-    }
-    if v.kind == .array {
-        w.beginList(OpenBracket, v.items.count);
-        for item, i in v.items {
-            w.nextElement(i);
-            w.writeValue(item);
+    switch v.kind {
+        case .null   { w.sb.addString("null"); }
+        case .bool   { w.writeBool(v.boolean); }
+        case .string { w.writeString(v.text); }
+        case .number {
+            if v.text.len > 0 { w.sb.addString(v.text); }
+            else              { w.writeF64(v.number); }
         }
-        w.endList(CloseBracket, v.items.count);
-        return;
-    }
-    if v.kind == .object {
-        w.beginList(OpenBrace, v.fields.count);
-        i := 0;
-        for entry in v.fields {
-            w.nextElement(i);
-            w.writeKey(entry.key);
-            w.writeValue(entry.value);
-            i += 1;
+        case .array {
+            w.beginList(OpenBracket, v.items.count);
+            for item, i in v.items {
+                w.nextElement(i);
+                w.writeValue(item);
+            }
+            w.endList(CloseBracket, v.items.count);
         }
-        w.endList(CloseBrace, v.fields.count);
+        case .object {
+            w.beginList(OpenBrace, v.fields.count);
+            i := 0;
+            for entry in v.fields {
+                w.nextElement(i);
+                w.writeKey(entry.key);
+                w.writeValue(entry.value);
+                i += 1;
+            }
+            w.endList(CloseBrace, v.fields.count);
+        }
     }
 }
 
@@ -206,57 +209,57 @@ writeMemberName :: method (w: *Writer, name: string) {
 
 @private
 writeAny :: method (w: *Writer, data: *void, type: *Type) {
-    kind := type.kind;
-
-    if kind == .bool {
-        w.writeBool(*(data as *bool));
-    }
-    else if kind == .int {
-        writeInteger(&w.sb, data, type as *TypePrimitive);
-    }
-    else if kind == .float {
-        if type.size == 4 { w.writeF32(*(data as *f32)); }
-        else              { w.writeF64(*(data as *f64)); }
-    }
-    else if kind == .string {
-        w.writeString(*(data as *string));
-    }
-    else if kind == .enum {
-        enumType := type as *TypeEnum;
-        value := enumType.readValue(data);
-        name, ok := enumType.nameOf(value);
-        if ok && !w.options.enumsAsNumbers {
-            w.sb.addChar(Quote);
-            addStyledName(&w.sb, name, w.options.enumValues);
-            w.sb.addChar(Quote);
-        } else {
-            w.sb.addInt64(value);
+    switch type.kind {
+        case .bool {
+            w.writeBool(*(data as *bool));
         }
-    }
-    else if kind == .pointer {
-        pointee := (type as *TypePointer).pointerTo;
-        address := *(data as **void);
-        if address == null || pointee.kind == .void {
+        case .int {
+            writeInteger(&w.sb, data, type as *TypePrimitive);
+        }
+        case .float {
+            if type.size == 4 { w.writeF32(*(data as *f32)); }
+            else              { w.writeF64(*(data as *f64)); }
+        }
+        case .string {
+            w.writeString(*(data as *string));
+        }
+        case .enum {
+            enumType := type as *TypeEnum;
+            value := enumType.readValue(data);
+            name, ok := enumType.nameOf(value);
+            if ok && !w.options.enumsAsNumbers {
+                w.sb.addChar(Quote);
+                addStyledName(&w.sb, name, w.options.enumValues);
+                w.sb.addChar(Quote);
+            } else {
+                w.sb.addInt64(value);
+            }
+        }
+        case .pointer {
+            pointee := (type as *TypePointer).pointerTo;
+            address := *(data as **void);
+            if address == null || pointee.kind == .void {
+                w.sb.addString("null");
+            } else {
+                w.writeAny(address, pointee);
+            }
+        }
+        case .array {
+            arrayType := type as *TypeArray;
+            elements, count := arrayElements(data, arrayType);
+            w.writeElements(elements, count, arrayType.elemType);
+        }
+        case .struct {
+            w.writeStruct(data, type as *TypeStruct);
+        }
+        case .any {
+            boxed := *(data as *any);
+            if boxed.type == null { w.sb.addString("null"); }
+            else                  { w.writeAny(boxed.data, boxed.type); }
+        }
+        else {
             w.sb.addString("null");
-        } else {
-            w.writeAny(address, pointee);
         }
-    }
-    else if kind == .array {
-        arrayType := type as *TypeArray;
-        elements, count := arrayElements(data, arrayType);
-        w.writeElements(elements, count, arrayType.elemType);
-    }
-    else if kind == .struct {
-        w.writeStruct(data, type as *TypeStruct);
-    }
-    else if kind == .any {
-        boxed := *(data as *any);
-        if boxed.type == null { w.sb.addString("null"); }
-        else                  { w.writeAny(boxed.data, boxed.type); }
-    }
-    else {
-        w.sb.addString("null");
     }
 }
 
@@ -378,15 +381,19 @@ writeMap :: method (w: *Writer, data: *void, type: *TypeStruct) {
 
 @private
 writeInteger :: (sb: *fmt.StringBuilder, data: *void, type: *TypePrimitive) {
-    kind := type.kind;
-    if kind == .u8 || kind == .char       { sb.addUInt64((*(data as *u8)) as u64); }
-    else if kind == .u16                  { sb.addUInt64((*(data as *u16)) as u64); }
-    else if kind == .u32 || kind == .uint { sb.addUInt64((*(data as *u32)) as u64); }
-    else if kind == .u64                  { sb.addUInt64(*(data as *u64)); }
-    else if kind == .i8                   { sb.addInt64((*(data as *i8)) as i64); }
-    else if kind == .i16                  { sb.addInt64((*(data as *i16)) as i64); }
-    else if kind == .i64                  { sb.addInt64(*(data as *i64)); }
-    else                                  { sb.addInt64((*(data as *i32)) as i64); }
+    // A char is written as its number
+    switch type.kind {
+        case .u8
+        case .char { sb.addUInt64((*(data as *u8)) as u64); }
+        case .u16  { sb.addUInt64((*(data as *u16)) as u64); }
+        case .u32
+        case .uint { sb.addUInt64((*(data as *u32)) as u64); }
+        case .u64  { sb.addUInt64(*(data as *u64)); }
+        case .i8   { sb.addInt64((*(data as *i8)) as i64); }
+        case .i16  { sb.addInt64((*(data as *i16)) as i64); }
+        case .i64  { sb.addInt64(*(data as *i64)); }
+        else       { sb.addInt64((*(data as *i32)) as i64); }
+    }
 }
 
 //
