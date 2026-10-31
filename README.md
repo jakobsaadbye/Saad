@@ -4,6 +4,25 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.4.3 - 30. Oct 2026
+
+* BREAKING: Struct literals and named arguments use `:` instead of `=`
+
+```odin
+Person :: struct {
+    name: string;
+    age:  int;
+}
+
+p := Person{name: "ada", age: 18};
+
+greet :: (name: string, times := 1) {}
+greet("ada", times: 3);
+```
+
+It matches the `key: value` of map literals, and a struct declaration can be copied into a struct literal by
+replacing the types with values. The old `name = value` is an error that points to the new syntax.
+
 ## Update v0.4.2 - 30. Oct 2026
 
 * Default values for struct members
@@ -17,7 +36,7 @@ Person :: struct {
 }
 
 p: Person;                 // name = "anon", age = 30, tags = 3
-q := Person{name = "ada"}; // age = 30, tags = 3
+q := Person{name: "ada"};  // age = 30, tags = 3
 ```
 
 Defaults are used when a struct is declared without a value, and for the members a struct literal leaves
@@ -246,7 +265,7 @@ MyButton :: struct {
 main :: () {
     // Here we assign a function to the onClick handler
     btn := MyButton{
-        onClick = () {
+        onClick: () {
             Print("You clicked!");
         }
     };
@@ -429,7 +448,7 @@ Myprint :: (format: string, args: ...any, newline := true) {
 }
 
 main :: () {
-    Myprint("Default parameters are %", "useful during refactoring or providing an extensible api", newline = false);
+    Myprint("Default parameters are %", "useful during refactoring or providing an extensible api", newline: false);
 }
 
 

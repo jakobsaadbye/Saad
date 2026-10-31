@@ -25,8 +25,8 @@ defaultParametersNoPositionals :: () {
 positionalArgumentsNoDefaults :: () {
     print("\n------------ Positional arguments (no default parameters) --------------\n");
         
-    bar(d = 1, a = true, b = 4, c = "Positional arguments are cool");
-    bar(true, 69, c = "Positional arguments needs to go last", d = 3.14);
+    bar(d: 1, a: true, b: 4, c: "Positional arguments are cool");
+    bar(true, 69, c: "Positional arguments needs to go last", d: 3.14);
 
     //
     // These should all error if commented in
@@ -44,13 +44,13 @@ positionalArgumentsNoDefaults :: () {
 positionalArgumentsWithDefaults :: () {
     print("\n------------ Positional arguments (with default parameters) --------------\n");
 
-    baz(a = true, b = 5, c = 69);
+    baz(a: true, b: 5, c: 69);
     baz(true, 8);
     bar(
-        a = true, 
-        b = 6, 
-        c = "Your mom", 
-        d = 3.14,
+        a: true, 
+        b: 6, 
+        c: "Your mom", 
+        d: 3.14,
     );
     
     
@@ -83,7 +83,7 @@ variadicsWithDefaultArguments :: () {
     print("\n------------ Variadics with default arguments --------------\n");
 
     // Legal
-    Myprint("%, %, %", "A big house", "a dog", "a tesla", newline = true, sayHello = true);
+    Myprint("%, %, %", "A big house", "a dog", "a tesla", newline: true, sayHello: true);
 
     myStrings: []any = ["penge", "cigaretter"];
     Myprint("Franke, du skylder mig % og %", ...myStrings);

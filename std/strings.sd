@@ -17,9 +17,9 @@ NewStringBuilder :: (initialCapacity: int) -> StringBuilder {
     memset(buffer, 0, initialCapacity);
 
     return {
-        buffer   = buffer,
-        cursor   = 0,
-        capacity = initialCapacity,
+        buffer: buffer,
+        cursor: 0,
+        capacity: initialCapacity,
     };
 }
 

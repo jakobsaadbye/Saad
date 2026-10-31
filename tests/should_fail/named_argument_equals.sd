@@ -1,0 +1,8 @@
+// Named arguments are given their values with ':'
+// expect-error: Use ':' instead of '=' to give a named argument its value
+
+greet :: (name: string, times: int) {}
+
+main :: () {
+    greet(name = "ada", times = 2);
+}
