@@ -1,4 +1,4 @@
-// Map<K, V> from std/collections.sd, a hash table written in Saad
+// Map<K, V> from std/prelude/collections.sd, a hash table written in Saad
 
 Point :: struct {
     x: int;

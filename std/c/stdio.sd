@@ -1,0 +1,24 @@
+namespace c;
+
+// <stdio.h>. A FILE is opaque, so it is a *void
+
+SEEK_SET :: 0;
+SEEK_CUR :: 1;
+SEEK_END :: 2;
+
+extern "C" {
+    printf  :: (format: *u8, args: ...any) -> int;
+    sprintf :: (buffer: *u8, format: *u8, args: ...any) -> int;
+    puts    :: (str: *u8) -> int;
+
+    fopen   :: (path: *u8, mode: *u8) -> *void;
+    fclose  :: (file: *void) -> int;
+    fread   :: (buffer: *void, size: i64, count: i64, file: *void) -> i64;
+    fwrite  :: (buffer: *void, size: i64, count: i64, file: *void) -> i64;
+    fflush  :: (file: *void) -> int;
+    fseek   :: (file: *void, offset: i32, origin: int) -> int;
+    ftell   :: (file: *void) -> i32;
+
+    remove  :: (path: *u8) -> int;
+    rename  :: (oldPath: *u8, newPath: *u8) -> int;
+}

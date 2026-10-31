@@ -54,6 +54,29 @@ MS int64_t ms_strlen(const char *s) { return (int64_t) strlen(s); }
 MS void  ms_exit(int c) { fflush(stdout); exit(c); }
 MS void  ms_ExitProcess(unsigned c) { fflush(stdout); exit((int)c); }
 MS int   ms_abs(int x) { return abs(x); }
+
+// ---- stdio, stdlib and string.h used by std/c ----
+MS int     ms_puts(const char *s) { int r = puts(s); fflush(stdout); return r; }
+MS FILE   *ms_fopen(const char *p, const char *m) { return fopen(p, m); }
+MS int     ms_fclose(FILE *f) { return fclose(f); }
+MS int64_t ms_fread(void *b, int64_t s, int64_t c, FILE *f) { return (int64_t) fread(b, s, c, f); }
+MS int64_t ms_fwrite(const void *b, int64_t s, int64_t c, FILE *f) { return (int64_t) fwrite(b, s, c, f); }
+MS int     ms_fflush(FILE *f) { return fflush(f); }
+MS int     ms_fseek(FILE *f, int32_t o, int w) { return fseek(f, o, w); }
+MS int32_t ms_ftell(FILE *f) { return (int32_t) ftell(f); }
+MS int     ms_remove(const char *p) { return remove(p); }
+MS int     ms_rename(const char *a, const char *b) { return rename(a, b); }
+MS char   *ms_getenv(const char *n) { return getenv(n); }
+MS int     ms_system(const char *c) { fflush(stdout); return system(c); }
+MS int     ms_memcmp(const void *a, const void *b, int64_t n) { return memcmp(a, b, n); }
+
+// ---- kernel32 functions used by std/os/windows.sd and std/time.sd ----
+#include <time.h>
+#include <unistd.h>
+MS void ms_Sleep(uint32_t ms) { usleep((useconds_t) ms * 1000); }
+MS int  ms_QueryPerformanceCounter(int64_t *c) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); *c = (int64_t) t.tv_sec * 1000000000 + t.tv_nsec; return 1; }
+MS int  ms_QueryPerformanceFrequency(int64_t *f) { *f = 1000000000; return 1; }
+MS void ms_GetSystemTimeAsFileTime(uint64_t *ft) { struct timespec t; clock_gettime(CLOCK_REALTIME, &t); *ft = ((uint64_t) t.tv_sec + 11644473600ULL) * 10000000ULL + (uint64_t) t.tv_nsec / 100; }
 #define F1(name) MS double ms_##name(double x) { return name(x); } MS float ms_##name##f(float x) { return name##f(x); }
 F1(ceil) F1(floor) F1(fabs) F1(round) F1(trunc) F1(rint) F1(nearbyint)
 F1(sin) F1(cos) F1(tan) F1(asin) F1(acos) F1(atan) F1(sinh) F1(cosh) F1(tanh) F1(sqrt) F1(exp) F1(log) F1(log10)

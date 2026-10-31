@@ -1,0 +1,69 @@
+namespace random;
+
+// Pseudo random numbers (xorshift64*). Fast and good enough for games and simulations, but not for
+// anything to do with security. The same seed always gives the same numbers, e.g
+//
+//     rng := random.NewRandom(time.unix() as u64);  // different numbers every run
+//     dice := rng.nextInt(1, 7);
+
+Random :: struct {
+    state: u64;
+}
+
+NewRandom :: (seed: u64) -> Random {
+    r := Random{state: seed ^ 88172645463325252};
+    if r.state == 0 {
+        r.state = 88172645463325252;
+    }
+
+    // Close seeds give close states. Mix them a bit before the first number
+    for 0..8 {
+        r.next();
+    }
+    return r;
+}
+
+// The next 64 random bits
+next :: method (r: *Random) -> u64 {
+    x := r.state;
+    x = x ^ (x >> 12);
+    x = x ^ (x << 25);
+    x = x ^ (x >> 27);
+    r.state = x;
+    return x * 2685821657736338717;
+}
+
+// A random integer from min up to but not including max, e.g rng.nextInt(1, 7) for a dice
+nextInt :: method (r: *Random, min: int, max: int) -> int {
+    if max <= min {
+        return min;
+    }
+    range := (max as i64 - min as i64) as u64;
+    return (min as i64 + (r.next() % range) as i64) as int;
+}
+
+// A random float from 0 up to but not including 1
+nextFloat :: method (r: *Random) -> f64 {
+    return (r.next() >> 11) as f64 / 9007199254740992.0; // The top 53 bits divided by 2^53
+}
+
+nextBool :: method (r: *Random) -> bool {
+    return (r.next() >> 63) == 1;
+}
+
+// True with the probability p, e.g rng.chance(0.25) is true one in four times
+chance :: method (r: *Random, p: f64) -> bool {
+    return r.nextFloat() < p;
+}
+
+// Puts the elements in a random order
+shuffle :: <T>(r: *Random, elements: []T) {
+    i := elements.count - 1;
+    while i > 0 {
+        j := r.nextInt(0, i + 1);
+        tmp := elements[i];
+        elements[i] = elements[j];
+        elements[j] = tmp;
+        i -= 1;
+    }
+}

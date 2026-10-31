@@ -1,0 +1,71 @@
+// std/slices.sd
+
+import slices;
+
+Card :: struct {
+    rank: int;
+}
+
+main :: () {
+    {
+        xs := [5, 3, 9, 1, 7];
+        slices.sort(xs);
+        assert(xs[0] == 1 && xs[1] == 3 && xs[2] == 5 && xs[3] == 7 && xs[4] == 9);
+        assert(slices.isSorted(xs));
+    }
+    {
+        // Big enough for the quicksort part, with duplicates and sorted runs
+        xs: [..]int;
+        for i in 0..200 {
+            xs.add((i * 7919) % 101);
+        }
+        for i in 0..50 {
+            xs.add(i);
+        }
+        assert(!slices.isSorted(xs));
+        slices.sort(xs);
+        assert(slices.isSorted(xs));
+        assert(xs.count == 250);
+
+        // Already sorted and reversed input
+        slices.sort(xs);
+        assert(slices.isSorted(xs));
+        slices.reverse(xs);
+        assert(xs[0] >= xs[xs.count - 1]);
+        slices.sort(xs);
+        assert(slices.isSorted(xs));
+    }
+    {
+        names: [..]string;
+        names.add("carl");
+        names.add("anna");
+        names.add("bob");
+        slices.sort(names);
+        assert(names[0] == "anna" && names[1] == "bob" && names[2] == "carl");
+        assert(slices.indexOf(names, "bob") == 1);
+        assert(slices.indexOf(names, "dave") == -1);
+        assert(slices.contains(names, "carl"));
+    }
+    {
+        // Fixed arrays, floats and structs with ==
+        fs: [4]f64 = [2.5, -1.0, 0.5, 2.0];
+        slices.sort(fs);
+        assert(fs[0] == -1.0 && fs[3] == 2.5);
+
+        cards := [Card{1}, Card{2}, Card{3}];
+        assert(slices.contains(cards, Card{2}));
+        slices.reverse(cards);
+        assert(cards[0].rank == 3);
+        slices.swap(cards, 0, 2);
+        assert(cards[0].rank == 1);
+    }
+    {
+        empty: [..]int;
+        slices.sort(empty);
+        slices.reverse(empty);
+        assert(slices.isSorted(empty));
+        assert(!slices.contains(empty, 1));
+    }
+
+    print("ok");
+}

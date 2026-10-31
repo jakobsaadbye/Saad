@@ -23,9 +23,11 @@ typedef struct Parser {
     int split_shift_right_token; // Index + 1 of a '>>' token whose first '>' has been eaten as the end of a list of type arguments e.g List<List<int>>. 0 if none
     AstStruct *reparse_self_struct; // Set when parsing an instance of a generic method that was declared inside this struct
 
+    // The prelude in std/prelude is imported by every file without an import
     char *runtime_file_path;
     char *collections_file_path;
-    AstFile *collections_file; // std/collections.sd, holding List and Map. Every other file imports it
+    AstFile *collections_file; // std/prelude/collections.sd, holding List and Map. Every other file imports it
+    char *c_bindings_path;     // Absolute path of std/c. The prelude is built on these files, so they don't import it
 
     DynamicArray namespaces; // of *Namespace. All the namespaces found in the project and the standard library
     char *builtin_string_file_path;

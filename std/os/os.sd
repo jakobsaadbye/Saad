@@ -1,0 +1,115 @@
+namespace os;
+
+// Files, environment variables and processes. Built on the C runtime.
+// The Windows API is in os.windows
+
+use c;
+
+// Ends the program right away with the exit code
+exit :: (code: int) {
+    c.exit(code);
+}
+
+// Runs a command in the shell and returns its exit code
+run :: (command: string) -> int {
+    cCommand := command.toCString();
+    code := system(cCommand);
+    free(cCommand);
+    return code;
+}
+
+// The value of an environment variable. ok is false if it isn't set
+getEnv :: (name: string) -> string, bool {
+    cName := name.toCString();
+    value := getenv(cName);
+    free(cName);
+    if value == null {
+        return "", false;
+    }
+    return fromCString(value), true;
+}
+
+// The whole file. ok is false if it couldn't be read. The text is allocated with malloc
+readFile :: (path: string) -> string, bool {
+    file := openFile(path, "rb");
+    if file == null {
+        return "", false;
+    }
+
+    capacity := 4096;
+    count    := 0;
+    data     := malloc(capacity) as *u8;
+    while true {
+        if count == capacity {
+            capacity *= 2;
+            data = realloc(data, capacity) as *u8;
+        }
+        read := fread(&data[count], 1, (capacity - count) as i64, file) as int;
+        if read <= 0 {
+            break;
+        }
+        count += read;
+    }
+    fclose(file);
+
+    text: string;
+    text.data = data;
+    text.len  = count;
+    return text, true;
+}
+
+// Creates the file or replaces what is in it. Returns false if it couldn't be written
+writeFile :: (path: string, text: string) -> bool {
+    return writeToFile(path, text, "wb");
+}
+
+// Adds the text to the end of the file, and creates it if it doesn't exist
+appendFile :: (path: string, text: string) -> bool {
+    return writeToFile(path, text, "ab");
+}
+
+fileExists :: (path: string) -> bool {
+    file := openFile(path, "rb");
+    if file == null {
+        return false;
+    }
+    fclose(file);
+    return true;
+}
+
+// Returns false if the file couldn't be removed
+removeFile :: (path: string) -> bool {
+    cPath := path.toCString();
+    result := remove(cPath);
+    free(cPath);
+    return result == 0;
+}
+
+// Returns false if the file couldn't be renamed
+renameFile :: (oldPath: string, newPath: string) -> bool {
+    cOld := oldPath.toCString();
+    cNew := newPath.toCString();
+    result := rename(cOld, cNew);
+    free(cOld);
+    free(cNew);
+    return result == 0;
+}
+
+@private
+openFile :: (path: string, mode: string) -> *void {
+    cPath := path.toCString();
+    file := fopen(cPath, mode.data);
+    free(cPath);
+    return file;
+}
+
+@private
+writeToFile :: (path: string, text: string, mode: string) -> bool {
+    file := openFile(path, mode);
+    if file == null {
+        return false;
+    }
+    written := fwrite(text.data, 1, text.len, file);
+    fclose(file);
+    return written == text.len;
+}

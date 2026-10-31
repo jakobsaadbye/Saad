@@ -1,6 +1,6 @@
-// expect-error: The namespace 'windows' belongs to the standard library
+// expect-error: The namespace 'raylib' belongs to the standard library
 
-import windows;
+import raylib;
 
 main :: () {
 }

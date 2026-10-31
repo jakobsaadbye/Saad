@@ -1,4 +1,4 @@
-// [..]T is List<T> from std/collections.sd, which is written in Saad
+// [..]T is List<T> from std/prelude/collections.sd, which is written in Saad
 
 use fmt;
 use c;

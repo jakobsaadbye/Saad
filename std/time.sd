@@ -1,0 +1,50 @@
+namespace time;
+
+// Clocks, stopwatches and sleeping
+
+import os.windows;
+
+// Seconds since some point in the past, with a high resolution. Use it to measure how long something takes
+now :: () -> f64 {
+    counter, frequency: i64;
+    windows.QueryPerformanceCounter(&counter);
+    windows.QueryPerformanceFrequency(&frequency);
+    return counter as f64 / frequency as f64;
+}
+
+// Seconds since January 1, 1970 (UTC)
+unix :: () -> i64 {
+    fileTime: u64;
+    windows.GetSystemTimeAsFileTime(&fileTime);
+    return (fileTime / 10000000) as i64 - 11644473600;
+}
+
+// Pauses the program
+sleep :: (milliseconds: int) {
+    windows.Sleep(milliseconds as u32);
+}
+
+// Measures the time since it was started, e.g
+//
+//     watch := time.startStopwatch();
+//     ...
+//     fmt.Print("Took % ms", watch.milliseconds());
+Stopwatch :: struct {
+    start: f64;
+}
+
+startStopwatch :: () -> Stopwatch {
+    return Stopwatch{start: now()};
+}
+
+restart :: method (watch: *Stopwatch) {
+    watch.start = now();
+}
+
+seconds :: method (watch: Stopwatch) -> f64 {
+    return now() - watch.start;
+}
+
+milliseconds :: method (watch: Stopwatch) -> f64 {
+    return (now() - watch.start) * 1000.0;
+}

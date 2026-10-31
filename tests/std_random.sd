@@ -1,0 +1,64 @@
+// std/random.sd
+
+import random;
+import slices;
+
+main :: () {
+    {
+        // The same seed gives the same numbers
+        a := random.NewRandom(42);
+        b := random.NewRandom(42);
+        for 0..100 {
+            assert(a.next() == b.next());
+        }
+
+        c := random.NewRandom(43);
+        assert(a.next() != c.next());
+    }
+    {
+        rng := random.NewRandom(1);
+        seen: [6]bool;
+        for 0..1000 {
+            dice := rng.nextInt(1, 7);
+            assert(dice >= 1 && dice <= 6);
+            seen[dice - 1] = true;
+        }
+        for s in seen {
+            assert(s);
+        }
+
+        negative := rng.nextInt(-10, -5);
+        assert(negative >= -10 && negative < -5);
+        assert(rng.nextInt(3, 3) == 3);
+    }
+    {
+        rng := random.NewRandom(7);
+        sum: f64 = 0.0;
+        trues := 0;
+        for 0..1000 {
+            f := rng.nextFloat();
+            assert(f >= 0.0 && f < 1.0);
+            sum += f;
+            if rng.chance(0.25) {
+                trues += 1;
+            }
+        }
+        assert(sum > 400.0 && sum < 600.0);
+        assert(trues > 150 && trues < 350);
+    }
+    {
+        rng := random.NewRandom(3);
+        xs: [..]int;
+        for i in 0..50 {
+            xs.add(i);
+        }
+        random.shuffle(&rng, xs);
+        assert(!slices.isSorted(xs));
+        slices.sort(xs);
+        for x, i in xs {
+            assert(x == i);
+        }
+    }
+
+    print("ok");
+}
