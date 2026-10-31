@@ -1,9 +1,0 @@
-// extern "C" {
-//     realloc :: (buffer: *void, new_size: int) -> *void;
-// }
-import "c_stdlib";
-
-// @Deprecated: Use array.add(elem)
-appendInt :: (array: *[..]int, elem: int) {
-    array.add(elem);
-}

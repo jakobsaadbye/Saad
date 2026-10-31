@@ -15,6 +15,144 @@
     #include <fcntl.h>
     #include <unistd.h>
 #endif
+#include <dirent.h>
+#include <sys/stat.h>
+
+//
+// Namespaces
+//
+// A file declares its namespace with 'namespace game.physics;' at the top. Before parsing, the folder of the main file
+// (and every folder below it) and the standard library are scanned for such files, so that 'import game.physics;' knows
+// which files to load
+//
+
+// Returns the name in 'namespace a.b;' if the file starts with it (after comments), otherwise NULL
+static char *read_namespace_declaration(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) return NULL;
+
+    char text[4096];
+    size_t length = fread(text, 1, sizeof(text) - 1, f);
+    fclose(f);
+    text[length] = '\0';
+
+    char *c = text;
+    while (*c) {
+        if (*c == ' ' || *c == '\t' || *c == '\r' || *c == '\n') { c++; continue; }
+        if (c[0] == '/' && c[1] == '/') { while (*c && *c != '\n') c++; continue; }
+        if (c[0] == '/' && c[1] == '*') {
+            c += 2;
+            while (*c && !(c[0] == '*' && c[1] == '/')) c++;
+            if (*c) c += 2;
+            continue;
+        }
+        break;
+    }
+
+    if (strncmp(c, "namespace", 9) != 0 || !(c[9] == ' ' || c[9] == '\t')) return NULL;
+    c += 9;
+    while (*c == ' ' || *c == '\t') c++;
+
+    char name[256];
+    int n = 0;
+    while (n < 255 && (starts_identifier(*c) || is_digit(*c) || *c == '.')) name[n++] = *c++;
+    name[n] = '\0';
+    if (n == 0) return NULL;
+    return strdup(name);
+}
+
+static bool path_has_extension(const char *path, const char *extension) {
+    size_t path_len = strlen(path), ext_len = strlen(extension);
+    return path_len > ext_len + 1 && path[path_len - ext_len - 1] == '.' && strcmp(path + path_len - ext_len, extension) == 0;
+}
+
+static void scan_namespaces(CompilerConfig *config, Parser *parser, const char *dir, bool is_standard, int depth) {
+    if (depth > 16) return;
+
+    DIR *d = opendir(dir);
+    if (d == NULL) return;
+
+    struct dirent *entry;
+    while ((entry = readdir(d)) != NULL) {
+        const char *name = entry->d_name;
+        if (name[0] == '.') continue;                 // ., .. and hidden folders like .git
+        if (strcmp(name, "build") == 0) continue;     // Compiler output
+
+        char *path = strcmp(dir, ".") == 0 ? strdup(name) : join_path(dir, name);
+
+        struct stat info;
+        if (stat(path, &info) != 0) continue;
+
+        if (S_ISDIR(info.st_mode)) {
+            // The standard library is scanned on its own, also when the project contains it
+            char *absolute = get_absolute_path(path);
+            char *stdlib   = get_absolute_path(config->stdlib_path);
+            bool is_stdlib = !is_standard && absolute && stdlib && strcmp(absolute, stdlib) == 0;
+            if (!is_stdlib) scan_namespaces(config, parser, path, is_standard, depth + 1);
+            continue;
+        }
+
+        if (!path_has_extension(path, config->file_extension)) continue;
+
+        char *ns_name = read_namespace_declaration(path);
+        if (ns_name == NULL) continue;
+
+        // The compiler later works from the folder of the main file, so the paths are made absolute now
+        char *absolute = get_absolute_path(path);
+        if (absolute == NULL) continue;
+
+        Namespace *ns = add_namespace(parser, ns_name);
+        if (is_standard) ns->is_standard = true;
+        da_append(&ns->paths, absolute);
+    }
+    closedir(d);
+}
+
+static char *directory_of(const char *path) {
+    const char *slash = strrchr(path, '/');
+    const char *backslash = strrchr(path, '\\');
+    if (backslash > slash) slash = backslash;
+    if (slash == NULL) return strdup(".");
+
+    size_t length = slash - path;
+    char *dir = malloc(length + 1);
+    memcpy(dir, path, length);
+    dir[length] = '\0';
+    return dir;
+}
+
+static void visit_namespace(DynamicArray *paths_to_visit, Namespace *ns) {
+    for (int i = 0; i < ns->paths.count; i++) {
+        da_append(paths_to_visit, ((char **)ns->paths.items)[i]);
+    }
+}
+
+// Finds the namespace of 'import a.b;' or 'use a.b;'. 'import math.sin;' is the declaration 'sin' of the namespace 'math'
+static bool resolve_namespace_import(Parser *parser, AstImport *import) {
+    Namespace *ns = find_namespace(parser, import->path);
+    if (ns) {
+        import->ns = ns;
+        return true;
+    }
+
+    char *last_dot = strrchr(import->path, '.');
+    if (import->kind == IMPORT_NAMESPACE && last_dot) {
+        char *parent = strdup(import->path);
+        parent[last_dot - import->path] = '\0';
+
+        Namespace *parent_ns = find_namespace(parser, parent);
+        if (parent_ns) {
+            import->kind = IMPORT_NAME;
+            import->ns   = parent_ns;
+            import->name = strdup(last_dot + 1);
+            return true;
+        }
+    }
+
+    report_error_ast(parser, LABEL_ERROR, (Ast *)import, "Unknown namespace '%s'", import->path);
+    report_error_ast(parser, LABEL_HINT, NULL, "A file is in a namespace when it starts with 'namespace %s;'", import->path);
+    return false;
+}
 
 typedef struct CompilerReport {
     CompilerConfig *config;
@@ -165,35 +303,70 @@ void write_text_file(const char *path, StringBuilder sb) {
 // Parses the main file and every file it imports (directly or indirectly). The main file is parsed_files[0]
 static bool parse_all_files(CompilerConfig *config, Parser *parser, const char *main_path, DynamicArray *parsed_files) {
     DynamicArray paths_to_visit = da_init(8, sizeof(char *));
+    DynamicArray parsed_paths   = da_init(8, sizeof(char *)); // The absolute paths of the parsed files, as the same file can be reached by different paths
     da_append(&paths_to_visit, main_path);
 
     for (int cursor = 0; cursor < paths_to_visit.count; cursor++) {
         char *path = ((char **)paths_to_visit.items)[cursor];
+        char *absolute = get_absolute_path(path);
+        if (absolute == NULL) absolute = path;
 
         // Skip files that have already been parsed
         // @Speed: Optimize this O(N2) to a lookup
         bool is_visited = false;
-        for (int i = 0; i < parsed_files->count; i++) {
-            AstFile *file = ((AstFile **)parsed_files->items)[i];
-            if (strcmp(path, file->absolute_path) == 0) {
+        for (int i = 0; i < parsed_paths.count; i++) {
+            if (strcmp(absolute, ((char **)parsed_paths.items)[i]) == 0) {
                 is_visited = true;
                 break;
             }
         }
         if (is_visited) continue;
+        da_append(&parsed_paths, absolute);
 
         AstFile *file = parse_file(parser, path);
         if (file == NULL) return false;
         da_append(parsed_files, file);
 
+        // A file of the project cannot join a namespace of the standard library
+        if (file->ns && file->ns->is_standard) {
+            char *absolute = get_absolute_path(path);
+            char *stdlib   = get_absolute_path(config->stdlib_path);
+            if (absolute && stdlib && strncmp(absolute, stdlib, strlen(stdlib)) != 0) {
+                report_error_range(parser, (Pos){0, 1, 1}, (Pos){0, 1, 1}, "The namespace '%s' belongs to the standard library", file->ns->name);
+                report_error_ast(parser, LABEL_HINT, NULL, "Give your namespace another name e.g mygame.%s", file->ns->name);
+                return false;
+            }
+        }
+
+        // The other files of the same namespace
+        if (file->ns) visit_namespace(&paths_to_visit, file->ns);
+
         // Visit the imported files next
         for (int i = 0; i < file->imports.count; i++) {
             AstImport *import = ((AstImport **)file->imports.items)[i];
+
+            if (import->kind != IMPORT_FILE) {
+                if (!resolve_namespace_import(parser, import)) return false;
+                visit_namespace(&paths_to_visit, import->ns);
+                continue;
+            }
 
             // @Improve: These error messages when we get a proper module system
             if (!resolve_import(config, parser, import, file)) return false;
 
             da_append(&paths_to_visit, import->resolved_path);
+        }
+
+        // Namespaces used by a qualified name without an import e.g math.sin(x)
+        for (int i = 0; i < file->referenced_roots.count; i++) {
+            char  *root   = ((char **)file->referenced_roots.items)[i];
+            size_t length = strlen(root);
+            for (int j = 0; j < parser->namespaces.count; j++) {
+                Namespace *ns = ((Namespace **)parser->namespaces.items)[j];
+                if (strncmp(ns->name, root, length) == 0 && (ns->name[length] == '\0' || ns->name[length] == '.')) {
+                    visit_namespace(&paths_to_visit, ns);
+                }
+            }
         }
     }
 
@@ -208,10 +381,14 @@ static bool link_imports(Parser *parser, DynamicArray parsed_files) {
 
         for (int j = 0; j < file->imports.count; j++) {
             AstImport *import = ((AstImport **)file->imports.items)[j];
+            if (import->kind != IMPORT_FILE) continue;
 
             for (int k = 0; k < parsed_files.count; k++) {
                 AstFile *other_file = ((AstFile **)parsed_files.items)[k];
-                if (strcmp(import->resolved_path, other_file->absolute_path) == 0) {
+                char *a = get_absolute_path(import->resolved_path);
+                char *b = get_absolute_path(other_file->absolute_path);
+                bool same = (a && b) ? strcmp(a, b) == 0 : strcmp(import->resolved_path, other_file->absolute_path) == 0;
+                if (same) {
                     import->imported_file = other_file;
                     break;
                 }
@@ -285,6 +462,8 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     // ----------- Parse -----------
     report.parse_time_start = clock();
     DynamicArray parsed_files = da_init(8, sizeof(AstFile *));
+    scan_namespaces(config, &parser, config->stdlib_path, true, 0);
+    scan_namespaces(config, &parser, directory_of(main_path), false, 0);
     if (!parse_all_files(config, &parser, main_path, &parsed_files) || !link_imports(&parser, parsed_files)) {
         cleanup();
         return false;

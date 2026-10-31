@@ -1,4 +1,4 @@
-import "fmt";
+use fmt;
 
 main :: () {
     // Functions can be assigned to a new function

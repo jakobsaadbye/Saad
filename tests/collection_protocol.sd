@@ -1,6 +1,6 @@
 // Any struct with the right methods gets the syntax of a collection: c[k], for x in c, [a, b, c] literals and passing it as a slice
 
-import "c_stdlib";
+use c;
 
 Stack :: struct <T> {
     data:     *T;

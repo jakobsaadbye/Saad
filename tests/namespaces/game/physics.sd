@@ -1,0 +1,17 @@
+namespace game.physics;
+
+use geometry;
+import game.render; // game.render uses game.physics. Not `use`, as both geometry and game.render have a Vec2
+
+Body :: struct {
+    pos:  Vec2;
+    mass: f64;
+}
+
+moved :: (b: Body, by: Vec2) -> Body {
+    return Body{add(b.pos, by), b.mass};
+}
+
+drawnName :: (b: Body) -> string {
+    return render.name(b);
+}

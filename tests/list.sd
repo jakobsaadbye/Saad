@@ -1,7 +1,7 @@
 // [..]T is List<T> from std/collections.sd, which is written in Saad
 
-import "fmt";
-import "c_stdlib";
+use fmt;
+use c;
 
 Point :: struct { x: int; y: int; }
 

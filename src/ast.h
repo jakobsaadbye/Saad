@@ -137,6 +137,8 @@ typedef struct AstExpr {
     struct AstExpr *replacement; // Set by the typer when the expression means another expression e.g xs[i] means *xs.indexRef(i) when xs is a collection. The backend lowers the replacement instead
 } AstExpr;
 
+typedef struct Namespace Namespace;
+
 typedef struct AstFile {
     Ast          head;
     char        *text;
@@ -147,7 +149,26 @@ typedef struct AstFile {
     DynamicArray flattened_function_defns; // of AstFunctionDefn*. A list of all the functions found in this file, both at top-level or inner functions
     bool         is_parsed;
     bool         has_imported_builtin_string;
+
+    Namespace   *ns;               // The namespace declared with 'namespace a.b;' at the top of the file, or NULL
+    DynamicArray referenced_roots; // of char*. First names of qualified names e.g the 'math' in math.sin(x), so that their namespaces get loaded
+    int          check_state;      // 0 not checked, 1 being checked, 2 checked. Files can use each other
 } AstFile;
+
+// A namespace e.g 'game.physics'. Any number of files, in any folders, can declare that they are in it with 'namespace game.physics;'
+typedef struct Namespace {
+    char        *name;
+    DynamicArray paths;       // of char*. The files declaring the namespace
+    DynamicArray files;       // of *AstFile. The parsed files of the namespace
+    bool         is_standard; // Declared by the standard library. Other files cannot join it
+} Namespace;
+
+typedef enum ImportKind {
+    IMPORT_FILE,      // import "fmt"; The old way of importing all the declarations of a file. Deprecated
+    IMPORT_NAMESPACE, // import math; or import math as m; Makes the namespace usable as a qualified name e.g math.sin(x)
+    IMPORT_NAME,      // import math.sin; or import math.sin as s; A single declaration of a namespace
+    IMPORT_USE,       // use os; Every public declaration of the namespace
+} ImportKind;
 
 typedef struct AstImport {
     Ast      head;
@@ -156,6 +177,12 @@ typedef struct AstImport {
     char    *resolved_path;
     AstFile *imported_file;
     bool     is_prelude; // The import of std/collections.sd that every file gets. A file's own declarations win over the ones it imports
+
+    ImportKind kind;
+    char      *path;  // The dotted path e.g "math.sin"
+    char      *alias; // The name after 'as', or NULL
+    char      *name;  // IMPORT_NAME: the name of the declaration e.g "sin"
+    Namespace *ns;    // The namespace, found when the files are loaded
 } AstImport;
 
 typedef struct AstExtern {
@@ -176,6 +203,11 @@ typedef enum IdentifierFlags {
     IDENTIFIER_IS_RESOLVED          = 1 << 7,
     IDENTIFIER_IS_BUILTIN_FUNCTION  = 1 << 8,
     IDENTIFIER_IS_TYPE_ALIAS        = 1 << 9,  // e.g Byte :: u8; or IntList :: List<int>; Also set on the type parameters bound in an instance of a generic
+    IDENTIFIER_IS_NAMESPACE         = 1 << 10, // The name of an imported namespace e.g the 'm' of 'import math as m;'
+    IDENTIFIER_IS_AMBIGUOUS         = 1 << 11, // Brought into scope by more than one 'use'. Using it is an error, see 'ambiguous'
+    IDENTIFIER_IS_IMPORTED_NAME     = 1 << 12, // A copy made by 'import math.sin;' or 'import math.sin as s;'
+    IDENTIFIER_IS_PRIVATE           = 1 << 13, // @private. Only visible inside its own namespace, or its own file if it has no namespace
+    IDENTIFIER_IS_DEPRECATED        = 1 << 14, // @deprecated("message"). Using it gives a warning
 } IdentifierFlags;
 
 typedef struct AstIdentifier {
@@ -192,6 +224,11 @@ typedef struct AstIdentifier {
     int member_index;   // Used to know the insertion order of a struct member
     int member_offset;  // Relative positive offset of the member within the struct
     int stack_offset;
+
+    Namespace     *ns;                 // IDENTIFIER_IS_NAMESPACE: the namespace
+    DynamicArray   ambiguous;          // IDENTIFIER_IS_AMBIGUOUS: of *AstIdentifier. The declarations with this name
+    AstIdentifier *imported_from;      // IDENTIFIER_IS_IMPORTED_NAME: the declaration it is a copy of
+    char          *deprecated_message; // IDENTIFIER_IS_DEPRECATED
 } AstIdentifier;
 
 typedef enum DeclarationFlags {
@@ -364,6 +401,7 @@ typedef struct AstFunctionDefn {
     AstFunctionDefn *generic_function;  // Set on an instance to the generic function it was instantiated from
     DynamicArray     type_args;         // of *Type. Set on an instance to the types it was instantiated with
     char            *instance_name;     // Set on an instance to a readable name e.g "max<int>"
+    char            *instance_key;      // Set on an instance to the name with namespaces e.g "max<raylib.Color>", which tells instances apart
 
     bool             is_registered_method; // Set when the method has been added to the methods of its receiver struct
 
@@ -728,6 +766,7 @@ typedef struct TypeEnum {
     AstIdentifier *count;
     AstIdentifier *names;
     AstIdentifier *values;
+    char          *qualified_name; // The name with the namespace e.g "raylib.KeyboardKey"
 } TypeEnum;
 
 typedef struct TypeEnumValue {
@@ -742,6 +781,7 @@ typedef struct TypeStruct {
     AstStruct     *node;
     AstIdentifier *identifier;
     unsigned int   alignment;
+    char          *qualified_name; // The name with the namespace e.g "raylib.Color". Structs with the same qualified name are the same type
 } TypeStruct;
 
 typedef struct TypeFunction {

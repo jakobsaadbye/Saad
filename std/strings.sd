@@ -1,6 +1,6 @@
-import "c_stdlib";
-import "c_string";
-import "arrays";
+namespace fmt; // StringBuilder and the formatting of values for fmt
+
+use c;
 
 ////////////////////////////////////////////////////////////////////////////////////
 //   StringBuilder
@@ -323,7 +323,7 @@ add :: method (sb: *StringBuilder, format: string, args: ...any) {
     placeholderIndicies: [..]int;
     for c, i in format {
         if c == 37 { // '%'
-            appendInt(&placeholderIndicies, i);
+            placeholderIndicies.add(i);
         }
     }
 

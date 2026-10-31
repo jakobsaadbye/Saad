@@ -1,0 +1,7 @@
+// expect-error: 'Vec3' is not declared in the namespace 'shapes'
+
+import shapes;
+
+main :: () {
+    v: shapes.Vec3;
+}

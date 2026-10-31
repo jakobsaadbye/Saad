@@ -1,0 +1,7 @@
+// Another file of the namespace 'geometry', in another folder. It sees the private declarations of the namespace
+namespace geometry;
+
+twice :: (x: int) -> int {
+    v: Vec2;
+    return twiceInternal(x) + v.secret() - 7;
+}

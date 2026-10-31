@@ -26,10 +26,14 @@ typedef struct Parser {
     char *runtime_file_path;
     char *collections_file_path;
     AstFile *collections_file; // std/collections.sd, holding List and Map. Every other file imports it
+
+    DynamicArray namespaces; // of *Namespace. All the namespaces found in the project and the standard library
     char *builtin_string_file_path;
 } Parser;
 
 Parser   parser_init(Lexer *lexer);
+Namespace *find_namespace(Parser *parser, const char *name);
+Namespace *add_namespace(Parser *parser, const char *name);
 AstFile *parse_file(Parser *parser, char *file_path);
 
 AstIdentifier  *generate_identifier(Parser *parser, char *ident_name, Type *type, IdentifierFlags flags);

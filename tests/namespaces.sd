@@ -1,0 +1,55 @@
+// Namespaces, from tests/namespaces/ and the standard library
+
+use geometry;
+use game.physics;
+import game.render;
+import game.render as gfx;
+import geometry.twice;
+import geometry.add as plusVec;
+import math as m;
+import math.sqrt;
+
+main :: () {
+    {
+        // 'use' brings in every public declaration
+        a := Vec2{3, 4};
+        assert(a.length2() == 25);
+        assert(add(a, ORIGIN) == a);
+        shape := Shape.Square;
+        assert(shape == .Square);
+
+        // A namespace can be spread over files in different folders, which share their private declarations
+        assert(twice(5) == 10);
+
+        // Names from single imports, also renamed
+        assert(plusVec(a, a).x == 6);
+    }
+    {
+        // Qualified names work with and without an import
+        p := geometry.Vec2{1, 2};
+        q: geometry.Vec2 = geometry.add(p, p);
+        assert(q.y == 4);
+        assert(geometry.Shape.Circle != geometry.Shape.Square);
+        b: geometry.Box<int> = {5};
+        assert(b.value == 5);
+
+        // render.Vec2 and geometry.Vec2 are different types with the same name
+        r := gfx.Vec2{1, 2};
+        s: render.Vec2 = r;
+        assert(s.x == 1);
+        assert(typeof(r) == "game.render.Vec2");
+        assert(typeof(p) == "geometry.Vec2");
+    }
+    {
+        // Namespaces can use each other
+        body := Body{Vec2{1, 1}, 2.0};
+        assert(moved(body, Vec2{1, 0}).pos.x == 2);
+        assert(drawnName(body) == "body");
+        assert(render.name(body) == "body");
+    }
+    {
+        // The standard library
+        assert(sqrt(16.0) == 4.0);
+        assert(m.floor(2.5) == 2.0);
+    }
+}

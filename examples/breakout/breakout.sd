@@ -1,6 +1,6 @@
-import "fmt";
-import "math";
-import "raylib";
+use fmt;
+use math;
+use raylib;
 
 BALL_SIZE           :: 20;
 BRICK_WIDTH         :: 100;

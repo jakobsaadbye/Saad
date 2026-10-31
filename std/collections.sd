@@ -10,7 +10,7 @@
 //   [k1: v1, k2: v2]         reserve(n) and set(k, v)
 //////////////////////////////////
 
-import "c_stdlib";
+use c;
 
 //
 // Allocators

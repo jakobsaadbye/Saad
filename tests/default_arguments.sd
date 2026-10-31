@@ -1,4 +1,4 @@
-import "fmt";
+use fmt;
 
 foo :: (a := 3) {
     print("%\n", a);

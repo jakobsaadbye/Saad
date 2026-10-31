@@ -1,3 +1,5 @@
+namespace c;
+
 extern "C" {
     strlen :: (str: *u8) -> int;
 }

@@ -1,0 +1,10 @@
+namespace game.render;
+
+use game.physics;
+
+// A different Vec2 than geometry.Vec2
+Vec2 :: struct { x: int; y: int; }
+
+name :: (b: Body) -> string {
+    return "body";
+}

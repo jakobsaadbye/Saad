@@ -1,3 +1,5 @@
+namespace windows;
+
 CriticalSection :: struct {
     data: [40]u8;  // opaque, windows manages this internally
 }
