@@ -4,6 +4,14 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.7.1 - 1. Nov 2026
+
+* The standard library and breakout use switch where it reads better, e.g the kinds of types in `fmt` and
+  `std/json`, the escapes and characters of the JSON parser, and the pickups of breakout
+* A function doesn't need a return at its end when every way through it returns: an `if` with an `else`, or a
+  switch with an `else` or one that handles every value of an enum or union, where every branch returns
+* A case of a switch expression can give an untyped number to a switch of any number type, e.g `=> Minus;` for a u8
+
 ## Update v0.7.0 - 31. Oct 2026
 
 * switch

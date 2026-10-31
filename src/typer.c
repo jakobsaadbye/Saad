@@ -3768,6 +3768,7 @@ bool check_union_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject, Typ
     if (!ok) return false;
 
     bool has_else = sw->cases.count > 0 && ((AstCase **)sw->cases.items)[sw->cases.count - 1]->is_else;
+    sw->is_exhaustive = true; // Every variant is handled, or there is an else. Otherwise it is an error below
     if (!has_else) {
         StringBuilder missing = sb_init(32);
         int missing_count = 0;
@@ -3821,6 +3822,15 @@ bool check_switch_arm(Typer *typer, AstSwitchArm *arm) {
     }
 
     if (!leads_to_integer_overflow(typer, sw->result_type, arm->value)) return false;
+
+    // An untyped number, e.g a literal or a constant, becomes the number type of the switch. It was checked to fit above
+    if (is_untyped_type(arm->value->type) && (sw->result_type->kind == TYPE_INTEGER || sw->result_type->kind == TYPE_FLOAT)) {
+        if (arm->value->type->kind == TYPE_FLOAT && sw->result_type->kind == TYPE_INTEGER) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arm->value, "This case gives a float, but the switch gives a %s", type_to_str(sw->result_type));
+            return false;
+        }
+        return true;
+    }
 
     if (!types_are_equal(sw->result_type, arm->value->type)) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arm->value, "This case gives a %s, but the switch gives a %s", type_to_str(arm->value->type), type_to_str(sw->result_type));
@@ -3968,6 +3978,7 @@ bool check_switch(Typer *typer, AstSwitch *sw) {
         }
     }
 
+    sw->is_exhaustive = has_else || (subject && subject->type->kind == TYPE_ENUM); // Every value of an enum is handled, or it is an error below
     if (sw->is_expression && !has_else && !(subject && subject->type->kind == TYPE_ENUM)) {
         report_error_ast(parser, LABEL_ERROR, (Ast *)sw, "A switch that gives a value needs an else, so that it has a value when no case matches");
         return false;
@@ -4067,19 +4078,46 @@ bool check_break_or_continue(Typer *typer, AstBreakOrContinue *boc) {
     return true;
 }
 
-bool check_if_function_needs_a_return(Typer *typer, AstFunctionDefn *func_defn) {
-    bool has_return = false;
-    For (Ast*, func_defn->body->statements, {
-        if (it->kind == AST_RETURN) {
-            has_return = true;
-            break;
+// True if every way through the statement ends in a return, e.g an if with an else, or a switch, where every branch returns
+bool always_returns(Ast *stmt) {
+    switch (stmt->kind) {
+    case AST_RETURN:
+        return true;
+    case AST_BLOCK: {
+        AstBlock *block = (AstBlock *)stmt;
+        for (int i = 0; i < block->statements.count; i++) {
+            if (always_returns(((Ast **)block->statements.items)[i])) return true;
         }
-    });
+        return false;
+    }
+    case AST_IF: {
+        AstIf *ast_if = (AstIf *)stmt;
+        if (ast_if->else_block == NULL || !always_returns((Ast *)ast_if->then_block) || !always_returns((Ast *)ast_if->else_block)) return false;
+        for (int i = 0; i < ast_if->else_ifs.count; i++) {
+            if (!always_returns((Ast *)((AstIf **)ast_if->else_ifs.items)[i]->then_block)) return false;
+        }
+        return true;
+    }
+    case AST_SWITCH: {
+        AstSwitch *sw = (AstSwitch *)stmt;
+        if (!sw->is_exhaustive || sw->cases.count == 0) return false;
+        for (int i = 0; i < sw->cases.count; i++) {
+            if (!always_returns((Ast *)((AstCase **)sw->cases.items)[i]->block)) return false;
+        }
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+bool check_if_function_needs_a_return(Typer *typer, AstFunctionDefn *func_defn) {
+    bool has_return = always_returns((Ast *)func_defn->body);
 
     Type *return_type_0 = ((Type **)func_defn->return_types.items)[0];
     if (!has_return && return_type_0->kind != TYPE_VOID && !func_defn->is_extern && !func_defn->is_lambda) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)func_defn, "Function is missing a return");
-        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)func_defn, "Put an explicit return at the outer scope of the function. In the future we should be able to detect nested returns");
+        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)func_defn, "Every way through the function must end in a return, e.g an if needs an else that returns too");
         return false;
     }
 

@@ -150,11 +150,12 @@ nameOf :: method (type: *TypeEnum, value: i64) -> string, bool {
 
 // Reads the value of an enum stored at data, as an i64
 readValue :: method (type: *TypeEnum, data: *void) -> i64 {
-    size := type.backingType.size;
-    if size == 1 { return (*(data as *i8)) as i64; }
-    if size == 2 { return (*(data as *i16)) as i64; }
-    if size == 8 { return *(data as *i64); }
-    return (*(data as *i32)) as i64;
+    return switch type.backingType.size {
+        case 1 => (*(data as *i8)) as i64;
+        case 2 => (*(data as *i16)) as i64;
+        case 8 => *(data as *i64);
+        else   => (*(data as *i32)) as i64;
+    };
 }
 
 // The address of the member inside a struct value that starts at data

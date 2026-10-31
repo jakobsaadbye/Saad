@@ -58,9 +58,11 @@ at :: method (v: Value, index: i64) -> Value {
 
 // The number of elements of an array or members of an object
 length :: method (v: Value) -> i64 {
-    if v.kind == .array  { return v.items.count; }
-    if v.kind == .object { return v.fields.count; }
-    return 0;
+    return switch v.kind {
+        case .array  => v.items.count;
+        case .object => v.fields.count;
+        else         => 0;
+    };
 }
 
 // The keys of an object, in the order they were written
@@ -275,21 +277,24 @@ parseValue :: method (p: *Parser, depth: int) -> Value, bool {
     }
 
     ch := p.peek();
-    if ch == OpenBrace {
-        object, ok := p.parseObject(depth);
-        return object, ok;
-    }
-    if ch == OpenBracket {
-        array, ok := p.parseArray(depth);
-        return array, ok;
-    }
-    if ch == Quote {
-        s, ok := p.parseString();
-        return Value{kind: .string, text: s}, ok;
-    }
-    if ch == Minus || (ch >= Zero && ch <= Nine) {
-        number, ok := p.parseNumber();
-        return number, ok;
+    switch ch {
+        case OpenBrace {
+            object, ok := p.parseObject(depth);
+            return object, ok;
+        }
+        case OpenBracket {
+            array, ok := p.parseArray(depth);
+            return array, ok;
+        }
+        case Quote {
+            s, ok := p.parseString();
+            return Value{kind: .string, text: s}, ok;
+        }
+        case Minus
+        case Zero...Nine {
+            number, ok := p.parseNumber();
+            return number, ok;
+        }
     }
     if p.eatWord("true")  { return Value{kind: .bool, boolean: true}, true; }
     if p.eatWord("false") { return Value{kind: .bool, boolean: false}, true; }
@@ -336,14 +341,15 @@ parseObject :: method (p: *Parser, depth: int) -> Value, bool {
         object.fields.set(key, member);
 
         p.skipSpace();
-        ch := p.peek();
-        if ch == Comma {
-            p.at += 1;
-            continue;
-        }
-        if ch == CloseBrace {
-            p.at += 1;
-            return object, true;
+        switch p.peek() {
+            case Comma {
+                p.at += 1;
+                continue;
+            }
+            case CloseBrace {
+                p.at += 1;
+                return object, true;
+            }
         }
         p.fail("Expected a ',' or a '}' after the member");
         return object, false;
@@ -369,14 +375,15 @@ parseArray :: method (p: *Parser, depth: int) -> Value, bool {
         array.items.add(element);
 
         p.skipSpace();
-        ch := p.peek();
-        if ch == Comma {
-            p.at += 1;
-            continue;
-        }
-        if ch == CloseBracket {
-            p.at += 1;
-            return array, true;
+        switch p.peek() {
+            case Comma {
+                p.at += 1;
+                continue;
+            }
+            case CloseBracket {
+                p.at += 1;
+                return array, true;
+            }
         }
         p.fail("Expected a ',' or a ']' after the element");
         return array, false;
@@ -466,20 +473,26 @@ parseHex4 :: method (p: *Parser) -> int, bool {
 // Adds a unicode code point as UTF-8
 @private
 addUtf8 :: (sb: *fmt.StringBuilder, code: int) {
-    if code < 128 {
-        sb.addChar(code as u8);
-    } else if code < 2048 {
-        sb.addChar((192 | (code >> 6)) as u8);
-        sb.addChar((128 | (code & 63)) as u8);
-    } else if code < 65536 {
-        sb.addChar((224 | (code >> 12)) as u8);
-        sb.addChar((128 | ((code >> 6) & 63)) as u8);
-        sb.addChar((128 | (code & 63)) as u8);
-    } else {
-        sb.addChar((240 | (code >> 18)) as u8);
-        sb.addChar((128 | ((code >> 12) & 63)) as u8);
-        sb.addChar((128 | ((code >> 6) & 63)) as u8);
-        sb.addChar((128 | (code & 63)) as u8);
+    // 1 to 4 bytes, depending on how big the code point is
+    switch code {
+        case 0..128 {
+            sb.addChar(code as u8);
+        }
+        case 128..2048 {
+            sb.addChar((192 | (code >> 6)) as u8);
+            sb.addChar((128 | (code & 63)) as u8);
+        }
+        case 2048..65536 {
+            sb.addChar((224 | (code >> 12)) as u8);
+            sb.addChar((128 | ((code >> 6) & 63)) as u8);
+            sb.addChar((128 | (code & 63)) as u8);
+        }
+        else {
+            sb.addChar((240 | (code >> 18)) as u8);
+            sb.addChar((128 | ((code >> 12) & 63)) as u8);
+            sb.addChar((128 | ((code >> 6) & 63)) as u8);
+            sb.addChar((128 | (code & 63)) as u8);
+        }
     }
 }
 
@@ -515,39 +528,38 @@ parseString :: method (p: *Parser) -> string, bool {
         p.at += 1;
         escape := p.peek();
         p.at += 1;
-        if escape == Quote || escape == Backslash || escape == Slash {
-            sb.addChar(escape);
-        } else if escape == LowerB {
-            sb.addChar(8);
-        } else if escape == LowerF {
-            sb.addChar(12);
-        } else if escape == LowerN {
-            sb.addChar(Newline);
-        } else if escape == LowerR {
-            sb.addChar(Return);
-        } else if escape == LowerT {
-            sb.addChar(Tab);
-        } else if escape == LowerU {
-            code, ok := p.parseHex4();
-            if !ok { sb.free(); return "", false; }
+        switch escape {
+            case Quote
+            case Backslash
+            case Slash  { sb.addChar(escape); }
+            case LowerB { sb.addChar(8); }
+            case LowerF { sb.addChar(12); }
+            case LowerN { sb.addChar(Newline); }
+            case LowerR { sb.addChar(Return); }
+            case LowerT { sb.addChar(Tab); }
+            case LowerU {
+                code, ok := p.parseHex4();
+                if !ok { sb.free(); return "", false; }
 
-            // A code point above 0xFFFF is written as two escapes, a surrogate pair
-            if code >= 55296 && code <= 56319 && p.eatWord("\\u") {
-                low, lowOk := p.parseHex4();
-                if !lowOk { sb.free(); return "", false; }
-                if low >= 56320 && low <= 57343 {
-                    code = 65536 + ((code - 55296) << 10) + (low - 56320);
-                } else {
-                    addUtf8(&sb, 65533);
-                    code = low;
+                // A code point above 0xFFFF is written as two escapes, a surrogate pair
+                if code >= 55296 && code <= 56319 && p.eatWord("\\u") {
+                    low, lowOk := p.parseHex4();
+                    if !lowOk { sb.free(); return "", false; }
+                    if low >= 56320 && low <= 57343 {
+                        code = 65536 + ((code - 55296) << 10) + (low - 56320);
+                    } else {
+                        addUtf8(&sb, 65533);
+                        code = low;
+                    }
                 }
+                addUtf8(&sb, code);
             }
-            addUtf8(&sb, code);
-        } else {
-            p.at -= 1;
-            p.fail("Unknown escape in a string");
-            sb.free();
-            return "", false;
+            else {
+                p.at -= 1;
+                p.fail("Unknown escape in a string");
+                sb.free();
+                return "", false;
+            }
         }
     }
     return "", false;

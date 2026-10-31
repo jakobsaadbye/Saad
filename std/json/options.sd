@@ -87,9 +87,12 @@ addStyledName :: (sb: *fmt.StringBuilder, name: string, style: NameStyle) {
         return;
     }
 
-    separator: u8 = 0;
-    if style == .snakeCase || style == .upperSnake { separator = Underscore as u8; }
-    if style == .kebabCase                        { separator = Minus as u8; }
+    separator: u8 = switch style {
+        case .snakeCase
+        case .upperSnake => Underscore;
+        case .kebabCase  => Minus;
+        else             => 0;
+    };
 
     word := 0;         // The number of words written
     inWord := false;   // Inside a word, so the next letter continues it

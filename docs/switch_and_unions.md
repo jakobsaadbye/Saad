@@ -31,6 +31,8 @@ switch name {
 * A switch on an enum without an `else` must handle every value of the enum. The compiler lists the ones
   that are missing.
 * A value that is handled twice is an error.
+* A function doesn't need a return after a switch where every case returns, when it has an `else` or handles
+  every value of an enum or union. The same goes for an `if` with an `else` where every branch returns.
 
 ### Switch expressions
 

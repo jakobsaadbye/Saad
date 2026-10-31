@@ -505,6 +505,7 @@ typedef struct AstSwitch {
     DynamicArray   cases;   // of *AstCase
     AstBlock      *lowered; // Made by the typer: a hidden local with the subject and a chain of ifs. This is what is lowered
     bool           is_expression;
+    bool           is_exhaustive; // Has an else, or handles every value of an enum or union. Set by the typer
     Type          *result_type; // The type of the value of a switch expression
     int            result_slot; // Used while lowering a switch expression: the slot its value is stored in
 } AstSwitch;
