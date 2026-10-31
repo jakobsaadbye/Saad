@@ -4,8 +4,9 @@
 
 ```odin
 switch status {
-    case .open            { ... }
-    case .closed, .locked { ... }    // more values
+    case .open   { ... }
+    case .closed                     // cases right after each other share the block
+    case .locked { ... }
 }
 
 switch score {
@@ -16,7 +17,7 @@ switch score {
 }
 
 switch name {
-    case "alice", "bob" { ... }      // anything that can be compared with ==
+    case "alice" { ... }             // anything that can be compared with ==
 }
 
 switch {                             // no value: each case is a condition, like a chain of if else
@@ -26,6 +27,8 @@ switch {                             // no value: each case is a condition, like
 }
 ```
 
+* Each `case` has one value and goes on its own line. Cases on the lines right after each other share the block
+  of the last one.
 * The first case that matches runs, and nothing else. There is no fallthrough, so `break` and `continue`
   are for the loop around the switch.
 * The value is evaluated once.
@@ -76,7 +79,8 @@ grow :: (s: *Shape) {
 ```
 
 * A switch on a union without an `else` must handle every variant.
-* In a case with more variants, e.g `case .rect, .circle`, `v` is the union itself.
+* In a case with more variants, e.g `case .rect` and `case .circle` on the lines right after each other, `v`
+  is the union itself.
 * The zero value of a union holds its first variant, with a zeroed value. So `Option<T>` below is `.none`
   until it is given a value.
 * Unions can be generic, have methods and be in lists and maps like structs. They can't be compared with

@@ -5,8 +5,9 @@ Status :: enum { open, closed, locked }
 describe :: (s: Status) -> string {
     // Every value is handled, so there is no else
     switch s {
-        case .open           { return "open"; }
-        case .closed, .locked { return "shut"; }
+        case .open   { return "open"; }
+        case .closed
+        case .locked { return "shut"; }  // Cases right after each other share the block
     }
     return "?";
 }
@@ -15,7 +16,8 @@ grade :: (score: int) -> string {
     switch score {
         case 90...100 { return "A"; }   // 90 to 100
         case 80..90   { return "B"; }   // 80 to 89
-        case 0, -1    { return "none"; }
+        case 0
+        case -1       { return "none"; }
         else          { return "C"; }
     }
     return "";
@@ -51,7 +53,8 @@ main :: () {
         result := "";
         switch "beta" {
             case "alpha"         { result = "a"; }
-            case "beta", "gamma" { result = "b or g"; }
+            case "beta"
+            case "gamma" { result = "b or g"; }
         }
         assert(result == "b or g");
     }

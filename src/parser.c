@@ -2890,6 +2890,11 @@ bool reparse_default_values(Parser *parser, AstDeclaration *generic_decl, AstBlo
     return ok;
 }
 
+// True if the next token is the first on its line
+bool starts_line(Parser *parser) {
+    return peek_token(parser, -1).end.line < peek_next_token(parser).start.line;
+}
+
 AstSwitch *parse_switch(Parser *parser) {
     Token switch_token = peek_next_token(parser);
     eat_token(parser);
@@ -2935,20 +2940,38 @@ AstSwitch *parse_switch(Parser *parser) {
         ast_case->head.start = next.start;
         ast_case->values     = da_init(1, sizeof(AstExpr *));
 
+        if ((next.type == TOKEN_ELSE || next.type == TOKEN_CASE) && !starts_line(parser)) {
+            report_error_token(parser, LABEL_ERROR, next, "Each case of a switch goes on its own line");
+            return NULL;
+        }
+
         if (next.type == TOKEN_ELSE) {
             eat_token(parser);
             ast_case->is_else = true;
         } else if (next.type == TOKEN_CASE) {
-            eat_token(parser);
+            // One value per case. Cases on the lines right after each other share the block of the last one e.g
+            //     case .closed
+            //     case .locked { ... }
             while (true) {
+                eat_token(parser); // case
+
                 parser->inside_statement_header = true;
                 AstExpr *value = parse_range_or_normal_expression(parser);
                 parser->inside_statement_header = false;
                 if (!value) return NULL;
                 da_append(&ast_case->values, value);
 
-                if (peek_next_token(parser).type != ',') break;
-                eat_token(parser);
+                Token after = peek_next_token(parser);
+                if (after.type == ',') {
+                    report_error_token(parser, LABEL_ERROR, after, "A case has one value");
+                    report_error_ast(parser, LABEL_HINT, NULL, "Put the next value in a case on the next line. Cases right after each other share the block");
+                    return NULL;
+                }
+                if (after.type != TOKEN_CASE) break;
+                if (!starts_line(parser)) {
+                    report_error_token(parser, LABEL_ERROR, after, "Each case of a switch goes on its own line");
+                    return NULL;
+                }
             }
         } else {
             report_error_token(parser, LABEL_ERROR, next, "Expected a 'case' or an 'else' in the switch");

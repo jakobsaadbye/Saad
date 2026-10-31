@@ -15,7 +15,8 @@ area :: (s: Shape) -> f32 {
     switch v in s {
         case .circle        { return 3.0 * v.radius * v.radius; }   // v is the Circle
         case .rect          { return v.w * v.h; }
-        case .label, .empty { return 0.0; }
+        case .label
+        case .empty         { return 0.0; }
     }
     return -1.0;
 }

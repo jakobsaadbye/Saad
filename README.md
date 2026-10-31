@@ -10,8 +10,9 @@ A just for fun compiler
 
 ```odin
 switch status {
-    case .open            { ... }
-    case .closed, .locked { ... }
+    case .open   { ... }
+    case .closed
+    case .locked { ... }
 }
 
 switch score {
