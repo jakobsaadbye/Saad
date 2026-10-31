@@ -80,6 +80,8 @@ void reserve_local_storage(AstFunctionDefn *func_defn, int size);
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size);
 void reset_temporary_storage(AstFunctionDefn *func_defn);
 AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name);
+bool check_attribute_value(Typer *typer, AstStructLiteral *value);
+bool is_constant_value(AstExpr *expr);
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct);
 TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instance);
 Type *copy_type(Typer *typer, Type *type);
@@ -2055,33 +2057,8 @@ void reserve_space_for_runtime_any_value(Typer *typer, Type *value_type) {
     // 16 bytes for preserving the destination address + value across a function call
     reserve_temporary_storage(typer->enclosing_function, 16);
 
-    // Reserve space for copying the value on the stack
+    // Reserve space for copying the value on the stack. The type descriptor is a constant, see type_info_global() in ir_lower.c
     reserve_local_storage(typer->enclosing_function, value_type->size);
-
-    if (value_type->kind == TYPE_STRUCT) {
-        reserve_temporary_storage(typer->enclosing_function, 16); // 16 bytes is needed to keep a stable base_offset and cursor for types that needs arrays
-
-        TypeStruct *type_struct = (TypeStruct *) value_type;
-
-        DynamicArray members = type_struct->node->members->identifiers;
-        for (int i = 0; i < members.count; i++) {
-            AstIdentifier *member = ((AstIdentifier **) members.items)[i];
-            if (member->flags & IDENTIFIER_IS_CONSTANT) {
-                continue;
-            }
-            reserve_space_for_runtime_any_value(typer, member->type);
-        }
-    }
-
-    if (value_type->kind == TYPE_POINTER) {
-        TypePointer *type_ptr = (TypePointer *) value_type;
-        reserve_space_for_runtime_any_value(typer, type_ptr->pointer_to);
-    }
-
-    if (value_type->kind == TYPE_ARRAY) {
-        TypeArray *type_array = (TypeArray *) value_type;
-        reserve_space_for_runtime_any_value(typer, type_array->elem_type);
-    }
 }
 
 //
@@ -3092,6 +3069,85 @@ bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
     }
     typer->current_scope = ast_struct->static_members->parent;
 
+    // The attributes of the members e.g @json.Field(name: "id")
+    for (int i = 0; i < members.count; i++) {
+        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+        for (int j = 0; j < member->attributes.count; j++) {
+            AstStructLiteral *value = ((AstStructLiteral **)member->attributes.items)[j];
+            if (!check_attribute_value(typer, value)) return false;
+        }
+    }
+
+    return true;
+}
+
+// True if the expression is known when compiling, so that it can be stored in the value of an attribute
+bool is_constant_value(AstExpr *expr) {
+    switch (expr->head.kind) {
+    case AST_LITERAL: {
+        AstLiteral *lit = (AstLiteral *)expr;
+        if (lit->kind != LITERAL_IDENTIFIER) return true;
+        AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
+        return ident && (ident->flags & IDENTIFIER_IS_CONSTANT) && ident->value && is_constant_value(ident->value);
+    }
+    case AST_ENUM_LITERAL:
+        return true;
+    case AST_MEMBER_ACCESS: {
+        AstMemberAccess *ma = (AstMemberAccess *)expr;
+        if (ma->access_kind == MEMBER_ACCESS_ENUM_MEMBER) return true;
+        if (ma->access_kind == MEMBER_ACCESS_STATIC_STRUCT_MEMBER) return ma->struct_member->value && is_constant_value(ma->struct_member->value);
+        return false;
+    }
+    case AST_UNARY: {
+        AstUnary *unary = (AstUnary *)expr;
+        return unary->operator == OP_UNARY_MINUS && unary->expr->head.kind == AST_LITERAL && is_constant_value(unary->expr);
+    }
+    case AST_CAST:
+        return is_constant_value(((AstCast *)expr)->expr);
+    case AST_STRUCT_LITERAL: {
+        AstStructLiteral *lit = (AstStructLiteral *)expr;
+        for (int i = 0; i < lit->initializers.count; i++) {
+            AstStructInitializer *init = ((AstStructInitializer **)lit->initializers.items)[i];
+            if (!is_constant_value(init->value)) return false;
+        }
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+// The value of an attribute on a struct member e.g @json.Field(name: "id") is a struct literal of a struct marked with @attribute,
+// with values that are known when compiling, as it is stored in the program for reflection
+bool check_attribute_value(Typer *typer, AstStructLiteral *value) {
+    Type *type = check_expression(typer, (AstExpr *)value, NULL);
+    if (!type) return false;
+
+    if (type->kind != TYPE_STRUCT || !((TypeStruct *)type)->node->is_attribute) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "'%s' is not an attribute", type_to_str(type));
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Mark the struct with @attribute to use its values as attributes");
+        return false;
+    }
+
+    for (int i = 0; i < value->initializers.count; i++) {
+        AstStructInitializer *init = ((AstStructInitializer **)value->initializers.items)[i];
+        if (!is_constant_value(init->value)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)init->value, "The arguments of an attribute must be known when compiling");
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Use literals, enum values and constants");
+            return false;
+        }
+    }
+
+    // Members without an argument get their default value, which must also be known when compiling
+    DynamicArray members = ((TypeStruct *)type)->node->members->identifiers;
+    for (int i = 0; i < members.count; i++) {
+        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+        AstExpr *fallback = member->decl && member->decl->values.count > 0 ? ((AstExpr **)member->decl->values.items)[0] : NULL;
+        if (fallback && !is_constant_value(fallback)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)fallback, "The default values of an attribute struct must be known when compiling");
+            return false;
+        }
+    }
     return true;
 }
 

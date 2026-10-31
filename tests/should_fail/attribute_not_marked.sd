@@ -1,0 +1,12 @@
+// expect-error: 'Note' is not an attribute
+
+Note :: struct { text: string; }
+
+Row :: struct {
+    @Note(text: "hi")
+    id: int;
+}
+
+main :: () {
+    r: Row;
+}

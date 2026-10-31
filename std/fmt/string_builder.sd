@@ -194,11 +194,15 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
     }
     else if arg.type.kind == .enum {
         enumType := arg.type as *TypeEnum;
+        name, ok := enumType.nameOf(enumType.readValue(arg.data));
         sb.addString(".");
-        sb.addString(enumType.valueName);
+        if ok {
+            sb.addString(name);
+        } else {
+            sb.addString("<invalid>");
+        }
     }
     else if arg.type.kind == .pointer {
-        ptrType := arg.type as *TypePointer;
         value := arg.data as **void;
 
         buf: [64]u8;
@@ -206,59 +210,30 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
 
         str: string;
         str.data = buf.data;
-        str.len  = written; // written;
+        str.len  = written;
 
         sb.addString(str);
     }
     else if arg.type.kind == .array {
         arrType := arg.type as *TypeArray;
-        data := arg.data as **void;
 
-        if *data == null {
-            sb.addString("[]");
-            return;
+        // A fixed array is stored in the value, a slice points to its elements
+        elements := arg.data as *u8;
+        count    := arrType.count;
+        if arrType.kind != .fixed {
+            slice := *(arg.data as *[]u8);
+            elements = slice.data;
+            count    = slice.count;
         }
 
         sb.addString("[");
-        for i in 0..arrType.count {
-            
-            elemSize := arrType.elemType.size;
+        for i in 0..count {
+            value: any;
+            value.type = arrType.elemType;
+            value.data = &elements[i * arrType.elemType.size];
+            sb.addAnyValue(value);
 
-            elemPtr: *u8 = null;
-            if arrType.kind == .fixed {
-                arrPtr := arg.data as **u8;
-                elem0Ptr := *arrPtr;
-                elemPtr = &elem0Ptr[i * elemSize];
-            } else if arrType.kind == .slice {
-                slicePtr := arg.data as *[]u8;
-                slice := *slicePtr;
-                elem0 := slice.data;
-                elemPtr = &elem0[i * elemSize];
-            } else if arrType.kind == .dynamic {
-                dynArrPtr := arg.data as *[..]u8;
-                dynArr := *dynArrPtr;
-                elem0 := dynArr.data;
-                elemPtr = &elem0[i * elemSize];
-            }
-
-            // Only show the full value if its a primitive type since we don't
-            // generate type descriptors for each element.
-            if arrType.elemType.isPrimitive() || arrType.elemType.kind == .string {
-                value: any;
-                value.type = arrType.elemType;
-                value.data = elemPtr;
-                sb.addAnyValue(value);
-            } 
-            else {
-                buf: [64]u8;
-                sprintf(buf.data, xx "0x%p", elemPtr);
-                str: string;
-                str.data = buf.data;
-                str.len  = strlen(buf.data);
-                sb.addString(str);
-            }
-
-            if i != arrType.count - 1 {
+            if i != count - 1 {
                 sb.addString(", ");
             }
         }
@@ -272,22 +247,16 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
             sb.addString(member.name);
             sb.addString(" = ");
 
-            // print("%", member.name);
-            
             value: any;
             value.type = member.type;
-            value.data = member.value;
+            value.data = member.valueIn(arg.data);
             sb.addAnyValue(value);
 
             if i != structType.members.count - 1 {
                 sb.addString(", ");
             }
-
         }
         sb.addString(" }");
-
-
-
     }
     else {
         sb.addString("<");

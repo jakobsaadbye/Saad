@@ -57,6 +57,11 @@ typedef struct PtrMap {
     int          count;
 } PtrMap;
 
+typedef struct TypeInfoEntry {
+    char *key;
+    int   global;
+} TypeInfoEntry;
+
 typedef struct Lowerer {
     Parser          *parser;
     IrModule        *module;
@@ -73,6 +78,9 @@ typedef struct Lowerer {
     PtrMap           const_globals;   // AstIdentifier* -> global index of an aggregate constant
     int              assert_filename_global; // Cached per file
     AstFile         *assert_filename_file;
+
+    AstBlock        *runtime_scope;   // The declarations of runtime.sd, for the layouts of the type descriptors
+    IrArray(TypeInfoEntry) type_infos; // The descriptor of each type, by the name of the type
 
     jmp_buf          on_error;
 } Lowerer;
@@ -1542,160 +1550,194 @@ static int string_global_raw(Lowerer *L, const char *text) {
     return str->index;
 }
 
-// dst = cond ? if_true : if_false
-static int emit_select(Lowerer *L, int cond, int if_true, int if_false) {
-    IrType type = ir_vreg_type(L->func, if_true);
-    int slot = ir_new_slot(L->func, ir_type_size(type), ir_type_size(type), "select");
-    IrBlock *on_true  = create_block(L, "select.true");
-    IrBlock *on_false = create_block(L, "select.false");
-    IrBlock *done     = create_block(L, "select.end");
-    terminate_br(L, cond, on_true, on_false);
-    set_block(L, on_true);
-    emit_store(L, type, addr_slot(slot, 0), if_true);
-    terminate_jmp(L, done);
-    set_block(L, on_false);
-    emit_store(L, type, addr_slot(slot, 0), if_false);
-    terminate_jmp(L, done);
-    set_block(L, done);
-    return emit_load(L, type, addr_slot(slot, 0));
+//////////////////////////////////////////////////////////////////////////////////////////
+// Runtime type information
+//
+// Every type that is converted to an 'any' gets one constant descriptor (a Type, TypePrimitive, TypeStruct, ... of runtime.sd).
+// The layouts are read from the structs in runtime.sd, so they can't get out of sync with the compiler
+//////////////////////////////////////////////////////////////////////////////////////////
+
+static AstStruct *runtime_struct(Lowerer *L, const char *name) {
+    AstIdentifier *ident = L->runtime_scope ? find_identifier_in_scope(L->runtime_scope, (char *) name) : NULL;
+    if (ident == NULL || ident->type == NULL || ident->type->kind != TYPE_STRUCT) {
+        lower_fail(L, NULL, "Compiler Error: Failed to find the struct '%s' of runtime.sd", name);
+    }
+    return ((TypeStruct *) ident->type)->node;
 }
 
-// Returns a ptr to a string ({data, len}) holding the name of an enum value. Unknown values give "<invalid>"
-static int enum_value_name(Lowerer *L, int value, TypeEnum *enum_type) {
-    AstEnum *ast_enum = enum_type->node;
-    int64_t min = enum_type->min_value, max = enum_type->max_value;
-    int64_t range = max - min + 1;
-    if (range <= 0 || range > 4096) LOWER_NOT_IMPLEMENTED(L, ast_enum, "names of enums with a value range above 4096");
+static int runtime_size(Lowerer *L, const char *struct_name) {
+    return runtime_struct(L, struct_name)->identifier->type->size;
+}
 
-    int table = ptr_map_get(&L->const_globals, enum_type);
-    if (table < 0) {
-        // One string per value in [min, max], holes get "?"
-        IrGlobal *names = ir_global_data(L->module, "enum_value_names", NULL, (int)(range * 16), 8, true);
-        int len = 0;
-        int unknown = string_data_global(L, "?", 1, &len);
-        for (int64_t v = 0; v < range; v++) {
-            IrReloc reloc = { (int)(v * 16), unknown };
-            int name_len = 1;
-            for (int i = 0; i < ast_enum->enumerators.count; i++) {
-                AstEnumerator *etor = da_get_deref(ast_enum->enumerators, i);
-                if (etor->value == min + v) {
-                    reloc.target = string_data_global(L, etor->name, (int) strlen(etor->name), &name_len);
-                    break;
-                }
+static int runtime_offset(Lowerer *L, const char *struct_name, const char *member_name) {
+    AstIdentifier *member = get_struct_member(runtime_struct(L, struct_name), (char *) member_name);
+    if (member == NULL) lower_fail(L, NULL, "Compiler Error: The struct '%s' of runtime.sd has no member '%s'", struct_name, member_name);
+    return member->member_offset;
+}
+
+static void write_pointer_field(IrGlobal *global, int offset, int target) {
+    IrReloc reloc = { offset, target };
+    ir_array_push(global->relocs, reloc);
+}
+
+// A string { data, len } in a global
+static void write_string_field(Lowerer *L, IrGlobal *global, int offset, const char *text) {
+    int len = (int) strlen(text);
+    IrGlobal *data = ir_global_data(L->module, "str", text, len + 1, 1, true);
+    write_pointer_field(global, offset, data->index);
+    write_int_bytes(&global->data[offset + 8], len, 8);
+}
+
+// A slice { data, count } in a global
+static void write_slice_field(IrGlobal *global, int offset, int data, int64_t count) {
+    if (count > 0) write_pointer_field(global, offset, data);
+    write_int_bytes(&global->data[offset + 8], count, 8);
+}
+
+static int type_info_global(Lowerer *L, Type *type);
+
+// The value of an attribute e.g @json.Field(name: "id"): the default values of its struct, and then its arguments
+static int attribute_value_global(Lowerer *L, AstStructLiteral *value) {
+    Type *type = value->head.type;
+    IrGlobal *global = ir_global_data(L->module, "attribute", NULL, type->size > 0 ? type->size : 1, type_alignment(type), true);
+
+    DynamicArray members = ((TypeStruct *) type)->node->members->identifiers;
+    for (int i = 0; i < members.count; i++) {
+        AstIdentifier *member = da_get_deref(members, i);
+        AstExpr *fallback = member_default_value(member);
+        if (fallback) write_constant(L, global, member->member_offset, fallback, member->type);
+    }
+    write_constant(L, global, 0, (AstExpr *) value, type);
+    return global->index;
+}
+
+static int struct_members_global(Lowerer *L, TypeStruct *struct_type, int *out_count) {
+    DynamicArray members = struct_type->node->members->identifiers;
+    int entry_size = runtime_size(L, "StructMember");
+
+    int count = 0;
+    for (int i = 0; i < members.count; i++) {
+        AstIdentifier *member = da_get_deref(members, i);
+        if (!(member->flags & IDENTIFIER_IS_CONSTANT)) count++;
+    }
+    *out_count = count;
+    if (count == 0) return -1;
+
+    IrGlobal *array = ir_global_data(L->module, "struct_members", NULL, count * entry_size, 8, true);
+    int entry = 0;
+    for (int i = 0; i < members.count; i++) {
+        AstIdentifier *member = da_get_deref(members, i);
+        if (member->flags & IDENTIFIER_IS_CONSTANT) continue;
+
+        int at = entry * entry_size;
+        write_string_field(L, array, at + runtime_offset(L, "StructMember", "name"), member->name);
+        write_pointer_field(array, at + runtime_offset(L, "StructMember", "type"), type_info_global(L, member->type));
+        write_int_bytes(&array->data[at + runtime_offset(L, "StructMember", "offset")], member->member_offset, 8);
+        write_int_bytes(&array->data[at + runtime_offset(L, "StructMember", "index")], member->member_index, 8);
+
+        int attribute_count = member->attributes.count;
+        if (attribute_count > 0) {
+            // An array of 'any' { data, type }
+            IrGlobal *attributes = ir_global_data(L->module, "attributes", NULL, attribute_count * 16, 8, true);
+            for (int j = 0; j < attribute_count; j++) {
+                AstStructLiteral *value = da_get_deref(member->attributes, j);
+                write_pointer_field(attributes, j * 16,     attribute_value_global(L, value));
+                write_pointer_field(attributes, j * 16 + 8, type_info_global(L, value->head.type));
             }
-            ir_array_push(names->relocs, reloc);
-            write_int_bytes(&names->data[v * 16 + 8], name_len, 8);
+            write_slice_field(array, at + runtime_offset(L, "StructMember", "attributes"), attributes->index, attribute_count);
         }
-        table = names->index;
-        ptr_map_put(&L->const_globals, enum_type, table);
+        entry++;
+    }
+    return array->index;
+}
+
+static int enum_values_global(Lowerer *L, TypeEnum *enum_type, int *out_count) {
+    DynamicArray enumerators = enum_type->node->enumerators;
+    int entry_size = runtime_size(L, "EnumValue");
+    *out_count = enumerators.count;
+    if (enumerators.count == 0) return -1;
+
+    IrGlobal *array = ir_global_data(L->module, "enum_values", NULL, enumerators.count * entry_size, 8, true);
+    for (int i = 0; i < enumerators.count; i++) {
+        AstEnumerator *etor = da_get_deref(enumerators, i);
+        int at = i * entry_size;
+        write_string_field(L, array, at + runtime_offset(L, "EnumValue", "name"), etor->name);
+        write_int_bytes(&array->data[at + runtime_offset(L, "EnumValue", "value")], etor->value, 8);
+    }
+    return array->index;
+}
+
+// The global holding the descriptor of the type. Each type gets one, so descriptors can be compared by address
+static int type_info_global(Lowerer *L, Type *type) {
+    if (type_is_untyped_int(type))   type = primitive_type(PRIMITIVE_INT);
+    if (type_is_untyped_float(type)) type = primitive_type(PRIMITIVE_FLOAT);
+
+    char *key = type_to_str(type);
+    for (int i = 0; i < L->type_infos.count; i++) {
+        if (strcmp(L->type_infos.items[i].key, key) == 0) return L->type_infos.items[i].global;
     }
 
-    Type *backing = enum_type->backing_type;
-    int value64 = convert_scalar(L, value, backing, primitive_type(PRIMITIVE_I64));
-    int index   = emit_binop(L, IR_SUB, IR_I64, value64, emit_const(L, IR_I64, min));
-    int in_range = emit_cmp(L, IR_ICMP, IR_CMP_ULT, IR_I64, index, emit_const(L, IR_I64, range));
-    int entry   = emit_ptr_add(L, emit_global_addr(L, table), emit_binop(L, IR_MUL, IR_I64, index, emit_const(L, IR_I64, 16)));
-    int invalid = emit_global_addr(L, string_global_raw(L, "<invalid>"));
-    return emit_select(L, in_range, entry, invalid);
-}
-
-static int string_arg(Lowerer *L, const char *text) {
-    // Strings are passed to C functions by reference
-    return emit_global_addr(L, string_global_raw(L, text));
-}
-
-// Builds the runtime type descriptor (a *Type, see runtime.sd) for a value of 'type' stored at 'value_ptr'.
-// Struct and enum descriptors describe the specific value (member value pointers, the enum value's name)
-static int type_descriptor(Lowerer *L, Type *type, int value_ptr, Ast *site) {
+    const char *layout = "Type";
     switch (type->kind) {
-    case TYPE_VOID:
-    case TYPE_BOOL:
-    case TYPE_INTEGER:
-    case TYPE_FLOAT: {
-        char name[64];
-        snprintf(name, sizeof(name), "Type_%s", ((TypePrimitive *) type)->name);
-        if (type_is_untyped_int(type))   snprintf(name, sizeof(name), "Type_untyped_int");
-        if (type_is_untyped_float(type)) snprintf(name, sizeof(name), "Type_untyped_float");
-        return emit_load(L, IR_PTR, addr_global(ir_find_or_add_extern(L->module, name), 0));
+    case TYPE_VOID: case TYPE_BOOL: case TYPE_INTEGER: case TYPE_FLOAT: layout = "TypePrimitive"; break;
+    case TYPE_POINTER: layout = "TypePointer"; break;
+    case TYPE_ARRAY:   layout = "TypeArray";   break;
+    case TYPE_ENUM:    layout = "TypeEnum";    break;
+    case TYPE_STRUCT:  layout = "TypeStruct";  break;
+    case TYPE_ANY:     layout = "TypeAny";     break;
+    default: break;
     }
-    case TYPE_STRING:
-        return emit_load(L, IR_PTR, addr_global(ir_find_or_add_extern(L->module, "Type_string"), 0));
-    case TYPE_ANY:
-        return emit_c_call(L, "runtime_get_type_any", IR_PTR, 0, NULL);
+
+    IrGlobal *global = ir_global_data(L->module, "type_info", NULL, runtime_size(L, layout), 8, true);
+
+    // Cached before the parts are made, so that a type that refers to itself e.g Node :: struct { next: *Node; } ends
+    TypeInfoEntry entry = { key, global->index };
+    ir_array_push(L->type_infos, entry);
+
+    // The head, a Type :: struct { name: string; kind: TypeKind; size: int; flags: int; }
+    write_string_field(L, global, runtime_offset(L, "Type", "name"), key);
+    write_int_bytes(&global->data[runtime_offset(L, "Type", "kind")], type->kind - TYPE_VOID, 4);
+    write_int_bytes(&global->data[runtime_offset(L, "Type", "size")], type->size, 4);
+
+    switch (type->kind) {
+    case TYPE_VOID: case TYPE_BOOL: case TYPE_INTEGER: case TYPE_FLOAT: {
+        write_int_bytes(&global->data[runtime_offset(L, "TypePrimitive", "kind")], ((TypePrimitive *) type)->kind - 1, 4);
+        break;
+    }
     case TYPE_POINTER: {
         Type *pointee = ((TypePointer *) type)->pointer_to;
-        int pointee_value = emit_load(L, IR_PTR, addr_vreg(value_ptr, 0));
-        int args[2];
-        args[0] = string_arg(L, type_to_str(type));
-        args[1] = pointee->kind == TYPE_VOID ? emit_load(L, IR_PTR, addr_global(ir_find_or_add_extern(L->module, "Type_void"), 0))
-                                             : type_descriptor(L, pointee, pointee_value, site);
-        return emit_c_call(L, "runtime_get_type_pointer", IR_PTR, 2, args);
+        write_pointer_field(global, runtime_offset(L, "TypePointer", "pointerTo"), type_info_global(L, pointee));
+        break;
     }
     case TYPE_ARRAY: {
         TypeArray *array = (TypeArray *) type;
-        int args[4];
-        args[0] = string_arg(L, type_to_str(type));
-        args[1] = emit_const(L, IR_I32, array->array_kind);
-        args[2] = type_descriptor(L, array->elem_type, value_ptr, site);
-        if (array->array_kind == ARRAY_FIXED) args[3] = emit_const(L, IR_I64, fixed_array_count(array));
-        else                                  args[3] = emit_load(L, IR_I64, addr_vreg(value_ptr, 8));
-        return emit_c_call(L, "runtime_get_type_array", IR_PTR, 4, args);
+        write_int_bytes(&global->data[runtime_offset(L, "TypeArray", "kind")], array->array_kind, 4);
+        write_pointer_field(global, runtime_offset(L, "TypeArray", "elemType"), type_info_global(L, array->elem_type));
+        int64_t count = array->array_kind == ARRAY_FIXED ? fixed_array_count(array) : 0;
+        write_int_bytes(&global->data[runtime_offset(L, "TypeArray", "count")], count, 8);
+        break;
     }
     case TYPE_ENUM: {
         TypeEnum *enum_type = (TypeEnum *) type;
-        int value = emit_load(L, ir_type_of(type), addr_vreg(value_ptr, 0));
-        int args[5];
-        args[0] = string_arg(L, enum_type->identifier->name);
-        args[1] = enum_value_name(L, value, enum_type);
-        args[2] = type_descriptor(L, enum_type->backing_type, value_ptr, site);
-        args[3] = emit_const(L, IR_I32, enum_type->min_value);
-        args[4] = emit_const(L, IR_I32, enum_type->max_value);
-        return emit_c_call(L, "runtime_get_type_enum", IR_PTR, 5, args);
+        write_pointer_field(global, runtime_offset(L, "TypeEnum", "backingType"), type_info_global(L, enum_type->backing_type));
+        int count = 0;
+        int values = enum_values_global(L, enum_type, &count);
+        write_slice_field(global, runtime_offset(L, "TypeEnum", "values"), values, count);
+        break;
     }
     case TYPE_STRUCT: {
         TypeStruct *struct_type = (TypeStruct *) type;
-        DynamicArray members = struct_type->node->members->identifiers;
-
-        // StructMember :: struct { name: string; type: *Type; value: *void; index: i64; offset: i64; }   (48 bytes)
         int count = 0;
-        for (int i = 0; i < members.count; i++) {
-            AstIdentifier *member = da_get_deref(members, i);
-            if (!(member->flags & IDENTIFIER_IS_CONSTANT)) count++;
-        }
-        int size = emit_const(L, IR_I64, count > 0 ? count * 48 : 1);
-        int array = emit_c_call(L, "malloc", IR_PTR, 1, &size);
-
-        int entry_index = 0;
-        for (int i = 0; i < members.count; i++) {
-            AstIdentifier *member = da_get_deref(members, i);
-            if (member->flags & IDENTIFIER_IS_CONSTANT) continue;
-
-            int member_value = emit_ptr_add(L, value_ptr, emit_const(L, IR_I64, member->member_offset));
-            int member_type  = type_descriptor(L, member->type, member_value, site);
-            IrAddr entry = addr_vreg(array, entry_index * 48);
-
-            int name_len = 0;
-            int name = string_data_global(L, member->name, (int) strlen(member->name), &name_len);
-            emit_store(L, IR_PTR, entry, emit_global_addr(L, name));
-            emit_store(L, IR_I64, addr_add(entry, 8),  emit_const(L, IR_I64, name_len));
-            emit_store(L, IR_PTR, addr_add(entry, 16), member_type);
-            emit_store(L, IR_PTR, addr_add(entry, 24), member_value);
-            emit_store(L, IR_I64, addr_add(entry, 32), emit_const(L, IR_I64, member->member_index));
-            emit_store(L, IR_I64, addr_add(entry, 40), emit_const(L, IR_I64, member->member_offset));
-            entry_index++;
-        }
-
-        int args[5];
-        args[0] = string_arg(L, struct_type->identifier->name);
-        args[1] = array;
-        args[2] = emit_const(L, IR_I32, count);
-        args[3] = emit_const(L, IR_I32, type->size);
-        args[4] = emit_const(L, IR_I32, struct_type->alignment);
-        return emit_c_call(L, "runtime_get_type_struct", IR_PTR, 5, args);
+        int members = struct_members_global(L, struct_type, &count);
+        write_slice_field(global, runtime_offset(L, "TypeStruct", "members"), members, count);
+        write_int_bytes(&global->data[runtime_offset(L, "TypeStruct", "alignment")], struct_type->alignment, 4);
+        break;
     }
     default:
-        lower_fail(L, site, "Not implemented in the IR backend yet: runtime type information for %s", type_to_str(type));
+        break;
     }
+
+    return global->index;
 }
 
 // Boxes a value into an 'any': { data: *void (pointer to a copy of the value), type: *Type }
@@ -1703,17 +1745,11 @@ static Value box_to_any(Lowerer *L, Value value, Type *any_type, Ast *site) {
     Type *from = value.type;
     Value boxed;
 
-    if (is_fixed_array(from)) {
-        // Fixed arrays are boxed as a pointer to their elements (like the runtime expects)
-        boxed = temp_place(L, (Type *) type_defn_null_ptr, "boxed array pointer");
-        emit_store(L, IR_PTR, boxed.addr, addr_to_ptr(L, value_to_place(L, value).addr));
-    } else {
-        boxed = temp_place(L, from, "boxed value");
-        store_value(L, boxed.addr, from, value, site);
-    }
+    boxed = temp_place(L, from, "boxed value");
+    store_value(L, boxed.addr, from, value, site);
 
     int data = addr_to_ptr(L, boxed.addr);
-    int type = type_descriptor(L, from, data, site);
+    int type = emit_global_addr(L, type_info_global(L, from));
 
     Value any = temp_place(L, any_type, "any");
     emit_store(L, IR_PTR, any.addr, data);
@@ -2482,6 +2518,11 @@ IrModule *lower_program(Parser *parser, AstFile *main_file) {
     if (main_ident == NULL || main_ident->type == NULL || main_ident->type->kind != TYPE_FUNCTION) {
         report_error_ast(parser, LABEL_ERROR, NULL, "No main function was found in '%s'", main_file->absolute_path);
         return NULL;
+    }
+
+    for (int i = 0; i < main_file->imports.count; i++) {
+        AstImport *import = da_get_deref(main_file->imports, i);
+        if (import->imported_file && strcmp(import->string, "runtime") == 0) L->runtime_scope = import->imported_file->scope;
     }
 
     function_global(L, ((TypeFunction *) main_ident->type)->node);

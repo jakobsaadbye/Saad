@@ -9,9 +9,12 @@ String :: struct {
     len:   i64;
 }
 
+// The compiler generates one constant descriptor for every type that is converted to an 'any'. The layouts of these structs are read by
+// the compiler (see type_info_global in ir_lower.c), so members can be added, but each name must stay
+
 TypeKind :: enum {
     void,
-    bool, 
+    bool,
     int,
     float,
     string,
@@ -39,11 +42,9 @@ TypePrimitiveKind :: enum {
     float, // alias for f32
     f32,
     f64,
-    string,
+    char,
     bool,
     void,
-    untypedInt,
-    untypedFloat,
 };
 
 TypeArrayKind :: enum {
@@ -73,23 +74,26 @@ TypeArray :: struct {
     head:      Type;
     kind:      TypeArrayKind;
     elemType: *Type;
-    count:     i64;
+    count:     i64;   // The number of elements of a fixed array. A slice has its count in its value
+}
+
+EnumValue :: struct {
+    name:  string;
+    value: i64;
 }
 
 TypeEnum :: struct {
     head:         Type;
-    valueName:    string;
     backingType: *Type;
-    minValue:     int;
-    maxValue:     int;
+    values:       []EnumValue;
 };
 
 StructMember :: struct {
-    name:  string;
-    type:  *Type;
-    value: *void;
-    index:  i64;
-    offset: i64;
+    name:       string;
+    type:       *Type;
+    offset:     i64;
+    index:      i64;
+    attributes: []any;  // The values of the attributes on the member e.g @json.Field(name: "id")
 }
 
 TypeStruct :: struct {
@@ -99,9 +103,7 @@ TypeStruct :: struct {
 };
 
 TypeAny :: struct {
-    head:  Type;
-    data: *void;
-    type: *Type;
+    head: Type;
 }
 
 //////////////////////////////////
@@ -113,7 +115,6 @@ Any :: struct {
     type: *Type;
 }
 
-
 //////////////////////////////////
 // Builtin functions that are filled out by the compiler
 //////////////////////////////////
@@ -123,11 +124,6 @@ Any :: struct {
 //////////////////////////////////
 
 extern "C" {
-    runtime_get_type_pointer :: (name: string, pointerTo: *Type) -> *TypePointer;
-    runtime_get_type_array   :: (name: string, kind: TypeArrayKind, elem_type: *Type, count: i64) -> *TypeArray;
-    runtime_get_type_enum    :: (name: string, valueName: string, backingType: *Type, minValue: int, maxValue: int) -> *TypeEnum;
-    runtime_get_type_struct  :: (name: string, members: *StructMember, members_count: int, size: int, alignment: int) -> *TypeStruct;
-    runtime_get_type_any     :: () -> *TypeAny;
     runtime_compare_strings  :: (str1: *string, str2: *string) -> int;
 }
 
@@ -135,5 +131,46 @@ isPrimitive :: method (type: *Type) -> bool {
     if type.kind == .bool  { return true; } 
     if type.kind == .int   { return true; }
     if type.kind == .float { return true; }
+    return false;
+}
+// The name of an enum value, e.g "open" for Status.open. ok is false if no value of the enum has the value
+nameOf :: method (type: *TypeEnum, value: i64) -> string, bool {
+    for v in type.values {
+        if v.value == value {
+            return v.name, true;
+        }
+    }
+    none: string;
+    return none, false;
+}
+
+// Reads the value of an enum stored at data, as an i64
+readValue :: method (type: *TypeEnum, data: *void) -> i64 {
+    size := type.backingType.size;
+    if size == 1 { return (*(data as *i8)) as i64; }
+    if size == 2 { return (*(data as *i16)) as i64; }
+    if size == 8 { return *(data as *i64); }
+    return (*(data as *i32)) as i64;
+}
+
+// The address of the member inside a struct value that starts at data
+valueIn :: method (member: *StructMember, data: *void) -> *void {
+    bytes := data as *u8;
+    address := &bytes[member.offset];
+    return address;
+}
+
+// Gets the value of the attribute of type T on the member, e.g
+//
+//     field: json.Field;
+//     if attributeOf(member, &field) { ... field.name ... }
+attributeOf :: <T>(member: *StructMember, value: *T) -> bool {
+    name := typeof(*value);
+    for attribute in member.attributes {
+        if attribute.type.name == name {
+            *value = *(attribute.data as *T);
+            return true;
+        }
+    }
     return false;
 }

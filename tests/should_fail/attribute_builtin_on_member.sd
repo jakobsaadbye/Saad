@@ -1,0 +1,10 @@
+// expect-error: The attributes of the language can't be given to struct members yet
+
+Row :: struct {
+    @private
+    id: int;
+}
+
+main :: () {
+    r: Row;
+}

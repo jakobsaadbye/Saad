@@ -1,0 +1,70 @@
+// Custom attributes on struct members, read through reflection
+
+ColumnKind :: enum { text, number }
+
+@attribute
+Column :: struct {
+    name:     string;
+    nullable: bool = false;
+    width:    int  = 10;
+    kind:     ColumnKind = .text;
+}
+
+@attribute
+Ignore :: struct {}
+
+DefaultName :: "unnamed";
+
+Row :: struct {
+    @Column(name: "row_id", kind: .number, width: -1)
+    id: int;
+
+    @Column(DefaultName, true) @Ignore
+    label: string;
+
+    plain: f64;
+}
+
+membersOf :: (value: any) -> []StructMember {
+    assert(value.type.kind == .struct);
+    return (value.type as *TypeStruct).members;
+}
+
+main :: () {
+    members := membersOf(Row{});
+    assert(members.count == 3);
+
+    {
+        id := members[0];
+        assert(id.name == "id");
+        assert(id.attributes.count == 1);
+
+        column: Column;
+        assert(attributeOf(&id, &column));
+        assert(column.name == "row_id");
+        assert(column.kind == .number);
+        assert(column.width == -1);
+        assert(!column.nullable);
+
+        ignore: Ignore;
+        assert(!attributeOf(&id, &ignore));
+    }
+    {
+        label := members[1];
+        assert(label.attributes.count == 2);
+        assert(label.attributes[0].type.name == typeof(Column));
+        assert(label.attributes[1].type.name == typeof(Ignore));
+
+        column: Column;
+        assert(attributeOf(&label, &column));
+        assert(column.name == "unnamed");
+        assert(column.nullable);
+        assert(column.width == 10);   // The default value
+        assert(column.kind == .text);
+    }
+    {
+        plain := members[2];
+        assert(plain.attributes.count == 0);
+        assert(plain.type.kind == .float);
+    }
+}

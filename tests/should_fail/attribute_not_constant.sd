@@ -1,0 +1,13 @@
+// expect-error: The arguments of an attribute must be known when compiling
+
+@attribute
+Note :: struct { size: int; }
+
+Row :: struct {
+    @Note(size: sizeof(int))
+    id: int;
+}
+
+main :: () {
+    r: Row;
+}
