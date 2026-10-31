@@ -688,10 +688,24 @@ void report_error_here(Lexer *lexer, const char *message, ...) {
     va_end(args);
 }
 
+Diagnostics diagnostics = { .print = true };
+
+static void add_diagnostic(char *file_path, const char *label, Pos start, Pos end, const char *message) {
+    if (diagnostics.count == diagnostics.capacity) {
+        diagnostics.capacity = diagnostics.capacity == 0 ? 16 : diagnostics.capacity * 2;
+        diagnostics.items    = realloc(diagnostics.items, diagnostics.capacity * sizeof(Diagnostic));
+    }
+    Diagnostic d = { label, file_path ? strdup(file_path) : NULL, start, end, strdup(message) };
+    diagnostics.items[diagnostics.count++] = d;
+}
+
 #define MAX_ERROR_LEN 512
 void report_error_helper(char *file_path, char *file_text, const char* label, Pos start, Pos end, const char *template, va_list args) {
     char message[MAX_ERROR_LEN];
     vsnprintf(message, MAX_ERROR_LEN, template, args);
+
+    add_diagnostic(file_path, label, start, end, message);
+    if (!diagnostics.print) return;
     
     if (start.line == -1) {
         // Skip reporting code line of location

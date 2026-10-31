@@ -465,6 +465,116 @@ static bool run_executable(bool output_to_console) {
 #endif
 }
 
+//
+// Diagnostics as JSON, for 'saad check --json'. The shape follows the Diagnostic of the Language Server Protocol:
+//
+//   {"version": 1, "success": false, "diagnostics": [
+//       {"file": "/abs/main.sd", "severity": 1, "message": "...", "range": {"start": {"line": 3, "character": 4}, "end": {...}},
+//        "related": [{"file": "...", "range": {...}, "message": "..."}]}]}
+//
+// Lines and characters count from 0, and a character is a byte of the UTF-8 text. Severity is 1 for errors and 2 for
+// warnings. A note or a hint with a position is related information of the diagnostic before it, one without a position is
+// added to its message
+//
+
+static void json_write_string(StringBuilder *sb, const char *text) {
+    sb_append(sb, "\"");
+    for (const char *c = text; c && *c; c++) {
+        // Colors of the terminal e.g \x1b[1m
+        if (*c == '\x1b' && c[1] == '[') {
+            while (*c && *c != 'm') c++;
+            if (!*c) break;
+            continue;
+        }
+        switch (*c) {
+        case '"':  sb_append(sb, "\\\""); break;
+        case '\\': sb_append(sb, "\\\\"); break;
+        case '\n': sb_append(sb, "\\n"); break;
+        case '\r': sb_append(sb, "\\r"); break;
+        case '\t': sb_append(sb, "\\t"); break;
+        default:
+            if ((unsigned char)*c < 32) sb_append(sb, "\\u%04x", (unsigned char)*c);
+            else                        sb_append(sb, "%c", *c);
+        }
+    }
+    sb_append(sb, "\"");
+}
+
+static void json_write_position(StringBuilder *sb, Pos pos) {
+    int line = pos.line > 0 ? pos.line - 1 : 0;
+    int col  = pos.col  > 0 ? pos.col  - 1 : 0;
+    sb_append(sb, "{\"line\": %d, \"character\": %d}", line, col);
+}
+
+static void json_write_location(StringBuilder *sb, Diagnostic *d) {
+    char *absolute = d->file_path ? get_absolute_path(d->file_path) : NULL;
+    sb_append(sb, "\"file\": ");
+    json_write_string(sb, absolute ? absolute : (d->file_path ? d->file_path : ""));
+    sb_append(sb, ", \"range\": {\"start\": ");
+    json_write_position(sb, d->start);
+    sb_append(sb, ", \"end\": ");
+    json_write_position(sb, d->start.line == -1 ? d->start : d->end);
+    sb_append(sb, "}");
+}
+
+static bool is_main_diagnostic(Diagnostic *d) {
+    return d->label == LABEL_ERROR || d->label == LABEL_WARNING;
+}
+
+static int severity_of(Diagnostic *d) {
+    if (d->label == LABEL_ERROR)   return 1;
+    if (d->label == LABEL_WARNING) return 2;
+    if (d->label == LABEL_NOTE)    return 3;
+    return 4;
+}
+
+void write_diagnostics_json(FILE *out, bool success) {
+    StringBuilder sb = sb_init(1024);
+    sb_append(&sb, "{\"version\": 1, \"success\": %s, \"diagnostics\": [", success ? "true" : "false");
+
+    for (int i = 0; i < diagnostics.count;) {
+        Diagnostic *d = &diagnostics.items[i];
+
+        // The notes and hints after it
+        int next = i + 1;
+        while (next < diagnostics.count && !is_main_diagnostic(&diagnostics.items[next])) next++;
+        if (!is_main_diagnostic(d)) next = i + 1; // A note on its own
+
+        if (i > 0) sb_append(&sb, ",");
+        sb_append(&sb, "\n  {");
+        json_write_location(&sb, d);
+        sb_append(&sb, ", \"severity\": %d, \"message\": ", severity_of(d));
+
+        StringBuilder message = sb_init(128);
+        sb_append(&message, "%s", d->message);
+        for (int j = i + 1; j < next; j++) {
+            Diagnostic *extra = &diagnostics.items[j];
+            if (extra->start.line == -1) sb_append(&message, "\n%s: %s", extra->label == LABEL_HINT ? "hint" : "note", extra->message);
+        }
+        json_write_string(&sb, message.buffer);
+
+        sb_append(&sb, ", \"related\": [");
+        bool first = true;
+        for (int j = i + 1; j < next; j++) {
+            Diagnostic *extra = &diagnostics.items[j];
+            if (extra->start.line == -1) continue;
+            if (!first) sb_append(&sb, ", ");
+            first = false;
+            sb_append(&sb, "{");
+            json_write_location(&sb, extra);
+            sb_append(&sb, ", \"message\": ");
+            json_write_string(&sb, extra->message);
+            sb_append(&sb, "}");
+        }
+        sb_append(&sb, "]}");
+        i = next;
+    }
+
+    sb_append(&sb, "\n]}\n");
+    fwrite(sb.buffer, 1, sb.cursor, out);
+    fflush(out);
+}
+
 bool compile_program(CompilerConfig *config, const char *main_path, bool output_to_console) {
     CompilerReport report = {
         .config = config
@@ -506,6 +616,11 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
         return false;
     }
     report.typer_time_end = clock();
+
+    if (config->check_only) {
+        reset_stdout();
+        return true;
+    }
 
     make_directory("build");
 

@@ -4,6 +4,12 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.8.1 - 1. Nov 2026
+
+* `saad check main.sd` type checks a program without compiling it. With `--json` it writes the errors and warnings as
+  JSON, for an editor. It is the first step to a language server, see `docs/lsp.md`
+* The compiler no longer exits in the middle of a file on a syntax error
+
 ## Update v0.8.0 - 1. Nov 2026
 
 * Global variables

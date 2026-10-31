@@ -1981,7 +1981,7 @@ unsigned long long max_integer_value(TypePrimitive *type) {
     case PRIMITIVE_UNTYPED_INT: return U64_MAX;
     default:
         printf("Internal compiler error: Unknown type kind %d in max_integer_value()", type->kind);
-        exit(1);
+        return U64_MAX;
     }
 }
 
@@ -5874,8 +5874,8 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_I64); // @Investigate - Shouldn't this be checked for both sides being integers???
     else if (expr->head.kind == AST_SEMICOLON_EXPR) result = primitive_type(PRIMITIVE_VOID);
     else {
-        printf("%s:%d: compiler-error: Unhandled cases in 'check_expression()'. Expression was of type %s", __FILE__, __LINE__, ast_to_str((Ast *)expr));
-        exit(1);
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "Compiler Error: Unhandled expression '%s' in check_expression()", ast_to_str((Ast *)expr));
+        return NULL;
     }
 
     if (result == NULL) {

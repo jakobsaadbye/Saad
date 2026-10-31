@@ -885,6 +885,8 @@ typedef struct CompilerConfig {
     CodegenBackend     backend;
     OptimizationLevel  optimization_level;
     bool               run_program;        // Run the executable after a successful build
+    bool               check_only;         // Stop after type checking: 'saad check'
+    bool               json;               // Write the diagnostics as JSON: 'saad check --json'
 } CompilerConfig;
 
 typedef struct Relocation {

@@ -67,6 +67,7 @@ bool parse_type_arguments(Parser *parser, DynamicArray *type_args);
 
 void *ast_allocate(Parser *parser, size_t size);
 void expect(Parser *parser, Token given, TokenType expected_type);
+void stop_parsing(Parser *parser);
 void eat_token(Parser *parser);
 void vomit_token(Parser *parser);
 Token peek_token(Parser *parser, int lookahead);
@@ -262,15 +263,28 @@ AstFile *parse_file(Parser *parser, char *file_path) {
         da_append(&file->ns->files, file);
     }
 
+    // A syntax error that can't be returned from (see stop_parsing) jumps back here, and the file fails to parse
+    jmp_buf  on_syntax_error;
+    jmp_buf *outer_syntax_error = parser->syntax_error;
+    parser->syntax_error = &on_syntax_error;
+    if (setjmp(on_syntax_error)) {
+        parser->syntax_error = outer_syntax_error;
+        return NULL;
+    }
+
     while (true) {
         next = peek_next_token(parser);
         if (next.type == TOKEN_END) break;
 
         Ast *stmt = parse_statement(parser);
-        if (!stmt) return NULL;
+        if (!stmt) {
+            parser->syntax_error = outer_syntax_error;
+            return NULL;
+        }
 
         da_append(&file->statements, stmt);
     }
+    parser->syntax_error = outer_syntax_error;
 
     // Eat the end token
     eat_token(parser);
@@ -1827,7 +1841,7 @@ bool parse_enumerators(Parser *parser, AstEnum *ast_enum) {
             enum_index++;
         } else {
             report_error_token(parser, LABEL_ERROR, next, "Expected name of the enumerator");
-            exit(1);
+            stop_parsing(parser);
         }
 
         next = peek_next_token(parser);
@@ -1844,7 +1858,7 @@ bool parse_enumerators(Parser *parser, AstEnum *ast_enum) {
         } else {
             Token token_missing_comma = peek_token(parser, -1);
             report_error_range(parser, token_missing_comma.end, token_missing_comma.end, "Expected a comma");
-            exit(1);
+            stop_parsing(parser);
         }
     }
     expect(parser, next, '}');
@@ -2509,7 +2523,7 @@ AstArrayLiteral *parse_array_literal(Parser *parser) {
         next = peek_next_token(parser);
         if (next.type != ']' && next.type != ',') {
             report_error_token(parser, LABEL_ERROR, next, "Expected a comma here");
-            exit(1);
+            stop_parsing(parser);
         }
         if (next.type == ',') {
             eat_token(parser);
@@ -3502,10 +3516,16 @@ AstIdentifier *make_identifier_from_token(Parser *parser, Token ident_token, Typ
     return ident;
 }
 
+// Stops parsing the file after a syntax error that was reported: parse_file() returns NULL
+void stop_parsing(Parser *parser) {
+    if (parser->syntax_error) longjmp(*parser->syntax_error, 1);
+    exit(1);
+}
+
 void expect(Parser *parser, Token given, TokenType expected_type) {
     if (given.type != expected_type) {
         report_error_token(parser, LABEL_ERROR, given, "Unexpected token '%s'. Expected '%s'", token_type_to_str(given.type), token_type_to_str(expected_type));
-        exit(1);
+        stop_parsing(parser);
     }
     // Everything's cool dude
 }
@@ -3557,7 +3577,7 @@ int get_operator_precedence(OperatorType op) {
             return 14;
         default:
             printf("%s:%d: compiler-error: Unexpected token type '%s'. Expected token to be an operator\n", __FILE__, __LINE__, token_type_to_str((TokenType)(op)));
-            exit(1);
+            return 0;
     }
 }
 
@@ -3685,7 +3705,7 @@ AstExpr *parse_leaf(Parser *parser) {
         Token next = peek_next_token(parser);
         if (next.type != ')') {
             report_error_token(parser, LABEL_ERROR, t, "Expected a closing paranthesis for this parenthesis");
-            exit(1);
+            stop_parsing(parser);
         }
         eat_token(parser);
         return sub_expr;

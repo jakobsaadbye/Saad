@@ -1,3 +1,4 @@
+#include <setjmp.h>
 #include "ast.h"
 #include "lib/file.h"
 
@@ -32,6 +33,8 @@ typedef struct Parser {
 
     DynamicArray namespaces; // of *Namespace. All the namespaces found in the project and the standard library
     char *builtin_string_file_path;
+
+    jmp_buf *syntax_error; // Where parse_file() continues after a syntax error, see stop_parsing()
 } Parser;
 
 Parser   parser_init(Lexer *lexer);

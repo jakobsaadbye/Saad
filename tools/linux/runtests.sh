@@ -56,6 +56,10 @@ for f in tests/should_fail/*.sd; do
         echo "    expected the error to contain: $missing"
         echo "$output" | grep -E 'error' | head -3 | sed 's/^/    /'
         failed=$((failed + 1))
+    elif ! ./bin/saad check "$f" --json | grep -q '"success": false, "diagnostics": \[$'; then
+        # 'saad check --json' must report it too, as an editor reads that
+        echo "${RED}FAILED (saad check --json didn't report it)${RESET}"
+        failed=$((failed + 1))
     else
         echo "${GREEN}OK (rejected)${RESET}"
         passed=$((passed + 1))
