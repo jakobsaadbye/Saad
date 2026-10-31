@@ -1,0 +1,171 @@
+// std/json: encode, decode and parse
+
+import json;
+
+Status :: enum { open, closed }
+
+Address :: struct {
+    street: string;
+    zip:    int;
+}
+
+Person :: struct {
+    @json.Field(name: "first_name")
+    firstName: string;
+    age:       int = 18;
+    height:    f64;
+    tags:      [..]string;
+    status:    Status;
+    address:   *Address;
+    scores:    Map<string, int>;
+    extra:     json.Value;
+
+    @json.Field(skip: true)
+    cache: int = 99;
+
+    @json.Field(omitEmpty: true)
+    nickname: string;
+}
+
+Limits :: struct {
+    small: u8;
+    tiny:  i8;
+    big:   i64;
+    huge:  u64;
+    f:     f32;
+}
+
+main :: () {
+    {
+        // Values of the language
+        assert(json.encode(5) == "5");
+        assert(json.encode(-12) == "-12");
+        assert(json.encode(true) == "true");
+        assert(json.encode(2.5) == "2.5");
+        assert(json.encode("a \"quote\"\n") == "\"a \\\"quote\\\"\\n\"");
+        assert(json.encode([1, 2, 3]) == "[1,2,3]");
+        assert(json.encode(Status.closed) == "\"closed\"");
+
+        x: f64 = 0.1;
+        assert(json.encode(x) == "0.1");
+        y: f32 = 0.1;
+        assert(json.encode(y) == "0.1");
+
+        empty: [..]int;
+        assert(json.encode(empty) == "[]");
+    }
+    {
+        // A struct with names from json.Field, skip and omitEmpty
+        home := Address{"Main St", 2100};
+        p := Person{firstName: "Ada", age: 36, height: 1.75, status: .closed, address: &home};
+        p.tags.add("math");
+        p.scores.set("chess", 7);
+
+        text := json.encode(p);
+        assert(text == "{\"first_name\":\"Ada\",\"age\":36,\"height\":1.75,\"tags\":[\"math\"],\"status\":\"closed\",\"address\":{\"street\":\"Main St\",\"zip\":2100},\"scores\":{\"chess\":7},\"extra\":null}");
+
+        // Read it back
+        q: Person;
+        err := json.decode(text, &q);
+        assert(err == "");
+        assert(q.firstName == "Ada" && q.age == 36 && q.height == 1.75);
+        assert(q.tags.count == 1 && q.tags[0] == "math");
+        assert(q.status == .closed);
+        assert(q.address.street == "Main St" && q.address.zip == 2100);
+        assert(q.scores["chess"] == 7);
+        assert(q.cache == 99);
+        assert(json.encode(q) == text);
+
+        pretty := json.encode(home, indent: 2);
+        assert(pretty == "{\n  \"street\": \"Main St\",\n  \"zip\": 2100\n}");
+    }
+    {
+        // Missing members keep their value, unknown members are skipped, null makes a pointer null
+        p: Person;
+        somewhere := Address{"Old St", 1};
+        p.address = &somewhere;
+        err := json.decode("{\"cache\": 1, \"unknown\": [1, 2], \"address\": null, \"nickname\": \"Lovelace\"}", &p);
+        assert(err == "");
+        assert(p.age == 18 && p.cache == 99);
+        assert(p.address == null);
+        assert(p.nickname == "Lovelace");
+    }
+    {
+        // A json.Value member keeps any shape
+        p: Person;
+        err := json.decode("{\"extra\": {\"list\": [1, \"two\", false], \"n\": 3}}", &p);
+        assert(err == "");
+        assert(p.extra.get("list").at(1).asString() == "two");
+        assert(p.extra.get("n").asInt() == 3);
+        assert(p.extra.toJson() == "{\"list\":[1,\"two\",false],\"n\":3}");
+    }
+    {
+        // Integers are read exactly and checked against their type
+        l: Limits;
+        assert(json.decode("{\"small\": 255, \"tiny\": -128, \"big\": -9223372036854775808, \"huge\": 18446744073709551615, \"f\": 1e3}", &l) == "");
+        assert(l.small == 255 && l.tiny == -128 && l.huge == 18446744073709551615 && l.f == 1000.0);
+        assert(l.big == -9223372036854775807 - 1);
+        assert(json.encode(l) == "{\"small\":255,\"tiny\":-128,\"big\":-9223372036854775808,\"huge\":18446744073709551615,\"f\":1000}");
+
+        assert(json.decode("{\"small\": 2e2}", &l) == "");
+        assert(l.small == 200);
+
+        assert(json.decode("{\"small\": 256}", &l) == "small: 256 doesn't fit in a u8");
+        assert(json.decode("{\"tiny\": -129}", &l) == "tiny: -129 doesn't fit in a i8");
+        assert(json.decode("{\"small\": -1}", &l) == "small: -1 doesn't fit in a u8");
+        assert(json.decode("{\"big\": 1.5}", &l) == "big: 1.5 is not a whole number, as a i64 must be");
+    }
+    {
+        // Errors say where they are
+        p: Person;
+        assert(json.decode("{\"address\": {\"zip\": \"x\"}}", &p) == "address.zip: Expected a number, but got a string");
+        assert(json.decode("{\"status\": \"half\"}", &p) == "status: 'half' is not a value of Status");
+        assert(json.decode("{\"tags\": [\"a\", 1]}", &p) == "tags[1]: Expected a string, but got a number");
+        assert(json.decode("[1, 2]", &p) == "Expected an object, but got an array");
+        assert(json.decode("{\"status\": 1}", &p) == "");
+        assert(p.status == .closed);
+    }
+    {
+        // Parsing into json.Value
+        v, err := json.parse(" {\"a\": [1, 2.5, -3e2, true, null, \"x\\n\\u00e6\\ud83d\\ude00\"], \"b\": {}} ");
+        assert(err == "");
+        a := v.get("a");
+        assert(a.length() == 6);
+        assert(a.at(0).asInt() == 1);
+        assert(a.at(1).asNumber() == 2.5);
+        assert(a.at(2).asNumber() == -300.0);
+        assert(a.at(3).asBool());
+        assert(a.at(4).isNull());
+        assert(a.at(5).asString() == "x\næ😀");
+        assert(a.at(99).isNull() && v.get("nope").get("deeper").isNull());
+        assert(v.get("b").kind == .object && v.get("b").length() == 0);
+        assert(v.keys().count == 2);
+        assert(v.toJson() == "{\"a\":[1,2.5,-3e2,true,null,\"x\\n\\u00e6\\ud83d\\ude00\"],\"b\":{}}" || v.toJson() == "{\"a\":[1,2.5,-3e2,true,null,\"x\\næ😀\"],\"b\":{}}");
+        v.free();
+    }
+    {
+        // Invalid JSON
+        _, e1 := json.parse("{\"a\": [1, 2,]}");
+        assert(e1 == "Expected a value at line 1, column 13");
+        _, e2 := json.parse("{\n  \"a\": tru\n}");
+        assert(e2 == "Expected a value at line 2, column 8");
+        _, e3 := json.parse("\"open");
+        assert(e3 == "The string has no closing '\"' at line 1, column 6");
+        _, e4 := json.parse("01");
+        assert(e4 == "Expected the end of the text after the value at line 1, column 2");
+        _, e5 := json.parse("");
+        assert(e5 == "Expected a value, but the text ended at line 1, column 1");
+    }
+    {
+        // Making values
+        v := json.newObject();
+        v.put("name", json.newString("Ada"));
+        list := json.newArray();
+        list.push(json.newNumber(1.0));
+        list.push(json.newBool(false));
+        list.push(json.newNull());
+        v.put("list", list);
+        assert(v.toJson() == "{\"name\":\"Ada\",\"list\":[1,false,null]}");
+        assert(v.toJson(indent: 1) == "{\n \"name\": \"Ada\",\n \"list\": [\n  1,\n  false,\n  null\n ]\n}");
+    }
+}

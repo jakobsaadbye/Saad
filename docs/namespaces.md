@@ -15,9 +15,9 @@ Body :: struct { mass: f64; }
   also the private ones, without importing anything.
 * Namespaces can use each other, also in a cycle.
 * Files without a `namespace` are standalone, like the main file of a program.
-* The standard library namespaces are top-level: `fmt`, `math`, `mem`, `os`, `time`, `random`, `slices`, `c`
+* The standard library namespaces are top-level: `fmt`, `json`, `math`, `mem`, `os`, `time`, `random`, `c`
   and `raylib`, plus `os.windows`. A project cannot add files to them. See `docs/standard_library.md`.
-* The prelude (`List`, `Map`, `string` and the runtime) is always there, without an import.
+* The prelude (`List`, `Map`, the methods of strings and slices, and the runtime) is always there, without an import.
 
 Before parsing, the compiler scans the folder of the main file (and every folder below it, except hidden
 folders and `build`) and `std/` for files that start with `namespace`. Only the namespaces a program
@@ -67,16 +67,19 @@ Slot :: struct { index: int; }
 ```
 
 * Attributes go before a function, method (also inside a struct), struct, enum, constant or type alias,
-  at the top of a file. Not inside functions, and not on struct members yet.
+  at the top of a file. Not inside functions.
 * Unknown, repeated and misplaced attributes are errors.
+* Structs marked with `@attribute` are attributes of your own, which go on struct members and are read through
+  reflection, e.g `@json.Field(name: "id")`. See `docs/reflection.md`.
 
 | Attribute | |
 | --- | --- |
 | `@private` | Only visible inside its namespace, in any of its files. In a file without a namespace, only inside the file. `use` and imports leave it out. A public function cannot take or return a private type |
 | `@deprecated("message")` | Using it gives a warning with the message. The message is optional |
+| `@attribute` | On a struct: its values can be given to struct members as attributes |
 
 ## Not done yet
 
 * A project file that lists or excludes folders, for big projects.
 * `use` with a list of names, e.g. `use math.{sin, cos}`. Import each name on its own line for now.
-* Attributes on struct members, and user-defined attributes.
+* The attributes of the language on struct members, and attribute values on other declarations than members.

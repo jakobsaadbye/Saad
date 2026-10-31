@@ -67,6 +67,7 @@ MS int32_t ms_ftell(FILE *f) { return (int32_t) ftell(f); }
 MS int     ms_remove(const char *p) { return remove(p); }
 MS int     ms_rename(const char *a, const char *b) { return rename(a, b); }
 MS char   *ms_getenv(const char *n) { return getenv(n); }
+MS double  ms_strtod(const char *s, char **e) { return strtod(s, e); }
 MS int     ms_system(const char *c) { fflush(stdout); return system(c); }
 MS int     ms_memcmp(const void *a, const void *b, int64_t n) { return memcmp(a, b, n); }
 

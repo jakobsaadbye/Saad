@@ -133,7 +133,10 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
     if arg.type.kind == .int {
         prim := arg.type as *TypePrimitive;
 
-        if prim.kind == .u8 {
+        if prim.kind == .char {
+            sb.addChar(*(arg.data as *u8));
+        }
+        else if prim.kind == .u8 {
             value := *(arg.data as *u8);
             sb.addUInt64(value as u64);
         } 

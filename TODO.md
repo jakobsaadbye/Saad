@@ -187,3 +187,13 @@ Roadmap:
 - Foreign functions / C bindings
 - Modules / Packages
 - Own ARM64 backend
+
+Found while writing std/json:
+-------------------
+- `as` binds tighter than `*` and `&`: `*(p as *i8) as i64` is `*((p as *i8) as i64)`. Probably the casts should bind looser
+- An untyped constant can't initialize a typed variable: `open: u8 = OpenBracket;` (works for literals and arguments)
+- `return f();` of a function with more than one return value is not supported by the IR backend yet
+- All the return values have to be taken: `ok := two();` is an error when `two` returns two values
+- No `?:` and no character literals ('a'), so std/json names the characters it uses as constants
+- Struct member defaults can't use an enum that is declared after the struct
+- Methods with type parameters of their own (e.g `rng.shuffle(xs)` on a non-generic Random)

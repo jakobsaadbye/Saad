@@ -3,11 +3,13 @@
 ```
 std/
   prelude/      Always there, without an import
-    runtime.sd      Types for reflection (Type, Any, ...) and the runtime functions
+    runtime.sd      Types for reflection (Type, TypeStruct, ...), attributeOf and the runtime functions
     collections.sd  List<T> ([..]T) and Map<K, V>
-    string.sd       The methods of string (slice, split, indexOf, ...)
+    slices.sd       Methods on slices, arrays and lists: sort, reverse, indexOf, contains, ...
+    string.sd       The methods of string (slice, split, indexOf, free, ...)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
-  fmt/          namespace fmt: print and StringBuilder
+  fmt/          namespace fmt: print, sprint and StringBuilder
+  json/         namespace json: encode, decode, parse and json.Value
   os/           namespace os: files, environment variables, processes
     windows.sd      namespace os.windows: the Windows API (threads, Sleep, ...)
   vendor/       Bindings for libraries the standard library doesn't own
@@ -15,7 +17,6 @@ std/
   math.sd       namespace math
   mem.sd        namespace mem: arenas
   random.sd     namespace random
-  slices.sd     namespace slices
   time.sd       namespace time
 ```
 
@@ -28,6 +29,8 @@ get the prelude, as the prelude is built on them.
 ```odin
 fmt.print("% is % years old", name, age);          // with a newline
 fmt.print("no newline", newline: false);
+text := fmt.sprint("Score: %", score);              // like print, but returns the text
+text.free();
 sb := fmt.newStringBuilder(64);
 sb.add("% + % = %", 1, 2, 3);
 text := sb.toString();
@@ -76,18 +79,62 @@ random.shuffle(&rng, cards);        // any slice, list or fixed array
 bits := rng.next();                 // 64 random bits
 ```
 
-## slices
+## Methods on slices (prelude)
 
-Generic functions for slices. Fixed arrays and lists convert to slices.
+Slices, fixed arrays and lists have these methods without an import. They are generic methods on `[]T` in
+`std/prelude/slices.sd`, so any library can add methods like them.
 
 ```odin
-slices.sort(xs);                    // with <, quicksort with insertion sort for small ranges
-slices.isSorted(xs);
-slices.reverse(xs);
-slices.indexOf(xs, 3);              // -1 when not found, compares with ==
-slices.contains(names, "anna");
-slices.swap(xs, 0, 1);
+xs := [3, 1, 2];
+xs.sort();                          // with <, quicksort with insertion sort for small ranges
+xs.isSorted();
+xs.reverse();
+xs.indexOf(3);                      // -1 when not found, compares with ==
+names.contains("anna");
+xs.swap(0, 1);
 ```
+
+A type's own method of the same name wins, e.g `List` has its own `indexOf`, `contains` and `reverse`.
+
+## json
+
+```odin
+Person :: struct {
+    @json.Field(name: "first_name")
+    firstName: string;
+    age:       int = 18;
+    tags:      [..]string;
+    address:   *Address;
+    extra:     json.Value;            // any JSON
+
+    @json.Field(skip: true)
+    cache: *void;
+
+    @json.Field(omitEmpty: true)
+    nickname: string;
+}
+
+text := json.encode(person);              // {"first_name":"Ada","age":36,...}
+text := json.encode(person, indent: 2);   // over more lines
+
+p: Person;
+err := json.decode(text, &p);             // "" when it worked, otherwise e.g "address.zip: Expected a number, but got a string"
+
+value, parseErr := json.parse(text);      // a json.Value of any shape
+name := value.get("first_name").asString();
+first := value.get("tags").at(0).asString("none");
+value.toJson();
+```
+
+* `encode` and `decode` work through reflection: bool, numbers, strings, enums (by name), structs, fixed arrays,
+  slices, `List<T>`, `Map<string, V>`, pointers and `json.Value`.
+* `json.Field` is an attribute (see `docs/reflection.md`): `name` renames a member, `skip` leaves it out, and
+  `omitEmpty` leaves out 0, false, "", null and things without elements.
+* Decoding keeps members that are not in the JSON, so default values stay, and skips members it doesn't know.
+  Integers are read from the text, so an `i64` or `u64` doesn't lose digits, and they must fit their type.
+* `json.Value` has `get`, `at`, `has`, `length`, `keys`, `asString`, `asNumber`, `asInt`, `asBool`, `isNull`,
+  `toJson`, `clone` and `free`, and is made with `newObject`, `newArray`, `newString`, `newNumber`, `newBool`,
+  `newNull`, `put` and `push`.
 
 ## math, mem, c
 
@@ -102,4 +149,4 @@ slices.swap(xs, 0, 1);
 * `strings` with `contains`, `trim`, `replace`, `join` and a `parseInt`/`parseFloat`.
 * `os.listDir` and `os.makeDir`, and a `path` namespace (`join`, `extension`, `directory`).
 * `math` functions of its own: `Pi`, `clamp`, `lerp`, `min`/`max`, vectors.
-* `json`, `hash` (e.g fnv1a, crc32) and `threads` (a portable layer over `os.windows`).
+* `hash` (e.g fnv1a, crc32), `base64` (e.g fnv1a, crc32) and `threads` (a portable layer over `os.windows`).

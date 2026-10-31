@@ -1,0 +1,419 @@
+namespace json;
+
+// Writes values as JSON text, e.g
+//
+//     Person :: struct {
+//         @json.Field(name: "first_name")
+//         firstName: string;
+//
+//         @json.Field(skip: true)
+//         cache: *void;
+//     }
+//
+//     text := json.encode(person);           // {"first_name":"Ada"}
+//     text := json.encode(person, indent: 2) // over more lines
+
+import fmt;
+use c;
+
+// How a struct member is written and read. Without it, a member is written with its own name
+@attribute
+Field :: struct {
+    name:      string;        // The name in JSON, instead of the name of the member
+    skip:      bool = false;  // Not written or read
+    omitEmpty: bool = false;  // Not written when it is empty: 0, false, "", null or no elements
+}
+
+// The value as JSON text. With an indent above 0, objects and arrays are written over more lines.
+//
+//   bool, numbers and strings   as themselves
+//   enums                       the name of the value, e.g "open"
+//   structs                     objects, with the names from json.Field
+//   arrays, slices and lists    arrays
+//   Map<string, V>              objects
+//   pointers                    the value they point to, or null
+//   json.Value                  as it is
+encode :: <T>(value: T, indent := 0) -> string {
+    w := newWriter(indent);
+    // A pointer keeps the type of a collection, which would be a slice of its elements in an any
+    boxed: any = &value;
+    pointer := boxed.type as *TypePointer;
+    w.writeAny(*(boxed.data as **void), pointer.pointerTo);
+    return w.sb.toString();
+}
+
+//////////////////////////////////////////////////////////////////////////////////////
+// Writer
+//////////////////////////////////////////////////////////////////////////////////////
+
+@private
+Writer :: struct {
+    sb:     fmt.StringBuilder;
+    indent: int;
+    depth:  int;
+}
+
+@private
+newWriter :: (indent: int) -> Writer {
+    return Writer{sb: fmt.newStringBuilder(64), indent: indent};
+}
+
+// A newline and the indentation, when writing over more lines
+@private
+newline :: method (w: *Writer) {
+    if w.indent <= 0 { return; }
+    w.sb.addChar(Newline);
+    for 0..(w.indent * w.depth) {
+        w.sb.addChar(Space);
+    }
+}
+
+@private
+writeString :: method (w: *Writer, s: string) {
+    w.sb.addChar(Quote);
+    for ch in s {
+        if ch == Quote          { w.sb.addString("\\\""); }
+        else if ch == Backslash { w.sb.addString("\\\\"); }
+        else if ch == Newline   { w.sb.addString("\\n"); }
+        else if ch == Return    { w.sb.addString("\\r"); }
+        else if ch == Tab       { w.sb.addString("\\t"); }
+        else if ch == 8         { w.sb.addString("\\b"); }
+        else if ch == 12        { w.sb.addString("\\f"); }
+        else if ch < Space {
+            w.sb.addString("\\u00");
+            w.sb.addChar(hexChar((ch >> 4) as int));
+            w.sb.addChar(hexChar((ch & 15) as int));
+        }
+        else { w.sb.addChar(ch); }
+    }
+    w.sb.addChar(Quote);
+}
+
+@private
+writeBool :: method (w: *Writer, b: bool) {
+    if b { w.sb.addString("true"); }
+    else { w.sb.addString("false"); }
+}
+
+@private
+hexChar :: (digit: int) -> u8 {
+    if digit < 10 { return (Zero + digit) as u8; }
+    return (LowerA + digit - 10) as u8;
+}
+
+// The shortest text that reads back as the same f64. Not a number and infinity are not JSON, so they are written as null
+@private
+writeF64 :: method (w: *Writer, n: f64) {
+    if n != n || n - n != 0.0 {
+        w.sb.addString("null");
+        return;
+    }
+
+    buffer: [32]u8;
+    for precision in 15..18 {
+        sprintf(buffer.data, xx "%.*g", precision, n);
+        if strtod(buffer.data, null) == n { break; }
+    }
+    w.sb.addString(fromCString(buffer.data));
+}
+
+@private
+writeF32 :: method (w: *Writer, n: f32) {
+    if n != n || n - n != 0.0 {
+        w.sb.addString("null");
+        return;
+    }
+
+    buffer: [32]u8;
+    for precision in 6..10 {
+        sprintf(buffer.data, xx "%.*g", precision, n as f64);
+        if strtod(buffer.data, null) as f32 == n { break; }
+    }
+    w.sb.addString(fromCString(buffer.data));
+}
+
+@private
+writeValue :: method (w: *Writer, v: Value) {
+    if v.kind == .null   { w.sb.addString("null"); return; }
+    if v.kind == .bool   { w.writeBool(v.boolean); return; }
+    if v.kind == .string { w.writeString(v.text); return; }
+    if v.kind == .number {
+        if v.text.len > 0 { w.sb.addString(v.text); }
+        else              { w.writeF64(v.number); }
+        return;
+    }
+    if v.kind == .array {
+        w.beginList(OpenBracket, v.items.count);
+        for item, i in v.items {
+            w.nextElement(i);
+            w.writeValue(item);
+        }
+        w.endList(CloseBracket, v.items.count);
+        return;
+    }
+    if v.kind == .object {
+        w.beginList(OpenBrace, v.fields.count);
+        i := 0;
+        for entry in v.fields {
+            w.nextElement(i);
+            w.writeKey(entry.key);
+            w.writeValue(entry.value);
+            i += 1;
+        }
+        w.endList(CloseBrace, v.fields.count);
+    }
+}
+
+@private
+beginList :: method (w: *Writer, open: u8, count: i64) {
+    w.sb.addChar(open);
+    w.depth += 1;
+}
+
+@private
+nextElement :: method (w: *Writer, index: i64) {
+    if index > 0 { w.sb.addChar(Comma); }
+    w.newline();
+}
+
+@private
+endList :: method (w: *Writer, close: u8, count: i64) {
+    w.depth -= 1;
+    if count > 0 { w.newline(); }
+    w.sb.addChar(close);
+}
+
+@private
+writeKey :: method (w: *Writer, key: string) {
+    w.writeString(key);
+    w.sb.addChar(Colon);
+    if w.indent > 0 { w.sb.addChar(Space); }
+}
+
+//
+// Writing any value through reflection
+//
+
+@private
+writeAny :: method (w: *Writer, data: *void, type: *Type) {
+    kind := type.kind;
+
+    if kind == .bool {
+        w.writeBool(*(data as *bool));
+    }
+    else if kind == .int {
+        writeInteger(&w.sb, data, type as *TypePrimitive);
+    }
+    else if kind == .float {
+        if type.size == 4 { w.writeF32(*(data as *f32)); }
+        else              { w.writeF64(*(data as *f64)); }
+    }
+    else if kind == .string {
+        w.writeString(*(data as *string));
+    }
+    else if kind == .enum {
+        enumType := type as *TypeEnum;
+        value := enumType.readValue(data);
+        name, ok := enumType.nameOf(value);
+        if ok { w.writeString(name); }
+        else  { w.sb.addInt64(value); }
+    }
+    else if kind == .pointer {
+        pointee := (type as *TypePointer).pointerTo;
+        address := *(data as **void);
+        if address == null || pointee.kind == .void {
+            w.sb.addString("null");
+        } else {
+            w.writeAny(address, pointee);
+        }
+    }
+    else if kind == .array {
+        arrayType := type as *TypeArray;
+        elements, count := arrayElements(data, arrayType);
+        w.writeElements(elements, count, arrayType.elemType);
+    }
+    else if kind == .struct {
+        w.writeStruct(data, type as *TypeStruct);
+    }
+    else if kind == .any {
+        boxed := *(data as *any);
+        if boxed.type == null { w.sb.addString("null"); }
+        else                  { w.writeAny(boxed.data, boxed.type); }
+    }
+    else {
+        w.sb.addString("null");
+    }
+}
+
+@private
+writeElements :: method (w: *Writer, elements: *u8, count: i64, elemType: *Type) {
+    w.beginList(OpenBracket, count);
+    for i in 0..count {
+        w.nextElement(i);
+        w.writeAny(&elements[i * elemType.size], elemType);
+    }
+    w.endList(CloseBracket, count);
+}
+
+@private
+writeStruct :: method (w: *Writer, data: *void, type: *TypeStruct) {
+    name := type.head.name;
+
+    if name == typeof(Value) {
+        w.writeValue(*(data as *Value));
+        return;
+    }
+    if name.startsWith("List<") {
+        elements, count, elemType := listElements(data, type);
+        w.writeElements(elements, count, elemType);
+        return;
+    }
+    if name.startsWith("Map<") {
+        w.writeMap(data, type);
+        return;
+    }
+
+    w.beginList(OpenBrace, type.members.count);
+    written := 0;
+    for i in 0..type.members.count {
+        member := &type.members[i];
+        field := fieldOf(member);
+        if field.skip { continue; }
+
+        value := member.valueIn(data);
+        if field.omitEmpty && isEmpty(value, member.type) { continue; }
+
+        w.nextElement(written);
+        w.writeKey(field.name);
+        w.writeAny(value, member.type);
+        written += 1;
+    }
+    w.endList(CloseBrace, written);
+}
+
+// A Map<string, V> is an object. Maps with other keys are arrays of [key, value] pairs
+@private
+writeMap :: method (w: *Writer, data: *void, type: *TypeStruct) {
+    entriesMember := findMember(type, "entries");
+    entriesType   := entriesMember.type as *TypeStruct;
+    entries, count, entryType := listElements(entriesMember.valueIn(data), entriesType);
+
+    entryStruct := entryType as *TypeStruct;
+    keyMember   := findMember(entryStruct, "key");
+    valueMember := findMember(entryStruct, "value");
+    stringKeys  := keyMember.type.kind == .string;
+
+    open  := OpenBracket as u8;
+    close := CloseBracket as u8;
+    if stringKeys {
+        open  = OpenBrace as u8;
+        close = CloseBrace as u8;
+    }
+
+    w.beginList(open, count);
+    for i in 0..count {
+        entry := (&entries[i * entryType.size]) as *void;
+        w.nextElement(i);
+        if stringKeys {
+            w.writeKey(*(keyMember.valueIn(entry) as *string));
+            w.writeAny(valueMember.valueIn(entry), valueMember.type);
+        } else {
+            w.sb.addChar(OpenBracket);
+            w.writeAny(keyMember.valueIn(entry), keyMember.type);
+            w.sb.addChar(Comma);
+            w.writeAny(valueMember.valueIn(entry), valueMember.type);
+            w.sb.addChar(CloseBracket);
+        }
+    }
+    w.endList(close, count);
+}
+
+@private
+writeInteger :: (sb: *fmt.StringBuilder, data: *void, type: *TypePrimitive) {
+    kind := type.kind;
+    if kind == .u8 || kind == .char       { sb.addUInt64((*(data as *u8)) as u64); }
+    else if kind == .u16                  { sb.addUInt64((*(data as *u16)) as u64); }
+    else if kind == .u32 || kind == .uint { sb.addUInt64((*(data as *u32)) as u64); }
+    else if kind == .u64                  { sb.addUInt64(*(data as *u64)); }
+    else if kind == .i8                   { sb.addInt64((*(data as *i8)) as i64); }
+    else if kind == .i16                  { sb.addInt64((*(data as *i16)) as i64); }
+    else if kind == .i64                  { sb.addInt64(*(data as *i64)); }
+    else                                  { sb.addInt64((*(data as *i32)) as i64); }
+}
+
+//
+// Helpers for reflection, also used when decoding
+//
+
+// The json.Field of a member, with the name of the member when it has none
+@private
+fieldOf :: (member: *StructMember) -> Field {
+    field: Field;
+    if !attributeOf(member, &field) || field.name.len == 0 {
+        field.name = member.name;
+    }
+    return field;
+}
+
+@private
+findMember :: (type: *TypeStruct, name: string) -> *StructMember {
+    for i in 0..type.members.count {
+        if type.members[i].name == name {
+            return &type.members[i];
+        }
+    }
+    return null;
+}
+
+// The elements of a fixed array or a slice
+@private
+arrayElements :: (data: *void, type: *TypeArray) -> *u8, i64 {
+    if type.kind == .fixed {
+        return data as *u8, type.count;
+    }
+    slice := *(data as *[]u8);
+    return slice.data, slice.count;
+}
+
+// The elements of a List<T>, and the type T
+@private
+listElements :: (data: *void, type: *TypeStruct) -> *u8, i64, *Type {
+    dataMember  := findMember(type, "data");
+    countMember := findMember(type, "count");
+    elements := *(dataMember.valueIn(data) as **u8);
+    count    := *(countMember.valueIn(data) as *i64);
+    elemType := (dataMember.type as *TypePointer).pointerTo;
+    return elements, count, elemType;
+}
+
+// True for 0, false, "", null and things without elements
+@private
+isEmpty :: (data: *void, type: *Type) -> bool {
+    if type.kind == .string {
+        return (*(data as *string)).len == 0;
+    }
+    if type.kind == .array {
+        _, count := arrayElements(data, type as *TypeArray);
+        return count == 0;
+    }
+    if type.kind == .struct {
+        structType := type as *TypeStruct;
+        if structType.head.name.startsWith("List<") {
+            _, count, _ := listElements(data, structType);
+            return count == 0;
+        }
+        if structType.head.name.startsWith("Map<") {
+            return *(findMember(structType, "count").valueIn(data) as *i64) == 0;
+        }
+        if structType.head.name == typeof(Value) {
+            return (*(data as *Value)).kind == .null;
+        }
+    }
+
+    // All bytes are zero
+    bytes := data as *u8;
+    for i in 0..type.size {
+        if bytes[i] != 0 { return false; }
+    }
+    return true;
+}

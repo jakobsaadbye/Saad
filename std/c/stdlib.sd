@@ -10,4 +10,5 @@ extern "C" {
     exit    :: (code: int);
     getenv  :: (name: *u8) -> *u8;
     system  :: (command: *u8) -> int;
+    strtod  :: (str: *u8, end: **u8) -> f64;
 }

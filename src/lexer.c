@@ -190,10 +190,11 @@ bool lex_file(Lexer *lexer) {
             eat_character(lexer);
             char next = peek_next_char(lexer);
 
-            while (next != '"') {
+            while (next != '"' && next != '\0') {
+                // An escape e.g \" or \\ doesn't end the string
+                if (next == '\\' && peek_char(lexer, 1) != '\0') eat_character(lexer);
                 eat_character(lexer);
                 next = peek_next_char(lexer);
-                
             }
             eat_character(lexer);
 

@@ -1,0 +1,554 @@
+namespace json;
+
+// A JSON value of any shape, e.g
+//
+//     value, err := json.parse("{\"name\": \"Ada\", \"langs\": [\"en\", \"da\"]}");
+//     name  := value.get("name").asString();
+//     first := value.get("langs").at(0).asString();
+
+import fmt;
+use c;
+
+Kind :: enum {
+    null,
+    bool,
+    number,
+    string,
+    array,
+    object,
+}
+
+Value :: struct {
+    kind:    Kind;
+    boolean: bool;
+    number:  f64;
+    text:    string;             // A string, or how a number was written, e.g "12" or "1e3"
+    items:   [..]Value;          // The elements of an array
+    fields:  Map<string, Value>; // The members of an object, in the order they were written
+}
+
+//
+// Reading values. Reading something that isn't there gives a null value, so reads can be chained: v.get("a").at(0).get("b")
+//
+
+isNull :: method (v: Value) -> bool {
+    return v.kind == .null;
+}
+
+// The member of an object
+get :: method (v: Value, key: string) -> Value {
+    if v.kind != .object {
+        return Value{};
+    }
+    none: Value;
+    return v.fields.get(key, none);
+}
+
+has :: method (v: Value, key: string) -> bool {
+    return v.kind == .object && v.fields.has(key);
+}
+
+// The element of an array
+at :: method (v: Value, index: i64) -> Value {
+    if v.kind != .array || index < 0 || index >= v.items.count {
+        return Value{};
+    }
+    return v.items[index];
+}
+
+// The number of elements of an array or members of an object
+length :: method (v: Value) -> i64 {
+    if v.kind == .array  { return v.items.count; }
+    if v.kind == .object { return v.fields.count; }
+    return 0;
+}
+
+// The keys of an object, in the order they were written
+keys :: method (v: Value) -> [..]string {
+    return v.fields.keys();
+}
+
+asString :: method (v: Value, fallback := "") -> string {
+    if v.kind == .string {
+        return v.text;
+    }
+    return fallback;
+}
+
+asNumber :: method (v: Value, fallback: f64 = 0.0) -> f64 {
+    if v.kind == .number {
+        return v.number;
+    }
+    return fallback;
+}
+
+asInt :: method (v: Value, fallback: i64 = 0) -> i64 {
+    if v.kind == .number {
+        return v.number as i64;
+    }
+    return fallback;
+}
+
+asBool :: method (v: Value, fallback := false) -> bool {
+    if v.kind == .bool {
+        return v.boolean;
+    }
+    return fallback;
+}
+
+//
+// Making values
+//
+
+newNull :: () -> Value {
+    return Value{};
+}
+
+newBool :: (b: bool) -> Value {
+    return Value{kind: .bool, boolean: b};
+}
+
+newNumber :: (n: f64) -> Value {
+    return Value{kind: .number, number: n};
+}
+
+newString :: (s: string) -> Value {
+    return Value{kind: .string, text: s};
+}
+
+newArray :: () -> Value {
+    return Value{kind: .array};
+}
+
+newObject :: () -> Value {
+    return Value{kind: .object};
+}
+
+// Adds an element to an array
+push :: method (v: *Value, element: Value) {
+    v.items.add(element);
+}
+
+// Sets a member of an object
+put :: method (v: *Value, key: string, member: Value) {
+    v.fields.set(key, member);
+}
+
+// Frees the arrays and objects inside the value. The strings point into memory that was allocated by parse
+free :: method (v: *Value) {
+    for i in 0..v.items.count {
+        v.items[i].free();
+    }
+    v.items.free();
+    for entry in v.fields {
+        value := entry.value;
+        value.free();
+    }
+    v.fields.free();
+}
+
+// The value as JSON text. With an indent above 0, objects and arrays are written over more lines
+toJson :: method (v: Value, indent := 0) -> string {
+    w := newWriter(indent);
+    w.writeValue(v);
+    return w.sb.toString();
+}
+
+//////////////////////////////////////////////////////////////////////////////////////
+// Parsing
+//////////////////////////////////////////////////////////////////////////////////////
+
+// Parses JSON text. err is empty when it is valid JSON, otherwise it tells what is wrong and where
+parse :: (text: string) -> Value, string {
+    p := Parser{text: text};
+    p.skipSpace();
+    value, ok := p.parseValue(0);
+    if ok {
+        p.skipSpace();
+        if p.at < text.len {
+            p.fail("Expected the end of the text after the value");
+            ok = false;
+        }
+    }
+    if !ok {
+        return Value{}, p.error;
+    }
+    return value, "";
+}
+
+@private MaxDepth :: 512;
+
+// The characters of JSON
+@private Tab          :: 9;
+@private Newline      :: 10;
+@private Return       :: 13;
+@private Space        :: 32;
+@private Quote        :: 34;
+@private Plus         :: 43;
+@private Comma        :: 44;
+@private Minus        :: 45;
+@private Dot          :: 46;
+@private Slash        :: 47;
+@private Zero         :: 48;
+@private Nine         :: 57;
+@private Colon        :: 58;
+@private UpperA       :: 65;
+@private UpperE       :: 69;
+@private UpperF       :: 70;
+@private OpenBracket  :: 91;
+@private Backslash    :: 92;
+@private CloseBracket :: 93;
+@private LowerA       :: 97;
+@private LowerB       :: 98;
+@private LowerE       :: 101;
+@private LowerF       :: 102;
+@private LowerN       :: 110;
+@private LowerR       :: 114;
+@private LowerT       :: 116;
+@private LowerU       :: 117;
+@private OpenBrace    :: 123;
+@private CloseBrace   :: 125;
+
+@private
+Parser :: struct {
+    text:  string;
+    at:    i64;
+    error: string;
+}
+
+@private
+fail :: method (p: *Parser, message: string) {
+    // The line and column of the error, counted from 1
+    line   := 1;
+    column := 1;
+    for i in 0..p.at {
+        if i >= p.text.len { break; }
+        if p.text[i] == Newline {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    p.error = fmt.sprint("% at line %, column %", message, line, column);
+}
+
+@private
+peek :: method (p: *Parser) -> u8 {
+    if p.at >= p.text.len {
+        return 0;
+    }
+    return p.text[p.at];
+}
+
+@private
+skipSpace :: method (p: *Parser) {
+    while p.at < p.text.len {
+        ch := p.text[p.at];
+        if ch != Space && ch != Newline && ch != Return && ch != Tab {
+            return;
+        }
+        p.at += 1;
+    }
+}
+
+// Eats the word if it comes next, e.g true
+@private
+eatWord :: method (p: *Parser, word: string) -> bool {
+    if p.at + word.len > p.text.len {
+        return false;
+    }
+    for i in 0..word.len {
+        if p.text[p.at + i] != word[i] {
+            return false;
+        }
+    }
+    p.at += word.len;
+    return true;
+}
+
+@private
+parseValue :: method (p: *Parser, depth: int) -> Value, bool {
+    if depth > MaxDepth {
+        p.fail("The values are nested too deep");
+        return Value{}, false;
+    }
+
+    ch := p.peek();
+    if ch == OpenBrace {
+        object, ok := p.parseObject(depth);
+        return object, ok;
+    }
+    if ch == OpenBracket {
+        array, ok := p.parseArray(depth);
+        return array, ok;
+    }
+    if ch == Quote {
+        s, ok := p.parseString();
+        return Value{kind: .string, text: s}, ok;
+    }
+    if ch == Minus || (ch >= Zero && ch <= Nine) {
+        number, ok := p.parseNumber();
+        return number, ok;
+    }
+    if p.eatWord("true")  { return Value{kind: .bool, boolean: true}, true; }
+    if p.eatWord("false") { return Value{kind: .bool, boolean: false}, true; }
+    if p.eatWord("null")  { return Value{}, true; }
+
+    if ch == 0 {
+        p.fail("Expected a value, but the text ended");
+    } else {
+        p.fail("Expected a value");
+    }
+    return Value{}, false;
+}
+
+@private
+parseObject :: method (p: *Parser, depth: int) -> Value, bool {
+    p.at += 1; // {
+    object := Value{kind: .object};
+
+    p.skipSpace();
+    if p.peek() == CloseBrace {
+        p.at += 1;
+        return object, true;
+    }
+
+    while true {
+        p.skipSpace();
+        if p.peek() != Quote {
+            p.fail("Expected the name of a member as a string");
+            return object, false;
+        }
+        key, keyOk := p.parseString();
+        if !keyOk { return object, false; }
+
+        p.skipSpace();
+        if p.peek() != Colon {
+            p.fail("Expected a ':' after the name of the member");
+            return object, false;
+        }
+        p.at += 1;
+        p.skipSpace();
+
+        member, ok := p.parseValue(depth + 1);
+        if !ok { return object, false; }
+        object.fields.set(key, member);
+
+        p.skipSpace();
+        ch := p.peek();
+        if ch == Comma {
+            p.at += 1;
+            continue;
+        }
+        if ch == CloseBrace {
+            p.at += 1;
+            return object, true;
+        }
+        p.fail("Expected a ',' or a '}' after the member");
+        return object, false;
+    }
+    return object, false;
+}
+
+@private
+parseArray :: method (p: *Parser, depth: int) -> Value, bool {
+    p.at += 1; // [
+    array := Value{kind: .array};
+
+    p.skipSpace();
+    if p.peek() == CloseBracket {
+        p.at += 1;
+        return array, true;
+    }
+
+    while true {
+        p.skipSpace();
+        element, ok := p.parseValue(depth + 1);
+        if !ok { return array, false; }
+        array.items.add(element);
+
+        p.skipSpace();
+        ch := p.peek();
+        if ch == Comma {
+            p.at += 1;
+            continue;
+        }
+        if ch == CloseBracket {
+            p.at += 1;
+            return array, true;
+        }
+        p.fail("Expected a ',' or a ']' after the element");
+        return array, false;
+    }
+    return array, false;
+}
+
+@private
+isDigit :: (ch: u8) -> bool {
+    return ch >= Zero && ch <= Nine;
+}
+
+@private
+parseNumber :: method (p: *Parser) -> Value, bool {
+    start := p.at;
+    if p.peek() == Minus { p.at += 1; }
+
+    // No leading zeros, e.g 012
+    if p.peek() == Zero {
+        p.at += 1;
+    } else if isDigit(p.peek()) {
+        while isDigit(p.peek()) { p.at += 1; }
+    } else {
+        p.fail("Expected a digit");
+        return Value{}, false;
+    }
+
+    if p.peek() == Dot {
+        p.at += 1;
+        if !isDigit(p.peek()) {
+            p.fail("Expected a digit after the '.'");
+            return Value{}, false;
+        }
+        while isDigit(p.peek()) { p.at += 1; }
+    }
+
+    if p.peek() == LowerE || p.peek() == UpperE {
+        p.at += 1;
+        if p.peek() == Plus || p.peek() == Minus { p.at += 1; }
+        if !isDigit(p.peek()) {
+            p.fail("Expected a digit in the exponent");
+            return Value{}, false;
+        }
+        while isDigit(p.peek()) { p.at += 1; }
+    }
+
+    text := p.text.slice(start as int, p.at as int).copy();
+    return Value{kind: .number, number: parseF64(text), text: text}, true;
+}
+
+// The number written in the text, which must be a valid JSON number
+@private
+parseF64 :: (text: string) -> f64 {
+    buffer := text.toCString();
+    n := strtod(buffer, null);
+    c.free(buffer);
+    return n;
+}
+
+@private
+hexDigit :: (ch: u8) -> int {
+    if ch >= Zero && ch <= Nine     { return (ch - Zero) as int; }
+    if ch >= LowerA && ch <= LowerF { return (ch - LowerA) as int + 10; }
+    if ch >= UpperA && ch <= UpperF { return (ch - UpperA) as int + 10; }
+    return -1;
+}
+
+@private
+parseHex4 :: method (p: *Parser) -> int, bool {
+    if p.at + 4 > p.text.len {
+        p.fail("Expected 4 hex digits after \\u");
+        return 0, false;
+    }
+    value := 0;
+    for 0..4 {
+        digit := hexDigit(p.text[p.at]);
+        if digit < 0 {
+            p.fail("Expected 4 hex digits after \\u");
+            return 0, false;
+        }
+        value = value * 16 + digit;
+        p.at += 1;
+    }
+    return value, true;
+}
+
+// Adds a unicode code point as UTF-8
+@private
+addUtf8 :: (sb: *fmt.StringBuilder, code: int) {
+    if code < 128 {
+        sb.addChar(code as u8);
+    } else if code < 2048 {
+        sb.addChar((192 | (code >> 6)) as u8);
+        sb.addChar((128 | (code & 63)) as u8);
+    } else if code < 65536 {
+        sb.addChar((224 | (code >> 12)) as u8);
+        sb.addChar((128 | ((code >> 6) & 63)) as u8);
+        sb.addChar((128 | (code & 63)) as u8);
+    } else {
+        sb.addChar((240 | (code >> 18)) as u8);
+        sb.addChar((128 | ((code >> 12) & 63)) as u8);
+        sb.addChar((128 | ((code >> 6) & 63)) as u8);
+        sb.addChar((128 | (code & 63)) as u8);
+    }
+}
+
+// A string with its escapes replaced. The text is allocated
+@private
+parseString :: method (p: *Parser) -> string, bool {
+    p.at += 1; // "
+    sb := fmt.newStringBuilder(16);
+
+    while true {
+        if p.at >= p.text.len {
+            p.fail("The string has no closing '\"'");
+            sb.free();
+            return "", false;
+        }
+
+        ch := p.text[p.at];
+        if ch == Quote {
+            p.at += 1;
+            return sb.toString(), true;
+        }
+        if ch < Space {
+            p.fail("A string can't have a control character like a newline. Write it as an escape like \\n");
+            sb.free();
+            return "", false;
+        }
+        if ch != Backslash {
+            sb.addChar(ch);
+            p.at += 1;
+            continue;
+        }
+
+        p.at += 1;
+        escape := p.peek();
+        p.at += 1;
+        if escape == Quote || escape == Backslash || escape == Slash {
+            sb.addChar(escape);
+        } else if escape == LowerB {
+            sb.addChar(8);
+        } else if escape == LowerF {
+            sb.addChar(12);
+        } else if escape == LowerN {
+            sb.addChar(Newline);
+        } else if escape == LowerR {
+            sb.addChar(Return);
+        } else if escape == LowerT {
+            sb.addChar(Tab);
+        } else if escape == LowerU {
+            code, ok := p.parseHex4();
+            if !ok { sb.free(); return "", false; }
+
+            // A code point above 0xFFFF is written as two escapes, a surrogate pair
+            if code >= 55296 && code <= 56319 && p.eatWord("\\u") {
+                low, lowOk := p.parseHex4();
+                if !lowOk { sb.free(); return "", false; }
+                if low >= 56320 && low <= 57343 {
+                    code = 65536 + ((code - 55296) << 10) + (low - 56320);
+                } else {
+                    addUtf8(&sb, 65533);
+                    code = low;
+                }
+            }
+            addUtf8(&sb, code);
+        } else {
+            p.at -= 1;
+            p.fail("Unknown escape in a string");
+            sb.free();
+            return "", false;
+        }
+    }
+    return "", false;
+}

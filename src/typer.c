@@ -1022,6 +1022,11 @@ bool unify_types(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindings, 
         if (index == -1) return true; // Not a type parameter
 
         AstIdentifier *type_param = ((AstIdentifier **)generic->type_params.items)[index];
+
+        // A fixed array is passed as a slice, so a parameter 'value: T' given a [3]int has T = []int
+        if (param && param->type == param_type && arg_type->kind == TYPE_ARRAY && ((TypeArray *)arg_type)->array_kind == ARRAY_FIXED) {
+            arg_type = (Type *)generate_slice_of(typer->parser, ((TypeArray *)arg_type)->elem_type);
+        }
         return bind_type_param(typer, generic, &bindings[index], type_param, arg_type, arg, param);
     }
     case TYPE_POINTER: {
@@ -6186,9 +6191,13 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             return NULL;
         }
 
-        // A constant of another file might not have been checked yet
-        if (ident->head.file && ident->head.file != typer->current_file && ident->decl && (ident->decl->flags & DECLARATION_CONSTANT) && !(ident->flags & IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN)) {
-            bool ok = check_declaration_of(typer, ident->imported_from ? ident->imported_from : ident);
+        // A constant of another file might not have been checked yet. A name from an import or another file of the namespace is a copy of the declared one
+        AstIdentifier *declared = ident->imported_from ? ident->imported_from : ident;
+        // Constants at the top of a file can be used anywhere, also before they are declared, e.g by a function above them
+        AstFile *used_in   = literal->head.head.file ? literal->head.head.file : typer->current_file;
+        bool     top_level = declared->head.file && declared->scope == declared->head.file->scope;
+        if (declared->head.file && (declared->head.file != used_in || top_level) && declared->decl && (declared->decl->flags & DECLARATION_CONSTANT) && !(declared->flags & IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN)) {
+            bool ok = check_declaration_of(typer, declared);
             if (!ok) return NULL;
             if (ident->imported_from) {
                 ident->type  = ident->imported_from->type;
