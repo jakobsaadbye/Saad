@@ -62,6 +62,7 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_t
 Type *check_member_access(Typer *typer, AstMemberAccess * ma);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
+Type *check_enum_values(Typer *typer, AstEnum *ast_enum);
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn);
 
 char *type_to_str(Type *type);
@@ -4621,6 +4622,14 @@ Type *check_enum_defn(Typer *typer, AstEnum *ast_enum) {
         return (Type *) enum_defn;
     }
 
+    ast_enum->is_being_checked = true;
+    Type *result = check_enum_values(typer, ast_enum);
+    ast_enum->is_being_checked = false;
+    return result;
+}
+
+Type *check_enum_values(Typer *typer, AstEnum *ast_enum) {
+    TypeEnum *enum_defn = (TypeEnum *) ast_enum->identifier->type;
     int min_value = 0;
     int max_value = 0;
     int auto_increment_value = 0;
@@ -4748,6 +4757,16 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) 
         }
 
         return NULL;
+    }
+
+    // An enum declared later or in another file is checked now, e.g for the default value of a member 'style: Style = .plain;'
+    if (!(found->head.flags & AST_FLAG_IS_TYPE_CHECKED) && !enum_defn->node->is_being_checked) {
+        Typer saved_state = *typer;
+        typer->current_file  = enum_defn->node->head.file ? enum_defn->node->head.file : typer->current_file;
+        typer->current_scope = enum_defn->identifier->scope ? enum_defn->identifier->scope : typer->current_scope;
+        Type *ok = check_enum_defn(typer, enum_defn->node);
+        typer_restore_state(typer, saved_state);
+        if (!ok) return NULL;
     }
 
     if (!(found->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {

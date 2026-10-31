@@ -115,7 +115,7 @@ Person :: struct {
 }
 
 text := json.encode(person);              // {"first_name":"Ada","age":36,...}
-text := json.encode(person, indent: 2);   // over more lines
+text := json.encode(person, json.Pretty); // over more lines
 
 p: Person;
 err := json.decode(text, &p);             // "" when it worked, otherwise e.g "address.zip: Expected a number, but got a string"
@@ -132,6 +132,25 @@ value.toJson();
   `omitEmpty` leaves out 0, false, "", null and things without elements.
 * Decoding keeps members that are not in the JSON, so default values stay, and skips members it doesn't know.
   Integers are read from the text, so an `i64` or `u64` doesn't lose digits, and they must fit their type.
+* Both take options as the last argument:
+
+  ```odin
+  json.encode(person, json.Pretty);         // indent: 2
+  json.decode(text, &person, json.SnakeCase);
+  json.encode(person, json.Options{indent: 4, names: .snakeCase, enumsAsNumbers: true, omitEmpty: true});
+  ```
+
+  | Option | Default | |
+  | --- | --- | --- |
+  | `indent` | 0 | Spaces per level. 0 writes everything on one line |
+  | `names` | `.asWritten` | How member names are written and read: `.camelCase`, `.pascalCase`, `.snakeCase`, `.kebabCase`, `.upperSnake`. A name from `json.Field` is used as it is |
+  | `enumValues` | `.asWritten` | The same for the values of enums |
+  | `enumsAsNumbers` | false | Writes enums as numbers. Both are read |
+  | `omitEmpty` | false | `omitEmpty` for every member |
+  | `strict` | false | Decoding fails on members the struct doesn't have |
+
+  The standard options are `json.Compact`, `json.Pretty`, `json.CamelCase`, `json.SnakeCase` and `json.KebabCase`.
+  `json.styleName("userID", .snakeCase)` gives `user_id`: words are split where the case changes and at `_` and `-`.
 * `json.Value` has `get`, `at`, `has`, `length`, `keys`, `asString`, `asNumber`, `asInt`, `asBool`, `isNull`,
   `toJson`, `clone` and `free`, and is made with `newObject`, `newArray`, `newString`, `newNumber`, `newBool`,
   `newNull`, `put` and `push`.
