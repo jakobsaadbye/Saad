@@ -70,6 +70,10 @@ Map :: struct <K, V> {
   Each instance of the method is added to the methods of the instance of the struct it is called on.
 * `register_methods_early()` adds the methods of a file to their structs before anything is checked, so
   methods can be called before they are declared.
+* A generic method of a struct that isn't generic, e.g `choice :: method <T>(r: *Random, xs: []T) -> T`, is added to
+  the methods of the struct (`TypeStruct.method_struct` on the generic). Its type parameters are inferred at the
+  call like for a generic function, and its instances are plain functions named after the struct, e.g
+  `Random.choice$int`.
 * A generic method whose receiver is `[]T` (e.g `sort :: method <T>(xs: []T)`) is a method on slices
   (`register_slice_method()`). It goes in `Typer.slice_methods` instead of on a struct. `xs.sort()` on a slice,
   fixed array or collection (a struct with `elements()`) is rewritten to the generic call `sort(xs)`
@@ -91,7 +95,7 @@ Map :: struct <K, V> {
 
 ## Not supported yet
 
-Generic methods with type parameters of their own, explicit type arguments at call sites (`max<f64>(...)`),
+Generic methods of a generic struct with type parameters of their own (e.g `map :: method <U>` on a `List<T>`), explicit type arguments at call sites (`max<f64>(...)`),
 generic functions as values, constraints, constants and function type members in generic structs, and
 generic type aliases like `Pair2<T> :: Pair<T, T>`.
 

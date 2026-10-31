@@ -67,17 +67,26 @@ fmt.print("took % ms", watch.milliseconds());   // also seconds() and restart()
 
 ## random
 
-A seeded xorshift64* generator. Fast and good for games and simulations, not for security.
+Named like Python's random module. A xorshift64* generator: fast and good for games and simulations, not for
+security.
 
 ```odin
-rng := random.newRandom(time.unix() as u64);   // the same seed gives the same numbers
-dice := rng.nextInt(1, 7);          // 1 to 6
-f := rng.nextFloat();               // from 0 up to but not including 1
-coin := rng.nextBool();
-if rng.chance(0.1) { ... }          // true one in ten times
-random.shuffle(&rng, cards);        // any slice, list or fixed array
-bits := rng.next();                 // 64 random bits
+dice  := random.between(1, 6);      // 1 to 6, both included
+f     := random.random();           // from 0 up to but not including 1
+x     := random.uniform(-1.0, 1.0); // from -1 up to but not including 1
+name  := random.choice(names);      // one of them
+picks := random.choices(names, 3);  // 3 of them, maybe the same one more than once
+some  := random.sample(names, 2);   // 2 different ones
+random.shuffle(cards);              // any slice, list or fixed array
+if random.chance(0.1) { ... }       // true one in ten times
+height := random.gauss(170.0, 10.0); // normal distribution with a mean and a standard deviation
+bits  := random.bits();             // 64 random bits
 ```
+
+* The functions use a generator that is seeded from the clock the first time it is used. `random.seed(42)` makes
+  them repeatable.
+* `rng := random.newRandom(42);` is a generator of your own, with the same methods: `rng.between(1, 6)`,
+  `rng.choice(names)`, `rng.shuffle(cards)`, ...
 
 ## Methods on slices (prelude)
 

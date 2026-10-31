@@ -1168,6 +1168,48 @@ static Value lower_constant(Lowerer *L, AstIdentifier *ident, Ast *site) {
     return value_scalar(lower_scalar_as(L, value, value->type), value->type);
 }
 
+static bool is_fixed_array(Type *type);
+
+// Writes the default values of the struct members in 'type' into the data of a global
+static void write_default_constants(Lowerer *L, IrGlobal *global, int offset, Type *type) {
+    if (type->kind == TYPE_STRUCT && !((TypeStruct *) type)->node->is_union) {
+        DynamicArray members = ((TypeStruct *) type)->node->members->identifiers;
+        for (int i = 0; i < members.count; i++) {
+            AstIdentifier *member = da_get_deref(members, i);
+            if (member->flags & IDENTIFIER_IS_CONSTANT) continue;
+            AstExpr *value = member_default_value(member);
+            if (value) write_constant(L, global, offset + member->member_offset, value, member->type);
+            else       write_default_constants(L, global, offset + member->member_offset, member->type);
+        }
+    }
+    else if (is_fixed_array(type) && has_default_values(((TypeArray *) type)->elem_type)) {
+        Type *elem = ((TypeArray *) type)->elem_type;
+        for (int64_t i = 0; i < fixed_array_count((TypeArray *) type); i++) {
+            write_default_constants(L, global, offset + (int)(i * elem->size), elem);
+        }
+    }
+}
+
+// The global holding a global variable e.g 'count := 0;', with its start value
+static int global_variable(Lowerer *L, AstIdentifier *ident) {
+    int cached = ptr_map_get(&L->const_globals, ident);
+    if (cached >= 0) return cached;
+
+    Type *type = ident->type;
+    int size = type_storage_size(type);
+    IrGlobal *global = ir_global_data(L->module, ident->name, NULL, size > 0 ? size : 1, type_alignment(type), false);
+    ptr_map_put(&L->const_globals, ident, global->index);
+
+    AstExpr *value = NULL;
+    AstDeclaration *decl = ident->decl;
+    for (int i = 0; decl && i < decl->idents.count && i < decl->values.count; i++) {
+        if (da_get_deref(decl->idents, i) == ident) value = da_get_deref(decl->values, i);
+    }
+    if (value) write_constant(L, global, 0, value, type);
+    else       write_default_constants(L, global, 0, type);
+    return global->index;
+}
+
 static Value lower_identifier(Lowerer *L, AstLiteral *lit) {
     AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
     if (ident == NULL) lower_fail(L, (Ast *) lit, "Compiler Error: Unresolved identifier");
@@ -1175,6 +1217,11 @@ static Value lower_identifier(Lowerer *L, AstLiteral *lit) {
 
     if (ident->flags & IDENTIFIER_IS_CONSTANT) {
         return lower_constant(L, ident, (Ast *) lit);
+    }
+
+    AstIdentifier *declared = ident->imported_from ? ident->imported_from : ident;
+    if (declared->flags & IDENTIFIER_IS_GLOBAL) {
+        return value_place(addr_global(global_variable(L, declared), 0), declared->type);
     }
 
     int slot = local_slot(L, ident);

@@ -210,6 +210,7 @@ typedef enum IdentifierFlags {
     IDENTIFIER_IS_IMPORTED_NAME     = 1 << 12, // A copy made by 'import math.sin;' or 'import math.sin as s;'
     IDENTIFIER_IS_PRIVATE           = 1 << 13, // @private. Only visible inside its own namespace, or its own file if it has no namespace
     IDENTIFIER_IS_DEPRECATED        = 1 << 14, // @deprecated("message"). Using it gives a warning
+    IDENTIFIER_IS_GLOBAL            = 1 << 15, // A variable at the top of a file e.g 'count := 0;'. It lives in the data of the program
 } IdentifierFlags;
 
 typedef struct AstIdentifier {
@@ -417,6 +418,7 @@ typedef struct AstFunctionDefn {
 
     bool             is_registered_method; // Set when the method has been added to the methods of its receiver struct
     bool             is_slice_method;      // A generic method on []T e.g 'sort :: method <T>(xs: []T)'. Slices, fixed arrays and collections can call it
+    TypeStruct      *method_struct;        // A generic method of a struct that isn't generic e.g 'choice :: method <T>(r: *Random, xs: []T) -> T'. Its instances are plain functions
 
     // Methods declared inside a struct e.g 'get :: method (key: K) -> V' inside Map :: struct <K, V> {...}. They are turned into the same
     // as a method declared outside the struct with an implicit 'self' receiver e.g 'get :: method <K, V>(self: *Map<K, V>, key: K) -> V'

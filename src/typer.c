@@ -1224,8 +1224,18 @@ bool register_generic_method(Typer *typer, AstFunctionDefn *generic) {
         return register_slice_method(typer, generic);
     }
 
+    // A method with type parameters of its own on a struct that isn't generic e.g 'choice :: method <T>(r: *Random, xs: []T) -> T'
+    if (receiver_type && receiver_type->kind == TYPE_NAME) {
+        AstIdentifier *struct_ident = lookup_from_scope(parser, generic->body->parent, receiver_type->name);
+        if (struct_ident && struct_ident->type && struct_ident->type->kind == TYPE_STRUCT && ((TypeStruct *)struct_ident->type)->node->type_params.count == 0) {
+            TypeStruct *struct_type = (TypeStruct *)struct_ident->type;
+            generic->method_struct = struct_type;
+            return register_method(typer, generic, struct_type);
+        }
+    }
+
     if (receiver_type == NULL || receiver_type->kind != TYPE_GENERIC_INSTANCE) {
-        report_error_ast(parser, LABEL_ERROR, receiver_type ? (Ast *)receiver_type : (Ast *)receiver, "The receiver of a generic method must be a slice []T or a generic struct, with the type parameters of the method as its type arguments");
+        report_error_ast(parser, LABEL_ERROR, receiver_type ? (Ast *)receiver_type : (Ast *)receiver, "The receiver of a generic method must be a slice []T, a struct or a generic struct, with the type parameters of the method as its type arguments");
         report_error_ast(parser, LABEL_HINT, NULL, "e.g set :: method <K, V>(m: *Map<K, V>, key: K, value: V)");
         return false;
     }
@@ -1433,8 +1443,9 @@ AstFunctionDefn *instantiate_generic_function(Typer *typer, AstFunctionDefn *gen
     AstFunctionDefn *instance = reparse_generic_function(parser, generic, scope);
     if (!instance) return NULL;
 
-    // An instance of a method on slices is a plain function, as slices have no struct to hold methods
-    if (generic->is_slice_method) instance->is_method = false;
+    // An instance of a method on slices is a plain function, as slices have no struct to hold methods. So is an instance of a
+    // generic method of a struct that isn't generic, as the struct has the generic method under that name already
+    if (generic->is_slice_method || generic->method_struct) instance->is_method = false;
 
     AstIdentifier *ident = ast_allocate(parser, sizeof(AstIdentifier));
     memcpy(ident, generic->identifier, sizeof(AstIdentifier));
@@ -2382,6 +2393,13 @@ bool check_declaration_of(Typer *typer, AstIdentifier *ident) {
     typer->current_scope = ident->scope ? ident->scope : typer->current_scope;
     typer->current_file  = ident->head.file ? ident->head.file : typer->current_file;
 
+    // A declaration at the top of a file is not inside the function that uses it, e.g a global variable
+    AstBlock *file_scope = ident->head.file ? ident->head.file->scope : NULL;
+    if (file_scope && find_identifier_in_scope(file_scope, ident->name) == ident) {
+        typer->current_scope      = file_scope;
+        typer->enclosing_function = NULL;
+    }
+
     bool ok = check_declaration(typer, ident->decl);
 
     DynamicArray stack = typer->enclosing_function_stack; // Might have been reallocated while checking
@@ -2724,9 +2742,20 @@ check_identifiers_vs_values:
 
         return true;
     } else {
-        // @TODO: Non-constant declarations in global scope should also be sized. Variables that live in global scope, should probably have some defined stack address of where they live, so they can be referenced locally. Still an open question on how i would do this.
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)decl, "Global variables are not yet supported. Only constants");
-        return false;
+        // A global variable e.g 'count := 0;'. It lives in the data of the program, so its start value is written there when compiling
+        for (int i = 0; i < decl->values.count; i++) {
+            AstExpr *value = ((AstExpr **)decl->values.items)[i];
+            if (!is_constant_value(value)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "The start value of a global variable must be known when compiling");
+                report_error_ast(typer->parser, LABEL_HINT, NULL, "Use literals, enum values and constants, or give it its value in a function");
+                return false;
+            }
+        }
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+            ident->flags |= IDENTIFIER_IS_GLOBAL;
+        }
+        return true;
     }
 
     return true;
@@ -2869,16 +2898,18 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
 
 
     bool lhs_is_constant = false;
-    if (assign->lhs->head.kind == AST_MEMBER_ACCESS) {
-        AstIdentifier * member = ((AstMemberAccess *)(assign->lhs))->struct_member;
-        lhs_is_constant = member->flags & IDENTIFIER_IS_CONSTANT;
+    AstExpr *place = assign->lhs;
+    if (place->head.kind == AST_MEMBER_ACCESS && place->replacement) place = place->replacement; // e.g counting.total is the global 'total' of the namespace
+    if (place->head.kind == AST_MEMBER_ACCESS) {
+        AstIdentifier * member = ((AstMemberAccess *)(place))->struct_member;
+        lhs_is_constant = member && (member->flags & IDENTIFIER_IS_CONSTANT);
     } 
-    else if (assign->lhs->head.kind == AST_ARRAY_ACCESS) {
+    else if (place->head.kind == AST_ARRAY_ACCESS) {
         // @Incomplete: I guess this could be a constant?
         lhs_is_constant = false;
     }
-    else if (is_literal_identifier(assign->lhs)) {
-        AstIdentifier *ident = ((AstLiteral *)(assign->lhs))->as.value.identifier.resolved_identifier;
+    else if (is_literal_identifier(place)) {
+        AstIdentifier *ident = ((AstLiteral *)(place))->as.value.identifier.resolved_identifier;
         assert(ident); // Is checked in check_expression so no need to check it here also
         lhs_is_constant = ident->flags & IDENTIFIER_IS_CONSTANT;
     } 
@@ -5031,6 +5062,12 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
             append_mangled_name(&sb, func_defn->receiver_struct->identifier->name);
             sb_append(&sb, ".%s", func_defn->identifier->name);
             func_defn->symbol_name = sb_to_string(&sb);
+        } else if (func_defn->generic_function && func_defn->generic_function->method_struct) {
+            // e.g Random.choice$int, so it doesn't clash with a function choice<T>
+            StringBuilder sb = sb_init(32);
+            append_mangled_name(&sb, func_defn->generic_function->method_struct->identifier->name);
+            sb_append(&sb, ".%s", func_defn->identifier->name);
+            func_defn->symbol_name = sb_to_string(&sb);
         } else {
             func_defn->symbol_name = func_defn->identifier->name;
         }
@@ -6776,6 +6813,9 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
 }
 
 bool is_non_constant_identifier_found_inside_current_function(Typer *typer, AstIdentifier *ident) {
+    AstIdentifier *declared = ident->imported_from ? ident->imported_from : ident;
+    if (declared->flags & IDENTIFIER_IS_GLOBAL) return true;
+
     if (!(ident->flags & IDENTIFIER_IS_CONSTANT) 
     && typer->enclosing_function && typer->enclosing_function != ident->scope->enclosing_function) 
     {
@@ -6876,14 +6916,15 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         AstIdentifier *declared = ident->imported_from ? ident->imported_from : ident;
         // Constants at the top of a file can be used anywhere, also before they are declared, e.g by a function above them
         AstFile *used_in   = literal->head.head.file ? literal->head.head.file : typer->current_file;
-        bool     top_level = declared->head.file && declared->scope == declared->head.file->scope;
-        if (declared->head.file && (declared->head.file != used_in || top_level) && declared->decl && (declared->decl->flags & DECLARATION_CONSTANT) && !(declared->flags & IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN)) {
+        bool     top_level = declared->head.file && (declared->scope == declared->head.file->scope || find_identifier_in_scope(declared->head.file->scope, declared->name) == declared);
+        bool is_variable_on_top = top_level && declared->decl && !(declared->decl->flags & (DECLARATION_CONSTANT | DECLARATION_IS_FUNCTION_PARAMETER | DECLARATION_IS_STRUCT_MEMBER)); // A global variable
+        if (declared->head.file && (declared->head.file != used_in || top_level) && declared->decl && ((declared->decl->flags & DECLARATION_CONSTANT) || is_variable_on_top) && !(declared->flags & IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN)) {
             bool ok = check_declaration_of(typer, declared);
             if (!ok) return NULL;
             if (ident->imported_from) {
                 ident->type  = ident->imported_from->type;
                 ident->value = ident->imported_from->value;
-                ident->flags |= ident->imported_from->flags & IDENTIFIER_IS_RESOLVED;
+                ident->flags |= ident->imported_from->flags & (IDENTIFIER_IS_RESOLVED | IDENTIFIER_IS_GLOBAL);
             }
         }
 
@@ -6896,6 +6937,16 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         bool needs_ordering_check = true;
 
         if (ident->flags & IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN) {
+            needs_ordering_check = false;
+        }
+
+        // Global variables can be used by any function, also one above them
+        if (declared->flags & IDENTIFIER_IS_GLOBAL) {
+            needs_ordering_check = false;
+        }
+
+        // So can the names of structs and enums, e.g 'state := State.idle;' above 'State :: enum {...}'
+        if (declared->flags & (IDENTIFIER_IS_NAME_OF_ENUM | IDENTIFIER_IS_NAME_OF_STRUCT)) {
             needs_ordering_check = false;
         }
 

@@ -1,15 +1,28 @@
 namespace random;
 
-// Pseudo random numbers (xorshift64*). Fast and good enough for games and simulations, but not for
-// anything to do with security. The same seed always gives the same numbers, e.g
+// Pseudo random numbers, named like Python's random module:
 //
-//     rng := random.newRandom(time.unix() as u64);  // different numbers every run
-//     dice := rng.nextInt(1, 7);
+//     dice := random.between(1, 6);           // 1 to 6
+//     name := random.choice(names);
+//     random.shuffle(cards);
+//     if random.chance(0.25) { ... }
+//
+// The functions use a generator that is seeded from the clock the first time it is used, so every run is different.
+// random.seed(42) makes them repeatable. A Random of your own has the same methods and its own sequence:
+//
+//     rng := random.newRandom(42);
+//     dice := rng.between(1, 6);
+//
+// The generator is xorshift64*. It is fast and good for games and simulations, but not for anything to do with security.
+
+import math;
+import time;
 
 Random :: struct {
     state: u64;
 }
 
+// A generator that always gives the same numbers for the same seed
 newRandom :: (seed: u64) -> Random {
     r := Random{state: seed ^ 88172645463325252};
     if r.state == 0 {
@@ -18,13 +31,87 @@ newRandom :: (seed: u64) -> Random {
 
     // Close seeds give close states. Mix them a bit before the first number
     for 0..8 {
-        r.next();
+        r.bits();
     }
     return r;
 }
 
-// The next 64 random bits
-next :: method (r: *Random) -> u64 {
+//
+// The generator that the functions use
+//
+
+@private
+defaultRandom: Random; // A state of 0 means it isn't seeded yet
+
+@private
+generator :: () -> *Random {
+    if defaultRandom.state == 0 {
+        nanoseconds := (time.now() * 1000000000.0) as u64;
+        defaultRandom = newRandom(time.unix() as u64 ^ nanoseconds);
+    }
+    return &defaultRandom;
+}
+
+// Makes the numbers of the functions repeatable, e.g for a test
+seed :: (value: u64) {
+    defaultRandom = newRandom(value);
+}
+
+// 64 random bits
+bits :: () -> u64 {
+    return generator().bits();
+}
+
+// A float from 0 up to but not including 1
+random :: () -> f64 {
+    return generator().random();
+}
+
+// An integer from min to max, both included, e.g between(1, 6) for a dice
+between :: (min: int, max: int) -> int {
+    return generator().between(min, max);
+}
+
+// A float from min up to but not including max
+uniform :: (min: f64, max: f64) -> f64 {
+    return generator().uniform(min, max);
+}
+
+// True with the probability p, e.g chance(0.25) is true one in four times
+chance :: (p: f64) -> bool {
+    return generator().chance(p);
+}
+
+// A float from the normal distribution with the mean and the standard deviation
+gauss :: (mean: f64, deviation: f64) -> f64 {
+    return generator().gauss(mean, deviation);
+}
+
+// One of the choices, which must not be empty
+choice :: <T>(choices: []T) -> T {
+    return generator().choice(choices);
+}
+
+// 'count' of the choices. A choice can be picked more than once
+choices :: <T>(population: []T, count: int) -> [..]T {
+    return generator().choices(population, count);
+}
+
+// 'count' different elements of the population, in a random order
+sample :: <T>(population: []T, count: int) -> [..]T {
+    return generator().sample(population, count);
+}
+
+// Puts the elements in a random order
+shuffle :: <T>(elements: []T) {
+    generator().shuffle(elements);
+}
+
+//
+// The methods of a generator
+//
+
+bits :: method (r: *Random) -> u64 {
     x := r.state;
     x ^= x >> 12;
     x ^= x << 25;
@@ -33,34 +120,67 @@ next :: method (r: *Random) -> u64 {
     return x * 2685821657736338717;
 }
 
-// A random integer from min up to but not including max, e.g rng.nextInt(1, 7) for a dice
-nextInt :: method (r: *Random, min: int, max: int) -> int {
-    if max <= min {
-        return min;
-    }
-    range := (max as i64 - min as i64) as u64;
-    return (min as i64 + (r.next() % range) as i64) as int;
+random :: method (r: *Random) -> f64 {
+    return (r.bits() >> 11) as f64 / 9007199254740992.0; // The top 53 bits divided by 2^53
 }
 
-// A random float from 0 up to but not including 1
-nextFloat :: method (r: *Random) -> f64 {
-    return (r.next() >> 11) as f64 / 9007199254740992.0; // The top 53 bits divided by 2^53
+between :: method (r: *Random, min: int, max: int) -> int {
+    assert(min <= max);
+    range := (max as i64 - min as i64 + 1) as u64;
+    return (min as i64 + (r.bits() % range) as i64) as int;
 }
 
-nextBool :: method (r: *Random) -> bool {
-    return (r.next() >> 63) == 1;
+uniform :: method (r: *Random, min: f64, max: f64) -> f64 {
+    return min + (max - min) * r.random();
 }
 
-// True with the probability p, e.g rng.chance(0.25) is true one in four times
 chance :: method (r: *Random, p: f64) -> bool {
-    return r.nextFloat() < p;
+    return r.random() < p;
 }
 
-// Puts the elements in a random order
-shuffle :: <T>(r: *Random, elements: []T) {
+// The Box-Muller transform of two uniform numbers
+gauss :: method (r: *Random, mean: f64, deviation: f64) -> f64 {
+    u := 1.0 - r.random(); // Not 0, for the log
+    v := r.random();
+    z := math.sqrt(-2.0 * math.log(u)) * math.cos(6.283185307179586 * v);
+    return mean + z * deviation;
+}
+
+choice :: method <T>(r: *Random, choices: []T) -> T {
+    assert(choices.count > 0);
+    return choices[r.between(0, (choices.count - 1) as int)];
+}
+
+choices :: method <T>(r: *Random, population: []T, count: int) -> [..]T {
+    result: [..]T;
+    result.reserve(count);
+    for 0..count {
+        result.add(r.choice(population));
+    }
+    return result;
+}
+
+sample :: method <T>(r: *Random, population: []T, count: int) -> [..]T {
+    assert(count >= 0 && count <= population.count);
+
+    // The first 'count' elements of a partly shuffled copy
+    pool: [..]T;
+    pool.reserve(population.count);
+    for x in population {
+        pool.add(x);
+    }
+    for i in 0..count {
+        j := r.between(i, (pool.count - 1) as int);
+        pool.elements().swap(i, j);
+    }
+    pool.count = count;
+    return pool;
+}
+
+shuffle :: method <T>(r: *Random, elements: []T) {
     i := elements.count - 1;
     while i > 0 {
-        j := r.nextInt(0, i + 1);
+        j := r.between(0, i as int);
         tmp := elements[i];
         elements[i] = elements[j];
         elements[j] = tmp;

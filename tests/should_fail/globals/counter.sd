@@ -1,0 +1,12 @@
+// Used by tests/should_fail/global_private.sd: a global of a namespace, private to it
+namespace tally;
+
+@private
+count := 0;
+
+total: i64 = 100; // public
+
+next :: () -> int {
+    count += 1;
+    return count;
+}

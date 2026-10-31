@@ -4,6 +4,42 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.8.0 - 1. Nov 2026
+
+* Global variables
+
+```odin
+count := 0;
+names: [..]string;
+origin: Point;           // with the default values of Point
+
+@private
+cache: [64]int;          // only for this namespace
+
+bump :: () { count += 1; }
+```
+
+A global variable starts with a value that is known when compiling (literals, enum values and constants), or with
+the default value of its type. Any function can use it, also one above it.
+
+* The random library is named like Python's
+
+```odin
+import random;
+
+dice := random.between(1, 6);   // both included
+name := random.choice(names);
+random.shuffle(cards);
+picks := random.sample(names, 2);
+
+rng := random.newRandom(42);    // repeatable, with the same methods
+rng.between(1, 6);
+```
+
+* Generic methods of a struct that isn't generic, e.g `choice :: method <T>(r: *Random, xs: []T) -> T` called as `rng.choice(xs)`
+* BREAKING: `rng.nextInt(min, max)` is `rng.between(min, max - 1)`, `nextFloat` is `random`, `next` is `bits`,
+  `nextBool()` is `chance(0.5)`, and `random.shuffle(&rng, xs)` is `rng.shuffle(xs)` or `random.shuffle(xs)`
+
 ## Update v0.7.1 - 1. Nov 2026
 
 * The standard library and breakout use switch where it reads better, e.g the kinds of types in `fmt` and
