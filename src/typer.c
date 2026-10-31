@@ -459,6 +459,11 @@ bool check_namespace_import(Typer *typer, AstImport *import) {
 
 bool check_import(Typer *typer, AstImport *import) {
     if (import->kind != IMPORT_FILE) {
+        // import "fmt"; of a namespace of the standard library
+        if (import->path_token.type == TOKEN_LITERAL_STRING) {
+            report_error_ast(typer->parser, LABEL_WARNING, (Ast *)import, "import \"%s\"; is deprecated", import->string);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Write 'use %s;' to get all of its names, or 'import %s;' to write %s.name", import->path, import->path, import->path);
+        }
         return check_namespace_import(typer, import);
     }
 

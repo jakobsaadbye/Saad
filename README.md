@@ -4,6 +4,42 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.5.1 - 31. Oct 2026
+
+* The standard library is sorted into folders, so the top of `std/` stays clean. See `docs/standard_library.md`.
+
+```
+std/
+  prelude/   runtime, List/Map and the string methods. Always there, without an import
+  c/         namespace c: the C bindings
+  fmt/       namespace fmt
+  os/        namespace os, and os.windows for the Windows API
+  vendor/    raylib
+  math.sd  mem.sd  random.sd  slices.sd  time.sd
+```
+
+* New namespaces: `os` (files, environment variables, running commands), `time` (clocks, stopwatches,
+  sleep), `random` (a seeded generator) and `slices` (generic sort, reverse, indexOf, contains)
+
+```odin
+import os;
+import random;
+import slices;
+
+main :: () {
+    text, ok := os.readFile("names.txt");
+    names := text.split("\n");
+    slices.sort(names);
+
+    rng := random.NewRandom(42);
+    random.shuffle(&rng, names);
+    dice := rng.nextInt(1, 7);
+}
+```
+
+* BREAKING: `printf` and `sprintf` moved from `fmt` to `c`, and the namespace `windows` is now `os.windows`.
+  `import "fmt";` of a namespace of the standard library now means `use fmt;` (still with a warning).
+
 ## Update v0.5.0 - 31. Oct 2026
 
 * Namespaces

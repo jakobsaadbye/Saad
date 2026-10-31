@@ -1,4 +1,5 @@
 use fmt;
+use c; // sprintf
 use math;
 use raylib;
 

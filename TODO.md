@@ -60,7 +60,7 @@ Future development
 -----------------
 
 * Collections (see docs/collections.md)
-  [x] Dynamic arrays as List<T> in std/collections.sd, with an initial capacity (reserve), more methods and allocators
+  [x] Dynamic arrays as List<T> in std/prelude/collections.sd, with an initial capacity (reserve), more methods and allocators
   [x] Map<K, V> with [k: v] literals
   [x] for key, value in m
   [] map / filter (needs methods with type parameters of their own)

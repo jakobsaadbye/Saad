@@ -171,7 +171,7 @@ typedef struct CompilerReport {
 } CompilerReport;
 
 
-// Finds the root folder of the compiler (the folder containing std/runtime.sd).
+// Finds the root folder of the compiler (the folder containing std/prelude/runtime.sd).
 // Uses the SAAD_ROOT environment variable if set, otherwise searches upwards from the executable's location
 char *find_compiler_root() {
     char *env_root = getenv("SAAD_ROOT");
@@ -185,9 +185,11 @@ char *find_compiler_root() {
 
         for (int depth = 0; depth < 4; depth++) {
             char *std_dir      = join_path(dir, "std");
-            char *runtime_path = join_path(std_dir, "runtime.sd");
+            char *prelude_dir  = join_path(std_dir, "prelude");
+            char *runtime_path = join_path(prelude_dir, "runtime.sd");
             bool found = check_file_exists(runtime_path);
             free(std_dir);
+            free(prelude_dir);
             free(runtime_path);
 
             if (found) return dir;
@@ -262,6 +264,9 @@ void cleanup() {
 
 bool resolve_import(CompilerConfig *config, Parser *parser, AstImport *import, AstFile *current_file) {
 
+    // The imports of the prelude are resolved by the parser
+    if (import->head.flags & AST_FLAG_COMPILER_GENERATED) return import->resolved_path != NULL;
+
     char *import_path = malloc(strlen(import->string) + 8);
     sprintf(import_path, "%s.%s", import->string, config->file_extension);
 
@@ -279,6 +284,17 @@ bool resolve_import(CompilerConfig *config, Parser *parser, AstImport *import, A
             import->resolved_path = join_path(config->stdlib_path, import_path);
         }
         change_directory(config->working_directory);
+    }
+
+    // import "fmt"; of a namespace of the standard library is the same as use fmt;
+    if (import->resolved_path == NULL) {
+        Namespace *ns = find_namespace(parser, import->string);
+        if (ns && ns->is_standard) {
+            import->kind = IMPORT_USE;
+            import->path = import->string;
+            import->ns   = ns;
+            return true;
+        }
     }
 
     if (import->resolved_path == NULL) {
@@ -327,6 +343,10 @@ static bool parse_all_files(CompilerConfig *config, Parser *parser, const char *
         if (file == NULL) return false;
         da_append(parsed_files, file);
 
+        // The rest of the compiler works from the folder of the main file. Imports with a string are relative to
+        // it and the output goes to its build folder
+        if (cursor == 0) change_directory(config->working_directory);
+
         // A file of the project cannot join a namespace of the standard library
         if (file->ns && file->ns->is_standard) {
             char *absolute = get_absolute_path(path);
@@ -353,6 +373,10 @@ static bool parse_all_files(CompilerConfig *config, Parser *parser, const char *
 
             // @Improve: These error messages when we get a proper module system
             if (!resolve_import(config, parser, import, file)) return false;
+            if (import->kind != IMPORT_FILE) {
+                visit_namespace(&paths_to_visit, import->ns);
+                continue;
+            }
 
             da_append(&paths_to_visit, import->resolved_path);
         }
@@ -453,9 +477,12 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     
     Lexer lexer           = lexer_init();
     Parser parser         = parser_init(&lexer);
-    parser.runtime_file_path        = join_path(config->stdlib_path, "runtime.sd");
-    parser.builtin_string_file_path = join_path(config->stdlib_path, "builtin_string.sd");
-    parser.collections_file_path    = join_path(config->stdlib_path, "collections.sd");
+    char *prelude_path              = join_path(config->stdlib_path, "prelude");
+    char *c_bindings_path           = join_path(config->stdlib_path, "c");
+    parser.runtime_file_path        = join_path(prelude_path, "runtime.sd");
+    parser.builtin_string_file_path = join_path(prelude_path, "string.sd");
+    parser.collections_file_path    = join_path(prelude_path, "collections.sd");
+    parser.c_bindings_path          = get_absolute_path(c_bindings_path);
     ConstEvaluator ce     = const_evaluator_init(&parser);
     Typer typer           = typer_init(&parser, &ce);
 

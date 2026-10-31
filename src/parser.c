@@ -40,7 +40,7 @@ AstIdentifier  *make_identifier_from_string(Parser *parser, const char *name, Ty
 AstIdentifier  *generate_identifier(Parser *parser, char *ident_name, Type *type, IdentifierFlags flags);
 TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_data, char *struct_name);
-bool            generate_and_add_import(Parser *parser, char *path);
+bool            generate_and_add_import(Parser *parser, char *name, char *resolved_path);
 
 bool starts_array_literal(Parser *parser);
 char *parse_dotted_name(Parser *parser);
@@ -160,19 +160,24 @@ void dump_file_declarations(AstFile *file) {
     printf("\n");
 }
 
-// The files that std/collections.sd is built on don't import it, so that there are no circular imports
+// The files that std/prelude/collections.sd is built on (the runtime and the C bindings in std/c) don't
+// import it, so that there are no circular imports
 bool is_file_below_collections(Parser *parser, char *file_path) {
-    const char *below[] = { "runtime.sd", "c_stdlib.sd", "c_string.sd" };
-    for (int i = 0; i < (int)(sizeof(below) / sizeof(below[0])); i++) {
-        size_t path_len = strlen(file_path), name_len = strlen(below[i]);
-        if (path_len < name_len) continue;
-        if (strcmp(file_path + path_len - name_len, below[i]) != 0) continue;
+    if (parser->runtime_file_path && strcmp(file_path, parser->runtime_file_path) == 0) return true;
+    if (parser->c_bindings_path == NULL) return false;
 
-        // Only the files in the standard library folder
-        size_t dir_len = strlen(parser->collections_file_path) - strlen("collections.sd");
-        if (path_len - name_len == dir_len && strncmp(file_path, parser->collections_file_path, dir_len) == 0) return true;
+    char *absolute = get_absolute_path(file_path);
+    if (absolute == NULL) return false;
+
+    size_t dir_len = strlen(parser->c_bindings_path);
+    bool is_below  = strncmp(absolute, parser->c_bindings_path, dir_len) == 0 && (absolute[dir_len] == '/' || absolute[dir_len] == '\\');
+    if (is_below) {
+        // Only the files directly in std/c
+        char *name = absolute + dir_len + 1;
+        is_below = strchr(name, '/') == NULL && strchr(name, '\\') == NULL;
     }
-    return false;
+    free(absolute);
+    return is_below;
 }
 
 AstFile *parse_file(Parser *parser, char *file_path) {
@@ -211,7 +216,7 @@ AstFile *parse_file(Parser *parser, char *file_path) {
 
     // Add import to the runtime library
     if (parser->runtime_file_path == NULL || strcmp(parser->current_file->absolute_path, parser->runtime_file_path) != 0) {
-        ok = generate_and_add_import(parser, "runtime");
+        ok = generate_and_add_import(parser, "runtime", parser->runtime_file_path);
         if (!ok) return NULL;
     }
 
@@ -220,7 +225,7 @@ AstFile *parse_file(Parser *parser, char *file_path) {
         parser->collections_file = file;
     }
     else if (parser->collections_file_path && !is_file_below_collections(parser, file_path)) {
-        ok = generate_and_add_import(parser, "collections");
+        ok = generate_and_add_import(parser, "collections", parser->collections_file_path);
         if (!ok) return NULL;
 
         AstImport *prelude = ((AstImport **)file->imports.items)[file->imports.count - 1];
@@ -268,15 +273,21 @@ char *resolve_import_path(Parser *parser, char *path_string) {
     return path_string;
 }
 
-bool generate_and_add_import(Parser *parser, char *path) {
+// Imports a file of the prelude. The path is already resolved, so the compiler doesn't search for it
+bool generate_and_add_import(Parser *parser, char *name, char *resolved_path) {
 
     // Check if we already have the import
     for (int i = 0; i < parser->current_file->imports.count; i++) {
         AstImport *existing = ((AstImport **)parser->current_file->imports.items)[i];
-        if (strcmp(existing->string, path) == 0) {
+        if (strcmp(existing->string, name) == 0) {
             // Import already exists
             return true;
         }
+    }
+
+    if (resolved_path == NULL) {
+        report_error_ast(parser, LABEL_ERROR, NULL, "Compiler Error: Failed to resolve import '%s'", name);
+        return false;
     }
 
     AstImport *ast_import  = ast_allocate(parser, sizeof(AstImport));
@@ -286,12 +297,8 @@ bool generate_and_add_import(Parser *parser, char *path) {
     ast_import->head.end   = (Pos){0, 0, 0};
     ast_import->head.flags = AST_FLAG_COMPILER_GENERATED;
     ast_import->path_token = (Token){0};
-    ast_import->string     = path;
-    ast_import->resolved_path = resolve_import_path(parser, path);
-    if (ast_import->string == NULL) {
-        report_error_ast(parser, LABEL_ERROR, NULL, "Compiler Error: Failed to resolve import '%s'", path);
-        return false;
-    }
+    ast_import->string     = name;
+    ast_import->resolved_path = resolved_path;
 
     // Insert the import at the top of the file
     da_insert(&parser->current_file->statements, ast_import, 0);
@@ -3373,7 +3380,7 @@ AstExpr *parse_leaf(Parser *parser) {
 
     if (t.type == TOKEN_LITERAL_STRING) {
         if (!parser->current_file->has_imported_builtin_string && (parser->builtin_string_file_path == NULL || strcmp(parser->current_file->absolute_path, parser->builtin_string_file_path) != 0)) {
-            bool ok = generate_and_add_import(parser, "builtin_string");
+            bool ok = generate_and_add_import(parser, "builtin_string", parser->builtin_string_file_path);
             if (!ok) return NULL;
             parser->current_file->has_imported_builtin_string = true;
         }

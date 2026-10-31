@@ -1,4 +1,9 @@
-namespace windows;
+namespace os.windows;
+
+// Bindings for the Windows API (kernel32), e.g
+//
+//     import os.windows;
+//     windows.Sleep(100);
 
 CriticalSection :: struct {
     data: [40]u8;  // opaque, windows manages this internally
@@ -34,4 +39,12 @@ extern "C" {
     ) -> bool;
 
     WakeConditionVariable       :: (conditionVariable: *ConditionVariable);
+
+    //
+    // Time
+    //
+    Sleep                     :: (dwMilliseconds: u32);
+    QueryPerformanceCounter   :: (lpPerformanceCount: *i64) -> bool;
+    QueryPerformanceFrequency :: (lpFrequency: *i64) -> bool;
+    GetSystemTimeAsFileTime   :: (lpSystemTimeAsFileTime: *u64);  // 100 nanosecond intervals since January 1, 1601 (UTC)
 }

@@ -1,11 +1,11 @@
 # Collections
 
-`List<T>` and `Map<K, V>` live in `std/collections.sd` and are written in Saad. The compiler has no
+`List<T>` and `Map<K, V>` live in `std/prelude/collections.sd` and are written in Saad. The compiler has no
 special knowledge of them. They get their syntax from a small **collection protocol**: methods with
 certain names that any struct can declare. A library author could have written them, and can write
 other collections that feel just as built in.
 
-Every file imports `std/collections.sd` automatically. A file's own declarations win over it, so a
+Every file imports `std/prelude/collections.sd` automatically. A file's own declarations win over it, so a
 file can still declare its own `List` or `Map`. `[..]T` always means the standard `List<T>`.
 
 ## The collection protocol
@@ -103,7 +103,7 @@ hashes cached in the entries. Removing shifts `entries` down and rebuilds `slots
 
 ## Hashing
 
-A key type needs `hash :: method (key: K) -> u64` and `==`. `std/collections.sd` gives a hash to all
+A key type needs `hash :: method (key: K) -> u64` and `==`. `std/prelude/collections.sd` gives a hash to all
 the integer types, `f32`, `f64`, `bool` and `string` (FNV-1a), and has `hashU64` and `hashCombine`
 for your own types. Structs compare with `==` member by member:
 

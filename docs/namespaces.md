@@ -15,8 +15,8 @@ Body :: struct { mass: f64; }
   also the private ones, without importing anything.
 * Namespaces can use each other, also in a cycle.
 * Files without a `namespace` are standalone, like the main file of a program.
-* The standard library namespaces are top-level: `fmt`, `math`, `mem`, `c`, `raylib`, `windows`.
-  A project cannot add files to them.
+* The standard library namespaces are top-level: `fmt`, `math`, `mem`, `os`, `time`, `random`, `slices`, `c`
+  and `raylib`, plus `os.windows`. A project cannot add files to them. See `docs/standard_library.md`.
 * The prelude (`List`, `Map`, `string` and the runtime) is always there, without an import.
 
 Before parsing, the compiler scans the folder of the main file (and every folder below it, except hidden
@@ -43,7 +43,7 @@ std_name := math.sqrt(2.0); // a fully qualified name works without an import
   write it with its namespace. It is not an error as long as the name isn't used.
 * Methods belong to their type, so `xs.add(1)` needs no import.
 * `import "fmt";` (a string) is the old way to import a file. It still works, with a warning for files in
-  a namespace.
+  a namespace. For a namespace of the standard library it means `use fmt;`.
 
 Structs and enums are told apart by their namespace: `game.render.Vec2` and `geometry.Vec2` are different
 types, also inside generic instances and anonymous structs. Their names in error messages and `typeof`

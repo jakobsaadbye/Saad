@@ -1,0 +1,95 @@
+namespace slices;
+
+// Generic functions on slices. Fixed arrays and lists convert to slices, e.g
+//
+//     xs := [3, 1, 2];
+//     slices.sort(xs);
+//     if slices.contains(xs, 2) { ... }
+
+// Sorts the elements from smallest to largest with <
+sort :: <T>(elements: []T) {
+    quickSort(elements, 0, elements.count - 1);
+}
+
+isSorted :: <T>(elements: []T) -> bool {
+    for i in 1..elements.count {
+        if elements[i] < elements[i - 1] {
+            return false;
+        }
+    }
+    return true;
+}
+
+reverse :: <T>(elements: []T) {
+    i := 0;
+    j := elements.count - 1;
+    while i < j {
+        swap(elements, i, j);
+        i += 1;
+        j -= 1;
+    }
+}
+
+// The index of the first element that is == value, or -1
+indexOf :: <T>(elements: []T, value: T) -> int {
+    for element, i in elements {
+        if element == value {
+            return i;
+        }
+    }
+    return -1;
+}
+
+contains :: <T>(elements: []T, value: T) -> bool {
+    return indexOf(elements, value) != -1;
+}
+
+swap :: <T>(elements: []T, i: int, j: int) {
+    tmp := elements[i];
+    elements[i] = elements[j];
+    elements[j] = tmp;
+}
+
+// Sorts elements[lo] to elements[hi]. Quicksort for big ranges, insertion sort for small ones
+@private
+quickSort :: <T>(elements: []T, lo: int, hi: int) {
+    while hi - lo > 16 {
+        // The median of three as the pivot, so sorted input isn't the worst case
+        mid := lo + (hi - lo) / 2;
+        if elements[mid] < elements[lo] { swap(elements, mid, lo); }
+        if elements[hi]  < elements[lo] { swap(elements, hi, lo);  }
+        if elements[hi]  < elements[mid] { swap(elements, hi, mid); }
+        pivot := elements[mid];
+
+        i := lo;
+        j := hi;
+        while i <= j {
+            while elements[i] < pivot { i += 1; }
+            while pivot < elements[j] { j -= 1; }
+            if i <= j {
+                swap(elements, i, j);
+                i += 1;
+                j -= 1;
+            }
+        }
+
+        // Recurse into the smaller half and loop on the bigger one, so the depth stays small
+        if j - lo < hi - i {
+            quickSort(elements, lo, j);
+            lo = i;
+        } else {
+            quickSort(elements, i, hi);
+            hi = j;
+        }
+    }
+
+    for i in lo + 1..hi + 1 {
+        value := elements[i];
+        j := i;
+        while j > lo && value < elements[j - 1] {
+            elements[j] = elements[j - 1];
+            j -= 1;
+        }
+        elements[j] = value;
+    }
+}
