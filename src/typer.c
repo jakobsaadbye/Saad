@@ -102,6 +102,13 @@ bool struct_is_comparable(TypeStruct *struct_type, AstIdentifier **bad_member);
 bool register_generic_method(Typer *typer, AstFunctionDefn *generic);
 bool register_methods_early(Typer *typer, AstFile *file);
 bool check_struct_statement(Typer *typer, AstStruct *ast_struct);
+char *type_identity(Type *type);
+AstIdentifier *resolve_qualified_name(Typer *typer, AstExpr *expr, bool *failed);
+AstIdentifier *lookup_type_identifier(Typer *typer, char *name, Ast *site);
+AstIdentifier *find_namespace_declaration(Namespace *ns, char *name);
+bool check_namespace_files(Typer *typer, Namespace *ns);
+bool report_if_not_visible(Typer *typer, AstIdentifier *ident, Ast *site);
+AstLiteral *make_resolved_identifier_literal(Typer *typer, AstIdentifier *ident, Ast *at);
 AstFunctionDefn *readonly_self_method(Typer *typer, AstExpr *expr);
 AstFunctionDefn *readonly_self_place(Typer *typer, AstExpr *expr);
 void report_readonly_self(Typer *typer, Ast *at, AstFunctionDefn *method, const char *action, AstExpr *place);
@@ -150,7 +157,36 @@ void typer_restore_state(Typer *typer, Typer saved_state) {
     typer->parser->current_scope = saved_state.current_scope;
 }
 
+// Adds the declarations of the other files of the same namespace to a file's scope. A namespace shares its declarations, also the private ones
+bool import_namespace_siblings(Typer *typer, AstFile *file) {
+    Parser *parser = typer->parser;
+    for (int i = 0; i < file->ns->files.count; i++) {
+        AstFile *sibling = ((AstFile **)file->ns->files.items)[i];
+        if (sibling == file) continue;
+
+        for (int j = 0; j < sibling->scope->identifiers.count; j++) {
+            AstIdentifier *ident = ((AstIdentifier **)sibling->scope->identifiers.items)[j];
+            if (ident->head.file != sibling) continue; // Only what the sibling declares itself
+
+            AstIdentifier *existing = find_identifier_in_scope(file->scope, ident->name);
+            if (existing == ident) continue;
+            if (existing && existing->head.file == file) {
+                report_error_ast(parser, LABEL_ERROR, (Ast *)existing, "Redeclaration of '%s' in the namespace '%s'", ident->name, file->ns->name);
+                report_error_ast(parser, LABEL_NOTE, (Ast *)ident, "Here is the other declaration, in another file of the namespace");
+                return false;
+            }
+            if (existing) continue;
+            da_append(&file->scope->identifiers, ident);
+        }
+    }
+    return true;
+}
+
 bool check_file(Typer *typer, AstFile *ast_file) {
+    // Files can use each other, so a file that is being checked is not checked again
+    if (ast_file->check_state != 0) return true;
+    ast_file->check_state = 1;
+
     typer->current_file        = ast_file;
     typer->current_scope       = ast_file->scope;
     typer->enclosing_function  = NULL;
@@ -163,8 +199,22 @@ bool check_file(Typer *typer, AstFile *ast_file) {
     typer->parser->current_file  = ast_file;
     typer->parser->current_scope = ast_file->scope;
 
+    if (ast_file->ns) {
+        bool ok = import_namespace_siblings(typer, ast_file);
+        if (!ok) return false;
+    }
+
     bool ok = register_methods_early(typer, ast_file);
     if (!ok) return false;
+
+    // The other files of the namespace e.g so that their methods are registered
+    if (ast_file->ns) {
+        Typer saved_state = *typer;
+        bool siblings_ok = check_namespace_files(typer, ast_file->ns);
+        typer_restore_state(typer, saved_state);
+        typer->enclosing_function_stack = saved_state.enclosing_function_stack;
+        if (!siblings_ok) return false;
+    }
 
     for (int i = 0; i < ast_file->statements.count; i++) {
         Ast *stmt = ((Ast **)(ast_file->statements.items))[i];
@@ -178,6 +228,7 @@ bool check_file(Typer *typer, AstFile *ast_file) {
         }
     }
 
+    ast_file->check_state = 2;
     return true;
 }
 
@@ -214,6 +265,9 @@ bool import_declarations(Parser *parser, AstImport *import, AstFile *to_file) {
         if (src_ident->head.file != from_file) {
             continue;
         }
+        if (src_ident->flags & IDENTIFIER_IS_PRIVATE) {
+            continue;
+        }
 
         // A file's own declarations win over the standard collections it imports, so a file can have its own List
         if (import->is_prelude && find_identifier_in_scope(to_file->scope, src_ident->name)) {
@@ -237,8 +291,179 @@ bool import_declarations(Parser *parser, AstImport *import, AstFile *to_file) {
     return true;
 }
 
+bool check_namespace_files(Typer *typer, Namespace *ns) {
+    for (int i = 0; i < ns->files.count; i++) {
+        AstFile *file = ((AstFile **)ns->files.items)[i];
+        if (file->check_state != 0) continue;
+
+        Typer current_state = *typer;
+        bool ok = check_file(typer, file);
+        if (!ok) return false;
+        typer_restore_state(typer, current_state);
+    }
+    return true;
+}
+
+// A public declaration of a namespace (or a private one, for code in the same namespace), or NULL
+AstIdentifier *find_namespace_declaration(Namespace *ns, char *name) {
+    for (int i = 0; i < ns->files.count; i++) {
+        AstFile *file = ((AstFile **)ns->files.items)[i];
+        for (int j = 0; j < file->scope->identifiers.count; j++) {
+            AstIdentifier *ident = ((AstIdentifier **)file->scope->identifiers.items)[j];
+            if (ident->head.file == file && strcmp(ident->name, name) == 0) return ident;
+        }
+    }
+    return NULL;
+}
+
+char *namespace_of(AstIdentifier *ident) {
+    if (ident->head.file && ident->head.file->ns) return ident->head.file->ns->name;
+    return ident->head.file ? ident->head.file->absolute_path : "?";
+}
+
+bool is_prelude_identifier(Typer *typer, AstIdentifier *ident) {
+    Parser *parser = typer->parser;
+    AstFile *file  = ident->head.file;
+    if (file == NULL) return false;
+    if (file == parser->collections_file) return true;
+    if (parser->runtime_file_path && strcmp(file->absolute_path, parser->runtime_file_path) == 0) return true;
+    if (parser->builtin_string_file_path && strcmp(file->absolute_path, parser->builtin_string_file_path) == 0) return true;
+    return false;
+}
+
+void replace_in_scope(AstBlock *scope, AstIdentifier *old_ident, AstIdentifier *new_ident) {
+    for (int i = 0; i < scope->identifiers.count; i++) {
+        if (((AstIdentifier **)scope->identifiers.items)[i] == old_ident) {
+            ((AstIdentifier **)scope->identifiers.items)[i] = new_ident;
+            return;
+        }
+    }
+}
+
+// Adds a declaration that 'use' brings into a file. The file's own declarations and explicit imports win over it, and it wins over the prelude.
+// Two different declarations with the same name from 'use' are ambiguous, which is an error where the name is used
+void add_used_identifier(Typer *typer, AstFile *file, AstIdentifier *ident) {
+    AstIdentifier *existing = find_identifier_in_scope(file->scope, ident->name);
+    if (existing == NULL) {
+        da_append(&file->scope->identifiers, ident);
+        return;
+    }
+    if (existing == ident) return;
+    if (existing->head.file == file) return;
+    if (existing->flags & (IDENTIFIER_IS_IMPORTED_NAME | IDENTIFIER_IS_NAMESPACE)) return;
+
+    if (is_prelude_identifier(typer, existing)) {
+        replace_in_scope(file->scope, existing, ident);
+        return;
+    }
+
+    if (existing->flags & IDENTIFIER_IS_AMBIGUOUS) {
+        for (int i = 0; i < existing->ambiguous.count; i++) {
+            if (((AstIdentifier **)existing->ambiguous.items)[i] == ident) return;
+        }
+        da_append(&existing->ambiguous, ident);
+        return;
+    }
+
+    AstIdentifier *ambiguous = ast_allocate(typer->parser, sizeof(AstIdentifier));
+    ambiguous->head      = existing->head;
+    ambiguous->head.file = file;
+    ambiguous->name      = existing->name;
+    ambiguous->flags     = IDENTIFIER_IS_AMBIGUOUS | IDENTIFIER_IS_RESOLVED;
+    ambiguous->scope     = file->scope;
+    ambiguous->ambiguous = da_init(2, sizeof(AstIdentifier *));
+    da_append(&ambiguous->ambiguous, existing);
+    da_append(&ambiguous->ambiguous, ident);
+    replace_in_scope(file->scope, existing, ambiguous);
+}
+
+// Adds a name that an import gives a file e.g the 'm' of 'import math as m;' or the 'sin' of 'import math.sin;'
+bool add_imported_name(Typer *typer, AstFile *file, AstIdentifier *ident, AstImport *import) {
+    AstIdentifier *existing = find_identifier_in_scope(file->scope, ident->name);
+    if (existing && (existing->head.file == file || (existing->flags & (IDENTIFIER_IS_IMPORTED_NAME | IDENTIFIER_IS_NAMESPACE)))) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)import, "The import of '%s' conflicts with another '%s'", ident->name, ident->name);
+        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)existing, "Here is the other '%s'", ident->name);
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Give the import another name with 'as' e.g import %s as other;", import->path);
+        return false;
+    }
+    if (existing) {
+        replace_in_scope(file->scope, existing, ident);
+    } else {
+        da_append(&file->scope->identifiers, ident);
+    }
+    return true;
+}
+
+bool check_namespace_import(Typer *typer, AstImport *import) {
+    Parser    *parser = typer->parser;
+    AstFile   *file   = typer->current_file;
+    Namespace *ns     = import->ns;
+
+    Typer current_state = *typer;
+    bool ok = check_namespace_files(typer, ns);
+    if (!ok) return false;
+    typer_restore_state(typer, current_state);
+
+    bool same_namespace = file->ns == ns;
+
+    if (import->kind == IMPORT_USE) {
+        for (int i = 0; i < ns->files.count; i++) {
+            AstFile *ns_file = ((AstFile **)ns->files.items)[i];
+            for (int j = 0; j < ns_file->scope->identifiers.count; j++) {
+                AstIdentifier *ident = ((AstIdentifier **)ns_file->scope->identifiers.items)[j];
+                if (ident->head.file != ns_file) continue;
+                if ((ident->flags & IDENTIFIER_IS_PRIVATE) && !same_namespace) continue;
+                add_used_identifier(typer, file, ident);
+            }
+        }
+        return true;
+    }
+
+    if (import->kind == IMPORT_NAMESPACE) {
+        char *last = strrchr(import->path, '.');
+        AstIdentifier *ident = ast_allocate(parser, sizeof(AstIdentifier));
+        ident->head.kind  = AST_IDENTIFIER;
+        ident->head.file  = file;
+        ident->head.start = import->head.start;
+        ident->head.end   = import->head.end;
+        ident->name       = import->alias ? import->alias : (last ? last + 1 : import->path);
+        ident->flags      = IDENTIFIER_IS_NAMESPACE | IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_RESOLVED;
+        ident->scope      = file->scope;
+        ident->ns         = ns;
+        return add_imported_name(typer, file, ident, import);
+    }
+
+    // import math.sin; or import math.sin as s;
+    AstIdentifier *target = find_namespace_declaration(ns, import->name);
+    if (target == NULL) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)import, "'%s' is not declared in the namespace '%s'", import->name, ns->name);
+        return false;
+    }
+    if (!report_if_not_visible(typer, target, (Ast *)import)) return false;
+
+    AstIdentifier *ident = ast_allocate(parser, sizeof(AstIdentifier));
+    memcpy(ident, target, sizeof(AstIdentifier));
+    ident->name          = import->alias ? import->alias : target->name;
+    ident->flags        |= IDENTIFIER_IS_IMPORTED_NAME;
+    ident->imported_from = target;
+    return add_imported_name(typer, file, ident, import);
+}
+
 bool check_import(Typer *typer, AstImport *import) {
+    if (import->kind != IMPORT_FILE) {
+        return check_namespace_import(typer, import);
+    }
+
     assert(import->imported_file != NULL);
+
+    // import "fmt"; is deprecated, except for the files the compiler imports itself
+    if (!(import->head.flags & AST_FLAG_COMPILER_GENERATED)) {
+        AstFile *imported = import->imported_file;
+        if (imported->ns) {
+            report_error_ast(typer->parser, LABEL_WARNING, (Ast *)import, "import \"%s\"; is deprecated", import->string);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Write 'use %s;' to get all of its names, or 'import %s;' to write %s.name", imported->ns->name, imported->ns->name, imported->ns->name);
+        }
+    }
 
     // Go typecheck the imported file
     Typer current_state = *typer;
@@ -384,7 +609,13 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
         scope = parser->collections_file->scope;
     }
 
-    AstIdentifier *ident = lookup_from_scope(parser, scope, instance->head.name);
+    AstIdentifier *ident = NULL;
+    if (instance->is_standard) {
+        ident = lookup_from_scope(parser, scope, instance->head.name);
+    } else {
+        ident = lookup_type_identifier(typer, instance->head.name, (Ast *)instance);
+        if (ident == NULL && strchr(instance->head.name, '.')) return NULL; // Reported by lookup_type_identifier
+    }
     if (ident == NULL) {
         report_error_ast(parser, LABEL_ERROR, (Ast *)(instance), "Unknown type '%s'", instance->head.name);
         return NULL;
@@ -435,9 +666,19 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
     sb_append(&sb, ">");
     char *name = sb_to_string(&sb);
 
+    // The key tells instances apart, with the namespaces of the types e.g "List<raylib.Color>"
+    StringBuilder key_sb = sb_init(32);
+    sb_append(&key_sb, "%s<", generic_type->qualified_name ? generic_type->qualified_name : generic_type->head.name);
+    for (int i = 0; i < type_args.count; i++) {
+        sb_append(&key_sb, "%s", type_identity(((Type **)type_args.items)[i]));
+        if (i + 1 < type_args.count) sb_append(&key_sb, ", ");
+    }
+    sb_append(&key_sb, ">");
+    char *key = sb_to_string(&key_sb);
+
     for (int i = 0; i < generic->instances.count; i++) {
         TypeStruct *existing = ((TypeStruct **)generic->instances.items)[i];
-        if (strcmp(existing->head.name, name) == 0) {
+        if (strcmp(existing->qualified_name, key) == 0) {
             da_free(&type_args);
             return existing;
         }
@@ -457,6 +698,7 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
     struct_type->head.kind       = TYPE_STRUCT;
     struct_type->head.name       = name;
     struct_type->node            = node;
+    struct_type->qualified_name  = key;
 
     AstIdentifier *struct_ident  = ast_allocate(parser, sizeof(AstIdentifier));
     memcpy(struct_ident, generic->identifier, sizeof(AstIdentifier));
@@ -700,7 +942,7 @@ bool types_are_identical(Type *a, Type *b) {
     case TYPE_ANY:
         return true;
     default:
-        return strcmp(type_to_str(a), type_to_str(b)) == 0;
+        return strcmp(type_identity(a), type_identity(b)) == 0;
     }
 }
 
@@ -1066,9 +1308,18 @@ AstFunctionDefn *instantiate_generic_function(Typer *typer, AstFunctionDefn *gen
     sb_append(&sb, ">");
     char *name = sb_to_string(&sb);
 
+    StringBuilder key_sb = sb_init(32);
+    sb_append(&key_sb, "<");
+    for (int i = 0; i < type_args.count; i++) {
+        sb_append(&key_sb, "%s", type_identity(((Type **)type_args.items)[i]));
+        if (i + 1 < type_args.count) sb_append(&key_sb, ", ");
+    }
+    sb_append(&key_sb, ">");
+    char *key = sb_to_string(&key_sb);
+
     for (int i = 0; i < generic->instances.count; i++) {
         AstFunctionDefn *existing = ((AstFunctionDefn **)generic->instances.items)[i];
-        if (strcmp(existing->instance_name, name) == 0) {
+        if (strcmp(existing->instance_key, key) == 0) {
             return existing;
         }
     }
@@ -1112,6 +1363,7 @@ AstFunctionDefn *instantiate_generic_function(Typer *typer, AstFunctionDefn *gen
     instance->generic_function = generic;
     instance->type_args        = type_args;
     instance->instance_name    = name;
+    instance->instance_key     = key;
 
     // Add the instance before it is checked, so that recursive calls with the same type arguments find it
     da_append(&generic->instances, instance);
@@ -1262,7 +1514,9 @@ AstExpr *member_default_value(AstIdentifier *member) {
 // name have the same members, so the first one with a name is the type for all of them
 Type *resolve_anonymous_type(Typer *typer, Type *type) {
     Parser *parser = typer->parser;
-    StringBuilder sb = sb_init(64);
+    StringBuilder sb  = sb_init(64);
+    StringBuilder key = sb_init(64); // With the namespaces of the member types
+    sb_append(&key, "struct { ");
 
     if (type->kind == TYPE_STRUCT) {
         TypeStruct *struct_type = (TypeStruct *)type;
@@ -1282,6 +1536,7 @@ Type *resolve_anonymous_type(Typer *typer, Type *type) {
         for (int i = 0; i < members.count; i++) {
             AstIdentifier *member = ((AstIdentifier **)members.items)[i];
             sb_append(&sb, "%s: %s", member->name, type_to_str(member->type));
+            sb_append(&key, "%s: %s", member->name, type_identity(member->type));
 
             // The default value is a part of the type, so structs with different defaults are different types
             AstExpr *value = member_default_value(member);
@@ -1289,8 +1544,10 @@ Type *resolve_anonymous_type(Typer *typer, Type *type) {
                 int start = value->head.start.input_idx;
                 int end   = value->head.end.input_idx;
                 sb_append(&sb, " = %.*s", end - start, value->head.file->text + start);
+                sb_append(&key, " = %.*s", end - start, value->head.file->text + start);
             }
             sb_append(&sb, "; ");
+            sb_append(&key, "; ");
         }
         sb_append(&sb, "}");
     } else {
@@ -1317,16 +1574,21 @@ Type *resolve_anonymous_type(Typer *typer, Type *type) {
     }
 
     char *name = sb_to_string(&sb);
+    char *identity = type->kind == TYPE_STRUCT ? (sb_append(&key, "}"), sb_to_string(&key)) : name;
     for (int i = 0; i < typer->anonymous_types.count; i++) {
         Type *existing = ((Type **)typer->anonymous_types.items)[i];
-        if (existing->kind == type->kind && strcmp(existing->name, name) == 0) {
+        if (existing->kind == type->kind && strcmp(type_identity(existing), identity) == 0) {
             return existing;
         }
     }
 
     type->name = name;
-    if (type->kind == TYPE_STRUCT) ((TypeStruct *)type)->identifier->name = name;
-    else                           ((TypeEnum *)type)->identifier->name   = name;
+    if (type->kind == TYPE_STRUCT) {
+        ((TypeStruct *)type)->identifier->name = name;
+        ((TypeStruct *)type)->qualified_name   = identity;
+    } else {
+        ((TypeEnum *)type)->identifier->name = name;
+    }
     da_append(&typer->anonymous_types, type);
     (void)parser;
     return type;
@@ -1430,9 +1692,20 @@ Type *resolve_type(Typer *typer, Type *type) {
     }
 
     if (type->kind == TYPE_NAME) {
-        AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, type->name);
+        AstIdentifier *ident = lookup_type_identifier(typer, type->name, (Ast *)type);
+        if (ident == NULL && strchr(type->name, '.')) return NULL; // Reported by lookup_type_identifier
         if (ident == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Unknown type '%s'", type_to_str(type));
+            return NULL;
+        }
+        if (ident->flags & IDENTIFIER_IS_AMBIGUOUS) {
+            AstIdentifier *first = ((AstIdentifier **)ident->ambiguous.items)[0];
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "'%s' is ambiguous. It is declared in more than one of the namespaces you use", type->name);
+            for (int i = 0; i < ident->ambiguous.count; i++) {
+                AstIdentifier *candidate = ((AstIdentifier **)ident->ambiguous.items)[i];
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)candidate, "In '%s'", namespace_of(candidate));
+            }
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Write it with its namespace e.g %s.%s", namespace_of(first), type->name);
             return NULL;
         }
 
@@ -1845,6 +2118,135 @@ bool method_can_change_receiver(AstFunctionDefn *method) {
     return receiver->type && receiver->type->kind == TYPE_POINTER;
 }
 
+// Reports an error if a private declaration is used outside of its namespace (or file, if it has no namespace)
+bool report_if_not_visible(Typer *typer, AstIdentifier *ident, Ast *site) {
+    if (!(ident->flags & IDENTIFIER_IS_PRIVATE)) return true;
+
+    AstFile *from = typer->current_file;
+    AstFile *decl = ident->head.file;
+    bool visible = decl == from || (decl && from && decl->ns && decl->ns == from->ns);
+    if (visible) return true;
+
+    if (decl && decl->ns) report_error_ast(typer->parser, LABEL_ERROR, site, "'%s' is private to the namespace '%s'", ident->name, decl->ns->name);
+    else                  report_error_ast(typer->parser, LABEL_ERROR, site, "'%s' is private to its file", ident->name);
+    report_error_ast(typer->parser, LABEL_NOTE, (Ast *)ident, "Here is the declaration of '%s'", ident->name);
+    return false;
+}
+
+// Collects the names of a qualified name e.g [game, physics, Body] for game.physics.Body. Returns false if it is not only names
+bool collect_qualified_names(AstExpr *expr, char **names, int *count, int max) {
+    if (expr->head.kind == AST_LITERAL && ((AstLiteral *)expr)->kind == LITERAL_IDENTIFIER) {
+        if (*count >= max) return false;
+        names[(*count)++] = ((AstLiteral *)expr)->as.value.identifier.name;
+        return true;
+    }
+    if (expr->head.kind == AST_MEMBER_ACCESS) {
+        AstMemberAccess *ma = (AstMemberAccess *)expr;
+        if (!collect_qualified_names(ma->left, names, count, max)) return false;
+        return collect_qualified_names(ma->right, names, count, max);
+    }
+    return false;
+}
+
+// The namespace that a list of names refers to e.g [m] with 'import math as m;', or [game, physics]. NULL if it is not a namespace
+Namespace *namespace_of_names(Typer *typer, char **names, int count) {
+    AstIdentifier *first = lookup_from_scope(typer->parser, typer->current_scope, names[0]);
+    if (first && !(first->flags & IDENTIFIER_IS_NAMESPACE)) return NULL; // A name in scope wins over a namespace with the same name
+
+    StringBuilder sb = sb_init(32);
+    sb_append(&sb, "%s", first ? first->ns->name : names[0]);
+    for (int i = 1; i < count; i++) sb_append(&sb, ".%s", names[i]);
+    char *path = sb_to_string(&sb);
+    return find_namespace(typer->parser, path);
+}
+
+// Returns the declaration of a qualified name e.g math.sin or m.Vec2, or NULL if the expression is not one.
+// Sets 'failed' if it is a qualified name, but there is an error
+AstIdentifier *resolve_qualified_name(Typer *typer, AstExpr *expr, bool *failed) {
+    *failed = false;
+
+    char *names[16];
+    int   count = 0;
+    if (!collect_qualified_names(expr, names, &count, 16) || count < 2) return NULL;
+
+    Namespace *ns = namespace_of_names(typer, names, count - 1);
+    if (ns == NULL) return NULL;
+
+    AstIdentifier *ident = find_namespace_declaration(ns, names[count - 1]);
+    if (ident == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "'%s' is not declared in the namespace '%s'", names[count - 1], ns->name);
+        *failed = true;
+        return NULL;
+    }
+    if (!report_if_not_visible(typer, ident, (Ast *)expr)) {
+        *failed = true;
+        return NULL;
+    }
+    return ident;
+}
+
+// Looks up the name of a type, which can be qualified e.g Vec2, m.Vec2 or game.physics.Body
+AstIdentifier *lookup_type_identifier(Typer *typer, char *name, Ast *site) {
+    if (strchr(name, '.') == NULL) {
+        return lookup_from_scope(typer->parser, typer->current_scope, name);
+    }
+
+    char *copy = strdup(name);
+    char *names[16];
+    int   count = 0;
+    for (char *part = strtok(copy, "."); part && count < 16; part = strtok(NULL, ".")) names[count++] = part;
+
+    Namespace *ns = namespace_of_names(typer, names, count - 1);
+    if (ns == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, site, "Unknown namespace in the type '%s'", name);
+        return NULL;
+    }
+
+    AstIdentifier *ident = find_namespace_declaration(ns, names[count - 1]);
+    if (ident == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, site, "'%s' is not declared in the namespace '%s'", names[count - 1], ns->name);
+        return NULL;
+    }
+    if (!report_if_not_visible(typer, ident, site)) return NULL;
+    return ident;
+}
+
+// An identifier expression that already knows its declaration e.g the 'sin' of math.sin
+AstLiteral *make_resolved_identifier_literal(Typer *typer, AstIdentifier *ident, Ast *at) {
+    AstLiteral *literal = ast_allocate(typer->parser, sizeof(AstLiteral));
+    literal->head.head       = *at;
+    literal->head.head.kind  = AST_LITERAL;
+    literal->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    literal->kind            = LITERAL_IDENTIFIER;
+    literal->as.value.identifier.name   = ident->name;
+    literal->as.value.identifier.length = (int)strlen(ident->name);
+    literal->as.value.identifier.resolved_identifier = ident;
+    return literal;
+}
+
+// The name a type is told apart by: the namespace is a part of the name of structs and enums e.g "raylib.Color"
+char *type_identity(Type *type) {
+    switch (type->kind) {
+    case TYPE_STRUCT: return ((TypeStruct *)type)->qualified_name ? ((TypeStruct *)type)->qualified_name : type->name;
+    case TYPE_ENUM:   return ((TypeEnum *)type)->qualified_name   ? ((TypeEnum *)type)->qualified_name   : type->name;
+    case TYPE_POINTER: {
+        StringBuilder sb = sb_init(32);
+        sb_append(&sb, "*%s", type_identity(((TypePointer *)type)->pointer_to));
+        return sb_to_string(&sb);
+    }
+    case TYPE_ARRAY: {
+        TypeArray *array = (TypeArray *)type;
+        StringBuilder sb = sb_init(32);
+        if (array->array_kind == ARRAY_FIXED)        sb_append(&sb, "[%lld]%s", array->capacity, type_identity(array->elem_type));
+        else if (array->array_kind == ARRAY_SLICE)   sb_append(&sb, "[]%s", type_identity(array->elem_type));
+        else                                         sb_append(&sb, "[..]%s", type_identity(array->elem_type));
+        return sb_to_string(&sb);
+    }
+    default:
+        return type_to_str(type);
+    }
+}
+
 // Returns true if the identifier names a type e.g a struct, an enum, a type alias or a type parameter bound in an instance
 bool identifier_is_type(AstIdentifier *ident) {
     return ident->flags & (IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_NAME_OF_ENUM | IDENTIFIER_IS_TYPE_ALIAS);
@@ -2230,7 +2632,7 @@ bool types_are_equal(Type *lhs, Type *rhs) {
     }
 
     if ((lhs->kind == TYPE_STRUCT && rhs->kind == TYPE_STRUCT) || (lhs->kind == TYPE_ENUM && rhs->kind == TYPE_ENUM)) {
-        return strcmp(lhs->name, rhs->name) == 0;
+        return lhs == rhs || strcmp(type_identity(lhs), type_identity(rhs)) == 0;
     }
 
     if (lhs->kind == TYPE_ARRAY && rhs->kind == TYPE_ARRAY) {
@@ -3353,6 +3755,14 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         return call->head.type;
     }
 
+    // A qualified function e.g math.sin(x) is called like any other function
+    if (call->expression->head.kind == AST_MEMBER_ACCESS) {
+        bool failed = false;
+        AstIdentifier *qualified = resolve_qualified_name(typer, call->expression, &failed);
+        if (failed) return NULL;
+        if (qualified) call->expression = (AstExpr *)make_resolved_identifier_literal(typer, qualified, (Ast *)call->expression);
+    }
+
     typer->checking_callee = is_literal_identifier(call->expression);
     Type *expr_type = check_expression(typer, call->expression, NULL);
     typer->checking_callee = false;
@@ -4071,6 +4481,15 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
             func_defn->symbol_name = sb_to_string(&sb);
         } else {
             func_defn->symbol_name = func_defn->identifier->name;
+        }
+
+        // Functions of a namespace get it as a prefix e.g game$physics$collide, so that namespaces can have functions with the same name
+        AstFile *file = func_defn->head.head.file;
+        if (file && file->ns && !func_defn->is_extern) {
+            StringBuilder sb = sb_init(32);
+            for (char *c = file->ns->name; *c; c++) sb_append(&sb, "%c", *c == '.' ? '$' : *c);
+            sb_append(&sb, "$%s", func_defn->symbol_name);
+            func_defn->symbol_name = sb_to_string(&sb);
         }
     }
 
@@ -4840,6 +5259,18 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
 }
 
 Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
+    // A qualified name e.g math.PI or m.Color
+    bool failed = false;
+    AstIdentifier *qualified = resolve_qualified_name(typer, (AstExpr *)ma, &failed);
+    if (failed) return NULL;
+    if (qualified) {
+        AstLiteral *literal = make_resolved_identifier_literal(typer, qualified, (Ast *)ma);
+        Type *type = check_expression(typer, (AstExpr *)literal, NULL);
+        if (!type) return NULL;
+        ma->head.replacement = (AstExpr *)literal;
+        return type;
+    }
+
     typer->checking_place = typer->current_place; // e.g xs[i].x = 5 changes the element in the collection, so xs[i] is a place too
     Type *type_lhs = check_expression(typer, ma->left, NULL);
     if (!type_lhs) return NULL;
@@ -4849,7 +5280,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     // @Cleanup - I think this bit of code can be better put elsewhere in a unary dot as that is what we are checking for here. e.g .ENUM
     //            That way, we wouldn't need to have an access kind for the member
     //
-    AstExpr *lhs = ma->left;
+    AstExpr *lhs = ma->left->replacement ? ma->left->replacement : ma->left; // e.g m.Color in m.Color.Red
     if (type_lhs->kind == TYPE_ENUM && lhs->head.kind == AST_LITERAL && ((AstLiteral *)(lhs))->kind == LITERAL_IDENTIFIER) {
         char *ident_name    = ((AstLiteral *)(lhs))->as.value.identifier.name;
         TypeEnum *enum_defn = ((TypeEnum *)(type_lhs));
@@ -4889,7 +5320,8 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     bool is_static_member_access = false;
     if (type_lhs->kind == TYPE_STRUCT && lhs->head.kind == AST_LITERAL && ((AstLiteral *)(lhs))->kind == LITERAL_IDENTIFIER) {
         char *ident_name = ((AstLiteral *)(lhs))->as.value.identifier.name;
-        AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
+        AstIdentifier *ident = ((AstLiteral *)(lhs))->as.value.identifier.resolved_identifier;
+        if (!ident) ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
         assert(ident && "Typechecked the name of a struct, but didn't find it again while resolving member access");
 
         if (ident->flags & (IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_TYPE_ALIAS)) {
@@ -5686,7 +6118,11 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     case LITERAL_IDENTIFIER: {
         char   *ident_name   = literal->as.value.identifier.name;
         AstIdentifier *ident = NULL;
-        if (typer->current_scope->belongs_to_struct) {
+        if (literal->as.value.identifier.resolved_identifier) {
+            // Already resolved e.g the declaration of a qualified name like math.sin
+            ident = literal->as.value.identifier.resolved_identifier;
+        }
+        else if (typer->current_scope->belongs_to_struct) {
             ident = lookup_from_scope(typer->parser, typer->current_scope->belongs_to_struct->static_members, ident_name);
         } else {
             ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
@@ -5703,6 +6139,33 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
                 }
             }
             return NULL;
+        }
+
+        if (ident->flags & IDENTIFIER_IS_NAMESPACE) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)literal, "'%s' is a namespace, not a value", ident->name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Use one of its declarations e.g %s.name", ident->name);
+            return NULL;
+        }
+        if (ident->flags & IDENTIFIER_IS_AMBIGUOUS) {
+            AstIdentifier *first = ((AstIdentifier **)ident->ambiguous.items)[0];
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)literal, "'%s' is ambiguous. It is declared in more than one of the namespaces you use", ident->name);
+            for (int i = 0; i < ident->ambiguous.count; i++) {
+                AstIdentifier *candidate = ((AstIdentifier **)ident->ambiguous.items)[i];
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)candidate, "In '%s'", namespace_of(candidate));
+            }
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Write it with its namespace e.g %s.%s", namespace_of(first), ident->name);
+            return NULL;
+        }
+
+        // A constant of another file might not have been checked yet
+        if (ident->head.file && ident->head.file != typer->current_file && ident->decl && (ident->decl->flags & DECLARATION_CONSTANT) && !(ident->flags & IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN)) {
+            bool ok = check_declaration_of(typer, ident->imported_from ? ident->imported_from : ident);
+            if (!ok) return NULL;
+            if (ident->imported_from) {
+                ident->type  = ident->imported_from->type;
+                ident->value = ident->imported_from->value;
+                ident->flags |= ident->imported_from->flags & IDENTIFIER_IS_RESOLVED;
+            }
         }
 
         if (!is_non_constant_identifier_found_inside_current_function(typer, ident)) {

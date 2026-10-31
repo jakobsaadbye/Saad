@@ -80,6 +80,8 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_ELSE:                  return "else";
         case TOKEN_NEW:                   return "new";
         case TOKEN_IMPORT:                return "import";
+        case TOKEN_USE:                   return "use";
+        case TOKEN_NAMESPACE:             return "namespace";
         case TOKEN_EXTERN:                return "extern";
         case TOKEN_TYPE_UINT:             return "TYPE_UINT";
         case TOKEN_TYPE_U8:               return "TYPE_U8";
@@ -308,6 +310,7 @@ KeywordMatch match_keyword(Lexer *lexer) {
     }
     if (keyword_len == 3) {
         if (strcmp(text, "new") == 0) token = TOKEN_NEW;
+        if (strcmp(text, "use") == 0) token = TOKEN_USE;
         if (strcmp(text, "int") == 0) token = TOKEN_TYPE_INT;
         if (strcmp(text, "for") == 0) token = TOKEN_FOR;
         if (strcmp(text, "u16") == 0) token = TOKEN_TYPE_U16;
@@ -350,6 +353,9 @@ KeywordMatch match_keyword(Lexer *lexer) {
     }
     if (keyword_len == 8) {
         if (strcmp(text, "continue") == 0) token = TOKEN_CONTINUE;
+    }
+    if (keyword_len == 9) {
+        if (strcmp(text, "namespace") == 0) token = TOKEN_NAMESPACE;
     }
 
     if (token == TOKEN_NONE) {
@@ -633,6 +639,7 @@ bool is_single_character_token(char c) {
     if (c == ':') return true;
     if (c == '.') return true;
     if (c == '#') return true;
+    if (c == '@') return true;
     return false;
 }
 

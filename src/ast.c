@@ -206,8 +206,8 @@ char *type_to_str(Type *type) {
 
         return sb_to_string(&sb); // @Leak
     }
-    case TYPE_STRUCT:    return type->name;
-    case TYPE_ENUM:      return type->name; // "enum";
+    case TYPE_STRUCT:    return ((TypeStruct *)type)->qualified_name ? ((TypeStruct *)type)->qualified_name : type->name; // With the namespace e.g raylib.Color
+    case TYPE_ENUM:      return ((TypeEnum *)type)->qualified_name   ? ((TypeEnum *)type)->qualified_name   : type->name;
     case TYPE_FUNCTION: {
         TypeFunction *func = (TypeFunction *)(type);
         StringBuilder sb = sb_init(32);

@@ -11,7 +11,6 @@ Ast             *parse_statement(Parser *parser);
 AstBlock        *parse_block(Parser *parser, AstBlock *inject_into_scope);
 AstDeclaration  *parse_declaration(Parser *parser);
 AstAssignment   *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token);
-AstDirective    *parse_directive(Parser *parser);
 AstFunctionDefn *parse_function_defn(Parser *parser);
 AstFunctionCall *parse_function_call(Parser *parser, AstExpr *lhs);
 AstStruct       *parse_struct_defn(Parser *parser);
@@ -44,6 +43,9 @@ TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *t
 bool            generate_and_add_import(Parser *parser, char *path);
 
 bool starts_array_literal(Parser *parser);
+char *parse_dotted_name(Parser *parser);
+char *qualified_name(Parser *parser, const char *name);
+void add_referenced_root(Parser *parser, char *name);
 bool starts_struct_literal(Parser *parser);
 int  scan_type_arguments(Parser *parser, int lookahead);
 bool starts_type_alias(Parser *parser, int lookahead);
@@ -86,8 +88,67 @@ Parser parser_init(Lexer *lexer) {
     parser.current_file  = NULL;
     parser.inside_statement_header = false;
     parser.inside_parameter_list   = false;
+    parser.namespaces    = da_init(16, sizeof(Namespace *));
 
     return parser;
+}
+
+// The name of a declaration with the namespace of the current file e.g "raylib.Color", or NULL if the file has no namespace
+char *qualified_name(Parser *parser, const char *name) {
+    if (parser->current_file == NULL || parser->current_file->ns == NULL) return NULL;
+
+    StringBuilder sb = sb_init(32);
+    sb_append(&sb, "%s.%s", parser->current_file->ns->name, name);
+    return sb_to_string(&sb);
+}
+
+Namespace *find_namespace(Parser *parser, const char *name) {
+    for (int i = 0; i < parser->namespaces.count; i++) {
+        Namespace *ns = ((Namespace **)parser->namespaces.items)[i];
+        if (strcmp(ns->name, name) == 0) return ns;
+    }
+    return NULL;
+}
+
+Namespace *add_namespace(Parser *parser, const char *name) {
+    Namespace *ns = find_namespace(parser, name);
+    if (ns) return ns;
+
+    ns = calloc(1, sizeof(Namespace));
+    ns->name  = strdup(name);
+    ns->paths = da_init(2, sizeof(char *));
+    ns->files = da_init(2, sizeof(AstFile *));
+    da_append(&parser->namespaces, ns);
+    return ns;
+}
+
+// Parses a dotted name e.g game.physics, into a new string
+char *parse_dotted_name(Parser *parser) {
+    Token first = peek_next_token(parser);
+    if (first.type != TOKEN_LITERAL_IDENTIFIER) {
+        report_error_token(parser, LABEL_ERROR, first, "Expected the name of a namespace");
+        return NULL;
+    }
+    eat_token(parser);
+
+    StringBuilder sb = sb_init(32);
+    sb_append(&sb, "%s", first.as_value.value.identifier.name);
+    while (peek_next_token(parser).type == '.' && peek_token(parser, 1).type == TOKEN_LITERAL_IDENTIFIER) {
+        eat_token(parser);
+        sb_append(&sb, ".%s", peek_next_token(parser).as_value.value.identifier.name);
+        eat_token(parser);
+    }
+    return sb_to_string(&sb);
+}
+
+// Remembers the first name of a qualified name e.g the 'math' in math.sin(x), so that the namespace is loaded even without an import
+void add_referenced_root(Parser *parser, char *name) {
+    if (parser->current_file == NULL) return;
+    DynamicArray *roots = &parser->current_file->referenced_roots;
+    for (int i = 0; i < roots->count; i++) {
+        if (strcmp(((char **)roots->items)[i], name) == 0) return;
+    }
+    da_append(roots, name);
 }
 
 void dump_file_declarations(AstFile *file) {
@@ -141,6 +202,7 @@ AstFile *parse_file(Parser *parser, char *file_path) {
     file->statements    = da_init(64, sizeof(Ast *));
     file->imports       = da_init(8,  sizeof(AstImport *));
     file->flattened_function_defns = da_init(16, sizeof(AstFunctionDefn *));
+    file->referenced_roots = da_init(4, sizeof(char *));
     file->scope         = new_block(parser, BLOCK_IMPERATIVE);
     file->is_parsed     = false;
 
@@ -165,7 +227,24 @@ AstFile *parse_file(Parser *parser, char *file_path) {
         prelude->is_prelude = true;
     }
 
+    // namespace game.physics;
     Token next = peek_next_token(parser);
+    if (next.type == TOKEN_NAMESPACE) {
+        eat_token(parser);
+        char *name = parse_dotted_name(parser);
+        if (!name) return NULL;
+
+        Token semicolon = peek_next_token(parser);
+        if (semicolon.type != ';') {
+            report_error_token(parser, LABEL_ERROR, semicolon, "Expected a ';' after the name of the namespace");
+            return NULL;
+        }
+        eat_token(parser);
+
+        file->ns = add_namespace(parser, name);
+        da_append(&file->ns->files, file);
+    }
+
     while (true) {
         next = peek_next_token(parser);
         if (next.type == TOKEN_END) break;
@@ -224,13 +303,51 @@ bool generate_and_add_import(Parser *parser, char *path) {
 
 AstImport *parse_import(Parser *parser) {
     Token import_token = peek_next_token(parser);
-    expect(parser, import_token, TOKEN_IMPORT);
+    bool  is_use       = import_token.type == TOKEN_USE;
     eat_token(parser);
-    
+
     Token path_token = peek_next_token(parser);
 
-    if (path_token.type != TOKEN_LITERAL_STRING) {
-        report_error_token(parser, LABEL_ERROR, path_token, "Expected a string for the file or module to be imported");
+    // import math; import math as m; import math.sin; use os;
+    if (path_token.type == TOKEN_LITERAL_IDENTIFIER) {
+        char *path = parse_dotted_name(parser);
+        if (!path) return NULL;
+
+        char *alias = NULL;
+        if (peek_next_token(parser).type == TOKEN_AS) {
+            Token as_token = peek_next_token(parser);
+            if (is_use) {
+                report_error_token(parser, LABEL_ERROR, as_token, "'use' brings the names of a namespace into scope, so it cannot be renamed");
+                report_error_ast(parser, LABEL_HINT, NULL, "Rename it with import instead e.g import %s as name;", path);
+                return NULL;
+            }
+            eat_token(parser);
+
+            Token alias_token = peek_next_token(parser);
+            if (alias_token.type != TOKEN_LITERAL_IDENTIFIER) {
+                report_error_token(parser, LABEL_ERROR, alias_token, "Expected a name after 'as'");
+                return NULL;
+            }
+            eat_token(parser);
+            alias = alias_token.as_value.value.identifier.name;
+        }
+
+        AstImport *ast_import  = ast_allocate(parser, sizeof(AstImport));
+        ast_import->head.kind  = AST_IMPORT;
+        ast_import->head.file  = parser->current_file;
+        ast_import->head.start = import_token.start;
+        ast_import->head.end   = peek_token(parser, -1).end;
+        ast_import->kind       = is_use ? IMPORT_USE : IMPORT_NAMESPACE;
+        ast_import->path       = path;
+        ast_import->alias      = alias;
+        ast_import->string     = path;
+
+        da_append(&parser->current_file->imports, ast_import);
+        return ast_import;
+    }
+
+    if (is_use || path_token.type != TOKEN_LITERAL_STRING) {
+        report_error_token(parser, LABEL_ERROR, path_token, "Expected the name of a namespace e.g %s math;", is_use ? "use" : "import");
         return NULL;
     }
     eat_token(parser);
@@ -294,77 +411,6 @@ AstExtern *parse_extern(Parser *parser) {
     return ast_extern;
 }
 
-AstDirective *parse_directive(Parser *parser) {
-    Token next = peek_next_token(parser);
-    expect(parser, next, '#');
-    eat_token(parser);
-
-    Token hash_tag = next;
-
-    next = peek_next_token(parser);
-    if (next.type != TOKEN_LITERAL_IDENTIFIER) {
-        report_error_token(parser, LABEL_ERROR, next, "Syntax Error: Expected the name of a directive");
-        return NULL;
-    }
-    eat_token(parser);
-
-    char *dir_str = next.as_value.value.string.data;
-    
-    DirectiveKind dir_kind = DIRECTIVE_INVALID;    
-    if (strcmp(dir_str, "import") == 0) dir_kind = DIRECTIVE_IMPORT;
-    if (strcmp(dir_str, "extern") == 0) dir_kind = DIRECTIVE_EXTERN;
-
-    if (dir_kind == DIRECTIVE_INVALID) {
-        report_error_token(parser, LABEL_ERROR, next, "Syntax Error: '%s' is not the name of a directive", dir_str);
-        return NULL;
-    }
-
-    AstDirective *dir = ast_allocate(parser, sizeof(AstDirective));
-    dir->head.kind   = AST_DIRECTIVE;
-    dir->head.file   = parser->current_file;
-    dir->head.start  = hash_tag.start;
-    dir->kind        = dir_kind;
-
-    if (dir_kind == DIRECTIVE_IMPORT) {
-        Token tok = peek_next_token(parser);
-        if (tok.type != TOKEN_LITERAL_STRING) {
-            report_error_token(parser, LABEL_ERROR, next, "Syntax Error: Expected an import string");
-            return NULL;
-        }
-        eat_token(parser);
-
-        char *import_name = tok.as_value.value.string.data;
-
-        dir->import_name = import_name;
-        dir->head.end    = tok.end;
-    }
-
-    if (dir_kind == DIRECTIVE_EXTERN) {
-        Token tok = peek_next_token(parser);
-        if (tok.type != TOKEN_LITERAL_STRING) {
-            report_error_token(parser, LABEL_ERROR, next, "Syntax Error: Expected the extern ABI string. Currently only \"C\"");
-            return NULL;
-        }
-        eat_token(parser);
-
-        char *abi_string = tok.as_value.value.string.data;
-
-        Abi abi = ABI_INVALID;
-        if (strcmp(abi_string, "c") == 0) abi = ABI_C;
-        if (strcmp(abi_string, "C") == 0) abi = ABI_C;
-
-        if (abi == ABI_INVALID) {
-            report_error_token(parser, LABEL_ERROR, tok, "Syntax Error: '%s' is not a valid abi. The following abi's are possible: [\"C\"]", abi_string);
-            return NULL;
-        }
-
-        dir->extern_abi = abi;
-        dir->head.end   = tok.end;
-    }
-
-    return dir;
-
-}
 
 AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
     AstBlock *block;
@@ -538,10 +584,21 @@ Ast *parse_statement(Parser *parser) {
         }
     }
 
-    else if (token.type == TOKEN_IMPORT) {
+    else if (token.type == TOKEN_IMPORT || token.type == TOKEN_USE) {
         stmt = (Ast *)(parse_import(parser));
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
+    }
+
+    else if (token.type == TOKEN_NAMESPACE) {
+        report_error_token(parser, LABEL_ERROR, token, "The namespace of a file must be declared first in the file");
+        return NULL;
+    }
+
+    else if (token.type == '#') {
+        report_error_token(parser, LABEL_ERROR, token, "'#' is reserved for compile-time features");
+        report_error_ast(parser, LABEL_HINT, NULL, "#import is replaced by 'import name;', and #extern by an 'extern \"C\" { ... }' block");
+        return NULL;
     }
 
     else if (token.type == TOKEN_EXTERN) {
@@ -992,6 +1049,37 @@ Type *parse_type(Parser *parser) {
 
     if (next.type == TOKEN_STRUCT) return (Type *)parse_anonymous_struct_type(parser);
     if (next.type == TOKEN_ENUM)   return (Type *)parse_anonymous_enum_type(parser);
+
+    // A qualified type name e.g math.Vec2 or game.physics.Body<int>
+    if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '.' && peek_token(parser, 2).type == TOKEN_LITERAL_IDENTIFIER) {
+        add_referenced_root(parser, next.as_value.value.identifier.name);
+        char *name = parse_dotted_name(parser);
+        if (!name) return NULL;
+
+        if (peek_next_token(parser).type == '<' && scan_type_arguments(parser, 0) != -1) {
+            TypeGenericInstance *instance = type_alloc(&parser->type_table, sizeof(TypeGenericInstance));
+            instance->type_args = da_init(1, sizeof(Type *));
+            bool ok = parse_type_arguments(parser, &instance->type_args);
+            if (!ok) return NULL;
+
+            instance->head.head.kind  = AST_TYPE;
+            instance->head.head.file  = parser->current_file;
+            instance->head.head.start = next.start;
+            instance->head.head.end   = peek_token(parser, -1).end;
+            instance->head.kind       = TYPE_GENERIC_INSTANCE;
+            instance->head.name       = name;
+            return (Type *)(instance);
+        }
+
+        Type *ti = type_alloc(&parser->type_table, sizeof(Type));
+        ti->head.kind  = AST_TYPE;
+        ti->head.file  = parser->current_file;
+        ti->head.start = next.start;
+        ti->head.end   = peek_token(parser, -1).end;
+        ti->kind       = TYPE_NAME;
+        ti->name       = name;
+        return ti;
+    }
 
     if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '<' && scan_type_arguments(parser, 1) != -1) {
         // Instance of a generic struct e.g List<int>
@@ -1496,6 +1584,7 @@ TypeEnum *make_enum_type(Parser *parser, AstEnum *ast_enum, AstIdentifier *ident
     type_enum->names->decl = (AstDeclaration *) ast_enum;
     type_enum->values = generate_identifier(parser, "values", (Type *) generate_slice_of(parser, (Type *) type_enum), IDENTIFIER_IS_CONSTANT);
     type_enum->values->decl = (AstDeclaration *) ast_enum;
+    type_enum->qualified_name = ast_enum->is_anonymous ? NULL : qualified_name(parser, ident->name);
 
     return type_enum;
 }
@@ -1728,6 +1817,7 @@ AstStruct *parse_struct_defn(Parser *parser) {
     type_struct->head.name       = ident->name;
     type_struct->identifier      = ident;
     type_struct->node            = struct_defn;
+    type_struct->qualified_name  = qualified_name(parser, ident->name);
 
     // type_add_user_defined(&parser->type_table, (Type *)(type_struct));
 
@@ -3394,6 +3484,20 @@ bool starts_struct_literal(Parser *parser) {
     Token next = peek_next_token(parser);
     if (next.type == '{') return true;
     if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '{') return true;
+
+    // A qualified struct name e.g math.Vec2{1, 2} or game.Box<int>{}
+    if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '.') {
+        int i = 0;
+        while (peek_token(parser, i).type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, i + 1).type == '.') i += 2;
+        if (peek_token(parser, i).type != TOKEN_LITERAL_IDENTIFIER) return false;
+        i += 1;
+        if (peek_token(parser, i).type == '{') return true;
+        if (peek_token(parser, i).type == '<') {
+            int end = scan_type_arguments(parser, i);
+            return end != -1 && peek_token(parser, end).type == '{';
+        }
+        return false;
+    }
     if (next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '<') {
         // Instance of a generic struct e.g List<int>{...}
         int end = scan_type_arguments(parser, 1);
@@ -3409,6 +3513,10 @@ void *ast_allocate(Parser *parser, size_t size) {
 
 AstExpr *make_member_access(Parser *parser, Token token, AstExpr *lhs, AstExpr *rhs) {
     assert(token.type == '.');
+
+    if (lhs->head.kind == AST_LITERAL && ((AstLiteral *)lhs)->kind == LITERAL_IDENTIFIER) {
+        add_referenced_root(parser, ((AstLiteral *)lhs)->as.value.identifier.name);
+    }
 
     AstMemberAccess *ma = ast_allocate(parser, sizeof(AstMemberAccess));
     ma->head.head.kind  = AST_MEMBER_ACCESS;
