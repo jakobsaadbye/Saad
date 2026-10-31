@@ -42,6 +42,9 @@ TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_data, char *struct_name);
 bool            generate_and_add_import(Parser *parser, char *name, char *resolved_path);
 AstStructLiteral *parse_struct_literal_body(Parser *parser, Type *explicit_type, Token start_token, TokenType open, TokenType close);
+AstSwitch *parse_switch(Parser *parser);
+AstDeclaration *add_union_member(Parser *parser, AstIdentifier *ident, Type *type);
+AstExpr *parse_range_or_normal_expression(Parser *parser);
 
 bool starts_array_literal(Parser *parser);
 char *parse_dotted_name(Parser *parser);
@@ -426,6 +429,24 @@ AstExtern *parse_extern(Parser *parser) {
 }
 
 
+// Declares a member of the union being parsed, for the members that are not written as a declaration: the tag and the variants without a value
+AstDeclaration *add_union_member(Parser *parser, AstIdentifier *ident, Type *type) {
+    AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
+    decl->head.kind  = AST_DECLARATION;
+    decl->head.file  = parser->current_file;
+    decl->head.start = ident->head.start;
+    decl->head.end   = ident->head.end;
+    decl->idents     = da_init(1, sizeof(AstIdentifier *));
+    decl->values     = da_init(1, sizeof(AstExpr *));
+    decl->type       = type;
+    decl->flags      = DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_STRUCT_MEMBER;
+    da_append(&decl->idents, ident);
+    ident->decl = decl;
+
+    if (add_declaration_to_scope(parser, parser->current_scope, decl) != NULL) return NULL;
+    return decl;
+}
+
 AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
     AstBlock *block;
     if (inject_into_scope) {
@@ -442,6 +463,18 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
     while (true) {
         next = peek_next_token(parser);
         if (next.type == '}' || next.type == TOKEN_END) break;
+
+        // A variant of a union without a value e.g 'empty;'
+        AstStruct *owner = block->belongs_to_struct;
+        if (owner && owner->is_union && next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == ';') {
+            eat_token(parser);
+            eat_token(parser);
+            AstIdentifier *variant = make_identifier_from_token(parser, next, NULL);
+            AstDeclaration *decl = add_union_member(parser, variant, primitive_type(PRIMITIVE_VOID));
+            if (!decl) return NULL;
+            da_append(&block->statements, decl);
+            continue;
+        }
 
         Ast *stmt = parse_statement(parser);
         if (!stmt) return NULL;
@@ -738,7 +771,7 @@ Ast *parse_statement(Parser *parser) {
         return parse_attributed_declaration(parser);
     }
 
-    if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_STRUCT) {
+    if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && (peek_token(parser, 2).type == TOKEN_STRUCT || peek_token(parser, 2).type == TOKEN_UNION)) {
         stmt = (Ast *)(parse_struct_defn(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
@@ -812,6 +845,12 @@ Ast *parse_statement(Parser *parser) {
 
     else if (token.type == TOKEN_IF) {
         stmt = (Ast *)(parse_if(parser));
+        statement_ends_with_semicolon = false;
+        matched_a_statement = true;
+    }
+
+    else if (token.type == TOKEN_SWITCH) {
+        stmt = (Ast *)(parse_switch(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
@@ -1943,10 +1982,11 @@ AstStruct *parse_struct_defn(Parser *parser) {
     eat_token(parser);
 
     Token struct_token = peek_next_token(parser);
-    expect(parser, struct_token, TOKEN_STRUCT);
+    if (struct_token.type != TOKEN_UNION) expect(parser, struct_token, TOKEN_STRUCT);
     eat_token(parser);
 
     AstStruct *struct_defn = (AstStruct *)(ast_allocate(parser, sizeof(AstStruct)));
+    struct_defn->is_union       = struct_token.type == TOKEN_UNION;
     struct_defn->static_members = make_empty_struct_scope(parser, struct_defn);
     struct_defn->static_members->parent = parser->current_scope;
     struct_defn->type_params    = da_init(1, sizeof(AstIdentifier *));
@@ -1963,9 +2003,22 @@ AstStruct *parse_struct_defn(Parser *parser) {
 
     AstBlock *scope = new_block(parser, BLOCK_DECLARATIVE);
     scope->belongs_to_struct = struct_defn;
+    if (struct_defn->is_union) {
+        // The tag comes first, so the member index of a variant is its tag
+        AstIdentifier *tag = make_identifier_from_string(parser, "$tag", primitive_type(PRIMITIVE_U32));
+        tag->head.start = struct_token.start;
+        tag->head.end   = struct_token.end;
+        add_union_member(parser, tag, primitive_type(PRIMITIVE_U32));
+    }
     scope = parse_block(parser, scope);
     if (!scope) return NULL;
     close_block(parser);
+
+    if (struct_defn->is_union && scope->identifiers.count < 2) {
+        report_error_token(parser, LABEL_ERROR, struct_token, "A union needs at least one variant");
+        report_error_ast(parser, LABEL_HINT, NULL, "e.g Shape :: union { circle: Circle; empty; }");
+        return NULL;
+    }
 
     // Methods declared inside the struct are not members. They are checked like methods declared after the struct
     struct_defn->inside_methods = da_init(1, sizeof(AstDeclaration *));
@@ -2835,6 +2888,81 @@ bool reparse_default_values(Parser *parser, AstDeclaration *generic_decl, AstBlo
     parser->current_file            = saved_file;
     parser->split_shift_right_token = saved_split_token;
     return ok;
+}
+
+AstSwitch *parse_switch(Parser *parser) {
+    Token switch_token = peek_next_token(parser);
+    eat_token(parser);
+
+    AstSwitch *ast_switch  = ast_allocate(parser, sizeof(AstSwitch));
+    ast_switch->head.kind  = AST_SWITCH;
+    ast_switch->head.file  = parser->current_file;
+    ast_switch->head.start = switch_token.start;
+    ast_switch->cases      = da_init(4, sizeof(AstCase *));
+
+    // switch v in shape {
+    if (peek_next_token(parser).type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_IN) {
+        ast_switch->binding = peek_next_token(parser);
+        eat_token(parser);
+        eat_token(parser);
+    }
+
+    if (peek_next_token(parser).type != '{') {
+        parser->inside_statement_header = true;
+        ast_switch->subject = parse_expression(parser, MIN_PRECEDENCE);
+        parser->inside_statement_header = false;
+        if (!ast_switch->subject) return NULL;
+    } else if (ast_switch->binding.type != TOKEN_NONE) {
+        report_error_token(parser, LABEL_ERROR, peek_next_token(parser), "Expected the value to switch on after 'in'");
+        return NULL;
+    }
+
+    Token open = peek_next_token(parser);
+    expect(parser, open, '{');
+    eat_token(parser);
+
+    while (true) {
+        Token next = peek_next_token(parser);
+        if (next.type == '}') {
+            eat_token(parser);
+            ast_switch->head.end = next.end;
+            break;
+        }
+
+        AstCase *ast_case   = ast_allocate(parser, sizeof(AstCase));
+        ast_case->head.kind  = AST_CASE;
+        ast_case->head.file  = parser->current_file;
+        ast_case->head.start = next.start;
+        ast_case->values     = da_init(1, sizeof(AstExpr *));
+
+        if (next.type == TOKEN_ELSE) {
+            eat_token(parser);
+            ast_case->is_else = true;
+        } else if (next.type == TOKEN_CASE) {
+            eat_token(parser);
+            while (true) {
+                parser->inside_statement_header = true;
+                AstExpr *value = parse_range_or_normal_expression(parser);
+                parser->inside_statement_header = false;
+                if (!value) return NULL;
+                da_append(&ast_case->values, value);
+
+                if (peek_next_token(parser).type != ',') break;
+                eat_token(parser);
+            }
+        } else {
+            report_error_token(parser, LABEL_ERROR, next, "Expected a 'case' or an 'else' in the switch");
+            report_error_ast(parser, LABEL_HINT, NULL, "e.g switch status { case .open { ... } else { ... } }");
+            return NULL;
+        }
+
+        ast_case->block = parse_block(parser, NULL);
+        if (!ast_case->block) return NULL;
+        ast_case->head.end = ast_case->block->head.end;
+        da_append(&ast_switch->cases, ast_case);
+    }
+
+    return ast_switch;
 }
 
 AstIf *parse_if(Parser *parser) {

@@ -54,6 +54,8 @@ typedef enum AstKind {
     AST_RETURN,
     AST_BREAK_OR_CONTINUE,
     AST_IF,
+    AST_SWITCH,
+    AST_CASE,
     AST_FOR,
     AST_WHILE,
     AST_EXPR,
@@ -328,6 +330,8 @@ typedef struct AstStruct {
     DynamicArray   inside_methods;   // of *AstDeclaration. The methods declared inside the struct. They are not members of the struct
     bool           is_anonymous;     // e.g struct { name: string; age: int; }. Anonymous structs with the same members are the same type
     bool           is_attribute;     // Marked with @attribute, so its values can be given to struct members e.g @json.Field(name: "id")
+    bool           is_union;         // Shape :: union { circle: Circle; empty; }. The first member is the hidden '$tag' (u32), the index of the variant + 1
+                                     // that is held. The other members are the variants, which all start at the same offset
 } AstStruct;
 
 typedef struct AstEnum {
@@ -482,6 +486,24 @@ typedef struct AstIf {
     AstBlock     *else_block;
     DynamicArray  else_ifs;  // of *AstIf
 } AstIf;
+
+// switch status { case .open, .closed { ... } case 1..5 { ... } else { ... } }
+// switch v in shape { case .circle { v is the Circle } }       for a union
+// switch { case x < 0 { ... } else { ... } }                    without a value, each case is a condition
+typedef struct AstCase {
+    Ast           head;
+    DynamicArray  values;   // of *AstExpr. Values, ranges (a..b, a...b) or conditions. Empty for the else
+    AstBlock     *block;
+    bool          is_else;
+} AstCase;
+
+typedef struct AstSwitch {
+    Ast            head;
+    AstExpr       *subject; // NULL for a switch of conditions
+    Token          binding; // The name after 'switch' in 'switch v in shape'. TOKEN_NONE if there is none
+    DynamicArray   cases;   // of *AstCase
+    AstBlock      *lowered; // Made by the typer: a hidden local with the subject and a chain of ifs. This is what is lowered
+} AstSwitch;
 
 typedef enum ForKind {
     FOR_WITH_NAMED_ITERATOR,

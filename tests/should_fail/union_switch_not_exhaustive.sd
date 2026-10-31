@@ -1,0 +1,10 @@
+// expect-error: The switch doesn't handle .empty of Shape
+
+Shape :: union { circle: f32; empty; }
+
+main :: () {
+    s := Shape.empty;
+    switch v in s {
+        case .circle { }
+    }
+}

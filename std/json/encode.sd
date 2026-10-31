@@ -287,6 +287,10 @@ writeStruct :: method (w: *Writer, data: *void, type: *TypeStruct) {
         w.writeMap(data, type);
         return;
     }
+    if type.head.isUnion() {
+        w.writeUnion(data, type);
+        return;
+    }
 
     w.beginList(OpenBrace, type.members.count);
     written := 0;
@@ -305,6 +309,34 @@ writeStruct :: method (w: *Writer, data: *void, type: *TypeStruct) {
         written += 1;
     }
     w.endList(CloseBrace, written);
+}
+
+// A union is the name of its variant, e.g "empty", or an object with the name and the value, e.g {"circle": {"radius": 2}}.
+// The names are written like enum values, so in the style of enumValues
+@private
+writeUnion :: method (w: *Writer, data: *void, type: *TypeStruct) {
+    variant := type.variantOf(data);
+    if variant == null {
+        w.sb.addString("null");
+        return;
+    }
+
+    if variant.type.kind == .void {
+        w.sb.addChar(Quote);
+        addStyledName(&w.sb, variant.name, w.options.enumValues);
+        w.sb.addChar(Quote);
+        return;
+    }
+
+    w.beginList(OpenBrace, 1);
+    w.nextElement(0);
+    w.sb.addChar(Quote);
+    addStyledName(&w.sb, variant.name, w.options.enumValues);
+    w.sb.addChar(Quote);
+    w.sb.addChar(Colon);
+    if w.options.indent > 0 { w.sb.addChar(Space); }
+    w.writeAny(variant.valueIn(data), variant.type);
+    w.endList(CloseBrace, 1);
 }
 
 // A Map<string, V> is an object. Maps with other keys are arrays of [key, value] pairs

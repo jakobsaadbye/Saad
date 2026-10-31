@@ -83,6 +83,13 @@ void reset_temporary_storage(AstFunctionDefn *func_defn);
 AstIdentifier *get_struct_member(AstStruct *struct_defn, char *name);
 bool check_attribute_value(Typer *typer, AstStructLiteral *value);
 bool is_constant_value(AstExpr *expr);
+AstIdentifier *union_variant(TypeStruct *union_type, char *name);
+AstStructLiteral *make_union_literal(Typer *typer, TypeStruct *union_type, AstIdentifier *variant, Ast *at);
+AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, Type *type);
+bool check_union_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject, TypeStruct *union_type, bool by_pointer, AstBlock *lowered, AstBlock *scope_before);
+AstBinary *make_binary(Typer *typer, TokenType op, AstExpr *left, AstExpr *right, Ast *at);
+AstUnary *generate_address_of_value(Typer *typer, AstExpr *value);
+bool check_switch(Typer *typer, AstSwitch *sw);
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct);
 TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instance);
 Type *copy_type(Typer *typer, Type *type);
@@ -713,6 +720,7 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
     node->methods        = make_empty_struct_scope(parser, node);
     node->generic_struct = generic;
     node->type_args      = type_args;
+    node->is_union       = generic->is_union;
 
     TypeStruct *struct_type      = ast_allocate(parser, sizeof(TypeStruct));
     struct_type->head.head       = generic_type->head.head;
@@ -2602,7 +2610,9 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         for (int i = 0; i < decl->idents.count; i++) {
             AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
 
-            if (ident->type->kind == TYPE_VOID) {
+            // A variant of a union without a value e.g 'empty;' has type void
+            bool is_union_variant = (decl->flags & DECLARATION_IS_STRUCT_MEMBER) && typer->current_scope && typer->current_scope->belongs_to_struct && typer->current_scope->belongs_to_struct->is_union;
+            if (ident->type->kind == TYPE_VOID && !is_union_variant) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ident->type), "Variables are not allowed to have type void");
                 return false;
             }
@@ -3036,7 +3046,31 @@ bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
     int largest_alignment = 0;
     int offset  = 0;
 
-    for (int i = 0; i < members.count; i++) {
+    if (ast_struct->is_union) {
+        // The tag, and then the variants on top of each other
+        int payload_alignment = 1;
+        int payload_size      = 0;
+        for (int i = 1; i < members.count; i++) {
+            AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+            if (member->decl && member->decl->values.count > 0) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)((AstExpr **)member->decl->values.items)[0], "The variants of a union can't have default values");
+                return false;
+            }
+            int alignment = get_alignment_of_type(member->type);
+            if (alignment > payload_alignment) payload_alignment = alignment;
+            if (member->type->size > payload_size) payload_size = member->type->size;
+        }
+
+        int payload_offset = align_up(4, payload_alignment);
+        ((AstIdentifier **)members.items)[0]->member_offset = 0;
+        for (int i = 1; i < members.count; i++) {
+            ((AstIdentifier **)members.items)[i]->member_offset = payload_offset;
+        }
+        offset            = payload_offset + payload_size;
+        largest_alignment = payload_alignment > 4 ? payload_alignment : 4;
+    }
+
+    for (int i = 0; i < members.count && !ast_struct->is_union; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
 
         int alignment = get_alignment_of_type(member->type);
@@ -3521,6 +3555,414 @@ bool check_assert(Typer *typer, AstAssert *ast_assert) {
     return true;
 }
 
+//
+// switch
+//
+// A switch is turned into a hidden local holding the value it switches on and a chain of ifs (AstSwitch.lowered), which is what is
+// checked and lowered. So a case value can be anything that can be compared with ==
+//
+
+AstBinary *make_binary(Typer *typer, TokenType op, AstExpr *left, AstExpr *right, Ast *at) {
+    AstBinary *binary       = ast_allocate(typer->parser, sizeof(AstBinary));
+    binary->head.head.kind  = AST_BINARY;
+    binary->head.head.file  = at->file;
+    binary->head.head.start = at->start;
+    binary->head.head.end   = at->end;
+    binary->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    binary->operator        = op;
+    binary->left            = left;
+    binary->right           = right;
+    return binary;
+}
+
+// The condition of one value of a case
+AstExpr *case_condition(Typer *typer, AstSwitch *sw, AstIdentifier *subject, AstExpr *value) {
+    Ast *at = (Ast *)value;
+
+    // switch { case x < 0 { ... } }
+    if (subject == NULL) {
+        if (value->head.kind == AST_RANGE_EXPR) {
+            report_error_ast(typer->parser, LABEL_ERROR, at, "A switch without a value takes conditions, not ranges");
+            return NULL;
+        }
+        return value;
+    }
+
+    // case 1..10 or case 1...10
+    if (value->head.kind == AST_RANGE_EXPR) {
+        AstRangeExpr *range = (AstRangeExpr *)value;
+        AstExpr *low  = (AstExpr *)make_binary(typer, TOKEN_GREATER_EQUAL, (AstExpr *)make_resolved_identifier_literal(typer, subject, at), range->start, at);
+        AstExpr *high = (AstExpr *)make_binary(typer, range->inclusive ? TOKEN_LESS_EQUAL : '<', (AstExpr *)make_resolved_identifier_literal(typer, subject, at), range->end, at);
+        return (AstExpr *)make_binary(typer, TOKEN_LOGICAL_AND, low, high, at);
+    }
+
+    (void)sw;
+    return (AstExpr *)make_binary(typer, TOKEN_DOUBLE_EQUAL, (AstExpr *)make_resolved_identifier_literal(typer, subject, at), value, at);
+}
+
+// subject.member, for the members the compiler reads itself e.g the tag of a union
+AstExpr *member_of_local(Typer *typer, AstIdentifier *local, char *member_name, Ast *at) {
+    AstLiteral *member = ast_allocate(typer->parser, sizeof(AstLiteral));
+    member->head.head       = *at;
+    member->head.head.kind  = AST_LITERAL;
+    member->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    member->kind            = LITERAL_IDENTIFIER;
+    member->as.value.identifier.name   = member_name;
+    member->as.value.identifier.length = (int)strlen(member_name);
+
+    AstMemberAccess *ma = ast_allocate(typer->parser, sizeof(AstMemberAccess));
+    ma->head.head       = *at;
+    ma->head.head.kind  = AST_MEMBER_ACCESS;
+    ma->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    ma->left            = (AstExpr *)make_resolved_identifier_literal(typer, local, at);
+    ma->right           = (AstExpr *)member;
+    return (AstExpr *)ma;
+}
+
+// The variant of a case of a switch on a union e.g .circle
+AstIdentifier *case_variant(Typer *typer, TypeStruct *union_type, AstExpr *value) {
+    if (value->head.kind != AST_ENUM_LITERAL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "A case of a switch on a union is a variant of the union e.g .%s", ((AstIdentifier **)union_type->node->members->identifiers.items)[1]->name);
+        return NULL;
+    }
+    char *name = ((AstEnumLiteral *)value)->identifier->name;
+    AstIdentifier *variant = union_variant(union_type, name);
+    if (variant == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "'%s' is not a variant of %s", name, type_to_str((Type *)union_type));
+        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)union_type->node, "Here is the definition of %s", type_to_str((Type *)union_type));
+        return NULL;
+    }
+    return variant;
+}
+
+// Declares the name of 'switch v in shape' at the start of a case: the value of the variant, or a pointer to it when switching on a pointer
+bool declare_case_binding(Typer *typer, AstSwitch *sw, AstCase *c, AstIdentifier *subject, AstIdentifier *variant, bool by_pointer) {
+    Parser *parser = typer->parser;
+    Ast    *at     = (Ast *)c;
+
+    AstExpr *value = NULL;
+    if (variant == NULL) {
+        value = (AstExpr *)make_resolved_identifier_literal(typer, subject, at); // More than one variant: the union itself
+    } else {
+        value = member_of_local(typer, subject, variant->name, at);
+        if (by_pointer) {
+            AstUnary *address = ast_allocate(parser, sizeof(AstUnary));
+            address->head.head       = value->head;
+            address->head.head.kind  = AST_UNARY;
+            address->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+            address->operator        = OP_ADDRESS_OF;
+            address->expr            = value;
+            value = (AstExpr *)address;
+        }
+    }
+
+    AstIdentifier *binding = make_identifier_from_string(parser, sw->binding.as_value.value.identifier.name, NULL);
+    binding->head.file  = sw->head.file;
+    binding->head.start = sw->binding.start;
+    binding->head.end   = sw->binding.end;
+    binding->scope      = c->block;
+
+    AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
+    decl->head.kind  = AST_DECLARATION;
+    decl->head.file  = sw->head.file;
+    decl->head.start = c->head.start;
+    decl->head.end   = c->head.start;
+    decl->head.flags = AST_FLAG_COMPILER_GENERATED;
+    decl->idents     = da_init(1, sizeof(AstIdentifier *));
+    decl->values     = da_init(1, sizeof(AstExpr *));
+    decl->flags      = DECLARATION_INFER | DECLARATION_IS_COMPILER_GENERATED;
+    da_append(&decl->idents, binding);
+    da_append(&decl->values, value);
+    binding->decl = decl;
+
+    if (find_identifier_in_scope(c->block, binding->name)) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)find_identifier_in_scope(c->block, binding->name), "'%s' is already the name of the value of the switch", binding->name);
+        return false;
+    }
+    da_append(&c->block->identifiers, binding);
+    da_insert(&c->block->statements, decl, 0);
+    return true;
+}
+
+// The value of a case value that is a constant enum value or integer, for finding values that are handled twice
+bool case_constant(AstExpr *value, int64_t *out) {
+    if (value->head.kind == AST_ENUM_LITERAL) {
+        AstEnumLiteral *lit = (AstEnumLiteral *)value;
+        if (lit->enum_member == NULL) return false;
+        *out = lit->enum_member->value;
+        return true;
+    }
+    if (value->head.kind == AST_MEMBER_ACCESS) {
+        AstMemberAccess *ma = (AstMemberAccess *)value;
+        if (ma->access_kind != MEMBER_ACCESS_ENUM_MEMBER || ma->enum_member == NULL || ma->enum_member->head.kind == AST_IDENTIFIER) return false;
+        *out = ma->enum_member->value;
+        return true;
+    }
+    if (value->head.kind == AST_LITERAL && ((AstLiteral *)value)->kind == LITERAL_INTEGER) {
+        *out = ((AstLiteral *)value)->as.value.integer;
+        return true;
+    }
+    if (value->head.kind == AST_UNARY && ((AstUnary *)value)->operator == OP_UNARY_MINUS && case_constant(((AstUnary *)value)->expr, out)) {
+        *out = -*out;
+        return true;
+    }
+    return false;
+}
+
+// switch v in shape { case .circle { ... } }: each case tests the tag, and declares v as the value of its variant
+bool check_union_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject, TypeStruct *union_type, bool by_pointer, AstBlock *lowered, AstBlock *scope_before) {
+    Parser *parser = typer->parser;
+    DynamicArray variants = union_type->node->members->identifiers;
+    bool *handled = calloc(variants.count, sizeof(bool));
+
+    AstIf *first = NULL;
+    for (int i = 0; i < sw->cases.count; i++) {
+        AstCase *c = ((AstCase **)sw->cases.items)[i];
+        if (c->is_else) {
+            if (first) first->else_block = c->block;
+            else       da_append(&lowered->statements, c->block);
+            break;
+        }
+
+        AstExpr       *condition = NULL;
+        AstIdentifier *only      = NULL;
+        for (int j = 0; j < c->values.count; j++) {
+            AstExpr *value = ((AstExpr **)c->values.items)[j];
+            AstIdentifier *variant = case_variant(typer, union_type, value);
+            if (!variant) { typer->current_scope = scope_before; return false; }
+
+            if (handled[variant->member_index]) {
+                report_error_ast(parser, LABEL_ERROR, (Ast *)value, "The variant '%s' is handled by an earlier case of the switch", variant->name);
+                typer->current_scope = scope_before;
+                return false;
+            }
+            handled[variant->member_index] = true;
+            only = variant;
+
+            AstLiteral *tag      = ast_allocate(parser, sizeof(AstLiteral));
+            tag->head.head       = value->head;
+            tag->head.head.kind  = AST_LITERAL;
+            tag->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+            tag->kind            = LITERAL_INTEGER;
+            tag->as.value.integer = variant->member_index - 1;
+
+            AstExpr *test = (AstExpr *)make_binary(typer, TOKEN_DOUBLE_EQUAL, member_of_local(typer, subject, "$tag", (Ast *)value), (AstExpr *)tag, (Ast *)value);
+            condition = condition ? (AstExpr *)make_binary(typer, TOKEN_LOGICAL_OR, condition, test, (Ast *)value) : test;
+        }
+
+        if (sw->binding.type != TOKEN_NONE) {
+            AstIdentifier *variant = c->values.count == 1 ? only : NULL;
+            if (!(variant && variant->type->kind == TYPE_VOID)) {
+                if (!declare_case_binding(typer, sw, c, subject, variant, by_pointer)) { typer->current_scope = scope_before; return false; }
+            }
+        }
+
+        AstIf *ast_if      = ast_allocate(parser, sizeof(AstIf));
+        ast_if->head.kind  = AST_IF;
+        ast_if->head.file  = c->head.file;
+        ast_if->head.start = c->head.start;
+        ast_if->head.end   = c->head.end;
+        ast_if->head.flags = AST_FLAG_COMPILER_GENERATED;
+        ast_if->condition  = condition;
+        ast_if->then_block = c->block;
+        ast_if->else_ifs   = da_init(1, sizeof(AstIf *));
+
+        if (first == NULL) {
+            first = ast_if;
+            da_append(&lowered->statements, first);
+        } else {
+            da_append(&first->else_ifs, ast_if);
+        }
+    }
+
+    bool ok = check_block(typer, lowered);
+    typer->current_scope = scope_before;
+    if (!ok) return false;
+
+    bool has_else = sw->cases.count > 0 && ((AstCase **)sw->cases.items)[sw->cases.count - 1]->is_else;
+    if (!has_else) {
+        StringBuilder missing = sb_init(32);
+        int missing_count = 0;
+        for (int i = 1; i < variants.count; i++) {
+            if (handled[i]) continue;
+            if (missing_count > 0) sb_append(&missing, ", ");
+            sb_append(&missing, ".%s", ((AstIdentifier **)variants.items)[i]->name);
+            missing_count++;
+        }
+        if (missing_count > 0) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)sw->subject, "The switch doesn't handle %s of %s", sb_to_string(&missing), type_to_str((Type *)union_type));
+            report_error_ast(parser, LABEL_HINT, NULL, "Add a case for %s, or an else", missing_count == 1 ? "it" : "them");
+            return false;
+        }
+    }
+    free(handled);
+    return true;
+}
+
+bool check_switch(Typer *typer, AstSwitch *sw) {
+    Parser *parser = typer->parser;
+
+    for (int i = 0; i < sw->cases.count; i++) {
+        AstCase *c = ((AstCase **)sw->cases.items)[i];
+        if (c->is_else && i != sw->cases.count - 1) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)c, "The else of a switch must be its last case");
+            return false;
+        }
+    }
+
+    AstBlock *scope_before = typer->current_scope;
+    parser->current_scope  = typer->current_scope;
+    AstBlock *lowered      = new_block(parser, BLOCK_IMPERATIVE);
+    parser->current_scope  = scope_before;
+    lowered->head.file          = sw->head.file;
+    lowered->head.start         = sw->head.start;
+    lowered->head.end           = sw->head.end;
+    lowered->enclosing_function = scope_before->enclosing_function;
+    sw->lowered = lowered;
+    typer->current_scope = lowered;
+
+    // The value is evaluated once, into a hidden local
+    AstIdentifier *subject = NULL;
+    if (sw->subject) {
+        char *name = malloc(32);
+        snprintf(name, 32, "$switch%d", typer->next_hidden_local_id++);
+
+        subject = ast_allocate(parser, sizeof(AstIdentifier));
+        subject->head.kind  = AST_IDENTIFIER;
+        subject->head.file  = sw->head.file;
+        subject->head.start = sw->subject->head.start;
+        subject->head.end   = sw->subject->head.end;
+        subject->name       = name;
+        subject->scope      = lowered;
+
+        AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
+        decl->head.kind  = AST_DECLARATION;
+        decl->head.file  = sw->head.file;
+        decl->head.start = sw->subject->head.start;
+        decl->head.end   = sw->subject->head.end;
+        decl->head.flags = AST_FLAG_COMPILER_GENERATED;
+        decl->idents     = da_init(1, sizeof(AstIdentifier *));
+        decl->values     = da_init(1, sizeof(AstExpr *));
+        decl->flags      = DECLARATION_INFER | DECLARATION_IS_COMPILER_GENERATED;
+        da_append(&decl->idents, subject);
+        da_append(&decl->values, sw->subject);
+        subject->decl = decl;
+
+        da_append(&lowered->identifiers, subject);
+        da_append(&lowered->statements, decl);
+        if (!check_statement(typer, (Ast *)decl)) return false;
+    }
+
+    // A switch on a union, or a pointer to one
+    TypeStruct *union_type = NULL;
+    bool        by_pointer = false;
+    if (subject) {
+        Type *type = subject->type;
+        if (type->kind == TYPE_POINTER) {
+            type = ((TypePointer *)type)->pointer_to;
+            by_pointer = true;
+        }
+        if (type->kind == TYPE_STRUCT && ((TypeStruct *)type)->node->is_union) {
+            union_type = (TypeStruct *)type;
+        } else {
+            by_pointer = false;
+        }
+    }
+
+    if (union_type) {
+        return check_union_switch(typer, sw, subject, union_type, by_pointer, lowered, scope_before);
+    }
+
+    if (sw->binding.type != TOKEN_NONE) {
+        report_error_token(parser, LABEL_ERROR, sw->binding, "Only a switch on a union can give its value a name");
+        report_error_ast(parser, LABEL_HINT, NULL, "e.g switch v in shape { case .circle { ... } }");
+        return false;
+    }
+
+    // The chain of ifs
+    AstIf *first = NULL;
+    for (int i = 0; i < sw->cases.count; i++) {
+        AstCase *c = ((AstCase **)sw->cases.items)[i];
+        if (c->is_else) {
+            if (first) first->else_block = c->block;
+            else       da_append(&lowered->statements, c->block);
+            break;
+        }
+
+        AstExpr *condition = NULL;
+        for (int j = 0; j < c->values.count; j++) {
+            AstExpr *value = ((AstExpr **)c->values.items)[j];
+            AstExpr *test  = case_condition(typer, sw, subject, value);
+            if (!test) return false;
+            condition = condition ? (AstExpr *)make_binary(typer, TOKEN_LOGICAL_OR, condition, test, (Ast *)value) : test;
+        }
+
+        AstIf *ast_if      = ast_allocate(parser, sizeof(AstIf));
+        ast_if->head.kind  = AST_IF;
+        ast_if->head.file  = c->head.file;
+        ast_if->head.start = c->head.start;
+        ast_if->head.end   = c->head.end;
+        ast_if->head.flags = AST_FLAG_COMPILER_GENERATED;
+        ast_if->condition  = condition;
+        ast_if->then_block = c->block;
+        ast_if->else_ifs   = da_init(1, sizeof(AstIf *));
+
+        if (first == NULL) {
+            first = ast_if;
+            da_append(&lowered->statements, first);
+        } else {
+            da_append(&first->else_ifs, ast_if);
+        }
+    }
+
+    bool ok = check_block(typer, lowered);
+    typer->current_scope = scope_before;
+    if (!ok) return false;
+
+    // Values that are handled twice, and the values of an enum that are not handled
+    bool has_else = sw->cases.count > 0 && ((AstCase **)sw->cases.items)[sw->cases.count - 1]->is_else;
+    DynamicArray seen = da_init(8, sizeof(int64_t));
+    for (int i = 0; i < sw->cases.count; i++) {
+        AstCase *c = ((AstCase **)sw->cases.items)[i];
+        for (int j = 0; j < c->values.count && subject; j++) {
+            AstExpr *value = ((AstExpr **)c->values.items)[j];
+            int64_t constant;
+            if (!case_constant(value, &constant)) continue;
+            for (int k = 0; k < seen.count; k++) {
+                if (((int64_t *)seen.items)[k] == constant) {
+                    report_error_ast(parser, LABEL_ERROR, (Ast *)value, "This value is handled by an earlier case of the switch");
+                    return false;
+                }
+            }
+            da_append(&seen, constant);
+        }
+    }
+
+    if (subject && subject->type->kind == TYPE_ENUM && !has_else) {
+        AstEnum *node = ((TypeEnum *)subject->type)->node;
+        StringBuilder missing = sb_init(32);
+        int missing_count = 0;
+        for (int i = 0; i < node->enumerators.count; i++) {
+            AstEnumerator *etor = ((AstEnumerator **)node->enumerators.items)[i];
+            bool handled = false;
+            for (int k = 0; k < seen.count; k++) {
+                if (((int64_t *)seen.items)[k] == etor->value) handled = true;
+            }
+            if (handled) continue;
+            if (missing_count > 0) sb_append(&missing, ", ");
+            sb_append(&missing, ".%s", etor->name);
+            missing_count++;
+        }
+        if (missing_count > 0) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)sw->subject, "The switch doesn't handle %s of %s", sb_to_string(&missing), type_to_str(subject->type));
+            report_error_ast(parser, LABEL_HINT, NULL, "Add a case for %s, or an else", missing_count == 1 ? "it" : "them");
+            return false;
+        }
+    }
+    da_free(&seen);
+    return true;
+}
+
 bool check_if(Typer *typer, AstIf *ast_if) {
     Type *condition_type = check_expression(typer, ast_if->condition, NULL);
     if (!condition_type) return NULL;
@@ -3572,6 +4014,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_RETURN:            return check_return(typer, (AstReturn *)(stmt));
     case AST_ASSERT:            return check_assert(typer, (AstAssert *)(stmt));
     case AST_IF:                return check_if(typer, (AstIf *)(stmt));
+    case AST_SWITCH:            return check_switch(typer, (AstSwitch *)(stmt));
     default:
         XXX;
     }
@@ -4722,6 +5165,26 @@ AstEnumerator *find_enum_member(AstEnum *enum_defn, char *name) {
 }
 
 Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) {
+    // A variant without a value of the union that is wanted e.g 'return .none;' for an Option<int>
+    if (!literal->explicit_type && lhs_type && lhs_type->kind == TYPE_STRUCT && ((TypeStruct *)lhs_type)->node->is_union) {
+        TypeStruct    *union_type = (TypeStruct *)lhs_type;
+        AstIdentifier *variant    = union_variant(union_type, literal->identifier->name);
+        if (variant == NULL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)literal, "'%s' is not a variant of %s", literal->identifier->name, type_to_str(lhs_type));
+            return NULL;
+        }
+        if (variant->type->kind != TYPE_VOID) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)literal, "The variant '%s' needs a value", variant->name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "e.g %s{%s: ...}", type_to_str(lhs_type), variant->name);
+            return NULL;
+        }
+        AstStructLiteral *value = make_union_literal(typer, union_type, variant, (Ast *)literal);
+        Type *type = check_expression(typer, (AstExpr *)value, lhs_type);
+        if (!type) return NULL;
+        literal->head.replacement = (AstExpr *)value;
+        return type;
+    }
+
     if (literal->explicit_type) {
         // A value of an anonymous enum e.g enum { open, closed }.open
         Type *resolved = resolve_type(typer, literal->explicit_type);
@@ -5493,6 +5956,20 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     
             ma->access_kind = MEMBER_ACCESS_STRUCT_MEMBER;
         }
+        else if (is_static_member_access && struct_type->node->is_union && union_variant(struct_type, member_name)) {
+            // A variant without a value e.g Shape.empty
+            AstIdentifier *variant = union_variant(struct_type, member_name);
+            if (variant->type->kind != TYPE_VOID) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)rhs, "The variant '%s' needs a value", member_name);
+                report_error_ast(typer->parser, LABEL_HINT, NULL, "e.g %s{%s: ...}", type_to_str((Type *)struct_type), member_name);
+                return NULL;
+            }
+            AstStructLiteral *literal = make_union_literal(typer, struct_type, variant, (Ast *)ma);
+            Type *type = check_expression(typer, (AstExpr *)literal, (Type *)struct_type);
+            if (!type) return NULL;
+            ma->head.replacement = (AstExpr *)literal;
+            return type;
+        }
         else if (is_static_member_access) {
             member = find_identifier_in_scope(struct_type->node->static_members, member_name);
             ma->access_kind = MEMBER_ACCESS_STATIC_STRUCT_MEMBER;
@@ -5500,6 +5977,13 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         else {
             member = get_struct_member(struct_type->node, member_name);
             ma->access_kind = MEMBER_ACCESS_STRUCT_MEMBER;
+
+            // The variants of a union are read with a switch, which knows which one the union holds
+            if (member && struct_type->node->is_union && !(ma->head.head.flags & AST_FLAG_COMPILER_GENERATED)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)rhs, "The variant '%s' of a union is read with a switch", member_name);
+                report_error_ast(typer->parser, LABEL_HINT, NULL, "e.g switch v in value { case .%s { ... v ... } }", member_name);
+                return NULL;
+            }
         }
 
         ma->struct_member = member;
@@ -5601,6 +6085,83 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     return member->type;
 }
 
+//
+// Unions
+//
+
+// The variant of a union with the name, or NULL. The hidden tag is not a variant
+AstIdentifier *union_variant(TypeStruct *union_type, char *name) {
+    AstIdentifier *member = get_struct_member(union_type->node, name);
+    if (member == NULL || member->member_index == 0) return NULL;
+    return member;
+}
+
+// The initializer of the hidden tag for a variant e.g $tag: 2. The first variant has the tag 0, so a zeroed union holds it
+AstStructInitializer *union_tag_initializer(Typer *typer, AstIdentifier *variant, Ast *at) {
+    AstLiteral *tag      = ast_allocate(typer->parser, sizeof(AstLiteral));
+    tag->head.head.kind  = AST_LITERAL;
+    tag->head.head.file  = at->file;
+    tag->head.head.start = at->start;
+    tag->head.head.end   = at->end;
+    tag->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    tag->kind            = LITERAL_INTEGER;
+    tag->as.value.integer = variant->member_index - 1;
+
+    AstStructInitializer *init = ast_allocate(typer->parser, sizeof(AstStructInitializer));
+    init->head.kind  = AST_STRUCT_INITIALIZER;
+    init->head.file  = at->file;
+    init->head.start = at->start;
+    init->head.end   = at->end;
+    init->designator = make_identifier_from_string(typer->parser, "$tag", NULL);
+    init->value      = (AstExpr *)tag;
+    return init;
+}
+
+// A union literal gives one variant its value e.g Shape{circle: Circle{2}}. The tag of the variant is added to it
+bool check_union_literal(Typer *typer, AstStructLiteral *literal, TypeStruct *union_type) {
+    if (literal->initializers.count == 0) {
+        return true; // The first variant, zeroed
+    }
+
+    AstStructInitializer *init = ((AstStructInitializer **)literal->initializers.items)[0];
+    if (literal->initializers.count > 1 || init->designator == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)literal, "A union holds one variant, so its literal gives one variant a value");
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "e.g %s{%s: ...}", type_to_str((Type *)union_type), ((AstIdentifier **)union_type->node->members->identifiers.items)[1]->name);
+        return false;
+    }
+
+    AstIdentifier *variant = union_variant(union_type, init->designator->name);
+    if (variant == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)init->designator, "'%s' is not a variant of %s", init->designator->name, type_to_str((Type *)union_type));
+        return false;
+    }
+    if (variant->type->kind == TYPE_VOID) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)init, "The variant '%s' has no value", variant->name);
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Write it as %s.%s", type_to_str((Type *)union_type), variant->name);
+        return false;
+    }
+
+    AstStructInitializer *tag = union_tag_initializer(typer, variant, (Ast *)init);
+    da_append(&literal->initializers, tag);
+    return true;
+}
+
+// The value of a variant without a value e.g Shape.empty
+AstStructLiteral *make_union_literal(Typer *typer, TypeStruct *union_type, AstIdentifier *variant, Ast *at) {
+    AstStructLiteral *literal = ast_allocate(typer->parser, sizeof(AstStructLiteral));
+    literal->head.head.kind  = AST_STRUCT_LITERAL;
+    literal->head.head.file  = at->file;
+    literal->head.head.start = at->start;
+    literal->head.head.end   = at->end;
+    literal->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    literal->explicit_type   = NULL; // union_type is given when it is checked, as an explicit struct type means it was checked already
+    (void)union_type;
+    literal->initializers    = da_init(1, sizeof(AstStructInitializer *));
+    AstStructInitializer *tag = union_tag_initializer(typer, variant, at);
+    da_append(&literal->initializers, tag);
+    return literal;
+}
+
 Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_type) {
     TypeStruct *struct_defn = NULL;
     if (literal->explicit_type) {
@@ -5657,6 +6218,10 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         }
 
         struct_defn = (TypeStruct *)(ctx_type);
+    }
+
+    if (struct_defn->node->is_union && !(literal->head.head.flags & AST_FLAG_COMPILER_GENERATED)) {
+        if (!check_union_literal(typer, literal, struct_defn)) return NULL;
     }
 
     DynamicArray members = struct_defn->node->members->identifiers;
@@ -5816,6 +6381,12 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         }
         if (strcmp(ti_lhs->name, ti_rhs->name) != 0) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Cannot compare a %s with a %s", text_bold(type_to_str(ti_lhs)), text_bold(type_to_str(ti_rhs)));
+            return NULL;
+        }
+
+        if (((TypeStruct *)ti_lhs)->node->is_union) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Unions can't be compared with %s", binary->operator == TOKEN_DOUBLE_EQUAL ? "==" : "!=");
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Use a switch to see which variant it holds");
             return NULL;
         }
 

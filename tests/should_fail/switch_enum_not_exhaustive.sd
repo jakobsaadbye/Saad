@@ -1,0 +1,10 @@
+// expect-error: The switch doesn't handle .closed, .locked of Status
+
+Status :: enum { open, closed, locked }
+
+main :: () {
+    s := Status.open;
+    switch s {
+        case .open { }
+    }
+}

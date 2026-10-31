@@ -1731,6 +1731,9 @@ static int type_info_global(Lowerer *L, Type *type) {
         int members = struct_members_global(L, struct_type, &count);
         write_slice_field(global, runtime_offset(L, "TypeStruct", "members"), members, count);
         write_int_bytes(&global->data[runtime_offset(L, "TypeStruct", "alignment")], struct_type->alignment, 4);
+        if (struct_type->node->is_union) {
+            write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], 1, 4); // UnionFlag in runtime.sd
+        }
         break;
     }
     default:
@@ -2384,6 +2387,7 @@ static void lower_statement(Lowerer *L, Ast *stmt) {
     case AST_BLOCK:             lower_block(L, (AstBlock *) stmt); return;
     case AST_ASSERT:            lower_assert(L, (AstAssert *) stmt); return;
     case AST_IF:                lower_if(L, (AstIf *) stmt); return;
+    case AST_SWITCH:            lower_block(L, ((AstSwitch *) stmt)->lowered); return;
     case AST_WHILE:             lower_while(L, (AstWhile *) stmt); return;
     case AST_FOR:               lower_for(L, (AstFor *) stmt); return;
     case AST_BREAK_OR_CONTINUE: lower_break_or_continue(L, (AstBreakOrContinue *) stmt); return;

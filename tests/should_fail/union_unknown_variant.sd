@@ -1,0 +1,11 @@
+// expect-error: 'square' is not a variant of Shape
+
+Shape :: union { circle: f32; empty; }
+
+main :: () {
+    s := Shape.empty;
+    switch s {
+        case .square { }
+        else { }
+    }
+}
