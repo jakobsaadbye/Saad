@@ -155,6 +155,8 @@ typedef struct AstFile {
     Namespace   *ns;               // The namespace declared with 'namespace a.b;' at the top of the file, or NULL
     DynamicArray referenced_roots; // of char*. First names of qualified names e.g the 'math' in math.sin(x), so that their namespaces get loaded
     int          check_state;      // 0 not checked, 1 being checked, 2 checked. Files can use each other
+    Pos          ns_name_start; // The name in 'namespace a.b;', for an editor
+    Pos          ns_name_end;
 } AstFile;
 
 // A namespace e.g 'game.physics'. Any number of files, in any folders, can declare that they are in it with 'namespace game.physics;'
@@ -185,6 +187,8 @@ typedef struct AstImport {
     char      *alias; // The name after 'as', or NULL
     char      *name;  // IMPORT_NAME: the name of the declaration e.g "sin"
     Namespace *ns;    // The namespace, found when the files are loaded
+    Pos        path_start; // The dotted path e.g math.sin, for an editor
+    Pos        path_end;
 } AstImport;
 
 typedef struct AstExtern {

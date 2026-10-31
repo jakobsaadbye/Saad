@@ -193,7 +193,7 @@ AstFile *parse_file(Parser *parser, char *file_path) {
     // printf("Parsing '%s' ...\n", file_path);
 
     // Read in the file text
-    char *file_text = read_entire_file(file_path);
+    char *file_text = parser->read_source ? parser->read_source(file_path) : read_entire_file(file_path);
     if (file_text == NULL) {
         return NULL;
     }
@@ -249,8 +249,10 @@ AstFile *parse_file(Parser *parser, char *file_path) {
     Token next = peek_next_token(parser);
     if (next.type == TOKEN_NAMESPACE) {
         eat_token(parser);
+        file->ns_name_start = peek_next_token(parser).start;
         char *name = parse_dotted_name(parser);
         if (!name) return NULL;
+        file->ns_name_end = peek_token(parser, -1).end;
 
         Token semicolon = peek_next_token(parser);
         if (semicolon.type != ';') {
@@ -345,6 +347,7 @@ AstImport *parse_import(Parser *parser) {
     if (path_token.type == TOKEN_LITERAL_IDENTIFIER) {
         char *path = parse_dotted_name(parser);
         if (!path) return NULL;
+        Pos path_end = peek_token(parser, -1).end;
 
         char *alias = NULL;
         if (peek_next_token(parser).type == TOKEN_AS) {
@@ -372,6 +375,8 @@ AstImport *parse_import(Parser *parser) {
         ast_import->head.end   = peek_token(parser, -1).end;
         ast_import->kind       = is_use ? IMPORT_USE : IMPORT_NAMESPACE;
         ast_import->path       = path;
+        ast_import->path_start = path_token.start;
+        ast_import->path_end   = path_end;
         ast_import->alias      = alias;
         ast_import->string     = path;
 

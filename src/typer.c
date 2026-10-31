@@ -1,4 +1,5 @@
 #include "const_expr.c"
+#include "index.h"
 #include "lib/string_builder.h"
 
 #define DEBUG_THERE_WERE_ERRORS 0
@@ -432,6 +433,15 @@ bool check_namespace_import(Typer *typer, AstImport *import) {
 
     bool same_namespace = file->ns == ns;
 
+    // The path is a use of the namespace, or of the declaration for 'import math.sin;'
+    char *last_part = strrchr(import->path, '.') ? strrchr(import->path, '.') + 1 : import->path;
+    if (import->kind == IMPORT_NAME) {
+        AstIdentifier *declaration = find_namespace_declaration(ns, import->name);
+        if (declaration) index_name_use((Ast *)import, import->path_start, import->path_end, declaration);
+    } else {
+        index_namespace_use((Ast *)import, import->path_start, import->path_end, ns, last_part);
+    }
+
     if (import->kind == IMPORT_USE) {
         for (int i = 0; i < ns->files.count; i++) {
             AstFile *ns_file = ((AstFile **)ns->files.items)[i];
@@ -656,6 +666,12 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
         report_error_ast(parser, LABEL_ERROR, (Ast *)(instance), "'%s' is not a generic struct, so it cannot be given type arguments", instance->head.name);
         return NULL;
     }
+
+    // The name of the generic struct e.g the List of List<int>
+    Pos name_end = instance->head.head.start;
+    name_end.input_idx += (int)strlen(instance->head.name);
+    name_end.col       += (int)strlen(instance->head.name);
+    if (!instance->is_standard) index_name_use((Ast *)instance, instance->head.head.start, name_end, ident);
 
     TypeStruct *generic_type = (TypeStruct *)(ident->type);
     AstStruct  *generic      = generic_type->node;
@@ -1810,6 +1826,8 @@ Type *resolve_type(Typer *typer, Type *type) {
             if (!ok) return NULL;
         }
 
+        index_identifier_use((Ast *)type, ident);
+
         if (ident->type == NULL || !identifier_is_type(ident)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "'%s' is not a type", type->name);
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(ident), "Here is the declaration of '%s'", ident->name);
@@ -2315,6 +2333,13 @@ AstIdentifier *resolve_qualified_name(Typer *typer, AstExpr *expr, bool *failed)
         *failed = true;
         return NULL;
     }
+
+    // e.g math.sqrt is a use of the namespace math and of its sqrt
+    if (expr->head.kind == AST_MEMBER_ACCESS) {
+        AstMemberAccess *ma = (AstMemberAccess *)expr;
+        index_identifier_use((Ast *)ma->right, ident);
+        index_namespace_use((Ast *)ma->left, ma->left->head.start, ma->left->head.end, ns, names[count - 2]);
+    }
     return ident;
 }
 
@@ -2719,6 +2744,7 @@ check_identifiers_vs_values:
         AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
         ident->flags |= IDENTIFIER_IS_RESOLVED;
         ident->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
+        index_identifier(ident); // Also a declaration that is never used, e.g for hover
     }
 
     //
@@ -3657,6 +3683,7 @@ AstIdentifier *case_variant(Typer *typer, TypeStruct *union_type, AstExpr *value
         report_error_ast(typer->parser, LABEL_NOTE, (Ast *)union_type->node, "Here is the definition of %s", type_to_str((Type *)union_type));
         return NULL;
     }
+    index_identifier_use((Ast *)value, variant);
     return variant;
 }
 
@@ -4500,6 +4527,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[param_index];
             
             if (strcmp(arg->ident->name, param->name) == 0) {
+                index_identifier_use((Ast *)arg->ident, param);
 
                 for (int k = 0; k < arg_index; k++) {
                     AstArgument *prev_arg = ((AstArgument **)call->arguments.items)[k];
@@ -5289,6 +5317,7 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) 
             report_error_ast(typer->parser, LABEL_HINT, NULL, "e.g %s{%s: ...}", type_to_str(lhs_type), variant->name);
             return NULL;
         }
+        index_identifier_use((Ast *)literal, variant);
         AstStructLiteral *value = make_union_literal(typer, union_type, variant, (Ast *)literal);
         Type *type = check_expression(typer, (AstExpr *)value, lhs_type);
         if (!type) return NULL;
@@ -5349,6 +5378,7 @@ Type *check_enum_literal(Typer *typer, AstEnumLiteral *literal, Type *lhs_type) 
     }
 
     literal->enum_member = found;
+    index_enumerator_use(literal->identifier && literal->identifier->head.start.line > 0 ? (Ast *)literal->identifier : (Ast *)literal, found);
 
     return lhs_type;
 }
@@ -5939,6 +5969,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
 
                 ma->access_kind = MEMBER_ACCESS_ENUM_MEMBER;
                 ma->enum_member = enum_member;
+                index_enumerator_use((Ast *)rhs, enum_member);
 
                 return (Type *)(enum_defn);
             }
@@ -6076,6 +6107,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
                 report_error_ast(typer->parser, LABEL_HINT, NULL, "e.g %s{%s: ...}", type_to_str((Type *)struct_type), member_name);
                 return NULL;
             }
+            index_identifier_use((Ast *)rhs, variant);
             AstStructLiteral *literal = make_union_literal(typer, struct_type, variant, (Ast *)ma);
             Type *type = check_expression(typer, (AstExpr *)literal, (Type *)struct_type);
             if (!type) return NULL;
@@ -6109,6 +6141,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         }
 
         ma->struct_member = member;
+        if (member) index_identifier_use((Ast *)rhs, member);
     } 
     // else if (rhs->head.kind == AST_FUNCTION_CALL) {
     //     func_call = (AstFunctionCall *) rhs;
@@ -6385,6 +6418,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
             if (!ok) return NULL;
 
             init->member = member;
+            index_identifier_use((Ast *)init->designator, member);
             curr_member_index = member->member_index + 1;
         } else {
             if (curr_member_index > members.count - 1) {
@@ -6971,6 +7005,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Compiler Error: '%s' is unresolved", ident->name);
             return NULL;
         }
+        index_identifier_use((Ast *)literal, ident);
 
         if (ident->type->kind == TYPE_FUNCTION && is_generic_function(((TypeFunction *)ident->type)->node) && !typer->checking_callee) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Generic function '%s' can only be called, not used as a value", ident->name);

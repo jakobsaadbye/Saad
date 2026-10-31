@@ -27,8 +27,49 @@
 //
 
 // Returns the name in 'namespace a.b;' if the file starts with it (after comments), otherwise NULL
+//
+// Overlays: the text of a file that an editor has, which is not saved yet. 'saad index main.sd --overlay path=other' reads 'other'
+// instead of 'path'
+//
+
+typedef struct Overlay {
+    char *path;  // Absolute
+    char *text_path;
+} Overlay;
+
+static Overlay overlays[64];
+static int     overlay_count = 0;
+
+bool add_overlay(const char *argument) {
+    const char *equals = strchr(argument, '=');
+    if (equals == NULL || overlay_count == 64) return false;
+
+    char *path = calloc(equals - argument + 1, 1);
+    memcpy(path, argument, equals - argument);
+    char *absolute = get_absolute_path(path);
+    overlays[overlay_count].path      = absolute ? absolute : path;
+    overlays[overlay_count].text_path = strdup(equals + 1);
+    overlay_count++;
+    return true;
+}
+
+// The file to read for a path: its overlay, or the path itself
+static const char *source_path(const char *path) {
+    if (overlay_count == 0) return path;
+    char *absolute = get_absolute_path(path);
+    if (absolute == NULL) return path;
+    for (int i = 0; i < overlay_count; i++) {
+        if (strcmp(overlays[i].path, absolute) == 0) return overlays[i].text_path;
+    }
+    return path;
+}
+
+static char *read_source(const char *path) {
+    return read_entire_file(source_path(path));
+}
+
 static char *read_namespace_declaration(const char *path) {
-    FILE *f = fopen(path, "rb");
+    FILE *f = fopen(source_path(path), "rb");
     if (f == NULL) return NULL;
 
     char text[4096];
@@ -528,9 +569,10 @@ static int severity_of(Diagnostic *d) {
     return 4;
 }
 
-void write_diagnostics_json(FILE *out, bool success) {
+// The diagnostics as a JSON array
+void write_diagnostics_array(StringBuilder *out) {
     StringBuilder sb = sb_init(1024);
-    sb_append(&sb, "{\"version\": 1, \"success\": %s, \"diagnostics\": [", success ? "true" : "false");
+    sb_append(&sb, "[");
 
     for (int i = 0; i < diagnostics.count;) {
         Diagnostic *d = &diagnostics.items[i];
@@ -570,10 +612,20 @@ void write_diagnostics_json(FILE *out, bool success) {
         i = next;
     }
 
-    sb_append(&sb, "\n]}\n");
+    sb_append(&sb, "\n]");
+    sb_append(out, "%s", sb.buffer);
+}
+
+void write_diagnostics_json(FILE *out, bool success) {
+    StringBuilder sb = sb_init(1024);
+    sb_append(&sb, "{\"version\": 1, \"success\": %s, \"diagnostics\": ", success ? "true" : "false");
+    write_diagnostics_array(&sb);
+    sb_append(&sb, "}\n");
     fwrite(sb.buffer, 1, sb.cursor, out);
     fflush(out);
 }
+
+#include "index.c"
 
 bool compile_program(CompilerConfig *config, const char *main_path, bool output_to_console) {
     CompilerReport report = {
@@ -594,6 +646,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     parser.collections_file_path    = join_path(prelude_path, "collections.sd");
     parser.slices_file_path         = join_path(prelude_path, "slices.sd");
     parser.c_bindings_path          = get_absolute_path(c_bindings_path);
+    parser.read_source              = read_source;
     ConstEvaluator ce     = const_evaluator_init(&parser);
     Typer typer           = typer_init(&parser, &ce);
 
@@ -611,7 +664,9 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
 
     // ----------- Typecheck -----------
     report.typer_time_start = clock();
-    if (!check_file(&typer, main_file)) {
+    bool typed = check_file(&typer, main_file);
+    index_declarations(parsed_files); // For 'saad index', also when there are errors, so an editor can still find what was checked
+    if (!typed) {
         cleanup();
         return false;
     }

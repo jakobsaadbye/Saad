@@ -9,6 +9,8 @@ A just for fun compiler
 * `saad check main.sd` type checks a program without compiling it. With `--json` it writes the errors and warnings as
   JSON, for an editor. It is the first step to a language server, see `docs/lsp.md`
 * The compiler no longer exits in the middle of a file on a syntax error
+* `saad index main.sd` writes where every name is declared and used, with types and doc comments, as JSON for an
+  editor. `--overlay path=file` reads the unsaved text of an editor. See `docs/lsp.md`
 
 ## Update v0.8.0 - 1. Nov 2026
 

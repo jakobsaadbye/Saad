@@ -35,6 +35,8 @@ typedef struct Parser {
     char *builtin_string_file_path;
 
     jmp_buf *syntax_error; // Where parse_file() continues after a syntax error, see stop_parsing()
+
+    char *(*read_source)(const char *path); // Reads a file to parse. NULL means read_entire_file(), 'saad index --overlay' gives the text of an editor
 } Parser;
 
 Parser   parser_init(Lexer *lexer);

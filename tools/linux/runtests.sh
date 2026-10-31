@@ -66,6 +66,19 @@ for f in tests/should_fail/*.sd; do
     fi
 done
 
+# 'saad index' must know every name of tests/index.sd (needs python3)
+if command -v python3 > /dev/null; then
+    printf "%-56s " "saad index tests/index.sd"
+    if output=$(./bin/saad index tests/index.sd | python3 "$HERE/check_index.py" tests/index.sd 2>&1); then
+        echo "${GREEN}OK${RESET}"
+        passed=$((passed + 1))
+    else
+        echo "${RED}FAILED${RESET}"
+        echo "$output" | head -5 | sed 's/^/    /'
+        failed=$((failed + 1))
+    fi
+fi
+
 echo
 echo "$passed passed, $failed failed"
 [ $failed -eq 0 ]

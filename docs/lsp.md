@@ -18,7 +18,7 @@ editor ── LSP (JSON-RPC over stdin/stdout) ──> lsp/ (Saad)
 ## Phases
 
 1. **Diagnostics as data** (done): `saad check main.sd --json`, and no `exit()` on errors.
-2. **The index**: `saad index main.sd --json` with the declarations and uses of every name, for go to definition,
+2. **The index** (done): `saad index main.sd` with the declarations and uses of every name, for go to definition,
    find references, hover, the outline of a file and workspace symbols.
 3. **The server** in `lsp/`, with `std/io` (bytes on stdin and stdout) and running a command and reading its output.
 4. **Error recovery**: the typer goes on with the next declaration after an error, and the parser skips to the next
@@ -49,3 +49,39 @@ diagnostics as JSON and nothing else:
 In the compiler, every diagnostic goes through `report_error_helper()`, which adds it to `diagnostics` (lexer.h) and
 prints it unless `diagnostics.print` is false. A syntax error that can't be returned from calls `stop_parsing()`,
 which jumps back to `parse_file()`, so the compiler no longer exits in the middle of a file.
+
+## saad index
+
+`saad index main.sd` type checks a program and writes, as JSON, where every name is declared and used, and the
+diagnostics of `saad check`:
+
+```json
+{"version": 1, "success": true,
+ "symbols": [
+   {"id": 3, "name": "area", "kind": "method", "file": 0,
+    "nameRange": {"start": {"line": 17, "character": 4}, "end": {"line": 17, "character": 8}},
+    "range": {...}, "detail": "method (self: *Circle) -> f32", "container": 2, "doc": "The area of the circle"}],
+ "references": [
+   {"file": 0, "range": {"start": {"line": 40, "character": 12}, "end": {...}}, "symbol": 3}],
+ "files": ["/abs/main.sd", "/abs/std/fmt/print.sd"],
+ "diagnostics": [...]}
+```
+
+* A **symbol** is a declaration. `kind` is one of `namespace`, `function`, `method`, `struct`, `union`, `enum`,
+  `enumMember`, `field`, `variant`, `constant`, `global`, `variable`, `parameter`, `typeAlias` and `typeParameter`.
+  `nameRange` is its name and `range` the whole declaration, e.g a function with its body. `detail` is its signature
+  or type. `container` is the symbol it is in (the struct of a field or method, the enum of a value), or -1. `doc` is
+  the `//` lines right above it, when there are any.
+* A **reference** is a use of a symbol: go to definition is the symbol of the reference under the cursor, and find
+  references is every reference of a symbol. A declaration is not a reference of itself.
+* By default the index has the program's files, and the symbols of the standard library that the program uses.
+  `--std` also writes the rest of the standard library.
+* `--overlay path=file` reads `file` instead of `path`, for the text an editor hasn't saved. It can be given more
+  than once.
+* A name in a function that is never type checked isn't in the index, e.g in a generic function that is never called,
+  or after an error in the same declaration (until phase 4).
+
+In the compiler, the typer calls `index_identifier_use()` and friends (src/index.h) where it finds out what a name is,
+e.g for an identifier, a member, an enum value, a type name or a named argument. A symbol is known by the file and the
+offset of its name, so the copies the compiler makes of a declaration (for an import, a namespace or an instance of a
+generic) are the same symbol. `tools/linux/check_index.py` checks that `saad index` knows every name of `tests/index.sd`.
