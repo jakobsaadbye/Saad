@@ -66,7 +66,12 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_MINUS_EQUAL:           return "-=";
         case TOKEN_TIMES_EQUAL:           return "*=";
         case TOKEN_DIVIDE_EQUAL:          return "/=";
-        case TOKEN_PRINT:                 return "print";
+        case TOKEN_MODULO_EQUAL:          return "%=";
+        case TOKEN_XOR_EQUAL:             return "^=";
+        case TOKEN_OR_EQUAL:              return "|=";
+        case TOKEN_AND_EQUAL:             return "&=";
+        case TOKEN_SHIFT_LEFT_EQUAL:      return "<<=";
+        case TOKEN_SHIFT_RIGHT_EQUAL:     return ">>=";
         case TOKEN_ASSERT:                return "assert";
         case TOKEN_TYPEOF:                return "typeof";
         case TOKEN_SIZEOF:                return "sizeof";
@@ -335,7 +340,6 @@ KeywordMatch match_keyword(Lexer *lexer) {
     }
     if (keyword_len == 5) {
         if (strcmp(text, "float") == 0) token = TOKEN_TYPE_FLOAT;
-        if (strcmp(text, "print") == 0) token = TOKEN_PRINT;
         if (strcmp(text, "false") == 0) token = TOKEN_LITERAL_FALSE;
         if (strcmp(text, "break") == 0) token = TOKEN_BREAK;
         if (strcmp(text, "while") == 0) token = TOKEN_WHILE;
@@ -586,6 +590,8 @@ TokenType is_triple_character_token(Lexer *lexer) {
     char c2 = peek_char(lexer, 1);
     char c3 = peek_char(lexer, 2);
     if (c1 == '.' && c2 == '.' && c3 == '.') return TOKEN_TRIPLE_DOT;
+    if (c1 == '<' && c2 == '<' && c3 == '=') return TOKEN_SHIFT_LEFT_EQUAL;
+    if (c1 == '>' && c2 == '>' && c3 == '=') return TOKEN_SHIFT_RIGHT_EQUAL;
 
     return (TokenType)(0);
 }
@@ -610,6 +616,10 @@ TokenType is_double_character_token(Lexer *lexer) {
     if (c == '-' && next == '=') return TOKEN_MINUS_EQUAL;
     if (c == '*' && next == '=') return TOKEN_TIMES_EQUAL;
     if (c == '/' && next == '=') return TOKEN_DIVIDE_EQUAL;
+    if (c == '%' && next == '=') return TOKEN_MODULO_EQUAL;
+    if (c == '^' && next == '=') return TOKEN_XOR_EQUAL;
+    if (c == '|' && next == '=') return TOKEN_OR_EQUAL;
+    if (c == '&' && next == '=') return TOKEN_AND_EQUAL;
 
     return (TokenType)(0);
 }

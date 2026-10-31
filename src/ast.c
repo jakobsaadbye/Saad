@@ -16,7 +16,6 @@ const char *ast_to_str(Ast *ast) {
     case AST_DIRECTIVE:          return "AST_DIRECTIVE";
     case AST_IMPORT:             return "AST_IMPORT";
     case AST_EXTERN:             return "AST_EXTERN";
-    case AST_PRINT:              return "AST_PRINT";
     case AST_ASSERT:             return "AST_ASSERT";
     case AST_TYPEOF:             return "AST_TYPEOF";
     case AST_SIZEOF:             return "AST_SIZEOF";

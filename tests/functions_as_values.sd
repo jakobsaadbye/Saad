@@ -4,11 +4,11 @@ main :: () {
     // Functions can be assigned to a new function
     {
         foo := () {
-            Print("foo");
+            print("foo");
         };
 
         foo = () {
-            Print("another foo");
+            print("another foo");
         };
 
         foo(); // -> another foo
@@ -17,11 +17,11 @@ main :: () {
     // Functions can be stored in arrays
     {
         funcs := [
-            () { Print("1"); },
-            () { Print("2"); },
-            () { Print("3"); },
-            () { Print("4"); },
-            () { Print("5"); },
+            () { print("1"); },
+            () { print("2"); },
+            () { print("3"); },
+            () { print("4"); },
+            () { print("5"); },
         ];
 
         for func in funcs {
@@ -37,7 +37,7 @@ main :: () {
 
         btn := MyButton{
             onClick: () {
-                Print("Click!");
+                print("Click!");
             }
         };
     

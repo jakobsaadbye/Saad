@@ -1,5 +1,7 @@
 // std/random.sd
 
+use fmt;
+
 import random;
 import slices;
 

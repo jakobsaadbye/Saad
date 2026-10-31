@@ -67,6 +67,12 @@ typedef enum TokenType {
     TOKEN_MINUS_EQUAL  = 147,
     TOKEN_TIMES_EQUAL  = 148,
     TOKEN_DIVIDE_EQUAL = 149,
+    TOKEN_MODULO_EQUAL      = 136,
+    TOKEN_XOR_EQUAL         = 137,
+    TOKEN_OR_EQUAL          = 157,
+    TOKEN_AND_EQUAL         = 158,
+    TOKEN_SHIFT_LEFT_EQUAL  = 159,
+    TOKEN_SHIFT_RIGHT_EQUAL = 177,
 
     TOKEN_DOUBLE_COLON = 150,
     TOKEN_COLON_EQUAL  = 151,
@@ -76,7 +82,6 @@ typedef enum TokenType {
     TOKEN_IN           = 155,
     TOKEN_XX           = 156,
 
-    TOKEN_PRINT        = 160,
     TOKEN_ASSERT       = 161,
     TOKEN_IF           = 162,
     TOKEN_ELSE         = 163,

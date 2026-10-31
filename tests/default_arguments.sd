@@ -1,29 +1,29 @@
 use fmt;
 
 foo :: (a := 3) {
-    print("%\n", a);
+    print("%", a);
 }
 
 bar :: (a: bool, b: int, c: string, d: float) {
-    print("% % % %\n", a, b, c, d);
+    print("% % % %", a, b, c, d);
 }
 
 baz :: (a: bool, b: int, c := 8, d := "Hellope") {
-    print("% % % %\n", a, b, c, d);
+    print("% % % %", a, b, c, d);
 }
 
 Myprint2 :: (format: string, args: ...any) {
-    Print(format, ...args);
+    print(format, ...args);
 }
 
 defaultParametersNoPositionals :: () {
-    print("\n------------ Default parameters (no positional arguments) --------------\n");
+    print("\n------------ Default parameters (no positional arguments) --------------");
     foo();
     foo(5);
 }
 
 positionalArgumentsNoDefaults :: () {
-    print("\n------------ Positional arguments (no default parameters) --------------\n");
+    print("\n------------ Positional arguments (no default parameters) --------------");
         
     bar(d: 1, a: true, b: 4, c: "Positional arguments are cool");
     bar(true, 69, c: "Positional arguments needs to go last", d: 3.14);
@@ -42,7 +42,7 @@ positionalArgumentsNoDefaults :: () {
 }
 
 positionalArgumentsWithDefaults :: () {
-    print("\n------------ Positional arguments (with default parameters) --------------\n");
+    print("\n------------ Positional arguments (with default parameters) --------------");
 
     baz(a: true, b: 5, c: 69);
     baz(true, 8);
@@ -60,7 +60,7 @@ positionalArgumentsWithDefaults :: () {
 }
 
 normalVariadics :: () {
-    print("\n------------ Normal variadics --------------\n");
+    print("\n------------ Normal variadics --------------");
 
     Myprint2("Hello % % %\n", "my", "old", "friends");
     
@@ -69,18 +69,18 @@ normalVariadics :: () {
 }
 
 Myprint :: (format: string, args: ...any, newline := true, sayHello := false) {
-    Print(format, ...args);
+    print(format, ...args);
 
     if sayHello {
-        Print(" (Hello) ");
+        print(" (Hello) ");
     }
     if newline {
-        Print("\n");
+        print("");
     }
 }
 
 variadicsWithDefaultArguments :: () {
-    print("\n------------ Variadics with default arguments --------------\n");
+    print("\n------------ Variadics with default arguments --------------");
 
     // Legal
     Myprint("%, %, %", "A big house", "a dog", "a tesla", newline: true, sayHello: true);

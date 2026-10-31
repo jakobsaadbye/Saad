@@ -1,3 +1,5 @@
+use fmt;
+
 Plain :: struct {
     a: int;
     b: u8;
@@ -37,7 +39,7 @@ main :: () {
     assert(w.sum() == 0);
 
     // Printing walks the members of the struct, which does not include the methods
-    print("%\n", w);
+    print("%", w);
 
     p := Pair<u8, u8>{1, 2};
     assert(p.firstOf() == 1);

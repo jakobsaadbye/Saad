@@ -168,6 +168,6 @@ main :: () {
     {
         // Printing shows the elements
         xs: [..]int = [1, 2, 3];
-        Print("%", xs);
+        print("%", xs);
     }
 }

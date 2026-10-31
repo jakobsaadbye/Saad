@@ -50,7 +50,6 @@ typedef enum AstKind {
     AST_DIRECTIVE,
     AST_IMPORT,
     AST_EXTERN,
-    AST_PRINT,
     AST_ASSERT,
     AST_RETURN,
     AST_BREAK_OR_CONTINUE,
@@ -257,6 +256,12 @@ typedef enum AssignOp {
     ASSIGN_MINUS_EQUAL  = TOKEN_MINUS_EQUAL,
     ASSIGN_TIMES_EQUAL  = TOKEN_TIMES_EQUAL,
     ASSIGN_DIVIDE_EQUAL = TOKEN_DIVIDE_EQUAL,
+    ASSIGN_MODULO_EQUAL      = TOKEN_MODULO_EQUAL,
+    ASSIGN_XOR_EQUAL         = TOKEN_XOR_EQUAL,
+    ASSIGN_OR_EQUAL          = TOKEN_OR_EQUAL,
+    ASSIGN_AND_EQUAL         = TOKEN_AND_EQUAL,
+    ASSIGN_SHIFT_LEFT_EQUAL  = TOKEN_SHIFT_LEFT_EQUAL,
+    ASSIGN_SHIFT_RIGHT_EQUAL = TOKEN_SHIFT_RIGHT_EQUAL,
 } AssignOp;
 
 typedef struct AstAssignment {
@@ -338,7 +343,6 @@ typedef struct AstEnumerator {
     AstExpr *expr;  // null if auto-incremented enum
     int      value; // Evaluated value set by the typer
     int      index;
-    int      label; // Used by print to determine how to branch to this enum value
 } AstEnumerator;
 
 typedef struct AstEnumLiteral {
@@ -435,13 +439,6 @@ typedef struct AstFunctionCall {
 
     DynamicArray     lowered_arguments;      // of *AstExpr. A lowered representation of the argument list including hidden return arguments
 } AstFunctionCall;
-
-typedef struct AstPrint {
-    Ast              head;
-    DynamicArray     arguments;    // of *AstExpr
-    char            *c_string;     // Generated c string in typer
-    int              c_args;       // Number of arguments that needs to be supplied to the c_string
-} AstPrint;
 
 typedef struct AstExprStmt {
     AstExpr  head;

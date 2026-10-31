@@ -1,3 +1,5 @@
+use fmt;
+
 main :: () {
     
     print("Exclusive range");

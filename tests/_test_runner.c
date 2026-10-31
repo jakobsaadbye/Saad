@@ -140,6 +140,8 @@ int main() {
 
     // check_entire_directory(&config, "examples", false);
     check_entire_directory(&config, "tests", false);
+    check_entire_directory(&config, "tests/std", false);
+    check_entire_directory(&config, "tests/backend", false);
     check_entire_directory(&config, "tests/should_fail", true);
 
     return 0;

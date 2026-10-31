@@ -1,3 +1,5 @@
+use fmt;
+
 Node :: struct {
     next : *Node;
     data : int;
