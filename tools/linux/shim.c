@@ -88,6 +88,11 @@ MS int     ms_memcmp(const void *a, const void *b, int64_t n) { return memcmp(a,
 #include <time.h>
 #include <unistd.h>
 MS void ms_Sleep(uint32_t ms) { usleep((useconds_t) ms * 1000); }
+#include <sys/stat.h>
+#include <errno.h>
+static uint32_t last_error;
+MS int ms_CreateDirectoryA(const char *path, void *security) { (void) security; int ok = mkdir(path, 0777) == 0; last_error = ok ? 0 : (errno == EEXIST ? 183 : (uint32_t) errno); return ok; }
+MS uint32_t ms_GetLastError(void) { return last_error; }
 MS int  ms_QueryPerformanceCounter(int64_t *c) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); *c = (int64_t) t.tv_sec * 1000000000 + t.tv_nsec; return 1; }
 MS int  ms_QueryPerformanceFrequency(int64_t *f) { *f = 1000000000; return 1; }
 MS void ms_GetSystemTimeAsFileTime(uint64_t *ft) { struct timespec t; clock_gettime(CLOCK_REALTIME, &t); *ft = ((uint64_t) t.tv_sec + 11644473600ULL) * 10000000ULL + (uint64_t) t.tv_nsec / 100; }

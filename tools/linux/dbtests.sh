@@ -44,7 +44,7 @@ if [ -z "$SAAD_TEST_POSTGRES" ]; then
 fi
 
 passed=0; failed=0
-# generate.sd runs first: it checks the file that shop_tables.sd uses
+# generate.sd runs first: it checks the files that shop_tables.sd uses
 for f in tests/db/*.sd; do
     printf "%-56s " "$f"
     if output=$(bash "$HERE/run.sh" "$f" 2>&1); then
@@ -57,10 +57,10 @@ for f in tests/db/*.sd; do
     fi
 done
 
-# The program std/db/tools/generate.sd writes the same file as tests/db/generate.sd compares (with the schema it left)
+# The program std/db/tools/generate.sd writes the same files as tests/db/generate.sd compares (with the schema it left)
 printf "%-56s " "std/db/tools/generate.sd"
 OUT="$(mktemp -d)"
-if output=$(bash "$HERE/run.sh" std/db/tools/generate.sd "$SAAD_TEST_POSTGRES" "$OUT/shop.sd" shop saad_shop 2>&1) && diff -q "$OUT/shop.sd" tests/db/shop/shop.sd > /dev/null; then
+if output=$(bash "$HERE/run.sh" std/db/tools/generate.sd "$SAAD_TEST_POSTGRES" "$OUT/entities" entities saad_shop 2>&1) && diff -r "$OUT/entities" tests/db/entities > /dev/null; then
     echo "${GREEN}OK${RESET}"
     passed=$((passed + 1))
 else

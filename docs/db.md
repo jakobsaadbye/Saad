@@ -43,14 +43,14 @@ With the generator, the same program is:
 ```odin
 import db;
 import db.postgres;
-import shop;              // written by std/db/tools/generate.sd
+import entities;          // written by std/db/tools/generate.sd
 
 main :: () {
     conn, err := postgres.connect("host=localhost dbname=shop user=postgres password=secret");
-    app := shop.open(&conn);
+    app := entities.open(&conn);
 
-    ada, err1 := app.users.insert(shop.User{name: "Ada", role: .admin});   // gives back the id the database made
-    found, err2 := app.users.get(ada.id);                                   // a ?shop.User
+    ada, err1 := app.users.insert(entities.User{name: "Ada", role: .admin});   // gives back the id the database made
+    found, err2 := app.users.get(ada.id);                                       // a ?entities.User
     users, err3 := app.users.all();
 }
 ```
@@ -142,10 +142,10 @@ starts.
 
 ### Tests
 
-* `tests/db/generate.sd` checks that the generator writes `tests/db/shop/shop.sd` from the schema of
-  `tests/db/shop/setup.sd`, and `tests/db/shop_tables.sd` uses that code on the database. After a change of the
-  generator, `SAAD_UPDATE_GOLDEN=1 tools/linux/dbtests.sh` writes the file again. `dbtests.sh` also runs
-  `std/db/tools/generate.sd` itself and compares what it writes.
+* `tests/db/generate.sd` checks that the generator writes the files of `tests/db/entities` from the schema of
+  `tests/db/shop/setup.sd`, and that a later run removes the files of tables that are gone. `tests/db/shop_tables.sd`
+  uses those files on the database. After a change of the generator, `SAAD_UPDATE_GOLDEN=1 tools/linux/dbtests.sh`
+  writes them again. `dbtests.sh` also runs `std/db/tools/generate.sd` itself and compares what it writes.
 * `tests/std/db.sd` tests `db` with a driver written in the test itself. It needs no database and runs with
   the other tests (`tools/linux/runtests.sh`).
 * `tests/db/*.sd` need Postgres. `tools/linux/dbtests.sh` makes a throwaway server in a temporary folder (with
@@ -199,78 +199,94 @@ complete driver of 20 lines.
 
 ### 3. Tables and the generator
 
-#### db.Table<T>
+#### db.Table<T> and db.KeyedTable<T, K>
 
 The rows of one table, as structs of `T`:
 
 ```odin
-users := db.Table<User>{conn: &conn, name: "users"};      // schema: "sales" for another schema than public
+users := db.keyedTable<User, i64>(&conn, "users", "id");     // the column of the key, and its type
+users.generated = ["id", "created_at"];                     // the columns the database makes
+
 all, err := users.all();
-ada, err2 := users.get(1);                                // ?User, empty when no row has the key 1
-saved, err3 := users.insert(User{name: "Ada"});           // with what the database made, e.g the id
-changed, err4 := users.update(saved);                     // the row with its key. 1, or 0 when there is none
+ada, err2 := users.get(1);                                  // ?User, empty when no row has the key 1
+saved, err3 := users.insert(User{name: "Ada"});             // with the id and created_at the database made
+changed, err4 := users.update(saved);                       // the row with its key. 1, or 0 when there is none
 removed, err5 := users.delete(saved.id);
 n, err6 := users.count();
+
+items := db.table<OrderItem>(&conn, "order_items");         // no key of one column: all, insert and count
 ```
 
-* The columns are the members of `T`. A member's column is the name in `@db.Column(name: ...)`, or the
-  member's name in snake case: `createdAt` is `created_at`.
-* `@db.Column(key: true)` marks the key, which `get`, `update` and `delete` use.
-* `@db.Column(generated: true)` marks a column the database makes, e.g a `serial` id or a default of `now()`.
-  `insert` and `update` leave it out, and `insert` reads it back (`RETURNING *`).
+* `db.Table<T>` has `all`, `insert` and `count`. `db.KeyedTable<T, K>` embeds a `db.Table<T>` (see
+  `docs/embedding.md`) and adds `get`, `update` and `delete`, which take a key of type `K`, so `users.get("1")` is a
+  compile error. A `*db.KeyedTable<T, K>` is a `*db.Table<T>` where one is wanted.
+* `schema:` gives another schema than the one of the connection, e.g `db.table<Sale>(&conn, "sales", schema: "shop")`.
+* The columns are the members of `T`, in snake case: `createdAt` is `created_at`. A `_` at the end of a name is left
+  out, so the member `for_` is the column `for`.
+* The `generated` columns are left out of `insert` and `update`, and `insert` reads them back (`RETURNING *`).
+* For a struct written by hand, `@db.Column(name: "mail", key: true, generated: true, skip: true)` says the same on a
+  member.
 * Names are quoted in the SQL, so columns like `order` or `for` work.
 
 #### The generator
 
-A Saad program reads the tables from `information_schema` and the enums from `pg_enum`, and writes plain Saad
-into the project:
+A Saad program reads the tables from `information_schema` and the enums from `pg_enum`, and writes plain Saad files
+into a folder of the project:
 
 ```
-saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" models/shop.sd shop
-saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" models/sales.sd sales sales
+saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" entities
+saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" sales sales sales
 ```
 
-The arguments are the connection string, the file to write, its namespace, and the schema (public when it is
-left out). `saad run` runs the program in the folder it is called from, so the file is where you are. The same
-is a function too: `postgres.generate(&conn, postgres.GenerateOptions{ns: "shop"})` gives the code.
+The arguments are the connection string, the folder, the namespace (`entities` when it is left out) and the schema
+(`public` when it is left out). `saad run` runs the program in the folder it is called from, so the folder is where
+you are. The same is a function too: `postgres.generate(&conn, postgres.GenerateOptions{})` gives the files, and
+`postgres.writeFiles(folder, files)` writes them.
 
-For a table `users` it writes (`tests/db/shop/shop.sd` is a whole file):
+Each table gets a file with the struct of its row and the type of the table, e.g `user.sd` (`tests/db/entities` has
+all the files of a schema):
 
 ```odin
-// The enum role
-Role :: enum { guest, member, admin }
-
 // A row of users
 User :: struct {
-    @db.Column(key: true, generated: true)
     id:        i64;
     name:      string;
     email:     ?string;
     age:       ?i32;
     role:      Role = .guest;
     active:    bool = true;
-    @db.Column(generated: true)
     createdAt: string;        // timestamp with time zone
 }
 
-// The tables of the schema public, on a connection
-Database :: struct {
-    users: UsersTable;
-}
-
-open :: (conn: *db.Connection) -> Database { ... }
-
-// The rows of users
+// The rows of users: all, get, insert, update, delete and count of db.KeyedTable
 UsersTable :: struct {
-    table: db.Table<User>;
-
-    all    :: method () -> ([..]User, string) { ... }
-    get    :: method (key: i64) -> (?User, string) { ... }    // the key has its own type
-    insert :: method (row: User) -> (User, string) { ... }
-    update :: method (row: User) -> (i64, string) { ... }
-    delete :: method (key: i64) -> (i64, string) { ... }
-    count  :: method () -> (i64, string) { ... }
+    @embed table: db.KeyedTable<User, i64>;
 }
+```
+
+Each enum gets a file, e.g `role.sd` with `Role :: enum { guest, member, admin }`, and `database.sd` has all the
+tables:
+
+```odin
+Database :: struct {
+    orderItems: OrderItemsTable;
+    users:      UsersTable;
+}
+
+open :: (conn: *db.Connection) -> Database {
+    tables: Database;
+    tables.orderItems.table = db.table<OrderItem>(conn, "order_items");
+    tables.users.table      = db.keyedTable<User, i64>(conn, "users", "id");
+    tables.users.generated = ["id", "created_at"];
+    return tables;
+}
+```
+
+```odin
+import entities;
+
+app := entities.open(&conn);
+ada, err := app.users.insert(entities.User{name: "Ada", role: .admin});
 ```
 
 | Postgres | Saad |
@@ -283,16 +299,21 @@ UsersTable :: struct {
 | anything else, e.g `numeric`, `timestamptz`, `uuid`, `json` | `string`, with the type of the column as a comment |
 | a column that can be `NULL` | `?T` |
 
-* Names: the table `order_items` is the row `OrderItem` (most English plurals become singular), the table type
-  `OrderItemsTable` and the member `orderItems` of `Database`. The column `created_at` is the member `createdAt`.
-  A column that is a keyword gets a `_`, e.g `"for"` is `for_` with `@db.Column(name: "for")`.
+* The rows are plain structs: no attributes. What the tables need to know (the key, and the columns the database
+  makes) is in `open`.
+* Names: the table `order_items` is the row `OrderItem` in `order_item.sd` (most English plurals become singular),
+  the table type `OrderItemsTable` and the member `orderItems` of `Database`. The column `created_at` is the member
+  `createdAt`. A column that is a keyword gets a `_`, e.g `"for"` is `for_`. Only a column that the snake case of its
+  member isn't, e.g `"Type"`, gets `@db.Column(name: "Type")`.
 * A default that is a constant becomes the default of the member, e.g `role: Role = .guest`, so a struct literal
-  has the same values the database would give. A default that is computed (`nextval(...)`, `now()`, ...) and
-  identity columns make the column `generated`.
-* A table with a key of one column gets `get`, `update` and `delete`. Others get `all`, `insert` and `count`.
-* The file is plain Saad: a change of the database is a diff in the project, and building a program needs no
-  database. Make it again instead of changing it.
-* Typed query columns (`db.Field<T>`) come with step 4, which adds them to the table types.
+  has the values the database would give. A default that is computed (`nextval(...)`, `now()`, ...) and identity
+  columns are `generated`.
+* A table with a key of one column is a `db.KeyedTable`, typed by its key. Others are a `db.Table`.
+* Every file starts with `// Made by std/db/tools/generate.sd`, and `database.sd` lists the files. Run it again when
+  the database changes: the files of tables and enums that are gone are removed, but files you wrote yourself in the
+  folder are left alone. Make the files again instead of changing them.
+* Building a program needs no database: a change of the database is a diff of these files.
+* Typed query columns (`db.Field<T>`) come with step 4, as members of the table types next to the embedded table.
 
 ### 4. The typed query builder
 
@@ -332,6 +353,4 @@ Found while writing this, in the order they would help:
 * `defer`, to free a result on every return.
 * Operators on structs, so `app.users.age >= 18` could be a condition instead of `atLeast(18)`.
 * Attributes on structs, e.g `@db.Table("users")`, for tables written by hand.
-* Struct embedding (or `using`), so `UsersTable` could be a `db.Table<User>` with more methods, instead of
-  forwarding each method to its member `table`.
 * Types for dates, decimals and UUIDs. They are strings for now.

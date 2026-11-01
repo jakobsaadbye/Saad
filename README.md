@@ -80,23 +80,39 @@ saad check main.sd        # only check for errors
 
 ## Update v0.9.5 - 1. Nov 2026
 
-* A generator writes the tables of a Postgres database as Saad: a struct for each row (`?T` for columns that can be
-  `NULL`, the constant defaults of the database as the defaults of the members), an enum for each enum, and a
-  `Database` with a typed table for each table. See `docs/db.md`
+* Embedding: `@embed` on a struct member lends its members and methods to the struct it is in, like Go's embedding or
+  the `Ast *` of a C compiler, and a pointer to the struct is a pointer to what it embeds. See `docs/embedding.md`
+
+```odin
+Binary :: struct {
+    @embed head: Ast;
+    left, right: *Ast;
+}
+
+b.line = 3;         // b.head.line
+b.describe();       // b.head.describe()
+check(&b);          // check :: (node: *Ast)
+```
+
+* A generator writes the tables of a Postgres database as Saad files: a file for each table with the struct of its
+  row (`?T` for columns that can be `NULL`, the constant defaults of the database as the defaults of the members) and
+  the type of the table, a file for each enum, and `database.sd` with all the tables. In the namespace `entities` by
+  default. See `docs/db.md`
 
 ```
-saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" models/shop.sd shop
+saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" entities
 ```
 
 ```odin
-app := shop.open(&conn);
-ada, err := app.users.insert(shop.User{name: "Ada", role: .admin});   // with the id the database made
-found, err2 := app.users.get(ada.id);                                  // a ?shop.User
+app := entities.open(&conn);
+ada, err := app.users.insert(entities.User{name: "Ada", role: .admin});   // with the id the database made
+found, err2 := app.users.get(ada.id);                                      // a ?entities.User
 users, err3 := app.users.all();
 ```
 
-* `db.Table<T>` gives `all`, `get`, `insert`, `update`, `delete` and `count` for any struct, with
-  `@db.Column(key: true)` and `@db.Column(generated: true)` for its key and the columns the database makes
+* `db.Table<T>` (`all`, `insert`, `count`) and `db.KeyedTable<T, K>` (and `get`, `update`, `delete` with a key of type `K`)
+  work for any struct. The generated tables embed them, and the rows need no attributes
+* `os.makeDir(path)`
 * `saad run main.sd -- a b` gives the program the arguments after `--`, and runs it in the current folder instead of the
   folder of main.sd
 * Fixes: a list of a private type couldn't be used in its own namespace ("The public function 'add' takes the private

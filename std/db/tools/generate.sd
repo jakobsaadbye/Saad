@@ -1,10 +1,12 @@
-// Writes the tables of a Postgres database as Saad, e.g
+// Writes the tables of a Postgres database as Saad files into a folder, e.g
 //
-//     saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" models/shop.sd shop
-//     saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" models/sales.sd sales sales
+//     saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" entities
+//     saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" sales sales sales
 //
-// The arguments are the connection string, the file to write, the namespace of the file, and the schema (public when it
-// is left out). Make the file again when the database changes, instead of changing it. See docs/db.md
+// The arguments are the connection string, the folder, the namespace of the files (entities when it is left out) and
+// the schema (public when it is left out). Each table gets a file with the struct of its row and the type of the
+// table, each enum a file, and database.sd has the Database of all of them. Make them again when the database changes,
+// instead of changing them: the files of tables that are gone are removed. See docs/db.md
 
 import db;
 import db.postgres;
@@ -13,16 +15,16 @@ use fmt;
 
 main :: () {
     args := os.args();
-    if args.count < 4 {
-        print("Usage: saad run std/db/tools/generate.sd -- <connection string> <file to write> <namespace> [schema]");
-        print("   e.g saad run std/db/tools/generate.sd -- \"host=localhost dbname=shop user=postgres\" models/shop.sd shop");
+    if args.count < 3 {
+        print("Usage: saad run std/db/tools/generate.sd -- <connection string> <folder> [namespace] [schema]");
+        print("   e.g saad run std/db/tools/generate.sd -- \"host=localhost dbname=shop user=postgres\" entities");
         os.exit(2);
     }
 
-    options := postgres.GenerateOptions{ns: args[3]};
-    if args.count > 4 {
-        options.schema = args[4];
-    }
+    folder := args[2];
+    options: postgres.GenerateOptions;
+    if args.count > 3 { options.ns = args[3]; }
+    if args.count > 4 { options.schema = args[4]; }
 
     conn, err := postgres.connect(args[1]);
     if err != "" {
@@ -30,16 +32,21 @@ main :: () {
         os.exit(1);
     }
 
-    code, err2 := postgres.generate(&conn, options);
+    files, err2 := postgres.generate(&conn, options);
     conn.close();
     if err2 != "" {
         print("Can't read the tables: %", err2);
         os.exit(1);
     }
 
-    if !os.writeFile(args[2], code) {
-        print("Can't write %", args[2]);
+    removed, err3 := postgres.writeFiles(folder, files);
+    if err3 != "" {
+        print("%", err3);
         os.exit(1);
     }
-    print("Wrote the tables of the schema % to %", options.schema, args[2]);
+
+    print("Wrote % files of the schema % to %, in the namespace %", files.count, options.schema, folder, options.ns);
+    for name in removed {
+        print("Removed %, as its table or enum is gone", name);
+    }
 }

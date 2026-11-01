@@ -1,28 +1,40 @@
 namespace db.postgres;
 
-// Writes the tables of a database as Saad: a struct for each row, an enum for each enum, and a Database with a table
-// for each table, e.g
+// Writes the tables of a database as Saad files: one for each table, with the struct of a row and the type of the table,
+// one for each enum, and database.sd with a Database of all the tables, e.g
 //
-//     code, err := postgres.generate(&conn, postgres.GenerateOptions{ns: "shop"});
+//     files, err := postgres.generate(&conn, postgres.GenerateOptions{});        // namespace entities, schema public
+//     removed, err2 := postgres.writeFiles("entities", files);
 //
 // std/db/tools/generate.sd is the program around it. See docs/db.md
 
 import db;
 import fmt;
+import os;
 
 GenerateOptions :: struct {
-    ns:        string;            // The namespace of the file that is written, e.g shop
-    schema:    string = "public"; // The schema whose tables are written
+    ns:     string = "entities"; // The namespace of the files
+    schema: string = "public";   // The schema whose tables are written
 }
 
-// The Saad code of the tables and enums of the schema, or an error
-generate :: (conn: *db.Connection, options: GenerateOptions) -> (string, string) {
+// A file to write, e.g user.sd
+GeneratedFile :: struct {
+    name: string;
+    code: string;
+}
+
+// The first line of every file, so that the files of an earlier run are known
+GeneratedMark :: "// Made by std/db/tools/generate.sd";
+
+// The Saad files of the tables and enums of the schema, or an error
+generate :: (conn: *db.Connection, options: GenerateOptions) -> ([..]GeneratedFile, string) {
+    files: [..]GeneratedFile;
     columns, err := conn.query<SchemaColumn>(ColumnsSql, options.schema);
-    if err != "" { return "", err; }
+    if err != "" { return files, err; }
     keys, err2 := conn.query<SchemaKey>(KeysSql, options.schema);
-    if err2 != "" { return "", err2; }
+    if err2 != "" { return files, err2; }
     enumLabels, err3 := conn.query<SchemaEnumLabel>(EnumsSql, options.schema);
-    if err3 != "" { return "", err3; }
+    if err3 != "" { return files, err3; }
 
     // The enums with their labels, and the tables with their columns, in the order of their names
     enums: [..]SchemaEnum;
@@ -54,8 +66,53 @@ generate :: (conn: *db.Connection, options: GenerateOptions) -> (string, string)
     }
 
     w := Writer{options: options, enums: enums};
-    w.writeFile(tables);
-    return w.sb.toString(), "";
+    for e in enums {
+        files.add(GeneratedFile{name: w.fileNameOf(e.name, true), code: w.enumFile(e)});
+    }
+    for table in tables {
+        files.add(GeneratedFile{name: w.fileNameOf(singular(table.name), false), code: w.tableFile(table)});
+    }
+    files.add(GeneratedFile{name: "database.sd", code: w.databaseFile(tables, files)});
+    return files, "";
+}
+
+// Writes the files into the folder, which is made if it isn't there. The files of an earlier run (listed in its
+// database.sd) that are not written again, e.g of a table that is gone, are removed, if they were made by the generator.
+// Gives the names of those
+writeFiles :: (folder: string, files: [..]GeneratedFile) -> ([..]string, string) {
+    removed: [..]string;
+    if !os.makeDir(folder) {
+        return removed, fmt.sprint("Can't make the folder %", folder);
+    }
+
+    // The files of the last run
+    old, hadOld := os.readFile(fmt.sprint("%/database.sd", folder));
+    if hadOld {
+        for line in old.split("\n") {
+            if !line.startsWith("// Files: ") { continue; }
+            for name in line.slice(10).split(", ") {
+                if name.len == 0 { continue; }
+                written := false;
+                for file in files {
+                    if file.name == name { written = true; }
+                }
+                if written { continue; }
+                path := fmt.sprint("%/%", folder, name);
+                text, ok := os.readFile(path);
+                if ok && text.startsWith(GeneratedMark) && os.removeFile(path) {
+                    removed.add(name);
+                }
+            }
+        }
+    }
+
+    for file in files {
+        path := fmt.sprint("%/%", folder, file.name);
+        if !os.writeFile(path, file.code) {
+            return removed, fmt.sprint("Can't write %", path);
+        }
+    }
+    return removed, "";
 }
 
 //
@@ -114,7 +171,6 @@ SchemaTable :: struct {
 
 @private
 Writer :: struct {
-    sb:      fmt.StringBuilder;
     options: GenerateOptions;
     enums:   [..]SchemaEnum;
 }
@@ -124,81 +180,60 @@ Writer :: struct {
 Member :: struct {
     name:      string;   // e.g createdAt
     type:      string;   // e.g ?string
-    attribute: string;   // e.g @db.Column(key: true, generated: true), or empty
+    column:    string;   // e.g created_at
+    attribute: string;   // @db.Column(name: ...) when the column is not the name of the member in snake case, or empty
     value:     string;   // The default, e.g .guest, or empty
     comment:   string;   // e.g timestamp with time zone, or empty
+    generated: bool;     // Made by the database, e.g a serial or now()
+}
+
+// The name of the file of a row or an enum, e.g order_item.sd. An enum with the name of a table gets _enum
+@private
+fileNameOf :: method (w: *Writer, name: string, isEnum: bool) -> string {
+    file := db.columnName(camelCase(name));
+    if isEnum {
+        for e in w.enums {
+            if e.name == name { return fmt.sprint("%.sd", file); }
+        }
+    }
+    for e in w.enums {
+        if db.columnName(camelCase(e.name)) == file { return fmt.sprint("%_table.sd", file); }
+    }
+    return fmt.sprint("%.sd", file);
 }
 
 @private
-writeFile :: method (w: *Writer, tables: [..]SchemaTable) {
-    sb := &w.sb;
-    sb.addLine("// Made by std/db/tools/generate.sd from the schema % of a Postgres database. Make it again instead of", w.options.schema);
-    sb.addLine("// changing it, e.g saad run std/db/tools/generate.sd -- \"host=localhost dbname=app\" <this file> %", w.options.ns);
+header :: method (w: *Writer, sb: *fmt.StringBuilder, what: string) {
+    sb.addLine("% from the schema % of a Postgres database. Make it again instead", GeneratedMark, w.options.schema);
+    sb.addLine("// of changing it, e.g saad run std/db/tools/generate.sd -- \"host=localhost dbname=app\" <this folder> %", w.options.ns);
     sb.addLine("namespace %;", w.options.ns);
     sb.addLine("");
-    sb.addLine("import db;");
-
-    for e in w.enums {
+    if what.len > 0 {
+        sb.addLine("import db;");
         sb.addLine("");
-        sb.addLine("// The enum %", e.name);
-        sb.add("% :: enum {", pascalCase(e.name));
-        for label, i in e.labels {
-            if i > 0 { sb.addChar(','); }
-            sb.add(" %", enumValueName(label));
-        }
-        sb.addLine(" }");
-    }
-
-    for table in tables {
-        w.writeRow(table);
-    }
-
-    // The Database
-    sb.addLine("");
-    sb.addLine("// The tables of the schema %, on a connection, e.g", w.options.schema);
-    sb.addLine("//");
-    sb.addLine("//     app := %.open(&conn);", w.options.ns);
-    if tables.count > 0 {
-        sb.addLine("//     rows, err := app.%.all();", camelCase(tables[0].name));
-    }
-    sb.addLine("Database :: struct {");
-    width := 0;
-    for table in tables { width = atLeast(width, camelCase(table.name).len as int); }
-    for table in tables {
-        name := camelCase(table.name);
-        sb.add("    %:", name);
-        sb.addRepeated(' ', width - name.len as int + 1);
-        sb.addLine("%;", tableTypeName(table.name));
-    }
-    sb.addLine("}");
-
-    sb.addLine("");
-    sb.addLine("open :: (conn: *db.Connection) -> Database {");
-    sb.addLine("    tables: Database;");
-    for table in tables {
-        name := camelCase(table.name);
-        sb.add("    tables.%.table", name);
-        sb.addRepeated(' ', width - name.len as int);
-        sb.add(" = db.Table<%>{conn: conn, name: %", rowTypeName(table.name), saadString(table.name));
-        if w.options.schema != "public" {
-            sb.add(", schema: %", saadString(w.options.schema));
-        }
-        sb.addLine("};");
-    }
-    sb.addLine("    return tables;");
-    sb.addLine("}");
-
-    for table in tables {
-        w.writeTable(table);
     }
 }
 
-// The struct of a row, e.g User for the table users
 @private
-writeRow :: method (w: *Writer, table: SchemaTable) {
+enumFile :: method (w: *Writer, e: SchemaEnum) -> string {
+    sb: fmt.StringBuilder;
+    w.header(&sb, "");
+    sb.addLine("// The enum %", e.name);
+    sb.add("% :: enum {", pascalCase(e.name));
+    for label, i in e.labels {
+        if i > 0 { sb.addChar(','); }
+        sb.add(" %", enumValueName(label));
+    }
+    sb.addLine(" }");
+    return sb.toString();
+}
+
+// The struct of a row, e.g User, and the type of the table, e.g UsersTable
+@private
+tableFile :: method (w: *Writer, table: SchemaTable) -> string {
     members: [..]Member;
     for column in table.columns {
-        members.add(w.memberOf(column, column.columnName == table.key));
+        members.add(w.memberOf(column));
     }
 
     nameWidth := 0;
@@ -208,8 +243,8 @@ writeRow :: method (w: *Writer, table: SchemaTable) {
         typeWidth = atLeast(typeWidth, declarationOf(m).len as int + 1);
     }
 
-    sb := &w.sb;
-    sb.addLine("");
+    sb: fmt.StringBuilder;
+    w.header(&sb, "db");
     sb.addLine("// A row of %", table.name);
     sb.addLine("% :: struct {", rowTypeName(table.name));
     for m in members {
@@ -227,75 +262,109 @@ writeRow :: method (w: *Writer, table: SchemaTable) {
         sb.addLine("");
     }
     sb.addLine("}");
+
+    sb.addLine("");
+    keyType := w.keyTypeOf(table);
+    if keyType.len > 0 {
+        sb.addLine("// The rows of %: all, get, insert, update, delete and count of db.KeyedTable", table.name);
+    } else {
+        sb.addLine("// The rows of %: all, insert and count of db.Table. It has no key of one column, so no get, update and delete", table.name);
+    }
+    sb.addLine("% :: struct {", tableTypeName(table.name));
+    sb.addLine("    @embed table: %;", w.tableTypeOf(table));
+    sb.addLine("}");
+    return sb.toString();
 }
 
-// The table with typed methods, e.g UsersTable
+// The Database with the tables, and open
 @private
-writeTable :: method (w: *Writer, table: SchemaTable) {
-    row := rowTypeName(table.name);
-    keyType := "";
-    if table.key.len > 0 {
+databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]GeneratedFile) -> string {
+    sb: fmt.StringBuilder;
+    w.header(&sb, "db");
+
+    // The files, so that a later run knows which ones to remove
+    sb.add("// Files: ");
+    for file, i in files {
+        if i > 0 { sb.addString(", "); }
+        sb.addString(file.name);
+    }
+    sb.addLine(", database.sd");
+    sb.addLine("");
+
+    sb.addLine("// The tables of the schema %, e.g", w.options.schema);
+    sb.addLine("//");
+    sb.addLine("//     app := %.open(&conn);", w.options.ns);
+    if tables.count > 0 {
+        sb.addLine("//     rows, err := app.%.all();", camelCase(tables[0].name));
+    }
+    sb.addLine("Database :: struct {");
+    width := 0;
+    for table in tables { width = atLeast(width, camelCase(table.name).len as int); }
+    for table in tables {
+        name := camelCase(table.name);
+        sb.add("    %:", name);
+        sb.addRepeated(' ', width - name.len as int + 1);
+        sb.addLine("%;", tableTypeName(table.name));
+    }
+    sb.addLine("}");
+
+    sb.addLine("");
+    sb.addLine("// The tables on the connection");
+    sb.addLine("open :: (conn: *db.Connection) -> Database {");
+    sb.addLine("    tables: Database;");
+    for table in tables {
+        name := camelCase(table.name);
+        sb.add("    tables.%.table", name);
+        sb.addRepeated(' ', width - name.len as int);
+        if table.key.len > 0 {
+            sb.add(" = db.keyedTable<%, %>(conn, %, %", rowTypeName(table.name), w.keyTypeOf(table), saadString(table.name), saadString(table.key));
+        } else {
+            sb.add(" = db.table<%>(conn, %", rowTypeName(table.name), saadString(table.name));
+        }
+        if w.options.schema != "public" {
+            sb.add(", schema: %", saadString(w.options.schema));
+        }
+        sb.addLine(");");
+    }
+
+    // The columns the database makes
+    for table in tables {
+        generated: [..]string;
         for column in table.columns {
-            if column.columnName == table.key {
-                keyType = w.baseTypeOf(column);
-            }
+            if w.memberOf(column).generated { generated.add(saadString(column.columnName)); }
+        }
+        if generated.count > 0 {
+            sb.addLine("    tables.%.generated = [%];", camelCase(table.name), fmt.join(generated.elements(), ", "));
         }
     }
-
-    sb := &w.sb;
-    sb.addLine("");
-    sb.add("// The rows of %", table.name);
-    if keyType.len == 0 {
-        sb.add(". It has no key of one column, so it has no get, update and delete");
-    }
-    sb.addLine("");
-    sb.addLine("% :: struct {", tableTypeName(table.name));
-    sb.addLine("    table: db.Table<%>;", row);
-    sb.addLine("");
-    sb.addLine("    all :: method () -> ([..]%, string) {", row);
-    sb.addLine("        rows, err := self.table.all();");
-    sb.addLine("        return rows, err;");
-    sb.addLine("    }");
-    if keyType.len > 0 {
-        sb.addLine("");
-        sb.addLine("    // The row with the key, or empty");
-        sb.addLine("    get :: method (key: %) -> (?%, string) {", keyType, row);
-        sb.addLine("        found, err := self.table.get(key);");
-        sb.addLine("        return found, err;");
-        sb.addLine("    }");
-    }
-    sb.addLine("");
-    sb.addLine("    // Adds the row, and gives it back with what the database made, e.g its key");
-    sb.addLine("    insert :: method (row: %) -> (%, string) {", row, row);
-    sb.addLine("        saved, err := self.table.insert(row);");
-    sb.addLine("        return saved, err;");
-    sb.addLine("    }");
-    if keyType.len > 0 {
-        sb.addLine("");
-        sb.addLine("    // Writes the row to the row with its key. Gives the number of rows changed");
-        sb.addLine("    update :: method (row: %) -> (i64, string) {", row);
-        sb.addLine("        changed, err := self.table.update(row);");
-        sb.addLine("        return changed, err;");
-        sb.addLine("    }");
-        sb.addLine("");
-        sb.addLine("    // Removes the row with the key. Gives the number of rows removed");
-        sb.addLine("    delete :: method (key: %) -> (i64, string) {", keyType);
-        sb.addLine("        removed, err := self.table.delete(key);");
-        sb.addLine("        return removed, err;");
-        sb.addLine("    }");
-    }
-    sb.addLine("");
-    sb.addLine("    count :: method () -> (i64, string) {");
-    sb.addLine("        n, err := self.table.count();");
-    sb.addLine("        return n, err;");
-    sb.addLine("    }");
+    sb.addLine("    return tables;");
     sb.addLine("}");
+    return sb.toString();
+}
+
+// The type of the key of the table, e.g i64, or empty when it has no key of one column
+@private
+keyTypeOf :: method (w: *Writer, table: SchemaTable) -> string {
+    if table.key.len == 0 { return ""; }
+    for column in table.columns {
+        if column.columnName == table.key { return w.baseTypeOf(column); }
+    }
+    return "";
+}
+
+// e.g db.KeyedTable<User, i64>
+@private
+tableTypeOf :: method (w: *Writer, table: SchemaTable) -> string {
+    keyType := w.keyTypeOf(table);
+    if keyType.len > 0 { return fmt.sprint("db.KeyedTable<%, %>", rowTypeName(table.name), keyType); }
+    return fmt.sprint("db.Table<%>", rowTypeName(table.name));
 }
 
 @private
-memberOf :: method (w: *Writer, column: SchemaColumn, isKey: bool) -> Member {
+memberOf :: method (w: *Writer, column: SchemaColumn) -> Member {
     m: Member;
-    m.name = memberName(column.columnName);
+    m.name   = memberName(column.columnName);
+    m.column = column.columnName;
 
     base := w.baseTypeOf(column);
     m.type = base;
@@ -310,20 +379,16 @@ memberOf :: method (w: *Writer, column: SchemaColumn, isKey: bool) -> Member {
 
     // A default that is a constant becomes the default of the member. One that is computed, e.g nextval(...) of a
     // serial or now(), is made by the database
-    generated := column.isIdentity == "YES" || column.isGenerated == "ALWAYS";
-    if column.columnDefault.hasValue() && !generated {
+    m.generated = column.isIdentity == "YES" || column.isGenerated == "ALWAYS";
+    if column.columnDefault.hasValue() && !m.generated {
         value, isConstant := w.defaultValue(column.columnDefault.value(), base);
         if isConstant { m.value = value; }
-        else          { generated = true; }
+        else          { m.generated = true; }
     }
 
-    // The column of a member is its name in snake case, e.g createdAt is created_at. Others are named
-    parts: [..]string;
-    if snakeCase(m.name) != column.columnName { parts.add(fmt.sprint("name: %", saadString(column.columnName))); }
-    if isKey     { parts.add("key: true"); }
-    if generated { parts.add("generated: true"); }
-    if parts.count > 0 {
-        m.attribute = fmt.sprint("@db.Column(%)", fmt.join(parts.elements(), ", "));
+    // The column of a member is its name in snake case, e.g createdAt is created_at and for_ is for. Others are named
+    if db.columnName(m.name) != column.columnName {
+        m.attribute = fmt.sprint("@db.Column(name: %)", saadString(column.columnName));
     }
     return m;
 }
@@ -503,24 +568,6 @@ isKeyword :: (name: string) -> bool {
                  "true", "false", "null", "int", "uint", "float", "char", "bool", "void", "u8", "u16", "u32", "u64",
                  "i8", "i16", "i32", "i64", "f32", "f64"];
     return keywords.contains(name);
-}
-
-// The name of a column in snake case, e.g createdAt is created_at. The same as db.Table does
-@private
-snakeCase :: (name: string) -> string {
-    sb: fmt.StringBuilder;
-    for i in 0..name.len {
-        c := name[i];
-        if c >= 'A' && c <= 'Z' {
-            if i > 0 && name[i - 1] != '_' && !(name[i - 1] >= 'A' && name[i - 1] <= 'Z') {
-                sb.addChar('_');
-            }
-            sb.addChar(c + 32);
-        } else {
-            sb.addChar(c);
-        }
-    }
-    return sb.toString();
 }
 
 // A string literal of Saad, e.g "say \"hi\""

@@ -1,6 +1,6 @@
 namespace shopsetup;
 
-// The schema saad_shop that tests/db/generate.sd writes as tests/db/shop/shop.sd, and tests/db/shop_tables.sd uses
+// The schema saad_shop that tests/db/generate.sd writes as tests/db/entities, and tests/db/shop_tables.sd uses
 
 import db;
 use fmt;
