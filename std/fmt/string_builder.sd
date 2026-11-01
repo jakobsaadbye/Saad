@@ -280,8 +280,21 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
             sb.addArray(arg.data, arg.type as *TypeArray);
         }
         case .struct {
-            if arg.type.isUnion() { sb.addUnion(arg.data, arg.type as *TypeStruct); }
-            else                  { sb.addStruct(arg.data, arg.type as *TypeStruct); }
+            if arg.type.isOptional() {
+                // The value, or null when it is empty
+                data, type, present := (arg.type as *TypeStruct).optionalValue(arg.data);
+                if !present {
+                    sb.addString("null");
+                } else {
+                    value: any;
+                    value.type = type;
+                    value.data = data;
+                    sb.addValueIn(value, inside);
+                }
+            }
+            else if arg.type.isUnion()                { sb.addUnion(arg.data, arg.type as *TypeStruct); }
+            else if arg.type.name.startsWith("List<") { sb.addList(arg.data, arg.type as *TypeStruct); }
+            else                                      { sb.addStruct(arg.data, arg.type as *TypeStruct); }
         }
         else {
             sb.addChar('<');
@@ -326,6 +339,26 @@ addArray :: method (sb: *StringBuilder, data: *void, type: *TypeArray) {
         value: any;
         value.type = type.elemType;
         value.data = &elements[i * type.elemType.size];
+        sb.addValueIn(value, true);
+    }
+    sb.addChar(']');
+}
+
+// A List<T> as its elements, like a slice, e.g [1, 2]
+@private
+addList :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
+    // List starts with data: *T and count: i64, like a slice
+    elemType := (type.members[0].type as *TypePointer).pointerTo;
+    slice    := *(data as *[]u8);
+
+    sb.addChar('[');
+    for i in 0..slice.count {
+        if i > 0 {
+            sb.addString(", ");
+        }
+        value: any;
+        value.type = elemType;
+        value.data = &slice.data[i * elemType.size];
         sb.addValueIn(value, true);
     }
     sb.addChar(']');

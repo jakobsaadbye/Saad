@@ -28,6 +28,8 @@ const char *ast_to_str(Ast *ast) {
     case AST_ENUM_LITERAL:       return "AST_ENUM_LITERAL";
     case AST_FUNCTION_DEFN:      return "AST_FUNCTION_DEFN";
     case AST_FUNCTION_CALL:      return "AST_FUNCTION_CALL";
+    case AST_OPTIONAL_CHAIN:     return "AST_OPTIONAL_CHAIN";
+    case AST_OPTIONAL_VALUE:     return "AST_OPTIONAL_VALUE";
     case AST_ARGUMENT:           return "AST_ARGUMENT";
     case AST_IF:                 return "AST_IF";
     case AST_SWITCH:             return "AST_SWITCH";
@@ -150,6 +152,9 @@ void *type_alloc(TypeTable *tt, size_t size) {
     return arena_allocate(&tt->types, size);
 }
 
+bool  is_optional_type(Type *type);     // typer.c
+Type *optional_inner_type(Type *type);
+
 char *type_to_str(Type *type) {
     switch (type->kind) {
     case TYPE_INVALID:
@@ -196,6 +201,11 @@ char *type_to_str(Type *type) {
         TypeGenericInstance *instance = (TypeGenericInstance *)(type);
         StringBuilder sb = sb_init(32);
 
+        if (instance->is_standard && strcmp(type->name, "Optional") == 0 && instance->type_args.count == 1) {
+            sb_append(&sb, "?%s", type_to_str(((Type **)instance->type_args.items)[0])); // ?int
+            return sb_to_string(&sb);
+        }
+
         sb_append(&sb, "%s<", type->name);
         for (int i = 0; i < instance->type_args.count; i++) {
             Type *arg = ((Type **)instance->type_args.items)[i];
@@ -208,7 +218,27 @@ char *type_to_str(Type *type) {
 
         return sb_to_string(&sb); // @Leak
     }
-    case TYPE_STRUCT:    return ((TypeStruct *)type)->qualified_name ? ((TypeStruct *)type)->qualified_name : type->name; // With the namespace e.g raylib.Color
+    case TYPE_STRUCT: {
+        if (is_optional_type(type)) {
+            StringBuilder sb = sb_init(32);
+            sb_append(&sb, "?%s", type_to_str(optional_inner_type(type))); // ?int instead of Optional<int>
+            return sb_to_string(&sb);
+        }
+        AstStruct *node = ((TypeStruct *)type)->node;
+        if (node && node->generic_struct && node->generic_struct->identifier && node->type_args.count > 0) {
+            // An instance e.g List<?int>, with the type arguments as they are written
+            StringBuilder sb = sb_init(32);
+            TypeStruct *generic = (TypeStruct *)node->generic_struct->identifier->type;
+            const char *name = generic && generic->qualified_name ? generic->qualified_name : node->generic_struct->identifier->name;
+            sb_append(&sb, "%s<", name);
+            for (int i = 0; i < node->type_args.count; i++) {
+                sb_append(&sb, "%s%s", i > 0 ? ", " : "", type_to_str(((Type **)node->type_args.items)[i]));
+            }
+            sb_append(&sb, ">");
+            return sb_to_string(&sb);
+        }
+        return ((TypeStruct *)type)->qualified_name ? ((TypeStruct *)type)->qualified_name : type->name; // With the namespace e.g raylib.Color
+    }
     case TYPE_ENUM:      return ((TypeEnum *)type)->qualified_name   ? ((TypeEnum *)type)->qualified_name   : type->name;
     case TYPE_FUNCTION: {
         TypeFunction *func = (TypeFunction *)(type);

@@ -1,0 +1,9 @@
+// expect-error: Type mismatch. Wanted type int, got type ?int
+// expect-error: Use its value with x ?? fallback
+
+takesInt :: (x: int) {}
+
+main :: () {
+    x: ?int = 5;
+    takesInt(x);
+}

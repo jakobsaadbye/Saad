@@ -1,0 +1,143 @@
+// Optionals: ?T is a T or nothing
+
+use fmt;
+
+Address :: struct { street: string; zip: int; }
+
+User :: struct {
+    name:    string;
+    age:     ?int;
+    address: ?Address;
+    manager: *User;
+
+    greet :: method () -> string { return sprint("Hi %", self.name); }
+}
+
+half :: (x: int) -> ?int {
+    if x % 2 != 0 { return null; }
+    return x / 2;
+}
+
+orZero :: (x: ?int) -> int { return x ?? 0; }
+
+// T is inferred from a T given for a ?T
+unwrapOr :: <T>(x: ?T, fallback: T) -> T { return x ?? fallback; }
+
+calls := 0;
+fallback :: () -> int {
+    calls += 1;
+    return 99;
+}
+
+main :: () {
+    // Empty, a value, and empty again
+    {
+        a: ?int;
+        assert(!a.hasValue() && a == null);
+        a = 36;
+        assert(a.hasValue() && a != null && a.value() == 36);
+        a = null;
+        assert(a == null && a.valueOr(7) == 7);
+        assert(typeof(a) == "?int");
+    }
+
+    // ?? gives the value, or the right side, which is only computed when it is needed
+    {
+        assert(half(4) ?? -1 == 2);
+        assert(half(3) ?? -1 == -1);
+        x := half(6) ?? fallback();
+        y := half(5) ?? fallback();
+        assert(x == 3 && y == 99 && calls == 1);
+        assert(typeof(half(4) ?? 0) == "int");
+
+        // ?? binds tighter than comparisons and looser than arithmetic
+        assert(half(8) ?? 0 > 3);
+        assert(half(1) ?? 2 + 3 == 5);
+
+        // a ?? b ?? c
+        z := half(1) ?? half(3) ?? 11;
+        assert(z == 11);
+        w := half(1) ?? half(4);
+        assert(w == 2 && typeof(w) == "?int");
+    }
+
+    // Comparing with a value is true when it has that value
+    {
+        a: ?int = 5;
+        b: ?int = 5;
+        c: ?int;
+        assert(a == 5 && a != 6 && a == b && a != c && c != 5);
+        s: ?string = "hi";
+        assert(s == "hi" && s != "ho");
+    }
+
+    // Parameters, returns, struct literals and lists
+    {
+        assert(orZero(5) == 5 && orZero(null) == 0 && orZero(half(10)) == 5);
+
+        user := User{name: "Ada", age: 36};
+        assert(user.age == 36 && user.address == null);
+        other := User{name: "Bo", address: {"Main St", 2100}};
+        assert(other.address?.zip ?? 0 == 2100);
+
+        maybe: [..]?int;
+        maybe.add(5);
+        maybe.add(null);
+        maybe.add(half(8));
+        assert(maybe.count == 3 && maybe[1] == null && maybe[2] == 4);
+        assert(typeof(maybe) == "List<?int>");
+
+        assert(unwrapOr(half(7), 42) == 42);
+        assert(unwrapOr(5, 0) == 5);
+        assert(unwrapOr<string>(null, "none") == "none");
+    }
+
+    // Optional chaining: ?. on an optional or a pointer. The result is empty when the left side is
+    {
+        nobody: ?User;
+        assert(nobody?.name == null);
+        assert(nobody?.address?.zip == null);
+        assert(nobody?.greet() ?? "nobody" == "nobody");
+
+        someone: ?User = User{name: "Cy", address: Address{"Elm", 7}};
+        assert(someone?.name == "Cy");
+        assert(someone?.address?.zip ?? 0 == 7);
+        assert(someone?.greet() ?? "" == "Hi Cy");
+        assert(typeof(someone?.address?.zip) == "?int");
+        assert(typeof(someone?.age) == "?int"); // Not ??int
+
+        user := User{name: "Di"};
+        assert(user.manager?.name ?? "no manager" == "no manager");
+        boss := User{name: "Eve"};
+        user.manager = &boss;
+        assert(user.manager?.name ?? "no manager" == "Eve");
+        assert(user.manager?.greet() == "Hi Eve");
+    }
+
+    // Collections
+    {
+        xs := [1, 2, 3, 4];
+        isEven :: (x: int) -> bool { return x % 2 == 0; };
+        assert(xs.find(isEven) == 2);
+        assert(xs.find((x: int) -> bool { return x > 9; }) == null);
+
+        list: [..]int;
+        assert(list.tryFirst() == null && list.tryLast() ?? -1 == -1);
+        list.add(7);
+        assert(list.tryFirst() == 7);
+
+        ages: Map<string, int> = ["ada": 36];
+        assert(ages.tryGet("ada") == 36 && ages.tryGet("bob") == null);
+        assert(ages.tryGet("bob") ?? 0 == 0);
+    }
+
+    // Printing
+    {
+        a: ?int = 5;
+        b: ?string;
+        assert(sprint("% %", a, b) == "5 null");
+        assert(sprint("%", User{name: "Ada", age: 36}) == "User{name: \"Ada\", age: 36, address: null, manager: 0x0000000000000000}");
+    }
+
+    print("optionals ok");
+}

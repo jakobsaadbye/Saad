@@ -1704,6 +1704,25 @@ Type *parse_type(Parser *parser) {
         return (Type *)func_type;
     }
 
+    if (next.type == '?') {
+        // An optional e.g ?int, which is Optional<int> of the standard collections
+        eat_token(parser);
+        Type *inner = parse_type(parser);
+        if (!inner) return NULL;
+
+        TypeGenericInstance *optional = type_alloc(&parser->type_table, sizeof(TypeGenericInstance));
+        optional->head.head.kind  = AST_TYPE;
+        optional->head.head.file  = parser->current_file;
+        optional->head.head.start = next.start;
+        optional->head.head.end   = inner->head.end;
+        optional->head.kind       = TYPE_GENERIC_INSTANCE;
+        optional->head.name       = "Optional";
+        optional->is_standard     = true;
+        optional->type_args       = da_init(1, sizeof(Type *));
+        da_append(&optional->type_args, inner);
+        return (Type *)optional;
+    }
+
     if (next.type == TOKEN_TRIPLE_DOT) {
         // Variadic parameter
         eat_token(parser);
@@ -1836,6 +1855,7 @@ bool starts_type_alias(Parser *parser, int lookahead) {
     if (is_primitive_type_token(token))                       return true;
     if (token.type == TOKEN_STRING || token.type == TOKEN_ANY) return true;
     if (token.type == '*')                                    return true; // Dereferencing is never constant, so this is a pointer type
+    if (token.type == '?')                                    return true; // An optional e.g MaybeInt :: ?int;
 
     if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, lookahead + 1).type == '<') {
         int end = scan_type_arguments(parser, lookahead + 1);
@@ -1898,6 +1918,7 @@ int scan_type_arguments(Parser *parser, int lookahead) {
         case TOKEN_DOUBLE_DOT:
         case '.':  // A type of a namespace e.g Map<string, fmt.StringBuilder>
         case '*':
+        case '?':  // An optional e.g Map<string, ?int>
         case '[':
         case ']':
         case ',':
@@ -3905,6 +3926,7 @@ int get_operator_precedence(OperatorType op) {
             return 7;
         case OP_BITWISE_SHIFT_LEFT:
         case OP_BITWISE_SHIFT_RIGHT:
+        case OP_OPTIONAL_DEFAULT: // Like Swift: age ?? 0 > 18 is (age ?? 0) > 18, and age ?? x + 1 is age ?? (x + 1)
             return 8;
         case OP_MINUS:
         case OP_PLUS:
@@ -3925,6 +3947,7 @@ int get_operator_precedence(OperatorType op) {
         case OP_AS:
             return 13;
         case OP_DOT:
+        case OP_OPTIONAL_DOT:
         case OP_SUBSCRIPT:
         case OP_FUNC_CALL:
             return 14;
@@ -4003,11 +4026,15 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
         if (next_prec <= min_prec) {
             break;
         } else {
-            if (next.type == '.') {
+            if (next.type == '.' || next.type == TOKEN_QUESTION_DOT) {
                 eat_token(parser);
                 AstExpr *right = parse_leaf(parser);
                 if (!right) return NULL;
-                left = make_member_access(parser, next, left, right);
+
+                Token dot = next;
+                dot.type  = '.';
+                left = make_member_access(parser, dot, left, right);
+                if (next.type == TOKEN_QUESTION_DOT) ((AstMemberAccess *)left)->flags |= MEMBER_ACCESS_FLAGS_OPTIONAL_CHAIN;
             } 
             else if (next.type == '[') {
                 eat_token(parser);

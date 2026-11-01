@@ -37,6 +37,7 @@ typedef struct Segment {
     char name[128];
     bool call;
     bool index;
+    bool optional; // Reached with ?., so it is a member of the value inside an optional, e.g the b of a?.b
 } Segment;
 
 // What a chain is: a namespace, a type by its name (e.g Shape. or Status.), or a value of a type
@@ -119,6 +120,11 @@ static int read_chain(const char *text, int end, Segment *segments) {
         reversed[count++] = segment;
 
         // Another part before it
+        if (at > 2 && text[at - 1] == '.' && text[at - 2] == '?') {
+            reversed[count - 1].optional = true; // a?.b
+            at -= 2;
+            continue;
+        }
         if (at > 1 && text[at - 1] == '.' && text[at - 2] != '.') {
             at -= 1;
             continue;
@@ -292,6 +298,7 @@ static bool resolve_chain(Typer *typer, AstBlock *scope, Segment *segments, int 
             }
             return false;
         }
+        if (segment->optional && is_optional_type(target->type)) target->type = optional_inner_type(target->type);
         AstIdentifier *member = member_of(typer, target->type, segment->name);
         if (!member || !member->type) return false;
         target->type = after_call_or_index(typer, member->type, segment);
@@ -371,8 +378,12 @@ static void add_members(Typer *typer, Type *type) {
 
     if (type->kind == TYPE_STRUCT) {
         AstStruct *node = ((TypeStruct *)type)->node;
-        if (!node->is_union) add_scope_identifiers(node->members, &seen); // The variants of a union are read with a switch
-        else if (!already_added(&seen, "kind")) add_item("kind", "field", "the variant it holds", NULL);
+        // The variants of a union are read with a switch, and an optional is read with its methods, not its fields item and present
+        if (node->is_union) {
+            if (!already_added(&seen, "kind")) add_item("kind", "field", "the variant it holds", NULL);
+        } else if (!is_optional_type(type)) {
+            add_scope_identifiers(node->members, &seen);
+        }
         add_scope_identifiers(node->methods, &seen);
         if (node->generic_struct) add_scope_identifiers(node->generic_struct->methods, &seen); // The ones that aren't made yet
     }
@@ -879,19 +890,24 @@ void complete_program(Typer *typer, DynamicArray files) {
         return;
     }
 
+    // a?.b: the members of the value inside the optional
+    bool question = start > 1 && file->text[start - 2] == '?';
+    int  dot      = question ? start - 2 : start - 1;
+
     // A '.' with nothing before it, e.g 'status == .open', is a value of the type that is wanted there
-    char before_dot = start > 1 ? file->text[start - 2] : 0;
-    if (!is_name_char(before_dot) && before_dot != ')' && before_dot != ']') {
+    char before_dot = dot > 0 ? file->text[dot - 1] : 0;
+    if (!question && !is_name_char(before_dot) && before_dot != ')' && before_dot != ']') {
         add_values_of(expected_type_at(typer, file, scope, start - 1));
         return;
     }
 
     Segment segments[MAX_SEGMENTS];
-    int count = read_chain(file->text, start - 1, segments);
+    int count = read_chain(file->text, dot, segments);
     if (count <= 0) return;
 
     Target target;
     if (!resolve_chain(typer, scope, segments, count, &target)) return;
+    if (question && target.type && is_optional_type(target.type)) target.type = optional_inner_type(target.type);
     if (target.ns)             add_namespace_declarations(target.ns, file);
     else if (target.type_name) add_static_members(target.type_name);
     else                       add_members(typer, target.type);

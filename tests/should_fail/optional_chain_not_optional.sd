@@ -1,0 +1,9 @@
+// expect-error: ?. is for optionals and pointers, but this is a Point
+// expect-error: Use . instead
+
+Point :: struct { x: int; }
+
+main :: () {
+    p := Point{1};
+    y := p?.x;
+}

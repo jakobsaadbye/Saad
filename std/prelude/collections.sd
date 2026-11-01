@@ -13,6 +13,44 @@
 use c;
 
 //
+// Optionals
+//
+
+// A value that may be missing. ?T is the same as Optional<T>
+//
+//     age: ?int;                  // empty
+//     age = 36;                   // a T becomes a ?T where one is wanted
+//     age = null;                 // empty again
+//     if age.hasValue() { print("%", age.value()); }
+//     years := age ?? 0;          // the value, or what comes after ?? when it is empty
+//     zip := user?.address?.zip;  // empty when user or its address is empty
+//     if age == null { ... }      // the same as !age.hasValue()
+//
+// An empty optional has the zero value of T, so == compares two optionals by their values
+Optional :: struct <T> {
+    item:    T;
+    present: bool;
+
+    hasValue :: method () -> bool {
+        return self.present;
+    }
+
+    // The value. The program stops with an error when there is none, so check hasValue() first, or use valueOr or ??
+    value :: method () -> T {
+        assert(self.present); // value() of an empty optional. Check hasValue() first, or use valueOr or ??
+        return self.item;
+    }
+
+    // The value, or the fallback when there is none. The fallback is always computed, unlike with ??
+    valueOr :: method (fallback: T) -> T {
+        if self.present {
+            return self.item;
+        }
+        return fallback;
+    }
+}
+
+//
 // Allocators
 //
 
@@ -111,22 +149,20 @@ List :: struct <T> {
         return self.data[self.count - 1];
     }
 
-    // The first value and true, or false if the list is empty
-    tryFirst :: method () -> (T, bool) {
+    // The first value, or empty if the list is, e.g xs.tryFirst() ?? 0
+    tryFirst :: method () -> ?T {
         if self.count == 0 {
-            empty: T;
-            return empty, false;
+            return null;
         }
-        return self.data[0], true;
+        return self.data[0];
     }
 
-    // The last value and true, or false if the list is empty
-    tryLast :: method () -> (T, bool) {
+    // The last value, or empty if the list is
+    tryLast :: method () -> ?T {
         if self.count == 0 {
-            empty: T;
-            return empty, false;
+            return null;
         }
-        return self.data[self.count - 1], true;
+        return self.data[self.count - 1];
     }
 
     isEmpty :: method () -> bool {
@@ -313,14 +349,13 @@ Map :: struct <K, V> {
         return self.entries[index].value;
     }
 
-    // The value of the key and true, or false if the key is not there
-    tryGet :: method (key: K) -> (V, bool) {
+    // The value of the key, or empty if the key is not there, e.g ages.tryGet("bob") ?? 0
+    tryGet :: method (key: K) -> ?V {
         index := self.indexOfKey(key);
         if index == -1 {
-            empty: V;
-            return empty, false;
+            return null;
         }
-        return self.entries[index].value, true;
+        return self.entries[index].value;
     }
 
     has :: method (key: K) -> bool {

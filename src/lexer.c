@@ -54,6 +54,8 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_COLON_EQUAL:           return ":=";
         case TOKEN_RIGHT_ARROW:           return "->";
         case TOKEN_DOUBLE_DOT:            return "..";
+        case TOKEN_DOUBLE_QUESTION:       return "??";
+        case TOKEN_QUESTION_DOT:          return "?.";
         case TOKEN_TRIPLE_DOT:            return "...";
         case TOKEN_IN:                    return "in";
         case TOKEN_XX:                    return "xx";
@@ -694,6 +696,9 @@ bool is_binary_operator(TokenType op) {
     if (op == TOKEN_DOUBLE_EQUAL)  return true;
     if (op == TOKEN_NOT_EQUAL)     return true;
 
+    if (op == TOKEN_DOUBLE_QUESTION) return true;
+    if (op == TOKEN_QUESTION_DOT)    return true;
+
     if (op == '.') return true;
     if (op == '[') return true;
     if (op == '(') return true;
@@ -729,6 +734,8 @@ TokenType is_double_character_token(Lexer *lexer) {
     if (c == '-' && next == '>') return TOKEN_RIGHT_ARROW;
     if (c == '=' && next == '>') return TOKEN_FAT_ARROW;
     if (c == '.' && next == '.') return TOKEN_DOUBLE_DOT;
+    if (c == '?' && next == '?') return TOKEN_DOUBLE_QUESTION;
+    if (c == '?' && next == '.') return TOKEN_QUESTION_DOT;
     if (c == '+' && next == '=') return TOKEN_PLUS_EQUAL;
     if (c == '-' && next == '=') return TOKEN_MINUS_EQUAL;
     if (c == '*' && next == '=') return TOKEN_TIMES_EQUAL;
@@ -767,6 +774,7 @@ bool is_single_character_token(char c) {
     if (c == '.') return true;
     if (c == '#') return true;
     if (c == '@') return true;
+    if (c == '?') return true; // ?T
     return false;
 }
 

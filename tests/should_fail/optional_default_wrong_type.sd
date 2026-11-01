@@ -1,0 +1,6 @@
+// expect-error: The right side of ?? must be a int like the value of the left side, but it is a string
+
+main :: () {
+    x: ?int;
+    y := x ?? "none";
+}

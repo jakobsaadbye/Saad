@@ -1,0 +1,8 @@
+// An optional may be empty, so it has to be unwrapped first
+// expect-error: Only == and != work on a ?int, as it may be empty
+// expect-error: x ?? 0
+
+main :: () {
+    x: ?int = 5;
+    y := x + 1;
+}

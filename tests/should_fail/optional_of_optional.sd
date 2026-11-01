@@ -1,0 +1,5 @@
+// expect-error: An optional of an optional (??int) is not allowed
+
+main :: () {
+    x: ? ?int;
+}

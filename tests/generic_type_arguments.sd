@@ -117,10 +117,8 @@ main :: () {
         assert(typeof(xs.map(toText)) == "List<string>");
         assert(xs.map<f64>((x: int) -> f64 { return x as f64; })[1] == 2.0);
 
-        first, found := xs.find(isEven);
-        assert(found && first == 2);
-        _, none := xs.find((x: int) -> bool { return x > 10; });
-        assert(!none);
+        assert(xs.find(isEven) == 2);
+        assert(xs.find((x: int) -> bool { return x > 10; }) == null);
         assert(xs.findIndex(isEven) == 1);
         assert(xs.some(isEven) && !xs.every(isEven));
         assert(xs.every((x: int) -> bool { return x > 0; }));

@@ -98,15 +98,14 @@ reduce :: method <T, Acc>(elements: []T, start: Acc, f: (Acc, T) -> Acc) -> Acc 
     return result;
 }
 
-// The first element that match is true for. found is false when there is none
-find :: method <T>(elements: []T, match: (T) -> bool) -> (T, bool) {
+// The first element that match is true for, or empty when there is none
+find :: method <T>(elements: []T, match: (T) -> bool) -> ?T {
     for element in elements {
         if match(element) {
-            return element, true;
+            return element;
         }
     }
-    nothing: T;
-    return nothing, false;
+    return null;
 }
 
 // The index of the first element that match is true for, or -1

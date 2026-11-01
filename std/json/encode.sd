@@ -250,7 +250,14 @@ writeAny :: method (w: *Writer, data: *void, type: *Type) {
             w.writeElements(elements, count, arrayType.elemType);
         }
         case .struct {
-            w.writeStruct(data, type as *TypeStruct);
+            if type.isOptional() {
+                // The value, or null when it is empty
+                value, valueType, present := (type as *TypeStruct).optionalValue(data);
+                if present { w.writeAny(value, valueType); }
+                else       { w.sb.addString("null"); }
+            } else {
+                w.writeStruct(data, type as *TypeStruct);
+            }
         }
         case .any {
             boxed := *(data as *any);

@@ -1,0 +1,11 @@
+// expect-error: Use ?. for the members of its value
+// a?.b is an optional, so going on needs ?. too
+// expect-error: 'zip' is not a member
+
+Address :: struct { zip: int; }
+User :: struct { address: ?Address; }
+
+main :: () {
+    u: ?User;
+    z := u?.address.zip;
+}
