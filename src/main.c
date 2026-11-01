@@ -7,6 +7,7 @@ typedef enum CommandKind {
     COMMAND_RUN,
     COMMAND_CHECK,
     COMMAND_INDEX,
+    COMMAND_COMPLETE,
 } CommandKind;
 
 typedef struct Command {
@@ -21,6 +22,7 @@ static Command commands[] = {
     { "run",   COMMAND_RUN,   "Compile the program and run it" },
     { "check", COMMAND_CHECK, "Check the program for errors without compiling it. With --json, the errors are written as JSON" },
     { "index", COMMAND_INDEX, "Write where every name of the program is declared and used, and its errors, as JSON for an editor. --overlay path=file reads file instead of path. --std also writes the standard library" },
+    { "complete", COMMAND_COMPLETE, "Write what can be written at --at file:line:character (from 0), and the signature of the call there, as JSON for an editor. Takes --overlay too" },
 };
 static const int commands_count = sizeof(commands) / sizeof(commands[0]);
 
@@ -50,6 +52,23 @@ bool parse_options(CompilerConfig *config, int argc, char const *argv[], int fir
 
         if (strcmp(option, "--json") == 0) { config->json = true; continue; }
         if (strcmp(option, "--std") == 0)  { program_index.with_std = true; continue; }
+        if (strcmp(option, "--at") == 0 && i + 1 < argc) {
+            // file:line:character. The file can have a ':' itself, e.g C:/dev/main.sd
+            char *at = strdup(argv[i + 1]);
+            char *last = strrchr(at, ':');
+            char *middle = NULL;
+            if (last) { *last = '\0'; middle = strrchr(at, ':'); }
+            if (!last || !middle) {
+                printf("Error: --at takes file:line:character, e.g --at main.sd:10:4\n\n");
+                return false;
+            }
+            *middle = '\0';
+            program_completion.path      = at;
+            program_completion.line      = atoi(middle + 1);
+            program_completion.character = atoi(last + 1);
+            i++;
+            continue;
+        }
         if (strcmp(option, "--overlay") == 0 && i + 1 < argc) {
             if (!add_overlay(argv[i + 1])) {
                 printf("Error: --overlay takes path=file, e.g --overlay src/main.sd=/tmp/unsaved.sd\n\n");
@@ -113,6 +132,7 @@ int main(int argc, char const *argv[]) {
         case COMMAND_RUN:   config.run_program = true;  break;
         case COMMAND_CHECK: config.run_program = false; config.check_only = true; break;
         case COMMAND_INDEX: config.run_program = false; config.check_only = true; config.json = true; break;
+        case COMMAND_COMPLETE: config.run_program = false; config.check_only = true; config.json = true; break;
     }
 
     char *main_file_path_abs = get_absolute_path(main_file_path);
@@ -127,6 +147,18 @@ int main(int argc, char const *argv[]) {
         bool ok = compile_program(&config, main_file_path_abs, false);
         write_index_json(stdout, ok);
         return ok ? 0 : 1;
+    }
+
+    if (command->kind == COMMAND_COMPLETE) {
+        if (program_completion.path == NULL) {
+            printf("Error: complete needs --at file:line:character\n\n");
+            return 1;
+        }
+        diagnostics.print = false;
+        program_completion.enabled = true;
+        compile_program(&config, main_file_path_abs, false);
+        write_completion_json(stdout);
+        return 0;
     }
 
     if (command->kind == COMMAND_CHECK) {

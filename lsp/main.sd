@@ -81,6 +81,9 @@ handle :: (m: rpc.Message) {
         case "textDocument/hover"        { hover(m); }
         case "textDocument/documentSymbol" { documentSymbols(m); }
         case "workspace/symbol"          { workspaceSymbols(m); }
+        case "textDocument/completion"   { completion(m); }
+        case "textDocument/signatureHelp" { signatureHelp(m); }
+        case "textDocument/semanticTokens/full" { semanticTokens(m); }
         else {
             if rpc.isRequest(m) {
                 rpc.fail(m.id, rpc.MethodNotFound, fmt.sprint("% is not supported", m.name));
@@ -108,8 +111,9 @@ initialize :: (m: rpc.Message) {
     }
     rpc.log(fmt.sprint("The workspace is '%'. The compiler is %", workspaceRoot, compiler));
 
-    capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true}";
-    rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.1.0\"}}", capabilities));
+    capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]},\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":%,\"tokenModifiers\":%},\"full\":true}}";
+    capabilities = fmt.sprint(capabilities, json.encode(TokenTypes), json.encode(TokenModifiers));
+    rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.2.0\"}}", capabilities));
 }
 
 // The editor asks the server to end after asking it to shut down. Otherwise the server ends with an error
@@ -304,6 +308,19 @@ update :: (i: int) {
         return;
     }
 
+    watch := time.startStopwatch();
+    ok := p.run(compiler, overlayOptions());
+    p.generation = generation;
+    texts.clear();  // Files may have changed on disk too
+    if !ok {
+        return;
+    }
+    rpc.log(fmt.sprint("Indexed % in % ms: % files, % symbols, % references, % diagnostics", p.root, watch.milliseconds() as int, p.index.files.count, p.index.symbols.count, p.index.references.count, p.index.diagnostics.count));
+    publishDiagnostics(p);
+}
+
+// The --overlay options for the documents that aren't saved. Their text is written to their overlay files
+overlayOptions :: () -> string {
     sb := fmt.newStringBuilder(256);
     for doc, d in documents {
         if !doc.unsaved {
@@ -314,16 +331,7 @@ update :: (i: int) {
         }
         sb.addString(fmt.sprint(" --overlay \"%=%\"", doc.path, doc.overlay));
     }
-
-    watch := time.startStopwatch();
-    ok := p.run(compiler, sb.toString());
-    p.generation = generation;
-    texts.clear();  // Files may have changed on disk too
-    if !ok {
-        return;
-    }
-    rpc.log(fmt.sprint("Indexed % in % ms: % files, % symbols, % references, % diagnostics", p.root, watch.milliseconds() as int, p.index.files.count, p.index.symbols.count, p.index.references.count, p.index.diagnostics.count));
-    publishDiagnostics(p);
+    return sb.toString();
 }
 
 // Sends the diagnostics of every file of the project, and clears the ones it sent before for files that have none now
@@ -694,4 +702,232 @@ matches :: (name: string, query: string) -> bool {
         }
     }
     return q == query.len;
+}
+
+//
+// Completion and signature help, from 'saad complete' (docs/lsp.md)
+//
+
+// What can be written at the place of the request. ok is false when the compiler couldn't answer
+completionsAt :: (params: json.Value) -> project.Completions, bool {
+    uri  := params.get("textDocument").get("uri").asString();
+    path := source.pathOf(uri);
+    none: project.Completions;
+    if path == "" {
+        return none, false;
+    }
+    // The compiler checks the text as it is now, so the project isn't indexed first. That is done when the typing stops
+    key := source.keyOf(path);
+    program := -1;
+    for p, i in projects {
+        if p.fileNumber(key) >= 0 {
+            program = i as int;
+            break;
+        }
+    }
+    if program < 0 {
+        program = projectFor(key, path);
+    }
+    if program < 0 {
+        return none, false;
+    }
+
+    position := params.get("position");
+    at: project.Position;
+    at.line = position.get("line").asNumber() as int;
+    at.character = source.toByte(textOf(key, path).line(at.line), position.get("character").asNumber() as int);
+    p := projects.indexRef(program);
+    result, ok := p.complete(compiler, overlayOptions(), path, at);
+    return result, ok;
+}
+
+// The CompletionItemKind of LSP
+completionKind :: (kind: string) -> int {
+    return switch kind {
+        case "method"        => 2;
+        case "function"      => 3;
+        case "field"         => 5;
+        case "variable"
+        case "parameter"
+        case "global"        => 6;
+        case "namespace"     => 9;
+        case "enum"          => 13;
+        case "keyword"       => 14;
+        case "enumMember"
+        case "variant"       => 20;
+        case "constant"      => 21;
+        case "struct"
+        case "union"
+        case "typeAlias"     => 22;
+        case "typeParameter" => 25;
+        else                 => 1;
+    };
+}
+
+completion :: (m: rpc.Message) {
+    result, ok := completionsAt(m.params);
+    if !ok {
+        rpc.respond(m.id, "[]");
+        return;
+    }
+    sb := fmt.newStringBuilder(4096);
+    sb.addChar(91);
+    for item, i in result.items {
+        if i > 0 { sb.addChar(44); }
+        sb.addString(fmt.sprint("{\"label\":%,\"kind\":%,\"detail\":%", json.encode(item.label), completionKind(item.kind), json.encode(item.detail)));
+        if item.doc != "" {
+            sb.addString(fmt.sprint(",\"documentation\":{\"kind\":\"markdown\",\"value\":%}", json.encode(item.doc)));
+        }
+        // Keywords after the names of the program
+        if item.kind == "keyword" {
+            sb.addString(fmt.sprint(",\"sortText\":%", json.encode(fmt.sprint("~%", item.label))));
+        }
+        sb.addChar(125);
+    }
+    sb.addChar(93);
+    rpc.respond(m.id, sb.toString());
+}
+
+signatureHelp :: (m: rpc.Message) {
+    result, ok := completionsAt(m.params);
+    if !ok || result.signature == null {
+        rpc.respond(m.id, "null");
+        return;
+    }
+    signature := result.signature;
+    parameters := fmt.newStringBuilder(256);
+    for parameter, i in signature.parameters {
+        if i > 0 { parameters.addChar(44); }
+        parameters.addString(fmt.sprint("{\"label\":%}", json.encode(parameter)));
+    }
+    doc := "";
+    if signature.doc != "" {
+        doc = fmt.sprint(",\"documentation\":{\"kind\":\"markdown\",\"value\":%}", json.encode(signature.doc));
+    }
+    rpc.respond(m.id, fmt.sprint("{\"signatures\":[{\"label\":%,\"parameters\":[%]%}],\"activeSignature\":0,\"activeParameter\":%}",
+        json.encode(signature.label), parameters.toString(), doc, signature.active));
+}
+
+//
+// Semantic tokens: the names of a file by what they are, from the index. The editor colors the rest with its grammar
+//
+
+TokenTypes     :: ["namespace", "type", "struct", "enum", "enumMember", "function", "method", "property", "variable", "parameter", "typeParameter"];
+TokenModifiers :: ["declaration", "readonly"];
+
+// The index of the token type of a kind of symbol in TokenTypes
+tokenType :: (kind: string) -> int {
+    return switch kind {
+        case "namespace"     => 0;
+        case "typeAlias"     => 1;
+        case "struct"
+        case "union"         => 2;
+        case "enum"          => 3;
+        case "enumMember"
+        case "variant"       => 4;
+        case "function"      => 5;
+        case "method"        => 6;
+        case "field"         => 7;
+        case "parameter"     => 9;
+        case "typeParameter" => 10;
+        else                 => 8;  // variable, global and constant
+    };
+}
+
+// A name of the file, in bytes as the compiler counts
+Token :: struct {
+    line:      int;
+    start:     int;
+    end:       int;
+    kind:      int;
+    modifiers: int;
+}
+
+semanticTokens :: (m: rpc.Message) {
+    uri  := m.params.get("textDocument").get("uri").asString();
+    path := source.pathOf(uri);
+    key  := source.keyOf(path);
+    i    := projectFor(key, path);
+    if i < 0 {
+        rpc.respond(m.id, "{\"data\":[]}");
+        return;
+    }
+    p    := projects.indexRef(i);
+    file := p.fileNumber(key);
+
+    tokens: [..]Token;
+    for sym in p.index.symbols {
+        if sym.file == file {
+            tokens.add(tokenOf(sym.nameRange, &sym, 1));
+        }
+    }
+    for ref in p.index.references {
+        if ref.file == file {
+            sym := p.symbol(ref.symbol);
+            if sym != null {
+                tokens.add(tokenOf(ref.range, sym, 0));
+            }
+        }
+    }
+    sortTokens(tokens.elements());
+
+    // Each token is 5 numbers, relative to the one before: line, start, length, type and modifiers. In UTF-16 units
+    text := textOf(key, path);
+    sb := fmt.newStringBuilder(tokens.count as int * 16 + 16);
+    lastLine  := 0;
+    lastStart := 0;
+    written   := 0;
+    for t, n in tokens {
+        if t.end <= t.start || t.line < 0 {
+            continue;
+        }
+        if n > 0 {
+            previous := tokens[n - 1];
+            if previous.line == t.line && previous.start == t.start {
+                continue;  // The same name twice, e.g a declaration that is also a use
+            }
+        }
+        line  := text.line(t.line);
+        start := source.toUtf16(line, t.start);
+        end   := source.toUtf16(line, t.end);
+        deltaStart := start;
+        if t.line == lastLine {
+            deltaStart = start - lastStart;
+        }
+        if written > 0 { sb.addChar(44); }
+        sb.addString(fmt.sprint("%,%,%,%,%", t.line - lastLine, deltaStart, end - start, t.kind, t.modifiers));
+        lastLine  = t.line;
+        lastStart = start;
+        written  += 1;
+    }
+    rpc.respond(m.id, fmt.sprint("{\"data\":[%]}", sb.toString()));
+}
+
+tokenOf :: (r: project.Range, sym: *project.Symbol, declaration: int) -> Token {
+    t: Token;
+    t.line  = r.start.line;
+    t.start = r.start.character;
+    t.end   = r.end.character;
+    if r.end.line != r.start.line {
+        t.end = t.start;  // A name is on one line
+    }
+    t.kind = tokenType(sym.kind);
+    t.modifiers = declaration;
+    if sym.kind == "constant" || sym.kind == "enumMember" {
+        t.modifiers += 2;  // readonly
+    }
+    return t;
+}
+
+// By line, then by start. Insertion sort, as most of the tokens are in order already
+sortTokens :: (tokens: []Token) {
+    for i in 1..tokens.count {
+        t := tokens[i];
+        j := i - 1;
+        while j >= 0 && (tokens[j].line > t.line || (tokens[j].line == t.line && tokens[j].start > t.start)) {
+            tokens[j + 1] = tokens[j];
+            j -= 1;
+        }
+        tokens[j + 1] = t;
+    }
 }

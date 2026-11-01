@@ -99,6 +99,48 @@ run :: method (p: *Project, compiler: string, overlays: string) -> bool {
     return true;
 }
 
+//
+// What 'saad complete' writes: the names that can be written at a position, and the signature of the call there
+//
+
+CompletionItem :: struct {
+    label:  string;
+    kind:   string;   // e.g "field", "method" or "keyword"
+    detail: string;
+    doc:    string;
+}
+
+Signature :: struct {
+    label:      string;      // e.g "grow(by: f32)"
+    parameters: [..]string;  // e.g "by: f32"
+    active:     int;         // The parameter that is being written
+    doc:        string;
+}
+
+Completions :: struct {
+    version:   int;
+    items:     [..]CompletionItem;
+    signature: *Signature;  // null when the position isn't in a call
+}
+
+// Asks the compiler what can be written at the position of the file. ok is false if it didn't answer
+complete :: method (p: *Project, compiler: string, overlays: string, path: string, at: Position) -> Completions, bool {
+    command := fmt.sprint("\"%\" complete \"%\" --at \"%:%:%\"%", compiler, p.root, path, at.line, at.character, overlays);
+    text, code := os.output(command);
+    result: Completions;
+    if text.len == 0 {
+        rpc.log(fmt.sprint("Couldn't run the compiler (exit code %): %", code, command));
+        return result, false;
+    }
+    err := json.decode(text, &result);
+    text.free();
+    if err != "" {
+        rpc.log(fmt.sprint("The compiler didn't write completions: %", err));
+        return result, false;
+    }
+    return result, true;
+}
+
 // The number of the file in the index, or -1
 fileNumber :: method (p: *Project, key: string) -> int {
     for k, i in p.keys {

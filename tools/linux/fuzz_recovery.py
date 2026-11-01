@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Breaks real programs in random ways and checks that 'saad index' still writes an index, without crashing or hanging.
+"""Breaks real programs in random ways and checks that 'saad index' still writes an index, and 'saad complete' an answer,
+without crashing or hanging.
 
     tools/linux/fuzz_recovery.py [count] [seed]
 
@@ -77,6 +78,19 @@ def main():
                         problem = "no diagnostics"
                 except ValueError as e:
                     problem = f"not JSON: {e}"
+            # Completion at a place in the broken file, as an editor asks while typing
+            if not problem:
+                lines = broken.split("\n")
+                line = rng.randrange(len(lines))
+                at = f"{os.path.join(REPO, target)}:{line}:{rng.randrange(len(lines[line]) + 1)}"
+                complete = command[:1] + ["complete"] + command[2:] + ["--at", at]
+                result = subprocess.run(complete, capture_output=True, timeout=20, cwd=REPO)
+                try:
+                    answer = json.loads(result.stdout)
+                    if "items" not in answer:
+                        problem = f"no items from complete --at {at}"
+                except ValueError as e:
+                    problem = f"complete --at {at}: not JSON ({e}), exit code {result.returncode}"
         except subprocess.TimeoutExpired:
             problem = "timeout"
 

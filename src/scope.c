@@ -14,6 +14,7 @@ AstBlock *new_block(Parser *parser, BlockKind kind) {
     scope->enclosing_function = parser->enclosing_function;
     scope->belongs_to_struct  = NULL;
     scope->scope_number      = global_scope_counter++;
+    if (parser->current_file && parser->current_file->blocks.item_size) da_append(&parser->current_file->blocks, scope);
 
     parser->current_scope = scope;
     return scope;
