@@ -118,7 +118,7 @@ AstExpr *simplify_unary(ConstEvaluator *ce, AstBlock *scope, AstUnary *unary) {
         XXX; // Shouldn't happen
     }
 
-    printf("Unhandled cases in simplify_unary()\n");
+    fprintf(stderr, "Unhandled cases in simplify_unary()\n");
     exit(1);
 }
 
@@ -207,7 +207,7 @@ AstExpr *simplify_expression(ConstEvaluator *ce, AstBlock *scope, AstExpr *expr)
         }
         case AST_RANGE_EXPR:
         default:
-            printf("%s:%d: compiler-error: Unhandled cases in 'simplify_expression'. Expression was of type %s", __FILE__, __LINE__, ast_to_str((Ast *)expr));
+            fprintf(stderr, "%s:%d: compiler-error: Unhandled cases in 'simplify_expression'. Expression was of type %s", __FILE__, __LINE__, ast_to_str((Ast *)expr));
             return expr;
     }
 }

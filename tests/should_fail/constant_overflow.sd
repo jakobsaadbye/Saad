@@ -1,0 +1,8 @@
+// The value of a constant must fit the type it is assigned to
+
+Big :: 300;
+
+main :: () {
+    b: u8;
+    b = Big;
+}

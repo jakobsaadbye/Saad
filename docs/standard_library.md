@@ -9,6 +9,7 @@ std/
     string.sd       The methods of string (slice, split, indexOf, free, ...)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
   fmt/          namespace fmt: print, sprint and StringBuilder
+  io/           namespace io: bytes on stdin, stdout and stderr
   json/         namespace json: encode, decode, parse and json.Value
   os/           namespace os: files, environment variables, processes
     windows.sd      namespace os.windows: the Windows API (threads, Sleep, ...)
@@ -47,11 +48,31 @@ os.renameFile("out.txt", "new.txt");
 os.removeFile("new.txt");
 home, found := os.getEnv("HOME");
 code := os.run("echo hi");                  // runs a shell command, returns its exit code
+text, code := os.output("git status");      // runs a shell command, returns what it wrote and its exit code
+args := os.args();                          // the command line, args[0] is the program
 os.exit(1);
 ```
 
-`os.windows` has the bindings for the Windows API, e.g `CreateThread`, critical sections, condition variables
-and `Sleep`.
+`os.output` runs the command with cmd.exe and puts it in quotes first, so a command that starts with a quoted path
+works, e.g `os.output("\"C:/Program Files/tool.exe\" \"my file.txt\"")`.
+
+`os.windows` has the bindings for the Windows API, e.g `CreateThread`, critical sections, condition variables,
+`Sleep`, `GetStdHandle`, `ReadFile` and `WriteFile`.
+
+## io
+
+Bytes on the standard streams, for a program that another program talks to, e.g the language server (`lsp/`):
+
+```odin
+line, ok := io.readLine();      // without "\n" or "\r\n". ok is false at the end of the input
+body, ok := io.read(52);        // exactly 52 bytes
+waiting := io.hasInput();       // bytes have arrived, so a read won't wait
+io.write("hello\n");            // stdout, nothing added
+io.writeError("a log line\n");  // stderr
+```
+
+The input is binary, so `\r\n` stays as it is. `fmt.print` goes through the C runtime, which has its own buffer, so
+don't mix it with `io.write`.
 
 ## time
 
@@ -174,7 +195,6 @@ value.toJson();
 
 ## Ideas for later
 
-* `os.args()` for the command line arguments (needs support in the runtime).
 * `strings` with `contains`, `trim`, `replace`, `join` and a `parseInt`/`parseFloat`.
 * `os.listDir` and `os.makeDir`, and a `path` namespace (`join`, `extension`, `directory`).
 * `math` functions of its own: `Pi`, `clamp`, `lerp`, `min`/`max`, vectors.

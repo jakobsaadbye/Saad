@@ -1,0 +1,12 @@
+// expect-error: has no '}'
+
+helper :: () -> int {
+    if true {
+        return 1;
+
+    return 2;
+}
+
+main :: () {
+    assert(helper() == 1);
+}

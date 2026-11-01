@@ -1,0 +1,59 @@
+{
+  "name": "saad",
+  "displayName": "Saad",
+  "description": "The Saad language: highlighting, errors as you type, go to definition, find references, hover and outline",
+  "version": "0.1.0",
+  "publisher": "saad",
+  "license": "MIT",
+  "engines": { "vscode": "^1.82.0" },
+  "categories": ["Programming Languages"],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "saad",
+        "aliases": ["Saad", "saad"],
+        "extensions": [".sd"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "saad",
+        "scopeName": "source.saad",
+        "path": "./syntaxes/saad.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Saad",
+      "properties": {
+        "saad.compilerPath": {
+          "type": "string",
+          "default": "saad",
+          "description": "The Saad compiler (saad.exe). The language server runs 'saad index' with it."
+        },
+        "saad.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "The language server, built with 'saad build lsp/main.sd'. Empty for lsp/build/out.exe next to the compiler."
+        },
+        "saad.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Shows the messages between VS Code and the language server in the Output panel."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "saad.restartServer",
+        "title": "Saad: Restart the language server"
+      }
+    ]
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

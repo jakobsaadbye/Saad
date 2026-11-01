@@ -1,0 +1,71 @@
+// Uses every kind of name, for 'saad index'. tools/linux/check_index.py checks that each name in this file is a declaration
+// or a use of one
+
+import fmt;
+import geometry;
+use game.physics;
+
+// A shape with a size
+Shape :: union {
+    circle: Circle;
+    square: f32;
+    empty;
+}
+
+Circle :: struct {
+    radius: f32 = 1.0;
+
+    area :: method () -> f32 {
+        return 3.0 * self.radius * self.radius;
+    }
+}
+
+Status :: enum { open, closed }
+
+Pair :: struct <T> {
+    first:  T;
+    second: T;
+}
+
+Count :: int;
+Limit :: 10;
+total := 0;
+
+swapped :: <T>(p: Pair<T>) -> Pair<T> {
+    return Pair<T>{first: p.second, second: p.first};
+}
+
+grow :: method (c: *Circle, by: f32) {
+    c.radius += by;
+}
+
+size :: (s: Shape) -> f32 {
+    return switch v in s {
+        case .circle => v.area();
+        case .square => v * v;
+        case .empty  => 0.0;
+    };
+}
+
+main :: () {
+    c := Circle{radius: 2.0};
+    c.grow(by: 1.0);
+    s := Shape{circle: c};
+    status := Status.open;
+    other: Status = .closed;
+    n: Count = Limit;
+    total += n;
+
+    p := Pair<int>{first: 1, second: 2};
+    q := swapped(p);
+    v := geometry.Vec2{3, 4};
+    w := geometry.add(v, geometry.Origin);
+
+    switch status {
+        case .open   { total += 1; }
+        case .closed { total += 2; }
+    }
+    assert(other == .closed);
+    assert(size(s) > 0.0 && q.first == 2 && w.x == 3 && total == 11);
+    fmt.print("%", drawnName(Body{}));
+}

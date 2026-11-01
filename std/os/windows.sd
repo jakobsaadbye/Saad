@@ -47,4 +47,46 @@ extern "C" {
     QueryPerformanceCounter   :: (lpPerformanceCount: *i64) -> bool;
     QueryPerformanceFrequency :: (lpFrequency: *i64) -> bool;
     GetSystemTimeAsFileTime   :: (lpSystemTimeAsFileTime: *u64);  // 100 nanosecond intervals since January 1, 1601 (UTC)
+
+    //
+    // Files and the standard streams
+    //
+    GetStdHandle :: (nStdHandle: u32) -> *void;  // StdInputHandle, StdOutputHandle or StdErrorHandle
+
+    ReadFile :: (
+        hFile:                *void,
+        lpBuffer:             *void,
+        nNumberOfBytesToRead:  u32,
+        lpNumberOfBytesRead:  *u32,
+        lpOverlapped:         *void  // NULL
+    ) -> bool;
+
+    WriteFile :: (
+        hFile:                  *void,
+        lpBuffer:               *void,
+        nNumberOfBytesToWrite:   u32,
+        lpNumberOfBytesWritten: *u32,
+        lpOverlapped:           *void  // NULL
+    ) -> bool;
+
+    // How many bytes a pipe has that are not read yet, without waiting for any
+    PeekNamedPipe :: (
+        hNamedPipe:             *void,
+        lpBuffer:               *void,  // NULL to only ask how many
+        nBufferSize:             u32,
+        lpBytesRead:            *u32,
+        lpTotalBytesAvail:      *u32,
+        lpBytesLeftThisMessage: *u32
+    ) -> bool;
+}
+
+// The DWORD values -10, -11 and -12 for GetStdHandle
+StdInputHandle  :: 4294967286;
+StdOutputHandle :: 4294967285;
+StdErrorHandle  :: 4294967284;
+
+// From the C runtime of Windows (msvcrt)
+extern "C" {
+    // The arguments the program was started with
+    __getmainargs :: (argc: *i32, argv: ***u8, env: ***u8, doWildcard: i32, startInfo: *i32) -> i32;
 }

@@ -1,0 +1,32 @@
+// A function of the program can have the name of a C function that the standard library uses, e.g exit or malloc.
+// The C function is still called by the standard library
+
+import fmt;
+
+calls := 0;
+
+exit :: () {
+    calls += 1;
+}
+
+malloc :: (n: int) -> int {
+    return n * 2;
+}
+
+free :: (n: int) -> int {
+    return n - 1;
+}
+
+main :: () {
+    exit();
+    assert(malloc(4) == 8 && free(3) == 2);
+
+    // List and fmt.sprint allocate with C's malloc and free
+    numbers: [..]int;
+    for i in 0..100 {
+        numbers.add(i);
+    }
+    text := fmt.sprint("% %", numbers.count, calls);
+    assert(text == "100 1");
+    numbers.free();
+}

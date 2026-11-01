@@ -1,0 +1,196 @@
+namespace source;
+
+// The text of files, file URIs, and positions.
+//
+// The compiler counts a character of a line as a byte of the UTF-8 text. Editors count UTF-16 code units, so a letter
+// like 'ø' is two characters for the compiler and one for the editor. Lines are the same for both
+
+import fmt;
+
+Slash     :: 47;
+Backslash :: 92;
+Colon     :: 58;
+Percent   :: 37;
+Newline   :: 10;
+
+// A text and where its lines start
+Text :: struct {
+    text:  string;
+    lines: [..]i64;  // The offset of the first byte of each line
+}
+
+newText :: (text: string) -> Text {
+    t: Text;
+    t.text = text;
+    t.lines.add(0);
+    for ch, i in text {
+        if ch == Newline {
+            t.lines.add(i + 1);
+        }
+    }
+    return t;
+}
+
+// The line without its "\n" or "\r\n". Empty for a line that isn't there. It is not a copy
+line :: method (t: *Text, n: int) -> string {
+    if n < 0 || n >= t.lines.count {
+        return "";
+    }
+    start := t.lines[n];
+    end   := t.text.len;
+    if n + 1 < t.lines.count {
+        end = t.lines[n + 1] - 1;
+    }
+    if end > start && t.text[end - 1] == 13 {
+        end -= 1;
+    }
+    s: string;
+    s.data = &t.text.data[start];
+    s.len  = end - start;
+    return s;
+}
+
+// The UTF-16 column of a byte column of the line
+toUtf16 :: (line: string, byteColumn: int) -> int {
+    column := 0;
+    i := 0;
+    while i < byteColumn && i < line.len {
+        ch := line[i];
+        size := utf8Size(ch);
+        column += 1;
+        if size == 4 {
+            column += 1;  // Outside the basic plane, it is two UTF-16 units
+        }
+        i += size;
+    }
+    if byteColumn > line.len {
+        column += byteColumn - line.len as int;
+    }
+    return column;
+}
+
+// The byte column of a UTF-16 column of the line
+toByte :: (line: string, utf16Column: int) -> int {
+    column := 0;
+    i := 0;
+    while column < utf16Column && i < line.len {
+        size := utf8Size(line[i]);
+        column += 1;
+        if size == 4 {
+            column += 1;
+        }
+        i += size;
+    }
+    return i as int;
+}
+
+@private
+utf8Size :: (lead: u8) -> int {
+    if lead < 128 { return 1; }  // ASCII
+    if lead >= 240 { return 4; }
+    if lead >= 224 { return 3; }
+    if lead >= 192 { return 2; }
+    return 1;                    // Not the start of a character
+}
+
+//
+// File URIs, e.g file:///home/ada/main.sd and file:///c%3A/Users/ada/main.sd
+//
+
+// The path of a file URI, e.g "c:/Users/ada/main.sd". Empty if it isn't a file URI
+pathOf :: (uri: string) -> string {
+    if !uri.startsWith("file://") {
+        return "";
+    }
+    rest := uri.slice(7);
+
+    sb := fmt.newStringBuilder(rest.len as int);
+    i := 0;
+    while i < rest.len {
+        ch := rest[i];
+        if ch == Percent && i + 2 < rest.len {
+            sb.addChar((hexValue(rest[i + 1]) * 16 + hexValue(rest[i + 2])) as u8);
+            i += 3;
+            continue;
+        }
+        sb.addChar(ch);
+        i += 1;
+    }
+    path := sb.toString();
+
+    // A Windows path is /c:/Users/..., without the first slash
+    if path.len >= 3 && path[0] == Slash && path[2] == Colon {
+        return path.slice(1);
+    }
+    return path;
+}
+
+// The file URI of a path
+uriOf :: (path: string) -> string {
+    sb := fmt.newStringBuilder(path.len as int + 16);
+    sb.addString("file://");
+    if path.len >= 2 && path[1] == Colon {
+        sb.addChar(Slash);  // file:///c:/...
+    }
+    for ch in path {
+        if ch == Backslash {
+            sb.addChar(Slash);
+        } else if isUriCharacter(ch) {
+            sb.addChar(ch);
+        } else {
+            sb.addChar(Percent);
+            sb.addString(hexDigit(ch / 16));
+            sb.addString(hexDigit(ch % 16));
+        }
+    }
+    return sb.toString();
+}
+
+// The same text for every way a path can be written, to compare paths with: '/' instead of '\', and a lowercase drive letter
+keyOf :: (path: string) -> string {
+    sb := fmt.newStringBuilder(path.len as int);
+    for ch, i in path {
+        if ch == Backslash {
+            sb.addChar(Slash);
+        } else if i == 0 && path.len >= 2 && path[1] == Colon && ch >= 65 && ch <= 90 {
+            sb.addChar(ch + 32);
+        } else {
+            sb.addChar(ch);
+        }
+    }
+    return sb.toString();
+}
+
+// The folder of a path, without the last '/'. Empty when there is none
+folderOf :: (path: string) -> string {
+    i := path.len - 1;
+    while i >= 0 {
+        if path[i] == Slash || path[i] == Backslash {
+            return path.slice(0, i as int);
+        }
+        i -= 1;
+    }
+    return "";
+}
+
+@private
+isUriCharacter :: (ch: u8) -> bool {
+    if ch >= 48 && ch <= 57  { return true; }  // 0-9
+    if ch >= 65 && ch <= 90  { return true; }  // A-Z
+    if ch >= 97 && ch <= 122 { return true; }  // a-z
+    return ch == Slash || ch == 45 || ch == 46 || ch == 95 || ch == 126 || ch == Colon;  // / - . _ ~ :
+}
+
+@private
+hexValue :: (ch: u8) -> int {
+    if ch >= 48 && ch <= 57  { return (ch - 48) as int; }
+    if ch >= 65 && ch <= 70  { return (ch - 55) as int; }
+    if ch >= 97 && ch <= 102 { return (ch - 87) as int; }
+    return 0;
+}
+
+@private
+hexDigit :: (n: u8) -> string {
+    digits := "0123456789ABCDEF";
+    return digits.slice(n as int, n as int + 1);
+}

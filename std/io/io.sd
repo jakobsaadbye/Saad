@@ -1,0 +1,156 @@
+namespace io;
+
+// Bytes on the standard streams, e.g for a program that another program talks to over its stdin and stdout
+//
+//     line, ok := io.readLine();
+//     body, ok := io.read(12);
+//     io.write("hello\n");
+//
+// The input is read in binary, so "\r\n" stays as it is. fmt.print writes through the C runtime, which has its own buffer,
+// so don't mix it with io.write on the same stream
+
+import os.windows;
+import fmt;
+use c;
+
+@private BufferSize :: 65536;
+@private Newline    :: 10;
+@private Return     :: 13;
+
+@private
+Input :: struct {
+    handle: *void;
+    buffer: *u8;
+    start:  i64;   // The first byte that isn't read yet
+    end:    i64;   // The end of the bytes in the buffer
+    ended:  bool;  // There is no more input
+}
+
+@private input: Input;
+
+// Reads a line, without its "\n" or "\r\n". ok is false when the input has ended and there was nothing left to read.
+// The line is allocated with malloc
+readLine :: () -> string, bool {
+    sb := fmt.newStringBuilder(64);
+    while true {
+        if input.start == input.end && !fill() {
+            break;
+        }
+
+        // The end of the line in the buffer, or the end of the buffer
+        i := input.start;
+        while i < input.end && input.buffer[i] != Newline {
+            i += 1;
+        }
+        sb.addString(bytes(input.start, i));
+
+        if i < input.end {
+            input.start = i + 1;
+            line := sb.toString();
+            if line.len > 0 && line[line.len - 1] == Return {
+                line.len -= 1;
+            }
+            return line, true;
+        }
+        input.start = input.end;
+    }
+
+    line := sb.toString();
+    return line, line.len > 0;
+}
+
+// Reads exactly count bytes. ok is false when the input ended before that, and then the text is what there was.
+// The text is allocated with malloc
+read :: (count: i64) -> string, bool {
+    text: string;
+    text.data = malloc(count + 1) as *u8;
+    text.len  = 0;
+    while text.len < count {
+        if input.start == input.end && !fill() {
+            return text, false;
+        }
+        n := input.end - input.start;
+        if n > count - text.len {
+            n = count - text.len;
+        }
+        memcpy(&text.data[text.len], &input.buffer[input.start], n);
+        text.len    += n;
+        input.start += n;
+    }
+    text.data[count] = 0;
+    return text, true;
+}
+
+// If there are bytes to read that have already arrived, so a read doesn't have to wait for them
+hasInput :: () -> bool {
+    if input.start < input.end {
+        return true;
+    }
+    if input.ended {
+        return false;
+    }
+    available: u32;
+    if !windows.PeekNamedPipe(stdinHandle(), null, 0, null, &available, null) {
+        return false;  // e.g the console instead of a pipe
+    }
+    return available > 0;
+}
+
+// Writes to the standard output, with nothing added. Returns false if it couldn't be written
+write :: (text: string) -> bool {
+    return writeTo(windows.StdOutputHandle, text);
+}
+
+// Writes to the standard error, e.g the log of a program whose standard output is read by another program
+writeError :: (text: string) -> bool {
+    return writeTo(windows.StdErrorHandle, text);
+}
+
+@private
+writeTo :: (stream: u32, text: string) -> bool {
+    handle := windows.GetStdHandle(stream);
+    done: i64 = 0;
+    while done < text.len {
+        written: u32;
+        if !windows.WriteFile(handle, &text.data[done], (text.len - done) as u32, &written, null) || written == 0 {
+            return false;
+        }
+        done += written;
+    }
+    return true;
+}
+
+@private
+stdinHandle :: () -> *void {
+    if input.handle == null {
+        input.handle = windows.GetStdHandle(windows.StdInputHandle);
+        input.buffer = malloc(BufferSize) as *u8;
+    }
+    return input.handle;
+}
+
+// Reads more input into the buffer. Returns false when the input has ended
+@private
+fill :: () -> bool {
+    handle := stdinHandle();
+    if input.ended {
+        return false;
+    }
+    read: u32;
+    if !windows.ReadFile(handle, input.buffer, BufferSize, &read, null) || read == 0 {
+        input.ended = true;
+        return false;
+    }
+    input.start = 0;
+    input.end   = read;
+    return true;
+}
+
+// The bytes from start to end of the buffer, as a string that isn't allocated
+@private
+bytes :: (start: i64, end: i64) -> string {
+    s: string;
+    s.data = &input.buffer[start];
+    s.len  = end - start;
+    return s;
+}

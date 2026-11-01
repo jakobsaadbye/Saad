@@ -39,6 +39,19 @@ main :: () {
         os.removeFile("build/std_os_big.txt");
     }
     {
+        // What a command writes, and its exit code
+        text, code := os.output("echo hello");
+        assert(code == 0);
+        assert(text.startsWith("hello"));
+
+        _, failed := os.output("exit 3");
+        assert(failed == 3);
+
+        // The program itself is the first argument
+        args := os.args();
+        assert(args.count >= 1 && args[0].len > 0);
+    }
+    {
         _, ok := os.getEnv("SAAD_SURELY_NOT_SET_VARIABLE");
         assert(!ok);
         assert(os.run("exit 3") != 0);

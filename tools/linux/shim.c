@@ -86,10 +86,31 @@ MS double ms_pow(double x, double y) { return pow(x, y); }     MS float ms_powf(
 MS long ms_lround(double x) { return lround(x); }
 MS long long ms_llround(double x) { return llround(x); }
 
+// Standard handles are the file descriptor + 1, so stdin isn't NULL
+#include <sys/ioctl.h>
+#include <sys/wait.h>
+static int fd_of(void *h) { return (int)(intptr_t) h - 1; }
+MS void *ms_GetStdHandle(uint32_t n) { int fd = n == (uint32_t)-10 ? 0 : n == (uint32_t)-11 ? 1 : 2; return (void *)(intptr_t)(fd + 1); }
+MS int ms_ReadFile(void *h, void *b, uint32_t n, uint32_t *got, void *o) { ssize_t r = read(fd_of(h), b, n); *got = r > 0 ? (uint32_t) r : 0; return r >= 0; }
+MS int ms_WriteFile(void *h, const void *b, uint32_t n, uint32_t *put, void *o) { fflush(stdout); ssize_t r = write(fd_of(h), b, n); *put = r > 0 ? (uint32_t) r : 0; return r >= 0; }
+MS int ms_PeekNamedPipe(void *h, void *b, uint32_t size, uint32_t *got, uint32_t *avail, uint32_t *left) {
+    int n = 0; if (ioctl(fd_of(h), FIONREAD, &n) < 0) return 0; if (avail) *avail = (uint32_t) n; return 1;
+}
+// cmd.exe /c removes the outer quotes of a command that starts with a quote, which std/os does on purpose
+MS FILE *ms__popen(const char *command, const char *mode) {
+    size_t n = strlen(command); char *c = strdup(command);
+    if (n >= 2 && c[0] == '"' && c[n - 1] == '"') { memmove(c, c + 1, n - 2); c[n - 2] = 0; }
+    fflush(stdout); FILE *f = popen(c, mode[0] == 'w' ? "w" : "r"); free(c); return f;
+}
+MS int ms__pclose(FILE *f) { int s = pclose(f); return WIFEXITED(s) ? WEXITSTATUS(s) : -1; }
+static int saved_argc; static char **saved_argv;
+extern char **environ;
+MS int ms___getmainargs(int *argc, char ***argv, char ***env, int wild, void *info) { *argc = saved_argc; *argv = saved_argv; *env = environ; return 0; }
+
 // ---- runtime_support.c ----
 MS void ms_runtime_builtin_assert(bool c, RawString f, uint64_t l) { fflush(stdout); runtime_builtin_assert(c, f, l); }
 MS int  ms_runtime_compare_strings(RawString *a, RawString *b) { return runtime_compare_strings(a, b); }
 
 // ---- entry ----
 MS int ms_main(void);
-int main(void) { int r = ms_main(); fflush(stdout); return r; }
+int main(int argc, char **argv) { saved_argc = argc; saved_argv = argv; int r = ms_main(); fflush(stdout); return r; }

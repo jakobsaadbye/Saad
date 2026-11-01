@@ -1,0 +1,92 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Saad",
+  "scopeName": "source.saad",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#attributes" },
+    { "include": "#declarations" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#calls" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.saad", "match": "//.*$" },
+        { "name": "comment.block.saad", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.saad",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        { "name": "constant.character.escape.saad", "match": "\\\\." },
+        { "name": "constant.other.placeholder.saad", "match": "%" }
+      ]
+    },
+    "attributes": {
+      "name": "entity.other.attribute-name.saad",
+      "match": "@[A-Za-z_][A-Za-z0-9_.]*"
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "comment": "name :: (..) or name :: method, a function",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*::\\s*(?=(method\\b|<[^>]*>\\s*\\(|\\())",
+          "captures": { "1": { "name": "entity.name.function.saad" } }
+        },
+        {
+          "comment": "Name :: struct, union or enum",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*::\\s*(struct|union|enum)\\b",
+          "captures": { "1": { "name": "entity.name.type.saad" }, "2": { "name": "keyword.declaration.saad" } }
+        },
+        {
+          "match": "\\b(namespace|import|use)\\s+([A-Za-z_][A-Za-z0-9_.]*)",
+          "captures": { "1": { "name": "keyword.other.saad" }, "2": { "name": "entity.name.namespace.saad" } }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        { "name": "keyword.control.saad", "match": "\\b(if|else|for|while|in|switch|case|return|break|continue)\\b" },
+        { "name": "keyword.declaration.saad", "match": "\\b(struct|union|enum|method|extern|namespace|import|use|as)\\b" },
+        { "name": "keyword.other.saad", "match": "\\b(new|assert|typeof|sizeof|xx)\\b" }
+      ]
+    },
+    "types": {
+      "patterns": [
+        { "name": "storage.type.primitive.saad", "match": "\\b(int|uint|float|char|bool|void|string|any|u8|u16|u32|u64|i8|i16|i32|i64|f32|f64)\\b" },
+        { "name": "entity.name.type.saad", "match": "\\b[A-Z][A-Za-z0-9_]*\\b" }
+      ]
+    },
+    "constants": {
+      "name": "constant.language.saad",
+      "match": "\\b(true|false|null|self)\\b"
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.saad", "match": "\\b0x[0-9A-Fa-f_]+\\b" },
+        { "name": "constant.numeric.binary.saad", "match": "\\b0b[01_]+\\b" },
+        { "name": "constant.numeric.saad", "match": "\\b[0-9][0-9_]*(\\.[0-9]+)?([eE][+-]?[0-9]+)?\\b" }
+      ]
+    },
+    "calls": {
+      "match": "\\b([a-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+      "captures": { "1": { "name": "entity.name.function.call.saad" } }
+    },
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.declaration.saad", "match": "::|:=" },
+        { "name": "keyword.operator.arrow.saad", "match": "->|=>" },
+        { "name": "keyword.operator.range.saad", "match": "\\.\\.\\.?" },
+        { "name": "keyword.operator.saad", "match": "==|!=|<=|>=|&&|\\|\\||<<|>>|[-+*/%=<>!&|^~]" }
+      ]
+    }
+  }
+}

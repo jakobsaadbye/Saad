@@ -8,6 +8,10 @@ the backend without a Windows machine.
 ./build.sh                                  # builds bin/saad
 tools/linux/run.sh tests/structs.sd         # compile + run one program
 tools/linux/runtests.sh                     # run the whole test suite
+tools/linux/build_lsp.sh                    # build the language server (lsp/) as build/linux/saad-lsp
+python3 tools/linux/check_lsp.py build/linux/saad-lsp   # talk to it like an editor
+python3 tools/linux/check_recovery.py       # one error for a mistake, and the index still has the rest
+python3 tools/linux/fuzz_recovery.py 1000 7 # 1000 broken programs (seed 7): no crash, always an index
 ```
 
 Requirements: `gcc` and `nasm`.

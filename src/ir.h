@@ -266,6 +266,7 @@ typedef struct IrGlobal {
     uint8_t      *data;      // 'size' bytes (DATA only)
     IrArray(IrReloc) relocs; // DATA only
     IrFunction   *function;  // FUNCTION only
+    bool          is_saad;   // A function of the program, not of C. It gives its name to a C function with the same name
 } IrGlobal;
 
 typedef struct IrModule {

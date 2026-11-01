@@ -123,6 +123,7 @@ typedef enum AstFlags {
     AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER           = 1 << 7, // Set on an array access on a pointer
     AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN        = 1 << 8, // Set on constant identifiers having a function as value
     AST_FLAG_IS_BEING_CHECKED                      = 1 << 9, // Set on a type alias while its type is resolved, to find aliases that refer to themselves
+    AST_FLAG_HAS_ERRORS                            = 1 << 10, // Type checking it failed. It isn't checked again, see check_declaration_of()
 } AstFlags;
 
 typedef struct Ast {
@@ -150,11 +151,14 @@ typedef struct AstFile {
     AstBlock    *scope;      // All exported declarations in this file e.g function definitions, struct definitions etc is contained here
     DynamicArray flattened_function_defns; // of AstFunctionDefn*. A list of all the functions found in this file, both at top-level or inner functions
     bool         is_parsed;
+    bool         has_syntax_errors; // Statements with syntax errors were skipped, see skip_failed_statement()
     bool         has_imported_builtin_string;
 
     Namespace   *ns;               // The namespace declared with 'namespace a.b;' at the top of the file, or NULL
     DynamicArray referenced_roots; // of char*. First names of qualified names e.g the 'math' in math.sin(x), so that their namespaces get loaded
     int          check_state;      // 0 not checked, 1 being checked, 2 checked. Files can use each other
+    Pos          ns_name_start; // The name in 'namespace a.b;', for an editor
+    Pos          ns_name_end;
 } AstFile;
 
 // A namespace e.g 'game.physics'. Any number of files, in any folders, can declare that they are in it with 'namespace game.physics;'
@@ -185,6 +189,8 @@ typedef struct AstImport {
     char      *alias; // The name after 'as', or NULL
     char      *name;  // IMPORT_NAME: the name of the declaration e.g "sin"
     Namespace *ns;    // The namespace, found when the files are loaded
+    Pos        path_start; // The dotted path e.g math.sin, for an editor
+    Pos        path_end;
 } AstImport;
 
 typedef struct AstExtern {
@@ -211,6 +217,7 @@ typedef enum IdentifierFlags {
     IDENTIFIER_IS_PRIVATE           = 1 << 13, // @private. Only visible inside its own namespace, or its own file if it has no namespace
     IDENTIFIER_IS_DEPRECATED        = 1 << 14, // @deprecated("message"). Using it gives a warning
     IDENTIFIER_IS_GLOBAL            = 1 << 15, // A variable at the top of a file e.g 'count := 0;'. It lives in the data of the program
+    IDENTIFIER_IS_POISONED          = 1 << 16, // Its declaration has errors. Using it fails without another error, so one mistake gives one error
 } IdentifierFlags;
 
 typedef struct AstIdentifier {
@@ -885,6 +892,8 @@ typedef struct CompilerConfig {
     CodegenBackend     backend;
     OptimizationLevel  optimization_level;
     bool               run_program;        // Run the executable after a successful build
+    bool               check_only;         // Stop after type checking: 'saad check'
+    bool               json;               // Write the diagnostics as JSON: 'saad check --json'
 } CompilerConfig;
 
 typedef struct Relocation {

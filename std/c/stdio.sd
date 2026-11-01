@@ -19,6 +19,11 @@ extern "C" {
     fseek   :: (file: *void, offset: i32, origin: int) -> int;
     ftell   :: (file: *void) -> i32;
 
+    // Runs a command and gives a FILE to read its output from (mode "rb"), or to write its input to (mode "wb").
+    // _pclose waits for it to end and returns its exit code. These are the Windows names of popen and pclose
+    _popen  :: (command: *u8, mode: *u8) -> *void;
+    _pclose :: (file: *void) -> int;
+
     remove  :: (path: *u8) -> int;
     rename  :: (oldPath: *u8, newPath: *u8) -> int;
 }

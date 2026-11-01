@@ -2511,7 +2511,9 @@ static int function_global(Lowerer *L, AstFunctionDefn *func_defn) {
             if (!taken) break;
             snprintf(unique, sizeof(unique), "%s__%d", name, n);
         }
-        global = ir_global_new(L->module, IR_GLOBAL_EXTERN, unique)->index; // Becomes a FUNCTION when lowered
+        IrGlobal *g = ir_global_new(L->module, IR_GLOBAL_EXTERN, unique); // Becomes a FUNCTION when lowered
+        g->is_saad = true;
+        global = g->index;
         ir_array_push(pending_functions.list, func_defn);
     }
 

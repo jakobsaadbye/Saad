@@ -1,0 +1,7 @@
+// expect-error: Only declarations can be at the top of a file
+
+main :: () {
+}
+
+for i in 0..3 {
+}

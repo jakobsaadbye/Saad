@@ -185,6 +185,8 @@ typedef struct Lexer {
     int char_idx;
     int line_number;
     int col;
+
+    bool had_errors; // Characters were skipped
 } Lexer;
 
 typedef struct KeywordMatch {
@@ -221,6 +223,26 @@ bool is_unary_operator(TokenType op);
 bool is_digit(char c);
 char *text_bold(char *text);
 void report_error_here(Lexer *lexer, const char *message, ...);
+// Every error, warning, note and hint that is reported, in order. A note or a hint belongs to the error or warning before it.
+// The compiler prints them as they are reported, and 'saad check --json' writes them as data, e.g for an editor
+typedef struct Diagnostic {
+    const char *label;     // LABEL_ERROR, LABEL_WARNING, LABEL_NOTE or LABEL_HINT
+    char       *file_path;
+    Pos         start;     // line and col count from 1. A line of -1 means there is no position
+    Pos         end;
+    char       *message;
+} Diagnostic;
+
+typedef struct Diagnostics {
+    int  muted;  // While above 0, nothing is reported, e.g when a generic is parsed again, as it was reported the first time
+    bool        print;     // Print them as they are reported (the default)
+    Diagnostic *items;
+    int         count;
+    int         capacity;
+} Diagnostics;
+
+extern Diagnostics diagnostics;
+
 void report_error_helper(char *file_path, char *file_text, const char* label, Pos start, Pos end, const char *template, va_list args);
 Line get_line(char *input_str, int line_num);
 void free_line(Line line);

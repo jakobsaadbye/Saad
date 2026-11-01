@@ -1,0 +1,183 @@
+namespace project;
+
+// A program that the server knows: its main file, and what 'saad index' says about it (docs/lsp.md)
+
+import json;
+import os;
+import fmt;
+import rpc;
+import source;
+
+//
+// What 'saad index' writes. Lines and characters count from 0, and a character is a byte of the line
+//
+
+Position :: struct {
+    line:      int;
+    character: int;
+}
+
+Range :: struct {
+    start: Position;
+    end:   Position;
+}
+
+Symbol :: struct {
+    id:        int;
+    name:      string;
+    kind:      string;     // e.g "function", "struct" or "field"
+    file:      int;        // In files
+    nameRange: Range;
+    range:     Range;
+    detail:    string;     // The signature or the type
+    container: int = -1;   // The symbol it is in, e.g the struct of a field
+    doc:       string;
+}
+
+Reference :: struct {
+    file:   int;
+    range:  Range;
+    symbol: int;
+}
+
+Related :: struct {
+    file:    string;
+    range:   Range;
+    message: string;
+}
+
+Diagnostic :: struct {
+    file:     string;
+    range:    Range;
+    severity: int;
+    message:  string;
+    related:  [..]Related;
+}
+
+Index :: struct {
+    version:     int;
+    success:     bool;
+    symbols:     [..]Symbol;
+    references:  [..]Reference;
+    files:       [..]string;
+    diagnostics: [..]Diagnostic;
+}
+
+Project :: struct {
+    root:       string;      // The path of the main file
+    index:      Index;
+    keys:       [..]string;  // source.keyOf() of each file of the index
+    generation: int = -1;    // The generation of the documents it was indexed at
+    published:  [..]string;  // The files it has sent diagnostics for, as keys
+}
+
+// Runs 'saad index' on the main file. overlays are the --overlay options for the text the editor hasn't saved.
+// Returns false if the compiler couldn't be run or didn't write an index
+run :: method (p: *Project, compiler: string, overlays: string) -> bool {
+    command := fmt.sprint("\"%\" index \"%\"%", compiler, p.root, overlays);
+    text, code := os.output(command);
+    if text.len == 0 {
+        rpc.log(fmt.sprint("Couldn't run the compiler (exit code %): %", code, command));
+        return false;
+    }
+
+    index: Index;
+    err := json.decode(text, &index);
+    text.free();
+    if err != "" {
+        rpc.log(fmt.sprint("The compiler didn't write an index for %: %", p.root, err));
+        return false;
+    }
+
+    p.index.free();
+    p.index = index;
+
+    p.keys.clear();
+    for file in p.index.files {
+        p.keys.add(source.keyOf(file));
+    }
+    return true;
+}
+
+// The number of the file in the index, or -1
+fileNumber :: method (p: *Project, key: string) -> int {
+    for k, i in p.keys {
+        if k == key {
+            return i as int;
+        }
+    }
+    return -1;
+}
+
+symbol :: method (p: *Project, id: int) -> *Symbol {
+    if id < 0 || id >= p.index.symbols.count {
+        return null;
+    }
+    return &p.index.symbols[id];
+}
+
+// The symbol of the name at the position: a use of it, or its declaration. -1 when there is no name there
+symbolAt :: method (p: *Project, file: int, at: Position) -> int {
+    // A cursor right after a name is also on it, but a name that starts there comes first
+    for pass in 0..2 {
+        inclusive := pass == 1;
+        for ref in p.index.references {
+            if ref.file == file && contains(ref.range, at, inclusive) {
+                return ref.symbol;
+            }
+        }
+        for sym in p.index.symbols {
+            if sym.file == file && contains(sym.nameRange, at, inclusive) {
+                return sym.id;
+            }
+        }
+    }
+    return -1;
+}
+
+contains :: (r: Range, at: Position, inclusive: bool) -> bool {
+    if at.line < r.start.line || at.line > r.end.line {
+        return false;
+    }
+    if at.line == r.start.line && at.character < r.start.character {
+        return false;
+    }
+    if at.line == r.end.line {
+        if inclusive {
+            return at.character <= r.end.character;
+        }
+        return at.character < r.end.character;
+    }
+    return true;
+}
+
+// Symbols that are only seen inside a function
+isLocal :: (kind: string) -> bool {
+    return kind == "variable" || kind == "parameter" || kind == "typeParameter";
+}
+
+@private
+free :: method (index: *Index) {
+    for sym in index.symbols {
+        sym.name.free();
+        sym.kind.free();
+        sym.detail.free();
+        sym.doc.free();
+    }
+    for file in index.files {
+        file.free();
+    }
+    for d in index.diagnostics {
+        d.file.free();
+        d.message.free();
+        for r in d.related {
+            r.file.free();
+            r.message.free();
+        }
+        d.related.free();
+    }
+    index.symbols.free();
+    index.references.free();
+    index.files.free();
+    index.diagnostics.free();
+}
