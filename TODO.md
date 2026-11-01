@@ -68,6 +68,9 @@ Future development
   [] Map.remove in O(1) while keeping the order (tombstones)
   [] Decide on implicit narrowing of arguments and return values (i64 to i32 is allowed today)
 
+* Errors
+  [] try / catch, e.g for the errors that the functions of dbms give as their last value
+
 * Optionals (see docs/optionals.md)
   [x] ?T, hasValue / value / valueOr, ??, ?. on optionals and pointers, == null and == value
   [x] fmt, json and db read and write them, tryGet / tryFirst / tryLast / find give them

@@ -1,0 +1,218 @@
+namespace dbms;
+
+// A unit of work: the changes of the tables that use the context are kept until saveChanges writes all of them, in one
+// transaction, e.g
+//
+//     db := database.open(&conn);          // a Database embeds its *dbms.Context
+//
+//     ada := User{name: "Ada"};
+//     db.users.create(&ada);               // nothing is sent yet
+//     bo, err := db.users.get(2);          // reads go to the database at once
+//     bo.email = "bo@example.com";
+//     db.users.update(bo);
+//     db.categories.delete("books");
+//
+//     err2 := db.saveChanges();            // BEGIN, the 3 statements in the order they were made, COMMIT
+//     print("%", ada.id);                  // what the database made, e.g the id, is written back into ada
+//
+// The rows given to create and update are read when saveChanges runs, so they must still be there then
+
+import fmt;
+use c;
+
+Context :: struct {
+    conn:    *Connection;
+    changes: [..]Change;    // In the order they were made
+}
+
+ChangeKind :: enum { create, update, delete }
+
+// A change that saveChanges will write
+Change :: struct {
+    kind:  ChangeKind;
+    table: TableInfo;
+    row:   *void;   // The row of a create or an update
+    key:   any;     // The key of a delete
+}
+
+// What a change needs to know about its table
+TableInfo :: struct {
+    name:      string;
+    schema:    string;
+    key:       string;
+    generated: [..]string;
+    type:      *TypeStruct;   // Of the rows
+}
+
+// A context for the connection, made with its allocator
+newContext :: (conn: *Connection) -> *Context {
+    context := resizeMemory(conn.allocator, null, sizeof(Context)) as *Context;
+    memset(context, 0, sizeof(Context));
+    context.conn = conn;
+    context.changes.allocator = conn.allocator;
+    return context;
+}
+
+// The number of changes that are not saved yet
+pendingChanges :: method (context: *Context) -> i64 {
+    return context.changes.count;
+}
+
+// Forgets the changes that are not saved yet
+discardChanges :: method (context: *Context) {
+    context.changes.clear();
+}
+
+// Writes all the changes, in the order they were made, in one transaction. When one of them fails, none of them are
+// written, the error says which one, and the changes are kept so that they can be fixed and saved again.
+// After the commit, what the database made for the created rows (e.g serial ids and defaults of now()) is in them
+saveChanges :: method (context: *Context) -> string {
+    if context.changes.count == 0 {
+        return "";
+    }
+    conn := context.conn;
+    err := conn.begin();
+    if err != "" {
+        return err;
+    }
+
+    // The created rows as the database stored them, copied into the rows after the commit
+    stored: [..]StoredRow;
+    failed := "";
+    for change, i in context.changes {
+        e := context.apply(change, &stored);
+        if e != "" {
+            failed = fmt.sprint("% in % (change % of %): %", kindName(change.kind), change.table.name, i + 1, context.changes.count, e);
+            break;
+        }
+    }
+
+    if failed == "" {
+        failed = conn.commit();
+    }
+    if failed != "" {
+        conn.rollback();
+        stored.free();
+        return failed;
+    }
+
+    for s in stored {
+        memcpy(s.row, s.copy, s.size);
+    }
+    stored.free();
+    context.changes.clear();
+    return "";
+}
+
+// Records a change. The tables do, e.g create of a dbms.Table
+record :: method (context: *Context, kind: ChangeKind, table: TableInfo, row: *void, key: any) {
+    context.changes.add(Change{kind: kind, table: table, row: row, key: key});
+}
+
+@private
+StoredRow :: struct {
+    row:  *void;
+    copy: *void;
+    size: int;
+}
+
+@private
+kindName :: (kind: ChangeKind) -> string {
+    return switch kind {
+        case .create => "create";
+        case .update => "update";
+        case .delete => "delete";
+    };
+}
+
+@private
+apply :: method (context: *Context, change: Change, stored: *[..]StoredRow) -> string {
+    conn  := context.conn;
+    table := change.table;
+    type  := table.type;
+    name  := qualifiedName(table.schema, table.name);
+
+    switch change.kind {
+        case .create {
+            columns := columnsOf(type, table.generated, "");
+            args: [..]any;
+            names: fmt.StringBuilder;
+            values: fmt.StringBuilder;
+            for column in columns {
+                if column.generated { continue; }
+                if args.count > 0 {
+                    names.addString(", ");
+                    values.addString(", ");
+                }
+                args.add(valueOf(column, change.row));
+                names.addString(quoted(column.name));
+                values.add("$%", args.count);
+            }
+            sql := "";
+            if args.count == 0 { sql = fmt.sprint("INSERT INTO % DEFAULT VALUES RETURNING *", name); }
+            else               { sql = fmt.sprint("INSERT INTO % (%) VALUES (%) RETURNING *", name, names.toString(), values.toString()); }
+
+            result, err := conn.run(sql, ...args.elements());
+            names.free();
+            values.free();
+            args.free();
+            columns.free();
+            if err != "" { return err; }
+
+            // The row as it was stored, read into a copy of the row, so that members without a column keep their value
+            size := type.head.size;
+            copy := resizeMemory(conn.allocator, null, size as i64);
+            memcpy(copy, change.row, size);
+            readColumns := conn.columnsOf(result, type);
+            err = conn.readRow(result, 0, copy, type, readColumns);
+            readColumns.free();
+            conn.driver.freeResult(result);
+            if err != "" { return err; }
+            stored.add(StoredRow{row: change.row, copy: copy, size: size});
+            return "";
+        }
+        case .update {
+            columns := columnsOf(type, table.generated, table.key);
+            keyColumn, hasKey := keyOf(columns);
+            if !hasKey {
+                columns.free();
+                return fmt.sprint("The row has no member for the key %", table.key);
+            }
+            args: [..]any;
+            sb: fmt.StringBuilder;
+            sb.add("UPDATE % SET ", name);
+            for column in columns {
+                if column.generated || column.key { continue; }
+                if args.count > 0 { sb.addString(", "); }
+                args.add(valueOf(column, change.row));
+                sb.add("% = $%", quoted(column.name), args.count);
+            }
+            if args.count == 0 {
+                sb.free();
+                args.free();
+                columns.free();
+                return "";
+            }
+            key := valueOf(keyColumn, change.row);
+            args.add(key);
+            sb.add(" WHERE % = $%", quoted(table.key), args.count);
+
+            changed, err := conn.exec(sb.toString(), ...args.elements());
+            sb.free();
+            args.free();
+            columns.free();
+            if err != "" { return err; }
+            if changed == 0 { return fmt.sprint("No row has the key %", key); }
+            return "";
+        }
+        case .delete {
+            sql := fmt.sprint("DELETE FROM % WHERE % = $1", name, quoted(table.key));
+            removed, err := conn.exec(sql, change.key);
+            sql.free();
+            if err != "" { return err; }
+            if removed == 0 { return fmt.sprint("No row has the key %", change.key); }
+            return "";
+        }
+    }
+    return "";
+}

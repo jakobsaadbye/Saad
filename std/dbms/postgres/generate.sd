@@ -291,15 +291,25 @@ databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]Generate
     sb.addLine(", database.sd");
     sb.addLine("");
 
-    sb.addLine("// The tables of the schema %, e.g", w.options.schema);
+    // The context of the changes, unless a table has its name
+    context := "context";
+    for table in tables {
+        if camelCase(table.name) == context { context = "dbContext"; }
+    }
+
+    sb.addLine("// The tables of the schema %, and the changes to them, which saveChanges writes in one transaction, e.g", w.options.schema);
     sb.addLine("//");
     sb.addLine("//     db := %.open(&conn);", w.options.database);
     if tables.count > 0 {
         sb.addLine("//     rows, err := db.%.all();", camelCase(tables[0].name));
+        sb.addLine("//     db.%.create(&row);", camelCase(tables[0].name));
     }
+    sb.addLine("//     err2 := db.saveChanges();");
     sb.addLine("Database :: struct {");
     width := 0;
     for table in tables { width = atLeast(width, camelCase(table.name).len as int); }
+    sb.addLine("    @embed %: *dbms.Context;", context);
+    if tables.count > 0 { sb.addLine(""); }
     for table in tables {
         name := camelCase(table.name);
         sb.add("    %:", name);
@@ -312,14 +322,15 @@ databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]Generate
     sb.addLine("// The tables on the connection");
     sb.addLine("open :: (conn: *dbms.Connection) -> Database {");
     sb.addLine("    tables: Database;");
+    sb.addLine("    tables.% = dbms.newContext(conn);", context);
     for table in tables {
         name := camelCase(table.name);
         sb.add("    tables.%.table", name);
         sb.addRepeated(' ', width - name.len as int);
         if table.key.len > 0 {
-            sb.add(" = dbms.keyedTable<%, %>(conn, %, %", rowTypeName(table.name), w.keyTypeOf(table), saadString(table.name), saadString(table.key));
+            sb.add(" = dbms.keyedTable<%, %>(tables.%, %, %", rowTypeName(table.name), w.keyTypeOf(table), context, saadString(table.name), saadString(table.key));
         } else {
-            sb.add(" = dbms.table<%>(conn, %", rowTypeName(table.name), saadString(table.name));
+            sb.add(" = dbms.table<%>(tables.%, %", rowTypeName(table.name), context, saadString(table.name));
         }
         if w.options.schema != "public" {
             sb.add(", schema: %", saadString(w.options.schema));
@@ -344,9 +355,9 @@ databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]Generate
     for table in tables {
         sb.addLine("");
         if w.keyTypeOf(table).len > 0 {
-            sb.addLine("// The rows of %: all, get, insert, update, delete and count of dbms.KeyedTable", table.name);
+            sb.addLine("// The rows of %: all, get, count, and create, update and delete of dbms.KeyedTable", table.name);
         } else {
-            sb.addLine("// The rows of %: all, insert and count of dbms.Table. It has no key of one column, so no get, update and delete", table.name);
+            sb.addLine("// The rows of %: all, count and create of dbms.Table. It has no key of one column, so no get, update and delete", table.name);
         }
         sb.addLine("% :: struct {", tableTypeName(table.name));
         sb.addLine("    @embed table: %;", w.tableTypeOf(table));
