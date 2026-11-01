@@ -265,6 +265,30 @@ static void skip_failed_statement(Parser *parser, ParserState *state, bool top_l
     parser->reparse_self_struct     = state->reparse_self_struct;
     parser->split_shift_right_token = 0;
 
+    // The error is on a later line, which starts like a statement of its own: the statement before it isn't whole, e.g
+    // 'x := size(.' on the line above 'p := Pair{...};'. It ends at the end of its line, so the next one is still parsed
+    Token *all = (Token *)parser->lexer->tokens.items;
+    if (!top_level && failed_at < parser->lexer->tokens.count && all[failed_at].start.line > all[state->token_index].start.line) {
+        int first = failed_at;
+        while (first > state->token_index && all[first - 1].start.line == all[failed_at].start.line) first--;
+
+        int braces = 0; // A line inside a block of the statement is part of it
+        for (int i = state->token_index; i < first; i++) {
+            if (all[i].type == '{') braces++;
+            if (all[i].type == '}') braces--;
+        }
+        Token head = all[first];
+        Token after = first + 1 < parser->lexer->tokens.count ? all[first + 1] : (Token){0};
+        bool starts_statement = head.type == TOKEN_IF || head.type == TOKEN_FOR || head.type == TOKEN_WHILE || head.type == TOKEN_RETURN ||
+                                head.type == TOKEN_SWITCH || head.type == TOKEN_BREAK || head.type == TOKEN_CONTINUE ||
+                                (head.type == TOKEN_LITERAL_IDENTIFIER && (after.type == TOKEN_COLON_EQUAL || after.type == ':' ||
+                                 after.type == TOKEN_DOUBLE_COLON || after.type == '(' || is_assignment_operator(after)));
+        if (first > state->token_index && braces == 0 && starts_statement) {
+            parser->current_token_index = first;
+            return;
+        }
+    }
+
     // Only braces count: a statement can't end inside a '(' or '[', but one that is missing a ')' ends at its ';'
     parser->current_token_index = state->token_index;
     int depth = 0;
@@ -692,6 +716,13 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
     expect(parser, start_token, '{');
     eat_token(parser);
 
+    // Until its '}' is found, a block goes to the end of the file, so the scope at a position is known also when the
+    // '}' is missing (see 'saad complete')
+    Token *tokens = (Token *)parser->lexer->tokens.items;
+    block->head.file  = parser->current_file;
+    block->head.start = start_token.start;
+    block->head.end   = tokens[parser->lexer->tokens.count - 1].end;
+
     // A statement with a syntax error is skipped, see skip_failed_statement()
     jmp_buf  on_syntax_error;
     jmp_buf *outer_syntax_error = parser->syntax_error;
@@ -702,7 +733,19 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
     Token next;
     while (true) {
         next = peek_next_token(parser);
-        if (next.type == '}' || next.type == TOKEN_END) break;
+        if (next.type == '}') break;
+
+        // The file ended, so the '}' is missing. The block ends there, and the blocks it is in too, with one error
+        if (next.type == TOKEN_END) {
+            if (!recovers) break;
+            if (!parser->current_file->reported_missing_close) {
+                report_error_token(parser, LABEL_ERROR, start_token, "Syntax Error: This '{' has no '}'");
+                parser->current_file->reported_missing_close = true;
+            }
+            parser->current_file->has_syntax_errors = true;
+            missing_close = true;
+            break;
+        }
 
         // A declaration at the start of a line is at the top of the file, so the '}' of this block is missing
         if (recovers && !parser->inside_extern_block && starts_top_level_declaration(parser, 0)) {

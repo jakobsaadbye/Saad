@@ -108,6 +108,7 @@ CompletionItem :: struct {
     kind:   string;   // e.g "field", "method" or "keyword"
     detail: string;
     doc:    string;
+    insert: string;   // The text to write instead of the label, e.g "radius: " for a field of a struct literal
 }
 
 Signature :: struct {

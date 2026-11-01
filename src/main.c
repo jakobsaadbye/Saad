@@ -63,7 +63,8 @@ bool parse_options(CompilerConfig *config, int argc, char const *argv[], int fir
                 return false;
             }
             *middle = '\0';
-            program_completion.path      = at;
+            char *absolute = get_absolute_path(at); // Now, as the compiler changes its directory to the one of the main file
+            program_completion.path      = absolute ? absolute : at;
             program_completion.line      = atoi(middle + 1);
             program_completion.character = atoi(last + 1);
             i++;

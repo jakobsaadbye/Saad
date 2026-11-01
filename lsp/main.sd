@@ -778,6 +778,9 @@ completion :: (m: rpc.Message) {
         if item.doc != "" {
             sb.addString(fmt.sprint(",\"documentation\":{\"kind\":\"markdown\",\"value\":%}", json.encode(item.doc)));
         }
+        if item.insert != "" {
+            sb.addString(fmt.sprint(",\"insertText\":%", json.encode(item.insert)));
+        }
         // Keywords after the names of the program
         if item.kind == "keyword" {
             sb.addString(fmt.sprint(",\"sortText\":%", json.encode(fmt.sprint("~%", item.label))));
