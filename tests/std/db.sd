@@ -1,0 +1,152 @@
+// std/db without a database: a driver of its own that answers every query with the same table.
+// tests/db/postgres.sd tests the Postgres driver with a server
+
+import db;
+import mem;
+use fmt;
+use c;
+
+Status :: enum { draft, published }
+
+Post :: struct {
+    id:       i64;
+    title:    string;
+    likes:    u16;
+    rating:   f32;
+    status:   Status;
+    authorId: *i64;                      // author_id can be NULL
+    @db.Column(name: "body_text") body: string;
+    @db.Column(skip: true) title_upper: string;
+    missing: int = 42;
+}
+
+// The table of the fake database. Null is NULL
+Table :: struct {
+    columns: []string;
+    cells:   []*u8;      // Row after row
+    lastSql: string;
+    lastParams: [..]string;
+}
+
+fakeExecute :: (conn: *void, sql: *u8, params: []*u8, err: *string) -> *void {
+    table := conn as *Table;
+    table.lastSql = fromCString(sql).copy();
+    table.lastParams.clear();
+    for p in params {
+        if p == null { table.lastParams.add("NULL"); }
+        else         { table.lastParams.add(fromCString(p).copy()); }
+    }
+    if table.lastSql == "fail" {
+        *err = "ERROR: it failed";
+        return null;
+    }
+    return table;
+}
+fakeRowCount    :: (result: *void) -> i64 { t := result as *Table; return t.cells.count / t.columns.count; }
+fakeColumnCount :: (result: *void) -> i64 { return (result as *Table).columns.count; }
+fakeColumnName  :: (result: *void, column: i64) -> *u8 { return (result as *Table).columns[column].data; }
+fakeValue       :: (result: *void, row: i64, column: i64) -> *u8 { t := result as *Table; return t.cells[row * t.columns.count + column]; }
+fakeAffected    :: (result: *void) -> i64 { return 3; }
+fakeFreeResult  :: (result: *void) {}
+fakeClose       :: (conn: *void) {}
+
+main :: () {
+    columns := ["id", "title", "likes", "rating", "status", "author_id", "body_text", "title_upper", "extra"];
+    cells: [..]*u8;
+    for v in ["1", "Hello", "65535", "4.5", "published", "7", "First post", "IGNORED", "x"] { cells.add(v.data); }
+    for v in ["2", "Draft", "0", "-1", "0", "", "", "IGNORED", "y"] { cells.add(v.data); }
+    cells[14] = null; // author_id of row 2 is NULL
+
+    table := Table{columns: columns, cells: cells.elements()};
+
+    driver: db.Driver;
+    driver.name        = "fake";
+    driver.execute     = fakeExecute;
+    driver.rowCount    = fakeRowCount;
+    driver.columnCount = fakeColumnCount;
+    driver.columnName  = fakeColumnName;
+    driver.value       = fakeValue;
+    driver.affected    = fakeAffected;
+    driver.freeResult  = fakeFreeResult;
+    driver.close       = fakeClose;
+
+    conn := db.Connection{driver: &driver, handle: &table};
+
+    posts: [..]Post;
+    err := conn.query(&posts, "SELECT * FROM posts");
+    assert(err == "");
+    assert(table.lastSql == "SELECT * FROM posts");
+    assert(posts.count == 2);
+
+    first := posts[0];
+    assert(first.id == 1 && first.title == "Hello" && first.likes == 65535 && first.rating == 4.5);
+    assert(first.status == .published);
+    assert(first.authorId != null && *first.authorId == 7);
+    assert(first.body == "First post");
+    assert(first.title_upper == "");     // Skipped
+    assert(first.missing == 42);         // No column
+
+    second := posts[1];
+    assert(second.status == .draft);     // From its number
+    assert(second.authorId == null);
+    assert(second.rating == -1.0 && second.body == "");
+
+    // Parameters as text
+    tag := "news";
+    noTag: *string = null;
+    changed, e1 := conn.exec("UPDATE", 42, -7 as i8, 2.5, true, Status.published, "text", &tag, noTag, 'c');
+    assert(e1 == "" && changed == 3);
+    assert(table.lastParams.count == 9);
+    assert(table.lastParams[0] == "42" && table.lastParams[1] == "-7" && table.lastParams[2] == "2.5");
+    assert(table.lastParams[3] == "true" && table.lastParams[4] == "published" && table.lastParams[5] == "text");
+    assert(table.lastParams[6] == "news" && table.lastParams[7] == "NULL" && table.lastParams[8] == "c");
+
+    point := Post{};
+    _, e2 := conn.exec("UPDATE", point);
+    assert(e2 == "Parameter $1 can't be a Post");
+
+    // Errors of the driver and of reading
+    _, e3 := conn.exec("fail");
+    assert(e3 == "ERROR: it failed");
+
+    table.cells[2] = "65536".data;       // Too big for a u16
+    tooBig: [..]Post;
+    e4 := conn.query(&tooBig, "SELECT");
+    assert(e4 == "Row 1: likes: 65536 doesn't fit in a u16");
+    table.cells[2] = "65535".data;
+
+    table.cells[4] = "deleted".data;
+    badEnum: [..]Post;
+    e5 := conn.query(&badEnum, "SELECT");
+    assert(e5 == "Row 1: status: 'deleted' is not a value of Status");
+    table.cells[4] = "Published".data;   // Case doesn't matter
+
+    numbers: [..]int;
+    e6 := conn.query(&numbers, "SELECT");
+    assert(e6 == "Rows are read into structs, not into values of type int");
+
+    // One row and one value
+    one: Post;
+    found, e7 := conn.queryOne(&one, "SELECT");
+    assert(found && e7 == "" && one.title == "Hello" && one.status == .published);
+    id: i64 = 0;
+    hasId, e8 := conn.queryOne(&id, "SELECT");
+    assert(hasId && e8 == "" && id == 1);
+
+    // Memory from an arena
+    arena: mem.Arena;
+    alloc := arena.allocator();
+    conn.allocator = &alloc;
+    fromArena: [..]Post;
+    e9 := conn.query(&fromArena, "SELECT");
+    assert(e9 == "" && fromArena.count == 2 && fromArena.allocator == &alloc);
+    assert(fromArena[0].title == "Hello" && *fromArena[0].authorId == 7);
+    assert(arena.used() > 0);
+    arena.free();
+
+    conn.close();
+    _, e10 := conn.exec("SELECT");
+    assert(e10 == "The connection is closed");
+
+    print("db ok");
+}

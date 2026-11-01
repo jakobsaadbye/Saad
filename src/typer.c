@@ -6035,7 +6035,7 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
         elem_type = ptr->pointer_to;
     }
 
-    Type *index_expr_type = check_expression(typer, array_ac->index_expr, primitive_type(PRIMITIVE_U32));
+    Type *index_expr_type = check_expression(typer, array_ac->index_expr, primitive_type(PRIMITIVE_I64));
     if (!index_expr_type) return NULL;
 
     if (index_expr_type->kind != TYPE_INTEGER && index_expr_type->kind != TYPE_ENUM) {
