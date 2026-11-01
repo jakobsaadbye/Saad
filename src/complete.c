@@ -495,9 +495,8 @@ static void write_signature(AstIdentifier *ident, AstFunctionDefn *func, bool sk
     int shown = 0;
     for (int i = first; i < func->parameters.count; i++) {
         AstIdentifier *param = ((AstIdentifier **)func->parameters.items)[i];
-        char *text = param->type ? (char *)type_to_str(param->type) : "";
         StringBuilder one = sb_init(64);
-        sb_append(&one, "%s: %s", param->name, text);
+        sb_append(&one, "%s", parameter_text(param));
         if (shown > 0) {
             sb_append(&label, ", ");
             sb_append(&params, ", ");

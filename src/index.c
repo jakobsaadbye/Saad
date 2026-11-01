@@ -149,6 +149,39 @@ static const char *kind_of(AstIdentifier *ident) {
 }
 
 // e.g "<T>(xs: []T, x: T) -> int"
+// The text of a node as it is written in its file
+static char *source_text(Ast *node) {
+    if (!node || !node->file || !node->file->text) return NULL;
+    int start = node->start.input_idx;
+    int end   = node->end.input_idx;
+    if (end <= start || end - start > 200) return NULL;
+    char *text = calloc(end - start + 1, 1);
+    memcpy(text, &node->file->text[start], end - start);
+    return text;
+}
+
+// A parameter as it is written: 'by: f32', 'newline: bool = true', or 'options := Options{}' when its type comes from its
+// default value and isn't known, e.g in a generic function, which is checked for each set of type arguments
+char *parameter_text(AstIdentifier *param) {
+    StringBuilder sb = sb_init(64);
+    AstExpr *value = NULL;
+    if (param->decl && param->decl->values.count > 0) value = ((AstExpr **)param->decl->values.items)[0];
+    char *value_text = value ? source_text((Ast *)value) : NULL;
+
+    bool known = param->type && param->type->kind != TYPE_NAME;
+    if (known) {
+        sb_append(&sb, "%s: %s", param->name, type_to_str(param->type));
+        if (value_text) sb_append(&sb, " = %s", value_text);
+    } else if (value_text) {
+        sb_append(&sb, "%s := %s", param->name, value_text);
+    } else if (param->decl && param->decl->type && param->decl->type->kind == TYPE_NAME) {
+        sb_append(&sb, "%s: %s", param->name, type_to_str(param->decl->type)); // e.g a type parameter T
+    } else {
+        sb_append(&sb, "%s", param->name);
+    }
+    return sb_to_string(&sb);
+}
+
 static char *signature_of(AstFunctionDefn *func) {
     StringBuilder sb = sb_init(64);
     if (func->is_method) sb_append(&sb, "method ");
@@ -164,7 +197,7 @@ static char *signature_of(AstFunctionDefn *func) {
     for (int i = 0; i < func->parameters.count; i++) {
         AstIdentifier *param = ((AstIdentifier **)func->parameters.items)[i];
         if (i > 0) sb_append(&sb, ", ");
-        sb_append(&sb, "%s: %s", param->name, param->type ? type_to_str(param->type) : "?");
+        sb_append(&sb, "%s", parameter_text(param));
     }
     sb_append(&sb, ")");
 
@@ -382,6 +415,7 @@ static void index_struct_declarations(AstIdentifier *struct_ident, AstStruct *no
 
 void index_declarations(DynamicArray files) {
     if (!program_index.enabled) return;
+    if (files.count > 0) program_index.main_file = ((AstFile **)files.items)[0];
     for (int f = 0; f < files.count; f++) {
         AstFile *file = ((AstFile **)files.items)[f];
         if (file->ns) index_namespace(file->ns);
@@ -468,6 +502,9 @@ static void json_write_range(StringBuilder *sb, Pos start, Pos end) {
 
 static bool is_std_file(AstFile *file) {
     if (program_index.std_path == NULL) return false;
+    // An editor asks about a file of the standard library: it and its namespace are the program
+    AstFile *main = program_index.main_file;
+    if (main && (file == main || (main->ns && file->ns == main->ns))) return false;
     char *absolute = get_absolute_path(file->absolute_path);
     size_t length  = strlen(program_index.std_path);
     bool is_std    = absolute && strncmp(absolute, program_index.std_path, length) == 0;

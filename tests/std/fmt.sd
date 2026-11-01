@@ -98,7 +98,27 @@ stringBuilderTest :: () {
     print("%", str);
 }
 
+Person :: struct {
+    name: string;
+    age:  int;
+    tags: []string;
+}
+
+// Values are written as in Saad, so they can be copied back into a program
+literalTest :: () {
+    p := Person{name: "Ada", age: 36, tags: ["math", "say \"hi\"\n"]};
+    assert(sprint("%", p) == "Person{name: \"Ada\", age: 36, tags: [\"math\", \"say \\\"hi\\\"\\n\"]}");
+
+    // A string on its own has no quotes
+    assert(sprint("% is %", "Ada", 36) == "Ada is 36");
+    assert(sprint("%", ["a", "b"]) == "[\"a\", \"b\"]");
+
+    v := Vector3{1, 2, 3};
+    assert(sprint("%", v) == "Vector3{x: 1.000000, y: 2.000000, z: 3.000000}");
+}
+
 main :: () {
     printTest();
     stringBuilderTest();
+    literalTest();
 }
