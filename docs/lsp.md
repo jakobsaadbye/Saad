@@ -125,7 +125,10 @@ One mistake gives one error, and the rest of the program is still checked and in
   counted, so a missing `)` ends at the `;`), after the `}` of its block, or to the `}` of the block it is in. At the
   top of a file, it also stops at the next declaration at the start of a line. A declaration at the start of a line
   inside a block means its `}` is missing, e.g `This '{' has no '}'`, and the block ends there. Statements that only go
-  in a function (`for`, `return`, ...) are an error at the top of a file.
+  in a function (`for`, `return`, ...) are an error at the top of a file. A block that is still open at the end of the
+  file ends there (one error, "This '{' has no '}'"), so the function it is in is still checked. When the error is on a
+  later line that starts like a statement (`p := ...`, `if ...`), the statement that failed ends at the line above, e.g
+  `x := size(.` that is being written doesn't take the line below it.
 * **Typer.** Before each statement, the typer saves its state (the scope, the function, the loop, ...). When the
   statement fails, the state is put back and the next statement is checked (`check_statement_and_recover()`). This is
   done in files and in blocks, but not in the instances of generics, which are checked once for each set of type
@@ -170,12 +173,19 @@ checked even when the line that is being written isn't whole. Then the text befo
   enum, the variants of a union), and a value the members of its type: fields and methods, the methods of the generic
   struct that aren't made yet for an instance, the methods of strings, numbers and enums, and `count`, `data` and the
   methods of slices. A pointer is followed to what it points to.
+* A `.` with nothing before it is a value of the type that is wanted there, so it gives the values of an enum or the
+  variants of a union. The type comes from what is before it: `a == .` and `a != .` (the type of `a`), `a = .` and
+  `a: Status = .` (the type of the place), `case .` (the type of what the switch is on), `f(x, .` (the type of the
+  parameter), `return .` (the return type of the function) and `Point{kind: .` (the type of the field).
+* In a struct literal, e.g `Point{x: 1, |`, the fields that aren't written yet (the variants for a union), with
+  `insert` set to e.g `"y: "`. After `name:`, a value is written, so it is the names in scope.
 * Otherwise, the names in scope: the locals declared above the position and the parameters, the declarations and
   imports of the file, and the keywords.
 * In a call, `signature` is the function of the last `(` that isn't closed, and `active` the argument at the
   position. A method called on a value doesn't show its receiver.
 
-The scope at a position is the innermost block that has it (`file->blocks`).
+The scope at a position is the innermost block that has it (`file->blocks`). Until its `}` is parsed, a block goes to
+the end of the file, so a block that is being written still has a scope.
 
 ## Semantic tokens
 

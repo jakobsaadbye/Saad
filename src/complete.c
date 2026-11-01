@@ -304,7 +304,14 @@ static bool resolve_chain(Typer *typer, AstBlock *scope, Segment *segments, int 
 // The items
 //
 
+static void add_item_inserting(const char *name, const char *kind, const char *detail, const char *doc, const char *insert);
+
 static void add_item(const char *name, const char *kind, const char *detail, const char *doc) {
+    add_item_inserting(name, kind, detail, doc, NULL);
+}
+
+// 'insert' is the text that is written instead of the name, e.g "radius: " for a field of a struct literal
+static void add_item_inserting(const char *name, const char *kind, const char *detail, const char *doc, const char *insert) {
     StringBuilder *sb = &program_completion.items;
     if (program_completion.item_count > 0) sb_append(sb, ",");
     sb_append(sb, "\n  {\"label\": ");
@@ -316,6 +323,10 @@ static void add_item(const char *name, const char *kind, const char *detail, con
     if (doc && doc[0]) {
         sb_append(sb, ", \"doc\": ");
         json_write_string(sb, doc);
+    }
+    if (insert) {
+        sb_append(sb, ", \"insert\": ");
+        json_write_string(sb, insert);
     }
     sb_append(sb, "}");
     program_completion.item_count++;
@@ -522,27 +533,35 @@ static void write_signature(AstIdentifier *ident, AstFunctionDefn *func, bool sk
     program_completion.signature = sb.buffer;
 }
 
-static void complete_signature(Typer *typer, AstFile *file, AstBlock *scope, int offset) {
-    int argument = 0;
-    int open = open_paren_of_call(file->text, offset, &argument);
-    if (open < 0) return;
+// The call the offset is in: its function, and the argument at the offset. 'on_value' is set for a method called on a
+// value, whose receiver isn't an argument
+typedef struct Call {
+    AstIdentifier   *ident;
+    AstFunctionDefn *func;
+    bool             on_value;
+    int              argument;
+} Call;
+
+static bool call_at(Typer *typer, AstFile *file, AstBlock *scope, int offset, Call *call) {
+    *call = (Call){0};
+    int open = open_paren_of_call(file->text, offset, &call->argument);
+    if (open < 0) return false;
 
     int end = open;
     while (end > 0 && (file->text[end - 1] == ' ' || file->text[end - 1] == '\t')) end--;
     Segment segments[MAX_SEGMENTS];
     int count = read_chain(file->text, end, segments);
-    if (count <= 0) return;
+    if (count <= 0) return false;
 
     // The function is the last part. The parts before it are what it is called on
     AstBlock *call_scope = scope_at(file, open);
     if (call_scope) scope = call_scope;
     AstIdentifier *function = NULL;
-    bool on_value = false;
     if (count == 1) {
         function = lookup_visible(scope, segments[0].name);
     } else {
         Target target;
-        if (!resolve_chain(typer, scope, segments, count - 1, &target)) return;
+        if (!resolve_chain(typer, scope, segments, count - 1, &target)) return false;
         const char *name = segments[count - 1].name;
         if (target.ns) function = find_namespace_declaration(target.ns, (char *)name);
         else if (target.type_name && named_type(target.type_name) && named_type(target.type_name)->kind == TYPE_STRUCT) {
@@ -550,21 +569,264 @@ static void complete_signature(Typer *typer, AstFile *file, AstBlock *scope, int
         }
         else if (target.type) {
             function = member_of(typer, target.type, name);
-            on_value = true;
+            call->on_value = true;
             // A method on slices is a function, and the slice is its first argument
             if (!function && value_type_of(target.type)->kind == TYPE_ARRAY) {
                 for (int i = 0; i < typer->slice_methods.count; i++) {
                     AstFunctionDefn *method = ((AstFunctionDefn **)typer->slice_methods.items)[i];
                     if (method->identifier && strcmp(method->identifier->name, name) == 0) {
-                        write_signature(method->identifier, method, true, argument);
-                        return;
+                        call->ident = method->identifier;
+                        call->func  = method;
+                        return true;
                     }
                 }
             }
         }
     }
-    if (!function || !function->type || function->type->kind != TYPE_FUNCTION) return;
-    write_signature(function, ((TypeFunction *)function->type)->node, on_value, argument);
+    if (!function || !function->type || function->type->kind != TYPE_FUNCTION) return false;
+    call->ident = function;
+    call->func  = ((TypeFunction *)function->type)->node;
+    return true;
+}
+
+static void complete_signature(Typer *typer, AstFile *file, AstBlock *scope, int offset) {
+    Call call;
+    if (call_at(typer, file, scope, offset, &call)) write_signature(call.ident, call.func, call.on_value, call.argument);
+}
+
+// The type of the parameter that the argument at the offset is given to, or NULL
+static Type *parameter_type_at(Typer *typer, AstFile *file, AstBlock *scope, int offset) {
+    Call call;
+    if (!call_at(typer, file, scope, offset, &call)) return NULL;
+    int index = call.argument + ((call.on_value && call.func->is_method) ? 1 : 0);
+    if (index >= call.func->parameters.count) index = call.func->parameters.count - 1; // A variadic parameter
+    if (index < 0) return NULL;
+    AstIdentifier *param = ((AstIdentifier **)call.func->parameters.items)[index];
+    return param->type;
+}
+
+//
+// Struct literals, e.g 'Point{x: 1, |}': the fields that aren't written yet, and the type of the field a value is for
+//
+
+typedef struct Literal {
+    AstStruct *node;       // The struct of the literal
+    int        open;       // Its '{'
+    char       field[128]; // The field whose value is at the offset, e.g 'x' of 'Point{x: |'. Empty when a name is written
+    bool       in_value;   // After 'name:', so a value is written, not the name of a field
+} Literal;
+
+static void skip_spaces_back(const char *text, int *at) {
+    while (*at > 0 && isspace((unsigned char)text[*at - 1])) (*at)--;
+}
+
+// The struct literal the offset is directly in, not in a call or an array of it
+static bool literal_at(Typer *typer, AstFile *file, int offset, Literal *literal) {
+    const char *text = file->text;
+    *literal = (Literal){0};
+    int depth = 0;
+    int element = -1; // The start of the element at the offset: after its ',' or the '{'
+    int open = -1;
+    for (int p = offset - 1; p >= 0; p--) {
+        char c = text[p];
+        if (c == '"') {
+            for (p--; p >= 0 && !(text[p] == '"' && (p == 0 || text[p - 1] != '\\')); p--) {}
+            continue;
+        }
+        if (c == ')' || c == ']' || c == '}') depth++;
+        else if (c == '(' || c == '[') {
+            if (depth == 0) return false;
+            depth--;
+        }
+        else if (c == '{') {
+            if (depth == 0) { open = p; break; }
+            depth--;
+        }
+        else if (c == ',' && depth == 0 && element < 0) element = p + 1;
+        else if (c == ';' && depth == 0) return false;
+    }
+    if (open < 0) return false;
+    if (element < 0) element = open + 1;
+
+    // The type before the '{', e.g Point, geometry.Vec2 or Pair<int>
+    int end = open;
+    skip_spaces_back(text, &end);
+    if (end > 0 && text[end - 1] == '>') {
+        int angle = 0;
+        for (end--; end >= 0; end--) {
+            if (text[end] == '>') angle++;
+            if (text[end] == '<' && --angle == 0) break;
+        }
+        if (end < 0) return false;
+    }
+    Segment segments[MAX_SEGMENTS];
+    int count = read_chain(text, end, segments);
+    if (count <= 0) return false;
+    Target target;
+    if (!resolve_chain(typer, scope_at(file, open), segments, count, &target) || !target.type_name) return false;
+    Type *type = named_type(target.type_name);
+    if (!type || type->kind != TYPE_STRUCT) return false;
+    literal->node = ((TypeStruct *)type)->node;
+    literal->open = open;
+
+    // 'name: value' or just a name
+    int colon = -1;
+    for (int p = element; p < offset; p++) {
+        if (text[p] == ':' && text[p + 1] != ':' && text[p + 1] != '=') { colon = p; break; }
+    }
+    if (colon >= 0) {
+        int name_end = colon;
+        skip_spaces_back(text, &name_end);
+        int name_start = name_end;
+        while (name_start > element && is_name_char(text[name_start - 1])) name_start--;
+        int length = name_end - name_start;
+        if (length > 0 && length < (int)sizeof(literal->field)) memcpy(literal->field, &text[name_start], length);
+        literal->in_value = true;
+    } else {
+        for (int p = element; p < offset; p++) {
+            if (!isspace((unsigned char)text[p]) && !is_name_char(text[p])) return false; // e.g 'Vec2{1, 2 + |', which has no names
+        }
+    }
+    return true;
+}
+
+// If the field is written in the literal already, e.g the 'x' of 'Point{x: 1, |'
+static bool field_is_written(const char *text, int open, int offset, const char *name) {
+    int length = strlen(name);
+    int depth = 0;
+    for (int p = open + 1; p + length < offset; p++) {
+        char c = text[p];
+        if (c == '(' || c == '[' || c == '{') depth++;
+        if (c == ')' || c == ']' || c == '}') depth--;
+        if (depth != 0 || strncmp(&text[p], name, length) != 0) continue;
+        if (p > 0 && is_name_char(text[p - 1])) continue;
+        int after = p + length;
+        while (after < offset && isspace((unsigned char)text[after])) after++;
+        if (text[after] == ':') return true;
+    }
+    return false;
+}
+
+static void add_literal_fields(Literal *literal, const char *text, int offset) {
+    AstStruct *node = literal->node;
+    for (int i = 0; i < node->members->identifiers.count; i++) {
+        AstIdentifier *member = ((AstIdentifier **)node->members->identifiers.items)[i];
+        if (!is_visible_name(member->name) || (member->flags & IDENTIFIER_IS_STRUCT_METHOD)) continue;
+        if (member->type && member->type->kind == TYPE_FUNCTION) continue;
+        if (field_is_written(text, literal->open, offset, member->name)) continue;
+        char insert[160];
+        snprintf(insert, sizeof(insert), "%s: ", member->name);
+        AstFile *declared_in = member->head.file;
+        char *doc = declared_in ? doc_comment(declared_in, member->head.start.line) : NULL;
+        add_item_inserting(member->name, node->is_union ? "variant" : "field", member->type ? type_to_str(member->type) : "", doc, insert);
+    }
+}
+
+//
+// A '.' with nothing before it, e.g 'status == .open'. Its type comes from where it is written
+//
+
+static bool ends_with_word(const char *text, int end, const char *word) {
+    int length = strlen(word);
+    if (end < length || strncmp(&text[end - length], word, length) != 0) return false;
+    return end == length || !is_name_char(text[end - length - 1]);
+}
+
+// The value type of a chain that ends just before 'end', e.g the 'status' of 'status == '
+static Type *type_of_chain_before(Typer *typer, AstFile *file, AstBlock *scope, int end) {
+    skip_spaces_back(file->text, &end);
+    Segment segments[MAX_SEGMENTS];
+    int count = read_chain(file->text, end, segments);
+    if (count <= 0) return NULL;
+    Target target;
+    if (!resolve_chain(typer, scope, segments, count, &target)) return NULL;
+    if (target.type_name) return NULL;
+    return target.type;
+}
+
+// The type that the '.' at 'dot' is a value of, or NULL
+static Type *expected_type_at(Typer *typer, AstFile *file, AstBlock *scope, int dot) {
+    const char *text = file->text;
+    int at = dot;
+    skip_spaces_back(text, &at);
+    if (at == 0) return NULL;
+    char c = text[at - 1];
+    char before = at > 1 ? text[at - 2] : 0;
+
+    // a == .open, a != .open
+    if (c == '=' && (before == '=' || before == '!')) return type_of_chain_before(typer, file, scope, at - 2);
+
+    // a = .open, a: Status = .open, but not a := .open, which has no type to go by
+    if (c == '=' && before != ':' && before != '<' && before != '>' && before != '=') {
+        int end = at - 1;
+        skip_spaces_back(text, &end);
+        Segment segments[MAX_SEGMENTS];
+        int count = read_chain(text, end, segments);
+        if (count <= 0) return NULL;
+        Target target;
+        if (!resolve_chain(typer, scope, segments, count, &target)) return NULL;
+        if (target.type_name) return named_type(target.type_name); // The type of a declaration, e.g 'Status' of 'a: Status ='
+        return target.type;
+    }
+
+    // case .open, in the switch on a value of the type
+    if (ends_with_word(text, at, "case")) {
+        int depth = 0;
+        for (int p = at - 5; p >= 0; p--) {
+            if (text[p] == '}') depth++;
+            if (text[p] == '{' && depth-- == 0) {
+                int end = p;
+                skip_spaces_back(text, &end);
+                return type_of_chain_before(typer, file, scope_at(file, p), end);
+            }
+        }
+        return NULL;
+    }
+
+    // return .open
+    if (ends_with_word(text, at, "return")) {
+        AstFunctionDefn *func = scope ? scope->enclosing_function : NULL;
+        if (!func || func->return_types.count == 0) return NULL;
+        return ((Type **)func->return_types.items)[0];
+    }
+
+    // f(.open), f(a, .open)
+    if (c == '(' || c == ',') {
+        Literal literal;
+        if (c == ',' && literal_at(typer, file, dot, &literal)) return NULL; // e.g 'Point{x: 1, .' isn't a value
+        return parameter_type_at(typer, file, scope, dot);
+    }
+
+    // Point{kind: .open}
+    if (c == ':') {
+        Literal literal;
+        if (!literal_at(typer, file, dot, &literal) || !literal.field[0]) return NULL;
+        AstIdentifier *member = get_struct_member(literal.node, literal.field);
+        return member ? member->type : NULL;
+    }
+    return NULL;
+}
+
+// The values that can be written as '.name' for the type: the values of an enum and the variants of a union
+static void add_values_of(Type *type) {
+    type = value_type_of(type);
+    if (!type) return;
+    if (type->kind == TYPE_ENUM) {
+        AstEnum *node = ((TypeEnum *)type)->node;
+        for (int i = 0; i < node->enumerators.count; i++) {
+            AstEnumerator *etor = ((AstEnumerator **)node->enumerators.items)[i];
+            char value[32];
+            snprintf(value, sizeof(value), "%d", etor->value);
+            add_item(etor->name, "enumMember", value, NULL);
+        }
+    }
+    if (type->kind == TYPE_STRUCT && ((TypeStruct *)type)->node->is_union) {
+        AstStruct *node = ((TypeStruct *)type)->node;
+        for (int i = 0; i < node->members->identifiers.count; i++) {
+            AstIdentifier *variant = ((AstIdentifier **)node->members->identifiers.items)[i];
+            if (is_visible_name(variant->name)) add_item(variant->name, "variant", variant->type ? type_to_str(variant->type) : "", NULL);
+        }
+    }
 }
 
 // Called by compile_program() after the program is checked
@@ -591,13 +853,26 @@ void complete_program(Typer *typer, DynamicArray files) {
 
     bool after_dot = start > 0 && file->text[start - 1] == '.' && !(start > 1 && file->text[start - 2] == '.');
     if (!after_dot) {
+        // The name of a field in a struct literal, e.g 'Point{x: 1, |'
+        Literal literal;
+        if (literal_at(typer, file, start, &literal) && !literal.in_value) {
+            add_literal_fields(&literal, file->text, start);
+            return;
+        }
         add_names_in_scope(file, scope, start);
+        return;
+    }
+
+    // A '.' with nothing before it, e.g 'status == .open', is a value of the type that is wanted there
+    char before_dot = start > 1 ? file->text[start - 2] : 0;
+    if (!is_name_char(before_dot) && before_dot != ')' && before_dot != ']') {
+        add_values_of(expected_type_at(typer, file, scope, start - 1));
         return;
     }
 
     Segment segments[MAX_SEGMENTS];
     int count = read_chain(file->text, start - 1, segments);
-    if (count <= 0) return; // e.g '.open' of an enum value whose type isn't known here
+    if (count <= 0) return;
 
     Target target;
     if (!resolve_chain(typer, scope, segments, count, &target)) return;

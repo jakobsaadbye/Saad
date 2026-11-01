@@ -4,6 +4,14 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.8.5 - 1. Nov 2026
+
+* Completion of `.open` where the type is known: after `status == .`, `x = .`, `x: Status = .`, `case .`, `f(.` and
+  `return .`, it gives the values of the enum or the variants of the union
+* Completion of the fields of a struct literal that aren't written yet, e.g `Point{x: 1, |` gives `y`
+* A block that is still open at the end of a file no longer makes the function it is in fail to check, and a line
+  that is being written no longer takes the line below it into its error
+
 ## Update v0.8.4 - 1. Nov 2026
 
 * The language server completes names: the fields and methods after `c.`, the declarations of a namespace after

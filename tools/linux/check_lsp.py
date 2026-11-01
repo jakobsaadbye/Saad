@@ -77,6 +77,14 @@ class Client:
 
     notifications = []
 
+    def diagnostics_until(self, uri, wanted, tries=10):
+        """The diagnostics the server sends for the file, skipping the ones of earlier changes until they are as wanted"""
+        for _ in range(tries):
+            d = self.diagnostics(uri)
+            if wanted(d):
+                return d
+        return d
+
     def diagnostics(self, uri):
         """The diagnostics the server sends next for the file"""
         for i, m in enumerate(self.notifications):
@@ -189,6 +197,20 @@ def main():
     result = m["result"]
     check(result and result["signatures"][0]["label"] == "grow(by: f32)" and result["activeParameter"] == 0, f"the signature of grow: {result}")
 
+    print("completion of a value from its context, and of the fields of a struct literal")
+    def complete_at(line_text, marker="|"):
+        before, after = line_text.split(marker)
+        changed = text.replace("    total += n;", "    total += n;\n" + before + after)
+        client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 30}, "contentChanges": [{"text": changed}]})
+        m = client.request("textDocument/completion", {"textDocument": doc, "position": {"line": 57, "character": len(before)}})
+        return m["result"]
+    labels = [item["label"] for item in complete_at("    b := status == .|")]
+    check(labels == ["open", "closed"], f"the values of Status after '==': {labels}")
+    labels = [item["label"] for item in complete_at("    t := size(.|);")]
+    check(labels == ["circle", "square", "empty"], f"the variants of Shape for an argument: {labels}")
+    items = complete_at("    p2 := Pair<int>{first: 1, |};")
+    check([(i["label"], i.get("insertText")) for i in items] == [("second", "second: ")], f"the field of a struct literal that isn't written: {items}")
+
     print("semanticTokens")
     client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 21}, "contentChanges": [{"text": text}]})
     m = client.request("textDocument/semanticTokens/full", {"textDocument": doc})
@@ -229,7 +251,7 @@ def main():
         burst += b"Content-Length: %d\r\n\r\n" % len(body) + body
     client.process.stdin.write(burst)
     client.process.stdin.flush()
-    diagnostics = client.diagnostics(uri)
+    diagnostics = client.diagnostics_until(uri, lambda d: len(d) == 1 and "oops8" in d[0]["message"])
     check(len(diagnostics) == 1 and "oops8" in diagnostics[0]["message"], f"the error of the last change: {diagnostics}")
     m = client.request("textDocument/hover", {"textDocument": doc, "position": position_of(text, 44, "area")})
     runs = sum("Indexed" in line for line in client.log) - indexed
@@ -238,7 +260,7 @@ def main():
     print("didSave")
     client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 9}, "contentChanges": [{"text": text}]})
     client.notify("textDocument/didSave", {"textDocument": {"uri": uri}})
-    check(client.diagnostics(uri) == [], "saved without errors")
+    check(client.diagnostics_until(uri, lambda d: d == []) == [], "saved without errors")
 
     print("unknown request")
     m = client.request("textDocument/formatting", {"textDocument": doc, "options": {}})
