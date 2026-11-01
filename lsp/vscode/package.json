@@ -5,16 +5,27 @@
   "version": "0.1.0",
   "publisher": "saad",
   "license": "MIT",
-  "engines": { "vscode": "^1.82.0" },
-  "categories": ["Programming Languages"],
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
   "main": "./extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:saad"
+  ],
   "contributes": {
     "languages": [
       {
         "id": "saad",
-        "aliases": ["Saad", "saad"],
-        "extensions": [".sd"],
+        "aliases": [
+          "Saad",
+          "saad"
+        ],
+        "extensions": [
+          ".sd"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
@@ -31,16 +42,20 @@
         "saad.compilerPath": {
           "type": "string",
           "default": "saad",
-          "description": "The Saad compiler (saad.exe). The language server runs 'saad index' with it."
+          "description": "The Saad compiler (saad.exe). Absolute, or relative to the workspace. By default bin/saad.exe of the workspace, or saad on the PATH."
         },
         "saad.serverPath": {
           "type": "string",
           "default": "",
-          "description": "The language server, built with 'saad build lsp/main.sd'. Empty for lsp/build/out.exe next to the compiler."
+          "description": "The language server, built with 'saad build lsp/main.sd'. Absolute, or relative to the workspace. Empty for lsp/build/out.exe of the repository the compiler is in, or of the workspace."
         },
         "saad.trace.server": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Shows the messages between VS Code and the language server in the Output panel."
         }
@@ -50,6 +65,10 @@
       {
         "command": "saad.restartServer",
         "title": "Saad: Restart the language server"
+      },
+      {
+        "command": "saad.buildServer",
+        "title": "Saad: Build the language server"
       }
     ]
   },

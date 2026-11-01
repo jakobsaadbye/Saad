@@ -28,13 +28,21 @@ npx @vscode/vsce package         # saad-0.1.0.vsix
 code --install-extension saad-0.1.0.vsix
 ```
 
-Or open `lsp/vscode` in VS Code and press F5 to run it in a new window. Settings:
+Or open `lsp/vscode` in VS Code and press F5 to run it in a new window.
 
-* `saad.compilerPath`: the compiler, e.g `C:/dev/Saad/bin/saad.exe`. Default `saad`.
-* `saad.serverPath`: the server. By default `lsp/build/out.exe` of the repository the compiler is in.
+The extension finds the compiler and the server by itself when the Saad repository is open in VS Code: the compiler is
+`bin/saad.exe` and the server is `lsp/build/out.exe`. When the server isn't built yet, it asks to build it
+(`saad build lsp/main.sd`). For another project, set `saad.compilerPath` to the compiler, and the server is found in the
+repository the compiler is in. Settings:
+
+* `saad.compilerPath`: the compiler, e.g `C:/dev/Saad/bin/saad.exe`. Absolute, or relative to the workspace. By default
+  `bin/saad.exe` of the workspace, or `saad` on the PATH.
+* `saad.serverPath`: the server. By default `lsp/build/out.exe` of the repository the compiler is in, or of the
+  workspace, or `saad-lsp` on the PATH.
 * `saad.trace.server`: `messages` shows what VS Code and the server send each other, in the Output panel.
 
-The command "Saad: Restart the language server" starts it again, e.g after building a new one.
+Commands: "Saad: Restart the language server", and "Saad: Build the language server", which stops the server, builds
+it again and starts it, e.g after changing `lsp/`. The Output panel (Saad) shows where the extension looked for them.
 
 ## Other editors
 
