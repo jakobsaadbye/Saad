@@ -49,10 +49,10 @@ Connection :: struct {
     allocator: *Allocator;
 }
 
-// Gives a struct member another column name, or leaves it out of the rows, e.g
+// Gives a struct member another column name, leaves it out of the rows, or says what the column is, e.g
 //
 //     User :: struct {
-//         id: i64;
+//         @db.Column(key: true, generated: true) id: i64;
 //         @db.Column(name: "mail") email: string;
 //         @db.Column(skip: true)   cache: *Cache;
 //     }
@@ -61,8 +61,10 @@ Connection :: struct {
 // created_at, CreatedAt and createdat
 @attribute
 Column :: struct {
-    name: string;
-    skip: bool = false;
+    name:      string;
+    skip:      bool = false;
+    key:       bool = false; // The primary key, for db.Table's get, update and delete
+    generated: bool = false; // Made by the database, e.g a serial id or a default of now(). db.Table's insert and update leave it out
 }
 
 // Runs a statement that returns no rows, e.g INSERT, UPDATE or DELETE. Gives the number of rows it changed.

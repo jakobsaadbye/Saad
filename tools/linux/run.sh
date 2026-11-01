@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Compiles and runs a Saad program on Linux.
 #
-#   tools/linux/run.sh path/to/program.sd    compile with bin/saad, then run
+#   tools/linux/run.sh path/to/program.sd [args]    compile with bin/saad, then run with the arguments
 #   tools/linux/run.sh path/to/out.o         run a program compiled with 'saad build --elf'
 #   tools/linux/run.sh path/to/out.asm       run generated assembly, assembled with nasm
 #
@@ -59,4 +59,4 @@ fi
 gcc -no-pie -z noexecstack "$OBJECT" "$SHIM_O" $EXTRA -o "$TMP/program" -lm
 
 set +e
-timeout 10 "$TMP/program"
+timeout 10 "$TMP/program" "${@:2}"

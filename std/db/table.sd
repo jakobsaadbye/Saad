@@ -1,0 +1,246 @@
+namespace db;
+
+// The rows of one table, as structs of T, e.g
+//
+//     users := db.Table<User>{conn: &conn, name: "users"};
+//     all, err := users.all();
+//     ada, err2 := users.get(1);                     // a ?User, empty when no row has the key 1
+//     saved, err3 := users.insert(User{name: "Ada"}); // with the id the database gave it
+//     changed, err4 := users.update(saved);
+//     removed, err5 := users.delete(saved.id);
+//
+// The columns are the members of T. A member's column is the name of @db.Column, or the member's name in snake case,
+// e.g createdAt is created_at. The key is the member with @db.Column(key: true). A member with
+// @db.Column(generated: true), e.g a serial id or a default of now(), is left to the database by insert and update,
+// which read it back. std/db/tools/generate.sd writes these structs from a database
+import fmt;
+
+Table :: struct <T> {
+    conn:   *Connection;
+    name:   string;   // e.g users
+    schema: string;   // e.g sales. Empty is the schema the connection uses, e.g public
+
+    // Every row
+    all :: method () -> ([..]T, string) {
+        sql := fmt.sprint("SELECT * FROM %", qualifiedName(self.schema, self.name));
+        rows, err := self.conn.query<T>(sql);
+        sql.free();
+        return rows, err;
+    }
+
+    // The row with the key, or empty when there is none
+    get :: method <K>(key: K) -> (?T, string) {
+        columns := columnsOf(rowType<T>());
+        keyColumn, ok := keyOf(columns);
+        if !ok {
+            columns.free();
+            return null, noKey(self.name);
+        }
+        sql := fmt.sprint("SELECT * FROM % WHERE % = $1", qualifiedName(self.schema, self.name), quoted(keyColumn.name));
+        row, found, err := self.conn.queryOne<T>(sql, key);
+        sql.free();
+        columns.free();
+        if !found {
+            return null, err;
+        }
+        return row, err;
+    }
+
+    // Adds the row and gives it back as the database stored it, e.g with its generated id
+    insert :: method (row: T) -> (T, string) {
+        columns := columnsOf(rowType<T>());
+        args: [..]any;
+        sb: fmt.StringBuilder;
+        sb.add("INSERT INTO %", qualifiedName(self.schema, self.name));
+
+        names: fmt.StringBuilder;
+        values: fmt.StringBuilder;
+        for column in columns {
+            if column.generated { continue; }
+            if args.count > 0 {
+                names.addString(", ");
+                values.addString(", ");
+            }
+            args.add(valueOf(column, &row));
+            names.addString(quoted(column.name));
+            values.add("$%", args.count);
+        }
+        if args.count == 0 {
+            sb.addString(" DEFAULT VALUES");
+        } else {
+            sb.add(" (%) VALUES (%)", names.toString(), values.toString());
+        }
+        sb.addString(" RETURNING *");
+
+        saved, found, err := self.conn.queryOne<T>(sb.toString(), ...args.elements());
+        sb.free();
+        names.free();
+        values.free();
+        args.free();
+        columns.free();
+        if err == "" && !found {
+            err = fmt.sprint("Inserting into % gave no row back", self.name);
+        }
+        return saved, err;
+    }
+
+    // Writes every column of the row that isn't the key or generated, to the row with its key. Gives the number of rows
+    // changed, which is 0 when there is no row with the key
+    update :: method (row: T) -> (i64, string) {
+        columns := columnsOf(rowType<T>());
+        keyColumn, ok := keyOf(columns);
+        if !ok {
+            columns.free();
+            return 0, noKey(self.name);
+        }
+
+        args: [..]any;
+        sb: fmt.StringBuilder;
+        sb.add("UPDATE % SET ", qualifiedName(self.schema, self.name));
+        for column in columns {
+            if column.generated || column.key { continue; }
+            if args.count > 0 { sb.addString(", "); }
+            args.add(valueOf(column, &row));
+            sb.add("% = $%", quoted(column.name), args.count);
+        }
+        if args.count == 0 {
+            sb.free();
+            args.free();
+            columns.free();
+            return 0, "";
+        }
+        args.add(valueOf(keyColumn, &row));
+        sb.add(" WHERE % = $%", quoted(keyColumn.name), args.count);
+
+        changed, err := self.conn.exec(sb.toString(), ...args.elements());
+        sb.free();
+        args.free();
+        columns.free();
+        return changed, err;
+    }
+
+    // Removes the row with the key. Gives the number of rows removed, 0 or 1
+    delete :: method <K>(key: K) -> (i64, string) {
+        columns := columnsOf(rowType<T>());
+        keyColumn, ok := keyOf(columns);
+        if !ok {
+            columns.free();
+            return 0, noKey(self.name);
+        }
+        sql := fmt.sprint("DELETE FROM % WHERE % = $1", qualifiedName(self.schema, self.name), quoted(keyColumn.name));
+        removed, err := self.conn.exec(sql, key);
+        sql.free();
+        columns.free();
+        return removed, err;
+    }
+
+    // The number of rows
+    count :: method () -> (i64, string) {
+        sql := fmt.sprint("SELECT count(*) FROM %", qualifiedName(self.schema, self.name));
+        n, _, err := self.conn.queryOne<i64>(sql);
+        sql.free();
+        return n, err;
+    }
+}
+
+// The column of a member of a row struct
+@private
+TableColumn :: struct {
+    name:      string;
+    member:    *StructMember;
+    key:       bool;
+    generated: bool;
+}
+
+@private
+rowType :: <T>() -> *TypeStruct {
+    empty: T;
+    boxed: any = empty;
+    return boxed.type as *TypeStruct;
+}
+
+// The columns of the members of a row struct, without the skipped ones
+@private
+columnsOf :: (type: *TypeStruct) -> [..]TableColumn {
+    columns: [..]TableColumn;
+    for i in 0..type.members.count {
+        member := &type.members[i];
+        attribute: Column;
+        hasAttribute := attributeOf(member, &attribute);
+        if hasAttribute && attribute.skip { continue; }
+
+        column := TableColumn{member: member};
+        column.name = snakeCase(member.name);
+        if hasAttribute {
+            if attribute.name.len > 0 { column.name = attribute.name; }
+            column.key       = attribute.key;
+            column.generated = attribute.generated;
+        }
+        columns.add(column);
+    }
+    return columns;
+}
+
+@private
+keyOf :: (columns: [..]TableColumn) -> (TableColumn, bool) {
+    for column in columns {
+        if column.key { return column, true; }
+    }
+    none: TableColumn;
+    return none, false;
+}
+
+@private
+noKey :: (table: string) -> string {
+    return fmt.sprint("The table % has no key. Mark the member of its key with @db.Column(key: true)", table);
+}
+
+// The member of the row as a parameter
+@private
+valueOf :: (column: TableColumn, row: *void) -> any {
+    value: any;
+    value.type = column.member.type;
+    value.data = column.member.valueIn(row);
+    return value;
+}
+
+// A name for SQL in double quotes, e.g "order", so that any name works
+@private
+quoted :: (name: string) -> string {
+    sb: fmt.StringBuilder;
+    sb.addChar('"');
+    for c in name {
+        if c == '"' { sb.addChar('"'); }
+        sb.addChar(c);
+    }
+    sb.addChar('"');
+    return sb.toString();
+}
+
+@private
+qualifiedName :: (schema: string, name: string) -> string {
+    if schema.len == 0 {
+        return quoted(name);
+    }
+    return fmt.sprint("%.%", quoted(schema), quoted(name));
+}
+
+// e.g createdAt is created_at, and userID is user_id
+@private
+snakeCase :: (name: string) -> string {
+    sb: fmt.StringBuilder;
+    for i in 0..name.len {
+        c := name[i];
+        if c >= 'A' && c <= 'Z' {
+            previous: u8 = 0;
+            if i > 0 { previous = name[i - 1]; }
+            if i > 0 && previous != '_' && !(previous >= 'A' && previous <= 'Z') {
+                sb.addChar('_');
+            }
+            sb.addChar(c + 32);
+        } else {
+            sb.addChar(c);
+        }
+    }
+    return sb.toString();
+}

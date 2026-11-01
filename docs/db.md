@@ -34,8 +34,26 @@ main :: () {
 }
 ```
 
-Status: steps 1 and 2 of the plan below are done (`db`, `db.postgres`, rows into structs, transactions,
-allocators). The generator and the typed query builder are designed below, but not written yet.
+Status: steps 1 to 3 of the plan below are done: `db`, `db.postgres`, rows into structs, transactions,
+allocators, `db.Table<T>` and the generator that writes the tables of a database as Saad. The typed query
+builder (step 4) is designed below, but not written yet.
+
+With the generator, the same program is:
+
+```odin
+import db;
+import db.postgres;
+import shop;              // written by std/db/tools/generate.sd
+
+main :: () {
+    conn, err := postgres.connect("host=localhost dbname=shop user=postgres password=secret");
+    app := shop.open(&conn);
+
+    ada, err1 := app.users.insert(shop.User{name: "Ada", role: .admin});   // gives back the id the database made
+    found, err2 := app.users.get(ada.id);                                   // a ?shop.User
+    users, err3 := app.users.all();
+}
+```
 
 ## Running SQL
 
@@ -124,6 +142,10 @@ starts.
 
 ### Tests
 
+* `tests/db/generate.sd` checks that the generator writes `tests/db/shop/shop.sd` from the schema of
+  `tests/db/shop/setup.sd`, and `tests/db/shop_tables.sd` uses that code on the database. After a change of the
+  generator, `SAAD_UPDATE_GOLDEN=1 tools/linux/dbtests.sh` writes the file again. `dbtests.sh` also runs
+  `std/db/tools/generate.sd` itself and compares what it writes.
 * `tests/std/db.sd` tests `db` with a driver written in the test itself. It needs no database and runs with
   the other tests (`tools/linux/runtests.sh`).
 * `tests/db/*.sd` need Postgres. `tools/linux/dbtests.sh` makes a throwaway server in a temporary folder (with
@@ -170,54 +192,107 @@ complete driver of 20 lines.
 
 1. **Done** `db.postgres`: connect, run SQL with parameters, read rows, close.
 2. **Done** Rows into structs with `query` and `queryOne`, transactions, `conn.allocator`, `mem.Arena`.
-3. A generator that writes the tables as structs.
+3. **Done** `db.Table<T>` and a generator that writes the tables as structs.
 4. A typed query builder on the generated code: `app.users.where(...).select<User>()`.
-5. Later: joins, `insert`/`update`/`delete` from structs, a pool of connections, a SQLite driver, and Postgres
+5. Later: joins, a pool of connections, a SQLite driver, migrations, and Postgres
    spoken directly over a socket instead of libpq.
 
-### 3. The generator
+### 3. Tables and the generator
 
-A Saad program reads the tables from `information_schema` and writes plain Saad into the project:
+#### db.Table<T>
+
+The rows of one table, as structs of `T`:
+
+```odin
+users := db.Table<User>{conn: &conn, name: "users"};      // schema: "sales" for another schema than public
+all, err := users.all();
+ada, err2 := users.get(1);                                // ?User, empty when no row has the key 1
+saved, err3 := users.insert(User{name: "Ada"});           // with what the database made, e.g the id
+changed, err4 := users.update(saved);                     // the row with its key. 1, or 0 when there is none
+removed, err5 := users.delete(saved.id);
+n, err6 := users.count();
+```
+
+* The columns are the members of `T`. A member's column is the name in `@db.Column(name: ...)`, or the
+  member's name in snake case: `createdAt` is `created_at`.
+* `@db.Column(key: true)` marks the key, which `get`, `update` and `delete` use.
+* `@db.Column(generated: true)` marks a column the database makes, e.g a `serial` id or a default of `now()`.
+  `insert` and `update` leave it out, and `insert` reads it back (`RETURNING *`).
+* Names are quoted in the SQL, so columns like `order` or `for` work.
+
+#### The generator
+
+A Saad program reads the tables from `information_schema` and the enums from `pg_enum`, and writes plain Saad
+into the project:
 
 ```
 saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" models/shop.sd shop
+saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" models/sales.sd sales sales
 ```
 
+The arguments are the connection string, the file to write, its namespace, and the schema (public when it is
+left out). `saad run` runs the program in the folder it is called from, so the file is where you are. The same
+is a function too: `postgres.generate(&conn, postgres.GenerateOptions{ns: "shop"})` gives the code.
+
+For a table `users` it writes (`tests/db/shop/shop.sd` is a whole file):
+
 ```odin
-// Made by std/db/tools/generate.sd from the database 'shop'. Make it again instead of changing it
-namespace shop;
+// The enum role
+Role :: enum { guest, member, admin }
 
-import db;
-
+// A row of users
 User :: struct {
+    @db.Column(key: true, generated: true)
     id:        i64;
     name:      string;
     email:     ?string;
-    createdAt: string;      // created_at timestamptz
+    age:       ?i32;
+    role:      Role = .guest;
+    active:    bool = true;
+    @db.Column(generated: true)
+    createdAt: string;        // timestamp with time zone
 }
 
-// The tables of the database, e.g app.users.where(...)
+// The tables of the schema public, on a connection
 Database :: struct {
-    users:  UsersTable;
-    orders: OrdersTable;
+    users: UsersTable;
 }
 
 open :: (conn: *db.Connection) -> Database { ... }
 
-// The columns of users, for building queries. Each has the type of its member
+// The rows of users
 UsersTable :: struct {
-    table:     db.Table;                 // the connection and "users"
-    id:        db.Field<i64>;
-    name:      db.Field<string>;
-    email:     db.Field<?string>;
-    createdAt: db.Field<string>;
+    table: db.Table<User>;
+
+    all    :: method () -> ([..]User, string) { ... }
+    get    :: method (key: i64) -> (?User, string) { ... }    // the key has its own type
+    insert :: method (row: User) -> (User, string) { ... }
+    update :: method (row: User) -> (i64, string) { ... }
+    delete :: method (key: i64) -> (i64, string) { ... }
+    count  :: method () -> (i64, string) { ... }
 }
 ```
 
-* Plain structs and plain code: a change of the database is a diff in the project, and building a program
-  doesn't need a database.
-* Postgres enums become Saad enums, and columns that can be `NULL` optionals.
-* `db.Field<T>` is the typed query column of step 4. The attribute that names a column stays `@db.Column`.
+| Postgres | Saad |
+| --- | --- |
+| `smallint`, `integer`, `bigint` (and `serial`) | `i16`, `i32`, `i64` |
+| `real`, `double precision` | `f32`, `f64` |
+| `boolean` | `bool` |
+| an enum of the schema | an enum, with the labels as they are when they are names |
+| `text`, `varchar`, `char` | `string` |
+| anything else, e.g `numeric`, `timestamptz`, `uuid`, `json` | `string`, with the type of the column as a comment |
+| a column that can be `NULL` | `?T` |
+
+* Names: the table `order_items` is the row `OrderItem` (most English plurals become singular), the table type
+  `OrderItemsTable` and the member `orderItems` of `Database`. The column `created_at` is the member `createdAt`.
+  A column that is a keyword gets a `_`, e.g `"for"` is `for_` with `@db.Column(name: "for")`.
+* A default that is a constant becomes the default of the member, e.g `role: Role = .guest`, so a struct literal
+  has the same values the database would give. A default that is computed (`nextval(...)`, `now()`, ...) and
+  identity columns make the column `generated`.
+* A table with a key of one column gets `get`, `update` and `delete`. Others get `all`, `insert` and `count`.
+* The file is plain Saad: a change of the database is a diff in the project, and building a program needs no
+  database. Make it again instead of changing it.
+* Typed query columns (`db.Field<T>`) come with step 4, which adds them to the table types.
 
 ### 4. The typed query builder
 
@@ -257,4 +332,6 @@ Found while writing this, in the order they would help:
 * `defer`, to free a result on every return.
 * Operators on structs, so `app.users.age >= 18` could be a condition instead of `atLeast(18)`.
 * Attributes on structs, e.g `@db.Table("users")`, for tables written by hand.
+* Struct embedding (or `using`), so `UsersTable` could be a `db.Table<User>` with more methods, instead of
+  forwarding each method to its member `table`.
 * Types for dates, decimals and UUIDs. They are strings for now.

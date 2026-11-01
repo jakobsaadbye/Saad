@@ -35,7 +35,17 @@ static int ms_vformat(char *out, size_t out_cap, FILE *f, const char *fmt, __bui
         if (strchr("fFeEgGaA", conv)) { spec[n++] = conv; spec[n] = 0; double d = __builtin_va_arg(ap, double); len = snprintf(buf, sizeof buf, spec, d); }
         else if (strchr("diuxXo", conv)) { spec[n++] = 'l'; spec[n++] = 'l'; spec[n++] = conv; spec[n] = 0; long long v = __builtin_va_arg(ap, long long); len = snprintf(buf, sizeof buf, spec, v); }
         else if (conv == 'c') { spec[n++] = 'c'; spec[n] = 0; long long v = __builtin_va_arg(ap, long long); len = snprintf(buf, sizeof buf, spec, (int)v); }
-        else if (conv == 's') { spec[n++] = 's'; spec[n] = 0; char *s = __builtin_va_arg(ap, char *); len = snprintf(buf, sizeof buf, spec, s); }
+        else if (conv == 's') {
+            spec[n++] = 's'; spec[n] = 0; char *s = __builtin_va_arg(ap, char *);
+            len = snprintf(buf, sizeof buf, spec, s);
+            if (len >= (int) sizeof buf) { // Longer than buf, e.g a whole file
+                char *big = malloc((size_t) len + 1);
+                snprintf(big, (size_t) len + 1, spec, s);
+                EMIT(big, (size_t) len);
+                free(big);
+                continue;
+            }
+        }
         else if (conv == 'p') { void *v = __builtin_va_arg(ap, void *); len = snprintf(buf, sizeof buf, "%016llX", (unsigned long long)(uintptr_t) v); } // Like msvcrt
         else { len = 0; }
         EMIT(buf, (size_t)len);

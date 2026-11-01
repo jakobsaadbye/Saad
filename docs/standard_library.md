@@ -8,8 +8,9 @@ std/
     slices.sd       Methods on slices, arrays and lists: sort, reverse, indexOf, contains, ...
     string.sd       The methods of string (slice, split, indexOf, free, ...)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
-  db/           namespace db: run SQL and read rows into structs (see docs/db.md)
-    postgres/       namespace db.postgres: the Postgres driver, through libpq.dll
+  db/           namespace db: run SQL and read rows into structs, and db.Table<T> (see docs/db.md)
+    postgres/       namespace db.postgres: the Postgres driver, through libpq.dll, and generate()
+    tools/          generate.sd: writes the tables of a Postgres database as Saad
   fmt/          namespace fmt: print, sprint and StringBuilder
   io/           namespace io: bytes on stdin, stdout and stderr
   json/         namespace json: encode, decode, parse and json.Value

@@ -581,12 +581,35 @@ static bool assemble_and_link(CompilerConfig *config, IrModule *module, StringBu
     return true;
 }
 
-// Runs ./build/out.exe. Returns true if the program exited with code 0
-static bool run_executable(bool output_to_console) {
 #ifdef _WIN32
-    int exit_code = system(output_to_console ? ".\\build\\out.exe" : ".\\build\\out.exe >nul");
+// An argument for cmd.exe, in quotes, e.g "host=localhost dbname=shop". A " in it is written \"
+static void append_quoted_argument(StringBuilder *sb, const char *arg) {
+    sb_append(sb, " \"");
+    for (const char *c = arg; *c; c++) {
+        if (*c == '"') sb_append(sb, "\\\"");
+        else           sb_append(sb, "%c", *c);
+    }
+    sb_append(sb, "\"");
+}
+
+#endif
+
+// Runs ./build/out.exe in the folder saad was started in, with the arguments after '--'. True if it exited with code 0
+static bool run_executable(CompilerConfig *config, bool output_to_console) {
+#ifdef _WIN32
+    StringBuilder sb = sb_init(256);
+    // cmd.exe takes away the first and the last quote of a command that starts with one, so the whole command is in quotes too
+    sb_append(&sb, "\"\"%s\\build\\out.exe\"", config->working_directory);
+    for (int i = 0; i < config->program_argc; i++) append_quoted_argument(&sb, config->program_argv[i]);
+    if (!output_to_console) sb_append(&sb, " >nul");
+    sb_append(&sb, "\"");
+
+    if (config->caller_directory) change_directory(config->caller_directory);
+    int exit_code = system(sb.buffer);
+    change_directory(config->working_directory);
     return exit_code == 0;
 #else
+    (void) config;
     (void) output_to_console;
     printf("error: Running programs is only supported on Windows. Use 'build' instead\n");
     return false;
@@ -817,7 +840,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
         print_compiler_report(report);
     }
 
-    if (config->run_program && !run_executable(output_to_console)) {
+    if (config->run_program && !run_executable(config, output_to_console)) {
         cleanup();
         return false;
     }

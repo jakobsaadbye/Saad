@@ -67,7 +67,8 @@ definition. It needs Node.js (`winget install --id OpenJS.NodeJS.LTS -e`). See [
 ### Commands
 
 ```
-saad run main.sd          # compile and run
+saad run main.sd          # compile and run, in the current folder
+saad run tool.sd -- a b   # arguments after -- are for the program (os.args())
 saad build main.sd        # compile to build\out.exe
 saad check main.sd        # only check for errors
 ```
@@ -76,6 +77,31 @@ saad check main.sd        # only check for errors
 `gdb_guide.md`). On Linux, `./build.sh` builds the compiler, and it makes Windows programs too. See `docs/backend.md`.
 
 # Changelog
+
+## Update v0.9.5 - 1. Nov 2026
+
+* A generator writes the tables of a Postgres database as Saad: a struct for each row (`?T` for columns that can be
+  `NULL`, the constant defaults of the database as the defaults of the members), an enum for each enum, and a
+  `Database` with a typed table for each table. See `docs/db.md`
+
+```
+saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" models/shop.sd shop
+```
+
+```odin
+app := shop.open(&conn);
+ada, err := app.users.insert(shop.User{name: "Ada", role: .admin});   // with the id the database made
+found, err2 := app.users.get(ada.id);                                  // a ?shop.User
+users, err3 := app.users.all();
+```
+
+* `db.Table<T>` gives `all`, `get`, `insert`, `update`, `delete` and `count` for any struct, with
+  `@db.Column(key: true)` and `@db.Column(generated: true)` for its key and the columns the database makes
+* `saad run main.sd -- a b` gives the program the arguments after `--`, and runs it in the current folder instead of the
+  folder of main.sd
+* Fixes: a list of a private type couldn't be used in its own namespace ("The public function 'add' takes the private
+  type"), a method that changes its receiver couldn't be called on a pointer stored in a read-only self
+  (e.g `self.conn.query()`), and printing more than 4096 characters at once printed garbage in the Linux test harness
 
 ## Update v0.9.4 - 1. Nov 2026
 

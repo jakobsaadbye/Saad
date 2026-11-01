@@ -1,0 +1,42 @@
+// std/db/postgres/generate.sd writes tests/db/shop/shop.sd from the schema of tests/db/shop/setup.sd.
+// After a change of the generator, SAAD_UPDATE_GOLDEN=1 tools/linux/dbtests.sh writes the file again
+
+import db;
+import db.postgres;
+import shopsetup;
+import os;
+use fmt;
+use c;
+
+Golden :: "tests/db/shop/shop.sd";
+
+main :: () {
+    conn, err := postgres.connect(fromCString(getenv(xx "SAAD_TEST_POSTGRES")));
+    assert(err == "");
+    shopsetup.create(&conn);
+
+    code, err2 := postgres.generate(&conn, postgres.GenerateOptions{ns: "shop", schema: "saad_shop"});
+    assert(err2 == "");
+
+    _, update := os.getEnv("SAAD_UPDATE_GOLDEN");
+    if update {
+        assert(os.writeFile(Golden, code));
+        print("Wrote %", Golden);
+        return;
+    }
+
+    expected, ok := os.readFile(Golden);
+    assert(ok);
+    if code != expected {
+        os.writeFile("tests/db/build/shop.actual.sd", code);
+        print("The generated code isn't % any more. It is in tests/db/build/shop.actual.sd", Golden);
+        exit(1);
+    }
+
+    // A schema that doesn't exist has nothing
+    empty, err3 := postgres.generate(&conn, postgres.GenerateOptions{ns: "nothing", schema: "no_such_schema"});
+    assert(err3 == "" && empty.indexOf("Database :: struct {\n}") >= 0);
+
+    conn.close();
+    print("generate ok");
+}

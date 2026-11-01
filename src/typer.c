@@ -2515,6 +2515,7 @@ AstIdentifier *private_type_in(Type *type) {
 bool check_no_private_types_in_signature(Typer *typer, AstFunctionDefn *func_defn) {
     if (func_defn->is_lambda || func_defn->identifier == NULL) return true;
     if (func_defn->identifier->flags & IDENTIFIER_IS_PRIVATE) return true;
+    if (func_defn->generic_function) return true; // An instance, e.g List<T>.add for a private T of the namespace that uses it
 
     for (int i = func_defn->is_method ? 1 : 0; i < func_defn->parameters.count; i++) {
         AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
@@ -4762,8 +4763,12 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                 }
             }
 
+            // self itself, or a place inside it. A pointer stored inside self, e.g self.conn.query(), points elsewhere, as
+            // read-only self is shallow
             AstFunctionDefn *readonly = readonly_self_method(typer, ma->left);
-            if (!readonly) readonly = readonly_self_place(typer, ma->left);
+            if (!readonly && (ma->left->type == NULL || ma->left->type->kind != TYPE_POINTER)) {
+                readonly = readonly_self_place(typer, ma->left);
+            }
             if (readonly && method_can_change_receiver(func_defn)) {
                 StringBuilder sb = sb_init(32);
                 sb_append(&sb, "call the method '%s', which can change its receiver, on", func_defn->identifier->name);

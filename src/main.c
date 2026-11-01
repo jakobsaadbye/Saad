@@ -19,7 +19,7 @@ typedef struct Command {
 // Add new commands here
 static Command commands[] = {
     { "build", COMMAND_BUILD, "Compile the program to ./build/out.exe without running it. --debug makes it with nasm and gcc, with debug information for gdb" },
-    { "run",   COMMAND_RUN,   "Compile the program and run it. Takes --debug too" },
+    { "run",   COMMAND_RUN,   "Compile the program and run it in the current folder. Takes --debug too. Arguments after -- are for the program, e.g saad run tool.sd -- a.txt" },
     { "check", COMMAND_CHECK, "Check the program for errors without compiling it. With --json, the errors are written as JSON" },
     { "index", COMMAND_INDEX, "Write where every name of the program is declared and used, and its errors, as JSON for an editor. --overlay path=file reads file instead of path. --std also writes the standard library" },
     { "complete", COMMAND_COMPLETE, "Write what can be written at --at file:line:character (from 0), and the signature of the call there, as JSON for an editor. Takes --overlay too" },
@@ -50,6 +50,12 @@ bool parse_options(CompilerConfig *config, int argc, char const *argv[], int fir
     for (int i = first_option; i < argc; i++) {
         const char *option = argv[i];
 
+        if (strcmp(option, "--") == 0) {
+            // The rest is for the program, e.g saad run tool.sd -- input.txt
+            config->program_argc = argc - (i + 1);
+            config->program_argv = &argv[i + 1];
+            break;
+        }
         if (strcmp(option, "--json") == 0) { config->json = true; continue; }
         if (strcmp(option, "--std") == 0)  { program_index.with_std = true; continue; }
         if (strcmp(option, "--debug") == 0) { config->debug = true; continue; }
@@ -124,6 +130,7 @@ int main(int argc, char const *argv[]) {
     }
 
     CompilerConfig config = get_standard_compiler_config();
+    config.caller_directory = get_current_directory();
 
     if (!parse_options(&config, argc, argv, 3)) {
         print_usage();
