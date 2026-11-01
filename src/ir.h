@@ -267,6 +267,7 @@ typedef struct IrGlobal {
     IrArray(IrReloc) relocs; // DATA only
     IrFunction   *function;  // FUNCTION only
     bool          is_saad;   // A function of the program, not of C. It gives its name to a C function with the same name
+    char         *library;   // EXTERN: the library it is in, e.g "kernel32.dll". NULL for the C runtime
 } IrGlobal;
 
 typedef struct IrModule {

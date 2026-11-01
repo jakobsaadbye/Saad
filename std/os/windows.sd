@@ -13,7 +13,7 @@ ConditionVariable :: struct {
     ptr: *void;
 }
 
-extern "C" {
+extern "kernel32.dll" {
     CreateThread :: (
         lpThreadAttributes: *void,  // NULL for default
         dwStackSize:         u64,    // 0 for default

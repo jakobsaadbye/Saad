@@ -8,6 +8,8 @@
 #include "ir_lower.c"
 #include "regalloc.c"
 #include "x64_emit.c"
+#include "x64_asm.c"
+#include "object_writer.c"
 
 #ifdef _WIN32
     #include <io.h>
@@ -486,30 +488,97 @@ static bool link_imports(Parser *parser, DynamicArray parsed_files) {
     return true;
 }
 
-// Assembles ./build/out.asm and links it into ./build/out.exe
-static bool assemble_and_link(CompilerConfig *config) {
-    if (system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj") != 0) {
-        printf("error: Failed to assemble ./build/out.asm\n");
+// Copies a DLL the program imports next to it, e.g packages/raylib/lib/raylib.dll. A DLL of Windows isn't in packages/
+static void copy_library(CompilerConfig *config, const char *library) {
+    char *packages = join_path(config->compiler_path, "packages");
+    DIR *d = opendir(packages);
+    if (d == NULL) return;
+    struct dirent *entry;
+    while ((entry = readdir(d)) != NULL) {
+        if (entry->d_name[0] == '.') continue;
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s/lib/%s", packages, entry->d_name, library);
+        FILE *from = fopen(path, "rb");
+        if (!from) continue;
+
+        char target[1024];
+        snprintf(target, sizeof(target), "./build/%s", library);
+        struct stat source_info, target_info;
+        bool up_to_date = stat(path, &source_info) == 0 && stat(target, &target_info) == 0 && target_info.st_size == source_info.st_size && target_info.st_mtime >= source_info.st_mtime;
+        if (!up_to_date) {
+            FILE *to = fopen(target, "wb");
+            if (to) {
+                char buffer[65536];
+                size_t n;
+                while ((n = fread(buffer, 1, sizeof(buffer), from)) > 0) fwrite(buffer, 1, n, to);
+                fclose(to);
+            }
+        }
+        fclose(from);
+        break;
+    }
+    closedir(d);
+}
+
+// Makes ./build/out.exe from the assembly. The compiler assembles it itself (x64_asm.c) and writes the program
+// (object_writer.c), so nothing has to be installed. With --debug, nasm and gcc make it instead, with debug information
+// for gdb. With --elf, it writes ./build/out.o for running it on Linux (tools/linux)
+static bool assemble_and_link(CompilerConfig *config, IrModule *module, StringBuilder *assembly) {
+    if (config->debug) {
+        if (system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj") != 0) {
+            printf("error: Failed to assemble ./build/out.asm. 'saad build --debug' needs nasm\n");
+            return false;
+        }
+#ifdef _WIN32
+        char link_command[2048];
+        snprintf(link_command, sizeof(link_command),
+            "gcc -o ./build/out.exe ./build/out.obj "
+            "-L\"%s/packages/raylib/lib\" -lraylib "
+            "-lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid",
+            config->compiler_path
+        );
+        return system(link_command) == 0;
+#else
+        printf("note: Skipping linking. 'saad build --debug' can only link on Windows\n");
+        return true;
+#endif
+    }
+
+    AsmObject obj;
+    if (!x64_assemble(assembly->buffer, (int) assembly->cursor, &obj)) {
+        printf("Compiler Error: The assembler failed on ./build/out.asm, %s\n", obj.error);
         return false;
     }
 
-#ifdef _WIN32
-    char link_command[2048];
-    snprintf(link_command, sizeof(link_command),
-        "gcc -o ./build/out.exe ./build/out.obj "
-        "-L\"%s/packages/runtime/lib\" "
-        "-L\"%s/packages/raylib/lib\" "
-        "-lruntime_support -lraylib "
-        "-lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid",
-        config->compiler_path, config->compiler_path
-    );
-    return system(link_command) == 0;
-#else
-    // The x64 backend targets Win64, so we can only assemble (not link or run) on other platforms
-    (void) config;
-    printf("note: Skipping linking. The Win64 target can only be linked on Windows\n");
+    // The libraries of the externs, e.g kernel32.dll. The others are in the C runtime
+    for (int i = 0; i < module->globals.count; i++) {
+        IrGlobal *global = module->globals.items[i];
+        if (global->kind != IR_GLOBAL_EXTERN || !global->library) continue;
+        obj.symbols[asm_symbol(&obj, global->name)].library = global->library;
+    }
+
+    if (config->emit_elf) {
+        if (!elf_write(&obj, "./build/out.o", "ms_")) {
+            printf("error: Couldn't write ./build/out.o\n");
+            return false;
+        }
+        return true;
+    }
+
+    char error[256];
+    if (!pe_write(&obj, "./build/out.exe", error, sizeof(error))) {
+        printf("error: %s\n", error);
+        return false;
+    }
+    for (int i = 0; i < obj.symbol_count; i++) {
+        AsmSymbol *symbol = &obj.symbols[i];
+        if (symbol->is_extern && symbol->library) {
+            bool copied = false;
+            for (int j = 0; j < i; j++) if (obj.symbols[j].library && strcmp(obj.symbols[j].library, symbol->library) == 0) copied = true;
+            if (!copied) copy_library(config, symbol->library);
+        }
+    }
     return true;
-#endif
 }
 
 // Runs ./build/out.exe. Returns true if the program exited with code 0
@@ -738,7 +807,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
 
     // ----------- Assemble + link -----------
     report.asm_and_link_time_start = clock();
-    if (!assemble_and_link(config)) {
+    if (!assemble_and_link(config, module, &x64.assembly)) {
         cleanup();
         return false;
     }

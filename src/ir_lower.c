@@ -2498,6 +2498,7 @@ static int function_global(Lowerer *L, AstFunctionDefn *func_defn) {
 
     if (func_defn->is_extern) {
         global = ir_find_or_add_extern(L->module, name);
+        if (func_defn->extern_library) L->module->globals.items[global]->library = func_defn->extern_library;
     } else {
         // Different functions can share a name (e.g inner functions in different scopes), so a Saad
         // function whose name is already taken gets a unique symbol

@@ -14,15 +14,16 @@ python3 tools/linux/check_recovery.py       # one error for a mistake, and the i
 python3 tools/linux/fuzz_recovery.py 1000 7 # 1000 broken programs (seed 7): no crash, always an index
 ```
 
-Requirements: `gcc` and `nasm`.
+Requirements: `gcc` (and `nasm` to run an out.asm).
 
 ## How it works
 
-1. `bin/saad build file.sd` produces `build/out.asm` (Win64 code, NASM syntax).
-2. The assembly is assembled as ELF instead of COFF with `nasm -felf64 --prefix ms_`, so every
+1. `bin/saad build file.sd --elf` assembles the program with the compiler's own assembler and writes it as an ELF
+   object, `build/out.o`, instead of `build/out.exe` (Win64 code either way). With an out.asm,
+   `nasm -felf64 --prefix ms_` does the same. In both, every
    global and extern symbol gets an `ms_` prefix (`main` becomes `ms_main`, `printf` becomes `ms_printf`, ...).
-3. `shim.c` defines those `ms_` symbols as `__attribute__((ms_abi))` wrappers around the real
-   libc functions and `src/runtime_support.c`. gcc handles the Win64 calling convention at the
+2. `shim.c` defines those `ms_` symbols as `__attribute__((ms_abi))` wrappers around the real
+   libc functions. gcc handles the Win64 calling convention at the
    boundary, so the generated code runs unchanged. A real `main` calls `ms_main`.
 
 Because gcc's `ms_abi` code relies on the Win64 rules (16 byte stack alignment, shadow space,
