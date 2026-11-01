@@ -8,9 +8,8 @@ namespace db;
 //     User :: struct { id: i64; name: string; email: *string; }   // email can be NULL
 //
 //     conn, err := postgres.connect("host=localhost dbname=app user=postgres");
-//     users: [..]User;
-//     err = conn.query(&users, "SELECT id, name, email FROM users WHERE id > $1", 10);
-//     count, err2 := conn.exec("DELETE FROM users WHERE name = $1", "Bob");
+//     users, err2 := conn.query<User>("SELECT id, name, email FROM users WHERE id > $1", 10);
+//     count, err3 := conn.exec("DELETE FROM users WHERE name = $1", "Bob");
 //     conn.close();
 //
 // The namespace only knows the Driver below. A database is a driver of its own (db.postgres), so this folder
@@ -78,35 +77,37 @@ exec :: method (conn: *Connection, sql: string, args: ...any) -> i64, string {
     return changed, "";
 }
 
-// Runs a query and adds its rows to the list, one T per row. A column is read into the member of the same
-// name (see db.Column). Columns that T doesn't have are skipped, and members without a column keep their value.
+// Runs a query and gives its rows, one T per row, e.g
+//
+//     users, err := conn.query<User>("SELECT * FROM users WHERE age > $1", 30);
+//
+// A column is read into the member of the same name (see db.Column). Columns that T doesn't have are skipped, and
+// members without a column keep their default value.
 //
 // * NULL leaves a value as it is, except for pointers, which become null. So a column that can be NULL is
 //   read into a pointer, e.g *string, or a value with a default
 // * Columns are read from their text: numbers, bool (t/f or true/false), string, enums (by name or number),
 //   and pointers to them
-// * The list, strings and pointers are allocated with conn.allocator, unless the list has an allocator already
-query :: method <T>(conn: *Connection, rows: *[..]T, sql: string, args: ...any) -> string {
+// * The list, strings and pointers are allocated with conn.allocator
+query :: method <T>(conn: *Connection, sql: string, args: ...any) -> [..]T, string {
+    rows: [..]T;
+    rows.allocator = conn.allocator;
+
+    empty: T;
+    boxed: any = empty;
+    rowType := boxed.type;
+    if rowType.kind != .struct {
+        return rows, fmt.sprint("Rows are read into structs, not into values of type %. Use queryOne for a single value", rowType.name);
+    }
+
     result, err := conn.run(sql, ...args);
     if err != "" {
-        return err;
-    }
-
-    if rows.allocator == null {
-        rows.allocator = conn.allocator;
-    }
-
-    boxed: any = rows;
-    listType := (boxed.type as *TypePointer).pointerTo as *TypeStruct;
-    rowType  := (findMember(listType, "data").type as *TypePointer).pointerTo;
-    if rowType.kind != .struct {
-        conn.driver.freeResult(result);
-        return fmt.sprint("Rows are read into structs, not into values of type %", rowType.name);
+        return rows, err;
     }
 
     columns := conn.columnsOf(result, rowType as *TypeStruct);
     count := conn.driver.rowCount(result);
-    rows.reserve(rows.count + count);
+    rows.reserve(count);
     for r in 0..count {
         row: T;
         err = conn.readRow(result, r, &row, rowType as *TypeStruct, columns);
@@ -118,18 +119,24 @@ query :: method <T>(conn: *Connection, rows: *[..]T, sql: string, args: ...any) 
     }
     columns.free();
     conn.driver.freeResult(result);
-    return err;
+    return rows, err;
 }
 
-// Runs a query and reads its first row into the value. found is false when there are no rows
-queryOne :: method <T>(conn: *Connection, row: *T, sql: string, args: ...any) -> bool, string {
+// Runs a query and gives its first row, or the first column of it when T isn't a struct, e.g
+//
+//     user, found, err := conn.queryOne<User>("SELECT * FROM users WHERE id = $1", id);
+//     total, _, err2   := conn.queryOne<i64>("SELECT count(*) FROM users");
+//
+// found is false when there are no rows, and the value is then the default of T
+queryOne :: method <T>(conn: *Connection, sql: string, args: ...any) -> T, bool, string {
+    row: T;
     result, err := conn.run(sql, ...args);
     if err != "" {
-        return false, err;
+        return row, false, err;
     }
 
     boxed: any = row;
-    rowType := (boxed.type as *TypePointer).pointerTo;
+    rowType := boxed.type;
     found := conn.driver.rowCount(result) > 0;
     if !found {
         // Nothing to read
@@ -138,15 +145,15 @@ queryOne :: method <T>(conn: *Connection, row: *T, sql: string, args: ...any) ->
         if conn.driver.columnCount(result) < 1 {
             err = "The query gives no columns";
         } else {
-            err = conn.readValue(conn.driver.value(result, 0, 0), row, rowType, conn.columnName(result, 0));
+            err = conn.readValue(conn.driver.value(result, 0, 0), &row, rowType, conn.columnName(result, 0));
         }
     } else {
         columns := conn.columnsOf(result, rowType as *TypeStruct);
-        err = conn.readRow(result, 0, row, rowType as *TypeStruct, columns);
+        err = conn.readRow(result, 0, &row, rowType as *TypeStruct, columns);
         columns.free();
     }
     conn.driver.freeResult(result);
-    return found, err;
+    return row, found, err;
 }
 
 // Starts a transaction. Nothing it changes is seen by others until commit, and rollback undoes all of it, e.g
@@ -508,14 +515,4 @@ writeBits :: (data: *void, size: int, bits: u64) {
         case 4 { *(data as *u32) = bits as u32; }
         else   { *(data as *u64) = bits; }
     }
-}
-
-@private
-findMember :: (type: *TypeStruct, name: string) -> *StructMember {
-    for i in 0..type.members.count {
-        if type.members[i].name == name {
-            return &type.members[i];
-        }
-    }
-    return null;
 }

@@ -32,11 +32,11 @@ max(3, 9, 4);   // instance max<int>
 * The parser stores the type parameters on `AstFunctionDefn.type_params`, and remembers
   `first_token_index`, the first token of the function.
 * The generic function is not checked (`check_generic_function_defn()` only checks what is known without
-  type arguments). Every type parameter must be used by a parameter, as there is no syntax to give type
-  arguments explicitly.
+  type arguments).
 * At a call, `instantiate_generic_function_call()` infers the type arguments: `unify_types()` matches each
   parameter type as written (e.g `*Map<K, V>`) against the type of the argument (e.g `*Map<int, string>`)
-  through pointers, arrays, variadics and generic struct instances.
+  through pointers, arrays, variadics, function types (`f: (T) -> U` given a `(x: int) -> string`) and generic
+  struct instances.
   * Typed arguments must agree exactly (aliases like `int` and `i32` are the same type). Nothing is widened.
   * Untyped literals give way to typed arguments. Between untyped literals a float wins over an integer.
     Only untyped literals give the same type as `x := 1` and `x := 2.5`, which is `int` and `float`.
@@ -50,6 +50,26 @@ max(3, 9, 4);   // instance max<int>
   are called. Their symbols are mangled from the type arguments, e.g `max$int`.
 * A `>>` that closes two lists of type arguments is split without changing the token
   (`parser->split_shift_right_token`), as the tokens are parsed more than once.
+
+## Type arguments at a call
+
+```odin
+x := max<f64>(1, 2.5);
+p := pairOf<int, string>(7);                       // B is only in the return type, so it can only be given
+users, err := conn.query<User>("SELECT * FROM users");
+names := users.map<string>(nameOf);                // only U: the T of map comes from the receiver
+```
+
+* The parser reads `name<...>(` as a call with type arguments when the tokens between `<` and `>` can be a list of
+  types (`scan_type_arguments()`) and a `(` follows, like C#. They are stored on `AstFunctionCall.type_args`.
+  `a < b > (c)` is read as such a call too, so that comparison needs parentheses.
+* In `instantiate_generic_function_call()` the given types are bound first. The arguments of parameters whose
+  type parameters were all given are not used for inference, but checked against the instance like the arguments
+  of any call, so `max<f64>(1, 2)` converts the literals.
+* A call can give the first type parameters and leave the rest to inference.
+* For a method call (`x.m<...>()`, also on slices), the type arguments are the method's own type parameters: those
+  that the type of its receiver doesn't mention. The `T` of `List<T>` always comes from the list.
+* A type parameter that no parameter uses is allowed. A call that doesn't give it is an error with a hint.
 
 ## Methods
 
@@ -74,6 +94,13 @@ Map :: struct <K, V> {
   the methods of the struct (`TypeStruct.method_struct` on the generic). Its type parameters are inferred at the
   call like for a generic function, and its instances are plain functions named after the struct, e.g
   `Random.choice$int`.
+* A generic method of a generic struct can have type parameters of its own, besides those of the receiver, e.g
+  `convert :: method <U> (f: (T) -> U) -> Box<U>` inside `Box :: struct <T>`, or outside it
+  `convert :: method <T, U>(b: Box<T>, f: (T) -> U) -> Box<U>`. Such a method also gets `method_struct`, so its
+  instances are plain functions, e.g `Box.convert$int$string`: one instance of `Box<int>` can have many instances
+  of `convert`, which would clash as methods of the instance. Inside a struct, the method's own type parameters
+  can't have the names of the struct's.
+* A method on slices can have type parameters of its own too, e.g `map :: method <T, U>(xs: []T, f: (T) -> U) -> [..]U`.
 * A generic method whose receiver is `[]T` (e.g `sort :: method <T>(xs: []T)`) is a method on slices
   (`register_slice_method()`). It goes in `Typer.slice_methods` instead of on a struct. `xs.sort()` on a slice,
   fixed array or collection (a struct with `elements()`) is rewritten to the generic call `sort(xs)`
@@ -95,8 +122,7 @@ Map :: struct <K, V> {
 
 ## Not supported yet
 
-Generic methods of a generic struct with type parameters of their own (e.g `map :: method <U>` on a `List<T>`), explicit type arguments at call sites (`max<f64>(...)`),
-generic functions as values, constraints, constants and function type members in generic structs, and
+Generic functions as values, constraints, constants and function type members in generic structs, and
 generic type aliases like `Pair2<T> :: Pair<T, T>`.
 
 ## Type aliases

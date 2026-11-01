@@ -72,8 +72,7 @@ main :: () {
 
     conn := db.Connection{driver: &driver, handle: &table};
 
-    posts: [..]Post;
-    err := conn.query(&posts, "SELECT * FROM posts");
+    posts, err := conn.query<Post>("SELECT * FROM posts");
     assert(err == "");
     assert(table.lastSql == "SELECT * FROM posts");
     assert(posts.count == 2);
@@ -110,35 +109,29 @@ main :: () {
     assert(e3 == "ERROR: it failed");
 
     table.cells[2] = "65536".data;       // Too big for a u16
-    tooBig: [..]Post;
-    e4 := conn.query(&tooBig, "SELECT");
+    _, e4 := conn.query<Post>("SELECT");
     assert(e4 == "Row 1: likes: 65536 doesn't fit in a u16");
     table.cells[2] = "65535".data;
 
     table.cells[4] = "deleted".data;
-    badEnum: [..]Post;
-    e5 := conn.query(&badEnum, "SELECT");
+    _, e5 := conn.query<Post>("SELECT");
     assert(e5 == "Row 1: status: 'deleted' is not a value of Status");
     table.cells[4] = "Published".data;   // Case doesn't matter
 
-    numbers: [..]int;
-    e6 := conn.query(&numbers, "SELECT");
-    assert(e6 == "Rows are read into structs, not into values of type int");
+    _, e6 := conn.query<int>("SELECT");
+    assert(e6 == "Rows are read into structs, not into values of type int. Use queryOne for a single value");
 
     // One row and one value
-    one: Post;
-    found, e7 := conn.queryOne(&one, "SELECT");
+    one, found, e7 := conn.queryOne<Post>("SELECT");
     assert(found && e7 == "" && one.title == "Hello" && one.status == .published);
-    id: i64 = 0;
-    hasId, e8 := conn.queryOne(&id, "SELECT");
+    id, hasId, e8 := conn.queryOne<i64>("SELECT");
     assert(hasId && e8 == "" && id == 1);
 
     // Memory from an arena
     arena: mem.Arena;
     alloc := arena.allocator();
     conn.allocator = &alloc;
-    fromArena: [..]Post;
-    e9 := conn.query(&fromArena, "SELECT");
+    fromArena, e9 := conn.query<Post>("SELECT");
     assert(e9 == "" && fromArena.count == 2 && fromArena.allocator == &alloc);
     assert(fromArena[0].title == "Hello" && *fromArena[0].authorId == 7);
     assert(arena.used() > 0);

@@ -77,6 +77,41 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.9.3 - 1. Nov 2026
+
+* Type arguments can be given at a call. A type parameter that is only in the return type is given that way
+
+```odin
+x := max<f64>(1, 2.5);
+users, err := conn.query<User>("SELECT * FROM users WHERE age > $1", 30);
+person, err2 := json.decode<Person>(text);
+names := users.map<string>(nameOf);   // a method gets its own type parameters, not those of the receiver
+```
+
+* Methods can have type parameters of their own, also inside a generic struct
+
+```odin
+Box :: struct <T> {
+    value: T;
+    convert :: method <U> (f: (T) -> U) -> Box<U> { ... }
+}
+```
+
+* `map`, `filter`, `reduce`, `find`, `findIndex`, `some`, `every` and `countWhere` on slices, arrays and lists. The type
+  of a function argument is inferred, e.g `users.map(nameOf)` is a `[..]string`, and `map` and `filter` take an allocator
+
+```odin
+adults := users.filter(isAdult).map((u: User) -> string { return u.name; });
+total  := prices.reduce(0.0, (sum: f64, p: f64) -> f64 { return sum + p; });
+```
+
+* A function type can leave out the names of its parameters: `(T) -> U`, `(int, string) -> bool`
+* Changed: `conn.query<User>(sql)` gives the rows and `conn.queryOne<T>(sql)` gives the row, a found flag and the error,
+  instead of filling a pointer. `json.decode<T>(text)` gives the value; `json.decodeInto(text, &value)` is the old
+  `json.decode(text, &value)`
+* Fix: a function literal checked after a call to a function that wasn't checked yet was taken for a global variable
+  ("The start value of a global variable must be known when compiling")
+
 ## Update v0.9.2 - 1. Nov 2026
 
 * `std/db`: run SQL against Postgres and read the rows into plain structs. Columns are matched to members by name

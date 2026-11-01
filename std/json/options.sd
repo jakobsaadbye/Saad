@@ -3,7 +3,7 @@ namespace json;
 // How json.encode and json.decode write and read values, e.g
 //
 //     json.encode(person, json.Pretty);
-//     json.decode(text, &person, json.SnakeCase);
+//     person, err := json.decode<Person>(text, json.SnakeCase);
 //     json.encode(person, json.Options{indent: 4, names: .snakeCase, omitEmpty: true});
 
 import fmt;

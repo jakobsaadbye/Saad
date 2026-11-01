@@ -73,9 +73,8 @@ main :: () {
     count3, e3 := conn.exec("INSERT INTO saad_users (name) VALUES ('Cy'), ('Di')");
     assert(e3 == "" && count3 == 2);
 
-    users: [..]User;
-    err = conn.query(&users, "SELECT * FROM saad_users ORDER BY id");
-    assert(err == "");
+    users, err1 := conn.query<User>("SELECT * FROM saad_users ORDER BY id");
+    assert(err1 == "");
     assert(users.count == 4);
 
     ada := users[0];
@@ -93,33 +92,28 @@ main :: () {
     assert(bob.score == -1.25 && !bob.active && bob.role == .member);
 
     // Parameters in a query
-    young: [..]User;
-    err = conn.query(&young, "SELECT id, name FROM saad_users WHERE name = $1 OR id = $2", "Cy", 4);
-    assert(err == "");
+    young, err2 := conn.query<User>("SELECT id, name FROM saad_users WHERE name = $1 OR id = $2", "Cy", 4);
+    assert(err2 == "");
     assert(young.count == 2 && young[0].name == "Cy" && young[1].name == "Di");
     assert(young[0].email == null && young[0].age == -1); // Columns that are not there keep their value
 
     // One row, and one value
-    one: User;
-    found, e4 := conn.queryOne(&one, "SELECT * FROM saad_users WHERE id = $1", 2);
+    one, found, e4 := conn.queryOne<User>("SELECT * FROM saad_users WHERE id = $1", 2);
     assert(found && e4 == "" && one.name == "Bob");
-    missing, e5 := conn.queryOne(&one, "SELECT * FROM saad_users WHERE id = $1", 99);
+    _, missing, e5 := conn.queryOne<User>("SELECT * FROM saad_users WHERE id = $1", 99);
     assert(!missing && e5 == "");
 
-    total: i64 = 0;
-    hasTotal, e6 := conn.queryOne(&total, "SELECT count(*) FROM saad_users");
+    total, hasTotal, e6 := conn.queryOne<i64>("SELECT count(*) FROM saad_users");
     assert(hasTotal && e6 == "" && total == 4);
-    average := 0.0;
-    hasAverage, e7 := conn.queryOne(&average, "SELECT avg(score) FROM saad_users");
+    average, hasAverage, e7 := conn.queryOne<f64>("SELECT avg(score) FROM saad_users");
     assert(hasAverage && e7 == "" && average == 2.0625);
 
     // Errors of Postgres
     _, e8 := conn.exec("SELECT * FROM no_such_table");
     assert(e8.startsWith("ERROR:"));
     assert(e8.indexOf("no_such_table") >= 0);
-    wrong: [..]User;
-    err = conn.query(&wrong, "SELECT 'x' AS age");
-    assert(err == "Row 1: age: 'x' is not a whole number");
+    _, err3 := conn.query<User>("SELECT 'x' AS age");
+    assert(err3 == "Row 1: age: 'x' is not a whole number");
     nothing: *void = null;
     _, e9 := conn.exec("SELECT $1", &nothing);
     assert(e9 == "Parameter $1 can't be a **void");
@@ -128,15 +122,13 @@ main :: () {
     assert(conn.begin() == "");
     run(&conn, "DELETE FROM saad_users WHERE name = 'Di'");
     assert(conn.rollback() == "");
-    afterRollback: i64 = 0;
-    _, e10 := conn.queryOne(&afterRollback, "SELECT count(*) FROM saad_users");
+    afterRollback, _, e10 := conn.queryOne<i64>("SELECT count(*) FROM saad_users");
     assert(e10 == "" && afterRollback == 4);
 
     assert(conn.begin() == "");
     run(&conn, "UPDATE saad_users SET score = score + 1 WHERE name = 'Cy'");
     assert(conn.commit() == "");
-    cy: User;
-    _, e11 := conn.queryOne(&cy, "SELECT * FROM saad_users WHERE name = $1", "Cy");
+    cy, _, e11 := conn.queryOne<User>("SELECT * FROM saad_users WHERE name = $1", "Cy");
     assert(e11 == "" && cy.score == 1.0);
     run(&conn, "UPDATE saad_users SET score = 0 WHERE name = 'Cy'");
 
@@ -144,9 +136,8 @@ main :: () {
     arena: mem.Arena;
     alloc := arena.allocator();
     conn.allocator = &alloc;
-    fromArena: [..]User;
-    err = conn.query(&fromArena, "SELECT * FROM saad_users ORDER BY id");
-    assert(err == "" && fromArena.count == 4);
+    fromArena, err4 := conn.query<User>("SELECT * FROM saad_users ORDER BY id");
+    assert(err4 == "" && fromArena.count == 4);
     assert(fromArena.allocator == &alloc);
     assert(*fromArena[0].email == "ada@example.com");
     assert(arena.used() > 0);

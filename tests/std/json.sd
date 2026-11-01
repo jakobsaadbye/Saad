@@ -85,8 +85,7 @@ main :: () {
         assert(text == "{\"first_name\":\"Ada\",\"age\":36,\"height\":1.75,\"tags\":[\"math\"],\"status\":\"closed\",\"address\":{\"street\":\"Main St\",\"zip\":2100},\"scores\":{\"chess\":7},\"extra\":null}");
 
         // Read it back
-        q: Person;
-        err := json.decode(text, &q);
+        q, err := json.decode<Person>(text);
         assert(err == "");
         assert(q.firstName == "Ada" && q.age == 36 && q.height == 1.75);
         assert(q.tags.count == 1 && q.tags[0] == "math");
@@ -104,7 +103,7 @@ main :: () {
         p: Person;
         somewhere := Address{"Old St", 1};
         p.address = &somewhere;
-        err := json.decode("{\"cache\": 1, \"unknown\": [1, 2], \"address\": null, \"nickname\": \"Lovelace\"}", &p);
+        err := json.decodeInto("{\"cache\": 1, \"unknown\": [1, 2], \"address\": null, \"nickname\": \"Lovelace\"}", &p);
         assert(err == "");
         assert(p.age == 18 && p.cache == 99);
         assert(p.address == null);
@@ -113,7 +112,7 @@ main :: () {
     {
         // A json.Value member keeps any shape
         p: Person;
-        err := json.decode("{\"extra\": {\"list\": [1, \"two\", false], \"n\": 3}}", &p);
+        err := json.decodeInto("{\"extra\": {\"list\": [1, \"two\", false], \"n\": 3}}", &p);
         assert(err == "");
         assert(p.extra.get("list").at(1).asString() == "two");
         assert(p.extra.get("n").asInt() == 3);
@@ -122,27 +121,27 @@ main :: () {
     {
         // Integers are read exactly and checked against their type
         l: Limits;
-        assert(json.decode("{\"small\": 255, \"tiny\": -128, \"big\": -9223372036854775808, \"huge\": 18446744073709551615, \"f\": 1e3}", &l) == "");
+        assert(json.decodeInto("{\"small\": 255, \"tiny\": -128, \"big\": -9223372036854775808, \"huge\": 18446744073709551615, \"f\": 1e3}", &l) == "");
         assert(l.small == 255 && l.tiny == -128 && l.huge == 18446744073709551615 && l.f == 1000.0);
         assert(l.big == -9223372036854775807 - 1);
         assert(json.encode(l) == "{\"small\":255,\"tiny\":-128,\"big\":-9223372036854775808,\"huge\":18446744073709551615,\"f\":1000}");
 
-        assert(json.decode("{\"small\": 2e2}", &l) == "");
+        assert(json.decodeInto("{\"small\": 2e2}", &l) == "");
         assert(l.small == 200);
 
-        assert(json.decode("{\"small\": 256}", &l) == "small: 256 doesn't fit in a u8");
-        assert(json.decode("{\"tiny\": -129}", &l) == "tiny: -129 doesn't fit in a i8");
-        assert(json.decode("{\"small\": -1}", &l) == "small: -1 doesn't fit in a u8");
-        assert(json.decode("{\"big\": 1.5}", &l) == "big: 1.5 is not a whole number, as a i64 must be");
+        assert(json.decodeInto("{\"small\": 256}", &l) == "small: 256 doesn't fit in a u8");
+        assert(json.decodeInto("{\"tiny\": -129}", &l) == "tiny: -129 doesn't fit in a i8");
+        assert(json.decodeInto("{\"small\": -1}", &l) == "small: -1 doesn't fit in a u8");
+        assert(json.decodeInto("{\"big\": 1.5}", &l) == "big: 1.5 is not a whole number, as a i64 must be");
     }
     {
         // Errors say where they are
         p: Person;
-        assert(json.decode("{\"address\": {\"zip\": \"x\"}}", &p) == "address.zip: Expected a number, but got a string");
-        assert(json.decode("{\"status\": \"half\"}", &p) == "status: 'half' is not a value of Status");
-        assert(json.decode("{\"tags\": [\"a\", 1]}", &p) == "tags[1]: Expected a string, but got a number");
-        assert(json.decode("[1, 2]", &p) == "Expected an object, but got an array");
-        assert(json.decode("{\"status\": 1}", &p) == "");
+        assert(json.decodeInto("{\"address\": {\"zip\": \"x\"}}", &p) == "address.zip: Expected a number, but got a string");
+        assert(json.decodeInto("{\"status\": \"half\"}", &p) == "status: 'half' is not a value of Status");
+        assert(json.decodeInto("{\"tags\": [\"a\", 1]}", &p) == "tags[1]: Expected a string, but got a number");
+        assert(json.decodeInto("[1, 2]", &p) == "Expected an object, but got an array");
+        assert(json.decodeInto("{\"status\": 1}", &p) == "");
         assert(p.status == .closed);
     }
     {
@@ -212,12 +211,12 @@ main :: () {
 
         // Read back with the same options
         back: Response;
-        assert(json.decode(snake, &back, json.SnakeCase) == "");
+        assert(json.decodeInto(snake, &back, json.SnakeCase) == "");
         assert(back.statusCode == .notFound && back.userID == 7 && back.HTTPServer == "x" && back.plain_name && back.renamed == 1);
 
         // Read with other options, the names don't match
         other: Response;
-        assert(json.decode(snake, &other) == "");
+        assert(json.decodeInto(snake, &other) == "");
         assert(other.userID == 0 && other.renamed == 1);
     }
     {
@@ -228,14 +227,14 @@ main :: () {
         assert(text == "{\n \"status_code\": 2,\n \"user_id\": 1\n}");
 
         back: Response;
-        assert(json.decode(text, &back, options) == "");
+        assert(json.decodeInto(text, &back, options) == "");
         assert(back.statusCode == .serverError && back.userID == 1);
 
         // Strict decoding fails on members the struct doesn't have
         strict := json.Options{strict: true};
-        assert(json.decode("{\"userID\": 1, \"color\": \"red\"}", &back, strict) == "Response has no member 'color'");
-        assert(json.decode("{\"userID\": 1, \"color\": \"red\"}", &back) == "");
-        assert(json.decode("{\"statusCode\": \"not_found\"}", &back) == "statusCode: 'not_found' is not a value of HttpStatus");
+        assert(json.decodeInto("{\"userID\": 1, \"color\": \"red\"}", &back, strict) == "Response has no member 'color'");
+        assert(json.decodeInto("{\"userID\": 1, \"color\": \"red\"}", &back) == "");
+        assert(json.decodeInto("{\"statusCode\": \"not_found\"}", &back) == "statusCode: 'not_found' is not a value of HttpStatus");
     }
     {
         // Unions: the name of a variant without a value, or an object with the name and the value
@@ -247,12 +246,12 @@ main :: () {
         assert(text == "[{\"circle\":{\"radius\":2}},{\"label\":\"hi\"},\"empty\"]");
 
         back: [..]Shape;
-        assert(json.decode(text, &back) == "");
+        assert(json.decodeInto(text, &back) == "");
         assert(back.count == 3);
         assert(json.encode(back) == text);
 
         one: Shape;
-        assert(json.decode("{\"square\": 1}", &one) == "'square' is not a variant of Shape");
-        assert(json.decode("\"circle\"", &one) == "The variant 'circle' of Shape needs a value");
+        assert(json.decodeInto("{\"square\": 1}", &one) == "'square' is not a variant of Shape");
+        assert(json.decodeInto("\"circle\"", &one) == "The variant 'circle' of Shape needs a value");
     }
 }

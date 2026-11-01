@@ -55,6 +55,96 @@ swap :: method <T>(elements: []T, i: int, j: int) {
     elements[j] = tmp;
 }
 
+//
+// With functions
+//
+//     names  := users.map((u: User) -> string { return u.name; });
+//     adults := users.filter(isAdult);
+//     total  := prices.reduce(0.0, (sum: f64, p: f64) -> f64 { return sum + p; });
+//     ids    := users.map<i64>(idOf);      // The type of the result can be given, but is inferred from the function
+//
+// The lists of map and filter get their memory from the allocator. Null, the default, is the heap
+//
+
+// A list of f of each element, e.g [1, 2, 3].map(double) is [2, 4, 6]
+map :: method <T, U>(elements: []T, f: (T) -> U, allocator: *Allocator = null) -> [..]U {
+    result: [..]U;
+    result.allocator = allocator;
+    result.reserve(elements.count);
+    for element in elements {
+        result.add(f(element));
+    }
+    return result;
+}
+
+// A list of the elements that keep is true for, in the same order
+filter :: method <T>(elements: []T, keep: (T) -> bool, allocator: *Allocator = null) -> [..]T {
+    result: [..]T;
+    result.allocator = allocator;
+    for element in elements {
+        if keep(element) {
+            result.add(element);
+        }
+    }
+    return result;
+}
+
+// Combines the elements into one value, starting from start, e.g [1, 2, 3].reduce(0, add) is add(add(add(0, 1), 2), 3)
+reduce :: method <T, Acc>(elements: []T, start: Acc, f: (Acc, T) -> Acc) -> Acc {
+    result := start;
+    for element in elements {
+        result = f(result, element);
+    }
+    return result;
+}
+
+// The first element that match is true for. found is false when there is none
+find :: method <T>(elements: []T, match: (T) -> bool) -> (T, bool) {
+    for element in elements {
+        if match(element) {
+            return element, true;
+        }
+    }
+    nothing: T;
+    return nothing, false;
+}
+
+// The index of the first element that match is true for, or -1
+findIndex :: method <T>(elements: []T, match: (T) -> bool) -> int {
+    for element, i in elements {
+        if match(element) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+// True if match is true for at least one element
+some :: method <T>(elements: []T, match: (T) -> bool) -> bool {
+    return elements.findIndex(match) != -1;
+}
+
+// True if match is true for every element, also when there are none
+every :: method <T>(elements: []T, match: (T) -> bool) -> bool {
+    for element in elements {
+        if !match(element) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The number of elements that match is true for
+countWhere :: method <T>(elements: []T, match: (T) -> bool) -> int {
+    n := 0;
+    for element in elements {
+        if match(element) {
+            n += 1;
+        }
+    }
+    return n;
+}
+
 // Sorts elements[lo] to elements[hi]. Quicksort for big ranges, insertion sort for small ones
 @private
 quickSort :: <T>(elements: []T, lo: int, hi: int) {

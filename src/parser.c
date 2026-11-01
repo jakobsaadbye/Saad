@@ -1354,7 +1354,38 @@ void add_struct_member(Parser *parser, TypeStruct *struct_defn, char *name, Type
 
 }
 
+// A parameter of a function type that is only its type e.g the T of (T) -> U. It gets a name that can't be written, $0, $1, ...
+static AstDeclaration *parse_unnamed_parameter(Parser *parser, int index) {
+    Type *type = parse_type(parser);
+    if (!type) return NULL;
+
+    AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
+    decl->head.kind  = AST_DECLARATION;
+    decl->head.file  = parser->current_file;
+    decl->head.start = type->head.start;
+    decl->head.end   = type->head.end;
+    decl->idents     = da_init(1, sizeof(AstIdentifier *));
+    decl->values     = da_init(1, sizeof(AstExpr *));
+    decl->type       = type;
+    decl->flags     |= DECLARATION_TYPED_NO_EXPR;
+
+    char *name = malloc(16);
+    snprintf(name, 16, "$%d", index);
+    AstIdentifier *ident = make_identifier_from_string(parser, name, type);
+    ident->head.start = type->head.start;
+    ident->head.end   = type->head.end;
+    ident->decl       = decl;
+    da_append(&decl->idents, ident);
+
+    if (add_declaration_to_scope(parser, parser->current_scope, decl) != NULL) return NULL;
+    return decl;
+}
+
 bool parse_parameter_list(Parser *parser, AstFunctionDefn *func_defn) {
+    // Only this list has parameters without names, not the function types inside it
+    bool unnamed = parser->unnamed_parameters;
+    parser->unnamed_parameters = false;
+
     Token next = peek_next_token(parser);
     expect(parser, next, '(');
     func_defn->paren_start_token = next;
@@ -1377,7 +1408,7 @@ bool parse_parameter_list(Parser *parser, AstFunctionDefn *func_defn) {
             }
         }
 
-        AstDeclaration *decl = parse_declaration(parser);
+        AstDeclaration *decl = unnamed ? parse_unnamed_parameter(parser, func_defn->parameters.count) : parse_declaration(parser);
         if (!decl) {
             return false;
         }
@@ -1658,6 +1689,16 @@ Type *parse_type(Parser *parser) {
     if (starts_function_defn(parser)) {
         // Function
         TypeFunction *func_type = parse_function_signature(parser);
+        if (func_type == NULL) return NULL;
+
+        return (Type *)func_type;
+    }
+
+    if (next.type == '(') {
+        // A function type with only the types of its parameters e.g (T) -> U or (int, string) -> bool
+        parser->unnamed_parameters = true;
+        TypeFunction *func_type = parse_function_signature(parser);
+        parser->unnamed_parameters = false;
         if (func_type == NULL) return NULL;
 
         return (Type *)func_type;
@@ -2842,6 +2883,16 @@ AstExpr *parse_array_access(Parser *parser, Token open_bracket, AstExpr *left) {
     return (AstExpr *)(array_ac);
 }
 
+// A name that can be called with type arguments e.g max or rows.map
+static bool is_callee_name(AstExpr *expr) {
+    if (expr->head.kind == AST_LITERAL) return ((AstLiteral *)expr)->kind == LITERAL_IDENTIFIER;
+    if (expr->head.kind == AST_MEMBER_ACCESS) {
+        AstExpr *right = ((AstMemberAccess *)expr)->right;
+        return right->head.kind == AST_LITERAL && ((AstLiteral *)right)->kind == LITERAL_IDENTIFIER;
+    }
+    return false;
+}
+
 AstFunctionCall *parse_function_call(Parser *parser, AstExpr *lhs) {
     AstFunctionCall *call = ast_allocate(parser, sizeof(AstFunctionCall));
     call->arguments       = da_init(2, sizeof(AstArgument *));
@@ -3072,16 +3123,25 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         return NULL;
     }
 
-    if (self_struct && next.type == '<') {
-        report_error_token(parser, LABEL_ERROR, next, "Methods declared inside a struct cannot have type parameters of their own yet");
-        report_error_ast(parser, LABEL_NOTE, NULL, "They already have the type parameters of the struct");
-        return NULL;
-    }
-
-    // Type parameters of a generic function e.g max :: <T>(...)
+    // Type parameters of a generic function e.g max :: <T>(...). A method declared inside a struct can have type parameters of
+    // its own e.g the U of 'map :: method <U> (f: (x: T) -> U) -> List<U>', besides those of the struct
     if (next.type == '<') {
         bool ok = parse_type_parameters(parser, &func_defn->type_params);
         if (!ok) return NULL;
+
+        if (self_struct) {
+            for (int i = 0; i < func_defn->type_params.count; i++) {
+                AstIdentifier *own = ((AstIdentifier **)func_defn->type_params.items)[i];
+                for (int j = 0; j < self_struct->type_params.count; j++) {
+                    AstIdentifier *of_struct = ((AstIdentifier **)self_struct->type_params.items)[j];
+                    if (strcmp(own->name, of_struct->name) == 0) {
+                        report_error_ast(parser, LABEL_ERROR, (Ast *)own, "Type parameter '%s' is already a type parameter of '%s'", own->name, self_struct->identifier->name);
+                        report_error_ast(parser, LABEL_HINT, NULL, "A method declared inside a struct has the type parameters of the struct. Give the method's own type parameter another name");
+                        return NULL;
+                    }
+                }
+            }
+        }
 
         if (parser->inside_extern_block) {
             report_error_token(parser, LABEL_ERROR, next, "External C functions cannot be generic");
@@ -3918,6 +3978,22 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
             next = peek_next_token(parser);
 
             left = (AstExpr *)as_cast;
+        }
+
+        // Type arguments of a call e.g max<f64>(a, b) or rows.map<string>(f). It is a call when the '<...>' can be a list of
+        // types and is followed by '(', like C#. 'a < b > (c)' is read as a call too, so a comparison like that needs parentheses
+        if (next.type == '<' && is_callee_name(left)) {
+            int end = scan_type_arguments(parser, 0);
+            if (end != -1 && peek_token(parser, end).type == '(') {
+                DynamicArray type_args = da_init(1, sizeof(Type *));
+                if (!parse_type_arguments(parser, &type_args)) return NULL;
+
+                AstFunctionCall *call = parse_function_call(parser, left);
+                if (!call) return NULL;
+                call->type_args = type_args;
+                left = (AstExpr *)call;
+                continue;
+            }
         }
 
         if (ends_expression(next))          break;

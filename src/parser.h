@@ -17,6 +17,7 @@ typedef struct Parser {
 
     bool inside_statement_header;
     bool inside_parameter_list;
+    bool unnamed_parameters; // The next parameter list is of a function type with only the types of its parameters e.g (T) -> U
     bool inside_argument_list;
     bool inside_extern_block;
     char *extern_library;  // The library of the extern block that is parsed, e.g "kernel32.dll". NULL for extern "C"

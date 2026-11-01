@@ -161,6 +161,22 @@ names.contains("anna");
 xs.swap(0, 1);
 ```
 
+With a function, which can be a function literal or the name of a function:
+
+```odin
+doubled := xs.map((x: int) -> int { return x * 2; });   // a new [..]int
+names   := users.map(nameOf);                           // [..]string, U is inferred from nameOf
+ids     := users.map<i64>(idOf);                        // or given
+adults  := users.filter(isAdult);                       // the elements that it is true for, in order
+total   := prices.reduce(0.0, (sum: f64, p: f64) -> f64 { return sum + p; });
+user, found := users.find(isAdult);                     // the first one, found is false when there is none
+users.findIndex(isAdult);                               // -1 when there is none
+users.some(isAdult);  users.every(isAdult);  users.countWhere(isAdult);
+```
+
+`map` and `filter` take an allocator for the new list as their last argument, e.g `xs.filter(isEven, &alloc)`. Null,
+the default, is the heap. A function type can leave out the names of its parameters: `(T) -> U`.
+
 A type's own method of the same name wins, e.g `List` has its own `indexOf`, `contains` and `reverse`.
 
 ## json
@@ -184,8 +200,8 @@ Person :: struct {
 text := json.encode(person);              // {"first_name":"Ada","age":36,...}
 text := json.encode(person, json.Pretty); // over more lines
 
-p: Person;
-err := json.decode(text, &p);             // "" when it worked, otherwise e.g "address.zip: Expected a number, but got a string"
+p, err := json.decode<Person>(text);      // err is "" when it worked, otherwise e.g "address.zip: Expected a number, but got a string"
+err2 := json.decodeInto(text, &settings); // into a value that exists, which keeps what the JSON doesn't have
 
 value, parseErr := json.parse(text);      // a json.Value of any shape
 name := value.get("first_name").asString();
@@ -199,12 +215,13 @@ value.toJson();
 * `json.Field` is an attribute (see `docs/reflection.md`): `name` renames a member, `skip` leaves it out, and
   `omitEmpty` leaves out 0, false, "", null and things without elements.
 * Decoding keeps members that are not in the JSON, so default values stay, and skips members it doesn't know.
+  `decodeInto` keeps the values a value already has.
   Integers are read from the text, so an `i64` or `u64` doesn't lose digits, and they must fit their type.
 * Both take options as the last argument:
 
   ```odin
   json.encode(person, json.Pretty);         // indent: 2
-  json.decode(text, &person, json.SnakeCase);
+  person, err := json.decode<Person>(text, json.SnakeCase);
   json.encode(person, json.Options{indent: 4, names: .snakeCase, enumsAsNumbers: true, omitEmpty: true});
   ```
 
@@ -225,7 +242,7 @@ value.toJson();
 
 ## db
 
-`conn.query(&users, "SELECT * FROM users WHERE id > $1", 10)` reads rows into structs, `conn.exec` runs
+`users, err := conn.query<User>("SELECT * FROM users WHERE id > $1", 10)` reads rows into structs, `conn.exec` runs
 statements and `conn.queryOne` reads one row or value. `db.postgres` connects to Postgres. See `docs/db.md`.
 
 ## math, mem, c

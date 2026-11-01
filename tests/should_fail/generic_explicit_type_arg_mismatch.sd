@@ -1,0 +1,11 @@
+// An explicit type argument decides the type, and the arguments are checked against it
+// expect-error: Type mismatch
+
+max :: <T>(a: T, b: T) -> T {
+    if a > b { return a; }
+    return b;
+}
+
+main :: () {
+    x := max<int>(1, "two");
+}

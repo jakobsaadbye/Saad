@@ -1041,20 +1041,7 @@ Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic) {
             return NULL;
         }
 
-        // There is no syntax to give the type arguments explicitly, so each type parameter has to be inferable from the arguments
-        bool used_by_parameter = false;
-        for (int j = 0; j < generic->parameters.count; j++) {
-            AstIdentifier *func_param = ((AstIdentifier **)generic->parameters.items)[j];
-            if (type_mentions_name(func_param->type, param->name)) {
-                used_by_parameter = true;
-                break;
-            }
-        }
-        if (!used_by_parameter) {
-            report_error_ast(parser, LABEL_ERROR, (Ast *)param, "Type parameter '%s' of '%s' is not used by any parameter, so its type can never be inferred", param->name, generic->identifier->name);
-            report_error_ast(parser, LABEL_HINT, NULL, "Type parameters are inferred from the arguments of a call, so '%s' must appear in the type of a parameter", param->name);
-            return NULL;
-        }
+        // A type parameter that no parameter uses, e.g the T of 'zero :: <T>() -> T', is given at the call: zero<int>()
     }
 
     if (generic->is_method) {
@@ -1187,6 +1174,26 @@ bool unify_types(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindings, 
     case TYPE_VARIADIC: {
         return unify_types(typer, generic, bindings, ((TypeVariadic *)param_type)->type, arg_type, arg, param);
     }
+    case TYPE_FUNCTION: {
+        // e.g a parameter 'f: (T) -> U' given a function '(x: int) -> string' has T = int and U = string
+        if (arg_type->kind != TYPE_FUNCTION) return true;
+        AstFunctionDefn *wanted = ((TypeFunction *)param_type)->node;
+        AstFunctionDefn *given  = ((TypeFunction *)arg_type)->node;
+        if (wanted->parameters.count != given->parameters.count || wanted->return_types.count != given->return_types.count) return true;
+
+        for (int i = 0; i < wanted->parameters.count; i++) {
+            Type *wanted_param = ((AstIdentifier **)wanted->parameters.items)[i]->type;
+            Type *given_param  = ((AstIdentifier **)given->parameters.items)[i]->type;
+            if (!wanted_param || !given_param) continue;
+            if (!unify_types(typer, generic, bindings, wanted_param, given_param, arg, param)) return false;
+        }
+        for (int i = 0; i < wanted->return_types.count; i++) {
+            Type *wanted_return = ((Type **)wanted->return_types.items)[i];
+            Type *given_return  = ((Type **)given->return_types.items)[i];
+            if (!unify_types(typer, generic, bindings, wanted_return, given_return, arg, param)) return false;
+        }
+        return true;
+    }
     case TYPE_GENERIC_INSTANCE: {
         if (arg_type->kind != TYPE_STRUCT) return true;
 
@@ -1310,9 +1317,9 @@ bool register_slice_method(Typer *typer, AstFunctionDefn *generic) {
     Type          *elem     = ((TypeArray *)receiver->type)->elem_type;
 
     int index = elem->kind == TYPE_NAME ? type_param_index(generic->type_params, elem->name) : -1;
-    if (index == -1 || generic->type_params.count != 1) {
-        report_error_ast(parser, LABEL_ERROR, (Ast *)receiver->type, "The receiver of a method on slices must be []T, where T is the only type parameter of the method");
-        report_error_ast(parser, LABEL_HINT, NULL, "e.g sort :: method <T>(xs: []T)");
+    if (index == -1) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)receiver->type, "The receiver of a method on slices must be []T, where T is a type parameter of the method");
+        report_error_ast(parser, LABEL_HINT, NULL, "e.g sort :: method <T>(xs: []T), or map :: method <T, U>(xs: []T, f: (T) -> U) -> [..]U");
         return false;
     }
 
@@ -1411,15 +1418,15 @@ bool register_generic_method(Typer *typer, AstFunctionDefn *generic) {
         }
         used[index] = true;
     }
+    // Type parameters that are not type arguments of the receiver belong to the method itself e.g the U of
+    // 'map :: method <T, U>(xs: List<T>, f: (T) -> U) -> List<U>'. Its instances are then plain functions, like those of a
+    // generic method of a struct that isn't generic, as one instance of List<int> can have many instances of map
+    bool has_own_type_params = false;
     for (int i = 0; i < generic->type_params.count; i++) {
-        if (!used[i]) {
-            AstIdentifier *param = ((AstIdentifier **)generic->type_params.items)[i];
-            report_error_ast(parser, LABEL_ERROR, (Ast *)param, "Type parameter '%s' of method '%s' is not a type argument of the receiver", param->name, generic->identifier->name);
-            report_error_ast(parser, LABEL_NOTE, NULL, "Methods with type parameters of their own are not supported yet");
-            return false;
-        }
+        if (!used[i]) has_own_type_params = true;
     }
     free(used);
+    if (has_own_type_params) generic->method_struct = generic_struct;
 
     return register_method(typer, generic, generic_struct);
 }
@@ -1652,6 +1659,52 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
     }
 
     TypeBinding *bindings = calloc(generic->type_params.count, sizeof(TypeBinding));
+    bool        *explicit = calloc(generic->type_params.count, sizeof(bool));
+
+    // The type arguments given at the call e.g max<f64>(a, b). For a method they are the method's own type parameters, the
+    // ones that its receiver doesn't decide e.g the U of 'map :: method <T, U>(xs: []T, f: (T) -> U) -> [..]U'
+    if (call->type_args.count > 0) {
+        bool method_form = call->is_method_call || call->is_slice_method_call;
+        AstIdentifier *receiver = method_form && generic->parameters.count > 0 ? ((AstIdentifier **)generic->parameters.items)[0] : NULL;
+
+        int own_count = 0;
+        int *own = calloc(generic->type_params.count, sizeof(int));
+        for (int i = 0; i < generic->type_params.count; i++) {
+            AstIdentifier *type_param = ((AstIdentifier **)generic->type_params.items)[i];
+            if (receiver && receiver->type && type_mentions_name(receiver->type, type_param->name)) continue;
+            own[own_count++] = i;
+        }
+
+        if (call->type_args.count > own_count) {
+            Type *extra = ((Type **)call->type_args.items)[own_count < call->type_args.count ? own_count : 0];
+            if (own_count == 0) {
+                report_error_ast(parser, LABEL_ERROR, (Ast *)extra, "'%s' takes no type arguments%s", generic->identifier->name, receiver ? ", as its receiver decides its type parameters" : "");
+            } else {
+                report_error_ast(parser, LABEL_ERROR, (Ast *)extra, "'%s' takes %d type argument%s, but %d %s given", generic->identifier->name,
+                    own_count, own_count == 1 ? "" : "s", call->type_args.count, call->type_args.count == 1 ? "was" : "were");
+            }
+            report_error_ast(parser, LABEL_NOTE, (Ast *)generic->identifier, "Here is the definition of '%s'", generic->identifier->name);
+            return NULL;
+        }
+
+        for (int i = 0; i < call->type_args.count; i++) {
+            Type **arg_ptr = &((Type **)call->type_args.items)[i];
+            Type *type = resolve_type(typer, *arg_ptr);
+            if (!type) return NULL;
+            *arg_ptr = type;
+            if (type->kind == TYPE_VOID) {
+                AstIdentifier *type_param = ((AstIdentifier **)generic->type_params.items)[own[i]];
+                report_error_ast(parser, LABEL_ERROR, (Ast *)type, "Type parameter '%s' of '%s' cannot be void", type_param->name, generic->identifier->name);
+                return NULL;
+            }
+
+            bindings[own[i]].type   = type;
+            bindings[own[i]].kind   = BINDING_TYPED;
+            bindings[own[i]].source = (Ast *)type;
+            explicit[own[i]] = true;
+        }
+        free(own);
+    }
 
     for (int i = 0; i < call->arguments.count; i++) {
         AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
@@ -1674,6 +1727,17 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
         // Arguments that don't match a parameter are reported when checking the call against the instance
         if (param == NULL || param->type == NULL) continue;
         if (!type_mentions_any_type_param(param->type, generic->type_params)) continue;
+
+        // A parameter whose type parameters were all given at the call is checked against the instance, like any other argument
+        bool all_explicit = true;
+        for (int j = 0; j < generic->type_params.count; j++) {
+            AstIdentifier *type_param = ((AstIdentifier **)generic->type_params.items)[j];
+            if (!explicit[j] && type_mentions_name(param->type, type_param->name)) {
+                all_explicit = false;
+                break;
+            }
+        }
+        if (all_explicit) continue;
 
         // An argument that needs to know its type e.g the struct literal in points.add({1, 2}), is checked against the instance instead,
         // if its type parameters are already known e.g the T of add(value: T) from the receiver
@@ -1718,6 +1782,7 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
         if (binding.kind == BINDING_NONE) {
             report_error_token(parser, LABEL_ERROR, call->paren_start_token, "Cannot infer the type parameter '%s' of '%s', as no argument gives it a type", type_param->name, generic->identifier->name);
             report_error_ast(parser, LABEL_NOTE, (Ast *)generic->identifier, "Here is the definition of '%s'", generic->identifier->name);
+            report_error_ast(parser, LABEL_HINT, NULL, "Give the type at the call e.g %s<int>(...)", generic->identifier->name);
             return NULL;
         }
 
@@ -1734,6 +1799,7 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
         da_append(&type_args, type);
     }
     free(bindings);
+    free(explicit);
 
     return instantiate_generic_function(typer, generic, type_args, (Ast *)call);
 }
@@ -4526,6 +4592,7 @@ bool rewrite_slice_method_call(Typer *typer, AstFunctionCall *call) {
     }
 
     call->expression = (AstExpr *)make_resolved_identifier_literal(typer, method->identifier, (Ast *)ma->right);
+    call->is_slice_method_call = true;
     AstArgument *receiver = generate_argument_from_expr(typer, ma->left);
     da_insert(&call->arguments, receiver, 0);
     return true;
@@ -4661,6 +4728,12 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     // }
 
 
+    if (call->type_args.count > 0 && !is_generic_function(func_defn)) {
+        const char *name = func_defn->identifier ? func_defn->identifier->name : "The function";
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)((Type **)call->type_args.items)[0], "'%s' is not generic, so it takes no type arguments", name);
+        return NULL;
+    }
+
     if (is_generic_function(func_defn)) {
         AstFunctionDefn *instance = instantiate_generic_function_call(typer, call, func_defn);
         if (!instance) return NULL;
@@ -4672,11 +4745,10 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
     // Make sure that the function definition is fully resolved
     if (!(func_defn->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
+        // The function is checked with a stack of enclosing functions of its own, and the caller gets its own stack back.
+        // (The fresh stack used to go to the saved state, so the caller lost its enclosing functions)
         Typer temp = *typer;
-        
-        // @Incomplete: I don't think this resetting of the function stack is valid when we now have the possibility
-        // of making inner functions
-        temp.enclosing_function_stack = da_init(2, sizeof(AstFunctionDefn *));
+        typer->enclosing_function_stack = da_init(2, sizeof(AstFunctionDefn *));
 
         Type *ok = check_function_defn(typer, func_defn);
         if (!ok) return NULL;

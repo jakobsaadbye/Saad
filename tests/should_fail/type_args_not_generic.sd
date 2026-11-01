@@ -1,0 +1,7 @@
+// expect-error: 'twice' is not generic, so it takes no type arguments
+
+twice :: (x: int) -> int { return x * 2; }
+
+main :: () {
+    y := twice<int>(4);
+}

@@ -22,14 +22,13 @@ main :: () {
     conn, err := postgres.connect("host=localhost dbname=shop user=postgres password=secret");
     if err != "" { print("Can't connect: %", err); return; }
 
-    users: [..]User;
-    err = conn.query(&users, "SELECT * FROM users WHERE role = $1 ORDER BY name", Role.admin);
+    users, err1 := conn.query<User>("SELECT * FROM users WHERE role = $1 ORDER BY name", Role.admin);
     for u in users { print("% %", u.id, u.name); }
 
     changed, err2 := conn.exec("UPDATE users SET role = $1 WHERE id = $2", Role.member, 7);
 
-    total: i64;
-    found, err3 := conn.queryOne(&total, "SELECT count(*) FROM users");
+    total, found, err3 := conn.queryOne<i64>("SELECT count(*) FROM users");
+    ada, isThere, err4 := conn.queryOne<User>("SELECT * FROM users WHERE name = $1", "Ada");
 
     conn.close();
 }
@@ -43,8 +42,8 @@ allocators). The generator and the typed query builder are designed below, but n
 | | |
 | --- | --- |
 | `conn.exec(sql, args...) -> i64, string` | A statement without rows (INSERT, UPDATE, DELETE, CREATE, ...). Gives the number of rows it changed |
-| `conn.query(&rows, sql, args...) -> string` | Adds a T to the `[..]T` for every row |
-| `conn.queryOne(&value, sql, args...) -> bool, string` | The first row into a struct, or the first column into a single value, e.g `count(*)`. `false` when there are no rows |
+| `conn.query<T>(sql, args...) -> [..]T, string` | A T for every row |
+| `conn.queryOne<T>(sql, args...) -> T, bool, string` | The first row as a struct, or the first column of it as a single value, e.g `count(*)`. `false` when there are no rows |
 | `conn.begin()`, `conn.commit()`, `conn.rollback()` | Transactions. Each gives an error or `""` |
 | `conn.close()` | Closes the connection. Using it afterwards gives the error "The connection is closed" |
 
@@ -54,8 +53,6 @@ allocators). The generator and the typed query builder are designed below, but n
 * The arguments are the parameters `$1`, `$2`, ... of the SQL, sent apart from the SQL text, so a value can never
   change the SQL (no SQL injection). Numbers, `bool`, `string`, chars and enums (by name) can be parameters, and
   pointers to them, where `null` is `NULL`.
-* The type of the rows comes from the pointer, `&users`, as Saad has no explicit type arguments at calls
-  (`query<User>(...)`) yet.
 
 ## Rows into structs
 
@@ -98,8 +95,7 @@ arena: mem.Arena;
 alloc := arena.allocator();
 conn.allocator = &alloc;
 
-orders: [..]Order;
-err := conn.query(&orders, "SELECT * FROM orders WHERE customer = $1", id);
+orders, err := conn.query<Order>("SELECT * FROM orders WHERE customer = $1", id);
 // ... use the orders ...
 
 arena.free();   // or arena.clear() to use the memory again for the next request
@@ -175,7 +171,7 @@ complete driver of 20 lines.
 1. **Done** `db.postgres`: connect, run SQL with parameters, read rows, close.
 2. **Done** Rows into structs with `query` and `queryOne`, transactions, `conn.allocator`, `mem.Arena`.
 3. A generator that writes the tables as structs.
-4. A typed query builder on the generated code: `app.users.where(...).select(&rows)`.
+4. A typed query builder on the generated code: `app.users.where(...).select<User>()`.
 5. Later: joins, `insert`/`update`/`delete` from structs, a pool of connections, a SQLite driver, and Postgres
    spoken directly over a socket instead of libpq.
 
@@ -231,17 +227,15 @@ reads code, so the generated `Field`s stand in for the members, and their method
 ```odin
 app := shop.open(&conn);
 
-adults: [..]shop.User;
-err := app.users
+adults, err := app.users
     .where(app.users.age.atLeast(18).and(app.users.name.like("A%")))
     .orderBy(app.users.name)
     .limit(20)
-    .select(&adults);
+    .select<shop.User>();
 
 // Only the columns of a smaller struct: SELECT id, name
 Name :: struct { id: i64; name: string; }
-names: [..]Name;
-err = app.users.where(app.users.email.isNull()).select(&names);
+names, err2 := app.users.where(app.users.email.isNull()).select<Name>();
 
 app.users.age.atLeast("18");   // A compile error: wants an i32
 ```
@@ -251,7 +245,7 @@ app.users.age.atLeast("18");   // A compile error: wants an i32
   and `and`, `or`, `not` on conditions.
 * The builder writes the SQL with parameters, `WHERE age >= $1 AND name LIKE $2`, and runs it with `query`.
   `select` reads the rows like `query` does, so the struct decides which columns are read.
-* `first(&row)`, `count()`, `exists()`, and later `insert(row)`, `update().set(field, value)` and `delete()`.
+* `first<T>()`, `count()`, `exists()`, and later `insert(row)`, `update().set(field, value)` and `delete()`.
 * Plain SQL stays for everything the builder can't say.
 
 ## Gaps in the language
@@ -260,7 +254,6 @@ Found while writing this, in the order they would help:
 
 * Assigning several results to existing variables, `count, err = conn.exec(...)`. Today each call needs new
   names (`err1`, `err2`, ...) or a function around it.
-* Explicit type arguments, `conn.query<User>(sql)`, to give the rows back instead of filling a pointer.
 * `defer`, to free a result on every return.
 * Operators on structs, so `app.users.age >= 18` could be a condition instead of `atLeast(18)`.
 * Attributes on structs, e.g `@db.Table("users")`, for tables written by hand.

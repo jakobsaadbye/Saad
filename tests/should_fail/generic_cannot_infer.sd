@@ -1,0 +1,12 @@
+// T is only in the return type, so a call has to give it, e.g make<int>()
+// expect-error: Cannot infer the type parameter 'T' of 'make'
+// expect-error: Give the type at the call e.g make<int>(...)
+
+make :: <T>() -> T {
+    value: T;
+    return value;
+}
+
+main :: () {
+    x := make();
+}
