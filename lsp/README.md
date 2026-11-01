@@ -23,7 +23,9 @@ give the compiler as `initializationOptions.compilerPath`.
 
 ## VS Code
 
-The extension is in `lsp/vscode`. It has the highlighting of Saad and starts the server.
+The extension is in `lsp/vscode`. It has the highlighting of Saad, an icon for `.sd` files (a blue "S", in
+`lsp/vscode/icons`) and starts the server. VS Code shows the icon of a language when the file icon theme has no icon of
+its own for the file, as with the default theme (Seti).
 
 ```
 cd lsp/vscode

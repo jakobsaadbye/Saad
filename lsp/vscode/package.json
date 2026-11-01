@@ -26,7 +26,11 @@
         "extensions": [
           ".sd"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/saad-light.svg",
+          "dark": "./icons/saad-dark.svg"
+        }
       }
     ],
     "grammars": [
@@ -74,5 +78,6 @@
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
-  }
+  },
+  "icon": "icons/icon.png"
 }
