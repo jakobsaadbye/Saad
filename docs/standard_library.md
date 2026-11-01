@@ -8,6 +8,8 @@ std/
     slices.sd       Methods on slices, arrays and lists: sort, reverse, indexOf, contains, ...
     string.sd       The methods of string (slice, split, indexOf, free, ...)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
+  db/           namespace db: run SQL and read rows into structs (see docs/db.md)
+    postgres/       namespace db.postgres: the Postgres driver, through libpq.dll
   fmt/          namespace fmt: print, sprint and StringBuilder
   io/           namespace io: bytes on stdin, stdout and stderr
   json/         namespace json: encode, decode, parse and json.Value
@@ -221,10 +223,25 @@ value.toJson();
   `toJson`, `clone` and `free`, and is made with `newObject`, `newArray`, `newString`, `newNumber`, `newBool`,
   `newNull`, `put` and `push`.
 
+## db
+
+`conn.query(&users, "SELECT * FROM users WHERE id > $1", 10)` reads rows into structs, `conn.exec` runs
+statements and `conn.queryOne` reads one row or value. `db.postgres` connects to Postgres. See `docs/db.md`.
+
 ## math, mem, c
 
 * `math`: the functions of C's `math.h` (`sin`, `sqrt`, `pow`, ...).
-* `mem`: `Arena`, a bump allocator, and the sizes `Kilobyte` and `Megabyte`.
+* `mem`: `Arena`, memory that is freed all at once, and the sizes `Kilobyte` and `Megabyte`. The zero value is
+  ready to use: `arena.allocate(size)` gives zeroed memory, `arena.allocator()` an `Allocator` for lists, maps and
+  `db.Connection`, and `arena.clear()` and `arena.free()` free all of it.
+
+```odin
+arena: mem.Arena;
+alloc := arena.allocator();
+names: [..]string;
+names.allocator = &alloc;      // the list grows inside the arena
+arena.free();
+```
 * `c`: `printf`, `fopen`, `malloc`, `memcpy`, `strlen`, ... Use it when nothing else fits. Sizes that are
   `size_t` in C are `i64` here.
 

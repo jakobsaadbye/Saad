@@ -1,25 +1,31 @@
 namespace mem;
 
+// Arenas: memory that is taken bit by bit and freed all at once, e.g for everything of one request
+//
+//     arena: mem.Arena;
+//     p := arena.allocate(64);
+//     alloc := arena.allocator();       // An Allocator for lists, maps and e.g db.Connection
+//     arena.clear();                    // Everything is free to use again
+//     arena.free();
+
 use c;
 import fmt;
 
 Kilobyte :: 1024;
 Megabyte :: 1048576;
 
-Arena :: struct  {
+Arena :: struct {
     currentChunk: *Chunk;
-};
+}
 
 Chunk :: struct {
-    data:    *u8;
+    data:     *u8;
     cursor:   int;
     capacity: int;
-    prev:    *Chunk;
-};
+    prev:     *Chunk;
+}
 
-/////////////////////////////////////////////////
-// Arena
-/////////////////////////////////////////////////
+@private DefaultCapacity :: 4096;
 
 newArena :: (capacity: int) -> Arena {
     arena := Arena{};
@@ -27,10 +33,20 @@ newArena :: (capacity: int) -> Arena {
     return arena;
 }
 
+// Zeroed memory of the size, aligned to 8 bytes
 allocate :: method (arena: *Arena, size: int) -> *void {
+    size = (size + 7) / 8 * 8;
     chunk := arena.currentChunk;
+    if chunk == null {
+        capacity := DefaultCapacity;
+        while capacity < size {
+            capacity *= 2;
+        }
+        arena.currentChunk = newChunk(null, capacity);
+        return arena.allocate(size);
+    }
 
-    if chunk.cursor + size < chunk.capacity {
+    if chunk.cursor + size <= chunk.capacity {
         ptr := &chunk.data[chunk.cursor];
         chunk.cursor += size;
         memset(ptr, 0, size);
@@ -38,45 +54,94 @@ allocate :: method (arena: *Arena, size: int) -> *void {
     }
 
     newCap := chunk.capacity * 2;
-    while newCap < chunk.cursor + size {
+    while newCap < size {
         newCap *= 2;
     }
-
-    next := newChunk(chunk, newCap);
-    arena.currentChunk = next;
-
+    arena.currentChunk = newChunk(chunk, newCap);
     return arena.allocate(size);
 }
 
+// An Allocator that takes its memory from the arena, e.g for a list: 'list.allocator = &alloc'. The memory is freed
+// with the arena, so the allocator doesn't free anything itself
+allocator :: method (arena: *Arena) -> Allocator {
+    a: Allocator;
+    a.context = arena;
+    a.resize  = arenaResize;
+    return a;
+}
+
+// Frees all the memory of the arena
 free :: method (arena: *Arena) {
     chunk := arena.currentChunk;
     while chunk != null {
         free(chunk.data);
-        temp := chunk;
-        chunk = chunk.prev;
-        free(temp);
+        previous := chunk.prev;
+        free(chunk);
+        chunk = previous;
     }
+    arena.currentChunk = null;
 }
 
+// Makes all the memory of the arena free to use again. It keeps the biggest chunk, so the next use doesn't allocate
 clear :: method (arena: *Arena) {
     chunk := arena.currentChunk;
+    if chunk == null {
+        return;
+    }
+    previous := chunk.prev;
+    while previous != null {
+        free(previous.data);
+        next := previous.prev;
+        free(previous);
+        previous = next;
+    }
+    chunk.prev   = null;
+    chunk.cursor = 0;
+}
+
+// The bytes of the arena that are in use
+used :: method (arena: *Arena) -> int {
+    total := 0;
+    chunk := arena.currentChunk;
     while chunk != null {
-        memset(chunk.data, 0, chunk.capacity);
+        total += chunk.cursor;
         chunk = chunk.prev;
     }
+    return total;
 }
 
 newChunk :: (oldChunk: *Chunk, capacity: int) -> *Chunk {
-    newChunk: *Chunk = malloc(sizeof(Chunk));
-    if (newChunk == null) {
+    chunk := malloc(sizeof(Chunk)) as *Chunk;
+    if chunk == null {
         fmt.print("Failed to allocate a new chunk of memory for the arena");
         exit(1);
     }
 
-    newChunk.data = malloc(capacity);
-    newChunk.cursor = 0;
-    newChunk.capacity = capacity;
-    newChunk.prev = oldChunk;
+    chunk.data     = malloc(capacity) as *u8;
+    chunk.cursor   = 0;
+    chunk.capacity = capacity;
+    chunk.prev     = oldChunk;
+    return chunk;
+}
 
-    return newChunk;
+// Each block of the allocator starts with its size, so a bigger block can copy the old one
+@private
+arenaResize :: (context: *void, memory: *void, size: i64) -> *void {
+    if size == 0 {
+        return null; // Freed with the arena
+    }
+    arena := context as *Arena;
+    block := arena.allocate(size as int + 8) as *u8;
+    *(block as *i64) = size;
+    result := &block[8];
+    if memory != null {
+        old := memory as *u8;
+        header := &old[-8];
+        oldSize := *(header as *i64);
+        if oldSize > size {
+            oldSize = size;
+        }
+        memcpy(result, memory, oldSize as int);
+    }
+    return result;
 }

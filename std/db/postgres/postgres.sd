@@ -1,0 +1,140 @@
+namespace db.postgres;
+
+// The Postgres driver of db, through libpq (libpq.dll), e.g
+//
+//     import db;
+//     import db.postgres;
+//
+//     conn, err := postgres.connect("host=localhost port=5432 dbname=app user=postgres password=secret");
+//     if err != "" { fmt.print("Can't connect: %", err); return; }
+//
+// libpq.dll comes with PostgreSQL, in its bin folder (e.g C:\Program Files\PostgreSQL\16\bin), together with
+// the DLLs it needs. The program finds it when that folder is in PATH, or when the DLLs are next to it.
+// See docs/db.md
+
+import db;
+use c;
+
+// Connects with a connection string of libpq, e.g "host=localhost dbname=app user=postgres", or a URL like
+// "postgresql://postgres@localhost/app". err is empty when it worked
+connect :: (connectionString: string) -> db.Connection, string {
+    conn: db.Connection;
+    info := connectionString.toCString();
+    handle := PQconnectdb(info);
+    free(info);
+
+    if handle == null {
+        return conn, "libpq couldn't make a connection";
+    }
+    if PQstatus(handle) != ConnectionOk {
+        err := message(PQerrorMessage(handle));
+        PQfinish(handle);
+        return conn, err;
+    }
+
+    conn.driver = driver();
+    conn.handle = handle;
+    return conn, "";
+}
+
+// The driver for db.Connection
+driver :: () -> *db.Driver {
+    if theDriver == null {
+        d := calloc(1, sizeof(db.Driver)) as *db.Driver;
+        d.name        = "postgres";
+        d.execute     = execute;
+        d.rowCount    = rowCount;
+        d.columnCount = columnCount;
+        d.columnName  = columnName;
+        d.value       = value;
+        d.affected    = affected;
+        d.freeResult  = freeResult;
+        d.close       = close;
+        theDriver = d;
+    }
+    return theDriver;
+}
+
+@private theDriver: *db.Driver = null;
+
+@private ConnectionOk    :: 0;
+@private ResultCommandOk :: 1;
+@private ResultTuplesOk  :: 2;
+
+@private
+execute :: (conn: *void, sql: *u8, params: []*u8, err: *string) -> *void {
+    values: **u8 = null;
+    if params.count > 0 {
+        values = params.data;
+    }
+    result := PQexecParams(conn, sql, params.count as int, null, values, null, null, 0);
+    if result == null {
+        *err = message(PQerrorMessage(conn));
+        return null;
+    }
+    status := PQresultStatus(result);
+    if status != ResultCommandOk && status != ResultTuplesOk {
+        *err = message(PQresultErrorMessage(result));
+        PQclear(result);
+        return null;
+    }
+    return result;
+}
+
+@private rowCount    :: (result: *void) -> i64 { return PQntuples(result) as i64; }
+@private columnCount :: (result: *void) -> i64 { return PQnfields(result) as i64; }
+@private columnName  :: (result: *void, column: i64) -> *u8 { return PQfname(result, column as int); }
+@private freeResult  :: (result: *void) { PQclear(result); }
+@private close       :: (conn: *void) { PQfinish(conn); }
+
+@private
+value :: (result: *void, row: i64, column: i64) -> *u8 {
+    if PQgetisnull(result, row as int, column as int) != 0 {
+        return null;
+    }
+    return PQgetvalue(result, row as int, column as int);
+}
+
+@private
+affected :: (result: *void) -> i64 {
+    text := fromCString(PQcmdTuples(result));
+    n: i64 = 0;
+    for i in 0..text.len {
+        if text[i] < '0' || text[i] > '9' { break; }
+        n = n * 10 + (text[i] - '0') as i64;
+    }
+    return n;
+}
+
+// A copy of an error message of libpq, without the line break at its end
+@private
+message :: (text: *u8) -> string {
+    if text == null {
+        return "Unknown error";
+    }
+    s := fromCString(text);
+    while s.len > 0 && (s[s.len - 1] == '\n' || s[s.len - 1] == ' ') {
+        s.len -= 1;
+    }
+    if s.len == 0 {
+        return "Unknown error";
+    }
+    return s.copy();
+}
+
+extern "libpq.dll" {
+    PQconnectdb          :: (conninfo: *u8) -> *void;
+    PQstatus             :: (conn: *void) -> int;
+    PQerrorMessage       :: (conn: *void) -> *u8;
+    PQfinish             :: (conn: *void);
+    PQexecParams         :: (conn: *void, command: *u8, nParams: int, paramTypes: *u32, paramValues: **u8, paramLengths: *int, paramFormats: *int, resultFormat: int) -> *void;
+    PQresultStatus       :: (result: *void) -> int;
+    PQresultErrorMessage :: (result: *void) -> *u8;
+    PQntuples            :: (result: *void) -> int;
+    PQnfields            :: (result: *void) -> int;
+    PQfname              :: (result: *void, column: int) -> *u8;
+    PQgetvalue           :: (result: *void, row: int, column: int) -> *u8;
+    PQgetisnull          :: (result: *void, row: int, column: int) -> int;
+    PQcmdTuples          :: (result: *void) -> *u8;
+    PQclear              :: (result: *void);
+}

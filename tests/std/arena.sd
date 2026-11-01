@@ -1,0 +1,64 @@
+// mem.Arena: memory that is taken bit by bit and freed all at once
+
+import mem;
+use fmt;
+
+Point :: struct { x: i64; y: i64; }
+
+main :: () {
+    // The zero value is usable
+    arena: mem.Arena;
+    assert(arena.used() == 0);
+
+    p := arena.allocate(sizeof(Point)) as *Point;
+    assert(p.x == 0 && p.y == 0); // Zeroed
+    p.x = 3;
+    p.y = 4;
+    assert(arena.used() == 16);
+
+    // Sizes are rounded up to 8 bytes
+    arena.allocate(3);
+    assert(arena.used() == 24);
+
+    // More than a chunk holds makes a new chunk, and the old memory stays where it is
+    big := arena.allocate(10000) as *u8;
+    big[9999] = 7;
+    assert(p.x == 3 && p.y == 4);
+    assert(arena.used() == 10024);
+
+    // As the allocator of a list. Growing copies the old items
+    alloc := arena.allocator();
+    numbers: [..]int;
+    numbers.allocator = &alloc;
+    for i in 0..1000 {
+        numbers.add(i);
+    }
+    assert(numbers.count == 1000);
+    total := 0;
+    for n in numbers { total += n; }
+    assert(total == 499500);
+
+    names: [..]string;
+    names.allocator = &alloc;
+    names.add("a");
+    names.add("b");
+    names.add("c");
+    assert(names[2] == "c");
+
+    // clear() makes the memory free to use again
+    arena.clear();
+    assert(arena.used() == 0);
+    q := arena.allocate(16) as *Point;
+    assert(q.x == 0 && q.y == 0);
+
+    arena.free();
+    assert(arena.used() == 0);
+
+    // An arena with a capacity
+    other := mem.newArena(64);
+    other.allocate(100);
+    assert(other.used() == 104);
+    other.free();
+
+    print("arena ok");
+}

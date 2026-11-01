@@ -1,0 +1,521 @@
+namespace db;
+
+// Databases: run SQL and read the rows into plain structs, e.g with Postgres
+//
+//     import db;
+//     import db.postgres;
+//
+//     User :: struct { id: i64; name: string; email: *string; }   // email can be NULL
+//
+//     conn, err := postgres.connect("host=localhost dbname=app user=postgres");
+//     users: [..]User;
+//     err = conn.query(&users, "SELECT id, name, email FROM users WHERE id > $1", 10);
+//     count, err2 := conn.exec("DELETE FROM users WHERE name = $1", "Bob");
+//     conn.close();
+//
+// The namespace only knows the Driver below. A database is a driver of its own (db.postgres), so this folder
+// doesn't depend on any of them. See docs/db.md
+
+import fmt;
+use c;
+
+// What a database implements. The handles are the driver's own, e.g a PGconn and a PGresult of libpq.
+// Values are text, as written by the database, and parameters are given as text too
+Driver :: struct {
+    name: string;
+
+    // Runs the SQL with the parameters ($1, $2, ...). A null parameter is NULL. On an error, the result is
+    // null and the error is written to 'err', allocated with malloc
+    execute: (conn: *void, sql: *u8, params: []*u8, err: *string) -> *void;
+
+    rowCount:    (result: *void) -> i64;
+    columnCount: (result: *void) -> i64;
+    columnName:  (result: *void, column: i64) -> *u8;
+    // The text of a value, or null for NULL. It lives until freeResult
+    value:       (result: *void, row: i64, column: i64) -> *u8;
+    // The number of rows changed by INSERT, UPDATE or DELETE
+    affected:    (result: *void) -> i64;
+    freeResult:  (result: *void);
+
+    close: (conn: *void);
+}
+
+// A connection to a database, made by a driver, e.g postgres.connect(...)
+Connection :: struct {
+    driver: *Driver;
+    handle: *void;
+
+    // Where the rows, strings and pointers read by query come from. Null means the heap (malloc), so they are
+    // freed one by one. With an arena, e.g mem.Arena.allocator(), they are freed all at once
+    allocator: *Allocator;
+}
+
+// Gives a struct member another column name, or leaves it out of the rows, e.g
+//
+//     User :: struct {
+//         id: i64;
+//         @db.Column(name: "mail") email: string;
+//         @db.Column(skip: true)   cache: *Cache;
+//     }
+//
+// Without it, a member reads the column of the same name, where case and '_' don't matter: createdAt reads
+// created_at, CreatedAt and createdat
+@attribute
+Column :: struct {
+    name: string;
+    skip: bool = false;
+}
+
+// Runs a statement that returns no rows, e.g INSERT, UPDATE or DELETE. Gives the number of rows it changed.
+// The arguments are the parameters $1, $2, ... of the SQL
+exec :: method (conn: *Connection, sql: string, args: ...any) -> i64, string {
+    result, err := conn.run(sql, ...args);
+    if err != "" {
+        return 0, err;
+    }
+    changed := conn.driver.affected(result);
+    conn.driver.freeResult(result);
+    return changed, "";
+}
+
+// Runs a query and adds its rows to the list, one T per row. A column is read into the member of the same
+// name (see db.Column). Columns that T doesn't have are skipped, and members without a column keep their value.
+//
+// * NULL leaves a value as it is, except for pointers, which become null. So a column that can be NULL is
+//   read into a pointer, e.g *string, or a value with a default
+// * Columns are read from their text: numbers, bool (t/f or true/false), string, enums (by name or number),
+//   and pointers to them
+// * The list, strings and pointers are allocated with conn.allocator, unless the list has an allocator already
+query :: method <T>(conn: *Connection, rows: *[..]T, sql: string, args: ...any) -> string {
+    result, err := conn.run(sql, ...args);
+    if err != "" {
+        return err;
+    }
+
+    if rows.allocator == null {
+        rows.allocator = conn.allocator;
+    }
+
+    boxed: any = rows;
+    listType := (boxed.type as *TypePointer).pointerTo as *TypeStruct;
+    rowType  := (findMember(listType, "data").type as *TypePointer).pointerTo;
+    if rowType.kind != .struct {
+        conn.driver.freeResult(result);
+        return fmt.sprint("Rows are read into structs, not into values of type %", rowType.name);
+    }
+
+    columns := conn.columnsOf(result, rowType as *TypeStruct);
+    count := conn.driver.rowCount(result);
+    rows.reserve(rows.count + count);
+    for r in 0..count {
+        row: T;
+        err = conn.readRow(result, r, &row, rowType as *TypeStruct, columns);
+        if err != "" {
+            err = fmt.sprint("Row %: %", r + 1, err);
+            break;
+        }
+        rows.add(row);
+    }
+    columns.free();
+    conn.driver.freeResult(result);
+    return err;
+}
+
+// Runs a query and reads its first row into the value. found is false when there are no rows
+queryOne :: method <T>(conn: *Connection, row: *T, sql: string, args: ...any) -> bool, string {
+    result, err := conn.run(sql, ...args);
+    if err != "" {
+        return false, err;
+    }
+
+    boxed: any = row;
+    rowType := (boxed.type as *TypePointer).pointerTo;
+    found := conn.driver.rowCount(result) > 0;
+    if !found {
+        // Nothing to read
+    } else if rowType.kind != .struct {
+        // A single value, e.g SELECT count(*)
+        if conn.driver.columnCount(result) < 1 {
+            err = "The query gives no columns";
+        } else {
+            err = conn.readValue(conn.driver.value(result, 0, 0), row, rowType, conn.columnName(result, 0));
+        }
+    } else {
+        columns := conn.columnsOf(result, rowType as *TypeStruct);
+        err = conn.readRow(result, 0, row, rowType as *TypeStruct, columns);
+        columns.free();
+    }
+    conn.driver.freeResult(result);
+    return found, err;
+}
+
+// Starts a transaction. Nothing it changes is seen by others until commit, and rollback undoes all of it, e.g
+//
+//     err := conn.begin();
+//     _, err1 := conn.exec("UPDATE accounts SET balance = balance - $1 WHERE id = $2", 10, from);
+//     _, err2 := conn.exec("UPDATE accounts SET balance = balance + $1 WHERE id = $2", 10, to);
+//     if err1 != "" || err2 != "" { conn.rollback(); } else { conn.commit(); }
+begin :: method (conn: *Connection) -> string {
+    _, err := conn.exec("BEGIN");
+    return err;
+}
+
+commit :: method (conn: *Connection) -> string {
+    _, err := conn.exec("COMMIT");
+    return err;
+}
+
+rollback :: method (conn: *Connection) -> string {
+    _, err := conn.exec("ROLLBACK");
+    return err;
+}
+
+// Closes the connection
+close :: method (conn: *Connection) {
+    if conn.handle != null {
+        conn.driver.close(conn.handle);
+        conn.handle = null;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+//   Parameters
+////////////////////////////////////////////////////////////////////////////////////
+
+// Runs the SQL with the arguments as text parameters
+@private
+run :: method (conn: *Connection, sql: string, args: ...any) -> *void, string {
+    if conn.handle == null {
+        return null, "The connection is closed";
+    }
+
+    err := "";
+    params: [..]*u8;
+    for arg, i in args {
+        text, ok := paramText(arg);
+        if !ok {
+            err = fmt.sprint("Parameter $% can't be a %", i + 1, arg.type.name);
+            break;
+        }
+        params.add(text);
+    }
+
+    result: *void = null;
+    if err == "" {
+        query := sql.toCString();
+        result = conn.driver.execute(conn.handle, query, params.elements(), &err);
+        free(query);
+    }
+    for p in params { free(p); }
+    params.free();
+
+    if result == null {
+        if err == "" {
+            err = "The query failed";
+        }
+        return null, err;
+    }
+    return result, "";
+}
+
+// The value as the text of a parameter, allocated with malloc. Null is NULL
+@private
+paramText :: (arg: any) -> *u8, bool {
+    sb: fmt.StringBuilder;
+    switch arg.type.kind {
+        case .int {
+            prim := arg.type as *TypePrimitive;
+            if prim.kind == .char { sb.addChar(*(arg.data as *u8)); }
+            else                  { sb.addInteger(arg.data, prim); }
+        }
+        case .float {
+            buf: [64]u8;
+            value: f64 = 0.0;
+            if arg.type.size == 4 { value = (*(arg.data as *f32)) as f64; }
+            else                  { value = *(arg.data as *f64); }
+            sprintf(buf.data, xx "%.17g", value);
+            sb.addString(fromCString(buf.data));
+        }
+        case .bool {
+            if *(arg.data as *bool) { sb.addString("true"); }
+            else                    { sb.addString("false"); }
+        }
+        case .string {
+            sb.addString(*(arg.data as *string));
+        }
+        case .enum {
+            enumType := arg.type as *TypeEnum;
+            name, ok := enumType.nameOf(enumType.readValue(arg.data));
+            if !ok { return null, false; }
+            sb.addString(name);
+        }
+        case .pointer {
+            // null is NULL, otherwise the value it points to
+            pointer := *(arg.data as **void);
+            if pointer == null {
+                return null, true;
+            }
+            pointee := (arg.type as *TypePointer).pointerTo;
+            if pointee.kind == .void || pointee.kind == .pointer {
+                return null, false;
+            }
+            inner: any;
+            inner.type = pointee;
+            inner.data = pointer;
+            text, ok := paramText(inner);
+            return text, ok;
+        }
+        else {
+            return null, false;
+        }
+    }
+    text := sb.toString();
+    result := text.toCString();
+    sb.free();
+    return result, true;
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+//   Rows into structs
+////////////////////////////////////////////////////////////////////////////////////
+
+// The column of each member of the struct, or -1
+@private
+columnsOf :: method (conn: *Connection, result: *void, type: *TypeStruct) -> [..]i64 {
+    columns: [..]i64;
+    count := conn.driver.columnCount(result);
+    for i in 0..type.members.count {
+        member := &type.members[i];
+        name, named, skip := columnOf(member);
+        found: i64 = -1;
+        if !skip {
+            for c in 0..count {
+                column := fromCString(conn.driver.columnName(result, c));
+                if (named && column == name) || (!named && sameName(column, name)) {
+                    found = c;
+                    break;
+                }
+            }
+        }
+        columns.add(found);
+    }
+    return columns;
+}
+
+// The column name of a member, if it was given with db.Column, and if the member is skipped
+@private
+columnOf :: (member: *StructMember) -> string, bool, bool {
+    column: Column;
+    if attributeOf(member, &column) {
+        if column.skip { return "", false, true; }
+        if column.name.len > 0 { return column.name, true, false; }
+    }
+    return member.name, false, false;
+}
+
+// The same name, where case and '_' don't matter, e.g createdAt and created_at
+@private
+sameName :: (a: string, b: string) -> bool {
+    i := 0;
+    j := 0;
+    while true {
+        while i < a.len && a[i] == '_' { i += 1; }
+        while j < b.len && b[j] == '_' { j += 1; }
+        if i == a.len || j == b.len {
+            return i == a.len && j == b.len;
+        }
+        if lower(a[i]) != lower(b[j]) {
+            return false;
+        }
+        i += 1;
+        j += 1;
+    }
+    return false;
+}
+
+@private
+lower :: (c: u8) -> u8 {
+    if c >= 'A' && c <= 'Z' { return c + 32; }
+    return c;
+}
+
+@private
+columnName :: method (conn: *Connection, result: *void, column: i64) -> string {
+    return fromCString(conn.driver.columnName(result, column));
+}
+
+@private
+readRow :: method (conn: *Connection, result: *void, row: i64, data: *void, type: *TypeStruct, columns: [..]i64) -> string {
+    for i in 0..type.members.count {
+        column := columns[i];
+        if column < 0 { continue; }
+        member := &type.members[i];
+        err := conn.readValue(conn.driver.value(result, row, column), member.valueIn(data), member.type, conn.columnName(result, column));
+        if err != "" {
+            return err;
+        }
+    }
+    return "";
+}
+
+// Reads the text of a value (null for NULL) into the memory at data, which holds a value of the type
+@private
+readValue :: method (conn: *Connection, text: *u8, data: *void, type: *Type, column: string) -> string {
+    if text == null {
+        if type.kind == .pointer {
+            *(data as **void) = null;
+        }
+        return "";
+    }
+    value := fromCString(text);
+
+    switch type.kind {
+        case .bool {
+            if value == "t" || value == "true" || value == "1" {
+                *(data as *bool) = true;
+            } else if value == "f" || value == "false" || value == "0" {
+                *(data as *bool) = false;
+            } else {
+                return fmt.sprint("%: '%' is not a bool", column, value);
+            }
+            return "";
+        }
+        case .int {
+            return readInteger(value, data, type as *TypePrimitive, column);
+        }
+        case .float {
+            end: *u8 = null;
+            number := strtod(text, &end);
+            if end == text || *end != 0 {
+                return fmt.sprint("%: '%' is not a number", column, value);
+            }
+            if type.size == 4 { *(data as *f32) = number as f32; }
+            else              { *(data as *f64) = number; }
+            return "";
+        }
+        case .string {
+            *(data as *string) = conn.copyString(value);
+            return "";
+        }
+        case .enum {
+            return readEnum(value, data, type as *TypeEnum, column);
+        }
+        case .pointer {
+            pointee := (type as *TypePointer).pointerTo;
+            if pointee.kind == .void || pointee.kind == .struct || pointee.kind == .array {
+                return fmt.sprint("%: Can't read a column into a %", column, type.name);
+            }
+            memory := resizeMemory(conn.allocator, null, pointee.size as i64);
+            memset(memory, 0, pointee.size);
+            *(data as **void) = memory;
+            return conn.readValue(text, memory, pointee, column);
+        }
+        else {
+            return fmt.sprint("%: Can't read a column into a %", column, type.name);
+        }
+    }
+}
+
+// A copy of the string with the allocator of the connection, null terminated
+@private
+copyString :: method (conn: *Connection, s: string) -> string {
+    copy: string;
+    copy.data = resizeMemory(conn.allocator, null, s.len + 1) as *u8;
+    memcpy(copy.data, s.data, s.len);
+    copy.data[s.len] = 0;
+    copy.len = s.len;
+    return copy;
+}
+
+@private
+readInteger :: (text: string, data: *void, type: *TypePrimitive, column: string) -> string {
+    negative := text.len > 0 && text[0] == '-';
+    start := 0;
+    if negative || (text.len > 0 && text[0] == '+') { start = 1; }
+    if start == text.len {
+        return fmt.sprint("%: '%' is not a whole number", column, text);
+    }
+
+    magnitude: u64 = 0;
+    for i in start..text.len {
+        ch := text[i];
+        if ch < '0' || ch > '9' {
+            return fmt.sprint("%: '%' is not a whole number", column, text);
+        }
+        digit := (ch - '0') as u64;
+        if magnitude > (18446744073709551615 - digit) / 10 {
+            return fmt.sprint("%: % doesn't fit in a %", column, text, type.head.name);
+        }
+        magnitude = magnitude * 10 + digit;
+    }
+
+    kind := type.kind;
+    unsigned := kind == .u8 || kind == .u16 || kind == .u32 || kind == .u64 || kind == .uint || kind == .char;
+    bits := (type.head.size * 8) as u64;
+    if unsigned {
+        biggest: u64 = 18446744073709551615;
+        if bits < 64 { biggest = ((1 as u64) << bits) - 1; }
+        if (negative && magnitude != 0) || magnitude > biggest {
+            return fmt.sprint("%: % doesn't fit in a %", column, text, type.head.name);
+        }
+    } else {
+        limit := (1 as u64) << (bits - 1);
+        if (negative && magnitude > limit) || (!negative && magnitude >= limit) {
+            return fmt.sprint("%: % doesn't fit in a %", column, text, type.head.name);
+        }
+    }
+
+    value := magnitude;
+    if negative { value = 0 - magnitude; }
+    writeBits(data, type.head.size, value);
+    return "";
+}
+
+// An enum from the name of a value, e.g 'admin', where case and '_' don't matter, or its number
+@private
+readEnum :: (text: string, data: *void, type: *TypeEnum, column: string) -> string {
+    for option in type.values {
+        if sameName(option.name, text) {
+            writeBits(data, type.backingType.size, option.value as u64);
+            return "";
+        }
+    }
+
+    number: i64 = 0;
+    err := readInteger(text, &number, i64Type(), column);
+    if err == "" {
+        _, ok := type.nameOf(number);
+        if ok {
+            writeBits(data, type.backingType.size, number as u64);
+            return "";
+        }
+    }
+    return fmt.sprint("%: '%' is not a value of %", column, text, type.head.name);
+}
+
+@private
+i64Type :: () -> *TypePrimitive {
+    n: i64 = 0;
+    boxed: any = n;
+    return boxed.type as *TypePrimitive;
+}
+
+@private
+writeBits :: (data: *void, size: int, bits: u64) {
+    switch size {
+        case 1 { *(data as *u8)  = bits as u8; }
+        case 2 { *(data as *u16) = bits as u16; }
+        case 4 { *(data as *u32) = bits as u32; }
+        else   { *(data as *u64) = bits; }
+    }
+}
+
+@private
+findMember :: (type: *TypeStruct, name: string) -> *StructMember {
+    for i in 0..type.members.count {
+        if type.members[i].name == name {
+            return &type.members[i];
+        }
+    }
+    return null;
+}

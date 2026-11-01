@@ -23,7 +23,7 @@ for f in tests/*.sd tests/std/*.sd tests/backend/*.sd; do
         failed=$((failed + 1))
         continue
     fi
-    if output=$("$HERE/run.sh" "$(dirname "$f")/build/out.o" 2>&1); then
+    if output=$(bash "$HERE/run.sh" "$(dirname "$f")/build/out.o" 2>&1); then
         echo "${GREEN}OK${RESET}"
         passed=$((passed + 1))
     else

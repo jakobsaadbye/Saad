@@ -1,0 +1,164 @@
+// std/db with Postgres. Needs a server: tools/linux/dbtests.sh starts one and runs this with SAAD_TEST_POSTGRES set
+
+import db;
+import db.postgres;
+import mem;
+use fmt;
+use c;
+
+Role :: enum { guest, member, admin }
+
+User :: struct {
+    id:        i64;
+    name:      string;
+    email:     *string;           // NULL becomes null
+    age:       i32 = -1;          // NULL keeps the default
+    score:     f64;
+    active:    bool;
+    role:      Role;
+    createdAt: string;            // created_at
+    @db.Column(name: "nick_name") nick: string;
+    @db.Column(skip: true) cache: int = 7;
+}
+
+// Runs a statement that must work
+run :: (conn: *db.Connection, sql: string) {
+    _, err := conn.exec(sql);
+    if err != "" {
+        print("%", err);
+        exit(1);
+    }
+}
+
+main :: () {
+    info := fromCString(getenv(xx "SAAD_TEST_POSTGRES"));
+    if info.len == 0 {
+        print("Set SAAD_TEST_POSTGRES to a connection string");
+        exit(1);
+    }
+
+    conn, err := postgres.connect(info);
+    assert(err == "");
+
+    // A bad connection gives an error
+    _, bad := postgres.connect("host=localhost port=1 connect_timeout=1");
+    assert(bad != "");
+
+    run(&conn, "SET client_min_messages TO warning"); // No NOTICEs
+    run(&conn, "DROP TABLE IF EXISTS saad_users");
+    run(&conn, "DROP TYPE IF EXISTS saad_role");
+    run(&conn, "CREATE TYPE saad_role AS ENUM ('guest', 'member', 'admin')");
+    run(&conn, "CREATE TABLE saad_users (
+        id         bigserial PRIMARY KEY,
+        name       text NOT NULL,
+        email      text,
+        age        int,
+        score      double precision NOT NULL DEFAULT 0,
+        active     boolean NOT NULL DEFAULT true,
+        role       saad_role NOT NULL DEFAULT 'guest',
+        created_at text NOT NULL DEFAULT '2026-11-01',
+        nick_name  text NOT NULL DEFAULT ''
+    )");
+
+    // Parameters of every kind
+    email := "ada@example.com";
+    noEmail: *string = null;
+    count, e1 := conn.exec("INSERT INTO saad_users (name, email, age, score, active, role, nick_name) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                           "Ada", &email, 36, 9.5, true, Role.admin, "ada");
+    assert(e1 == "");
+    assert(count == 1);
+    count2, e2 := conn.exec("INSERT INTO saad_users (name, email, age, score, active, role) VALUES ($1, $2, NULL, $3, $4, $5)",
+                           "Bob", noEmail, -1.25, false, Role.member);
+    assert(e2 == "" && count2 == 1);
+    count3, e3 := conn.exec("INSERT INTO saad_users (name) VALUES ('Cy'), ('Di')");
+    assert(e3 == "" && count3 == 2);
+
+    users: [..]User;
+    err = conn.query(&users, "SELECT * FROM saad_users ORDER BY id");
+    assert(err == "");
+    assert(users.count == 4);
+
+    ada := users[0];
+    assert(ada.id == 1 && ada.name == "Ada");
+    assert(ada.email != null && *ada.email == "ada@example.com");
+    assert(ada.age == 36 && ada.score == 9.5 && ada.active);
+    assert(ada.role == .admin);
+    assert(ada.createdAt == "2026-11-01");
+    assert(ada.nick == "ada");
+    assert(ada.cache == 7);
+
+    bob := users[1];
+    assert(bob.name == "Bob" && bob.email == null);
+    assert(bob.age == -1);   // NULL keeps the default
+    assert(bob.score == -1.25 && !bob.active && bob.role == .member);
+
+    // Parameters in a query
+    young: [..]User;
+    err = conn.query(&young, "SELECT id, name FROM saad_users WHERE name = $1 OR id = $2", "Cy", 4);
+    assert(err == "");
+    assert(young.count == 2 && young[0].name == "Cy" && young[1].name == "Di");
+    assert(young[0].email == null && young[0].age == -1); // Columns that are not there keep their value
+
+    // One row, and one value
+    one: User;
+    found, e4 := conn.queryOne(&one, "SELECT * FROM saad_users WHERE id = $1", 2);
+    assert(found && e4 == "" && one.name == "Bob");
+    missing, e5 := conn.queryOne(&one, "SELECT * FROM saad_users WHERE id = $1", 99);
+    assert(!missing && e5 == "");
+
+    total: i64 = 0;
+    hasTotal, e6 := conn.queryOne(&total, "SELECT count(*) FROM saad_users");
+    assert(hasTotal && e6 == "" && total == 4);
+    average := 0.0;
+    hasAverage, e7 := conn.queryOne(&average, "SELECT avg(score) FROM saad_users");
+    assert(hasAverage && e7 == "" && average == 2.0625);
+
+    // Errors of Postgres
+    _, e8 := conn.exec("SELECT * FROM no_such_table");
+    assert(e8.startsWith("ERROR:"));
+    assert(e8.indexOf("no_such_table") >= 0);
+    wrong: [..]User;
+    err = conn.query(&wrong, "SELECT 'x' AS age");
+    assert(err == "Row 1: age: 'x' is not a whole number");
+    nothing: *void = null;
+    _, e9 := conn.exec("SELECT $1", &nothing);
+    assert(e9 == "Parameter $1 can't be a **void");
+
+    // Transactions
+    assert(conn.begin() == "");
+    run(&conn, "DELETE FROM saad_users WHERE name = 'Di'");
+    assert(conn.rollback() == "");
+    afterRollback: i64 = 0;
+    _, e10 := conn.queryOne(&afterRollback, "SELECT count(*) FROM saad_users");
+    assert(e10 == "" && afterRollback == 4);
+
+    assert(conn.begin() == "");
+    run(&conn, "UPDATE saad_users SET score = score + 1 WHERE name = 'Cy'");
+    assert(conn.commit() == "");
+    cy: User;
+    _, e11 := conn.queryOne(&cy, "SELECT * FROM saad_users WHERE name = $1", "Cy");
+    assert(e11 == "" && cy.score == 1.0);
+    run(&conn, "UPDATE saad_users SET score = 0 WHERE name = 'Cy'");
+
+    // The rows, strings and pointers from an arena, freed all at once
+    arena: mem.Arena;
+    alloc := arena.allocator();
+    conn.allocator = &alloc;
+    fromArena: [..]User;
+    err = conn.query(&fromArena, "SELECT * FROM saad_users ORDER BY id");
+    assert(err == "" && fromArena.count == 4);
+    assert(fromArena.allocator == &alloc);
+    assert(*fromArena[0].email == "ada@example.com");
+    assert(arena.used() > 0);
+    arena.free();
+    conn.allocator = null;
+
+    run(&conn, "DROP TABLE saad_users");
+    run(&conn, "DROP TYPE saad_role");
+    conn.close();
+
+    _, closed := conn.exec("SELECT 1");
+    assert(closed == "The connection is closed");
+
+    print("db ok");
+}

@@ -1,0 +1,3 @@
+// expect-error: This string has no '"' at its end
+main :: () {
+    s := "abc

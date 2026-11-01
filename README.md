@@ -77,6 +77,29 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.9.2 - 1. Nov 2026
+
+* `std/db`: run SQL against Postgres and read the rows into plain structs. Columns are matched to members by name
+  (`createdAt` reads `created_at`), `NULL` columns go into pointers, and the parameters `$1, $2, ...` are sent
+  apart from the SQL. See `docs/db.md`, which also has the plan for a generator and a typed query builder
+
+```odin
+import db;
+import db.postgres;
+
+conn, err := postgres.connect("host=localhost dbname=shop user=postgres");
+users: [..]User;
+err = conn.query(&users, "SELECT * FROM users WHERE age > $1", 30);
+changed, err2 := conn.exec("DELETE FROM users WHERE id = $1", 7);
+```
+
+* The memory of the rows comes from `conn.allocator`, e.g an arena that frees a whole request at once. `mem.Arena`
+  is ready to use as a zero value and gives an `Allocator` with `arena.allocator()`
+* `db` doesn't know Postgres: a database is a driver, a struct of functions, so `std/db` can move to a repository
+  of its own later
+* Fixes: an unterminated string at the end of a file crashed the compiler, errors after a string over several lines
+  had the wrong line, and `&p[-8]` (a negative index that is a literal) read the wrong memory
+
 ## Update v0.9.1 - 1. Nov 2026
 
 * Characters: `'a'`, `'\n'`, `'\''` and `'\x41'` are the number of the byte. Where a number type is wanted they become it,

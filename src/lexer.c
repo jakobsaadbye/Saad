@@ -137,9 +137,7 @@ bool lex_file(Lexer *lexer) {
         }
 
         if (c == '\n') {
-            eat_character(lexer);
-            lexer->line_number += 1;
-            lexer->col          = 1;
+            eat_character(lexer); // Counts the line
             continue;
         }
 
@@ -279,7 +277,13 @@ bool lex_file(Lexer *lexer) {
                 eat_character(lexer);
                 next = peek_next_char(lexer);
             }
-            eat_character(lexer);
+            if (next == '\0') {
+                // The file ended in the string. The string goes to the end, so nothing is read after the text
+                report_error_here(lexer, "Syntax Error: This string has no '\"' at its end");
+                lexer->had_errors = true;
+            } else {
+                eat_character(lexer);
+            }
 
             make_literal_here(lexer, TOKEN_LITERAL_STRING, pos_start);
             continue;
@@ -572,6 +576,9 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
         // but don't include them for the value of the string.
         const char *src = &lexer->file_text[pos_start.input_idx + 1];
         int str_len = pos_end.input_idx - pos_start.input_idx - 2;
+        bool closed = pos_end.input_idx - pos_start.input_idx >= 2 && lexer->file_text[pos_end.input_idx - 1] == '"';
+        if (!closed) str_len = pos_end.input_idx - pos_start.input_idx - 1; // A string that the file ended in has no closing quote
+        if (str_len < 0) str_len = 0;
         char *buffer = (char *)(malloc(str_len + 1));
         memset(buffer, '\0', str_len + 1);
         memcpy(buffer, src, str_len);
@@ -608,7 +615,13 @@ void eat_characters(Lexer *lexer, int chars_to_eat) {
 }
 
 void eat_character(Lexer *lexer) {
-    lexer->col++;
+    // A line break can also be inside a string or a comment
+    if (lexer->file_text[lexer->char_idx] == '\n') {
+        lexer->line_number += 1;
+        lexer->col          = 1;
+    } else {
+        lexer->col++;
+    }
     lexer->char_idx++;
 }
 
@@ -817,21 +830,26 @@ void report_error_helper(char *file_path, char *file_text, const char* label, Po
     bool singleline = num_lines == 1;
     if (singleline) {
         Line line = get_line(file_text, start.line);
-        char *start_segment = malloc(start.col);
-        memset(start_segment, '\0', start.col);
-        memcpy(start_segment, line.str, start.col - 1);
+        // Clamp the segments to the line, e.g for a position at the end of the file
+        int line_len  = line.end_idx - line.start_idx;
+        int start_off = start.input_idx - line.start_idx;
+        if (start_off < 0)        start_off = 0;
+        if (start_off > line_len) start_off = line_len;
+        int end_off = end.input_idx - line.start_idx;
+        if (end_off < start_off) end_off = start_off;
+        if (end_off > line_len)  end_off = line_len;
+
+        char *start_segment = calloc(start_off + 1, 1);
+        memcpy(start_segment, line.str, start_off);
 
         //  Highlight part
-        int highlight_len = end.input_idx - start.input_idx;
-        char *highlight_segment = malloc(highlight_len + 1);
-        memset(highlight_segment, '\0', highlight_len + 1);
-        memcpy(highlight_segment, &line.str[start.col - 1], highlight_len);
+        int highlight_len = end_off - start_off;
+        char *highlight_segment = calloc(highlight_len + 1, 1);
+        memcpy(highlight_segment, &line.str[start_off], highlight_len);
 
-
-        int end_segment_len = line.end_idx - end.input_idx;
-        char *end_segment = malloc(end_segment_len + 1);
-        memset(end_segment, '\0', end_segment_len + 1);
-        memcpy(end_segment, &file_text[end.input_idx], end_segment_len);
+        int end_segment_len = line_len - end_off;
+        char *end_segment = calloc(end_segment_len + 1, 1);
+        memcpy(end_segment, &line.str[end_off], end_segment_len);
 
         char line_num[10];
         sprintf(line_num, "  %d", start.line);
@@ -846,30 +864,40 @@ void report_error_helper(char *file_path, char *file_text, const char* label, Po
         printf(COLOR_RESET);
         printf("\n");
 
+        free(start_segment);
+        free(highlight_segment);
+        free(end_segment);
         free_line(line);
     } else {
         for (int i = 0; i < num_lines; i++) {
             int line_num = start.line + i;
             Line line = get_line(file_text, line_num);
+            int line_len = line.end_idx - line.start_idx;
             if (i == 0) {
-                char *start_segment = malloc(start.col);
-                memset(start_segment, '\0', start.col);
-                memcpy(start_segment, line.str, start.col - 1);
+                int off = start.col - 1;
+                if (off < 0)        off = 0;
+                if (off > line_len) off = line_len;
+                char *start_segment = calloc(off + 1, 1);
+                memcpy(start_segment, line.str, off);
 
-                char *rest = &line.str[start.col - 1];
+                char *rest = &line.str[off];
                 printf("  %d | %s" "%s" "%s" COLOR_RESET "\n", line_num, start_segment, label_color(label), rest);
-                
+
+                free(start_segment);
                 free_line(line);
                 continue;
             }
             if (i == num_lines - 1) {
-                char *end_segment = malloc(end.col);
-                memset(end_segment, '\0', end.col);
-                memcpy(end_segment, line.str, end.col - 1);
+                int off = end.col - 1;
+                if (off < 0)        off = 0;
+                if (off > line_len) off = line_len;
+                char *end_segment = calloc(off + 1, 1);
+                memcpy(end_segment, line.str, off);
 
-                char *rest = &line.str[end.col - 1];
+                char *rest = &line.str[off];
                 printf("  %d | " "%s" "%s" COLOR_RESET "%s" "\n", line_num, label_color(label), end_segment, rest);
 
+                free(end_segment);
                 free_line(line);
                 continue;
             }
