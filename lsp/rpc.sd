@@ -102,17 +102,14 @@ send :: (body: string) {
     io.write(body);
 }
 
-@private Zero  :: 48;
-@private Nine  :: 57;
-@private Space :: 32;
 
 @private
 parseInt :: (text: string) -> int {
     n := 0;
     for ch in text {
-        if ch >= Zero && ch <= Nine {
-            n = n * 10 + (ch - Zero) as int;
-        } else if ch != Space {
+        if ch >= '0' && ch <= '9' {
+            n = n * 10 + (ch - '0') as int;
+        } else if ch != ' ' {
             break;
         }
     }

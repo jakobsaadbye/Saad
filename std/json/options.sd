@@ -56,15 +56,12 @@ styleName :: (name: string, style: NameStyle) -> string {
     return sb.toString();
 }
 
-@private Underscore :: 95;
-@private UpperZ     :: 90;
-@private LowerZ     :: 122;
 
 @private
-isUpper :: (ch: u8) -> bool { return ch >= UpperA && ch <= UpperZ; }
+isUpper :: (ch: u8) -> bool { return ch >= 'A' && ch <= 'Z'; }
 
 @private
-isLower :: (ch: u8) -> bool { return ch >= LowerA && ch <= LowerZ; }
+isLower :: (ch: u8) -> bool { return ch >= 'a' && ch <= 'z'; }
 
 @private
 toUpper :: (ch: u8) -> u8 {
@@ -89,8 +86,8 @@ addStyledName :: (sb: *fmt.StringBuilder, name: string, style: NameStyle) {
 
     separator: u8 = switch style {
         case .snakeCase
-        case .upperSnake => Underscore;
-        case .kebabCase  => Minus;
+        case .upperSnake => '_';
+        case .kebabCase  => '-';
         else             => 0;
     };
 
@@ -98,7 +95,7 @@ addStyledName :: (sb: *fmt.StringBuilder, name: string, style: NameStyle) {
     inWord := false;   // Inside a word, so the next letter continues it
     for i in 0..name.len {
         ch := name[i];
-        if ch == Underscore || ch == Minus {
+        if ch == '_' || ch == '-' {
             inWord = false;
             continue;
         }

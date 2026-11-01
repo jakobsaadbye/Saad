@@ -1,0 +1,5 @@
+// expect-error: Unknown escape in a character
+
+main :: () {
+    c := '\q';
+}

@@ -132,7 +132,8 @@ typedef enum TokenType {
 } TokenType;
 
 typedef enum ValueFlags {
-    VALUE_IS_BIGGER_THAN_SIGNED_64_BIT_INTEGER = 1 << 0
+    VALUE_IS_BIGGER_THAN_SIGNED_64_BIT_INTEGER = 1 << 0,
+    VALUE_IS_CHARACTER                         = 1 << 1, // An integer written as a character e.g 'a'. Without a wanted type it is a char
 } ValueFlags;
 
 typedef struct As_value {

@@ -14,8 +14,6 @@ import fmt;
 use c;
 
 @private BufferSize :: 65536;
-@private Newline    :: 10;
-@private Return     :: 13;
 
 @private
 Input :: struct {
@@ -39,7 +37,7 @@ readLine :: () -> string, bool {
 
         // The end of the line in the buffer, or the end of the buffer
         i := input.start;
-        while i < input.end && input.buffer[i] != Newline {
+        while i < input.end && input.buffer[i] != '\n' {
             i += 1;
         }
         sb.addString(bytes(input.start, i));
@@ -47,7 +45,7 @@ readLine :: () -> string, bool {
         if i < input.end {
             input.start = i + 1;
             line := sb.toString();
-            if line.len > 0 && line[line.len - 1] == Return {
+            if line.len > 0 && line[line.len - 1] == '\r' {
                 line.len -= 1;
             }
             return line, true;

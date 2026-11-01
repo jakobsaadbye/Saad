@@ -1,0 +1,5 @@
+// expect-error: A character is one character between quotes. Use a string for more
+
+main :: () {
+    c := 'ab';
+}

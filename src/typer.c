@@ -4987,12 +4987,14 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                 call->lowered_arguments = da_init(func_defn->parameters.count, sizeof(AstExpr *));
     
                 // Add the user arguments
+                bool added_slice = false;
                 for (int i = 0; i < call->arguments.count; i++) {
                     AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
 
                     // Add the variadic slice argument
                     if (i == func_defn->variadic_parameter_index) {
                         da_append(&call->lowered_arguments, slice);
+                        added_slice = true;
 
                         // There used to be a continue here, but that causes any default arguments not to be included
                         // continue;
@@ -5003,6 +5005,8 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
                     da_append(&call->lowered_arguments, arg->value);
                 }
+                // No arguments for the variadic parameter, and it is the last one: it gets an empty slice
+                if (!added_slice) da_append(&call->lowered_arguments, slice);
             }
         } else {
             // Build up the lowered argument list
@@ -7076,6 +7080,12 @@ bool is_non_constant_identifier_found_inside_current_function(Typer *typer, AstI
 Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
     switch (literal->kind) {
     case LITERAL_INTEGER: {
+        // A character e.g 'a' is a char, unless a number of another type is wanted, e.g 'ch == ' '' with ch a u8
+        bool is_character = literal->as.flags & VALUE_IS_CHARACTER;
+        if (is_character && (!ctx_type || (ctx_type->kind != TYPE_INTEGER && ctx_type->kind != TYPE_FLOAT) || is_untyped_type(ctx_type))) {
+            return primitive_type(PRIMITIVE_CHAR);
+        }
+
         if (ctx_type) {
 
             // Try and coerce the integer literal into the context type

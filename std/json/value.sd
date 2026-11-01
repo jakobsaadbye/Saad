@@ -181,35 +181,6 @@ parse :: (text: string) -> Value, string {
 @private MaxDepth :: 512;
 
 // The characters of JSON
-@private Tab          :: 9;
-@private Newline      :: 10;
-@private Return       :: 13;
-@private Space        :: 32;
-@private Quote        :: 34;
-@private Plus         :: 43;
-@private Comma        :: 44;
-@private Minus        :: 45;
-@private Dot          :: 46;
-@private Slash        :: 47;
-@private Zero         :: 48;
-@private Nine         :: 57;
-@private Colon        :: 58;
-@private UpperA       :: 65;
-@private UpperE       :: 69;
-@private UpperF       :: 70;
-@private OpenBracket  :: 91;
-@private Backslash    :: 92;
-@private CloseBracket :: 93;
-@private LowerA       :: 97;
-@private LowerB       :: 98;
-@private LowerE       :: 101;
-@private LowerF       :: 102;
-@private LowerN       :: 110;
-@private LowerR       :: 114;
-@private LowerT       :: 116;
-@private LowerU       :: 117;
-@private OpenBrace    :: 123;
-@private CloseBrace   :: 125;
 
 @private
 Parser :: struct {
@@ -225,7 +196,7 @@ fail :: method (p: *Parser, message: string) {
     column := 1;
     for i in 0..p.at {
         if i >= p.text.len { break; }
-        if p.text[i] == Newline {
+        if p.text[i] == '\n' {
             line += 1;
             column = 1;
         } else {
@@ -247,7 +218,7 @@ peek :: method (p: *Parser) -> u8 {
 skipSpace :: method (p: *Parser) {
     while p.at < p.text.len {
         ch := p.text[p.at];
-        if ch != Space && ch != Newline && ch != Return && ch != Tab {
+        if ch != ' ' && ch != '\n' && ch != '\r' && ch != '\t' {
             return;
         }
         p.at += 1;
@@ -278,20 +249,20 @@ parseValue :: method (p: *Parser, depth: int) -> Value, bool {
 
     ch := p.peek();
     switch ch {
-        case OpenBrace {
+        case '{' {
             object, ok := p.parseObject(depth);
             return object, ok;
         }
-        case OpenBracket {
+        case '[' {
             array, ok := p.parseArray(depth);
             return array, ok;
         }
-        case Quote {
+        case '"' {
             s, ok := p.parseString();
             return Value{kind: .string, text: s}, ok;
         }
-        case Minus
-        case Zero...Nine {
+        case '-'
+        case '0'...'9' {
             number, ok := p.parseNumber();
             return number, ok;
         }
@@ -314,14 +285,14 @@ parseObject :: method (p: *Parser, depth: int) -> Value, bool {
     object := Value{kind: .object};
 
     p.skipSpace();
-    if p.peek() == CloseBrace {
+    if p.peek() == '}' {
         p.at += 1;
         return object, true;
     }
 
     while true {
         p.skipSpace();
-        if p.peek() != Quote {
+        if p.peek() != '"' {
             p.fail("Expected the name of a member as a string");
             return object, false;
         }
@@ -329,7 +300,7 @@ parseObject :: method (p: *Parser, depth: int) -> Value, bool {
         if !keyOk { return object, false; }
 
         p.skipSpace();
-        if p.peek() != Colon {
+        if p.peek() != ':' {
             p.fail("Expected a ':' after the name of the member");
             return object, false;
         }
@@ -342,11 +313,11 @@ parseObject :: method (p: *Parser, depth: int) -> Value, bool {
 
         p.skipSpace();
         switch p.peek() {
-            case Comma {
+            case ',' {
                 p.at += 1;
                 continue;
             }
-            case CloseBrace {
+            case '}' {
                 p.at += 1;
                 return object, true;
             }
@@ -363,7 +334,7 @@ parseArray :: method (p: *Parser, depth: int) -> Value, bool {
     array := Value{kind: .array};
 
     p.skipSpace();
-    if p.peek() == CloseBracket {
+    if p.peek() == ']' {
         p.at += 1;
         return array, true;
     }
@@ -376,11 +347,11 @@ parseArray :: method (p: *Parser, depth: int) -> Value, bool {
 
         p.skipSpace();
         switch p.peek() {
-            case Comma {
+            case ',' {
                 p.at += 1;
                 continue;
             }
-            case CloseBracket {
+            case ']' {
                 p.at += 1;
                 return array, true;
             }
@@ -393,16 +364,16 @@ parseArray :: method (p: *Parser, depth: int) -> Value, bool {
 
 @private
 isDigit :: (ch: u8) -> bool {
-    return ch >= Zero && ch <= Nine;
+    return ch >= '0' && ch <= '9';
 }
 
 @private
 parseNumber :: method (p: *Parser) -> Value, bool {
     start := p.at;
-    if p.peek() == Minus { p.at += 1; }
+    if p.peek() == '-' { p.at += 1; }
 
     // No leading zeros, e.g 012
-    if p.peek() == Zero {
+    if p.peek() == '0' {
         p.at += 1;
     } else if isDigit(p.peek()) {
         while isDigit(p.peek()) { p.at += 1; }
@@ -411,7 +382,7 @@ parseNumber :: method (p: *Parser) -> Value, bool {
         return Value{}, false;
     }
 
-    if p.peek() == Dot {
+    if p.peek() == '.' {
         p.at += 1;
         if !isDigit(p.peek()) {
             p.fail("Expected a digit after the '.'");
@@ -420,9 +391,9 @@ parseNumber :: method (p: *Parser) -> Value, bool {
         while isDigit(p.peek()) { p.at += 1; }
     }
 
-    if p.peek() == LowerE || p.peek() == UpperE {
+    if p.peek() == 'e' || p.peek() == 'E' {
         p.at += 1;
-        if p.peek() == Plus || p.peek() == Minus { p.at += 1; }
+        if p.peek() == '+' || p.peek() == '-' { p.at += 1; }
         if !isDigit(p.peek()) {
             p.fail("Expected a digit in the exponent");
             return Value{}, false;
@@ -445,9 +416,9 @@ parseF64 :: (text: string) -> f64 {
 
 @private
 hexDigit :: (ch: u8) -> int {
-    if ch >= Zero && ch <= Nine     { return (ch - Zero) as int; }
-    if ch >= LowerA && ch <= LowerF { return (ch - LowerA) as int + 10; }
-    if ch >= UpperA && ch <= UpperF { return (ch - UpperA) as int + 10; }
+    if ch >= '0' && ch <= '9'     { return (ch - '0') as int; }
+    if ch >= 'a' && ch <= 'f' { return (ch - 'a') as int + 10; }
+    if ch >= 'A' && ch <= 'F' { return (ch - 'A') as int + 10; }
     return -1;
 }
 
@@ -510,16 +481,16 @@ parseString :: method (p: *Parser) -> string, bool {
         }
 
         ch := p.text[p.at];
-        if ch == Quote {
+        if ch == '"' {
             p.at += 1;
             return sb.toString(), true;
         }
-        if ch < Space {
+        if ch < ' ' {
             p.fail("A string can't have a control character like a newline. Write it as an escape like \\n");
             sb.free();
             return "", false;
         }
-        if ch != Backslash {
+        if ch != '\\' {
             sb.addChar(ch);
             p.at += 1;
             continue;
@@ -529,15 +500,15 @@ parseString :: method (p: *Parser) -> string, bool {
         escape := p.peek();
         p.at += 1;
         switch escape {
-            case Quote
-            case Backslash
-            case Slash  { sb.addChar(escape); }
-            case LowerB { sb.addChar(8); }
-            case LowerF { sb.addChar(12); }
-            case LowerN { sb.addChar(Newline); }
-            case LowerR { sb.addChar(Return); }
-            case LowerT { sb.addChar(Tab); }
-            case LowerU {
+            case '"'
+            case '\\'
+            case '/'  { sb.addChar(escape); }
+            case 'b' { sb.addChar('\x08'); }
+            case 'f' { sb.addChar('\x0c'); }
+            case 'n' { sb.addChar('\n'); }
+            case 'r' { sb.addChar('\r'); }
+            case 't' { sb.addChar('\t'); }
+            case 'u' {
                 code, ok := p.parseHex4();
                 if !ok { sb.free(); return "", false; }
 

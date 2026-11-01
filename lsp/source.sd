@@ -7,11 +7,6 @@ namespace source;
 
 import fmt;
 
-Slash     :: 47;
-Backslash :: 92;
-Colon     :: 58;
-Percent   :: 37;
-Newline   :: 10;
 
 // A text and where its lines start
 Text :: struct {
@@ -24,7 +19,7 @@ newText :: (text: string) -> Text {
     t.text = text;
     t.lines.add(0);
     for ch, i in text {
-        if ch == Newline {
+        if ch == '\n' {
             t.lines.add(i + 1);
         }
     }
@@ -41,7 +36,7 @@ line :: method (t: *Text, n: int) -> string {
     if n + 1 < t.lines.count {
         end = t.lines[n + 1] - 1;
     }
-    if end > start && t.text[end - 1] == 13 {
+    if end > start && t.text[end - 1] == '\r' {
         end -= 1;
     }
     s: string;
@@ -108,7 +103,7 @@ pathOf :: (uri: string) -> string {
     i := 0;
     while i < rest.len {
         ch := rest[i];
-        if ch == Percent && i + 2 < rest.len {
+        if ch == '%' && i + 2 < rest.len {
             sb.addChar((hexValue(rest[i + 1]) * 16 + hexValue(rest[i + 2])) as u8);
             i += 3;
             continue;
@@ -119,7 +114,7 @@ pathOf :: (uri: string) -> string {
     path := sb.toString();
 
     // A Windows path is /c:/Users/..., without the first slash
-    if path.len >= 3 && path[0] == Slash && path[2] == Colon {
+    if path.len >= 3 && path[0] == '/' && path[2] == ':' {
         return path.slice(1);
     }
     return path;
@@ -129,16 +124,16 @@ pathOf :: (uri: string) -> string {
 uriOf :: (path: string) -> string {
     sb := fmt.newStringBuilder(path.len as int + 16);
     sb.addString("file://");
-    if path.len >= 2 && path[1] == Colon {
-        sb.addChar(Slash);  // file:///c:/...
+    if path.len >= 2 && path[1] == ':' {
+        sb.addChar('/');  // file:///c:/...
     }
     for ch in path {
-        if ch == Backslash {
-            sb.addChar(Slash);
+        if ch == '\\' {
+            sb.addChar('/');
         } else if isUriCharacter(ch) {
             sb.addChar(ch);
         } else {
-            sb.addChar(Percent);
+            sb.addChar('%');
             sb.addString(hexDigit(ch / 16));
             sb.addString(hexDigit(ch % 16));
         }
@@ -150,9 +145,9 @@ uriOf :: (path: string) -> string {
 keyOf :: (path: string) -> string {
     sb := fmt.newStringBuilder(path.len as int);
     for ch, i in path {
-        if ch == Backslash {
-            sb.addChar(Slash);
-        } else if i == 0 && path.len >= 2 && path[1] == Colon && ch >= 65 && ch <= 90 {
+        if ch == '\\' {
+            sb.addChar('/');
+        } else if i == 0 && path.len >= 2 && path[1] == ':' && ch >= 65 && ch <= 90 {
             sb.addChar(ch + 32);
         } else {
             sb.addChar(ch);
@@ -165,7 +160,7 @@ keyOf :: (path: string) -> string {
 folderOf :: (path: string) -> string {
     i := path.len - 1;
     while i >= 0 {
-        if path[i] == Slash || path[i] == Backslash {
+        if path[i] == '/' || path[i] == '\\' {
             return path.slice(0, i as int);
         }
         i -= 1;
@@ -175,17 +170,17 @@ folderOf :: (path: string) -> string {
 
 @private
 isUriCharacter :: (ch: u8) -> bool {
-    if ch >= 48 && ch <= 57  { return true; }  // 0-9
-    if ch >= 65 && ch <= 90  { return true; }  // A-Z
-    if ch >= 97 && ch <= 122 { return true; }  // a-z
-    return ch == Slash || ch == 45 || ch == 46 || ch == 95 || ch == 126 || ch == Colon;  // / - . _ ~ :
+    if ch >= '0' && ch <= '9' { return true; }
+    if ch >= 'A' && ch <= 'Z' { return true; }
+    if ch >= 'a' && ch <= 'z' { return true; }
+    return ch == '/' || ch == '-' || ch == '.' || ch == '_' || ch == '~' || ch == ':';
 }
 
 @private
 hexValue :: (ch: u8) -> int {
-    if ch >= 48 && ch <= 57  { return (ch - 48) as int; }
-    if ch >= 65 && ch <= 70  { return (ch - 55) as int; }
-    if ch >= 97 && ch <= 102 { return (ch - 87) as int; }
+    if ch >= '0' && ch <= '9' { return (ch - '0') as int; }
+    if ch >= 'A' && ch <= 'F' { return (ch - 'A' + 10) as int; }
+    if ch >= 'a' && ch <= 'f' { return (ch - 'a' + 10) as int; }
     return 0;
 }
 

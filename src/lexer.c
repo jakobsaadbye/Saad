@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include "lexer.h"
 
 #define DYNAMIC_ARRAY_IMPLEMENTATION
@@ -187,6 +188,83 @@ bool lex_file(Lexer *lexer) {
                 make_literal_here(lexer, TOKEN_LITERAL_INTEGER, pos_start);
             }
 
+            continue;
+        }
+
+        // A character e.g 'a', '\n' or '\''. It is the number of the byte
+        if (c == '\'') {
+            Pos pos_start = get_current_position(lexer);
+            eat_character(lexer);
+            int value = -1;
+            char ch = peek_next_char(lexer);
+            if (ch == '\\') {
+                eat_character(lexer);
+                char escape = peek_next_char(lexer);
+                switch (escape) {
+                case 'n':  value = '\n'; break;
+                case 't':  value = '\t'; break;
+                case 'r':  value = '\r'; break;
+                case '0':  value = 0;    break;
+                case '\\': value = '\\'; break;
+                case '\'': value = '\''; break;
+                case '"':  value = '"';  break;
+                case 'x': {
+                    int digits = 0, number = 0;
+                    while (digits < 2 && isxdigit((unsigned char)peek_char(lexer, 1 + digits))) {
+                        char d = peek_char(lexer, 1 + digits);
+                        number = number * 16 + (isdigit((unsigned char)d) ? d - '0' : (tolower((unsigned char)d) - 'a' + 10));
+                        digits++;
+                    }
+                    if (digits == 2) {
+                        eat_characters(lexer, 2);
+                        value = number;
+                    }
+                    break;
+                }
+                default: break;
+                }
+                if (value < 0) {
+                    report_error_here(lexer, "Syntax Error: Unknown escape in a character. The escapes are \\n \\t \\r \\0 \\\\ \\' \\\" and \\x with two hex digits");
+                    lexer->had_errors = true;
+                    value = 0;
+                }
+                if (peek_next_char(lexer) != '\0') eat_character(lexer);
+            } else if (ch == '\'' || ch == '\n' || ch == '\0') {
+                report_error_here(lexer, "Syntax Error: A character needs one character between its quotes, e.g 'a'");
+                lexer->had_errors = true;
+                value = 0;
+            } else if ((unsigned char)ch >= 0x80) {
+                report_error_here(lexer, "Syntax Error: A character is one byte, and this one takes more. Use a string, e.g \"ø\"");
+                lexer->had_errors = true;
+                value = 0;
+                while ((unsigned char)peek_next_char(lexer) >= 0x80) eat_character(lexer);
+            } else {
+                value = (unsigned char) ch;
+                eat_character(lexer);
+            }
+            if (peek_next_char(lexer) == '\'') {
+                eat_character(lexer);
+            } else {
+                // More characters before a ' on the same line, e.g 'ab', are taken in, so the rest of the line is fine
+                int ahead = 0;
+                while (peek_char(lexer, ahead) != '\0' && peek_char(lexer, ahead) != '\n' && peek_char(lexer, ahead) != '\'') ahead++;
+                if (peek_char(lexer, ahead) == '\'') {
+                    report_error_here(lexer, "Syntax Error: A character is one character between quotes. Use a string for more, e.g \"ab\"");
+                    eat_characters(lexer, ahead + 1);
+                } else {
+                    report_error_here(lexer, "Syntax Error: Expected a ' to end the character");
+                }
+                lexer->had_errors = true;
+            }
+
+            Pos pos_end = get_current_position(lexer);
+            Token token = {0};
+            token.type  = TOKEN_LITERAL_INTEGER;
+            token.start = pos_start;
+            token.end   = pos_end;
+            token.as_value.value.integer = value;
+            token.as_value.flags = VALUE_IS_CHARACTER;
+            push_token(lexer, token);
             continue;
         }
 

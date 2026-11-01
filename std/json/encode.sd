@@ -62,25 +62,25 @@ newWriter :: (options: Options) -> Writer {
 @private
 newline :: method (w: *Writer) {
     if w.options.indent <= 0 { return; }
-    w.sb.addChar(Newline);
+    w.sb.addChar('\n');
     for 0..(w.options.indent * w.depth) {
-        w.sb.addChar(Space);
+        w.sb.addChar(' ');
     }
 }
 
 @private
 writeString :: method (w: *Writer, s: string) {
-    w.sb.addChar(Quote);
+    w.sb.addChar('"');
     for ch in s {
         switch ch {
-            case Quote     { w.sb.addString("\\\""); }
-            case Backslash { w.sb.addString("\\\\"); }
-            case Newline   { w.sb.addString("\\n"); }
-            case Return    { w.sb.addString("\\r"); }
-            case Tab       { w.sb.addString("\\t"); }
+            case '"'  { w.sb.addString("\\\""); }
+            case '\\' { w.sb.addString("\\\\"); }
+            case '\n' { w.sb.addString("\\n"); }
+            case '\r' { w.sb.addString("\\r"); }
+            case '\t' { w.sb.addString("\\t"); }
             case 8         { w.sb.addString("\\b"); }
             case 12        { w.sb.addString("\\f"); }
-            case 0..Space {
+            case 0..' ' {
                 // The other control characters
                 w.sb.addString("\\u00");
                 w.sb.addChar(hexChar((ch >> 4) as int));
@@ -89,7 +89,7 @@ writeString :: method (w: *Writer, s: string) {
             else { w.sb.addChar(ch); }
         }
     }
-    w.sb.addChar(Quote);
+    w.sb.addChar('"');
 }
 
 @private
@@ -100,8 +100,8 @@ writeBool :: method (w: *Writer, b: bool) {
 
 @private
 hexChar :: (digit: int) -> u8 {
-    if digit < 10 { return (Zero + digit) as u8; }
-    return (LowerA + digit - 10) as u8;
+    if digit < 10 { return ('0' + digit) as u8; }
+    return ('a' + digit - 10) as u8;
 }
 
 // The shortest text that reads back as the same f64. Not a number and infinity are not JSON, so they are written as null
@@ -146,15 +146,15 @@ writeValue :: method (w: *Writer, v: Value) {
             else              { w.writeF64(v.number); }
         }
         case .array {
-            w.beginList(OpenBracket, v.items.count);
+            w.beginList('[', v.items.count);
             for item, i in v.items {
                 w.nextElement(i);
                 w.writeValue(item);
             }
-            w.endList(CloseBracket, v.items.count);
+            w.endList(']', v.items.count);
         }
         case .object {
-            w.beginList(OpenBrace, v.fields.count);
+            w.beginList('{', v.fields.count);
             i := 0;
             for entry in v.fields {
                 w.nextElement(i);
@@ -162,7 +162,7 @@ writeValue :: method (w: *Writer, v: Value) {
                 w.writeValue(entry.value);
                 i += 1;
             }
-            w.endList(CloseBrace, v.fields.count);
+            w.endList('}', v.fields.count);
         }
     }
 }
@@ -175,7 +175,7 @@ beginList :: method (w: *Writer, open: u8, count: i64) {
 
 @private
 nextElement :: method (w: *Writer, index: i64) {
-    if index > 0 { w.sb.addChar(Comma); }
+    if index > 0 { w.sb.addChar(','); }
     w.newline();
 }
 
@@ -189,18 +189,18 @@ endList :: method (w: *Writer, close: u8, count: i64) {
 @private
 writeKey :: method (w: *Writer, key: string) {
     w.writeString(key);
-    w.sb.addChar(Colon);
-    if w.options.indent > 0 { w.sb.addChar(Space); }
+    w.sb.addChar(':');
+    if w.options.indent > 0 { w.sb.addChar(' '); }
 }
 
 // The name of a member in the style of the options
 @private
 writeMemberName :: method (w: *Writer, name: string) {
-    w.sb.addChar(Quote);
+    w.sb.addChar('"');
     addStyledName(&w.sb, name, w.options.names);
-    w.sb.addChar(Quote);
-    w.sb.addChar(Colon);
-    if w.options.indent > 0 { w.sb.addChar(Space); }
+    w.sb.addChar('"');
+    w.sb.addChar(':');
+    if w.options.indent > 0 { w.sb.addChar(' '); }
 }
 
 //
@@ -228,9 +228,9 @@ writeAny :: method (w: *Writer, data: *void, type: *Type) {
             value := enumType.readValue(data);
             name, ok := enumType.nameOf(value);
             if ok && !w.options.enumsAsNumbers {
-                w.sb.addChar(Quote);
+                w.sb.addChar('"');
                 addStyledName(&w.sb, name, w.options.enumValues);
-                w.sb.addChar(Quote);
+                w.sb.addChar('"');
             } else {
                 w.sb.addInt64(value);
             }
@@ -265,12 +265,12 @@ writeAny :: method (w: *Writer, data: *void, type: *Type) {
 
 @private
 writeElements :: method (w: *Writer, elements: *u8, count: i64, elemType: *Type) {
-    w.beginList(OpenBracket, count);
+    w.beginList('[', count);
     for i in 0..count {
         w.nextElement(i);
         w.writeAny(&elements[i * elemType.size], elemType);
     }
-    w.endList(CloseBracket, count);
+    w.endList(']', count);
 }
 
 @private
@@ -295,7 +295,7 @@ writeStruct :: method (w: *Writer, data: *void, type: *TypeStruct) {
         return;
     }
 
-    w.beginList(OpenBrace, type.members.count);
+    w.beginList('{', type.members.count);
     written := 0;
     for i in 0..type.members.count {
         member := &type.members[i];
@@ -311,7 +311,7 @@ writeStruct :: method (w: *Writer, data: *void, type: *TypeStruct) {
         w.writeAny(value, member.type);
         written += 1;
     }
-    w.endList(CloseBrace, written);
+    w.endList('}', written);
 }
 
 // A union is the name of its variant, e.g "empty", or an object with the name and the value, e.g {"circle": {"radius": 2}}.
@@ -325,21 +325,21 @@ writeUnion :: method (w: *Writer, data: *void, type: *TypeStruct) {
     }
 
     if variant.type.kind == .void {
-        w.sb.addChar(Quote);
+        w.sb.addChar('"');
         addStyledName(&w.sb, variant.name, w.options.enumValues);
-        w.sb.addChar(Quote);
+        w.sb.addChar('"');
         return;
     }
 
-    w.beginList(OpenBrace, 1);
+    w.beginList('{', 1);
     w.nextElement(0);
-    w.sb.addChar(Quote);
+    w.sb.addChar('"');
     addStyledName(&w.sb, variant.name, w.options.enumValues);
-    w.sb.addChar(Quote);
-    w.sb.addChar(Colon);
-    if w.options.indent > 0 { w.sb.addChar(Space); }
+    w.sb.addChar('"');
+    w.sb.addChar(':');
+    if w.options.indent > 0 { w.sb.addChar(' '); }
     w.writeAny(variant.valueIn(data), variant.type);
-    w.endList(CloseBrace, 1);
+    w.endList('}', 1);
 }
 
 // A Map<string, V> is an object. Maps with other keys are arrays of [key, value] pairs
@@ -354,11 +354,11 @@ writeMap :: method (w: *Writer, data: *void, type: *TypeStruct) {
     valueMember := findMember(entryStruct, "value");
     stringKeys  := keyMember.type.kind == .string;
 
-    open  := OpenBracket as u8;
-    close := CloseBracket as u8;
+    open  := '[' as u8;
+    close := ']' as u8;
     if stringKeys {
-        open  = OpenBrace as u8;
-        close = CloseBrace as u8;
+        open  = '{' as u8;
+        close = '}' as u8;
     }
 
     w.beginList(open, count);
@@ -369,11 +369,11 @@ writeMap :: method (w: *Writer, data: *void, type: *TypeStruct) {
             w.writeKey(*(keyMember.valueIn(entry) as *string));
             w.writeAny(valueMember.valueIn(entry), valueMember.type);
         } else {
-            w.sb.addChar(OpenBracket);
+            w.sb.addChar('[');
             w.writeAny(keyMember.valueIn(entry), keyMember.type);
-            w.sb.addChar(Comma);
+            w.sb.addChar(',');
             w.writeAny(valueMember.valueIn(entry), valueMember.type);
-            w.sb.addChar(CloseBracket);
+            w.sb.addChar(']');
         }
     }
     w.endList(close, count);

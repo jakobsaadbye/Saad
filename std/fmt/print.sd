@@ -7,7 +7,7 @@ print :: (format: string, args: ...any, newline := true) {
     sb := newStringBuilder(256);
     sb.add(format, ...args);
     if newline {
-        sb.addChar(10); // '\n'
+        sb.addChar('\n');
     }
     printf("%s".data, sb.buffer);
     sb.free();

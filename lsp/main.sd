@@ -346,7 +346,7 @@ overlayOptions :: () -> string {
         if !doc.written {
             documents.indexRef(d).written = os.writeFile(doc.overlay, doc.text.text);
         }
-        sb.addString(fmt.sprint(" --overlay \"%=%\"", doc.path, doc.overlay));
+        sb.add(" --overlay \"%=%\"", doc.path, doc.overlay);
     }
     return sb.toString();
 }
@@ -384,7 +384,7 @@ publishDiagnostics :: (p: *project.Project) {
             if source.keyOf(file) != key {
                 continue;
             }
-            if !first { sb.addChar(44); }
+            if !first { sb.addChar(','); }
             first = false;
             sb.addString(diagnosticJson(d, key, path));
         }
@@ -404,7 +404,7 @@ publishDiagnostics :: (p: *project.Project) {
 diagnosticJson :: (d: project.Diagnostic, key: string, path: string) -> string {
     related := fmt.newStringBuilder(128);
     for r, i in d.related {
-        if i > 0 { related.addChar(44); }
+        if i > 0 { related.addChar(','); }
         file := r.file;
         if file == "" { file = path; }
         related.addString(fmt.sprint("{\"location\":%,\"message\":%}", locationJson(source.keyOf(file), file, r.range), json.encode(r.message)));
@@ -526,7 +526,7 @@ references :: (m: rpc.Message) {
     p := projects.indexRef(place.program);
 
     sb := fmt.newStringBuilder(1024);
-    sb.addChar(91);
+    sb.addChar('[');
     count := 0;
     if m.params.get("context").get("includeDeclaration").asBool() {
         sb.addString(symbolLocation(p, sym.file, sym.nameRange));
@@ -534,12 +534,12 @@ references :: (m: rpc.Message) {
     }
     for ref in p.index.references {
         if ref.symbol == sym.id {
-            if count > 0 { sb.addChar(44); }
+            if count > 0 { sb.addChar(','); }
             sb.addString(symbolLocation(p, ref.file, ref.range));
             count += 1;
         }
     }
-    sb.addChar(93);
+    sb.addChar(']');
     rpc.respond(m.id, sb.toString());
 }
 
@@ -626,16 +626,16 @@ documentSymbols :: (m: rpc.Message) {
     }
 
     sb := fmt.newStringBuilder(4096);
-    sb.addChar(91);
+    sb.addChar('[');
     first := true;
     for id in ids {
         if parentIn(p, id, ids) < 0 {
-            if !first { sb.addChar(44); }
+            if !first { sb.addChar(','); }
             first = false;
             addDocumentSymbol(&sb, p, id, ids, key, path);
         }
     }
-    sb.addChar(93);
+    sb.addChar(']');
     rpc.respond(m.id, sb.toString());
 }
 
@@ -654,12 +654,12 @@ parentIn :: (p: *project.Project, id: int, ids: [..]int) -> int {
 
 addDocumentSymbol :: (sb: *fmt.StringBuilder, p: *project.Project, id: int, ids: [..]int, key: string, path: string) {
     sym := p.symbol(id);
-    sb.addString(fmt.sprint("{\"name\":%,\"detail\":%,\"kind\":%,\"range\":%,\"selectionRange\":%,\"children\":[",
-        json.encode(sym.name), json.encode(sym.detail), symbolKind(sym.kind), rangeJson(key, path, sym.range), rangeJson(key, path, sym.nameRange)));
+    sb.add("{\"name\":%,\"detail\":%,\"kind\":%,\"range\":%,\"selectionRange\":%,\"children\":[",
+        json.encode(sym.name), json.encode(sym.detail), symbolKind(sym.kind), rangeJson(key, path, sym.range), rangeJson(key, path, sym.nameRange));
     first := true;
     for child in ids {
         if parentIn(p, child, ids) == id {
-            if !first { sb.addChar(44); }
+            if !first { sb.addChar(','); }
             first = false;
             addDocumentSymbol(sb, p, child, ids, key, path);
         }
@@ -679,7 +679,7 @@ workspaceSymbols :: (m: rpc.Message) {
     }
 
     sb := fmt.newStringBuilder(4096);
-    sb.addChar(91);
+    sb.addChar('[');
     seen: [..]string;  // A symbol can be in more than one project
     for _, i in projects {
         update(i);
@@ -696,17 +696,17 @@ workspaceSymbols :: (m: rpc.Message) {
             if seen.contains(id) {
                 continue;
             }
-            if seen.count > 0 { sb.addChar(44); }
+            if seen.count > 0 { sb.addChar(','); }
             seen.add(id);
 
             container := "";
             parent := p.symbol(sym.container);
             if parent != null { container = parent.name; }
-            sb.addString(fmt.sprint("{\"name\":%,\"kind\":%,\"location\":%,\"containerName\":%}",
-                json.encode(sym.name), symbolKind(sym.kind), symbolLocation(p, sym.file, sym.nameRange), json.encode(container)));
+            sb.add("{\"name\":%,\"kind\":%,\"location\":%,\"containerName\":%}",
+                json.encode(sym.name), symbolKind(sym.kind), symbolLocation(p, sym.file, sym.nameRange), json.encode(container));
         }
     }
-    sb.addChar(93);
+    sb.addChar(']');
     rpc.respond(m.id, sb.toString());
 }
 
@@ -788,9 +788,9 @@ completion :: (m: rpc.Message) {
         return;
     }
     sb := fmt.newStringBuilder(4096);
-    sb.addChar(91);
+    sb.addChar('[');
     for item, i in result.items {
-        if i > 0 { sb.addChar(44); }
+        if i > 0 { sb.addChar(','); }
         sb.addString(fmt.sprint("{\"label\":%,\"kind\":%,\"detail\":%", json.encode(item.label), completionKind(item.kind), json.encode(item.detail)));
         if item.doc != "" {
             sb.addString(fmt.sprint(",\"documentation\":{\"kind\":\"markdown\",\"value\":%}", json.encode(item.doc)));
@@ -802,9 +802,9 @@ completion :: (m: rpc.Message) {
         if item.kind == "keyword" {
             sb.addString(fmt.sprint(",\"sortText\":%", json.encode(fmt.sprint("~%", item.label))));
         }
-        sb.addChar(125);
+        sb.addChar('}');
     }
-    sb.addChar(93);
+    sb.addChar(']');
     rpc.respond(m.id, sb.toString());
 }
 
@@ -817,7 +817,7 @@ signatureHelp :: (m: rpc.Message) {
     signature := result.signature;
     parameters := fmt.newStringBuilder(256);
     for parameter, i in signature.parameters {
-        if i > 0 { parameters.addChar(44); }
+        if i > 0 { parameters.addChar(','); }
         parameters.addString(fmt.sprint("{\"label\":%}", json.encode(parameter)));
     }
     doc := "";
@@ -914,8 +914,8 @@ semanticTokens :: (m: rpc.Message) {
         if t.line == lastLine {
             deltaStart = start - lastStart;
         }
-        if written > 0 { sb.addChar(44); }
-        sb.addString(fmt.sprint("%,%,%,%,%", t.line - lastLine, deltaStart, end - start, t.kind, t.modifiers));
+        if written > 0 { sb.addChar(','); }
+        sb.add("%,%,%,%,%", t.line - lastLine, deltaStart, end - start, t.kind, t.modifiers);
         lastLine  = t.line;
         lastStart = start;
         written  += 1;

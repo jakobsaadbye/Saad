@@ -460,11 +460,22 @@ static void add_names_in_scope(AstFile *file, AstBlock *scope, int offset) {
 // Signature help
 //
 
+// If the closing quote at p ends a character literal, e.g 'a' or '\n', where it starts. Otherwise p
+static int start_of_character(const char *text, int p) {
+    if (text[p] != '\'') return p;
+    if (p >= 2 && text[p - 2] == '\'' && text[p - 1] != '\\') return p - 2;                      // 'a'
+    if (p >= 3 && text[p - 3] == '\'' && text[p - 2] == '\\') return p - 3;                       // '\n'
+    if (p >= 5 && text[p - 5] == '\'' && text[p - 4] == '\\' && text[p - 3] == 'x') return p - 5;  // '\x41'
+    return p;
+}
+
 // The '(' of the call the offset is in, and which argument it is at. -1 if it isn't in one
 static int open_paren_of_call(const char *text, int offset, int *argument) {
     int depth = 0;
     *argument = 0;
     for (int p = offset - 1; p >= 0; p--) {
+        p = start_of_character(text, p);
+        if (text[p] == '\'') continue;
         char c = text[p];
         if (c == '"') {  // Skips a string backwards
             for (p--; p >= 0 && !(text[p] == '"' && (p == 0 || text[p - 1] != '\\')); p--) {}
@@ -515,6 +526,10 @@ static void write_signature(AstIdentifier *ident, AstFunctionDefn *func, bool sk
 
     // A variadic parameter takes the rest of the arguments
     int active = argument;
+    for (int i = first; i < func->parameters.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)func->parameters.items)[i];
+        if (param->type && param->type->kind == TYPE_VARIADIC && active > i - first) active = i - first;
+    }
     if (shown > 0 && active >= shown) active = shown - 1;
 
     AstIdentifier *declared = ident->imported_from ? ident->imported_from : ident;
@@ -627,6 +642,8 @@ static bool literal_at(Typer *typer, AstFile *file, int offset, Literal *literal
     int element = -1; // The start of the element at the offset: after its ',' or the '{'
     int open = -1;
     for (int p = offset - 1; p >= 0; p--) {
+        p = start_of_character(text, p);
+        if (text[p] == '\'') continue;
         char c = text[p];
         if (c == '"') {
             for (p--; p >= 0 && !(text[p] == '"' && (p == 0 || text[p - 1] != '\\')); p--) {}
