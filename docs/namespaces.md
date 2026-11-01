@@ -67,7 +67,8 @@ Slot :: struct { index: int; }
 ```
 
 * Attributes go before a function, method (also inside a struct), struct, enum, constant, type alias or global
-  variable, at the top of a file. Not inside functions.
+  variable, at the top of a file. Not inside functions. A struct member takes `@embed` and the values of attribute
+  structs.
 * Unknown, repeated and misplaced attributes are errors.
 * Structs marked with `@attribute` are attributes of your own, which go on struct members and are read through
   reflection, e.g `@json.Field(name: "id")`. See `docs/reflection.md`.
@@ -77,6 +78,7 @@ Slot :: struct { index: int; }
 | `@private` | Only visible inside its namespace, in any of its files. In a file without a namespace, only inside the file. `use` and imports leave it out. A public function cannot take or return a private type |
 | `@deprecated("message")` | Using it gives a warning with the message. The message is optional |
 | `@attribute` | On a struct: its values can be given to struct members as attributes |
+| `@embed` | On a struct member: its members and methods can be used on the struct it is in. See `docs/embedding.md` |
 
 ## Not done yet
 

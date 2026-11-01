@@ -546,10 +546,21 @@ static int emit_to_bool(Lowerer *L, int vreg, Type *from) {
 }
 
 // Converts a scalar vreg of front-end type 'from' to front-end type 'to'
+int embedded_offset(TypeStruct *outer, TypeStruct *inner, int depth);
+
 static int convert_scalar(Lowerer *L, int vreg, Type *from, Type *to) {
     IrType src = ir_vreg_type(L->func, vreg);
     IrType dst = ir_type_of(to);
     assert(dst != IR_VOID);
+
+    // A *Outer as a *Inner that it embeds is the address of the embedded member
+    if (from->kind == TYPE_POINTER && to->kind == TYPE_POINTER) {
+        Type *outer = ((TypePointer *) from)->pointer_to, *inner = ((TypePointer *) to)->pointer_to;
+        if (outer->kind == TYPE_STRUCT && inner->kind == TYPE_STRUCT && outer != inner) {
+            int offset = embedded_offset((TypeStruct *) outer, (TypeStruct *) inner, 0);
+            if (offset > 0) return emit_ptr_add(L, vreg, emit_const(L, IR_I64, offset));
+        }
+    }
 
     if (to->kind == TYPE_BOOL && from->kind != TYPE_BOOL) {
         return emit_to_bool(L, vreg, from);

@@ -1,0 +1,6 @@
+// expect-error: @embed is for struct members
+
+@embed
+f :: () {}
+
+main :: () {}

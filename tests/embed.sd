@@ -1,0 +1,82 @@
+// @embed: the members and methods of an embedded struct member can be used on the struct it is in, and a pointer to the
+// struct is a pointer to what it embeds, like the Ast * of a C compiler
+
+use fmt;
+
+Ast :: struct {
+    kind: int;
+    line: int;
+
+    describe :: method () -> string { return sprint("node % at line %", self.kind, self.line); }
+    moveTo   :: method * (line: int) { self.line = line; }
+}
+
+// The embedded member is not the first, so a *Binary as an *Ast has an offset
+Binary :: struct {
+    op: u8;
+    @embed head: Ast;
+    left:  int;
+    right: int;
+}
+
+lineOf :: (node: *Ast) -> int { return node.line; }
+setKind :: (node: *Ast, kind: int) { node.kind = kind; }
+
+Box :: struct <T> {
+    value: T;
+    get :: method () -> T { return self.value; }
+}
+
+Named :: struct {
+    name: string;
+    @embed box: Box<int>;
+}
+
+// Two levels, and a method of its own that wins over the embedded one
+Deep :: struct {
+    @embed named: Named;
+    @embed node: Ast;
+    get :: method () -> int { return 100; }
+}
+
+// A pointer can be embedded too
+Counter :: struct { count: int; add :: method * () { self.count += 1; } }
+Shared :: struct { @embed counter: *Counter; }
+
+main :: () {
+    b := Binary{op: '+', head: Ast{kind: 3, line: 7}, left: 1, right: 2};
+
+    // Members and methods through the embedded member
+    assert(b.kind == 3 && b.line == 7);
+    assert(b.describe() == "node 3 at line 7");
+    b.moveTo(9);
+    assert(b.line == 9 && b.head.line == 9);
+    b.line = 11;
+    b.kind += 1;
+    assert(b.head.line == 11 && b.head.kind == 4);
+
+    // A *Binary is an *Ast
+    assert(lineOf(&b) == 11);
+    setKind(&b, 8);
+    assert(b.kind == 8);
+    node: *Ast = &b;
+    assert(node.line == 11 && node.kind == 8);
+    bp := &b;
+    assert(bp.describe() == "node 8 at line 11");
+
+    // A generic struct, and two levels
+    n := Named{name: "n", box: Box<int>{value: 5}};
+    assert(n.value == 5 && n.get() == 5);
+    d := Deep{named: n, node: Ast{kind: 1, line: 2}};
+    assert(d.value == 5 && d.name == "n" && d.line == 2);
+    assert(d.get() == 100 && d.box.get() == 5); // Its own method wins, the embedded one is still there by name
+    assert(lineOf(&d) == 2);
+
+    counter: Counter;
+    s := Shared{counter: &counter};
+    s.add();
+    s.add();
+    assert(counter.count == 2 && s.count == 2);
+
+    print("embed ok");
+}

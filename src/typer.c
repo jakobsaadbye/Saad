@@ -66,6 +66,7 @@ Type *optional_inner_type(Type *type);
 int   optional_present_offset(Type *type);
 Type *check_optional_chain(Typer *typer, AstExpr *whole, AstMemberAccess *ma);
 bool  types_fit_either_way(Type *wanted, Type *given);
+int   embedded_offset(TypeStruct *outer, TypeStruct *inner, int depth);
 static void hint_optional_unwrap(Typer *typer, Type *wanted, Type *given);
 static bool is_null_type(Type *type);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
@@ -3107,6 +3108,11 @@ static void hint_optional_unwrap(Typer *typer, Type *wanted, Type *given) {
 bool types_fit_either_way(Type *wanted, Type *given) {
     if (types_are_equal(wanted, given)) return true;
     if (is_optional_type(given) && !is_optional_type(wanted)) return false;
+    // Nor a *Inner where a *Outer is wanted, as not every Inner is in an Outer
+    if (wanted->kind == TYPE_POINTER && given->kind == TYPE_POINTER) {
+        Type *a = ((TypePointer *)wanted)->pointer_to, *b = ((TypePointer *)given)->pointer_to;
+        if (a->kind == TYPE_STRUCT && b->kind == TYPE_STRUCT && strcmp(type_identity(a), type_identity(b)) != 0) return false;
+    }
     return types_are_equal(given, wanted);
 }
 
@@ -3160,6 +3166,11 @@ bool types_are_equal(Type *lhs, Type *rhs) {
 
         // Allow casting to/from void pointer
         if (right_pointer_to->kind == TYPE_VOID || left_pointer_to->kind == TYPE_VOID) {
+            return true;
+        }
+        // A *Outer is a *Inner where Outer embeds Inner (@embed), like a pointer to its embedded member
+        if (left_pointer_to->kind == TYPE_STRUCT && right_pointer_to->kind == TYPE_STRUCT &&
+            embedded_offset((TypeStruct *)right_pointer_to, (TypeStruct *)left_pointer_to, 0) >= 0) {
             return true;
         }
         return types_are_equal(left_pointer_to, right_pointer_to);
@@ -3409,6 +3420,16 @@ bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
         typer->enclosing_function      = enclosing_function;
         typer->checking_member_default = checking_default;
         if (!ok) return false;
+
+        if (member->flags & IDENTIFIER_IS_EMBEDDED) {
+            Type *embedded = member->type->kind == TYPE_POINTER ? ((TypePointer *)member->type)->pointer_to : member->type;
+            bool is_struct = embedded->kind == TYPE_STRUCT && !((TypeStruct *)embedded)->node->is_union;
+            if (!is_struct || ast_struct->is_union) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *) member->decl, ast_struct->is_union ? "The variants of a union can't be embedded" : "Only a struct, or a pointer to one, can be embedded. '%s' is a %s", member->name, type_to_str(member->type));
+                report_error_ast(typer->parser, LABEL_HINT, NULL, "@embed makes the members and methods of a struct member usable on the struct it is in");
+                return false;
+            }
+        }
 
         if (member->decl->type == (Type *) struct_type) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *) member->decl, "Illegal recursive definition of type '%s'", struct_type->node->identifier->name);
@@ -6307,6 +6328,117 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     return result;
 }
 
+//
+// Embedding: a struct member with @embed. Its members and methods can be used on the struct it is in
+//
+
+#define EMBED_DEPTH_LIMIT 8
+
+// The struct that an embedded member is, or NULL. A pointer to a struct can be embedded too
+static TypeStruct *embedded_struct_of(AstIdentifier *member) {
+    if (!(member->flags & IDENTIFIER_IS_EMBEDDED) || member->type == NULL) return NULL;
+    Type *type = member->type;
+    if (type->kind == TYPE_POINTER) type = ((TypePointer *)type)->pointer_to;
+    if (type->kind != TYPE_STRUCT) return NULL;
+    return (TypeStruct *)type;
+}
+
+static bool struct_has_name(TypeStruct *type, const char *name) {
+    AstStruct *node = type->node;
+    if (get_struct_member(node, (char *)name)) return true;
+    if (get_struct_method(node, (char *)name)) return true;
+    if (node->generic_struct && get_struct_method(node->generic_struct, (char *)name)) return true;
+    return false;
+}
+
+// Finds the embedded members to go through to reach the member or method 'name' of a struct, the fewest first, like Go.
+// Gives how many there are in 'path' (0 when no embedded member has it), or -1 when two at the same depth have it
+int find_embedded_path(Typer *typer, TypeStruct *type, const char *name, AstIdentifier **path, Ast *site) {
+    // The structs at the current depth, and the path to each of them
+    typedef struct { TypeStruct *type; AstIdentifier *path[EMBED_DEPTH_LIMIT]; } Level;
+    Level *current = calloc(64, sizeof(Level));
+    Level *next    = calloc(64, sizeof(Level));
+    int current_count = 1, next_count = 0;
+    current[0].type = type;
+
+    int found_depth = 0;
+    for (int depth = 1; depth <= EMBED_DEPTH_LIMIT && current_count > 0; depth++) {
+        int found = 0;
+        AstIdentifier *first = NULL, *second = NULL;
+        next_count = 0;
+
+        for (int i = 0; i < current_count; i++) {
+            DynamicArray members = current[i].type->node->members->identifiers;
+            for (int j = 0; j < members.count; j++) {
+                AstIdentifier *member = ((AstIdentifier **)members.items)[j];
+                TypeStruct *embedded = embedded_struct_of(member);
+                if (!embedded || embedded->node->is_union) continue;
+
+                Level level = current[i];
+                level.type = embedded;
+                level.path[depth - 1] = member;
+
+                if (struct_has_name(embedded, name)) {
+                    found += 1;
+                    if (found == 1) { first = member; memcpy(path, level.path, sizeof(level.path)); }
+                    if (found == 2) second = member;
+                } else if (next_count < 64) {
+                    next[next_count++] = level;
+                }
+            }
+        }
+
+        if (found > 1) {
+            if (site) {
+                report_error_ast(typer->parser, LABEL_ERROR, site, "'%s' is in both of the embedded members '%s' and '%s'", name, first->name, second->name);
+                report_error_ast(typer->parser, LABEL_HINT, NULL, "Say which one, e.g x.%s.%s", first->name, name);
+            }
+            free(current); free(next);
+            return -1;
+        }
+        if (found == 1) { found_depth = depth; break; }
+
+        Level *swap = current; current = next; next = swap;
+        current_count = next_count;
+    }
+    free(current); free(next);
+    return found_depth;
+}
+
+// The member access left.name, as if it was written
+static AstExpr *make_member_access_of(Typer *typer, AstExpr *left, char *name) {
+    Parser *parser = typer->parser;
+    AstLiteral *member = ast_allocate(parser, sizeof(AstLiteral));
+    member->head.head       = left->head;
+    member->head.head.kind  = AST_LITERAL;
+    member->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    member->kind            = LITERAL_IDENTIFIER;
+    member->as.value.identifier.name   = name;
+    member->as.value.identifier.length = (int)strlen(name);
+
+    AstMemberAccess *ma = ast_allocate(parser, sizeof(AstMemberAccess));
+    ma->head.head       = left->head;
+    ma->head.head.kind  = AST_MEMBER_ACCESS;
+    ma->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    ma->left            = left;
+    ma->right           = (AstExpr *)member;
+    return (AstExpr *)ma;
+}
+
+// How far into the struct 'outer' the embedded struct 'inner' is, through embedded members by value, or -1. For *Outer as *Inner
+int embedded_offset(TypeStruct *outer, TypeStruct *inner, int depth) {
+    if (outer == inner || strcmp(type_identity((Type *)outer), type_identity((Type *)inner)) == 0) return 0;
+    if (depth >= EMBED_DEPTH_LIMIT) return -1;
+    DynamicArray members = outer->node->members->identifiers;
+    for (int i = 0; i < members.count; i++) {
+        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+        if (!(member->flags & IDENTIFIER_IS_EMBEDDED) || member->type == NULL || member->type->kind != TYPE_STRUCT) continue;
+        int offset = embedded_offset((TypeStruct *)member->type, inner, depth + 1);
+        if (offset >= 0) return member->member_offset + offset;
+    }
+    return -1;
+}
+
 Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     if (ma->flags & MEMBER_ACCESS_FLAGS_OPTIONAL_CHAIN) return check_optional_chain(typer, (AstExpr *)ma, ma);
 
@@ -6583,6 +6715,19 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     else {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "Invalid member expression");
         return NULL;
+    }
+
+    // A member or method of an embedded member (@embed), e.g app.users.all() for app.users.table.all()
+    if (!member && !is_static_member_access && member_name) {
+        AstIdentifier *path[EMBED_DEPTH_LIMIT];
+        int depth = find_embedded_path(typer, struct_type, member_name, path, (Ast *)rhs);
+        if (depth < 0) return NULL; // In more than one embedded member, which is reported
+        if (depth > 0) {
+            AstExpr *left = ma->left;
+            for (int i = 0; i < depth; i++) left = make_member_access_of(typer, left, path[i]->name);
+            ma->left = left;
+            return check_member_access(typer, ma);
+        }
     }
 
     if (!member) {

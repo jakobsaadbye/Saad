@@ -1,0 +1,7 @@
+// expect-error: Only a struct, or a pointer to one, can be embedded. 'count' is a int
+
+Thing :: struct { @embed count: int; }
+
+main :: () {
+    t: Thing;
+}

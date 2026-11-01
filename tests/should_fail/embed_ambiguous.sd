@@ -1,0 +1,11 @@
+// expect-error: 'line' is in both of the embedded members 'a' and 'b'
+// expect-error: Say which one, e.g x.a.line
+
+Pos :: struct { line: int; }
+Span :: struct { line: int; }
+Node :: struct { @embed a: Pos; @embed b: Span; }
+
+main :: () {
+    n: Node;
+    x := n.line;
+}
