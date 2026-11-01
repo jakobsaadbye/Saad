@@ -1,12 +1,12 @@
 namespace shopsetup;
 
-// The schema saad_shop that tests/db/generate.sd writes as tests/db/entities, and tests/db/shop_tables.sd uses
+// The schema saad_shop that tests/db/generate.sd writes as tests/db/model, and tests/db/shop_tables.sd uses
 
-import db;
+import dbms;
 use fmt;
 use c;
 
-create :: (conn: *db.Connection) {
+create :: (conn: *dbms.Connection) {
     statements := [
         "SET client_min_messages TO warning",
         "DROP SCHEMA IF EXISTS saad_shop CASCADE",

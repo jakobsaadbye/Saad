@@ -57,7 +57,7 @@ if age == 36 { ... }                        // true when it has the value 36
 
 * `fmt` prints the value, or `null`.
 * `json` writes the value or `null`, and reads `null` as empty. `omitEmpty` leaves out empty optionals.
-* `db` reads `NULL` as empty, e.g `email: ?string`, and an empty optional parameter is `NULL`.
+* `dbms` reads `NULL` as empty, e.g `email: ?string`, and an empty optional parameter is `NULL`.
 * `list.tryFirst()`, `list.tryLast()`, `map.tryGet(key)` and `xs.find(f)` give optionals, e.g
   `ages.tryGet("bob") ?? 0`.
 * Through reflection: `type.isOptional()`, `optionalValue(data)` and `setOptional(data, present)` on a

@@ -16,7 +16,7 @@ Body :: struct { mass: f64; }
 * Namespaces can use each other, also in a cycle.
 * Files without a `namespace` are standalone, like the main file of a program.
 * The standard library namespaces are top-level: `fmt`, `json`, `math`, `mem`, `os`, `time`, `random`, `c`,
-  `db` and `raylib`, plus `os.windows` and `db.postgres`. A project cannot add files to them. See `docs/standard_library.md`.
+  `dbms` and `raylib`, plus `os.windows` and `dbms.postgres`. A project cannot add files to them. See `docs/standard_library.md`.
 * The prelude (`List`, `Map`, the methods of strings and slices, and the runtime) is always there, without an import.
 
 Before parsing, the compiler scans the folder of the main file (and every folder below it, except hidden

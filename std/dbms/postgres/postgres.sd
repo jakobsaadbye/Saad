@@ -1,24 +1,24 @@
-namespace db.postgres;
+namespace dbms.postgres;
 
 // The Postgres driver of db, through libpq (libpq.dll), e.g
 //
-//     import db;
-//     import db.postgres;
+//     import dbms;
+//     import dbms.postgres;
 //
 //     conn, err := postgres.connect("host=localhost port=5432 dbname=app user=postgres password=secret");
 //     if err != "" { fmt.print("Can't connect: %", err); return; }
 //
 // libpq.dll comes with PostgreSQL, in its bin folder (e.g C:\Program Files\PostgreSQL\16\bin), together with
 // the DLLs it needs. The program finds it when that folder is in PATH, or when the DLLs are next to it.
-// See docs/db.md
+// See docs/dbms.md
 
-import db;
+import dbms;
 use c;
 
 // Connects with a connection string of libpq, e.g "host=localhost dbname=app user=postgres", or a URL like
 // "postgresql://postgres@localhost/app". err is empty when it worked
-connect :: (connectionString: string) -> db.Connection, string {
-    conn: db.Connection;
+connect :: (connectionString: string) -> dbms.Connection, string {
+    conn: dbms.Connection;
     info := connectionString.toCString();
     handle := PQconnectdb(info);
     free(info);
@@ -37,10 +37,10 @@ connect :: (connectionString: string) -> db.Connection, string {
     return conn, "";
 }
 
-// The driver for db.Connection
-driver :: () -> *db.Driver {
+// The driver for dbms.Connection
+driver :: () -> *dbms.Driver {
     if theDriver == null {
-        d := calloc(1, sizeof(db.Driver)) as *db.Driver;
+        d := calloc(1, sizeof(dbms.Driver)) as *dbms.Driver;
         d.name        = "postgres";
         d.execute     = execute;
         d.rowCount    = rowCount;
@@ -55,7 +55,7 @@ driver :: () -> *db.Driver {
     return theDriver;
 }
 
-@private theDriver: *db.Driver = null;
+@private theDriver: *dbms.Driver = null;
 
 @private ConnectionOk    :: 0;
 @private ResultCommandOk :: 1;

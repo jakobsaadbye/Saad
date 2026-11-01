@@ -94,24 +94,28 @@ b.describe();       // b.head.describe()
 check(&b);          // check :: (node: *Ast)
 ```
 
-* A generator writes the tables of a Postgres database as Saad files: a file for each table with the struct of its
-  row (`?T` for columns that can be `NULL`, the constant defaults of the database as the defaults of the members) and
-  the type of the table, a file for each enum, and `database.sd` with all the tables. In the namespace `entities` by
-  default. See `docs/db.md`
+* `std/db` is now `std/dbms` (namespaces `dbms` and `dbms.postgres`), so a program can call its database `db`
+* A generator writes the tables of a Postgres database as Saad files: `entity/<row>.sd` with the struct of each row
+  (`?T` for columns that can be `NULL`, the constant defaults of the database as the defaults of the members) and each
+  enum, in the namespace `entities`, and `database.sd` with the types of the tables, `Database` and `open`, in the
+  namespace `database`. See `docs/dbms.md`
 
 ```
-saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" entities
+saad run std/dbms/tools/generate.sd -- "host=localhost dbname=shop user=postgres" db
 ```
 
 ```odin
-app := entities.open(&conn);
-ada, err := app.users.insert(entities.User{name: "Ada", role: .admin});   // with the id the database made
-found, err2 := app.users.get(ada.id);                                      // a ?entities.User
-users, err3 := app.users.all();
+import database;
+use entities;
+
+db := database.open(&conn);
+ada, err := db.users.insert(User{name: "Ada", role: .admin});   // with the id the database made
+found, err2 := db.users.get(ada.id);                             // a ?User
+users, err3 := db.users.all();
 ```
 
-* `db.Table<T>` (`all`, `insert`, `count`) and `db.KeyedTable<T, K>` (and `get`, `update`, `delete` with a key of type `K`)
-  work for any struct. The generated tables embed them, and the rows need no attributes
+* `dbms.Table<T>` (`all`, `insert`, `count`) and `dbms.KeyedTable<T, K>` (and `get`, `update`, `delete` with a key of type
+  `K`) work for any struct. The generated tables embed them, and the rows need no attributes
 * `os.makeDir(path)`
 * `saad run main.sd -- a b` gives the program the arguments after `--`, and runs it in the current folder instead of the
   folder of main.sd

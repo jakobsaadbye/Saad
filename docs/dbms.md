@@ -1,11 +1,11 @@
-# db: databases
+# dbms: databases
 
-`std/db` runs SQL and reads the rows into plain structs. `db` is the core and knows no database. A database
-is a driver of its own namespace; `db.postgres` is the first one, through `libpq.dll`.
+`std/dbms` runs SQL and reads the rows into plain structs. `dbms` is the core and knows no database. A database
+is a driver of its own namespace; `dbms.postgres` is the first one, through `libpq.dll`.
 
 ```odin
-import db;
-import db.postgres;
+import dbms;
+import dbms.postgres;
 use fmt;
 
 Role :: enum { guest, member, admin }
@@ -34,24 +34,25 @@ main :: () {
 }
 ```
 
-Status: steps 1 to 3 of the plan below are done: `db`, `db.postgres`, rows into structs, transactions,
-allocators, `db.Table<T>` and the generator that writes the tables of a database as Saad. The typed query
+Status: steps 1 to 3 of the plan below are done: `dbms`, `dbms.postgres`, rows into structs, transactions,
+allocators, `dbms.Table<T>` and the generator that writes the tables of a database as Saad. The typed query
 builder (step 4) is designed below, but not written yet.
 
 With the generator, the same program is:
 
 ```odin
-import db;
-import db.postgres;
-import entities;          // written by std/db/tools/generate.sd
+import dbms;
+import dbms.postgres;
+import database;          // written by std/dbms/tools/generate.sd
+use entities;             // the rows, e.g User
 
 main :: () {
     conn, err := postgres.connect("host=localhost dbname=shop user=postgres password=secret");
-    app := entities.open(&conn);
+    db := database.open(&conn);
 
-    ada, err1 := app.users.insert(entities.User{name: "Ada", role: .admin});   // gives back the id the database made
-    found, err2 := app.users.get(ada.id);                                       // a ?entities.User
-    users, err3 := app.users.all();
+    ada, err1 := db.users.insert(User{name: "Ada", role: .admin});   // gives back the id the database made
+    found, err2 := db.users.get(ada.id);                              // a ?User
+    users, err3 := db.users.all();
 }
 ```
 
@@ -75,13 +76,13 @@ main :: () {
 ## Rows into structs
 
 Each column is read into the member with the same name, where case and `_` don't matter: `createdAt` reads
-`created_at`. `@db.Column` gives a member another column, or leaves it out:
+`created_at`. `@dbms.Column` gives a member another column, or leaves it out:
 
 ```odin
 User :: struct {
     id: i64;
-    @db.Column(name: "mail") email: string;
-    @db.Column(skip: true)   cache: *Cache;
+    @dbms.Column(name: "mail") email: string;
+    @dbms.Column(skip: true)   cache: *Cache;
     visits: int = -1;      // keeps -1 when the query has no column 'visits'
 }
 ```
@@ -124,7 +125,7 @@ arena.free();   // or arena.clear() to use the memory again for the next request
 `arena.used()` the bytes in use, `arena.clear()` makes all of it free again (keeping the newest chunk) and
 `arena.free()` gives it back.
 
-The parameters and the result of libpq itself are freed by `db` when a call returns.
+The parameters and the result of libpq itself are freed by `dbms` when a call returns.
 
 ## Setup
 
@@ -142,11 +143,11 @@ starts.
 
 ### Tests
 
-* `tests/db/generate.sd` checks that the generator writes the files of `tests/db/entities` from the schema of
+* `tests/db/generate.sd` checks that the generator writes the files of `tests/db/model` from the schema of
   `tests/db/shop/setup.sd`, and that a later run removes the files of tables that are gone. `tests/db/shop_tables.sd`
   uses those files on the database. After a change of the generator, `SAAD_UPDATE_GOLDEN=1 tools/linux/dbtests.sh`
-  writes them again. `dbtests.sh` also runs `std/db/tools/generate.sd` itself and compares what it writes.
-* `tests/std/db.sd` tests `db` with a driver written in the test itself. It needs no database and runs with
+  writes them again. `dbtests.sh` also runs `std/dbms/tools/generate.sd` itself and compares what it writes.
+* `tests/std/dbms.sd` tests `dbms` with a driver written in the test itself. It needs no database and runs with
   the other tests (`tools/linux/runtests.sh`).
 * `tests/db/*.sd` need Postgres. `tools/linux/dbtests.sh` makes a throwaway server in a temporary folder (with
   `initdb`), runs them and removes it. With `SAAD_TEST_POSTGRES` set to a connection string, it uses that
@@ -155,7 +156,7 @@ starts.
 
 ## Drivers
 
-`db` talks to a database through a `db.Driver`, a struct of functions. The values are text, as the database
+`dbms` talks to a database through a `dbms.Driver`, a struct of functions. The values are text, as the database
 writes them, which is what libpq gives and what SQLite can give too.
 
 ```odin
@@ -172,17 +173,17 @@ Driver :: struct {
 }
 ```
 
-A driver gives back a `db.Connection{driver: ..., handle: ...}` from its own `connect`. `tests/std/db.sd` has a
+A driver gives back a `dbms.Connection{driver: ..., handle: ...}` from its own `connect`. `tests/std/dbms.sd` has a
 complete driver of 20 lines.
 
 ## Keeping it apart
 
-`std/db` is written so it can move to its own repository:
+`std/dbms` is written so it can move to its own repository:
 
-* `db` uses only `fmt`, `c` and the prelude. It doesn't know Postgres; `db.postgres` knows `db`.
+* `dbms` uses only `fmt`, `c` and the prelude. It doesn't know Postgres; `dbms.postgres` knows `dbms`.
 * Nothing in the compiler knows about databases. Everything goes through reflection, member attributes and
   generic methods.
-* To move it: copy `std/db/` into a project, e.g `deps/db/`. The compiler finds namespaces in the folders of
+* To move it: copy `std/dbms/` into a project, e.g `deps/db/`. The compiler finds namespaces in the folders of
   the project. The standard library doesn't allow other files in its namespaces, so it has to leave `std/`
   rather than be in both places.
 * Not solved yet: DLLs are only copied next to a program from the compiler's `packages/*/lib/`. A library
@@ -190,21 +191,23 @@ complete driver of 20 lines.
 
 ## The plan
 
-1. **Done** `db.postgres`: connect, run SQL with parameters, read rows, close.
+1. **Done** `dbms.postgres`: connect, run SQL with parameters, read rows, close.
 2. **Done** Rows into structs with `query` and `queryOne`, transactions, `conn.allocator`, `mem.Arena`.
-3. **Done** `db.Table<T>` and a generator that writes the tables as structs.
-4. A typed query builder on the generated code: `app.users.where(...).select<User>()`.
-5. Later: joins, a pool of connections, a SQLite driver, migrations, and Postgres
+3. **Done** `dbms.Table<T>` and a generator that writes the tables as structs.
+4. A typed query builder on the generated code: `db.users.where(...).select<User>()`.
+5. A unit of work: change, add and remove rows in memory and write them all with `db.saveChanges()`, in one
+   transaction, instead of one statement for each change.
+6. Later: joins, a pool of connections, a SQLite driver, migrations, and Postgres
    spoken directly over a socket instead of libpq.
 
 ### 3. Tables and the generator
 
-#### db.Table<T> and db.KeyedTable<T, K>
+#### dbms.Table<T> and dbms.KeyedTable<T, K>
 
 The rows of one table, as structs of `T`:
 
 ```odin
-users := db.keyedTable<User, i64>(&conn, "users", "id");     // the column of the key, and its type
+users := dbms.keyedTable<User, i64>(&conn, "users", "id");     // the column of the key, and its type
 users.generated = ["id", "created_at"];                     // the columns the database makes
 
 all, err := users.all();
@@ -214,39 +217,47 @@ changed, err4 := users.update(saved);                       // the row with its 
 removed, err5 := users.delete(saved.id);
 n, err6 := users.count();
 
-items := db.table<OrderItem>(&conn, "order_items");         // no key of one column: all, insert and count
+items := dbms.table<OrderItem>(&conn, "order_items");         // no key of one column: all, insert and count
 ```
 
-* `db.Table<T>` has `all`, `insert` and `count`. `db.KeyedTable<T, K>` embeds a `db.Table<T>` (see
+* `dbms.Table<T>` has `all`, `insert` and `count`. `dbms.KeyedTable<T, K>` embeds a `dbms.Table<T>` (see
   `docs/embedding.md`) and adds `get`, `update` and `delete`, which take a key of type `K`, so `users.get("1")` is a
-  compile error. A `*db.KeyedTable<T, K>` is a `*db.Table<T>` where one is wanted.
-* `schema:` gives another schema than the one of the connection, e.g `db.table<Sale>(&conn, "sales", schema: "shop")`.
+  compile error. A `*dbms.KeyedTable<T, K>` is a `*dbms.Table<T>` where one is wanted.
+* `schema:` gives another schema than the one of the connection, e.g `dbms.table<Sale>(&conn, "sales", schema: "shop")`.
 * The columns are the members of `T`, in snake case: `createdAt` is `created_at`. A `_` at the end of a name is left
   out, so the member `for_` is the column `for`.
 * The `generated` columns are left out of `insert` and `update`, and `insert` reads them back (`RETURNING *`).
-* For a struct written by hand, `@db.Column(name: "mail", key: true, generated: true, skip: true)` says the same on a
+* For a struct written by hand, `@dbms.Column(name: "mail", key: true, generated: true, skip: true)` says the same on a
   member.
 * Names are quoted in the SQL, so columns like `order` or `for` work.
 
 #### The generator
 
 A Saad program reads the tables from `information_schema` and the enums from `pg_enum`, and writes plain Saad files
-into a folder of the project:
+into a folder of the project, e.g `db`:
 
 ```
-saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" entities
-saad run std/db/tools/generate.sd -- "host=localhost dbname=shop user=postgres" sales sales sales
+saad run std/dbms/tools/generate.sd -- "host=localhost dbname=shop user=postgres" db
+saad run std/dbms/tools/generate.sd -- "host=localhost dbname=shop user=postgres" sales/db sales
 ```
 
-The arguments are the connection string, the folder, the namespace (`entities` when it is left out) and the schema
-(`public` when it is left out). `saad run` runs the program in the folder it is called from, so the folder is where
-you are. The same is a function too: `postgres.generate(&conn, postgres.GenerateOptions{})` gives the files, and
-`postgres.writeFiles(folder, files)` writes them.
+```
+db/entity/user.sd      the struct of a row of users                     namespace entities
+db/entity/role.sd      an enum                                           namespace entities
+db/database.sd         the types of the tables, Database and open       namespace database
+```
 
-Each table gets a file with the struct of its row and the type of the table, e.g `user.sd` (`tests/db/entities` has
-all the files of a schema):
+The arguments are the connection string, the folder, the schema (`public` when it is left out), and the namespaces of
+the rows (`entities`) and of `database.sd` (`database`). `saad run` runs the program in the folder it is called from,
+so the folder is where you are. The same is a function too: `postgres.generate(&conn, postgres.GenerateOptions{})`
+gives the files, and `postgres.writeFiles(folder, files)` writes them. `tests/db/model` has all the files of a schema.
+
+The rows and enums are all that is in the namespace `entities`, so `use entities;` brings in only them:
 
 ```odin
+// db/entity/user.sd
+namespace entities;
+
 // A row of users
 User :: struct {
     id:        i64;
@@ -257,36 +268,47 @@ User :: struct {
     active:    bool = true;
     createdAt: string;        // timestamp with time zone
 }
-
-// The rows of users: all, get, insert, update, delete and count of db.KeyedTable
-UsersTable :: struct {
-    @embed table: db.KeyedTable<User, i64>;
-}
 ```
 
-Each enum gets a file, e.g `role.sd` with `Role :: enum { guest, member, admin }`, and `database.sd` has all the
-tables:
+`database.sd` has a type for each table, which embeds a `dbms.Table` or `dbms.KeyedTable`, and the `Database` with
+all of them:
 
 ```odin
+// db/database.sd
+namespace database;
+
+import dbms;
+use entities;
+
 Database :: struct {
     orderItems: OrderItemsTable;
     users:      UsersTable;
 }
 
-open :: (conn: *db.Connection) -> Database {
+open :: (conn: *dbms.Connection) -> Database {
     tables: Database;
-    tables.orderItems.table = db.table<OrderItem>(conn, "order_items");
-    tables.users.table      = db.keyedTable<User, i64>(conn, "users", "id");
+    tables.orderItems.table = dbms.table<OrderItem>(conn, "order_items");
+    tables.users.table      = dbms.keyedTable<User, i64>(conn, "users", "id");
     tables.users.generated = ["id", "created_at"];
     return tables;
 }
+
+// The rows of users: all, get, insert, update, delete and count of dbms.KeyedTable
+UsersTable :: struct {
+    @embed table: dbms.KeyedTable<User, i64>;
+}
 ```
 
-```odin
-import entities;
+A program then has:
 
-app := entities.open(&conn);
-ada, err := app.users.insert(entities.User{name: "Ada", role: .admin});
+```odin
+import dbms.postgres;
+import database;
+use entities;
+
+conn, err := postgres.connect("host=localhost dbname=shop user=postgres");
+db := database.open(&conn);
+ada, err2 := db.users.insert(User{name: "Ada", role: .admin});
 ```
 
 | Postgres | Saad |
@@ -301,19 +323,19 @@ ada, err := app.users.insert(entities.User{name: "Ada", role: .admin});
 
 * The rows are plain structs: no attributes. What the tables need to know (the key, and the columns the database
   makes) is in `open`.
-* Names: the table `order_items` is the row `OrderItem` in `order_item.sd` (most English plurals become singular),
-  the table type `OrderItemsTable` and the member `orderItems` of `Database`. The column `created_at` is the member
-  `createdAt`. A column that is a keyword gets a `_`, e.g `"for"` is `for_`. Only a column that the snake case of its
-  member isn't, e.g `"Type"`, gets `@db.Column(name: "Type")`.
+* The column `created_at` is the member `createdAt`. A column that is a keyword gets a `_`, e.g `"for"` is `for_`.
+  Only a column that the snake case of its member isn't, e.g `"Type"`, gets `@dbms.Column(name: "Type")`.
 * A default that is a constant becomes the default of the member, e.g `role: Role = .guest`, so a struct literal
   has the values the database would give. A default that is computed (`nextval(...)`, `now()`, ...) and identity
   columns are `generated`.
-* A table with a key of one column is a `db.KeyedTable`, typed by its key. Others are a `db.Table`.
-* Every file starts with `// Made by std/db/tools/generate.sd`, and `database.sd` lists the files. Run it again when
+* A table with a key of one column is a `dbms.KeyedTable`, typed by its key. Others are a `dbms.Table`.
+* Names: the table `order_items` is the row `OrderItem` in `entity/order_item.sd` (most English plurals become
+  singular), the table type `OrderItemsTable` and the member `orderItems` of `Database`.
+* Every file starts with `// Made by std/dbms/tools/generate.sd`, and `database.sd` lists the files. Run it again when
   the database changes: the files of tables and enums that are gone are removed, but files you wrote yourself in the
   folder are left alone. Make the files again instead of changing them.
 * Building a program needs no database: a change of the database is a diff of these files.
-* Typed query columns (`db.Field<T>`) come with step 4, as members of the table types next to the embedded table.
+* Typed query columns (`dbms.Field<T>`) come with step 4, as members of the table types next to the embedded table.
 
 ### 4. The typed query builder
 
@@ -321,22 +343,22 @@ C#'s LINQ turns `u => u.Age > 30` into a tree that a library can read. Saad has 
 reads code, so the generated `Field`s stand in for the members, and their methods build the conditions:
 
 ```odin
-app := shop.open(&conn);
+db := database.open(&conn);
 
-adults, err := app.users
-    .where(app.users.age.atLeast(18).and(app.users.name.like("A%")))
-    .orderBy(app.users.name)
+adults, err := db.users
+    .where(db.users.age.atLeast(18).and(db.users.name.like("A%")))
+    .orderBy(db.users.name)
     .limit(20)
-    .select<shop.User>();
+    .select<User>();
 
 // Only the columns of a smaller struct: SELECT id, name
 Name :: struct { id: i64; name: string; }
-names, err2 := app.users.where(app.users.email.isNull()).select<Name>();
+names, err2 := db.users.where(db.users.email.isNull()).select<Name>();
 
-app.users.age.atLeast("18");   // A compile error: wants an i32
+db.users.age.atLeast("18");   // A compile error: wants an i32
 ```
 
-* `atLeast :: method <T>(f: db.Field<T>, value: T) -> db.Condition` is what makes `"18"` a type error.
+* `atLeast :: method <T>(f: dbms.Field<T>, value: T) -> dbms.Condition` is what makes `"18"` a type error.
   Likewise `equals`, `notEquals`, `lessThan`, `atMost`, `greaterThan`, `between`, `like`, `isNull`, `oneOf`,
   and `and`, `or`, `not` on conditions.
 * The builder writes the SQL with parameters, `WHERE age >= $1 AND name LIKE $2`, and runs it with `query`.
@@ -351,6 +373,6 @@ Found while writing this, in the order they would help:
 * Assigning several results to existing variables, `count, err = conn.exec(...)`. Today each call needs new
   names (`err1`, `err2`, ...) or a function around it.
 * `defer`, to free a result on every return.
-* Operators on structs, so `app.users.age >= 18` could be a condition instead of `atLeast(18)`.
-* Attributes on structs, e.g `@db.Table("users")`, for tables written by hand.
+* Operators on structs, so `db.users.age >= 18` could be a condition instead of `atLeast(18)`.
+* Attributes on structs, e.g `@dbms.Table("users")`, for tables written by hand.
 * Types for dates, decimals and UUIDs. They are strings for now.

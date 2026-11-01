@@ -1,33 +1,39 @@
-namespace db.postgres;
+namespace dbms.postgres;
 
-// Writes the tables of a database as Saad files: one for each table, with the struct of a row and the type of the table,
-// one for each enum, and database.sd with a Database of all the tables, e.g
+// Writes the tables of a database as Saad files into a folder, e.g db:
 //
-//     files, err := postgres.generate(&conn, postgres.GenerateOptions{});        // namespace entities, schema public
-//     removed, err2 := postgres.writeFiles("entities", files);
+//     db/entity/user.sd   the struct of a row of users, in the namespace entities
+//     db/entity/role.sd   the enum role
+//     db/database.sd      the tables, Database and open, in the namespace database
 //
-// std/db/tools/generate.sd is the program around it. See docs/db.md
+// The rows and enums are all that is in their namespace, so 'use entities;' brings in nothing else, e.g
+//
+//     files, err := postgres.generate(&conn, postgres.GenerateOptions{});
+//     removed, err2 := postgres.writeFiles("db", files);
+//
+// std/dbms/tools/generate.sd is the program around it. See docs/dbms.md
 
-import db;
+import dbms;
 import fmt;
 import os;
 
 GenerateOptions :: struct {
-    ns:     string = "entities"; // The namespace of the files
-    schema: string = "public";   // The schema whose tables are written
+    entities: string = "entities"; // The namespace of the rows and enums, in the folder entity
+    database: string = "database"; // The namespace of database.sd: the tables, Database and open
+    schema:   string = "public";   // The schema whose tables are written
 }
 
-// A file to write, e.g user.sd
+// A file to write, e.g entity/user.sd
 GeneratedFile :: struct {
     name: string;
     code: string;
 }
 
 // The first line of every file, so that the files of an earlier run are known
-GeneratedMark :: "// Made by std/db/tools/generate.sd";
+GeneratedMark :: "// Made by std/dbms/tools/generate.sd";
 
 // The Saad files of the tables and enums of the schema, or an error
-generate :: (conn: *db.Connection, options: GenerateOptions) -> ([..]GeneratedFile, string) {
+generate :: (conn: *dbms.Connection, options: GenerateOptions) -> ([..]GeneratedFile, string) {
     files: [..]GeneratedFile;
     columns, err := conn.query<SchemaColumn>(ColumnsSql, options.schema);
     if err != "" { return files, err; }
@@ -70,19 +76,21 @@ generate :: (conn: *db.Connection, options: GenerateOptions) -> ([..]GeneratedFi
         files.add(GeneratedFile{name: w.fileNameOf(e.name, true), code: w.enumFile(e)});
     }
     for table in tables {
-        files.add(GeneratedFile{name: w.fileNameOf(singular(table.name), false), code: w.tableFile(table)});
+        files.add(GeneratedFile{name: w.fileNameOf(singular(table.name), false), code: w.rowFile(table)});
     }
     files.add(GeneratedFile{name: "database.sd", code: w.databaseFile(tables, files)});
     return files, "";
 }
 
-// Writes the files into the folder, which is made if it isn't there. The files of an earlier run (listed in its
-// database.sd) that are not written again, e.g of a table that is gone, are removed, if they were made by the generator.
-// Gives the names of those
+// Writes the files into the folder, which is made if it isn't there, and its folder entity. The files of an earlier run
+// (listed in its database.sd) that are not written again, e.g of a table that is gone, are removed, if they were made by
+// the generator. Gives the names of those
 writeFiles :: (folder: string, files: [..]GeneratedFile) -> ([..]string, string) {
     removed: [..]string;
-    if !os.makeDir(folder) {
-        return removed, fmt.sprint("Can't make the folder %", folder);
+    for dir in [folder, fmt.sprint("%/entity", folder)] {
+        if !os.makeDir(dir) {
+            return removed, fmt.sprint("Can't make the folder %", dir);
+        }
     }
 
     // The files of the last run
@@ -181,43 +189,36 @@ Member :: struct {
     name:      string;   // e.g createdAt
     type:      string;   // e.g ?string
     column:    string;   // e.g created_at
-    attribute: string;   // @db.Column(name: ...) when the column is not the name of the member in snake case, or empty
+    attribute: string;   // @dbms.Column(name: ...) when the column is not the name of the member in snake case, or empty
     value:     string;   // The default, e.g .guest, or empty
     comment:   string;   // e.g timestamp with time zone, or empty
     generated: bool;     // Made by the database, e.g a serial or now()
 }
 
-// The name of the file of a row or an enum, e.g order_item.sd. An enum with the name of a table gets _enum
+// The file of a row or an enum, e.g entity/order_item.sd. A row with the name of an enum gets _table
 @private
 fileNameOf :: method (w: *Writer, name: string, isEnum: bool) -> string {
-    file := db.columnName(camelCase(name));
-    if isEnum {
+    file := dbms.columnName(camelCase(name));
+    if !isEnum {
         for e in w.enums {
-            if e.name == name { return fmt.sprint("%.sd", file); }
+            if dbms.columnName(camelCase(e.name)) == file { return fmt.sprint("entity/%_table.sd", file); }
         }
     }
-    for e in w.enums {
-        if db.columnName(camelCase(e.name)) == file { return fmt.sprint("%_table.sd", file); }
-    }
-    return fmt.sprint("%.sd", file);
+    return fmt.sprint("entity/%.sd", file);
 }
 
 @private
-header :: method (w: *Writer, sb: *fmt.StringBuilder, what: string) {
-    sb.addLine("% from the schema % of a Postgres database. Make it again instead", GeneratedMark, w.options.schema);
-    sb.addLine("// of changing it, e.g saad run std/db/tools/generate.sd -- \"host=localhost dbname=app\" <this folder> %", w.options.ns);
-    sb.addLine("namespace %;", w.options.ns);
+header :: method (w: *Writer, sb: *fmt.StringBuilder, ns: string) {
+    sb.addLine("% from the schema % of a Postgres database. Make it again", GeneratedMark, w.options.schema);
+    sb.addLine("// instead of changing it, e.g saad run std/dbms/tools/generate.sd -- \"host=localhost dbname=app\" db");
+    sb.addLine("namespace %;", ns);
     sb.addLine("");
-    if what.len > 0 {
-        sb.addLine("import db;");
-        sb.addLine("");
-    }
 }
 
 @private
 enumFile :: method (w: *Writer, e: SchemaEnum) -> string {
     sb: fmt.StringBuilder;
-    w.header(&sb, "");
+    w.header(&sb, w.options.entities);
     sb.addLine("// The enum %", e.name);
     sb.add("% :: enum {", pascalCase(e.name));
     for label, i in e.labels {
@@ -228,9 +229,9 @@ enumFile :: method (w: *Writer, e: SchemaEnum) -> string {
     return sb.toString();
 }
 
-// The struct of a row, e.g User, and the type of the table, e.g UsersTable
+// The struct of a row, e.g User
 @private
-tableFile :: method (w: *Writer, table: SchemaTable) -> string {
+rowFile :: method (w: *Writer, table: SchemaTable) -> string {
     members: [..]Member;
     for column in table.columns {
         members.add(w.memberOf(column));
@@ -244,7 +245,14 @@ tableFile :: method (w: *Writer, table: SchemaTable) -> string {
     }
 
     sb: fmt.StringBuilder;
-    w.header(&sb, "db");
+    w.header(&sb, w.options.entities);
+    for m in members {
+        if m.attribute.len > 0 {
+            sb.addLine("import dbms;"); // For @dbms.Column
+            sb.addLine("");
+            break;
+        }
+    }
     sb.addLine("// A row of %", table.name);
     sb.addLine("% :: struct {", rowTypeName(table.name));
     for m in members {
@@ -262,25 +270,17 @@ tableFile :: method (w: *Writer, table: SchemaTable) -> string {
         sb.addLine("");
     }
     sb.addLine("}");
-
-    sb.addLine("");
-    keyType := w.keyTypeOf(table);
-    if keyType.len > 0 {
-        sb.addLine("// The rows of %: all, get, insert, update, delete and count of db.KeyedTable", table.name);
-    } else {
-        sb.addLine("// The rows of %: all, insert and count of db.Table. It has no key of one column, so no get, update and delete", table.name);
-    }
-    sb.addLine("% :: struct {", tableTypeName(table.name));
-    sb.addLine("    @embed table: %;", w.tableTypeOf(table));
-    sb.addLine("}");
     return sb.toString();
 }
 
-// The Database with the tables, and open
+// The types of the tables, the Database with them, and open
 @private
 databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]GeneratedFile) -> string {
     sb: fmt.StringBuilder;
-    w.header(&sb, "db");
+    w.header(&sb, w.options.database);
+    sb.addLine("import dbms;");
+    sb.addLine("use %;", w.options.entities);
+    sb.addLine("");
 
     // The files, so that a later run knows which ones to remove
     sb.add("// Files: ");
@@ -293,9 +293,9 @@ databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]Generate
 
     sb.addLine("// The tables of the schema %, e.g", w.options.schema);
     sb.addLine("//");
-    sb.addLine("//     app := %.open(&conn);", w.options.ns);
+    sb.addLine("//     db := %.open(&conn);", w.options.database);
     if tables.count > 0 {
-        sb.addLine("//     rows, err := app.%.all();", camelCase(tables[0].name));
+        sb.addLine("//     rows, err := db.%.all();", camelCase(tables[0].name));
     }
     sb.addLine("Database :: struct {");
     width := 0;
@@ -310,16 +310,16 @@ databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]Generate
 
     sb.addLine("");
     sb.addLine("// The tables on the connection");
-    sb.addLine("open :: (conn: *db.Connection) -> Database {");
+    sb.addLine("open :: (conn: *dbms.Connection) -> Database {");
     sb.addLine("    tables: Database;");
     for table in tables {
         name := camelCase(table.name);
         sb.add("    tables.%.table", name);
         sb.addRepeated(' ', width - name.len as int);
         if table.key.len > 0 {
-            sb.add(" = db.keyedTable<%, %>(conn, %, %", rowTypeName(table.name), w.keyTypeOf(table), saadString(table.name), saadString(table.key));
+            sb.add(" = dbms.keyedTable<%, %>(conn, %, %", rowTypeName(table.name), w.keyTypeOf(table), saadString(table.name), saadString(table.key));
         } else {
-            sb.add(" = db.table<%>(conn, %", rowTypeName(table.name), saadString(table.name));
+            sb.add(" = dbms.table<%>(conn, %", rowTypeName(table.name), saadString(table.name));
         }
         if w.options.schema != "public" {
             sb.add(", schema: %", saadString(w.options.schema));
@@ -339,6 +339,19 @@ databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]Generate
     }
     sb.addLine("    return tables;");
     sb.addLine("}");
+
+    // The types of the tables
+    for table in tables {
+        sb.addLine("");
+        if w.keyTypeOf(table).len > 0 {
+            sb.addLine("// The rows of %: all, get, insert, update, delete and count of dbms.KeyedTable", table.name);
+        } else {
+            sb.addLine("// The rows of %: all, insert and count of dbms.Table. It has no key of one column, so no get, update and delete", table.name);
+        }
+        sb.addLine("% :: struct {", tableTypeName(table.name));
+        sb.addLine("    @embed table: %;", w.tableTypeOf(table));
+        sb.addLine("}");
+    }
     return sb.toString();
 }
 
@@ -352,12 +365,12 @@ keyTypeOf :: method (w: *Writer, table: SchemaTable) -> string {
     return "";
 }
 
-// e.g db.KeyedTable<User, i64>
+// e.g dbms.KeyedTable<User, i64>
 @private
 tableTypeOf :: method (w: *Writer, table: SchemaTable) -> string {
     keyType := w.keyTypeOf(table);
-    if keyType.len > 0 { return fmt.sprint("db.KeyedTable<%, %>", rowTypeName(table.name), keyType); }
-    return fmt.sprint("db.Table<%>", rowTypeName(table.name));
+    if keyType.len > 0 { return fmt.sprint("dbms.KeyedTable<%, %>", rowTypeName(table.name), keyType); }
+    return fmt.sprint("dbms.Table<%>", rowTypeName(table.name));
 }
 
 @private
@@ -387,8 +400,8 @@ memberOf :: method (w: *Writer, column: SchemaColumn) -> Member {
     }
 
     // The column of a member is its name in snake case, e.g createdAt is created_at and for_ is for. Others are named
-    if db.columnName(m.name) != column.columnName {
-        m.attribute = fmt.sprint("@db.Column(name: %)", saadString(column.columnName));
+    if dbms.columnName(m.name) != column.columnName {
+        m.attribute = fmt.sprint("@dbms.Column(name: %)", saadString(column.columnName));
     }
     return m;
 }

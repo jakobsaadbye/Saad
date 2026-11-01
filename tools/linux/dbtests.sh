@@ -57,10 +57,10 @@ for f in tests/db/*.sd; do
     fi
 done
 
-# The program std/db/tools/generate.sd writes the same files as tests/db/generate.sd compares (with the schema it left)
-printf "%-56s " "std/db/tools/generate.sd"
+# The program std/dbms/tools/generate.sd writes the same files as tests/db/generate.sd compares (with the schema it left)
+printf "%-56s " "std/dbms/tools/generate.sd"
 OUT="$(mktemp -d)"
-if output=$(bash "$HERE/run.sh" std/db/tools/generate.sd "$SAAD_TEST_POSTGRES" "$OUT/entities" entities saad_shop 2>&1) && diff -r "$OUT/entities" tests/db/entities > /dev/null; then
+if output=$(bash "$HERE/run.sh" std/dbms/tools/generate.sd "$SAAD_TEST_POSTGRES" "$OUT/db" saad_shop 2>&1) && diff -r "$OUT/db" tests/db/model > /dev/null; then
     echo "${GREEN}OK${RESET}"
     passed=$((passed + 1))
 else

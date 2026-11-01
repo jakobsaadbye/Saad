@@ -1,8 +1,8 @@
-namespace db;
+namespace dbms;
 
 // The rows of one table, as structs of T, e.g
 //
-//     users := db.keyedTable<User, i64>(&conn, "users", "id");    // the key column and its type
+//     users := dbms.keyedTable<User, i64>(&conn, "users", "id");    // the key column and its type
 //     users.generated = ["id", "created_at"];                     // what the database makes, e.g a serial or now()
 //
 //     all, err := users.all();
@@ -13,7 +13,7 @@ namespace db;
 //
 // The columns are the members of T, in snake case: createdAt is created_at, and a _ at the end is left out, so for_
 // is the column for. The generated columns are left to the database by insert and update, and read back.
-// @db.Column on a member says the same for a struct written by hand. std/db/tools/generate.sd writes the structs
+// @dbms.Column on a member says the same for a struct written by hand. std/dbms/tools/generate.sd writes the structs
 // and tables of a database
 import fmt;
 
@@ -139,7 +139,7 @@ KeyedTable :: struct <T, K> {
     }
 }
 
-// The table of the name, e.g db.table<OrderItem>(&conn, "order_items")
+// The table of the name, e.g dbms.table<OrderItem>(&conn, "order_items")
 table :: <T>(conn: *Connection, name: string, schema := "") -> Table<T> {
     t: Table<T>;
     t.conn   = conn;
@@ -148,7 +148,7 @@ table :: <T>(conn: *Connection, name: string, schema := "") -> Table<T> {
     return t;
 }
 
-// The table of the name, with the column of its key and the type of the key, e.g db.keyedTable<User, i64>(&conn, "users", "id")
+// The table of the name, with the column of its key and the type of the key, e.g dbms.keyedTable<User, i64>(&conn, "users", "id")
 keyedTable :: <T, K>(conn: *Connection, name: string, key: string, schema := "") -> KeyedTable<T, K> {
     t: KeyedTable<T, K>;
     t.table = table<T>(conn, name, schema);
@@ -173,7 +173,7 @@ rowType :: <T>() -> *TypeStruct {
 }
 
 // The columns of the members of a row struct, without the skipped ones. The generated columns and the key come from the
-// table, and from @db.Column
+// table, and from @dbms.Column
 @private
 columnsOf :: (type: *TypeStruct, generated: [..]string, key: string) -> [..]TableColumn {
     columns: [..]TableColumn;

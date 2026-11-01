@@ -6,7 +6,7 @@
 #   tools/linux/run.sh path/to/out.asm       run generated assembly, assembled with nasm
 #
 # The exit code is the exit code of the program (asserts exit with 1).
-# Requirements: gcc (and nasm for .asm, and libpq-dev for std/db/postgres). Build the compiler first with ./build.sh
+# Requirements: gcc (and nasm for .asm, and libpq-dev for std/dbms/postgres). Build the compiler first with ./build.sh
 set -e
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -47,7 +47,7 @@ if [ -z "$OBJECT" ]; then
     nasm -felf64 --prefix ms_ "$ASM" -o "$TMP/program.o"
     OBJECT="$TMP/program.o"
 fi
-# libpq (std/db/postgres) only for the programs that call it, as it needs libpq-dev
+# libpq (std/dbms/postgres) only for the programs that call it, as it needs libpq-dev
 EXTRA=""
 if nm "$OBJECT" 2>/dev/null | grep -q ' U ms_PQ'; then
     PQ_O="$CACHE/shim_pq.o"

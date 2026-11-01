@@ -1056,7 +1056,7 @@ Ast *parse_attributed_declaration(Parser *parser) {
         // A struct member takes @embed and the values of attribute structs
         if (is_private || is_deprecated || is_attribute) {
             report_error_token(parser, LABEL_ERROR, first_builtin, "Struct members take @embed and the values of attribute structs, not @private, @deprecated or @attribute");
-            report_error_ast(parser, LABEL_HINT, NULL, "e.g @embed table: db.Table<User>; or @json.Field(name: \"id\")");
+            report_error_ast(parser, LABEL_HINT, NULL, "e.g @embed table: dbms.Table<User>; or @json.Field(name: \"id\")");
             return NULL;
         }
         AstDeclaration *decl = (AstDeclaration *)stmt;
@@ -1073,7 +1073,7 @@ Ast *parse_attributed_declaration(Parser *parser) {
     }
 
     if (is_embed) {
-        report_error_token(parser, LABEL_ERROR, first, "@embed is for struct members, e.g @embed table: db.Table<User>;");
+        report_error_token(parser, LABEL_ERROR, first, "@embed is for struct members, e.g @embed table: dbms.Table<User>;");
         return NULL;
     }
     if (custom.count > 0) {
