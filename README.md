@@ -2,19 +2,78 @@
 
 A just for fun compiler
 
-## Getting started
+## Quick start on Windows
 
-Build the compiler with `make.bat` (Windows, needs gcc) or `./build.sh` (Linux). Then:
+Saad compiles programs on its own: once the compiler is built, it needs no assembler or linker. To build the compiler
+you need Git and gcc (MinGW-w64).
+
+**1. Install Git and gcc.** In a terminal (PowerShell or cmd):
+
+```
+winget install --id Git.Git -e
+winget install --id BrechtSanders.WinLibs.POSIX.UCRT -e
+```
+
+Open a new terminal afterwards, so they are on the PATH. `gcc --version` should print a version. (Any MinGW-w64 gcc
+works, e.g from MSYS2, as long as `gcc` is on the PATH.)
+
+**2. Get Saad and build the compiler:**
+
+```
+git clone https://github.com/jakobsaadbye/Saad.git
+cd Saad
+make.bat
+```
+
+This makes `bin\saad.exe`. It finds the standard library in `std\` next to it, so leave it in the repository (or set
+`SAAD_ROOT` to the folder of the repository).
+
+**3. Put `saad` on the PATH**, so it works from any folder. In PowerShell, in the Saad folder:
+
+```powershell
+$path = [Environment]::GetEnvironmentVariable("Path", "User")
+[Environment]::SetEnvironmentVariable("Path", "$path;$PWD\bin", "User")
+```
+
+Then open a new terminal.
+
+**4. Write a program.** Save this as `hello.sd` in any folder:
+
+```odin
+import fmt;
+
+main :: () {
+    name := "Saad";
+    fmt.print("Hello from %!", name);
+}
+```
+
+and run it:
+
+```
+saad run hello.sd
+```
+
+It prints `Hello from Saad!`. The program is in `build\out.exe` next to `hello.sd`. More to try:
+
+```
+saad run examples\fibonacci.sd
+saad run examples\breakout\breakout.sd     # a game with raylib. raylib.dll is copied next to out.exe
+```
+
+**5. Editor support (optional).** The VS Code extension gives errors while typing, completion, hover and go to
+definition. It needs Node.js (`winget install --id OpenJS.NodeJS.LTS -e`). See [lsp/README.md](lsp/README.md).
+
+### Commands
 
 ```
 saad run main.sd          # compile and run
-saad build main.sd        # compile to build/out.exe
+saad build main.sd        # compile to build\out.exe
 saad check main.sd        # only check for errors
 ```
 
-The compiler makes `out.exe` itself, so nothing else has to be installed: `saad.exe`, `std/` and `packages/` are all it
-needs. `saad build main.sd --debug` uses nasm and gcc instead, for a program with debug information for gdb. See
-`docs/backend.md`, and `lsp/README.md` for the editor support.
+`saad build main.sd --debug` makes the program with nasm and gcc instead, with debug information for gdb (see
+`gdb_guide.md`). On Linux, `./build.sh` builds the compiler, and it makes Windows programs too. See `docs/backend.md`.
 
 # Changelog
 
