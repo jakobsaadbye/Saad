@@ -4,6 +4,22 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.8.2 - 1. Nov 2026
+
+* A language server for Saad, written in Saad, in `lsp/`: errors while typing (also of unsaved text), go to
+  definition, find references, hover, the outline of a file and workspace symbols. `lsp/vscode` is the extension for
+  VS Code, with highlighting. Any editor with an LSP client can use it, see `lsp/README.md`
+* `std/io`: bytes on stdin, stdout and stderr (`io.readLine`, `io.read`, `io.write`, `io.writeError`, `io.hasInput`)
+* `os.output(command)` runs a command and returns what it wrote and its exit code. `os.args()` is the command line
+* A function can use a constant that is declared below it, e.g `isLetter :: (c: u8) -> bool { return c >= A; }`
+  above `A :: 65;`
+* An untyped constant can be assigned to a smaller number type when it fits, e.g `bytes[0] = Quote;` for a `u8`, and
+  one that doesn't fit is an error
+* A type of a namespace can be a type argument, e.g `Map<string, fmt.StringBuilder>`
+* A function of a program can be called like a C function the standard library uses, e.g `exit` or `malloc`. Before,
+  the standard library called the program's function instead
+* `saad index` gives a function the range of its body, and a variable at the top of a file is a `global`
+
 ## Update v0.8.1 - 1. Nov 2026
 
 * `saad check main.sd` type checks a program without compiling it. With `--json` it writes the errors and warnings as

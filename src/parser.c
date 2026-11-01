@@ -1594,6 +1594,7 @@ int scan_type_arguments(Parser *parser, int lookahead) {
         case TOKEN_STRING:
         case TOKEN_ANY:
         case TOKEN_DOUBLE_DOT:
+        case '.':  // A type of a namespace e.g Map<string, fmt.StringBuilder>
         case '*':
         case '[':
         case ']':

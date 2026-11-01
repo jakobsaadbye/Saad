@@ -1,0 +1,36 @@
+// Constants at the top of a file can be used by a function above them, and an untyped constant becomes the number
+// type it is assigned to when it fits
+
+import fmt;
+
+Point :: struct {
+    x: u8;
+}
+
+firstLetter :: () -> u8 {
+    letters: [3]u8;
+    letters[0] = LetterA;  // Assigned to a u8
+    p: Point;
+    p.x = LetterA + 1;
+    small: i8 = Negative;
+    assert(small == -5);
+    wide: f32 = LetterA;
+    assert(wide == 65.0);
+    return letters[0] + p.x - 65;
+}
+
+main :: () {
+    assert(firstLetter() == 66);
+    assert(Answer == 42);
+
+    // A type of a namespace as a type argument
+    builders: Map<string, fmt.StringBuilder>;
+    builders.set("a", fmt.newStringBuilder(8));
+    list: [..]fmt.StringBuilder;
+    list.add(fmt.newStringBuilder(8));
+    assert(builders.count == 1 && list.count == 1);
+}
+
+LetterA  :: 65;
+Negative :: -5;
+Answer   :: 40 + 2;

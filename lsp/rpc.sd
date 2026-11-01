@@ -1,0 +1,120 @@
+namespace rpc;
+
+// JSON-RPC 2.0 over stdin and stdout, as the Language Server Protocol uses it. Each message is a header and a body:
+//
+//     Content-Length: 52\r\n
+//     \r\n
+//     {"jsonrpc": "2.0", "id": 1, "method": "initialize"}
+//
+// A request has an id and wants a response with the same id. A notification has no id and gets no response.
+
+import io;
+import json;
+import fmt;
+
+Message :: struct {
+    name:   string;      // The method, e.g "initialize"
+    id:     string;      // The id as it was written, e.g 7 or "7", so it is written back the same. Empty for a notification
+    params: json.Value;
+}
+
+// The error codes of JSON-RPC and LSP
+ParseError     :: -32700;
+InvalidRequest :: -32600;
+MethodNotFound :: -32601;
+InvalidParams  :: -32602;
+InternalError  :: -32603;
+RequestFailed  :: -32803;
+
+// Reads the next message. ok is false when the input has ended
+read :: () -> Message, bool {
+    while true {
+        length := -1;
+        while true {
+            line, ok := io.readLine();
+            if !ok {
+                return Message{}, false;
+            }
+            if line.len == 0 {
+                break;  // The end of the header
+            }
+            if line.toLower().startsWith("content-length:") {
+                length = parseInt(line.slice(15));
+            }
+        }
+        if length < 0 {
+            log("A message without a Content-Length was skipped");
+            continue;
+        }
+
+        body, ok := io.read(length);
+        if !ok {
+            return Message{}, false;
+        }
+
+        value, err := json.parse(body);
+        if err != "" {
+            log(fmt.sprint("A message that isn't JSON was skipped: %", err));
+            continue;
+        }
+
+        message: Message;
+        message.name = value.get("method").asString();
+        message.params = value.get("params");
+        id := value.get("id");
+        if id.kind == .string {
+            message.id = json.encode(id.text);
+        } else if id.kind == .number {
+            message.id = id.text;
+        }
+        return message, true;
+    }
+    return Message{}, false;
+}
+
+isRequest :: (message: Message) -> bool {
+    return message.id != "";
+}
+
+// Answers a request. result is JSON text, e.g "null" or what json.encode wrote
+respond :: (id: string, result: string) {
+    send(fmt.sprint("{\"jsonrpc\":\"2.0\",\"id\":%,\"result\":%}", id, result));
+}
+
+// Answers a request with an error
+fail :: (id: string, code: int, message: string) {
+    send(fmt.sprint("{\"jsonrpc\":\"2.0\",\"id\":%,\"error\":{\"code\":%,\"message\":%}}", id, code, json.encode(message)));
+}
+
+// Sends a notification, e.g textDocument/publishDiagnostics. params is JSON text
+notify :: (name: string, params: string) {
+    send(fmt.sprint("{\"jsonrpc\":\"2.0\",\"method\":%,\"params\":%}", json.encode(name), params));
+}
+
+// Writes a line to the log of the server, which is its standard error. Editors show it, e.g VS Code in its Output panel
+log :: (text: string) {
+    io.writeError(fmt.sprint("[saad-lsp] %\n", text));
+}
+
+@private
+send :: (body: string) {
+    io.write(fmt.sprint("Content-Length: %\r\n\r\n", body.len));
+    io.write(body);
+}
+
+@private Zero  :: 48;
+@private Nine  :: 57;
+@private Space :: 32;
+
+@private
+parseInt :: (text: string) -> int {
+    n := 0;
+    for ch in text {
+        if ch >= Zero && ch <= Nine {
+            n = n * 10 + (ch - Zero) as int;
+        } else if ch != Space {
+            break;
+        }
+    }
+    return n;
+}

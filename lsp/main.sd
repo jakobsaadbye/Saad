@@ -1,0 +1,697 @@
+// The Saad language server. Editors start it and talk to it over stdin and stdout with the Language Server Protocol.
+// It runs 'saad index' on the program of a file and answers from what that writes (docs/lsp.md), for
+//
+//   * errors and warnings as the code is written (diagnostics)
+//   * go to definition, find references and hover
+//   * the outline of a file (document symbols) and the symbols of the workspace
+//
+// Build it with 'saad build lsp/main.sd'. Usage: saad-lsp [--compiler path/to/saad]
+
+import rpc;
+import source;
+import project;
+import json;
+import fmt;
+import os;
+import io;
+import time;
+
+Document :: struct {
+    uri:     string;
+    path:    string;
+    key:     string;       // source.keyOf(path)
+    text:    source.Text;
+    unsaved: bool;         // The text isn't what is in the file
+    overlay: string;       // The file that has the text for the compiler while it isn't saved
+    written: bool;         // The overlay has the text
+}
+
+documents: [..]Document;
+projects:  [..]project.Project;
+texts:     Map<string, source.Text>;  // Files that are not open, read from disk. By key
+
+generation    := 0;       // Goes up when a document changes, so the projects know they are out of date
+compiler      := "saad";
+workspaceRoot := "";      // A path, or empty
+overlayFolder := "";
+overlayCount  := 0;
+shuttingDown  := false;
+changedKey    := "";      // A document that changed, and whose program is checked when no more messages are waiting
+changedPath   := "";
+
+main :: () {
+    args := os.args();
+    for arg, i in args {
+        if arg == "--compiler" && i + 1 < args.count {
+            compiler = args[i + 1];
+        }
+    }
+    setupOverlayFolder();
+    rpc.log(fmt.sprint("Started. The compiler is %", compiler));
+
+    while true {
+        message, ok := rpc.read();
+        if !ok {
+            break;
+        }
+        handle(message);
+
+        // While typing, a change comes after the other. The program is checked once they stop
+        if changedKey != "" && !io.hasInput() {
+            key := changedKey;
+            changedKey = "";
+            refresh(key, changedPath);
+        }
+    }
+    stop();  // The input ended
+}
+
+handle :: (m: rpc.Message) {
+    switch m.name {
+        case "initialize"                { initialize(m); }
+        case "initialized"               { }
+        case "shutdown"                  { shuttingDown = true; rpc.respond(m.id, "null"); }
+        case "exit"                      { stop(); }
+        case "textDocument/didOpen"      { didOpen(m.params); }
+        case "textDocument/didChange"    { didChange(m.params); }
+        case "textDocument/didSave"      { didSave(m.params); }
+        case "textDocument/didClose"     { didClose(m.params); }
+        case "textDocument/definition"   { definition(m); }
+        case "textDocument/references"   { references(m); }
+        case "textDocument/hover"        { hover(m); }
+        case "textDocument/documentSymbol" { documentSymbols(m); }
+        case "workspace/symbol"          { workspaceSymbols(m); }
+        else {
+            if rpc.isRequest(m) {
+                rpc.fail(m.id, rpc.MethodNotFound, fmt.sprint("% is not supported", m.name));
+            }
+            // Other notifications, e.g $/cancelRequest, need nothing
+        }
+    }
+}
+
+//
+// The life of the server
+//
+
+initialize :: (m: rpc.Message) {
+    root := m.params.get("rootUri").asString();
+    folders := m.params.get("workspaceFolders");
+    if folders.length() > 0 {
+        root = folders.at(0).get("uri").asString();
+    }
+    workspaceRoot = source.pathOf(root);
+
+    configured := m.params.get("initializationOptions").get("compilerPath").asString();
+    if configured != "" {
+        compiler = configured;
+    }
+    rpc.log(fmt.sprint("The workspace is '%'. The compiler is %", workspaceRoot, compiler));
+
+    capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true}";
+    rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.1.0\"}}", capabilities));
+}
+
+// The editor asks the server to end after asking it to shut down. Otherwise the server ends with an error
+stop :: () {
+    for doc in documents {
+        os.removeFile(doc.overlay);
+    }
+    if shuttingDown {
+        os.exit(0);
+    }
+    os.exit(1);
+}
+
+setupOverlayFolder :: () {
+    overlayFolder = "/tmp";
+    for name in ["TEMP", "TMPDIR"] {
+        folder, ok := os.getEnv(name);
+        if ok && folder != "" {
+            overlayFolder = folder;
+            return;
+        }
+    }
+}
+
+//
+// Documents
+//
+
+didOpen :: (params: json.Value) {
+    item := params.get("textDocument");
+    uri  := item.get("uri").asString();
+    path := source.pathOf(uri);
+    if path == "" {
+        return;
+    }
+
+    doc := findDocument(source.keyOf(path));
+    if doc == null {
+        d: Document;
+        d.uri  = uri;
+        d.path = path;
+        d.key  = source.keyOf(path);
+        overlayCount += 1;
+        d.overlay = fmt.sprint("%/saad-lsp-%-%.sd", overlayFolder, time.unix(), overlayCount);
+        documents.add(d);
+        doc = documents.indexRef(documents.count - 1);
+    }
+    doc.text    = source.newText(item.get("text").asString().copy());
+    onDisk, ok := os.readFile(path);
+    doc.unsaved = !ok || onDisk != doc.text.text;
+    onDisk.free();
+    doc.written = false;
+    generation += 1;
+
+    refresh(doc.key, doc.path);
+}
+
+didChange :: (params: json.Value) {
+    uri := params.get("textDocument").get("uri").asString();
+    doc := findDocument(source.keyOf(source.pathOf(uri)));
+    changes := params.get("contentChanges");
+    if doc == null || changes.length() == 0 {
+        return;
+    }
+
+    // The whole text is sent (textDocumentSync.change is 1)
+    doc.text.text.free();
+    doc.text    = source.newText(changes.at(changes.length() - 1).get("text").asString().copy());
+    doc.unsaved = true;
+    doc.written = false;
+    generation += 1;
+
+    // Checked in main when no more messages are waiting. Another document that changed before is checked now
+    if changedKey != "" && changedKey != doc.key {
+        refresh(changedKey, changedPath);
+    }
+    changedKey  = doc.key;
+    changedPath = doc.path;
+}
+
+didSave :: (params: json.Value) {
+    uri  := params.get("textDocument").get("uri").asString();
+    path := source.pathOf(uri);
+    key  := source.keyOf(path);
+    doc  := findDocument(key);
+    if doc != null {
+        doc.unsaved = false;
+    }
+    generation += 1;
+    if changedKey == key {
+        changedKey = "";
+    }
+    refresh(key, path);
+}
+
+didClose :: (params: json.Value) {
+    uri := params.get("textDocument").get("uri").asString();
+    key := source.keyOf(source.pathOf(uri));
+    for doc, i in documents {
+        if doc.key == key {
+            os.removeFile(doc.overlay);
+            documents.removeAt(i);
+            generation += 1;
+            return;
+        }
+    }
+}
+
+findDocument :: (key: string) -> *Document {
+    for doc, i in documents {
+        if doc.key == key {
+            return documents.indexRef(i);
+        }
+    }
+    return null;
+}
+
+// Checks the projects with the file again, and sends their diagnostics
+refresh :: (key: string, path: string) {
+    found := false;
+    for p, i in projects {
+        if p.fileNumber(key) >= 0 {
+            update(i);
+            found = true;
+        }
+    }
+    if !found {
+        projectFor(key, path);
+    }
+}
+
+//
+// Projects
+//
+
+// The project to answer a question about a file with. It is updated. -1 if there is none
+projectFor :: (key: string, path: string) -> int {
+    // A program that has the file, other than the file on its own
+    for p, i in projects {
+        if p.fileNumber(key) >= 0 && source.keyOf(p.root) != key {
+            update(i);
+            if projects[i].fileNumber(key) >= 0 {
+                return i as int;
+            }
+        }
+    }
+
+    // A main.sd in the folder of the file, or a folder above it in the workspace
+    folder := source.folderOf(path);
+    for level in 0..5 {
+        if folder == "" {
+            break;
+        }
+        candidate := fmt.sprint("%/main.sd", folder);
+        if source.keyOf(candidate) != key && os.fileExists(candidate) {
+            i := projectOf(candidate);
+            update(i);
+            if projects[i].fileNumber(key) >= 0 {
+                return i;
+            }
+        }
+        if source.keyOf(folder) == source.keyOf(workspaceRoot) {
+            break;
+        }
+        folder = source.folderOf(folder);
+    }
+
+    // The file on its own
+    i := projectOf(path);
+    update(i);
+    return i;
+}
+
+// The project with the main file. It is made if there is none
+projectOf :: (root: string) -> int {
+    key := source.keyOf(root);
+    for p, i in projects {
+        if source.keyOf(p.root) == key {
+            return i as int;
+        }
+    }
+    p: project.Project;
+    p.root = root;
+    projects.add(p);
+    return (projects.count - 1) as int;
+}
+
+// Indexes the project again if a document changed since it was indexed, and sends its diagnostics
+update :: (i: int) {
+    p := projects.indexRef(i);
+    if p.generation == generation {
+        return;
+    }
+
+    sb := fmt.newStringBuilder(256);
+    for doc, d in documents {
+        if !doc.unsaved {
+            continue;
+        }
+        if !doc.written {
+            documents.indexRef(d).written = os.writeFile(doc.overlay, doc.text.text);
+        }
+        sb.addString(fmt.sprint(" --overlay \"%=%\"", doc.path, doc.overlay));
+    }
+
+    watch := time.startStopwatch();
+    ok := p.run(compiler, sb.toString());
+    p.generation = generation;
+    texts.clear();  // Files may have changed on disk too
+    if !ok {
+        return;
+    }
+    rpc.log(fmt.sprint("Indexed % in % ms: % files, % symbols, % references, % diagnostics", p.root, watch.milliseconds() as int, p.index.files.count, p.index.symbols.count, p.index.references.count, p.index.diagnostics.count));
+    publishDiagnostics(p);
+}
+
+// Sends the diagnostics of every file of the project, and clears the ones it sent before for files that have none now
+publishDiagnostics :: (p: *project.Project) {
+    keys: [..]string;   // Of the files with diagnostics
+    paths: [..]string;
+    for d in p.index.diagnostics {
+        path := d.file;
+        if path == "" { path = p.root; }
+        key := source.keyOf(path);
+        if !keys.contains(key) {
+            keys.add(key);
+            paths.add(path);
+        }
+    }
+
+    // An open file of the project gets them too when it has none, so the editor clears what it shows
+    with := keys.count;
+    for doc in documents {
+        if p.fileNumber(doc.key) >= 0 && !keys.contains(doc.key) {
+            keys.add(doc.key);
+            paths.add(doc.path);
+        }
+    }
+
+    for key, k in keys {
+        path := paths[k];
+        sb := fmt.newStringBuilder(1024);
+        first := true;
+        for d in p.index.diagnostics {
+            file := d.file;
+            if file == "" { file = p.root; }
+            if source.keyOf(file) != key {
+                continue;
+            }
+            if !first { sb.addChar(44); }
+            first = false;
+            sb.addString(diagnosticJson(d, key, path));
+        }
+        rpc.notify("textDocument/publishDiagnostics", fmt.sprint("{\"uri\":%,\"diagnostics\":[%]}", json.encode(uriFor(key, path)), sb.toString()));
+    }
+
+    for key in p.published {
+        if !keys.contains(key) {
+            rpc.notify("textDocument/publishDiagnostics", fmt.sprint("{\"uri\":%,\"diagnostics\":[]}", json.encode(uriFor(key, key))));
+        }
+    }
+    keys.count = with;  // Only the files that had diagnostics
+    p.published.free();
+    p.published = keys;
+}
+
+diagnosticJson :: (d: project.Diagnostic, key: string, path: string) -> string {
+    related := fmt.newStringBuilder(128);
+    for r, i in d.related {
+        if i > 0 { related.addChar(44); }
+        file := r.file;
+        if file == "" { file = path; }
+        related.addString(fmt.sprint("{\"location\":%,\"message\":%}", locationJson(source.keyOf(file), file, r.range), json.encode(r.message)));
+    }
+    return fmt.sprint("{\"range\":%,\"severity\":%,\"source\":\"saad\",\"message\":%,\"relatedInformation\":[%]}",
+        rangeJson(key, path, d.range), d.severity, json.encode(d.message), related.toString());
+}
+
+//
+// Positions: the compiler counts bytes, the editor UTF-16 units
+//
+
+// The text of a file: the editor's if it is open, otherwise the file on disk
+textOf :: (key: string, path: string) -> *source.Text {
+    doc := findDocument(key);
+    if doc != null {
+        return &doc.text;
+    }
+    if !texts.has(key) {
+        text, ok := os.readFile(path);
+        texts.set(key, source.newText(text));
+    }
+    return texts.indexRef(key);
+}
+
+rangeJson :: (key: string, path: string, r: project.Range) -> string {
+    text := textOf(key, path);
+    startLine := max(r.start.line, 0);
+    endLine   := max(r.end.line, 0);
+    start := source.toUtf16(text.line(startLine), max(r.start.character, 0));
+    end   := source.toUtf16(text.line(endLine), max(r.end.character, 0));
+    return fmt.sprint("{\"start\":{\"line\":%,\"character\":%},\"end\":{\"line\":%,\"character\":%}}", startLine, start, endLine, end);
+}
+
+locationJson :: (key: string, path: string, r: project.Range) -> string {
+    return fmt.sprint("{\"uri\":%,\"range\":%}", json.encode(uriFor(key, path)), rangeJson(key, path, r));
+}
+
+// The URI of a file: the editor's own for an open document, so it is written the same
+uriFor :: (key: string, path: string) -> string {
+    doc := findDocument(key);
+    if doc != null {
+        return doc.uri;
+    }
+    return source.uriOf(path);
+}
+
+max :: (a: int, b: int) -> int {
+    if a > b { return a; }
+    return b;
+}
+
+//
+// Questions about a position in a file
+//
+
+// Where a request points: the project, the file in it and the position as the compiler counts it
+Place :: struct {
+    program: int = -1;    // In projects
+    file:    int = -1;
+    at:      project.Position;
+}
+
+placeOf :: (params: json.Value) -> Place {
+    uri  := params.get("textDocument").get("uri").asString();
+    path := source.pathOf(uri);
+    if path == "" {
+        return Place{};
+    }
+    key := source.keyOf(path);
+
+    place: Place;
+    place.program = projectFor(key, path);
+    if place.program < 0 {
+        return place;
+    }
+    place.file = projects[place.program].fileNumber(key);
+
+    position := params.get("position");
+    line := position.get("line").asNumber() as int;
+    character := position.get("character").asNumber() as int;
+    place.at.line = line;
+    place.at.character = source.toByte(textOf(key, path).line(line), character);
+    return place;
+}
+
+// The symbol of the name at the place, or null
+symbolAt :: (place: Place) -> *project.Symbol {
+    if place.program < 0 || place.file < 0 {
+        return null;
+    }
+    p := projects.indexRef(place.program);
+    return p.symbol(p.symbolAt(place.file, place.at));
+}
+
+symbolLocation :: (p: *project.Project, file: int, r: project.Range) -> string {
+    path := p.index.files[file];
+    return locationJson(source.keyOf(path), path, r);
+}
+
+definition :: (m: rpc.Message) {
+    place := placeOf(m.params);
+    sym := symbolAt(place);
+    if sym == null {
+        rpc.respond(m.id, "null");
+        return;
+    }
+    p := projects.indexRef(place.program);
+    rpc.respond(m.id, symbolLocation(p, sym.file, sym.nameRange));
+}
+
+references :: (m: rpc.Message) {
+    place := placeOf(m.params);
+    sym := symbolAt(place);
+    if sym == null {
+        rpc.respond(m.id, "[]");
+        return;
+    }
+    p := projects.indexRef(place.program);
+
+    sb := fmt.newStringBuilder(1024);
+    sb.addChar(91);
+    count := 0;
+    if m.params.get("context").get("includeDeclaration").asBool() {
+        sb.addString(symbolLocation(p, sym.file, sym.nameRange));
+        count += 1;
+    }
+    for ref in p.index.references {
+        if ref.symbol == sym.id {
+            if count > 0 { sb.addChar(44); }
+            sb.addString(symbolLocation(p, ref.file, ref.range));
+            count += 1;
+        }
+    }
+    sb.addChar(93);
+    rpc.respond(m.id, sb.toString());
+}
+
+hover :: (m: rpc.Message) {
+    place := placeOf(m.params);
+    sym := symbolAt(place);
+    if sym == null {
+        rpc.respond(m.id, "null");
+        return;
+    }
+    p := projects.indexRef(place.program);
+
+    text := fmt.sprint("```saad\n%\n```", signatureOf(p, sym));
+    if sym.doc != "" {
+        text = fmt.sprint("%\n\n%", text, sym.doc);
+    }
+    rpc.respond(m.id, fmt.sprint("{\"contents\":{\"kind\":\"markdown\",\"value\":%}}", json.encode(text)));
+}
+
+// How a symbol is shown, e.g "area :: method (self: *Circle) -> f32" or "Vec2.x: f32"
+signatureOf :: (p: *project.Project, sym: *project.Symbol) -> string {
+    name := sym.name;
+    container := p.symbol(sym.container);
+    if container != null && (sym.kind == "field" || sym.kind == "variant" || sym.kind == "enumMember") {
+        name = fmt.sprint("%.%", container.name, sym.name);
+    }
+
+    return switch sym.kind {
+        case "function"
+        case "method"
+        case "struct"
+        case "union"
+        case "enum"
+        case "typeAlias"     => fmt.sprint("% :: %", name, sym.detail);
+        case "namespace"     => fmt.sprint("namespace %", name);
+        case "enumMember"    => fmt.sprint("% = %", name, sym.detail);
+        case "constant"      => fmt.sprint("% : % : (constant)", name, sym.detail);
+        case "typeParameter" => fmt.sprint("% (a type parameter)", name);
+        else                 => fmt.sprint("%: %", name, sym.detail);
+    };
+}
+
+//
+// Symbols
+//
+
+// The SymbolKind of LSP
+symbolKind :: (kind: string) -> int {
+    return switch kind {
+        case "namespace"     => 3;
+        case "method"        => 6;
+        case "field"         => 8;
+        case "enum"          => 10;
+        case "function"      => 12;
+        case "constant"      => 14;
+        case "enumMember"
+        case "variant"       => 22;
+        case "struct"
+        case "union"         => 23;
+        case "typeAlias"     => 5;
+        case "typeParameter" => 26;
+        else                 => 13;  // Variable
+    };
+}
+
+documentSymbols :: (m: rpc.Message) {
+    uri  := m.params.get("textDocument").get("uri").asString();
+    path := source.pathOf(uri);
+    key  := source.keyOf(path);
+    i    := projectFor(key, path);
+    if i < 0 {
+        rpc.respond(m.id, "[]");
+        return;
+    }
+    p    := projects.indexRef(i);
+    file := p.fileNumber(key);
+
+    // The symbols of the file. One is in another if it is declared in it, e.g a field in its struct
+    ids: [..]int;
+    for sym in p.index.symbols {
+        if sym.file == file && !project.isLocal(sym.kind) {
+            ids.add(sym.id);
+        }
+    }
+
+    sb := fmt.newStringBuilder(4096);
+    sb.addChar(91);
+    first := true;
+    for id in ids {
+        if parentIn(p, id, ids) < 0 {
+            if !first { sb.addChar(44); }
+            first = false;
+            addDocumentSymbol(&sb, p, id, ids, key, path);
+        }
+    }
+    sb.addChar(93);
+    rpc.respond(m.id, sb.toString());
+}
+
+// The symbol the symbol is shown in, or -1. A method declared outside of its struct is shown on its own
+parentIn :: (p: *project.Project, id: int, ids: [..]int) -> int {
+    sym := p.symbol(id);
+    parent := p.symbol(sym.container);
+    if parent == null || !ids.contains(parent.id) {
+        return -1;
+    }
+    if !project.contains(parent.range, sym.nameRange.start, true) {
+        return -1;
+    }
+    return parent.id;
+}
+
+addDocumentSymbol :: (sb: *fmt.StringBuilder, p: *project.Project, id: int, ids: [..]int, key: string, path: string) {
+    sym := p.symbol(id);
+    sb.addString(fmt.sprint("{\"name\":%,\"detail\":%,\"kind\":%,\"range\":%,\"selectionRange\":%,\"children\":[",
+        json.encode(sym.name), json.encode(sym.detail), symbolKind(sym.kind), rangeJson(key, path, sym.range), rangeJson(key, path, sym.nameRange)));
+    first := true;
+    for child in ids {
+        if parentIn(p, child, ids) == id {
+            if !first { sb.addChar(44); }
+            first = false;
+            addDocumentSymbol(sb, p, child, ids, key, path);
+        }
+    }
+    sb.addString("]}");
+}
+
+workspaceSymbols :: (m: rpc.Message) {
+    query := m.params.get("query").asString().toLower();
+
+    // Without an open file, the program of the workspace
+    if projects.count == 0 && workspaceRoot != "" {
+        main := fmt.sprint("%/main.sd", workspaceRoot);
+        if os.fileExists(main) {
+            update(projectOf(main));
+        }
+    }
+
+    sb := fmt.newStringBuilder(4096);
+    sb.addChar(91);
+    seen: [..]string;  // A symbol can be in more than one project
+    for _, i in projects {
+        update(i);
+        p := projects.indexRef(i);
+        for sym in p.index.symbols {
+            if seen.count >= 500 {
+                break;
+            }
+            if project.isLocal(sym.kind) || !matches(sym.name.toLower(), query) {
+                continue;
+            }
+            path := p.index.files[sym.file];
+            id := fmt.sprint("%:%:%", source.keyOf(path), sym.nameRange.start.line, sym.nameRange.start.character);
+            if seen.contains(id) {
+                continue;
+            }
+            if seen.count > 0 { sb.addChar(44); }
+            seen.add(id);
+
+            container := "";
+            parent := p.symbol(sym.container);
+            if parent != null { container = parent.name; }
+            sb.addString(fmt.sprint("{\"name\":%,\"kind\":%,\"location\":%,\"containerName\":%}",
+                json.encode(sym.name), symbolKind(sym.kind), symbolLocation(p, sym.file, sym.nameRange), json.encode(container)));
+        }
+    }
+    sb.addChar(93);
+    rpc.respond(m.id, sb.toString());
+}
+
+// If the letters of the query are in the name in the same order, e.g "nwrd" matches "newRandom"
+matches :: (name: string, query: string) -> bool {
+    q := 0;
+    for ch in name {
+        if q < query.len && ch == query[q] {
+            q += 1;
+        }
+    }
+    return q == query.len;
+}

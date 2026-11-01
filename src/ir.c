@@ -168,7 +168,21 @@ int ir_find_or_add_extern(IrModule *module, const char *name) {
     for (int i = 0; i < module->globals.count; i++) {
         IrGlobal *global = module->globals.items[i];
         if (global->kind != IR_GLOBAL_DATA && strcmp(global->name, name) == 0) {
-            return i;
+            if (!global->is_saad) return i;
+
+            // A function of the program has the name of the C function, e.g 'exit :: () {...}' and C's exit(). It gets another symbol
+            char unique[256];
+            for (int n = 2; ; n++) {
+                snprintf(unique, sizeof(unique), "%s__%d", name, n);
+                bool taken = false;
+                for (int j = 0; j < module->globals.count; j++) {
+                    if (strcmp(module->globals.items[j]->name, unique) == 0) { taken = true; break; }
+                }
+                if (!taken) break;
+            }
+            global->name = ir_strdup(module, unique);
+            if (global->function) global->function->name = global->name;
+            break;
         }
     }
     return ir_global_new(module, IR_GLOBAL_EXTERN, name)->index;

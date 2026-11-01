@@ -138,6 +138,11 @@ static const char *kind_of(AstIdentifier *ident) {
         return owner && owner->is_union ? "variant" : "field";
     }
     if (flags & IDENTIFIER_IS_GLOBAL)   return "global";
+    // A variable at the top of a file, e.g 'total := 0;'
+    if (!(flags & IDENTIFIER_IS_CONSTANT) && ident->decl && !(ident->decl->flags & DECLARATION_IS_FUNCTION_PARAMETER) &&
+        ident->head.file && ident->head.file->scope && find_identifier_in_scope(ident->head.file->scope, ident->name) == ident) {
+        return "global";
+    }
     if (flags & IDENTIFIER_IS_CONSTANT) return "constant";
     if (ident->decl && (ident->decl->flags & DECLARATION_IS_FUNCTION_PARAMETER)) return "parameter";
     return "variable";
@@ -210,6 +215,12 @@ int index_identifier(AstIdentifier *ident) {
     if (whole && whole->file == ident->head.file && whole->start.line > 0 && whole->end.input_idx >= ident->head.end.input_idx) {
         symbol.start = whole->start.input_idx <= ident->head.start.input_idx ? whole->start : ident->head.start;
         symbol.end   = whole->end;
+    }
+
+    // A function with its body
+    AstFunctionDefn *defn = (ident->flags & (IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_STRUCT_METHOD)) ? function_of(ident) : NULL;
+    if (defn && defn->body && ((Ast *)defn->body)->file == ident->head.file && ((Ast *)defn->body)->end.input_idx > symbol.end.input_idx) {
+        symbol.end = ((Ast *)defn->body)->end;
     }
 
     int id = add_symbol(symbol);

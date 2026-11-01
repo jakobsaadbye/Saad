@@ -2013,6 +2013,30 @@ bool leads_to_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
         return true;
     }
 
+    // A constant, e.g 'Big :: 300;', is checked by its value
+    AstExpr *site = expr;
+    for (int depth = 0; depth < 16 && is_literal_identifier(expr); depth++) {
+        AstIdentifier *ident = ((AstLiteral *)expr)->as.value.identifier.resolved_identifier;
+        if (ident && ident->imported_from) ident = ident->imported_from;
+        if (!ident || !(ident->flags & IDENTIFIER_IS_CONSTANT) || !ident->value) return true;
+        AstExpr *value = ident->value;
+        if (value->head.kind == AST_LITERAL && ((AstLiteral *)value)->kind == LITERAL_INTEGER) {
+            long long n = ((AstLiteral *)value)->as.value.integer;
+            TypePrimitive *prim = (TypePrimitive *)lhs_type;
+            unsigned long long max_value = max_integer_value(prim);
+            bool is_signed = prim->kind == PRIMITIVE_I8 || prim->kind == PRIMITIVE_I16 || prim->kind == PRIMITIVE_I32 || prim->kind == PRIMITIVE_I64 || prim->kind == PRIMITIVE_INT || prim->kind == PRIMITIVE_UNTYPED_INT;
+            bool too_big   = n >= 0 && (unsigned long long) n > max_value;
+            bool too_small = n < 0 && (!is_signed || (unsigned long long)(-(n + 1)) > max_value);
+            if (too_big || too_small) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)site, "Assignment produces an integer overflow. '%s' is %lld, which doesn't fit in %s", ident->name, n, text_bold(type_to_str(lhs_type)));
+                return false;
+            }
+            return true;
+        }
+        expr = value;
+    }
+    if (expr != site) return true;  // A constant of an expression
+
     if (expr->head.kind == AST_LITERAL) {
         AstLiteral *lit = (AstLiteral *)(expr);
 
@@ -2023,6 +2047,11 @@ bool leads_to_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
             TypePrimitive *prim_type = (TypePrimitive *)(lhs_type);
             unsigned long long lit_value = (unsigned long long) lit->as.value.integer;
             unsigned long long max_value = max_integer_value(prim_type);
+
+            // A negative value, e.g a constant -5 that was folded into a literal, fits a signed type down to its minimum
+            long long n = lit->as.value.integer;
+            bool is_signed = prim_type->kind == PRIMITIVE_I8 || prim_type->kind == PRIMITIVE_I16 || prim_type->kind == PRIMITIVE_I32 || prim_type->kind == PRIMITIVE_I64 || prim_type->kind == PRIMITIVE_INT || prim_type->kind == PRIMITIVE_UNTYPED_INT;
+            if (n < 0 && is_signed) lit_value = (unsigned long long)(-(n + 1));
 
             if (lit_value > max_value) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(lit), "Assignment produces an integer overflow. Max value of type %s is %llu", text_bold(type_to_str(lhs_type)), max_value);
@@ -2520,7 +2549,11 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
                 value = (AstExpr *) any_cast;
             }
 
-            if (!types_are_equal(decl->type, value->type)) {
+            // An untyped number, e.g a constant, becomes the number type of the declaration if it fits
+            bool untyped_fits = is_untyped_type(value->type) && value->type->kind == TYPE_INTEGER && (decl->type->kind == TYPE_INTEGER || decl->type->kind == TYPE_FLOAT);
+            if (untyped_fits && !leads_to_integer_overflow(typer, decl->type, value)) return false;
+
+            if (!untyped_fits && !types_are_equal(decl->type, value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", ident->name, type_to_str(decl->type), type_to_str(value->type));
                 return false;
             }
@@ -2973,7 +3006,10 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         expr_type = any_cast->head.type;
     }
 
-    if (!types_are_equal(lhs_type, expr_type)) {
+    // An untyped number, e.g a constant, becomes the number type of the place. It is checked to fit below
+    bool untyped_fits = is_untyped_type(expr_type) && expr_type->kind == TYPE_INTEGER && (lhs_type->kind == TYPE_INTEGER || lhs_type->kind == TYPE_FLOAT);
+
+    if (!untyped_fits && !types_are_equal(lhs_type, expr_type)) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Assignment type mismatch. Wanted type %s. Got type %s", type_to_str(lhs_type), type_to_str(expr_type));
         return false;
     }
@@ -6976,6 +7012,11 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 
         // Global variables can be used by any function, also one above them
         if (declared->flags & IDENTIFIER_IS_GLOBAL) {
+            needs_ordering_check = false;
+        }
+
+        // And constants at the top of a file, by a function above them. They were checked above
+        if (top_level && typer->enclosing_function && declared->decl && (declared->decl->flags & DECLARATION_CONSTANT) && (declared->flags & IDENTIFIER_IS_RESOLVED)) {
             needs_ordering_check = false;
         }
 

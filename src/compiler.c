@@ -53,13 +53,22 @@ bool add_overlay(const char *argument) {
     return true;
 }
 
+// Paths are not case sensitive on Windows, and an editor may write the drive letter in lowercase
+static bool same_path(const char *a, const char *b) {
+#ifdef _WIN32
+    return _stricmp(a, b) == 0;
+#else
+    return strcmp(a, b) == 0;
+#endif
+}
+
 // The file to read for a path: its overlay, or the path itself
 static const char *source_path(const char *path) {
     if (overlay_count == 0) return path;
     char *absolute = get_absolute_path(path);
     if (absolute == NULL) return path;
     for (int i = 0; i < overlay_count; i++) {
-        if (strcmp(overlays[i].path, absolute) == 0) return overlays[i].text_path;
+        if (same_path(overlays[i].path, absolute)) return overlays[i].text_path;
     }
     return path;
 }

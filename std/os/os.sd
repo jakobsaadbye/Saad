@@ -4,6 +4,7 @@ namespace os;
 // The Windows API is in os.windows
 
 use c;
+import os.windows;
 
 // Ends the program right away with the exit code
 exit :: (code: int) {
@@ -16,6 +17,48 @@ run :: (command: string) -> int {
     code := system(cCommand);
     free(cCommand);
     return code;
+}
+
+// Runs a command in the shell and returns what it wrote to its standard output, and its exit code. The text is allocated
+// with malloc. What the command writes to its standard error is not captured, e.g
+//
+//     text, code := os.output("git status --short");
+//
+// The shell is cmd.exe, which removes the first and the last quote of a command that starts with a quote. So the command
+// is put in quotes, and one that starts with a quoted path works: os.output("\"C:/Program Files/tool.exe\" \"my file.txt\"")
+output :: (command: string) -> string, int {
+    quoted := malloc(command.len + 3) as *u8;
+    quoted[0] = Quote;
+    memcpy(&quoted[1], command.data, command.len);
+    quoted[command.len + 1] = Quote;
+    quoted[command.len + 2] = 0;
+
+    mode := "rb";
+    pipe := _popen(quoted, mode.data);
+    free(quoted);
+    if pipe == null {
+        return "", -1;
+    }
+
+    text := readAll(pipe);
+    code := _pclose(pipe);
+    return text, code;
+}
+
+// The arguments the program was started with. The first is the program itself
+args :: () -> []string {
+    argc: i32;
+    argv, env: **u8;
+    startInfo: i32;
+    windows.__getmainargs(&argc, &argv, &env, 0, &startInfo);
+
+    result: []string;
+    result.data  = malloc(argc as int * sizeof(string)) as *string;
+    result.count = argc;
+    for i in 0..argc {
+        result[i] = fromCString(argv[i]);
+    }
+    return result;
 }
 
 // The value of an environment variable. ok is false if it isn't set
@@ -36,6 +79,16 @@ readFile :: (path: string) -> string, bool {
         return "", false;
     }
 
+    text := readAll(file);
+    fclose(file);
+    return text, true;
+}
+
+@private Quote :: 34;
+
+// Everything that is left to read of a FILE
+@private
+readAll :: (file: *void) -> string {
     capacity := 4096;
     count    := 0;
     data     := malloc(capacity) as *u8;
@@ -50,12 +103,11 @@ readFile :: (path: string) -> string, bool {
         }
         count += read;
     }
-    fclose(file);
 
     text: string;
     text.data = data;
     text.len  = count;
-    return text, true;
+    return text;
 }
 
 // Creates the file or replaces what is in it. Returns false if it couldn't be written

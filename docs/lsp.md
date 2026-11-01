@@ -20,7 +20,8 @@ editor ── LSP (JSON-RPC over stdin/stdout) ──> lsp/ (Saad)
 1. **Diagnostics as data** (done): `saad check main.sd --json`, and no `exit()` on errors.
 2. **The index** (done): `saad index main.sd` with the declarations and uses of every name, for go to definition,
    find references, hover, the outline of a file and workspace symbols.
-3. **The server** in `lsp/`, with `std/io` (bytes on stdin and stdout) and running a command and reading its output.
+3. **The server** (done) in `lsp/`, with `std/io` (bytes on stdin and stdout), `os.output` (running a command and
+   reading its output) and `os.args`. See `lsp/README.md`.
 4. **Error recovery**: the typer goes on with the next declaration after an error, and the parser skips to the next
    top-level declaration after a syntax error, so the index stays useful while the code is being typed.
 5. Later: completion, signature help, semantic tokens.
@@ -85,3 +86,30 @@ In the compiler, the typer calls `index_identifier_use()` and friends (src/index
 e.g for an identifier, a member, an enum value, a type name or a named argument. A symbol is known by the file and the
 offset of its name, so the copies the compiler makes of a declaration (for an import, a namespace or an instance of a
 generic) are the same symbol. `tools/linux/check_index.py` checks that `saad index` knows every name of `tests/index.sd`.
+
+## The server
+
+`lsp/` is a program in Saad. It reads JSON-RPC messages with `std/io` and `std/json`, and answers them from the
+index:
+
+```
+lsp/
+  main.sd      The messages: initialize, the documents (open, change, save, close) and the questions
+  rpc.sd       namespace rpc: reading and writing JSON-RPC messages (Content-Length + JSON)
+  project.sd   namespace project: running 'saad index' and looking up the name at a position
+  source.sd    namespace source: file URIs, lines, and UTF-8 bytes <-> UTF-16 units
+  vscode/      The VS Code extension that starts the server
+```
+
+* **Projects.** A file is answered with the program it is part of: a program the server already indexed that has the
+  file, else the `main.sd` of its folder or a folder above it (up to the workspace), else the file on its own. A
+  project is indexed again when a document has changed since, and when a document is saved.
+* **Unsaved text.** Every open document is written to a file in the temporary folder, and given to the compiler with
+  `--overlay`. After a change, the program is checked again when no more messages are waiting (`io.hasInput()`), so
+  typing doesn't queue up a check for every key.
+* **Diagnostics** are sent for every file of the project with errors, and for the open files, so old errors go away.
+* **Positions.** The compiler counts bytes and the editor UTF-16 units, so `source` converts each position with the
+  line it is on (`positionEncoding` is `utf-16`).
+* The server writes its log to stderr. VS Code shows it in the Output panel (Saad).
+
+`tools/linux/check_lsp.py` talks to the server like an editor, and checks every feature on `tests/index.sd`.

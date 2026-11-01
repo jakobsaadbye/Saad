@@ -77,6 +77,17 @@ if command -v python3 > /dev/null; then
         echo "$output" | head -5 | sed 's/^/    /'
         failed=$((failed + 1))
     fi
+
+    # The language server (lsp/), talked to like an editor does
+    printf "%-56s " "language server lsp/"
+    if output=$(bash "$HERE/build_lsp.sh" 2>&1 > /dev/null && timeout 120 python3 "$HERE/check_lsp.py" "$REPO/build/linux/saad-lsp" 2>&1); then
+        echo "${GREEN}OK${RESET}"
+        passed=$((passed + 1))
+    else
+        echo "${RED}FAILED${RESET}"
+        echo "$output" | grep -v '^[a-zA-Z/]*$' | head -10 | sed 's/^/    /'
+        failed=$((failed + 1))
+    fi
 fi
 
 echo
