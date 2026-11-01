@@ -64,7 +64,7 @@ total := sum(xs);   // sum :: (values: []int) -> int
 | `swapRemoveAt(index) -> T` | Removes by moving the last value into the hole. O(1), changes the order |
 | `removeLast() -> T` | Removes and returns the last value |
 | `first() -> T`, `last() -> T` | Assert that the list is not empty |
-| `tryFirst() -> (T, bool)`, `tryLast() -> (T, bool)` | For lists that might be empty |
+| `tryFirst() -> ?T`, `tryLast() -> ?T` | For lists that might be empty, e.g `xs.tryLast() ?? 0` |
 | `isEmpty()`, `indexOf(value) -> i64` (-1 if missing), `contains(value)` | |
 | `reverse()`, `copy() -> List<T>` | |
 | `reserve(capacity)`, `clear()` (keeps the memory), `free()` | |
@@ -79,7 +79,7 @@ ages := ["alice": 31, "bob": 27];
 ages["carol"] = 40;        // Adds or changes
 a := ages["alice"];        // Asserts that the key is there
 b := ages.get("dave", 0);  // With a fallback
-c, ok := ages.tryGet("dave");
+c := ages.tryGet("dave") ?? 0; // An optional, ?int. See docs/optionals.md
 counts[word] += 1;         // A missing key starts at the zero value
 for name, age in ages { print("% is %", name, age); }
 for *entry in ages { entry.value += 1; }   // To change the values
@@ -91,7 +91,7 @@ index. A list keeps the index (`for x, i in xs`), as it has no `set` method.
 | Method | |
 | --- | --- |
 | `set(key, value)` | Adds or changes |
-| `get(key, fallback) -> V`, `tryGet(key) -> (V, bool)`, `has(key)` | |
+| `get(key, fallback) -> V`, `tryGet(key) -> ?V`, `has(key)` | |
 | `remove(key) -> bool` | Keeps the order of the other entries. O(n) |
 | `keys() -> [..]K`, `values() -> [..]V` | In insertion order |
 | `isEmpty()`, `reserve(count)`, `clear()`, `free()` | |

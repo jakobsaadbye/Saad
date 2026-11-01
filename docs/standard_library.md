@@ -169,7 +169,7 @@ names   := users.map(nameOf);                           // [..]string, U is infe
 ids     := users.map<i64>(idOf);                        // or given
 adults  := users.filter(isAdult);                       // the elements that it is true for, in order
 total   := prices.reduce(0.0, (sum: f64, p: f64) -> f64 { return sum + p; });
-user, found := users.find(isAdult);                     // the first one, found is false when there is none
+user := users.find(isAdult);                            // the first one, a ?User that is empty when there is none
 users.findIndex(isAdult);                               // -1 when there is none
 users.some(isAdult);  users.every(isAdult);  users.countWhere(isAdult);
 ```
@@ -214,6 +214,7 @@ value.toJson();
   without a value, e.g `"empty"`, or an object with the name and the value, e.g `{"circle": {"radius": 2}}`.
 * `json.Field` is an attribute (see `docs/reflection.md`): `name` renames a member, `skip` leaves it out, and
   `omitEmpty` leaves out 0, false, "", null and things without elements.
+* Optionals (`?T`) are written as their value or `null`, and `null` is read as empty. See `docs/optionals.md`.
 * Decoding keeps members that are not in the JSON, so default values stay, and skips members it doesn't know.
   `decodeInto` keeps the values a value already has.
   Integers are read from the text, so an `i64` or `u64` doesn't lose digits, and they must fit their type.

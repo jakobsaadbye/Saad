@@ -43,10 +43,10 @@ main :: () {
 
         // Reading keys that might not be there
         assert(ages.get("dave", -1) == -1);
-        age, found := ages.tryGet("bob");
-        assert(found && age == 27);
-        missing, there := ages.tryGet("dave");
-        assert(!there);
+        age := ages.tryGet("bob");
+        assert(age.hasValue() && age == 27);
+        assert(ages.tryGet("dave") == null);
+        assert(ages.tryGet("dave") ?? -1 == -1);
         assert(ages.has("carol") && !ages.has("dave"));
 
         assert(totalAge(ages) == 99);

@@ -77,6 +77,29 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.9.4 - 1. Nov 2026
+
+* Optionals: `?T` is a `T` or nothing. A `T` or `null` can be given where a `?T` is wanted, and its value is read with
+  `hasValue()`, `value()`, `valueOr(x)`, `??` and `?.`. See `docs/optionals.md`
+
+```odin
+User :: struct { name: string; age: ?int; address: ?Address; manager: *User; }
+
+age := user.age ?? 0;                        // the value, or 0. The right side is only computed when it is needed
+zip := user.address?.zip;                    // a ?int, empty when there is no address
+boss := user.manager?.name ?? "nobody";      // ?. works on pointers too
+if user.age == null { ... }
+if user.age.hasValue() { print("%", user.age.value()); }
+```
+
+* `db` reads a column that can be `NULL` into an optional (`email: ?string`), and `json` reads and writes `null` as an
+  empty optional. `fmt` prints the value or `null`
+* Changed: `list.tryFirst()`, `list.tryLast()`, `map.tryGet(key)` and `xs.find(f)` give an optional instead of a value and a
+  bool, e.g `ages.tryGet("bob") ?? 0`
+* Types print as written: `?int` and `List<?int>` instead of `Optional<int>` and `List<Optional<int>>`
+* A list inside a struct prints as its elements, e.g `tags: [1, 2]`
+* Fixes: `typeof(T)` of a type parameter crashed the compiler, and the editor now completes after `?.`
+
 ## Update v0.9.3 - 1. Nov 2026
 
 * Type arguments can be given at a call. A type parameter that is only in the return type is given that way

@@ -13,7 +13,7 @@ Role :: enum { guest, member, admin }
 User :: struct {
     id:        i64;
     name:      string;
-    email:     *string;    // NULL becomes null
+    email:     ?string;    // NULL is empty
     role:      Role;       // a Postgres enum, read by name
     createdAt: string;     // reads the column created_at
 }
@@ -52,7 +52,7 @@ allocators). The generator and the typed query builder are designed below, but n
   `Row 3: age: 'x' is not a whole number`.
 * The arguments are the parameters `$1`, `$2`, ... of the SQL, sent apart from the SQL text, so a value can never
   change the SQL (no SQL injection). Numbers, `bool`, `string`, chars and enums (by name) can be parameters, and
-  pointers to them, where `null` is `NULL`.
+  optionals and pointers of them, where empty and `null` are `NULL`.
 
 ## Rows into structs
 
@@ -75,9 +75,9 @@ User :: struct {
 | `boolean` | `bool` (`t`/`f`) |
 | `text`, `varchar`, and everything else | `string`, as Postgres writes it, e.g a `timestamptz` as `2026-11-01 10:00:00+01` |
 | a Postgres enum, or a number | an enum: its name (case and `_` don't matter) or its number |
-| a column that can be `NULL` | a pointer, e.g `*string` or `*i64`, which is `null` for `NULL` |
+| a column that can be `NULL` | an optional, e.g `?string` or `?i64`, which is empty for `NULL` (see `docs/optionals.md`) |
 
-* `NULL` into a value that isn't a pointer keeps the value, so a default stays.
+* `NULL` into a pointer is `null`, and into a value that is neither keeps the value, so a default stays.
 * Columns that the struct doesn't have are skipped, and members without a column keep their value. So a
   smaller struct is a way to read only some columns.
 
@@ -192,7 +192,7 @@ import db;
 User :: struct {
     id:        i64;
     name:      string;
-    email:     *string;
+    email:     ?string;
     createdAt: string;      // created_at timestamptz
 }
 
@@ -209,14 +209,14 @@ UsersTable :: struct {
     table:     db.Table;                 // the connection and "users"
     id:        db.Field<i64>;
     name:      db.Field<string>;
-    email:     db.Field<*string>;
+    email:     db.Field<?string>;
     createdAt: db.Field<string>;
 }
 ```
 
 * Plain structs and plain code: a change of the database is a diff in the project, and building a program
   doesn't need a database.
-* Postgres enums become Saad enums, and columns that can be `NULL` pointers.
+* Postgres enums become Saad enums, and columns that can be `NULL` optionals.
 * `db.Field<T>` is the typed query column of step 4. The attribute that names a column stays `@db.Column`.
 
 ### 4. The typed query builder

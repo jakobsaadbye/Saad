@@ -11,7 +11,7 @@ Role :: enum { guest, member, admin }
 User :: struct {
     id:        i64;
     name:      string;
-    email:     *string;           // NULL becomes null
+    email:     ?string;           // NULL is empty
     age:       i32 = -1;          // NULL keeps the default
     score:     f64;
     active:    bool;
@@ -61,10 +61,10 @@ main :: () {
     )");
 
     // Parameters of every kind
-    email := "ada@example.com";
-    noEmail: *string = null;
+    email: ?string = "ada@example.com";
+    noEmail: ?string;
     count, e1 := conn.exec("INSERT INTO saad_users (name, email, age, score, active, role, nick_name) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-                           "Ada", &email, 36, 9.5, true, Role.admin, "ada");
+                           "Ada", email, 36, 9.5, true, Role.admin, "ada");
     assert(e1 == "");
     assert(count == 1);
     count2, e2 := conn.exec("INSERT INTO saad_users (name, email, age, score, active, role) VALUES ($1, $2, NULL, $3, $4, $5)",
@@ -79,7 +79,7 @@ main :: () {
 
     ada := users[0];
     assert(ada.id == 1 && ada.name == "Ada");
-    assert(ada.email != null && *ada.email == "ada@example.com");
+    assert(ada.email == "ada@example.com" && ada.email.value() == "ada@example.com");
     assert(ada.age == 36 && ada.score == 9.5 && ada.active);
     assert(ada.role == .admin);
     assert(ada.createdAt == "2026-11-01");
@@ -139,7 +139,7 @@ main :: () {
     fromArena, err4 := conn.query<User>("SELECT * FROM saad_users ORDER BY id");
     assert(err4 == "" && fromArena.count == 4);
     assert(fromArena.allocator == &alloc);
-    assert(*fromArena[0].email == "ada@example.com");
+    assert(fromArena[0].email ?? "" == "ada@example.com");
     assert(arena.used() > 0);
     arena.free();
     conn.allocator = null;

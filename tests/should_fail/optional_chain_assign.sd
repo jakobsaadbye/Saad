@@ -1,0 +1,8 @@
+// expect-error: Can't assign through ?., as there may be nothing to assign to
+
+Point :: struct { x: int; }
+
+main :: () {
+    p: ?Point;
+    p?.x = 3;
+}

@@ -930,10 +930,30 @@ static void copy_aggregate(Lowerer *L, IrAddr dst, Value src, int size) {
     emit_memcpy(L, addr_to_ptr(L, dst), addr_to_ptr(L, src.addr), size);
 }
 
+bool  is_optional_type(Type *type);
+Type *optional_inner_type(Type *type);
+int   optional_present_offset(Type *type);
+static void store_value(Lowerer *L, IrAddr dst, Type *dst_type, Value src, Ast *site);
+
+// A T (or null) as a ?T: the value and present = true, or all zeros for null
+static Value wrap_in_optional(Lowerer *L, Value value, Type *optional_type, Ast *site) {
+    Value optional = temp_place(L, optional_type, "optional");
+    emit_zero(L, optional.addr, type_storage_size(optional_type));
+    if (!is_null_type(value.type)) {
+        store_value(L, optional.addr, optional_inner_type(optional_type), value, site);
+        emit_store(L, IR_I8, addr_add(optional.addr, optional_present_offset(optional_type)), emit_const(L, IR_I8, 1));
+    }
+    return optional;
+}
+
 // Converts an aggregate value to another aggregate type with a compatible layout, e.g a fixed array to a slice
 static Value convert_aggregate(Lowerer *L, Value value, Type *to, Ast *site) {
     Type *from = value.type;
     if (from == to) return value;
+
+    if (is_optional_type(to) && !is_optional_type(from)) {
+        return wrap_in_optional(L, value, to, site);
+    }
 
     value = value_to_place(L, value);
 
@@ -1433,6 +1453,25 @@ static int lower_comparison(Lowerer *L, AstBinary *bin) {
     Type *left  = bin->left->type;
     Type *right = bin->right->type;
 
+    // An optional compared with null, a value or an optional. An empty optional is all zeros, so optionals are equal when their memory is
+    if (is_optional_type(left) || is_optional_type(right)) {
+        AstExpr *optional = is_optional_type(left) ? bin->left : bin->right;
+        AstExpr *other    = optional == bin->left ? bin->right : bin->left;
+        Type    *type     = optional->type;
+
+        int equal;
+        IrAddr a = value_to_place(L, lower_expr(L, optional)).addr;
+        if (is_null_type(other->type)) {
+            int present = emit_load(L, IR_I8, addr_add(a, optional_present_offset(type)));
+            equal = emit_binop(L, IR_XOR, IR_I8, present, emit_const(L, IR_I8, 1));
+        } else {
+            IrAddr b = value_to_place(L, convert_aggregate(L, lower_expr(L, other), type, (Ast *) bin)).addr;
+            equal = emit_values_equal(L, a, b, type);
+        }
+        if (bin->operator == TOKEN_NOT_EQUAL) return emit_binop(L, IR_XOR, IR_I8, equal, emit_const(L, IR_I8, 1));
+        return equal;
+    }
+
     if (left->kind == TYPE_STRUCT && right->kind == TYPE_STRUCT) {
         IrAddr a = value_to_place(L, lower_expr(L, bin->left)).addr;
         IrAddr b = value_to_place(L, lower_expr(L, bin->right)).addr;
@@ -1486,9 +1525,79 @@ static int lower_logical_value(Lowerer *L, AstExpr *expr) {
     return emit_load(L, IR_I8, addr_slot(slot, 0));
 }
 
+// a ?? b: the value of a, or b when a is empty. b is only computed then
+static Value lower_optional_default(Lowerer *L, AstBinary *bin) {
+    Type *type      = bin->head.type;
+    Type *left_type = bin->left->type;
+
+    Value left   = value_to_place(L, lower_expr(L, bin->left));
+    Value result = temp_place(L, type, "?? result");
+
+    IrBlock *has      = create_block(L, "optional.has");
+    IrBlock *fallback = create_block(L, "optional.fallback");
+    IrBlock *done     = create_block(L, "optional.end");
+
+    int present = emit_load(L, IR_I8, addr_add(left.addr, optional_present_offset(left_type)));
+    terminate_br(L, present, has, fallback);
+
+    set_block(L, has);
+    if (is_optional_type(type)) store_value(L, result.addr, type, left, (Ast *) bin);
+    else                        store_value(L, result.addr, type, value_place(left.addr, optional_inner_type(left_type)), (Ast *) bin);
+    terminate_jmp(L, done);
+
+    set_block(L, fallback);
+    store_value(L, result.addr, type, lower_expr(L, bin->right), (Ast *) bin);
+    terminate_jmp(L, done);
+
+    set_block(L, done);
+    return result;
+}
+
+// a?.b or a?.m(x): the access on the value inside a, wrapped in an optional, or an empty optional when a is empty (or a null pointer)
+static Value lower_optional_chain(Lowerer *L, AstOptionalChain *chain) {
+    Type *type       = chain->head.type;
+    bool  has_result = type->kind != TYPE_VOID;
+    Value result     = has_result ? temp_place(L, type, "?. result") : value_none();
+
+    Value left = lower_expr(L, chain->left);
+    Value inside;
+    int present;
+    if (chain->through_pointer) {
+        int ptr = value_to_scalar(L, left);
+        present = emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_PTR, ptr, emit_const(L, IR_PTR, 0));
+        inside  = value_scalar(ptr, chain->value->head.type);
+    } else {
+        left    = value_to_place(L, left);
+        present = emit_load(L, IR_I8, addr_add(left.addr, optional_present_offset(chain->left->type)));
+        inside  = value_place(left.addr, chain->value->head.type);
+    }
+
+    IrBlock *has   = create_block(L, "chain.has");
+    IrBlock *empty = create_block(L, "chain.empty");
+    IrBlock *done  = create_block(L, "chain.end");
+    terminate_br(L, present, has, empty);
+
+    set_block(L, has);
+    void *saved = chain->value->lowered;
+    chain->value->lowered = &inside;
+    Value value = lower_expr(L, chain->inner);
+    chain->value->lowered = saved;
+    if (has_result) store_value(L, result.addr, type, value, (Ast *) chain);
+    terminate_jmp(L, done);
+
+    set_block(L, empty);
+    if (has_result) emit_zero(L, result.addr, type_storage_size(type));
+    terminate_jmp(L, done);
+
+    set_block(L, done);
+    return result;
+}
+
 static Value lower_binary(Lowerer *L, AstBinary *bin) {
     int op = bin->operator;
     Type *type = bin->head.type;
+
+    if (op == TOKEN_DOUBLE_QUESTION) return lower_optional_default(L, bin);
 
     if (op == TOKEN_LOGICAL_AND || op == TOKEN_LOGICAL_OR) {
         return value_scalar(lower_logical_value(L, (AstExpr *) bin), type);
@@ -1781,6 +1890,9 @@ static int type_info_global(Lowerer *L, Type *type) {
         if (struct_type->node->is_union) {
             write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], 1, 4); // UnionFlag in runtime.sd
         }
+        if (is_optional_type(type)) {
+            write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], 2, 4); // OptionalFlag in runtime.sd
+        }
         break;
     }
     default:
@@ -1982,6 +2094,13 @@ static Value lower_expr(Lowerer *L, AstExpr *expr) {
         return function_address(L, (AstFunctionDefn *) expr, expr->type);
     case AST_MEMBER_ACCESS:
         return lower_member_access(L, (AstMemberAccess *) expr);
+    case AST_OPTIONAL_CHAIN:
+        return lower_optional_chain(L, (AstOptionalChain *) expr);
+    case AST_OPTIONAL_VALUE: {
+        AstOptionalValue *value = (AstOptionalValue *) expr;
+        if (value->lowered == NULL) lower_fail(L, (Ast *) expr, "Compiler Error: The value of an optional is used outside its ?.");
+        return *(Value *) value->lowered;
+    }
     case AST_ARRAY_ACCESS:
         return value_place(array_access_addr(L, (AstArrayAccess *) expr), expr->type);
     case AST_ENUM_LITERAL: {

@@ -76,6 +76,8 @@ typedef enum AstKind {
     AST_MEMBER_ACCESS,
     AST_ARRAY_ACCESS,
     AST_LITERAL,
+    AST_OPTIONAL_CHAIN, // a?.b and a?.m(), made by the typer
+    AST_OPTIONAL_VALUE, // The value inside the optional of an AST_OPTIONAL_CHAIN
 } AstKind;
 
 typedef enum OperatorType {     // Here so that operators with the same symbols still can have different enumerations f.x unary minus and binary minus
@@ -111,6 +113,8 @@ typedef enum OperatorType {     // Here so that operators with the same symbols 
     OP_POINTER_DEREFERENCE = 4, // Picked arbitrarily. Should just not conflict with the others
     OP_SPREAD       = TOKEN_TRIPLE_DOT, // Spread operator e.g `foo(...args)`
     OP_AS           = TOKEN_AS,
+    OP_OPTIONAL_DEFAULT = TOKEN_DOUBLE_QUESTION, // a ?? b
+    OP_OPTIONAL_DOT     = TOKEN_QUESTION_DOT,    // a?.b
 } OperatorType;
 
 typedef enum AstFlags {
@@ -606,6 +610,7 @@ typedef struct AstArrayAccess {
 
 typedef enum MemberAccessFlags {
     MEMBER_ACCESS_FLAGS_RHS_IS_FUNCTION_CALL = 1 << 0,  // e.g `myStruct.foo()`. Not set if rhs is a method call
+    MEMBER_ACCESS_FLAGS_OPTIONAL_CHAIN       = 1 << 1,  // a?.b
 } MemberAccessFlags;
 
 typedef enum MemberAccessKind {
@@ -630,6 +635,22 @@ typedef struct AstMemberAccess {
         AstIdentifier *struct_member;
     };
 } AstMemberAccess;
+
+// The value inside an optional (or what a pointer points to) in an AST_OPTIONAL_CHAIN. It is only read when there is one
+typedef struct AstOptionalValue {
+    AstExpr head;
+    void   *lowered; // The place of the value, set by the backend while it lowers the chain
+} AstOptionalValue;
+
+// a?.b or a?.m(x). 'inner' is the access or call with 'value' as its receiver, and the chain is an optional of its type:
+// empty when 'left' is empty (or a null pointer), otherwise inner wrapped in an optional
+typedef struct AstOptionalChain {
+    AstExpr           head;
+    AstExpr          *left;
+    AstOptionalValue *value;
+    AstExpr          *inner;
+    bool              through_pointer; // left is a pointer, not an optional
+} AstOptionalChain;
 
 typedef struct AstUnary {
     AstExpr head;

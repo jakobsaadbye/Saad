@@ -61,6 +61,13 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type);
 Type *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Type *ctx_type);
 Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_type);
 Type *check_member_access(Typer *typer, AstMemberAccess * ma);
+bool  is_optional_type(Type *type);
+Type *optional_inner_type(Type *type);
+int   optional_present_offset(Type *type);
+Type *check_optional_chain(Typer *typer, AstExpr *whole, AstMemberAccess *ma);
+bool  types_fit_either_way(Type *wanted, Type *given);
+static void hint_optional_unwrap(Typer *typer, Type *wanted, Type *given);
+static bool is_null_type(Type *type);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
 Type *check_enum_values(Typer *typer, AstEnum *ast_enum);
@@ -814,6 +821,11 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
             report_error_ast(parser, LABEL_ERROR, (Ast *)(arg), "Type argument cannot be void");
             return NULL;
         }
+        if (instance->is_standard && strcmp(instance->head.name, "Optional") == 0 && is_optional_type(resolved)) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)(instance), "An optional of an optional (%s) is not allowed", type_to_str((Type *)instance));
+            report_error_ast(parser, LABEL_HINT, NULL, "Use %s, which is empty or has a value", type_to_str(resolved));
+            return NULL;
+        }
 
         da_append(&type_args, resolved);
     }
@@ -1127,6 +1139,15 @@ bool bind_type_param(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindin
     }
 
     if (binding->kind == BINDING_TYPED && kind == BINDING_TYPED) {
+        // A T or null fits a ?T, e.g "x" for the value of add on a [..]?string. The other way around, T becomes the optional
+        if (is_optional_type(binding->type) && !is_optional_type(type) && (is_null_type(type) || types_are_identical(optional_inner_type(binding->type), type))) {
+            return true;
+        }
+        if (is_optional_type(type) && !is_optional_type(binding->type) && (is_null_type(binding->type) || types_are_identical(optional_inner_type(type), binding->type))) {
+            binding->type   = type;
+            binding->source = (Ast *)arg;
+            return true;
+        }
         if (!types_are_identical(binding->type, type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Conflicting types for type parameter '%s' of '%s'. This argument to '%s' is of type %s, but an earlier argument made '%s' of type %s",
                 type_param->name, generic->identifier->name, param->name, text_bold(type_to_str(type)), type_param->name, text_bold(type_to_str(binding->type)));
@@ -1195,6 +1216,13 @@ bool unify_types(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindings, 
         return true;
     }
     case TYPE_GENERIC_INSTANCE: {
+        // A T (or null) given for a ?T gives the type of T, e.g 5 for x: ?T
+        TypeGenericInstance *wanted = (TypeGenericInstance *)param_type;
+        if (wanted->is_standard && strcmp(param_type->name, "Optional") == 0 && wanted->type_args.count == 1 && !is_optional_type(arg_type)) {
+            if (is_null_type(arg_type)) return true;
+            return unify_types(typer, generic, bindings, ((Type **)wanted->type_args.items)[0], arg_type, arg, param);
+        }
+
         if (arg_type->kind != TYPE_STRUCT) return true;
 
         AstStruct *instance = ((TypeStruct *)arg_type)->node;
@@ -2755,6 +2783,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
 
             if (!untyped_fits && !types_are_equal(decl->type, value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", ident->name, type_to_str(decl->type), type_to_str(value->type));
+                hint_optional_unwrap(typer, decl->type, value->type);
                 return false;
             }
         }
@@ -3028,11 +3057,69 @@ check_identifiers_vs_values:
     return true;
 }
 
+//
+// Optionals: ?T is Optional<T> from std/prelude/collections.sd
+//
+
+bool is_optional_type(Type *type) {
+    if (type == NULL || type->kind != TYPE_STRUCT) return false;
+    AstStruct *node = ((TypeStruct *)type)->node;
+    if (node == NULL || node->generic_struct == NULL || node->type_args.count != 1) return false;
+    AstStruct *generic = node->generic_struct;
+    if (strcmp(generic->identifier->name, "Optional") != 0) return false;
+
+    // Only the one of the standard collections, not a struct of a program that has the same name
+    AstFile *file = generic->head.file;
+    if (file == NULL || file->absolute_path == NULL) return false;
+    size_t len = strlen(file->absolute_path);
+    const char *suffix = "collections.sd";
+    return len >= strlen(suffix) && strcmp(file->absolute_path + len - strlen(suffix), suffix) == 0;
+}
+
+Type *optional_inner_type(Type *type) {
+    return ((Type **)((TypeStruct *)type)->node->type_args.items)[0];
+}
+
+int optional_present_offset(Type *type) {
+    AstIdentifier *present = get_struct_member(((TypeStruct *)type)->node, "present");
+    return present ? present->member_offset : 0;
+}
+
+static Type *optional_type_of(Typer *typer, Type *inner, Ast *site) {
+    return (Type *)instantiate_standard_collection(typer, "Optional", inner, NULL, site);
+}
+
+// The type of null
+static bool is_null_type(Type *type) {
+    return type->kind == TYPE_POINTER && ((TypePointer *)type)->pointer_to->kind == TYPE_VOID;
+}
+
+// A hint for a ?T given where a T is wanted
+static void hint_optional_unwrap(Typer *typer, Type *wanted, Type *given) {
+    if (wanted && given && is_optional_type(given) && !is_optional_type(wanted)) {
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "It may be empty. Use its value with x ?? fallback, x.valueOr(fallback), or x.value() after checking x.hasValue()");
+    }
+}
+
+// The type given fits the type wanted, or the other way around, as arguments and returns may narrow e.g i64 to i32.
+// But a ?T never goes where a T is wanted, as it may be empty
+bool types_fit_either_way(Type *wanted, Type *given) {
+    if (types_are_equal(wanted, given)) return true;
+    if (is_optional_type(given) && !is_optional_type(wanted)) return false;
+    return types_are_equal(given, wanted);
+}
+
 bool types_are_equal(Type *lhs, Type *rhs) {
     if (lhs->kind == TYPE_NAME || rhs->kind == TYPE_NAME) {
         if (errors_reported()) return false; // e.g the type of a member that has an error
         // Type names should have been resolved at this point
         assert(false && "Comparing an unresolved struct or enum in types_are_equal()"); 
+    }
+
+    // A T or null where a ?T is wanted. The backend wraps it (convert_aggregate)
+    if (is_optional_type(lhs) && !is_optional_type(rhs)) {
+        if (is_null_type(rhs)) return true;
+        return types_are_equal(optional_inner_type(lhs), rhs);
     }
 
     if (is_primitive_type(lhs->kind) && is_primitive_type(rhs->kind)) {
@@ -3139,6 +3226,12 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     Type *lhs_type  = check_expression(typer, assign->lhs, NULL);
     if (!lhs_type) return false;
 
+    if (assign->lhs->replacement && assign->lhs->replacement->head.kind == AST_OPTIONAL_CHAIN) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)assign->lhs, "Can't assign through ?., as there may be nothing to assign to");
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Check that it has a value first, e.g with hasValue()");
+        return false;
+    }
+
     AstFunctionDefn *readonly = readonly_self_place(typer, assign->lhs);
     if (!readonly) readonly = readonly_self_method(typer, assign->lhs);
     if (readonly) {
@@ -3220,6 +3313,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
 
     if (!untyped_fits && !types_are_equal(lhs_type, expr_type)) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Assignment type mismatch. Wanted type %s. Got type %s", type_to_str(lhs_type), type_to_str(expr_type));
+        hint_optional_unwrap(typer, lhs_type, expr_type);
         return false;
     }
 
@@ -3821,7 +3915,7 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
         Type *wanted = ((Type **)ef->return_types.items)[i];
 
         // @Incomplete: Like arguments, return values may both widen (i32 to i64) and narrow (i64 to i32), as existing code depends on narrowing
-        if (!types_are_equal(given, wanted) && !types_are_equal(wanted, given)) {
+        if (!types_fit_either_way(wanted, given)) {
             // Seek to find the corresponding return value that causes the type mismatch
             int      type_index = -1;
             AstExpr *failing_return_value = NULL;
@@ -4613,6 +4707,11 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         return call->head.type;
     }
 
+    // a?.m(x)
+    if (call->expression->head.kind == AST_MEMBER_ACCESS && (((AstMemberAccess *)call->expression)->flags & MEMBER_ACCESS_FLAGS_OPTIONAL_CHAIN)) {
+        return check_optional_chain(typer, (AstExpr *)call, (AstMemberAccess *)call->expression);
+    }
+
     // A qualified function e.g math.sin(x) is called like any other function
     if (call->expression->head.kind == AST_MEMBER_ACCESS) {
         bool failed = false;
@@ -4991,8 +5090,9 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                 }
             }
 
-            if (!types_are_equal(wanted_type, given_type) && !types_are_equal(given_type, wanted_type)) {
+            if (!types_fit_either_way(wanted_type, given_type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(wanted_type)), text_bold(type_to_str(given_type)));
+                hint_optional_unwrap(typer, wanted_type, given_type);
                 if (given_type->kind == TYPE_VARIADIC && ((TypeVariadic *)given_type)->type->kind == wanted_type->kind) {
                     report_error_ast(typer->parser, LABEL_HINT, (Ast *)(arg), "Use ... to spread the variadic argument into the parameter");
                 }
@@ -5120,8 +5220,9 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             }
 
             // @Incomplete: Arguments are allowed to both widen (i32 to i64) and narrow (i64 to i32), as existing code depends on narrowing
-            if (!types_are_equal(param->type, arg->value->type) && !types_are_equal(arg->value->type, param->type)) {
+            if (!types_fit_either_way(param->type, arg->value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg->value->type)));
+                hint_optional_unwrap(typer, param->type, arg->value->type);
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param->decl), "Here is the definition of '%s'", param->name);
                 return NULL;
             }
@@ -6162,6 +6263,11 @@ Type *check_new(Typer *typer, AstNew *ast_new, Type *ctx_type) {
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     Type *result = NULL;
 
+    // Where a ?T is wanted, a T is wanted too, e.g the struct literal in 'p: ?Point = {1, 2}'
+    if (ctx_type && is_optional_type(ctx_type)) ctx_type = optional_inner_type(ctx_type);
+
+    if (expr->head.kind == AST_OPTIONAL_VALUE || expr->head.kind == AST_OPTIONAL_CHAIN) return expr->type; // Made checked by check_optional_chain()
+
     // Only array and member accesses care about being used as a place. Everything below them is checked as a value, unless they say otherwise
     typer->current_place  = typer->checking_place;
     typer->checking_place = false;
@@ -6197,6 +6303,8 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
 }
 
 Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
+    if (ma->flags & MEMBER_ACCESS_FLAGS_OPTIONAL_CHAIN) return check_optional_chain(typer, (AstExpr *)ma, ma);
+
     // A qualified name e.g math.PI or m.Color
     bool failed = false;
     AstIdentifier *qualified = resolve_qualified_name(typer, (AstExpr *)ma, &failed);
@@ -6488,6 +6596,9 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
                 report_error_ast(typer->parser, LABEL_NOTE, NULL, "Slices and fixed size arrays have the members .data and .count");
             }
         }
+        else if (is_optional_type((Type *)struct_type)) {
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "It may be empty. Use ?. for the members of its value, e.g x?.%s, or check hasValue() and use value()", member_name);
+        }
         else {
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_type), "Here is the definition of %s", type_to_str((Type *)struct_type));
         }
@@ -6756,10 +6867,38 @@ Type *biggest_type(Type *lhs, Type *rhs) {
     else                        return rhs;
 }
 
+// a ?? b: the value of the optional a, or b when it is empty. b is only computed when a is empty
+static Type *check_optional_default(Typer *typer, AstBinary *binary, Type *ctx_type) {
+    Parser *parser = typer->parser;
+    Type *left = check_expression(typer, binary->left, ctx_type ? optional_type_of(typer, ctx_type, (Ast *)binary) : NULL);
+    if (!left) return NULL;
+    if (!is_optional_type(left)) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)binary->left, "The left side of ?? must be an optional, but it is a %s", text_bold(type_to_str(left)));
+        report_error_ast(parser, LABEL_HINT, NULL, "?? gives the value of an optional e.g age ?? 0 for an age: ?int");
+        return NULL;
+    }
+
+    Type *inner = optional_inner_type(left);
+    Type *right = check_expression(typer, binary->right, inner);
+    if (!right) return NULL;
+
+    // a ?? b ?? c, where b is an optional too
+    if (is_optional_type(right) && types_are_equal(left, right)) return left;
+
+    if (!types_are_equal(inner, right)) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)binary->right, "The right side of ?? must be a %s like the value of the left side, but it is a %s",
+            text_bold(type_to_str(inner)), text_bold(type_to_str(right)));
+        return NULL;
+    }
+    return inner;
+}
+
 Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
 
     Type *ti_lhs = NULL;
     Type *ti_rhs = NULL;
+
+    if ((int)binary->operator == OP_OPTIONAL_DEFAULT) return check_optional_default(typer, binary, ctx_type);
 
     // Use the type info from the opposite side of an auto-cast to give it a context type
     bool checked_both_sides = false;
@@ -6823,6 +6962,30 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
 
     TypeKind lhs = ti_lhs->kind;
     TypeKind rhs = ti_rhs->kind;
+
+    // Optionals are compared with null, with a value (age == 36 is true when age has the value 36) or with an optional
+    if (is_optional_type(ti_lhs) || is_optional_type(ti_rhs)) {
+        Type *optional = is_optional_type(ti_lhs) ? ti_lhs : ti_rhs;
+        Type *other    = optional == ti_lhs ? ti_rhs : ti_lhs;
+        bool  equality = binary->operator == TOKEN_DOUBLE_EQUAL || binary->operator == TOKEN_NOT_EQUAL;
+
+        if (!equality) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)binary, "Only == and != work on a %s, as it may be empty", text_bold(type_to_str(optional)));
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Use its value, e.g x.value() after checking x.hasValue(), or x ?? 0");
+            return NULL;
+        }
+        if (is_null_type(other) || types_are_equal(optional, other)) {
+            AstIdentifier *bad_member = NULL;
+            if (!is_null_type(other) && !struct_is_comparable((TypeStruct *)optional, &bad_member)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Cannot compare %s with %s, as its value cannot be compared",
+                    text_bold(type_to_str(optional)), binary->operator == TOKEN_DOUBLE_EQUAL ? "==" : "!=");
+                return NULL;
+            }
+            return primitive_type(PRIMITIVE_BOOL);
+        }
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)binary, "Cannot compare a %s with a %s", text_bold(type_to_str(ti_lhs)), text_bold(type_to_str(ti_rhs)));
+        return NULL;
+    }
 
     if (lhs == TYPE_STRUCT && rhs == TYPE_STRUCT) {
         // Structs can be compared member by member with == and !=
@@ -7322,8 +7485,8 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         // Save the resolved identifier on the literal
         literal->as.value.identifier.resolved_identifier = ident;
 
-        // Try and transform the constant identifier into a constant literal
-        if (ident->flags & IDENTIFIER_IS_CONSTANT) {
+        // Try and transform the constant identifier into a constant literal. A type alias (also a type parameter like T) has no value
+        if ((ident->flags & IDENTIFIER_IS_CONSTANT) && !(ident->flags & IDENTIFIER_IS_TYPE_ALIAS)) {
             if (is_primitive_type(ident->type->kind)) {
 
                 if (ident->value->head.kind != AST_LITERAL) {
@@ -7459,4 +7622,77 @@ bool is_untyped_type(Type *type) {
     }
 
     return false;
+}
+// a?.b or a?.m(x), where a is an optional or a pointer. The access is checked on the value inside (an AST_OPTIONAL_VALUE), and the
+// whole is an optional of its type, which is empty when a is. 'whole' is the member access, or the call of a?.m(x)
+Type *check_optional_chain(Typer *typer, AstExpr *whole, AstMemberAccess *ma) {
+    Parser *parser = typer->parser;
+
+    Type *left_type = check_expression(typer, ma->left, NULL);
+    if (!left_type) return NULL;
+
+    bool through_pointer = left_type->kind == TYPE_POINTER;
+    Type *value_type = NULL;
+    if (is_optional_type(left_type)) {
+        value_type = optional_inner_type(left_type);
+    } else if (through_pointer && !is_null_type(left_type)) {
+        value_type = left_type;
+    } else {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)ma->left, "?. is for optionals and pointers, but this is a %s", text_bold(type_to_str(left_type)));
+        report_error_ast(parser, LABEL_HINT, NULL, "Use . instead");
+        return NULL;
+    }
+
+    AstOptionalValue *value = ast_allocate(parser, sizeof(AstOptionalValue));
+    value->head.head        = ma->left->head;
+    value->head.head.kind   = AST_OPTIONAL_VALUE;
+    value->head.head.flags  = AST_FLAG_COMPILER_GENERATED | AST_FLAG_IS_TYPE_CHECKED;
+    value->head.type        = value_type;
+    value->head.replacement = NULL;
+
+    // The same access, on the value inside
+    AstMemberAccess *access = ast_allocate(parser, sizeof(AstMemberAccess));
+    memcpy(access, ma, sizeof(AstMemberAccess));
+    access->left              = (AstExpr *)value;
+    access->flags            &= ~MEMBER_ACCESS_FLAGS_OPTIONAL_CHAIN;
+    access->head.type         = NULL;
+    access->head.replacement  = NULL;
+    access->head.head.flags  &= ~AST_FLAG_IS_TYPE_CHECKED;
+
+    AstExpr *inner = (AstExpr *)access;
+    if (whole->head.kind == AST_FUNCTION_CALL) {
+        AstFunctionCall *call = ast_allocate(parser, sizeof(AstFunctionCall));
+        memcpy(call, whole, sizeof(AstFunctionCall));
+        call->expression        = (AstExpr *)access;
+        call->head.type         = NULL;
+        call->head.replacement  = NULL;
+        call->head.head.flags  &= ~AST_FLAG_IS_TYPE_CHECKED;
+        inner = (AstExpr *)call;
+    }
+
+    Type *inner_type = check_expression(typer, inner, NULL);
+    if (!inner_type) return NULL;
+
+    // A ?.b that is an optional itself stays one optional, e.g user?.nickname for a nickname: ?string. A call that gives nothing gives nothing
+    Type *result = inner_type;
+    if (inner_type->kind != TYPE_VOID && !is_optional_type(inner_type)) {
+        result = optional_type_of(typer, inner_type, (Ast *)whole);
+        if (!result) return NULL;
+    }
+
+    AstOptionalChain *chain = ast_allocate(parser, sizeof(AstOptionalChain));
+    chain->head.head        = whole->head;
+    chain->head.head.kind   = AST_OPTIONAL_CHAIN;
+    chain->head.head.flags  = AST_FLAG_COMPILER_GENERATED | AST_FLAG_IS_TYPE_CHECKED;
+    chain->head.type        = result;
+    chain->head.replacement = NULL;
+    chain->left             = ma->left;
+    chain->value            = value;
+    chain->inner            = inner;
+    chain->through_pointer  = !is_optional_type(left_type);
+
+    whole->replacement = (AstExpr *)chain;
+    whole->head.flags |= AST_FLAG_IS_TYPE_CHECKED;
+    whole->type        = result;
+    return result;
 }

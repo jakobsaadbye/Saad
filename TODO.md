@@ -68,6 +68,13 @@ Future development
   [] Map.remove in O(1) while keeping the order (tombstones)
   [] Decide on implicit narrowing of arguments and return values (i64 to i32 is allowed today)
 
+* Optionals (see docs/optionals.md)
+  [x] ?T, hasValue / value / valueOr, ??, ?. on optionals and pointers, == null and == value
+  [x] fmt, json and db read and write them, tryGet / tryFirst / tryLast / find give them
+  [] value() of an empty optional stops at an assert in collections.sd. A message of its own needs a string literal there,
+     which makes collections.sd import the string prelude while it is parsed, and that breaks the names it uses (e.g free)
+  [] Optional globals that start with a value, e.g count: ?int = 5; at the top level
+
 * Better structs
   [x] Constant members
   [x] Anonymous structs and enums e.g struct { age: int; } {36} and enum { open, closed }.open

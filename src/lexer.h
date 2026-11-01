@@ -77,6 +77,8 @@ typedef enum TokenType {
     TOKEN_CASE         = 179,
     TOKEN_UNION        = 250,
     TOKEN_FAT_ARROW    = 251, // => in a switch expression
+    TOKEN_DOUBLE_QUESTION = 252, // ?? e.g name ?? "anonymous"
+    TOKEN_QUESTION_DOT    = 253, // ?. e.g user?.address
 
     TOKEN_DOUBLE_COLON = 150,
     TOKEN_COLON_EQUAL  = 151,

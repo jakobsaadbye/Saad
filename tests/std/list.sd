@@ -79,11 +79,9 @@ main :: () {
         xs.clear();
         assert(xs.count == 0 && xs.capacity > 0);
 
-        v, ok := xs.tryLast();
-        assert(!ok);
+        assert(xs.tryLast() == null);
         xs.add(42);
-        first, found := xs.tryFirst();
-        assert(found && first == 42);
+        assert(xs.tryFirst() == 42 && xs.tryFirst().value() == 42);
     }
     {
         // Searching

@@ -5,7 +5,7 @@ namespace db;
 //     import db;
 //     import db.postgres;
 //
-//     User :: struct { id: i64; name: string; email: *string; }   // email can be NULL
+//     User :: struct { id: i64; name: string; email: ?string; }   // email can be NULL
 //
 //     conn, err := postgres.connect("host=localhost dbname=app user=postgres");
 //     users, err2 := conn.query<User>("SELECT id, name, email FROM users WHERE id > $1", 10);
@@ -84,10 +84,10 @@ exec :: method (conn: *Connection, sql: string, args: ...any) -> i64, string {
 // A column is read into the member of the same name (see db.Column). Columns that T doesn't have are skipped, and
 // members without a column keep their default value.
 //
-// * NULL leaves a value as it is, except for pointers, which become null. So a column that can be NULL is
-//   read into a pointer, e.g *string, or a value with a default
+// * A column that can be NULL is read into an optional, e.g ?string, which is empty for NULL. NULL into a pointer
+//   is null, and into anything else leaves its value, e.g a default
 // * Columns are read from their text: numbers, bool (t/f or true/false), string, enums (by name or number),
-//   and pointers to them
+//   and optionals and pointers of them
 // * The list, strings and pointers are allocated with conn.allocator
 query :: method <T>(conn: *Connection, sql: string, args: ...any) -> [..]T, string {
     rows: [..]T;
@@ -256,6 +256,21 @@ paramText :: (arg: any) -> *u8, bool {
             if !ok { return null, false; }
             sb.addString(name);
         }
+        case .struct {
+            // An optional: empty is NULL, otherwise its value
+            if !arg.type.isOptional() {
+                return null, false;
+            }
+            value, valueType, present := (arg.type as *TypeStruct).optionalValue(arg.data);
+            if !present {
+                return null, true;
+            }
+            inner: any;
+            inner.type = valueType;
+            inner.data = value;
+            text, ok := paramText(inner);
+            return text, ok;
+        }
         case .pointer {
             // null is NULL, otherwise the value it points to
             pointer := *(arg.data as **void);
@@ -372,7 +387,14 @@ readValue :: method (conn: *Connection, text: *u8, data: *void, type: *Type, col
         if type.kind == .pointer {
             *(data as **void) = null;
         }
+        if type.isOptional() {
+            (type as *TypeStruct).setOptional(data, false);
+        }
         return "";
+    }
+    if type.isOptional() {
+        item, itemType := (type as *TypeStruct).setOptional(data, true);
+        return conn.readValue(text, item, itemType, column);
     }
     value := fromCString(text);
 

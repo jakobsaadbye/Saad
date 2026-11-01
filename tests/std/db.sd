@@ -14,7 +14,8 @@ Post :: struct {
     likes:    u16;
     rating:   f32;
     status:   Status;
-    authorId: *i64;                      // author_id can be NULL
+    authorId: ?i64;                      // author_id can be NULL
+    @db.Column(name: "author_id") authorPointer: *i64;   // NULL is null
     @db.Column(name: "body_text") body: string;
     @db.Column(skip: true) title_upper: string;
     missing: int = 42;
@@ -80,22 +81,27 @@ main :: () {
     first := posts[0];
     assert(first.id == 1 && first.title == "Hello" && first.likes == 65535 && first.rating == 4.5);
     assert(first.status == .published);
-    assert(first.authorId != null && *first.authorId == 7);
+    assert(first.authorId == 7 && first.authorId.value() == 7);
+    assert(first.authorPointer != null && *first.authorPointer == 7);
     assert(first.body == "First post");
     assert(first.title_upper == "");     // Skipped
     assert(first.missing == 42);         // No column
 
     second := posts[1];
     assert(second.status == .draft);     // From its number
-    assert(second.authorId == null);
+    assert(second.authorId == null && !second.authorId.hasValue());
+    assert(second.authorPointer == null);
     assert(second.rating == -1.0 && second.body == "");
 
     // Parameters as text
     tag := "news";
     noTag: *string = null;
-    changed, e1 := conn.exec("UPDATE", 42, -7 as i8, 2.5, true, Status.published, "text", &tag, noTag, 'c');
+    maybe: ?string = "opt";
+    nothing: ?int;
+    changed, e1 := conn.exec("UPDATE", 42, -7 as i8, 2.5, true, Status.published, "text", &tag, noTag, 'c', maybe, nothing);
     assert(e1 == "" && changed == 3);
-    assert(table.lastParams.count == 9);
+    assert(table.lastParams.count == 11);
+    assert(table.lastParams[9] == "opt" && table.lastParams[10] == "NULL");
     assert(table.lastParams[0] == "42" && table.lastParams[1] == "-7" && table.lastParams[2] == "2.5");
     assert(table.lastParams[3] == "true" && table.lastParams[4] == "published" && table.lastParams[5] == "text");
     assert(table.lastParams[6] == "news" && table.lastParams[7] == "NULL" && table.lastParams[8] == "c");
@@ -133,7 +139,7 @@ main :: () {
     conn.allocator = &alloc;
     fromArena, e9 := conn.query<Post>("SELECT");
     assert(e9 == "" && fromArena.count == 2 && fromArena.allocator == &alloc);
-    assert(fromArena[0].title == "Hello" && *fromArena[0].authorId == 7);
+    assert(fromArena[0].title == "Hello" && fromArena[0].authorId == 7 && *fromArena[0].authorPointer == 7);
     assert(arena.used() > 0);
     arena.free();
 

@@ -15,7 +15,7 @@ use c;
 // * Members that are not in the JSON keep their value, so defaults stay. Members of the JSON that the struct doesn't have are skipped
 // * json.Field gives a member another name, and skip: true leaves it alone. The options say how the other names are written,
 //   e.g json.SnakeCase, and if members the struct doesn't have are an error (strict)
-// * A null leaves the value as it is, except for pointers, which become null
+// * A null leaves the value as it is, except for pointers, which become null, and optionals (?T), which become empty
 // * Strings, slices, lists, maps and the values of pointers are allocated with malloc
 // * Enums are read from the name of the value, e.g "open", or its number
 decode :: <T>(text: string, options := Options{}) -> T, string {
@@ -103,12 +103,21 @@ indexPath :: (path: string, index: i64) -> string {
 assign :: (v: Value, data: *void, type: *Type, path: string, options: *Options) -> string {
     kind := type.kind;
 
-    // null leaves the value as it is, but a pointer becomes null
+    // null leaves the value as it is, but a pointer becomes null and an optional empty
     if v.kind == .null {
         if kind == .pointer {
             *(data as **void) = null;
         }
+        if type.isOptional() {
+            (type as *TypeStruct).setOptional(data, false);
+        }
         return "";
+    }
+
+    // An optional, ?T, gets a value of T
+    if type.isOptional() {
+        item, itemType := (type as *TypeStruct).setOptional(data, true);
+        return assign(v, item, itemType, path, options);
     }
 
     switch kind {

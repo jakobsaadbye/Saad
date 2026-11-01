@@ -1,0 +1,6 @@
+// expect-error: The left side of ?? must be an optional, but it is a int
+
+main :: () {
+    x := 5;
+    y := x ?? 0;
+}

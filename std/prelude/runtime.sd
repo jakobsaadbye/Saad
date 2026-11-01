@@ -104,7 +104,8 @@ TypeStruct :: struct {
     alignment: int;
 };
 
-UnionFlag :: 1; // In Type.flags
+UnionFlag    :: 1; // In Type.flags
+OptionalFlag :: 2; // A ?T, which is a struct with the members item: T and present: bool
 
 TypeAny :: struct {
     head: Type;
@@ -182,6 +183,28 @@ attributeOf :: <T>(member: *StructMember, value: *T) -> bool {
 
 isUnion :: method (type: *Type) -> bool {
     return (type.flags & UnionFlag) != 0;
+}
+
+isOptional :: method (type: *Type) -> bool {
+    return (type.flags & OptionalFlag) != 0;
+}
+
+// The value inside the optional (a ?T) stored at data, and its type T. present is false when it is empty
+optionalValue :: method (type: *TypeStruct, data: *void) -> (*void, *Type, bool) {
+    item    := &type.members[0];
+    present := *(type.members[1].valueIn(data) as *bool);
+    return item.valueIn(data), item.type, present;
+}
+
+// Makes the optional at data empty, or present with a zero value. Gives where the value goes and its type
+setOptional :: method (type: *TypeStruct, data: *void, present: bool) -> (*void, *Type) {
+    bytes := data as *u8;
+    for i in 0..type.head.size {
+        bytes[i] = 0;
+    }
+    *(type.members[1].valueIn(data) as *bool) = present;
+    item := &type.members[0];
+    return item.valueIn(data), item.type;
 }
 
 // The variant that the union stored at data holds
