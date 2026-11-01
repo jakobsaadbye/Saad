@@ -5,6 +5,9 @@ A language server for Saad, written in Saad. Any editor with an LSP client can u
 * errors and warnings while typing, also for text that isn't saved
 * go to definition, find references and hover (the signature and the doc comment)
 * the outline of a file, and the symbols of the workspace (Ctrl+T in VS Code)
+* completion: the members after a `.`, and the names in scope
+* signature help: the parameters of the call that is being written
+* semantic highlighting: names colored by what they are, e.g a struct, a field, a parameter or an enum value
 
 The compiler does the work: the server runs `saad index` and answers from what it writes. See `docs/lsp.md`.
 

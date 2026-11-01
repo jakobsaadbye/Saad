@@ -371,6 +371,7 @@ AstFile *parse_file(Parser *parser, char *file_path) {
     file->imports       = da_init(8,  sizeof(AstImport *));
     file->flattened_function_defns = da_init(16, sizeof(AstFunctionDefn *));
     file->referenced_roots = da_init(4, sizeof(char *));
+    file->blocks        = da_init(64, sizeof(AstBlock *));
     file->scope         = new_block(parser, BLOCK_IMPERATIVE);
     file->is_parsed     = false;
 

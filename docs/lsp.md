@@ -24,7 +24,8 @@ editor ── LSP (JSON-RPC over stdin/stdout) ──> lsp/ (Saad)
    reading its output) and `os.args`. See `lsp/README.md`.
 4. **Error recovery** (done): after an error, the parser and the typer go on with the next statement, so the index
    and the errors cover the whole program while the code is being typed. See "Error recovery" below.
-5. Later: completion, signature help, semantic tokens.
+5. **Completion, signature help and semantic tokens** (done): `saad complete` and the index. See below.
+6. Later: rename, go to the definition of a type, code actions, formatting.
 
 ## saad check
 
@@ -145,3 +146,40 @@ One mistake gives one error, and the rest of the program is still checked and in
 names after it are still in the index. `tools/linux/fuzz_recovery.py` breaks real programs in random ways (deleting a
 `}` or `;`, renaming names, cutting files off, junk) and checks that the compiler never crashes and always writes an
 index. Both run in `tools/linux/runtests.sh`.
+
+## saad complete
+
+`saad complete main.sd --at file:line:character` writes what can be written at a position, and the signature of the
+call it is in. The line and the character count from 0, and the character is a byte of the line. It takes `--overlay`
+like `saad index`.
+
+```json
+{"version": 1,
+ "items": [
+  {"label": "radius", "kind": "field", "detail": "f32"},
+  {"label": "area", "kind": "method", "detail": "method (self: *Circle) -> f32", "doc": "The area of the circle"}],
+ "signature": {"label": "grow(by: f32)", "parameters": ["by: f32"], "active": 0}}
+```
+
+The program is checked first, and, as the compiler goes on after errors (phase 4), the code around the position is
+checked even when the line that is being written isn't whole. Then the text before the position says what is wanted
+(src/complete.c):
+
+* After a `.`, the chain before it (`a.b[0].c().`) is followed from the scope at the position: a namespace gives its
+  declarations (the private ones only in the same namespace), a type by its name its static members (the values of an
+  enum, the variants of a union), and a value the members of its type: fields and methods, the methods of the generic
+  struct that aren't made yet for an instance, the methods of strings, numbers and enums, and `count`, `data` and the
+  methods of slices. A pointer is followed to what it points to.
+* Otherwise, the names in scope: the locals declared above the position and the parameters, the declarations and
+  imports of the file, and the keywords.
+* In a call, `signature` is the function of the last `(` that isn't closed, and `active` the argument at the
+  position. A method called on a value doesn't show its receiver.
+
+The scope at a position is the innermost block that has it (`file->blocks`).
+
+## Semantic tokens
+
+The server colors the names of a file by what they are, from the index: every declaration and reference of the file is
+a token, of the type of its symbol (`namespace`, `type`, `struct`, `enum`, `enumMember`, `function`, `method`,
+`property`, `variable`, `parameter` and `typeParameter`). A declaration has the modifier `declaration`, and a constant
+or an enum value `readonly`. Keywords, strings, numbers and comments are left to the grammar of the editor.

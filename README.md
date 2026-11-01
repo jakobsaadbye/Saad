@@ -4,6 +4,14 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.8.4 - 1. Nov 2026
+
+* The language server completes names: the fields and methods after `c.`, the declarations of a namespace after
+  `fmt.`, the values of an enum after `Status.`, and the names in scope. It shows the signature of the call that is
+  being written, and colors the names of the program by what they are (semantic tokens)
+* `saad complete main.sd --at file:line:character` writes what can be written at a position, as JSON for an editor.
+  See `docs/lsp.md`
+
 ## Update v0.8.3 - 1. Nov 2026
 
 * The compiler goes on after an error. A statement with a syntax error is skipped, and so is one that fails to type

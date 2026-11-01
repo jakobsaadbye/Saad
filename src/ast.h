@@ -152,6 +152,7 @@ typedef struct AstFile {
     DynamicArray flattened_function_defns; // of AstFunctionDefn*. A list of all the functions found in this file, both at top-level or inner functions
     bool         is_parsed;
     bool         has_syntax_errors; // Statements with syntax errors were skipped, see skip_failed_statement()
+    DynamicArray blocks;           // of AstBlock*. Every block of the file, to find the scope at a position, see 'saad complete'
     bool         has_imported_builtin_string;
 
     Namespace   *ns;               // The namespace declared with 'namespace a.b;' at the top of the file, or NULL

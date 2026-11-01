@@ -173,6 +173,48 @@ def main():
     m = client.request("textDocument/hover", {"textDocument": doc, "position": position_of(broken, 71, "drawnName")})
     check(m["result"] is not None, "hover below the error")
 
+    print("completion")
+    typing = text.replace("    total += n;", "    total += n;\n    c.\n    c.grow(")
+    client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 20}, "contentChanges": [{"text": typing}]})
+    m = client.request("textDocument/completion", {"textDocument": doc, "position": {"line": 57, "character": 6}})
+    labels = [item["label"] for item in m["result"]]
+    check(labels[:3] == ["radius", "area", "grow"], f"the members of c: {labels}")
+    m = client.request("textDocument/completion", {"textDocument": doc, "position": {"line": 57, "character": 4}})
+    labels = [item["label"] for item in m["result"]]
+    check("total" in labels and "swapped" in labels and "fmt" in labels and "for" in labels, f"the names in scope: {labels[:20]}")
+    check("q" not in labels, "a variable declared below isn't in scope")
+
+    print("signatureHelp")
+    m = client.request("textDocument/signatureHelp", {"textDocument": doc, "position": {"line": 58, "character": 11}})
+    result = m["result"]
+    check(result and result["signatures"][0]["label"] == "grow(by: f32)" and result["activeParameter"] == 0, f"the signature of grow: {result}")
+
+    print("semanticTokens")
+    client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 21}, "contentChanges": [{"text": text}]})
+    m = client.request("textDocument/semanticTokens/full", {"textDocument": doc})
+    data = m["result"]["data"]
+    tokens, line, start = {}, 0, 0
+    for k in range(0, len(data), 5):
+        dl, ds, length, kind, modifiers = data[k:k + 5]
+        start = ds if dl else start + ds
+        line += dl
+        tokens[(line, start)] = (length, kind, modifiers)
+    legend = caps["semanticTokensProvider"]["legend"]["tokenTypes"]
+    def token(line, name, nth=0):
+        p = position_of(text, line, name, nth)
+        t = tokens.get((p["line"], p["character"]))
+        return legend[t[1]] if t else None
+    check(token(51, "Circle") == "struct", f"Circle is a struct: {token(51, 'Circle')}")
+    check(token(51, "radius") == "property", f"radius is a property: {token(51, 'radius')}")
+    check(token(52, "grow") == "method", f"grow is a method: {token(52, 'grow')}")
+    check(token(60, "swapped") == "function", f"swapped is a function: {token(60, 'swapped')}")
+    check(token(54, "open") == "enumMember", f"open is an enum member: {token(54, 'open')}")
+    check(token(38, "c") == "parameter", f"c is a parameter: {token(38, 'c')}")
+    # The diagnostics of the changes above, until the ones of the text as it is again
+    for _ in range(10):
+        if client.diagnostics(uri) == []:
+            break
+
     print("didChange back")
     client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 3}, "contentChanges": [{"text": text}]})
     check(client.diagnostics(uri) == [], "the error is cleared")
