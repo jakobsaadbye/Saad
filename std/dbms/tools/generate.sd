@@ -1,0 +1,66 @@
+// Writes the tables of a Postgres database as Saad files into a folder, e.g
+//
+//     saad run std/dbms/tools/generate.sd -- "host=localhost dbname=shop user=postgres" db
+//     saad run std/dbms/tools/generate.sd -- "host=localhost dbname=shop user=postgres" sales/db sales
+//
+// The arguments are the connection string, the folder, the schema (public when it is left out), and the namespaces of
+// the rows (entities) and of database.sd (database). It writes
+//
+//     db/entity/user.sd    the struct of a row of users, in the namespace entities
+//     db/entity/role.sd    an enum
+//     db/database.sd       the tables, Database and open, in the namespace database
+//
+// so a program has
+//
+//     import database;
+//     use entities;
+//
+//     db := database.open(&conn);
+//     ada, err := db.users.insert(User{name: "Ada"});
+//
+// Make them again when the database changes, instead of changing them: the files of tables that are gone are removed.
+// See docs/dbms.md
+
+import dbms;
+import dbms.postgres;
+import os;
+use fmt;
+
+main :: () {
+    args := os.args();
+    if args.count < 3 {
+        print("Usage: saad run std/dbms/tools/generate.sd -- <connection string> <folder> [schema] [entities namespace] [database namespace]");
+        print("   e.g saad run std/dbms/tools/generate.sd -- \"host=localhost dbname=shop user=postgres\" db");
+        os.exit(2);
+    }
+
+    folder := args[2];
+    options: postgres.GenerateOptions;
+    if args.count > 3 { options.schema = args[3]; }
+    if args.count > 4 { options.entities = args[4]; }
+    if args.count > 5 { options.database = args[5]; }
+
+    conn, err := postgres.connect(args[1]);
+    if err != "" {
+        print("Can't connect: %", err);
+        os.exit(1);
+    }
+
+    files, err2 := postgres.generate(&conn, options);
+    conn.close();
+    if err2 != "" {
+        print("Can't read the tables: %", err2);
+        os.exit(1);
+    }
+
+    removed, err3 := postgres.writeFiles(folder, files);
+    if err3 != "" {
+        print("%", err3);
+        os.exit(1);
+    }
+
+    print("Wrote % files of the schema % to %: the namespaces % and %", files.count, options.schema, folder, options.entities, options.database);
+    for name in removed {
+        print("Removed %, as its table or enum is gone", name);
+    }
+}

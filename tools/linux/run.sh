@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Compiles and runs a Saad program on Linux.
 #
-#   tools/linux/run.sh path/to/program.sd    compile with bin/saad, then run
+#   tools/linux/run.sh path/to/program.sd [args]    compile with bin/saad, then run with the arguments
 #   tools/linux/run.sh path/to/out.o         run a program compiled with 'saad build --elf'
 #   tools/linux/run.sh path/to/out.asm       run generated assembly, assembled with nasm
 #
 # The exit code is the exit code of the program (asserts exit with 1).
-# Requirements: gcc (and nasm for .asm, and libpq-dev for std/db/postgres). Build the compiler first with ./build.sh
+# Requirements: gcc (and nasm for .asm, and libpq-dev for std/dbms/postgres). Build the compiler first with ./build.sh
 set -e
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -47,7 +47,7 @@ if [ -z "$OBJECT" ]; then
     nasm -felf64 --prefix ms_ "$ASM" -o "$TMP/program.o"
     OBJECT="$TMP/program.o"
 fi
-# libpq (std/db/postgres) only for the programs that call it, as it needs libpq-dev
+# libpq (std/dbms/postgres) only for the programs that call it, as it needs libpq-dev
 EXTRA=""
 if nm "$OBJECT" 2>/dev/null | grep -q ' U ms_PQ'; then
     PQ_O="$CACHE/shim_pq.o"
@@ -59,4 +59,4 @@ fi
 gcc -no-pie -z noexecstack "$OBJECT" "$SHIM_O" $EXTRA -o "$TMP/program" -lm
 
 set +e
-timeout 10 "$TMP/program"
+timeout 10 "$TMP/program" "${@:2}"

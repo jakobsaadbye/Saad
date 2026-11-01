@@ -1,0 +1,65 @@
+// std/dbms/postgres/generate.sd writes tests/db/model from the schema of tests/db/shop/setup.sd.
+// After a change of the generator, SAAD_UPDATE_GOLDEN=1 tools/linux/dbtests.sh writes the files again
+
+import dbms;
+import dbms.postgres;
+import shopsetup;
+import os;
+use fmt;
+use c;
+
+Golden :: "tests/db/model";
+
+main :: () {
+    conn, err := postgres.connect(fromCString(getenv(xx "SAAD_TEST_POSTGRES")));
+    assert(err == "");
+    shopsetup.create(&conn);
+
+    options := postgres.GenerateOptions{schema: "saad_shop"};
+    assert(options.entities == "entities" && options.database == "database"); // The default namespaces
+
+    files, err2 := postgres.generate(&conn, options);
+    assert(err2 == "");
+    names := files.map((f: postgres.GeneratedFile) -> string { return f.name; });
+    assert(sprint("%", names) == "[\"entity/order_status.sd\", \"entity/role.sd\", \"entity/category.sd\", \"entity/order_item.sd\", \"entity/order.sd\", \"entity/user.sd\", \"database.sd\"]");
+
+    _, update := os.getEnv("SAAD_UPDATE_GOLDEN");
+    if update {
+        _, e := postgres.writeFiles(Golden, files);
+        assert(e == "");
+        print("Wrote %", Golden);
+        return;
+    }
+
+    for file in files {
+        expected, ok := os.readFile(sprint("%/%", Golden, file.name));
+        if !ok || file.code != expected {
+            os.makeDir("tests/db/build/entity");
+            os.writeFile(sprint("tests/db/build/%", file.name), file.code);
+            print("The generated % isn't the one in % any more. It is in tests/db/build/%", file.name, Golden, file.name);
+            exit(1);
+        }
+    }
+
+    // Writing into a folder: made when it isn't there. A later run removes the files of tables that are gone, but not
+    // files written by hand
+    folder := "tests/db/build/generated";
+    for file in files { os.removeFile(sprint("%/%", folder, file.name)); }
+    _, e1 := postgres.writeFiles(folder, files);
+    assert(e1 == "");
+    assert(os.fileExists(sprint("%/entity/category.sd", folder)));
+    assert(os.writeFile(sprint("%/entity/mine.sd", folder), "namespace entities;\n"));
+
+    fewer := files.filter((f: postgres.GeneratedFile) -> bool { return f.name != "entity/category.sd"; });
+    removed, e2 := postgres.writeFiles(folder, fewer);
+    assert(e2 == "" && removed.count == 1 && removed[0] == "entity/category.sd");
+    assert(!os.fileExists(sprint("%/entity/category.sd", folder)) && os.fileExists(sprint("%/entity/mine.sd", folder)));
+    os.removeFile(sprint("%/entity/mine.sd", folder));
+
+    // A schema that doesn't exist has only a database.sd, with no tables
+    empty, err3 := postgres.generate(&conn, postgres.GenerateOptions{schema: "no_such_schema"});
+    assert(err3 == "" && empty.count == 1 && empty[0].code.indexOf("Database :: struct {\n}") >= 0);
+
+    conn.close();
+    print("generate ok");
+}

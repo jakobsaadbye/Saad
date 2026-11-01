@@ -1,0 +1,91 @@
+// The code that std/dbms/postgres/generate.sd wrote (tests/db/model), used on the database it was written from.
+// The rows are all that is in the namespace entities, so use brings in only them
+
+import dbms;
+import dbms.postgres;
+import database;
+use entities;
+import shopsetup;
+use fmt;
+use c;
+
+// Any table of users: a *UsersTable is a *dbms.Table<User>, through the dbms.KeyedTable it embeds
+rowsOf :: (table: *dbms.Table<User>) -> i64 {
+    n, _ := table.count();
+    return n;
+}
+
+main :: () {
+    conn, err := postgres.connect(fromCString(getenv(xx "SAAD_TEST_POSTGRES")));
+    assert(err == "");
+    shopsetup.create(&conn);
+
+    db := database.open(&conn);
+
+    // Insert gives back what the database made: the key from the serial and created_at from now()
+    ada, e1 := db.users.insert(User{name: "Ada", email: "ada@example.com", age: 36, role: .admin});
+    assert(e1 == "");
+    assert(ada.id == 1 && ada.name == "Ada" && ada.role == .admin);
+    assert(ada.createdAt.len > 0);
+    assert(ada.active && ada.score == 0.0); // The defaults of the database are the defaults of the struct
+
+    bo, e2 := db.users.insert(User{name: "Bo"});
+    assert(e2 == "" && bo.id == 2 && bo.email == null && bo.age == null && bo.role == .guest);
+
+    count, e3 := db.users.count();
+    assert(e3 == "" && count == 2);
+    assert(rowsOf(&db.users) == 2);
+
+    // get gives an optional
+    found, e4 := db.users.get(ada.id);
+    assert(e4 == "" && found?.name == "Ada" && found?.email == "ada@example.com");
+    missing, e5 := db.users.get(99);
+    assert(e5 == "" && missing == null);
+
+    // update writes the row with its key
+    bo.email = "bo@example.com";
+    bo.active = false;
+    changed, e6 := db.users.update(bo);
+    assert(e6 == "" && changed == 1);
+    again, _ := db.users.get(bo.id);
+    assert(again?.email == "bo@example.com" && again?.active == false);
+
+    // Enums, numeric as text, a varchar with a default, and a column named with a keyword
+    order, e7 := db.orders.insert(Order{userId: ada.id, status: .in_transit, total: "12.50", type: "gift"});
+    assert(e7 == "");
+    assert(order.id == 1 && order.status == .in_transit && order.total == "12.50" && order.note == "none" && order.type == "gift");
+
+    // A table with a key of two columns has insert and all
+    _, e8 := db.orderItems.insert(OrderItem{orderId: order.id, product: "tea", quantity: 3});
+    _, e9 := db.orderItems.insert(OrderItem{orderId: order.id, product: "cake"});
+    assert(e8 == "" && e9 == "");
+    items, e10 := db.orderItems.all();
+    assert(e10 == "" && items.count == 2);
+    quantities := items.reduce(0, (sum: int, item: OrderItem) -> int { return sum + item.quantity; });
+    assert(quantities == 4);
+
+    // A text key, and the column "for", which is the member for_
+    category, e11 := db.categories.insert(Category{code: "books", for_: "readers"});
+    assert(e11 == "" && category.code == "books" && category.for_ == "readers" && category.uid == null);
+    books, _ := db.categories.get("books");
+    assert(books?.for_ ?? "" == "readers");
+
+    // delete
+    removed, e12 := db.categories.delete("books");
+    assert(e12 == "" && removed == 1);
+    gone, _ := db.categories.get("books");
+    assert(gone == null);
+
+    // Errors of the database come back as errors, e.g the user of an order must exist
+    _, e13 := db.orders.insert(Order{userId: 999});
+    assert(e13.startsWith("ERROR:") && e13.indexOf("foreign key") >= 0);
+
+    // all, with the methods of lists
+    users, e14 := db.users.all();
+    assert(e14 == "" && users.count == 2);
+    admins := users.filter((u: User) -> bool { return u.role == .admin; }).map((u: User) -> string { return u.name; });
+    assert(admins.count == 1 && admins[0] == "Ada");
+
+    conn.close();
+    print("shop tables ok");
+}

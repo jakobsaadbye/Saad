@@ -170,6 +170,8 @@ static Type *value_type_of(Type *type) {
 }
 
 // The member of a value of the type, e.g a field or a method
+int find_embedded_path(Typer *typer, TypeStruct *type, const char *name, AstIdentifier **path, Ast *site); // typer.c
+
 static AstIdentifier *member_of(Typer *typer, Type *type, const char *name) {
     type = value_type_of(type);
     if (type == NULL) return NULL;
@@ -180,6 +182,15 @@ static AstIdentifier *member_of(Typer *typer, Type *type, const char *name) {
         // The methods of an instance are made when they are used, so one that isn't is a method of the generic struct
         if (!member && node->generic_struct) member = get_struct_method(node->generic_struct, (char *)name);
         if (member) return member;
+
+        // One of an embedded member (@embed)
+        AstIdentifier *path[8];
+        int depth = find_embedded_path(typer, (TypeStruct *)type, name, path, NULL);
+        if (depth > 0) {
+            Type *inner = path[depth - 1]->type;
+            if (inner->kind == TYPE_POINTER) inner = ((TypePointer *)inner)->pointer_to;
+            return member_of(typer, inner, name);
+        }
     }
     TypeStruct *holder = method_holder_of(typer, type);
     if (holder && holder->node) {
@@ -371,6 +382,23 @@ static void add_scope_identifiers(AstBlock *block, DynamicArray *seen) {
 }
 
 // The members of a value of the type: fields and methods. A slice or an array has count, data and the methods on slices
+// The members and methods of the embedded members of a struct (@embed), after its own
+static void add_embedded_members(TypeStruct *type, DynamicArray *seen, int depth) {
+    if (depth > 8) return;
+    DynamicArray members = type->node->members->identifiers;
+    for (int i = 0; i < members.count; i++) {
+        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+        if (!(member->flags & IDENTIFIER_IS_EMBEDDED) || member->type == NULL) continue;
+        Type *embedded = member->type->kind == TYPE_POINTER ? ((TypePointer *)member->type)->pointer_to : member->type;
+        if (embedded->kind != TYPE_STRUCT) continue;
+        AstStruct *node = ((TypeStruct *)embedded)->node;
+        add_scope_identifiers(node->members, seen);
+        add_scope_identifiers(node->methods, seen);
+        if (node->generic_struct) add_scope_identifiers(node->generic_struct->methods, seen);
+        add_embedded_members((TypeStruct *)embedded, seen, depth + 1);
+    }
+}
+
 static void add_members(Typer *typer, Type *type) {
     DynamicArray seen = da_init(32, sizeof(char *));
     type = value_type_of(type);
@@ -386,6 +414,7 @@ static void add_members(Typer *typer, Type *type) {
         }
         add_scope_identifiers(node->methods, &seen);
         if (node->generic_struct) add_scope_identifiers(node->generic_struct->methods, &seen); // The ones that aren't made yet
+        add_embedded_members((TypeStruct *)type, &seen, 0);
     }
     if (type->kind == TYPE_ARRAY) {
         if (!already_added(&seen, "count")) add_item("count", "field", "i64", "The number of elements");

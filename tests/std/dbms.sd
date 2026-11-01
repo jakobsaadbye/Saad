@@ -1,7 +1,7 @@
-// std/db without a database: a driver of its own that answers every query with the same table.
+// std/dbms without a database: a driver of its own that answers every query with the same table.
 // tests/db/postgres.sd tests the Postgres driver with a server
 
-import db;
+import dbms;
 import mem;
 use fmt;
 use c;
@@ -15,9 +15,9 @@ Post :: struct {
     rating:   f32;
     status:   Status;
     authorId: ?i64;                      // author_id can be NULL
-    @db.Column(name: "author_id") authorPointer: *i64;   // NULL is null
-    @db.Column(name: "body_text") body: string;
-    @db.Column(skip: true) title_upper: string;
+    @dbms.Column(name: "author_id") authorPointer: *i64;   // NULL is null
+    @dbms.Column(name: "body_text") body: string;
+    @dbms.Column(skip: true) title_upper: string;
     missing: int = 42;
 }
 
@@ -60,7 +60,7 @@ main :: () {
 
     table := Table{columns: columns, cells: cells.elements()};
 
-    driver: db.Driver;
+    driver: dbms.Driver;
     driver.name        = "fake";
     driver.execute     = fakeExecute;
     driver.rowCount    = fakeRowCount;
@@ -71,7 +71,7 @@ main :: () {
     driver.freeResult  = fakeFreeResult;
     driver.close       = fakeClose;
 
-    conn := db.Connection{driver: &driver, handle: &table};
+    conn := dbms.Connection{driver: &driver, handle: &table};
 
     posts, err := conn.query<Post>("SELECT * FROM posts");
     assert(err == "");

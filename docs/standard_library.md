@@ -8,8 +8,9 @@ std/
     slices.sd       Methods on slices, arrays and lists: sort, reverse, indexOf, contains, ...
     string.sd       The methods of string (slice, split, indexOf, free, ...)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
-  db/           namespace db: run SQL and read rows into structs (see docs/db.md)
-    postgres/       namespace db.postgres: the Postgres driver, through libpq.dll
+  dbms/         namespace dbms: run SQL and read rows into structs, dbms.Table<T> and dbms.KeyedTable<T, K> (see docs/dbms.md)
+    postgres/       namespace dbms.postgres: the Postgres driver, through libpq.dll, and generate() and writeFiles()
+    tools/          generate.sd: writes the tables of a Postgres database as Saad files
   fmt/          namespace fmt: print, sprint and StringBuilder
   io/           namespace io: bytes on stdin, stdout and stderr
   json/         namespace json: encode, decode, parse and json.Value
@@ -83,6 +84,7 @@ os.appendFile("log.txt", "line\n");
 os.fileExists("out.txt");
 os.renameFile("out.txt", "new.txt");
 os.removeFile("new.txt");
+os.makeDir("out");                          // true when it is there afterwards, also when it was there before
 home, found := os.getEnv("HOME");
 code := os.run("echo hi");                  // runs a shell command, returns its exit code
 text, code := os.output("git status");      // runs a shell command, returns what it wrote and its exit code
@@ -241,17 +243,17 @@ value.toJson();
   `toJson`, `clone` and `free`, and is made with `newObject`, `newArray`, `newString`, `newNumber`, `newBool`,
   `newNull`, `put` and `push`.
 
-## db
+## dbms
 
 `users, err := conn.query<User>("SELECT * FROM users WHERE id > $1", 10)` reads rows into structs, `conn.exec` runs
-statements and `conn.queryOne` reads one row or value. `db.postgres` connects to Postgres. See `docs/db.md`.
+statements and `conn.queryOne` reads one row or value. `dbms.postgres` connects to Postgres. See `docs/dbms.md`.
 
 ## math, mem, c
 
 * `math`: the functions of C's `math.h` (`sin`, `sqrt`, `pow`, ...).
 * `mem`: `Arena`, memory that is freed all at once, and the sizes `Kilobyte` and `Megabyte`. The zero value is
   ready to use: `arena.allocate(size)` gives zeroed memory, `arena.allocator()` an `Allocator` for lists, maps and
-  `db.Connection`, and `arena.clear()` and `arena.free()` free all of it.
+  `dbms.Connection`, and `arena.clear()` and `arena.free()` free all of it.
 
 ```odin
 arena: mem.Arena;
@@ -266,6 +268,6 @@ arena.free();
 ## Ideas for later
 
 * `strings` with `contains`, `trim`, `replace`, `join` and a `parseInt`/`parseFloat`.
-* `os.listDir` and `os.makeDir`, and a `path` namespace (`join`, `extension`, `directory`).
+* `os.listDir`, and a `path` namespace (`join`, `extension`, `directory`).
 * `math` functions of its own: `Pi`, `clamp`, `lerp`, `min`/`max`, vectors.
 * `hash` (e.g fnv1a, crc32), `base64` (e.g fnv1a, crc32) and `threads` (a portable layer over `os.windows`).

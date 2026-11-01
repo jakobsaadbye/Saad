@@ -1,0 +1,10 @@
+// Made by std/dbms/tools/generate.sd from the schema saad_shop of a Postgres database. Make it again
+// instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
+namespace entities;
+
+// A row of order_items
+OrderItem :: struct {
+    orderId:  i32;
+    product:  string;
+    quantity: i16 = 1;
+}

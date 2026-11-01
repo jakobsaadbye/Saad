@@ -1,0 +1,39 @@
+// Read-only self is shallow: a method that changes its receiver can be called on a pointer stored in self, as that
+// changes what it points to, not self. And a list of a private type can be used inside its namespace
+
+Counter :: struct {
+    count: int;
+    add :: method * () { self.count += 1; }
+}
+
+Holder :: struct {
+    counter: *Counter;
+
+    // Not 'method *', but it may change the counter it points to
+    bump :: method () {
+        self.counter.add();
+    }
+}
+
+@private
+Secret :: struct { value: int; }
+
+@private
+secrets :: () -> [..]Secret {
+    list: [..]Secret;
+    list.add(Secret{1});
+    list.add(Secret{2});
+    return list;
+}
+
+main :: () {
+    counter: Counter;
+    holder := Holder{counter: &counter};
+    holder.bump();
+    holder.bump();
+    assert(counter.count == 2);
+
+    total := 0;
+    for s in secrets() { total += s.value; }
+    assert(total == 3);
+}

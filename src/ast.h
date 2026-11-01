@@ -224,6 +224,7 @@ typedef enum IdentifierFlags {
     IDENTIFIER_IS_DEPRECATED        = 1 << 14, // @deprecated("message"). Using it gives a warning
     IDENTIFIER_IS_GLOBAL            = 1 << 15, // A variable at the top of a file e.g 'count := 0;'. It lives in the data of the program
     IDENTIFIER_IS_POISONED          = 1 << 16, // Its declaration has errors. Using it fails without another error, so one mistake gives one error
+    IDENTIFIER_IS_EMBEDDED          = 1 << 17, // @embed on a struct member. Its members and methods can be used on the struct it is in
 } IdentifierFlags;
 
 typedef struct AstIdentifier {
@@ -922,6 +923,9 @@ typedef struct CompilerConfig {
     bool               json;               // Write the diagnostics as JSON: 'saad check --json'
     bool               debug;              // Make the program with nasm and gcc, with debug information: 'saad build --debug'
     bool               emit_elf;           // Write ./build/out.o for Linux instead of out.exe: 'saad build --elf' (tools/linux)
+    char              *caller_directory;   // Where saad was started. 'saad run' runs the program there
+    int                program_argc;       // The arguments after '--' of 'saad run main.sd -- a b', for the program
+    const char       **program_argv;
 } CompilerConfig;
 
 typedef struct Relocation {

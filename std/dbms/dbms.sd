@@ -1,9 +1,9 @@
-namespace db;
+namespace dbms;
 
 // Databases: run SQL and read the rows into plain structs, e.g with Postgres
 //
-//     import db;
-//     import db.postgres;
+//     import dbms;
+//     import dbms.postgres;
 //
 //     User :: struct { id: i64; name: string; email: ?string; }   // email can be NULL
 //
@@ -12,8 +12,8 @@ namespace db;
 //     count, err3 := conn.exec("DELETE FROM users WHERE name = $1", "Bob");
 //     conn.close();
 //
-// The namespace only knows the Driver below. A database is a driver of its own (db.postgres), so this folder
-// doesn't depend on any of them. See docs/db.md
+// The namespace only knows the Driver below. A database is a driver of its own (dbms.postgres), so this folder
+// doesn't depend on any of them. See docs/dbms.md
 
 import fmt;
 use c;
@@ -49,20 +49,22 @@ Connection :: struct {
     allocator: *Allocator;
 }
 
-// Gives a struct member another column name, or leaves it out of the rows, e.g
+// Gives a struct member another column name, leaves it out of the rows, or says what the column is, e.g
 //
 //     User :: struct {
-//         id: i64;
-//         @db.Column(name: "mail") email: string;
-//         @db.Column(skip: true)   cache: *Cache;
+//         @dbms.Column(key: true, generated: true) id: i64;
+//         @dbms.Column(name: "mail") email: string;
+//         @dbms.Column(skip: true)   cache: *Cache;
 //     }
 //
 // Without it, a member reads the column of the same name, where case and '_' don't matter: createdAt reads
 // created_at, CreatedAt and createdat
 @attribute
 Column :: struct {
-    name: string;
-    skip: bool = false;
+    name:      string;
+    skip:      bool = false;
+    key:       bool = false; // The primary key, for dbms.Table's get, update and delete
+    generated: bool = false; // Made by the database, e.g a serial id or a default of now(). dbms.Table's insert and update leave it out
 }
 
 // Runs a statement that returns no rows, e.g INSERT, UPDATE or DELETE. Gives the number of rows it changed.
@@ -81,7 +83,7 @@ exec :: method (conn: *Connection, sql: string, args: ...any) -> i64, string {
 //
 //     users, err := conn.query<User>("SELECT * FROM users WHERE age > $1", 30);
 //
-// A column is read into the member of the same name (see db.Column). Columns that T doesn't have are skipped, and
+// A column is read into the member of the same name (see dbms.Column). Columns that T doesn't have are skipped, and
 // members without a column keep their default value.
 //
 // * A column that can be NULL is read into an optional, e.g ?string, which is empty for NULL. NULL into a pointer
@@ -324,7 +326,7 @@ columnsOf :: method (conn: *Connection, result: *void, type: *TypeStruct) -> [..
     return columns;
 }
 
-// The column name of a member, if it was given with db.Column, and if the member is skipped
+// The column name of a member, if it was given with dbms.Column, and if the member is skipped
 @private
 columnOf :: (member: *StructMember) -> string, bool, bool {
     column: Column;

@@ -35,7 +35,17 @@ static int ms_vformat(char *out, size_t out_cap, FILE *f, const char *fmt, __bui
         if (strchr("fFeEgGaA", conv)) { spec[n++] = conv; spec[n] = 0; double d = __builtin_va_arg(ap, double); len = snprintf(buf, sizeof buf, spec, d); }
         else if (strchr("diuxXo", conv)) { spec[n++] = 'l'; spec[n++] = 'l'; spec[n++] = conv; spec[n] = 0; long long v = __builtin_va_arg(ap, long long); len = snprintf(buf, sizeof buf, spec, v); }
         else if (conv == 'c') { spec[n++] = 'c'; spec[n] = 0; long long v = __builtin_va_arg(ap, long long); len = snprintf(buf, sizeof buf, spec, (int)v); }
-        else if (conv == 's') { spec[n++] = 's'; spec[n] = 0; char *s = __builtin_va_arg(ap, char *); len = snprintf(buf, sizeof buf, spec, s); }
+        else if (conv == 's') {
+            spec[n++] = 's'; spec[n] = 0; char *s = __builtin_va_arg(ap, char *);
+            len = snprintf(buf, sizeof buf, spec, s);
+            if (len >= (int) sizeof buf) { // Longer than buf, e.g a whole file
+                char *big = malloc((size_t) len + 1);
+                snprintf(big, (size_t) len + 1, spec, s);
+                EMIT(big, (size_t) len);
+                free(big);
+                continue;
+            }
+        }
         else if (conv == 'p') { void *v = __builtin_va_arg(ap, void *); len = snprintf(buf, sizeof buf, "%016llX", (unsigned long long)(uintptr_t) v); } // Like msvcrt
         else { len = 0; }
         EMIT(buf, (size_t)len);
@@ -78,6 +88,11 @@ MS int     ms_memcmp(const void *a, const void *b, int64_t n) { return memcmp(a,
 #include <time.h>
 #include <unistd.h>
 MS void ms_Sleep(uint32_t ms) { usleep((useconds_t) ms * 1000); }
+#include <sys/stat.h>
+#include <errno.h>
+static uint32_t last_error;
+MS int ms_CreateDirectoryA(const char *path, void *security) { (void) security; int ok = mkdir(path, 0777) == 0; last_error = ok ? 0 : (errno == EEXIST ? 183 : (uint32_t) errno); return ok; }
+MS uint32_t ms_GetLastError(void) { return last_error; }
 MS int  ms_QueryPerformanceCounter(int64_t *c) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); *c = (int64_t) t.tv_sec * 1000000000 + t.tv_nsec; return 1; }
 MS int  ms_QueryPerformanceFrequency(int64_t *f) { *f = 1000000000; return 1; }
 MS void ms_GetSystemTimeAsFileTime(uint64_t *ft) { struct timespec t; clock_gettime(CLOCK_REALTIME, &t); *ft = ((uint64_t) t.tv_sec + 11644473600ULL) * 10000000ULL + (uint64_t) t.tv_nsec / 100; }

@@ -1,0 +1,12 @@
+// An *Ast isn't always in a Binary, so it can't be one without a cast
+// expect-error: Type mismatch
+
+Ast :: struct { kind: int; }
+Binary :: struct { @embed head: Ast; }
+
+takesBinary :: (b: *Binary) {}
+
+main :: () {
+    a: Ast;
+    takesBinary(&a);
+}

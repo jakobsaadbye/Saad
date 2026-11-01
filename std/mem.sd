@@ -4,7 +4,7 @@ namespace mem;
 //
 //     arena: mem.Arena;
 //     p := arena.allocate(64);
-//     alloc := arena.allocator();       // An Allocator for lists, maps and e.g db.Connection
+//     alloc := arena.allocator();       // An Allocator for lists, maps and e.g dbms.Connection
 //     arena.clear();                    // Everything is free to use again
 //     arena.free();
 

@@ -16,7 +16,7 @@ Body :: struct { mass: f64; }
 * Namespaces can use each other, also in a cycle.
 * Files without a `namespace` are standalone, like the main file of a program.
 * The standard library namespaces are top-level: `fmt`, `json`, `math`, `mem`, `os`, `time`, `random`, `c`,
-  `db` and `raylib`, plus `os.windows` and `db.postgres`. A project cannot add files to them. See `docs/standard_library.md`.
+  `dbms` and `raylib`, plus `os.windows` and `dbms.postgres`. A project cannot add files to them. See `docs/standard_library.md`.
 * The prelude (`List`, `Map`, the methods of strings and slices, and the runtime) is always there, without an import.
 
 Before parsing, the compiler scans the folder of the main file (and every folder below it, except hidden
@@ -67,7 +67,8 @@ Slot :: struct { index: int; }
 ```
 
 * Attributes go before a function, method (also inside a struct), struct, enum, constant, type alias or global
-  variable, at the top of a file. Not inside functions.
+  variable, at the top of a file. Not inside functions. A struct member takes `@embed` and the values of attribute
+  structs.
 * Unknown, repeated and misplaced attributes are errors.
 * Structs marked with `@attribute` are attributes of your own, which go on struct members and are read through
   reflection, e.g `@json.Field(name: "id")`. See `docs/reflection.md`.
@@ -77,6 +78,7 @@ Slot :: struct { index: int; }
 | `@private` | Only visible inside its namespace, in any of its files. In a file without a namespace, only inside the file. `use` and imports leave it out. A public function cannot take or return a private type |
 | `@deprecated("message")` | Using it gives a warning with the message. The message is optional |
 | `@attribute` | On a struct: its values can be given to struct members as attributes |
+| `@embed` | On a struct member: its members and methods can be used on the struct it is in. See `docs/embedding.md` |
 
 ## Not done yet
 

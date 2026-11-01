@@ -1,4 +1,4 @@
-// expect-error: The attributes of the language can't be given to struct members yet
+// expect-error: Struct members take @embed and the values of attribute structs, not @private, @deprecated or @attribute
 
 Row :: struct {
     @private

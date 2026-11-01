@@ -1,0 +1,53 @@
+namespace shopsetup;
+
+// The schema saad_shop that tests/db/generate.sd writes as tests/db/model, and tests/db/shop_tables.sd uses
+
+import dbms;
+use fmt;
+use c;
+
+create :: (conn: *dbms.Connection) {
+    statements := [
+        "SET client_min_messages TO warning",
+        "DROP SCHEMA IF EXISTS saad_shop CASCADE",
+        "CREATE SCHEMA saad_shop",
+        "CREATE TYPE saad_shop.role AS ENUM ('guest', 'member', 'admin')",
+        "CREATE TYPE saad_shop.order_status AS ENUM ('open', 'paid', 'in_transit', 'delivered')",
+        "CREATE TABLE saad_shop.users (
+            id         bigserial PRIMARY KEY,
+            name       text NOT NULL,
+            email      text,
+            age        int,
+            role       saad_shop.role NOT NULL DEFAULT 'guest',
+            active     boolean NOT NULL DEFAULT true,
+            score      double precision NOT NULL DEFAULT 0,
+            created_at timestamptz NOT NULL DEFAULT now()
+        )",
+        "CREATE TABLE saad_shop.orders (
+            id       serial PRIMARY KEY,
+            user_id  bigint NOT NULL REFERENCES saad_shop.users(id),
+            status   saad_shop.order_status NOT NULL DEFAULT 'open',
+            total    numeric(10, 2),
+            note     varchar(200) DEFAULT 'none',
+            \"type\" text
+        )",
+        "CREATE TABLE saad_shop.order_items (
+            order_id int NOT NULL REFERENCES saad_shop.orders(id),
+            product  text NOT NULL,
+            quantity smallint NOT NULL DEFAULT 1,
+            PRIMARY KEY (order_id, product)
+        )",
+        "CREATE TABLE saad_shop.categories (
+            code     text PRIMARY KEY,
+            \"for\"  text,
+            uid      uuid
+        )",
+    ];
+    for sql in statements {
+        _, err := conn.exec(sql);
+        if err != "" {
+            print("Setting up the schema failed: %", err);
+            exit(1);
+        }
+    }
+}

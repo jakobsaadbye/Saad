@@ -119,6 +119,14 @@ appendFile :: (path: string, text: string) -> bool {
     return writeToFile(path, text, "ab");
 }
 
+// Makes the folder, if it isn't there. Its parent folder must be there. true when it is there afterwards
+makeDir :: (path: string) -> bool {
+    cPath := path.toCString();
+    made := windows.CreateDirectoryA(cPath, null);
+    free(cPath);
+    return made || windows.GetLastError() == windows.ErrorAlreadyExists;
+}
+
 fileExists :: (path: string) -> bool {
     file := openFile(path, "rb");
     if file == null {

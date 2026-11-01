@@ -1,7 +1,7 @@
-// std/db with Postgres. Needs a server: tools/linux/dbtests.sh starts one and runs this with SAAD_TEST_POSTGRES set
+// std/dbms with Postgres. Needs a server: tools/linux/dbtests.sh starts one and runs this with SAAD_TEST_POSTGRES set
 
-import db;
-import db.postgres;
+import dbms;
+import dbms.postgres;
 import mem;
 use fmt;
 use c;
@@ -17,12 +17,12 @@ User :: struct {
     active:    bool;
     role:      Role;
     createdAt: string;            // created_at
-    @db.Column(name: "nick_name") nick: string;
-    @db.Column(skip: true) cache: int = 7;
+    @dbms.Column(name: "nick_name") nick: string;
+    @dbms.Column(skip: true) cache: int = 7;
 }
 
 // Runs a statement that must work
-run :: (conn: *db.Connection, sql: string) {
+run :: (conn: *dbms.Connection, sql: string) {
     _, err := conn.exec(sql);
     if err != "" {
         print("%", err);

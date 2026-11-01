@@ -931,7 +931,7 @@ bool starts_function_defn_at(Parser *parser, int cursor) {
 
 // The attributes of the language e.g @private and @deprecated("use add instead"). Any other attribute is the value of a struct
 // marked with @attribute e.g @json.Field(name: "id")
-static const char *known_attributes[] = { "private", "deprecated", "attribute" };
+static const char *known_attributes[] = { "private", "deprecated", "attribute", "embed" };
 
 // Parses the attributes in front of a declaration and the declaration, and gives the attributes to the declared identifier
 Ast *parse_attributed_declaration(Parser *parser) {
@@ -940,6 +940,7 @@ Ast *parse_attributed_declaration(Parser *parser) {
     bool  is_private = false;
     bool  is_deprecated = false;
     bool  is_attribute = false;
+    bool  is_embed = false;
     char *deprecated_message = NULL;
     Token first_builtin = {0};
     DynamicArray custom = da_init(1, sizeof(AstStructLiteral *));
@@ -985,13 +986,16 @@ Ast *parse_attributed_declaration(Parser *parser) {
         eat_token(parser);
         if (first_builtin.type == 0) first_builtin = at;
 
-        if ((strcmp(name, "private") == 0 && is_private) || (strcmp(name, "deprecated") == 0 && is_deprecated) || (strcmp(name, "attribute") == 0 && is_attribute)) {
+        if ((strcmp(name, "private") == 0 && is_private) || (strcmp(name, "deprecated") == 0 && is_deprecated) || (strcmp(name, "attribute") == 0 && is_attribute) || (strcmp(name, "embed") == 0 && is_embed)) {
             report_error_range(parser, at.start, name_token.end, "The attribute '@%s' is given more than once", name);
             return NULL;
         }
 
         if (strcmp(name, "attribute") == 0) {
             is_attribute = true;
+        }
+        if (strcmp(name, "embed") == 0) {
+            is_embed = true;
         }
         if (strcmp(name, "private") == 0) {
             is_private = true;
@@ -1049,16 +1053,17 @@ Ast *parse_attributed_declaration(Parser *parser) {
         for (int i = 0; i < decl->idents.count && count < 16; i++) idents[count++] = ((AstIdentifier **)decl->idents.items)[i];
     }
     else if (stmt->kind == AST_DECLARATION && (((AstDeclaration *)stmt)->flags & DECLARATION_IS_STRUCT_MEMBER)) {
-        // A struct member only takes the values of attribute structs
-        if (first_builtin.type != 0) {
-            report_error_token(parser, LABEL_ERROR, first_builtin, "The attributes of the language can't be given to struct members yet");
-            report_error_ast(parser, LABEL_HINT, NULL, "A struct member takes the values of structs marked with @attribute e.g @json.Field(name: \"id\")");
+        // A struct member takes @embed and the values of attribute structs
+        if (is_private || is_deprecated || is_attribute) {
+            report_error_token(parser, LABEL_ERROR, first_builtin, "Struct members take @embed and the values of attribute structs, not @private, @deprecated or @attribute");
+            report_error_ast(parser, LABEL_HINT, NULL, "e.g @embed table: dbms.Table<User>; or @json.Field(name: \"id\")");
             return NULL;
         }
         AstDeclaration *decl = (AstDeclaration *)stmt;
         for (int i = 0; i < decl->idents.count; i++) {
             AstIdentifier *member = ((AstIdentifier **)decl->idents.items)[i];
             member->attributes = custom;
+            if (is_embed) member->flags |= IDENTIFIER_IS_EMBEDDED;
         }
         return stmt;
     }
@@ -1067,10 +1072,14 @@ Ast *parse_attributed_declaration(Parser *parser) {
         return NULL;
     }
 
+    if (is_embed) {
+        report_error_token(parser, LABEL_ERROR, first, "@embed is for struct members, e.g @embed table: dbms.Table<User>;");
+        return NULL;
+    }
     if (custom.count > 0) {
         AstStructLiteral *value = ((AstStructLiteral **)custom.items)[0];
         report_error_ast(parser, LABEL_ERROR, (Ast *)value, "Unknown attribute '@%s'", type_to_str(value->explicit_type));
-        report_error_ast(parser, LABEL_HINT, NULL, "The attributes of the language are @private, @deprecated(\"message\") and @attribute");
+        report_error_ast(parser, LABEL_HINT, NULL, "The attributes of the language are @private, @deprecated(\"message\"), @attribute and @embed");
         report_error_ast(parser, LABEL_NOTE, NULL, "The values of structs marked with @attribute can only be given to struct members");
         return NULL;
     }

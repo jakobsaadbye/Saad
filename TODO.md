@@ -82,7 +82,7 @@ Future development
   [x] Default values
   [] Default values that call functions or are collection literals
   [] Defining inner structs
-  [] Struct embedding (inheritence)
+  [x] Struct embedding with @embed (see docs/embedding.md)
 
 * Global variables
 

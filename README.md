@@ -67,7 +67,8 @@ definition. It needs Node.js (`winget install --id OpenJS.NodeJS.LTS -e`). See [
 ### Commands
 
 ```
-saad run main.sd          # compile and run
+saad run main.sd          # compile and run, in the current folder
+saad run tool.sd -- a b   # arguments after -- are for the program (os.args())
 saad build main.sd        # compile to build\out.exe
 saad check main.sd        # only check for errors
 ```
@@ -76,6 +77,51 @@ saad check main.sd        # only check for errors
 `gdb_guide.md`). On Linux, `./build.sh` builds the compiler, and it makes Windows programs too. See `docs/backend.md`.
 
 # Changelog
+
+## Update v0.9.5 - 1. Nov 2026
+
+* Embedding: `@embed` on a struct member lends its members and methods to the struct it is in, like Go's embedding or
+  the `Ast *` of a C compiler, and a pointer to the struct is a pointer to what it embeds. See `docs/embedding.md`
+
+```odin
+Binary :: struct {
+    @embed head: Ast;
+    left, right: *Ast;
+}
+
+b.line = 3;         // b.head.line
+b.describe();       // b.head.describe()
+check(&b);          // check :: (node: *Ast)
+```
+
+* `std/db` is now `std/dbms` (namespaces `dbms` and `dbms.postgres`), so a program can call its database `db`
+* A generator writes the tables of a Postgres database as Saad files: `entity/<row>.sd` with the struct of each row
+  (`?T` for columns that can be `NULL`, the constant defaults of the database as the defaults of the members) and each
+  enum, in the namespace `entities`, and `database.sd` with the types of the tables, `Database` and `open`, in the
+  namespace `database`. See `docs/dbms.md`
+
+```
+saad run std/dbms/tools/generate.sd -- "host=localhost dbname=shop user=postgres" db
+```
+
+```odin
+import database;
+use entities;
+
+db := database.open(&conn);
+ada, err := db.users.insert(User{name: "Ada", role: .admin});   // with the id the database made
+found, err2 := db.users.get(ada.id);                             // a ?User
+users, err3 := db.users.all();
+```
+
+* `dbms.Table<T>` (`all`, `insert`, `count`) and `dbms.KeyedTable<T, K>` (and `get`, `update`, `delete` with a key of type
+  `K`) work for any struct. The generated tables embed them, and the rows need no attributes
+* `os.makeDir(path)`
+* `saad run main.sd -- a b` gives the program the arguments after `--`, and runs it in the current folder instead of the
+  folder of main.sd
+* Fixes: a list of a private type couldn't be used in its own namespace ("The public function 'add' takes the private
+  type"), a method that changes its receiver couldn't be called on a pointer stored in a read-only self
+  (e.g `self.conn.query()`), and printing more than 4096 characters at once printed garbage in the Linux test harness
 
 ## Update v0.9.4 - 1. Nov 2026
 

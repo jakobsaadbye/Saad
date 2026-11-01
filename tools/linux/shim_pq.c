@@ -1,5 +1,5 @@
 //////////////////////////////////////////////////////////////////////////////////////////
-// Linux test harness: the libpq functions of std/db/postgres as ms_abi wrappers, like shim.c.
+// Linux test harness: the libpq functions of std/dbms/postgres as ms_abi wrappers, like shim.c.
 // run.sh links this (and -lpq) only into programs that call them. Needs libpq-dev
 //////////////////////////////////////////////////////////////////////////////////////////
 #define MS __attribute__((ms_abi))

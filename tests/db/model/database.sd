@@ -1,0 +1,51 @@
+// Made by std/dbms/tools/generate.sd from the schema saad_shop of a Postgres database. Make it again
+// instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
+namespace database;
+
+import dbms;
+use entities;
+
+// Files: entity/order_status.sd, entity/role.sd, entity/category.sd, entity/order_item.sd, entity/order.sd, entity/user.sd, database.sd
+
+// The tables of the schema saad_shop, e.g
+//
+//     db := database.open(&conn);
+//     rows, err := db.categories.all();
+Database :: struct {
+    categories: CategoriesTable;
+    orderItems: OrderItemsTable;
+    orders:     OrdersTable;
+    users:      UsersTable;
+}
+
+// The tables on the connection
+open :: (conn: *dbms.Connection) -> Database {
+    tables: Database;
+    tables.categories.table = dbms.keyedTable<Category, string>(conn, "categories", "code", schema: "saad_shop");
+    tables.orderItems.table = dbms.table<OrderItem>(conn, "order_items", schema: "saad_shop");
+    tables.orders.table     = dbms.keyedTable<Order, i32>(conn, "orders", "id", schema: "saad_shop");
+    tables.users.table      = dbms.keyedTable<User, i64>(conn, "users", "id", schema: "saad_shop");
+    tables.orders.generated = ["id"];
+    tables.users.generated = ["id", "created_at"];
+    return tables;
+}
+
+// The rows of categories: all, get, insert, update, delete and count of dbms.KeyedTable
+CategoriesTable :: struct {
+    @embed table: dbms.KeyedTable<Category, string>;
+}
+
+// The rows of order_items: all, insert and count of dbms.Table. It has no key of one column, so no get, update and delete
+OrderItemsTable :: struct {
+    @embed table: dbms.Table<OrderItem>;
+}
+
+// The rows of orders: all, get, insert, update, delete and count of dbms.KeyedTable
+OrdersTable :: struct {
+    @embed table: dbms.KeyedTable<Order, i32>;
+}
+
+// The rows of users: all, get, insert, update, delete and count of dbms.KeyedTable
+UsersTable :: struct {
+    @embed table: dbms.KeyedTable<User, i64>;
+}

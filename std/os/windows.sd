@@ -78,7 +78,12 @@ extern "kernel32.dll" {
         lpTotalBytesAvail:      *u32,
         lpBytesLeftThisMessage: *u32
     ) -> bool;
+
+    CreateDirectoryA :: (lpPathName: *u8, lpSecurityAttributes: *void) -> bool;
+    GetLastError     :: () -> u32;
 }
+
+ErrorAlreadyExists :: 183; // GetLastError() when CreateDirectoryA is given a folder that is there
 
 // The DWORD values -10, -11 and -12 for GetStdHandle
 StdInputHandle  :: 4294967286;
