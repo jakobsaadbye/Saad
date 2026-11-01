@@ -1,6 +1,25 @@
 # The Saad language server
 
-A language server for Saad, written in Saad. Any editor with an LSP client can use it. It gives:
+A language server for Saad, written in Saad. Any editor with an LSP client can use it, and `lsp/vscode` is the
+extension for VS Code.
+
+**Completion.** The fields and methods after a `.`, then the parameters of the call that is being written:
+
+![Completion of the members of a value, and the signature of the method](images/completion.gif)
+
+**Values from their context.** After `status == .`, `case .`, `x = .` or `f(.`, the values of the enum that is wanted:
+
+![Completion of the values of an enum after ==](images/context.gif)
+
+**Hover.** The signature of a name and the `//` comment above its declaration:
+
+![Hovering a method, a struct and a function of the standard library](images/hover.gif)
+
+The GIFs are drawn by `tools/linux/lsp_demo_gifs.js`: it types in a small program, asks the language server for the
+completions, signatures, hovers and semantic tokens like an editor does, and draws the answers in the colors of VS
+Code's dark theme.
+
+Everything it does:
 
 * errors and warnings while typing, also for text that isn't saved
 * go to definition, find references and hover (the signature and the doc comment)
