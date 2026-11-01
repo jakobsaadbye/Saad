@@ -77,6 +77,29 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.9.1 - 1. Nov 2026
+
+* Characters: `'a'`, `'\n'`, `'\''` and `'\x41'` are the number of the byte. Where a number type is wanted they become it,
+  e.g `ch == ' '` for a `u8`, and otherwise they are a `char`, which prints as the character
+
+```odin
+isDigit :: (c: u8) -> bool { return c >= '0' && c <= '9'; }
+
+value := (ch - '0') as int;
+switch c {
+    case 'a'...'z' { ... }
+    case '\n'     { ... }
+}
+```
+
+* The StringBuilder is ready to use without `newStringBuilder`, and has `addLine`, `addRepeated`, `removeLast`,
+  `endsWith`, `length` and `isEmpty`. `%%` in a format is a `%`. `fmt.join(parts, ", ")` joins strings.
+  `addAnyValue` is now `addValue`. See `docs/standard_library.md`
+* Fixes: `sb.clear()` didn't empty the text, `sb.add()` leaked a list on every call, and a variadic parameter that got
+  no arguments, as the last parameter, had a garbage count
+* A char in a struct prints as `'a'`, so it can be copied back into a program
+* The standard library and the language server use characters instead of tables of constants like `Quote :: 34;`
+
 ## Update v0.9.0 - 1. Nov 2026
 
 * The compiler makes `out.exe` itself, with its own assembler and its own writer of Windows programs. nasm and gcc are no

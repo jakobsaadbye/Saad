@@ -1,0 +1,71 @@
+// Characters: 'a' is the number of the byte. Without a wanted type it is a char, which prints as the character
+
+import fmt;
+
+Token :: struct {
+    kind: char;
+    text: string;
+}
+
+Comma :: ',';
+
+isDigit :: (c: u8) -> bool {
+    return c >= '0' && c <= '9';
+}
+
+classify :: (c: u8) -> string {
+    return switch c {
+        case 'a'...'z' => "lower";
+        case 'A'...'Z' => "upper";
+        case '0'...'9' => "digit";
+        case ' '
+        case '\t'
+        case '\n'      => "space";
+        else           => "other";
+    };
+}
+
+main :: () {
+    // The value of a character is its byte
+    assert('A' == 65 && 'a' == 97 && '0' == 48 && ' ' == 32);
+    assert('\n' == 10 && '\t' == 9 && '\r' == 13 && '\0' == 0);
+    assert('\\' == 92 && '\'' == 39 && '"' == 34 && '\x41' == 'A' && '\x7f' == 127);
+
+    // It becomes the number type it is used as
+    b: u8 = 'b';
+    i: int = 'A';
+    f: f32 = 'A';
+    assert(b == 98 && i == 65 && f == 65.0);
+
+    // Without one it is a char
+    c := 'z';
+    assert(fmt.sprint("%", c) == "z");
+    assert(fmt.sprint("% %", 'o', 'k') == "o k");
+
+    // Digits of a string
+    number := 0;
+    for ch in "x=1234" {
+        if isDigit(ch) {
+            number = number * 10 + (ch - '0') as int;
+        }
+    }
+    assert(number == 1234);
+
+    text := "Hello";
+    assert(text[0] == 'H' && text[4] == 'o');
+    assert(classify('q') == "lower" && classify('Q') == "upper" && classify('7') == "digit");
+    assert(classify('\t') == "space" && classify('!') == "other");
+
+    // In a struct, a char is written in quotes
+    t := Token{kind: '+', text: "plus"};
+    assert(fmt.sprint("%", t) == "Token{kind: '+', text: \"plus\"}");
+    q := Token{kind: '\'', text: ""};
+    assert(fmt.sprint("%", q) == "Token{kind: '\\'', text: \"\"}");
+
+    // A constant
+    sb: fmt.StringBuilder;
+    sb.addChar(Comma);
+    sb.addChar('!');
+    assert(sb.toString() == ",!");
+    sb.free();
+}

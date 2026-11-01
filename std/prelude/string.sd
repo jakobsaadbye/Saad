@@ -48,7 +48,7 @@ toUpper :: method (s: string) -> string {
     result := s.copy();
 
     for c, i in s {
-        if c >= 97 && c <= 122 {
+        if c >= 'a' && c <= 'z' {
             result[i] = c - 32;
         }
     }
@@ -60,7 +60,7 @@ toLower :: method (s: string) -> string {
     result := s.copy();
 
     for c, i in s {
-        if c >= 65 && c <= 90 {
+        if c >= 'A' && c <= 'Z' {
             result[i] = c + 32;
         }
     }

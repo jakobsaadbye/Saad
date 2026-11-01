@@ -30,12 +30,34 @@ get the prelude, as the prelude is built on them.
 ```odin
 fmt.print("% is % years old", name, age);          // with a newline
 fmt.print("no newline", newline: false);
+fmt.print("100%% done");                            // %% is a %
 text := fmt.sprint("Score: %", score);              // like print, but returns the text
 text.free();
-sb := fmt.newStringBuilder(64);
-sb.add("% + % = %", 1, 2, 3);
-text := sb.toString();
+joined := fmt.join(["a", "b", "c"], ", ");          // "a, b, c"
 ```
+
+### StringBuilder
+
+```odin
+sb: fmt.StringBuilder;              // ready to use. fmt.newStringBuilder(1024) starts with room for 1024 bytes
+sb.add("% + % = %", 1, 2, 3);       // formatted like fmt.print
+sb.addLine("total: %", total);      // with a newline after it
+sb.addString(name);
+sb.addChar(',');
+sb.addRepeated(' ', 4);             // e.g indentation
+sb.addValue(person);                // a value like fmt.print writes it
+sb.addQuoted(name);                 // "Ada", with escapes. addQuotedChar('a') is 'a'
+
+for n in numbers { sb.add("%, ", n); }
+sb.removeLast(2);                   // the ", " after the last number
+
+sb.length(); sb.isEmpty(); sb.endsWith("!");
+text := sb.toString();              // the text, not a copy: it changes with the builder. .copy() to keep it
+sb.clear();                         // empty, and keeps its memory for more
+sb.free();
+```
+
+The text of a StringBuilder is always followed by a 0 byte, so `sb.buffer` can be given to C.
 
 Values are written as they are written in Saad, so printed values can be copied back into a program:
 
@@ -46,7 +68,8 @@ fmt.print("%", Shape{circle: Circle{2.0}});     // Shape{circle: Circle{radius: 
 fmt.print("%", "Ada");                          // Ada. A string on its own has no quotes
 ```
 
-Strings in a struct, an array or a union get quotes, with `"`, `\` and newlines escaped. An enum value is `.open`,
+Strings in a struct, an array or a union get quotes, with `"`, `\` and newlines escaped, and a char gets single quotes
+(`'a'`). An enum value is `.open`,
 an anonymous struct `{w: 1.000000, h: 2.000000}`, and the variant without a value of a generic union `.none`.
 
 ## os

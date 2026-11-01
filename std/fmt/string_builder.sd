@@ -5,96 +5,205 @@ use c;
 ////////////////////////////////////////////////////////////////////////////////////
 //   StringBuilder
 ////////////////////////////////////////////////////////////////////////////////////
+
+// Builds up a text, e.g
+//
+//     sb: fmt.StringBuilder;               // Ready to use, or newStringBuilder(capacity) to start with room
+//     sb.add("% items: ", count);          // Formats like fmt.print: each % is the next argument, %% is a %
+//     sb.addLine("total %", total);        // With a newline after it
+//     sb.addChar('[');
+//     sb.addString(name);
+//     text := sb.toString();               // The text, without copying. It changes when the builder does
+//     sb.free();
+//
+// The text is always followed by a 0 byte, so sb.buffer can be given to C.
 StringBuilder :: struct {
-    buffer:    *u8;
-    cursor:    int;
-    capacity:  int;
+    buffer:   *u8;   // The text and a 0 byte, or null before anything is added
+    cursor:   int;   // The length of the text
+    capacity: int;   // The bytes the buffer has room for
 }
 
-newStringBuilder :: (initialCapacity: int) -> StringBuilder {
-    buffer: *u8 = malloc(initialCapacity);
-
-    memset(buffer, 0, initialCapacity);
-
-    return {
-        buffer: buffer,
-        cursor: 0,
-        capacity: initialCapacity,
-    };
+newStringBuilder :: (initialCapacity := 64) -> StringBuilder {
+    sb: StringBuilder;
+    sb.reserve(initialCapacity);
+    return sb;
 }
 
-internalGrow :: method (sb: *StringBuilder, len: int) {
-    newCapacity := sb.capacity * 2;
-    while newCapacity <= sb.cursor + len {
-        newCapacity *= 2;
+// Makes room for the text to grow by at least 'extra' bytes
+reserve :: method (sb: *StringBuilder, extra: int) {
+    needed := sb.cursor + extra + 1; // The text, and its 0 byte
+    if needed <= sb.capacity {
+        return;
+    }
+    capacity := sb.capacity * 2;
+    if capacity < 16 {
+        capacity = 16;
+    }
+    while capacity < needed {
+        capacity *= 2;
     }
 
-    newBuffer: *u8 = realloc(sb.buffer, newCapacity);
-    if newBuffer == null {
-        print("OutOfMemoryException: Failed to reallocate a new buffer for the string builder");
+    buffer := realloc(sb.buffer, capacity) as *u8;
+    if buffer == null {
+        printf("Out of memory: a StringBuilder couldn't grow to %d bytes\n".data, capacity);
         exit(1);
     }
-
-    sb.buffer = newBuffer;
-    sb.capacity = newCapacity;
-
-    memset(&sb.buffer[sb.cursor], 0, newCapacity - sb.cursor);
+    sb.buffer   = buffer;
+    sb.capacity = capacity;
+    sb.buffer[sb.cursor] = 0;
 }
 
-internalAdd :: method (sb: *StringBuilder, strPtr: *u8, len: int) {
-    if sb.cursor + len < sb.capacity {
-        memcpy(&sb.buffer[sb.cursor], strPtr, len);
-        sb.cursor += len;
-    } else {
-        sb.internalGrow(len);
-    
-        // Append the string
-        memcpy(&sb.buffer[sb.cursor], strPtr, len);
-        sb.cursor += len;
+@private
+addBytes :: method (sb: *StringBuilder, bytes: *u8, count: int) {
+    if count <= 0 {
+        return;
     }
+    sb.reserve(count);
+    memcpy(&sb.buffer[sb.cursor], bytes, count);
+    sb.cursor += count;
+    sb.buffer[sb.cursor] = 0;
 }
 
-addStringSlice :: method (sb: *StringBuilder, str: string, start: int, end: int) {
-    strLen := end - start;
-    strPtr := str.data;
-    strPtr = &strPtr[start];
-    sb.internalAdd(strPtr, strLen);
+addString :: method (sb: *StringBuilder, s: string) {
+    sb.addBytes(s.data, s.len as int);
+}
+
+// The part of the string from 'start' to 'end' (not included)
+addStringSlice :: method (sb: *StringBuilder, s: string, start: int, end: int) {
+    sb.addBytes(&s.data[start], end - start);
 }
 
 addChar :: method (sb: *StringBuilder, c: u8) {
-    strLen := 1;
-    strPtr := &c;
-    sb.internalAdd(strPtr, strLen);
+    sb.reserve(1);
+    sb.buffer[sb.cursor] = c;
+    sb.cursor += 1;
+    sb.buffer[sb.cursor] = 0;
 }
 
-addString :: method (sb: *StringBuilder, str: string) {
-    sb.internalAdd(str.data, str.len);
+// The character 'count' times, e.g for indentation
+addRepeated :: method (sb: *StringBuilder, c: u8, count: int) {
+    if count <= 0 {
+        return;
+    }
+    sb.reserve(count);
+    memset(&sb.buffer[sb.cursor], c, count);
+    sb.cursor += count;
+    sb.buffer[sb.cursor] = 0;
 }
+
+// Adds the format with each % replaced by the next argument, written like fmt.print writes it. %% adds a %
+add :: method (sb: *StringBuilder, format: string, args: ...any) {
+    next := 0;   // The next argument
+    start := 0;  // The text since the last %
+    i := 0;
+    while i < format.len {
+        if format[i] != '%' {
+            i += 1;
+            continue;
+        }
+        sb.addStringSlice(format, start, i as int);
+        if i + 1 < format.len && format[i + 1] == '%' {
+            sb.addChar('%');
+            i += 2;
+        } else {
+            if next < args.count {
+                sb.addValue(args[next]);
+                next += 1;
+            } else {
+                sb.addChar('%'); // More % than arguments
+            }
+            i += 1;
+        }
+        start = i as int;
+    }
+    sb.addStringSlice(format, start, format.len as int);
+}
+
+// Like add, with a newline after it
+addLine :: method (sb: *StringBuilder, format: string, args: ...any) {
+    sb.add(format, ...args);
+    sb.addChar('\n');
+}
+
+// The length of the text
+length :: method (sb: StringBuilder) -> int {
+    return sb.cursor;
+}
+
+isEmpty :: method (sb: StringBuilder) -> bool {
+    return sb.cursor == 0;
+}
+
+endsWith :: method (sb: StringBuilder, s: string) -> bool {
+    return sb.toString().endsWith(s);
+}
+
+// Removes the last 'count' bytes, e.g the ", " after the last element of a list
+removeLast :: method (sb: *StringBuilder, count := 1) {
+    if count > sb.cursor {
+        count = sb.cursor;
+    }
+    sb.cursor -= count;
+    if sb.buffer != null {
+        sb.buffer[sb.cursor] = 0;
+    }
+}
+
+// Empties the text, and keeps the buffer for more
+clear :: method (sb: *StringBuilder) {
+    sb.cursor = 0;
+    if sb.buffer != null {
+        sb.buffer[0] = 0;
+    }
+}
+
+// The text, without copying it. It changes with the builder and is gone when it is freed, so copy it with .copy()
+// to keep it after that
+toString :: method (sb: StringBuilder) -> string {
+    s: string;
+    s.data = sb.buffer;
+    s.len  = sb.cursor;
+    return s;
+}
+
+free :: method (sb: *StringBuilder) {
+    free(sb.buffer);
+    sb.buffer   = null;
+    sb.cursor   = 0;
+    sb.capacity = 0;
+}
+
+// The strings with the separator between them, e.g join(["a", "b"], ", ") is "a, b". It is allocated with malloc
+join :: (parts: []string, separator: string) -> string {
+    sb: StringBuilder;
+    for part, i in parts {
+        if i > 0 {
+            sb.addString(separator);
+        }
+        sb.addString(part);
+    }
+    return sb.toString();
+}
+
+////////////////////////////////////////////////////////////////////////////////////
+//   Numbers
+////////////////////////////////////////////////////////////////////////////////////
 
 addFloat32 :: method (sb: *StringBuilder, v: f32) {
-    buf: [18]u8;
+    buf: [32]u8;
     sprintf(buf.data, xx "%f", v);
-
-    str: string;
-    str.data = buf.data as *u8;
-    str.len = strlen(buf.data);
-    sb.internalAdd(str.data, str.len);
+    sb.addBytes(buf.data, strlen(buf.data) as int);
 }
 
 addFloat64 :: method (sb: *StringBuilder, v: f64) {
-    buf: [18]u8;
+    buf: [32]u8;
     sprintf(buf.data, xx "%lf", v);
-
-    str: string;
-    str.data = buf.data as *u8;
-    str.len = strlen(buf.data);
-    sb.internalAdd(str.data, str.len);
+    sb.addBytes(buf.data, strlen(buf.data) as int);
 }
 
 addInt64 :: method (sb: *StringBuilder, v: i64) {
     if v < 0 {
-        sb.addChar(45); // -
-
+        sb.addChar('-');
         // -v overflows for the smallest i64, so v + 1 is negated instead
         sb.addUInt64((-(v + 1)) as u64 + 1);
         return;
@@ -103,43 +212,45 @@ addInt64 :: method (sb: *StringBuilder, v: i64) {
 }
 
 addUInt64 :: method (sb: *StringBuilder, v: u64) {
-    if v == 0 {
-        sb.addChar(48); // 0
-        return;
-    }
-
-    tmp: [32]u8; // enough for 64-bit int
-
+    digits: [20]u8; // Enough for any u64
     n := 0;
-    while v != 0 {
-        digit := v % 10;
-        v = v / 10;
-
-        c := (digit + 48) as u8;
-
-        tmp[n] = c;
+    while true {
+        digits[n] = (v % 10) as u8 + '0';
         n += 1;
+        v = v / 10;
+        if v == 0 {
+            break;
+        }
     }
-
-    // Add the digits in reverse order
+    // The digits are in reverse order
+    sb.reserve(n);
     for i in 0..n {
-        ri := (n - 1) - i;
-        c := tmp[ri];
-        sb.addChar(c);
+        sb.addChar(digits[n - 1 - i]);
     }
 }
 
+////////////////////////////////////////////////////////////////////////////////////
+//   Values, written as in Saad
+////////////////////////////////////////////////////////////////////////////////////
+
 // Adds a value as it is written in Saad, so it can be copied back into a program, e.g Point{x: 1, name: "Ada"}.
-// A string on its own is added as it is, and with quotes when it is in a struct, an array or a union
-addAnyValue :: method (sb: *StringBuilder, arg: any)  {
-    sb.addValue(arg, false);
+// A string or a char on its own is added as it is, and with quotes in a struct, an array or a union
+addValue :: method (sb: *StringBuilder, value: any) {
+    sb.addValueIn(value, false);
+}
+
+@deprecated("Use addValue")
+addAnyValue :: method (sb: *StringBuilder, value: any) {
+    sb.addValueIn(value, false);
 }
 
 @private
-addValue :: method (sb: *StringBuilder, arg: any, inside: bool)  {
+addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
     switch arg.type.kind {
         case .int {
-            sb.addInteger(arg.data, arg.type as *TypePrimitive);
+            prim := arg.type as *TypePrimitive;
+            if inside && prim.kind == .char { sb.addQuotedChar(*(arg.data as *u8)); }
+            else                            { sb.addInteger(arg.data, prim); }
         }
         case .float {
             if arg.type.size == 4 { sb.addFloat32(*(arg.data as *f32)); }
@@ -156,18 +267,14 @@ addValue :: method (sb: *StringBuilder, arg: any, inside: bool)  {
         case .enum {
             enumType := arg.type as *TypeEnum;
             name, ok := enumType.nameOf(enumType.readValue(arg.data));
-            sb.addString(".");
+            sb.addChar('.');
             if ok { sb.addString(name); }
             else  { sb.addString("<invalid>"); }
         }
         case .pointer {
             buf: [64]u8;
             written := sprintf(buf.data, xx "0x%p", *(arg.data as **void));
-
-            str: string;
-            str.data = buf.data;
-            str.len  = written;
-            sb.addString(str);
+            sb.addBytes(buf.data, written);
         }
         case .array {
             sb.addArray(arg.data, arg.type as *TypeArray);
@@ -177,20 +284,18 @@ addValue :: method (sb: *StringBuilder, arg: any, inside: bool)  {
             else                  { sb.addStruct(arg.data, arg.type as *TypeStruct); }
         }
         else {
-            sb.addString("<");
+            sb.addChar('<');
             sb.addString(arg.type.name);
-            sb.addString(">");
+            sb.addChar('>');
         }
     }
 }
 
 addInteger :: method (sb: *StringBuilder, data: *void, type: *TypePrimitive) {
     switch type.kind {
-        case .char {
-            sb.addChar(*(data as *u8));
-        }
-        case .u8  { sb.addUInt64((*(data as *u8)) as u64); }
-        case .u16 { sb.addUInt64((*(data as *u16)) as u64); }
+        case .char { sb.addChar(*(data as *u8)); }
+        case .u8   { sb.addUInt64((*(data as *u8)) as u64); }
+        case .u16  { sb.addUInt64((*(data as *u16)) as u64); }
         case .u32
         case .uint { sb.addUInt64((*(data as *u32)) as u64); }
         case .u64  { sb.addUInt64(*(data as *u64)); }
@@ -213,34 +318,48 @@ addArray :: method (sb: *StringBuilder, data: *void, type: *TypeArray) {
         count    = slice.count;
     }
 
-    sb.addString("[");
+    sb.addChar('[');
     for i in 0..count {
+        if i > 0 {
+            sb.addString(", ");
+        }
         value: any;
         value.type = type.elemType;
         value.data = &elements[i * type.elemType.size];
-        sb.addValue(value, true);
-
-        if i != count - 1 {
-            sb.addString(", ");
-        }
+        sb.addValueIn(value, true);
     }
-    sb.addString("]");
+    sb.addChar(']');
 }
 
-// The string in quotes, with '"', '\\' and the control characters escaped, e.g "say \"hi\"\n"
+// The string in quotes, with '"', '\' and the control characters escaped, e.g "say \"hi\"\n"
 addQuoted :: method (sb: *StringBuilder, s: string) {
-    sb.addChar(Quote);
+    sb.addChar('"');
     for c in s {
-        switch c {
-            case Quote     { sb.addString("\\\""); }
-            case Backslash { sb.addString("\\\\"); }
-            case 10        { sb.addString("\\n"); }
-            case 13        { sb.addString("\\r"); }
-            case 9         { sb.addString("\\t"); }
-            else           { sb.addChar(c); }
+        sb.addEscaped(c, '"');
+    }
+    sb.addChar('"');
+}
+
+// The character in quotes, e.g 'a' or '\n'
+addQuotedChar :: method (sb: *StringBuilder, c: u8) {
+    sb.addChar('\'');
+    sb.addEscaped(c, '\'');
+    sb.addChar('\'');
+}
+
+@private
+addEscaped :: method (sb: *StringBuilder, c: u8, quote: u8) {
+    switch c {
+        case '\\' { sb.addString("\\\\"); }
+        case '\n' { sb.addString("\\n"); }
+        case '\r' { sb.addString("\\r"); }
+        case '\t' { sb.addString("\\t"); }
+        case 0    { sb.addString("\\0"); }
+        else {
+            if c == quote { sb.addChar('\\'); }
+            sb.addChar(c);
         }
     }
-    sb.addChar(Quote);
 }
 
 // The name of a type before a literal. An anonymous struct has none, e.g {w: 1, h: 2}
@@ -251,9 +370,6 @@ addTypeName :: method (sb: *StringBuilder, type: *Type) {
     }
 }
 
-@private Quote     :: 34;
-@private Backslash :: 92;
-
 // Like a literal of the union: Shape{circle: Circle{radius: 2.000000}}, or Shape.empty for a variant without a value.
 // The variant without a value of a generic union is .none, as Option<int>.none can't be written
 addUnion :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
@@ -262,7 +378,7 @@ addUnion :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
         if type.head.name.indexOf("<") < 0 {
             sb.addString(type.head.name);
         }
-        sb.addString(".");
+        sb.addChar('.');
         if variant == null { sb.addString("<invalid>"); }
         else               { sb.addString(variant.name); }
         return;
@@ -271,72 +387,28 @@ addUnion :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
     value.type = variant.type;
     value.data = variant.valueIn(data);
     sb.addTypeName(&type.head);
-    sb.addString("{");
+    sb.addChar('{');
     sb.addString(variant.name);
     sb.addString(": ");
-    sb.addValue(value, true);
-    sb.addString("}");
+    sb.addValueIn(value, true);
+    sb.addChar('}');
 }
 
 // Like a literal of the struct: Point{x: 1, y: 2}
 addStruct :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
     sb.addTypeName(&type.head);
-    sb.addString("{");
+    sb.addChar('{');
     for member, i in type.members {
+        if i > 0 {
+            sb.addString(", ");
+        }
         sb.addString(member.name);
         sb.addString(": ");
 
         value: any;
         value.type = member.type;
         value.data = member.valueIn(data);
-        sb.addValue(value, true);
-
-        if i != type.members.count - 1 {
-            sb.addString(", ");
-        }
+        sb.addValueIn(value, true);
     }
-    sb.addString("}");
-}
-
-add :: method (sb: *StringBuilder, format: string, args: ...any) {
-
-    // Scan the format string to find all the placeholders
-    placeholderIndicies: [..]int;
-    for c, i in format {
-        if c == 37 { // '%'
-            placeholderIndicies.add(i);
-        }
-    }
-
-    // Build up the result string by pasting each segment of the source string
-    cursor := 0;
-    for index, i in placeholderIndicies {
-
-        // Add the static text up untill the placeholder
-        sb.addStringSlice(format, cursor, index);
-
-        // Fill in the placeholder
-        arg := args[i];
-        sb.addAnyValue(arg);
-
-        cursor = index + 1;
-    }
-
-    // Append the trailing part after the last placeholder
-    sb.addStringSlice(format, cursor, format.len);
-}
-
-clear :: method (sb: *StringBuilder) {
-    memset(sb.buffer, 0, sb.capacity);
-}
-
-toString :: method (sb: *StringBuilder) -> string {
-    str: string;
-    str.data = sb.buffer;
-    str.len  = sb.cursor;
-    return str;
-}
-
-free :: method (sb: *StringBuilder) {
-    free(sb.buffer);
+    sb.addChar('}');
 }

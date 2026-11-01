@@ -28,9 +28,9 @@ run :: (command: string) -> int {
 // is put in quotes, and one that starts with a quoted path works: os.output("\"C:/Program Files/tool.exe\" \"my file.txt\"")
 output :: (command: string) -> string, int {
     quoted := malloc(command.len + 3) as *u8;
-    quoted[0] = Quote;
+    quoted[0] = '"';
     memcpy(&quoted[1], command.data, command.len);
-    quoted[command.len + 1] = Quote;
+    quoted[command.len + 1] = '"';
     quoted[command.len + 2] = 0;
 
     mode := "rb";
@@ -84,7 +84,6 @@ readFile :: (path: string) -> string, bool {
     return text, true;
 }
 
-@private Quote :: 34;
 
 // Everything that is left to read of a FILE
 @private

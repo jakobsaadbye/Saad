@@ -393,18 +393,18 @@ writeBits :: (data: *void, size: int, bits: u64) {
 @private
 assignInteger :: (v: Value, data: *void, type: *TypePrimitive, path: string) -> string {
     text := v.text;
-    negative := text.len > 0 && text[0] == Minus;
+    negative := text.len > 0 && text[0] == '-';
 
     magnitude: u64 = 0;
     exact := true;
     for i in 0..text.len {
         ch := text[i];
-        if ch == Minus { continue; }
-        if ch < Zero || ch > Nine {
+        if ch == '-' { continue; }
+        if ch < '0' || ch > '9' {
             exact = false;
             break;
         }
-        digit := (ch - Zero) as u64;
+        digit := (ch - '0') as u64;
         if magnitude > (18446744073709551615 - digit) / 10 {
             return failAt(path, fmt.sprint("% is too big for a %", text, type.head.name));
         }

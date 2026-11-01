@@ -1,0 +1,5 @@
+// expect-error: A character is one byte, and this one takes more
+
+main :: () {
+    c := 'ø';
+}

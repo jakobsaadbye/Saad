@@ -117,8 +117,65 @@ literalTest :: () {
     assert(sprint("%", v) == "Vector3{x: 1.000000, y: 2.000000, z: 3.000000}");
 }
 
+// The StringBuilder: ready without newStringBuilder, and its helpers
+builderTest :: () {
+    sb: StringBuilder;
+    assert(sb.isEmpty() && sb.length() == 0);
+
+    sb.add("% + % = %", 1, 2, 3);
+    assert(sb.toString() == "1 + 2 = 3");
+
+    // %% is a %, and a % without an argument stays
+    sb.clear();
+    assert(sb.isEmpty());
+    sb.add("100%% of %", "it");
+    sb.add(" %");
+    assert(sb.toString() == "100% of it %");
+
+    sb.clear();
+    sb.addLine("a");
+    sb.addLine("b %", 2);
+    assert(sb.toString() == "a\nb 2\n");
+
+    // A list, then the separator after the last element is removed
+    sb.clear();
+    for n in [1, 2, 3] {
+        sb.add("%, ", n);
+    }
+    assert(sb.endsWith(", "));
+    sb.removeLast(2);
+    assert(sb.toString() == "1, 2, 3");
+
+    sb.clear();
+    sb.addRepeated(' ', 4);
+    sb.addChar('x');
+    assert(sb.toString() == "    x" && sb.length() == 5);
+
+    // It grows from nothing, and the text is followed by a 0 byte for C
+    sb.clear();
+    for 0..1000 {
+        sb.addChar('y');
+    }
+    assert(sb.length() == 1000 && sb.buffer[1000] == 0);
+    sb.free();
+    assert(sb.isEmpty());
+
+    parts := ["a", "b", "c"];
+    joined := join(parts, ", ");
+    assert(joined == "a, b, c");
+    empty: []string;
+    assert(join(empty, ", ") == "");
+
+    sb2 := newStringBuilder();
+    sb2.addQuoted("say \"hi\"");
+    sb2.addChar(' ');
+    sb2.addQuotedChar('\n');
+    assert(sb2.toString() == "\"say \\\"hi\\\"\" '\\n'");
+}
+
 main :: () {
     printTest();
     stringBuilderTest();
     literalTest();
+    builderTest();
 }

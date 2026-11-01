@@ -1,0 +1,20 @@
+// A variadic parameter that gets no arguments is an empty slice, also when it is the last parameter
+
+count :: (args: ...any) -> i64 {
+    return args.count;
+}
+
+countAfter :: (first: int, args: ...int) -> i64 {
+    total := 0;
+    for a in args {
+        total += a;
+    }
+    return args.count * 100 + total;
+}
+
+main :: () {
+    assert(count() == 0);
+    assert(count(1, "two", 3.0) == 3);
+    assert(countAfter(7) == 0);
+    assert(countAfter(7, 1, 2) == 203);
+}
