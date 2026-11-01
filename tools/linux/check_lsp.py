@@ -255,12 +255,26 @@ def main():
     check(len(diagnostics) == 1 and "oops8" in diagnostics[0]["message"], f"the error of the last change: {diagnostics}")
     m = client.request("textDocument/hover", {"textDocument": doc, "position": position_of(text, 44, "area")})
     runs = sum("Indexed" in line for line in client.log) - indexed
-    check(runs == 1, f"checked {runs} times for 5 changes")
+    check(runs <= 2, f"checked {runs} times for 5 changes")  # Once, or twice when a change arrives while the first check runs
 
     print("didSave")
     client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 9}, "contentChanges": [{"text": text}]})
     client.notify("textDocument/didSave", {"textDocument": {"uri": uri}})
     check(client.diagnostics_until(uri, lambda d: d == []) == [], "saved without errors")
+
+    print("a file of the standard library")
+    encode = os.path.join(REPO, "std", "json", "encode.sd")
+    encode_text = open(encode).read()
+    encode_uri = uri_of(encode)
+    client.notify("textDocument/didOpen", {"textDocument": {"uri": encode_uri, "languageId": "saad", "version": 1, "text": encode_text}})
+    check(client.diagnostics_until(encode_uri, lambda d: d == []) == [], "no errors in std/json/encode.sd")
+    m = client.request("textDocument/hover", {"textDocument": {"uri": encode_uri}, "position": position_of(encode_text, 36, "encode")})
+    value = m["result"]["contents"]["value"] if m["result"] else ""
+    check("options := Options{}" in value, f"hover of json.encode shows its default: {value!r}")
+    m = client.request("textDocument/documentSymbol", {"textDocument": {"uri": encode_uri}})
+    names = [s["name"] for s in m["result"] or []]
+    check("Writer" in names and "writeAny" in names, f"the outline of encode.sd: {names[:12]}")
+    client.notify("textDocument/didClose", {"textDocument": {"uri": encode_uri}})
 
     print("unknown request")
     m = client.request("textDocument/formatting", {"textDocument": doc, "options": {}})

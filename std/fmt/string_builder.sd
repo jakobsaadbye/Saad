@@ -129,7 +129,14 @@ addUInt64 :: method (sb: *StringBuilder, v: u64) {
     }
 }
 
+// Adds a value as it is written in Saad, so it can be copied back into a program, e.g Point{x: 1, name: "Ada"}.
+// A string on its own is added as it is, and with quotes when it is in a struct, an array or a union
 addAnyValue :: method (sb: *StringBuilder, arg: any)  {
+    sb.addValue(arg, false);
+}
+
+@private
+addValue :: method (sb: *StringBuilder, arg: any, inside: bool)  {
     switch arg.type.kind {
         case .int {
             sb.addInteger(arg.data, arg.type as *TypePrimitive);
@@ -143,7 +150,8 @@ addAnyValue :: method (sb: *StringBuilder, arg: any)  {
             else                    { sb.addString("false"); }
         }
         case .string {
-            sb.addString(*(arg.data as *string));
+            if inside { sb.addQuoted(*(arg.data as *string)); }
+            else      { sb.addString(*(arg.data as *string)); }
         }
         case .enum {
             enumType := arg.type as *TypeEnum;
@@ -210,7 +218,7 @@ addArray :: method (sb: *StringBuilder, data: *void, type: *TypeArray) {
         value: any;
         value.type = type.elemType;
         value.data = &elements[i * type.elemType.size];
-        sb.addAnyValue(value);
+        sb.addValue(value, true);
 
         if i != count - 1 {
             sb.addString(", ");
@@ -219,42 +227,75 @@ addArray :: method (sb: *StringBuilder, data: *void, type: *TypeArray) {
     sb.addString("]");
 }
 
-// .circle(Circle{ radius = 2 }), or .empty for a variant without a value
-addUnion :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
-    variant := type.variantOf(data);
-    sb.addString(".");
-    if variant == null {
-        sb.addString("<invalid>");
-        return;
+// The string in quotes, with '"', '\\' and the control characters escaped, e.g "say \"hi\"\n"
+addQuoted :: method (sb: *StringBuilder, s: string) {
+    sb.addChar(Quote);
+    for c in s {
+        switch c {
+            case Quote     { sb.addString("\\\""); }
+            case Backslash { sb.addString("\\\\"); }
+            case 10        { sb.addString("\\n"); }
+            case 13        { sb.addString("\\r"); }
+            case 9         { sb.addString("\\t"); }
+            else           { sb.addChar(c); }
+        }
     }
-    sb.addString(variant.name);
-    if variant.type.kind != .void {
-        value: any;
-        value.type = variant.type;
-        value.data = variant.valueIn(data);
-        sb.addString("(");
-        sb.addAnyValue(value);
-        sb.addString(")");
+    sb.addChar(Quote);
+}
+
+// The name of a type before a literal. An anonymous struct has none, e.g {w: 1, h: 2}
+@private
+addTypeName :: method (sb: *StringBuilder, type: *Type) {
+    if !type.name.startsWith("struct ") && !type.name.startsWith("union ") {
+        sb.addString(type.name);
     }
 }
 
+@private Quote     :: 34;
+@private Backslash :: 92;
+
+// Like a literal of the union: Shape{circle: Circle{radius: 2.000000}}, or Shape.empty for a variant without a value.
+// The variant without a value of a generic union is .none, as Option<int>.none can't be written
+addUnion :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
+    variant := type.variantOf(data);
+    if variant == null || variant.type.kind == .void {
+        if type.head.name.indexOf("<") < 0 {
+            sb.addString(type.head.name);
+        }
+        sb.addString(".");
+        if variant == null { sb.addString("<invalid>"); }
+        else               { sb.addString(variant.name); }
+        return;
+    }
+    value: any;
+    value.type = variant.type;
+    value.data = variant.valueIn(data);
+    sb.addTypeName(&type.head);
+    sb.addString("{");
+    sb.addString(variant.name);
+    sb.addString(": ");
+    sb.addValue(value, true);
+    sb.addString("}");
+}
+
+// Like a literal of the struct: Point{x: 1, y: 2}
 addStruct :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
-    sb.addString(type.head.name);
-    sb.addString("{ ");
+    sb.addTypeName(&type.head);
+    sb.addString("{");
     for member, i in type.members {
         sb.addString(member.name);
-        sb.addString(" = ");
+        sb.addString(": ");
 
         value: any;
         value.type = member.type;
         value.data = member.valueIn(data);
-        sb.addAnyValue(value);
+        sb.addValue(value, true);
 
         if i != type.members.count - 1 {
             sb.addString(", ");
         }
     }
-    sb.addString(" }");
+    sb.addString("}");
 }
 
 add :: method (sb: *StringBuilder, format: string, args: ...any) {

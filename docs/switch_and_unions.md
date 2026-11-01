@@ -121,7 +121,7 @@ grow :: (s: *Shape) {
   until it is given a value.
 * Unions can be generic, have methods and be in lists and maps like structs. They can't be compared with
   `==`, and their variants can't be read as members, e.g `shape.circle`.
-* `fmt` prints a union like an enum value with its value, e.g `.circle(Circle{ radius = 2 })`, and `std/json`
+* `fmt` prints a union like a literal of it, e.g `Shape{circle: Circle{radius: 2.000000}}` or `Shape.empty`, and `std/json`
   writes it as `"empty"` or `{"circle": {"radius": 2}}`.
 
 ```odin

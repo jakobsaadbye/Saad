@@ -37,6 +37,18 @@ sb.add("% + % = %", 1, 2, 3);
 text := sb.toString();
 ```
 
+Values are written as they are written in Saad, so printed values can be copied back into a program:
+
+```odin
+fmt.print("%", Person{name: "Ada", age: 36});   // Person{name: "Ada", age: 36}
+fmt.print("%", ["a", "b"]);                     // ["a", "b"]
+fmt.print("%", Shape{circle: Circle{2.0}});     // Shape{circle: Circle{radius: 2.000000}}
+fmt.print("%", "Ada");                          // Ada. A string on its own has no quotes
+```
+
+Strings in a struct, an array or a union get quotes, with `"`, `\` and newlines escaped. An enum value is `.open`,
+an anonymous struct `{w: 1.000000, h: 2.000000}`, and the variant without a value of a generic union `.none`.
+
 ## os
 
 ```odin

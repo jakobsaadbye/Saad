@@ -4,6 +4,18 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.8.6 - 1. Nov 2026
+
+* `fmt` prints values as they are written in Saad, so they can be copied back into a program:
+  `Person{name: "Ada", age: 36}` instead of `Person{ name = Ada, age = 36 }`. Strings in structs, arrays and unions
+  get quotes, and a union is printed like a literal of it, e.g `Shape{circle: Circle{radius: 2.000000}}`
+* The language server works in the files of the standard library, e.g `std/json/encode.sd`. A file of the standard
+  library is checked on its own, with its namespace
+* The signature of a function shows a parameter with a default value as it is written, e.g
+  `encode :: <T>(value: T, options := Options{})` instead of `options: ?`, and `newline: bool = true`
+* A file's imports are checked before the other files of its namespace, which can use its declarations
+* Fix: `std/mem.sd` used a variable in its own declaration
+
 ## Update v0.8.5 - 1. Nov 2026
 
 * Completion of `.open` where the type is known: after `status == .`, `x = .`, `x: Status = .`, `case .`, `f(.` and

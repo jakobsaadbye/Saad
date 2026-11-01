@@ -251,6 +251,13 @@ refresh :: (key: string, path: string) {
 
 // The project to answer a question about a file with. It is updated. -1 if there is none
 projectFor :: (key: string, path: string) -> int {
+    // A file of the standard library is its own program. A program that uses it only has the parts it uses in its index
+    if isInStandardLibrary(key) {
+        i := projectOf(path);
+        update(i);
+        return i;
+    }
+
     // A program that has the file, other than the file on its own
     for p, i in projects {
         if p.fileNumber(key) >= 0 && source.keyOf(p.root) != key {
@@ -285,6 +292,16 @@ projectFor :: (key: string, path: string) -> int {
     i := projectOf(path);
     update(i);
     return i;
+}
+
+// If the file is in the standard library, which is the std folder next to the bin folder of the compiler
+isInStandardLibrary :: (key: string) -> bool {
+    bin := source.folderOf(compiler);
+    if bin == "" {
+        return false;  // The compiler is on the PATH, so where it is isn't known
+    }
+    std := source.keyOf(fmt.sprint("%/std/", source.folderOf(bin)));
+    return key.startsWith(std);
 }
 
 // The project with the main file. It is made if there is none

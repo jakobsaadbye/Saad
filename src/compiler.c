@@ -116,6 +116,15 @@ static bool path_has_extension(const char *path, const char *extension) {
     return path_len > ext_len + 1 && path[path_len - ext_len - 1] == '.' && strcmp(path + path_len - ext_len, extension) == 0;
 }
 
+// If the file is in the folder of the standard library
+static bool is_in_stdlib(CompilerConfig *config, const char *path) {
+    char *absolute = get_absolute_path(path);
+    char *stdlib   = get_absolute_path(config->stdlib_path);
+    if (!absolute || !stdlib) return false;
+    size_t length = strlen(stdlib);
+    return strncmp(absolute, stdlib, length) == 0 && (absolute[length] == '/' || absolute[length] == '\\');
+}
+
 static void scan_namespaces(CompilerConfig *config, Parser *parser, const char *dir, bool is_standard, int depth) {
     if (depth > 16) return;
 
@@ -673,7 +682,9 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     report.parse_time_start = clock();
     DynamicArray parsed_files = da_init(8, sizeof(AstFile *));
     scan_namespaces(config, &parser, config->stdlib_path, true, 0);
-    scan_namespaces(config, &parser, directory_of(main_path), false, 0);
+    // The folder of the main file is the project, unless the main file is in the standard library, e.g when an editor
+    // asks about a file of it. That folder was scanned above
+    if (!is_in_stdlib(config, main_path)) scan_namespaces(config, &parser, directory_of(main_path), false, 0);
     if (!parse_all_files(config, &parser, main_path, &parsed_files) || !link_imports(&parser, parsed_files)) {
         cleanup();
         return false;

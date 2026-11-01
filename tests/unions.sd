@@ -119,8 +119,8 @@ main :: () {
     }
     {
         // Printing and reflection
-        assert(fmt.sprint("%", Shape{circle: Circle{2.0}}) == ".circle(Circle{ radius = 2.000000 })");
-        assert(fmt.sprint("%", Shape.empty) == ".empty");
+        assert(fmt.sprint("%", Shape{circle: Circle{2.0}}) == "Shape{circle: Circle{radius: 2.000000}}");
+        assert(fmt.sprint("%", Shape.empty) == "Shape.empty");
 
         s: any = Shape{label: "x"};
         assert(s.type.isUnion());

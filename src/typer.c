@@ -334,6 +334,13 @@ bool check_file(Typer *typer, AstFile *ast_file) {
 
     bool all_ok = register_methods_early(typer, ast_file); // A method with an error is skipped
 
+    // The imports first, as the other files of the namespace, which are checked next, can use declarations of this one
+    // that need them, e.g 'use c;' of std/fmt/print.sd when it is the main file
+    for (int i = 0; i < ast_file->statements.count; i++) {
+        Ast *stmt = ((Ast **)(ast_file->statements.items))[i];
+        if (stmt->kind == AST_IMPORT && !check_statement_and_recover(typer, stmt)) all_ok = false;
+    }
+
     // The other files of the namespace e.g so that their methods are registered
     if (ast_file->ns) {
         Typer saved_state = *typer;
@@ -346,6 +353,7 @@ bool check_file(Typer *typer, AstFile *ast_file) {
     // After an error, the other statements are still checked
     for (int i = 0; i < ast_file->statements.count; i++) {
         Ast *stmt = ((Ast **)(ast_file->statements.items))[i];
+        if (stmt->kind == AST_IMPORT) continue; // Done above
         if (!check_statement_and_recover(typer, stmt)) all_ok = false;
     }
 

@@ -42,8 +42,8 @@ allocate :: method (arena: *Arena, size: int) -> *void {
         newCap *= 2;
     }
 
-    newChunk := newChunk(chunk, newCap);
-    arena.currentChunk = newChunk;
+    next := newChunk(chunk, newCap);
+    arena.currentChunk = next;
 
     return arena.allocate(size);
 }
