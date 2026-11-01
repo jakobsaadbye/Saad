@@ -1,6 +1,6 @@
 {
     "files.associations": {
-        "*.sd": "odin",
+        "*.sd": "saad",
         "*.c": "c",
         "lexer.h": "c",
         "parser.h": "c",
