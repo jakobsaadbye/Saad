@@ -202,6 +202,114 @@ bool import_namespace_siblings(Typer *typer, AstFile *file) {
     return true;
 }
 
+//
+// Going on after an error. When a statement fails, the typer goes back to the state before it and checks the next one,
+// so one mistake doesn't hide the rest of the program from an editor (the index) or from the errors. A declaration that
+// failed is marked, and a name of it without a type is poisoned: using it fails without another error
+//
+
+typedef struct TyperState {
+    AstFile         *current_file;
+    AstBlock        *current_scope;
+    AstFunctionDefn *enclosing_function;
+    EnclosingLoop   *enclosing_loop;
+    DynamicArray     enclosing_function_stack;
+    int              enclosing_function_count;
+    AstDeclaration  *inside_declaration;
+    AstExtern       *inside_extern_block;
+    int              array_literal_depth;
+    bool             checking_callee;
+    bool             checking_place;
+    bool             current_place;
+    bool             checking_member_default;
+    int              struct_check_depth;
+} TyperState;
+
+static TyperState save_typer_state(Typer *typer) {
+    return (TyperState){
+        .current_file             = typer->current_file,
+        .current_scope            = typer->current_scope,
+        .enclosing_function       = typer->enclosing_function,
+        .enclosing_loop           = typer->enclosing_loop,
+        .enclosing_function_stack = typer->enclosing_function_stack,
+        .enclosing_function_count = typer->enclosing_function_stack.count,
+        .inside_declaration       = typer->inside_declaration,
+        .inside_extern_block      = typer->inside_extern_block,
+        .array_literal_depth      = typer->array_literal_depth,
+        .checking_callee          = typer->checking_callee,
+        .checking_place           = typer->checking_place,
+        .current_place            = typer->current_place,
+        .checking_member_default  = typer->checking_member_default,
+        .struct_check_depth       = typer->struct_check_depth,
+    };
+}
+
+static void restore_typer_state(Typer *typer, TyperState *state) {
+    typer->current_file        = state->current_file;
+    typer->current_scope       = state->current_scope;
+    typer->enclosing_function  = state->enclosing_function;
+    typer->enclosing_loop      = state->enclosing_loop;
+    // The stack may have been reallocated, but it is the same stack
+    if (typer->enclosing_function_stack.count > state->enclosing_function_count) typer->enclosing_function_stack.count = state->enclosing_function_count;
+    typer->inside_declaration  = state->inside_declaration;
+    typer->inside_extern_block = state->inside_extern_block;
+    typer->array_literal_depth = state->array_literal_depth;
+    typer->checking_callee     = state->checking_callee;
+    typer->checking_place      = state->checking_place;
+    typer->current_place       = state->current_place;
+    typer->checking_member_default = state->checking_member_default;
+    typer->struct_check_depth  = state->struct_check_depth;
+
+    // @Cleanup @CopyPasta :CopyPasteCurrentFile
+    typer->parser->current_file  = state->current_file;
+    typer->parser->current_scope = state->current_scope;
+}
+
+// Marks a declaration that failed to check. Its names without a type can't be used, e.g a method whose signature has
+// an error. Errors about them not being there (e.g 'm.size()') are not reported either, see is_poisoned_name()
+static void poison_declaration(Parser *parser, AstDeclaration *decl) {
+    decl->head.flags |= AST_FLAG_HAS_ERRORS;
+    for (int i = 0; i < decl->idents.count; i++) {
+        AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+        // A function with a type can still be called, e.g one with an error in its body. Other names can't be used,
+        // e.g 'xs: [..]Thing;' when Thing has an error
+        bool is_function = decl->head.flags & AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN;
+        if (!is_function || ident->type == NULL) ident->flags |= IDENTIFIER_IS_POISONED;
+        if (parser->poisoned_names.capacity == 0) parser->poisoned_names = da_init(16, sizeof(char *));
+        da_append(&parser->poisoned_names, ident->name);
+    }
+}
+
+static void poison_statement(Parser *parser, Ast *stmt) {
+    if (stmt->kind == AST_DECLARATION) poison_declaration(parser, (AstDeclaration *)stmt);
+    else stmt->flags |= AST_FLAG_HAS_ERRORS;
+}
+
+// An error was reported, so an internal error is likely to come from it
+static bool errors_reported(void) {
+    for (int i = 0; i < diagnostics.count; i++) {
+        if (diagnostics.items[i].label == LABEL_ERROR) return true;
+    }
+    return false;
+}
+
+static bool is_poisoned(AstIdentifier *ident) {
+    if (ident->flags & IDENTIFIER_IS_POISONED) return true;
+    return ident->imported_from && (ident->imported_from->flags & IDENTIFIER_IS_POISONED);
+}
+
+// Checks a statement. After an error, the state is as before it, so the next statement can be checked
+static bool check_statement_and_recover(Typer *typer, Ast *stmt) {
+    if (stmt->flags & AST_FLAG_HAS_ERRORS) return false; // Failed when it was checked before e.g by a use of it
+    TyperState state = save_typer_state(typer);
+    bool ok = check_statement(typer, stmt);
+    if (!ok) {
+        restore_typer_state(typer, &state);
+        poison_statement(typer->parser, stmt);
+    }
+    return ok;
+}
+
 bool check_file(Typer *typer, AstFile *ast_file) {
     // Files can use each other, so a file that is being checked is not checked again
     if (ast_file->check_state != 0) return true;
@@ -224,8 +332,7 @@ bool check_file(Typer *typer, AstFile *ast_file) {
         if (!ok) return false;
     }
 
-    bool ok = register_methods_early(typer, ast_file);
-    if (!ok) return false;
+    bool all_ok = register_methods_early(typer, ast_file); // A method with an error is skipped
 
     // The other files of the namespace e.g so that their methods are registered
     if (ast_file->ns) {
@@ -236,20 +343,14 @@ bool check_file(Typer *typer, AstFile *ast_file) {
         if (!siblings_ok) return false;
     }
 
+    // After an error, the other statements are still checked
     for (int i = 0; i < ast_file->statements.count; i++) {
         Ast *stmt = ((Ast **)(ast_file->statements.items))[i];
-        bool ok = check_statement(typer, stmt);
-        if (!ok) {
-
-        #if DEBUG_THERE_WERE_ERRORS
-            report_error_ast(typer->parser, LABEL_ERROR, stmt, "Compiler Error: Something went wrong while typechecking this statement");
-        #endif
-            return false; // @Improvement - Maybe proceed with typechecking if we can still continue after seing the error
-        }
+        if (!check_statement_and_recover(typer, stmt)) all_ok = false;
     }
 
     ast_file->check_state = 2;
-    return true;
+    return all_ok && !ast_file->has_syntax_errors;
 }
 
 void dump_scope_levels(AstBlock *scope) {
@@ -316,10 +417,11 @@ bool check_namespace_files(Typer *typer, Namespace *ns) {
         AstFile *file = ((AstFile **)ns->files.items)[i];
         if (file->check_state != 0) continue;
 
+        // A file with errors still gives its declarations to the namespace. The errors are reported, so the program fails
         Typer current_state = *typer;
-        bool ok = check_file(typer, file);
-        if (!ok) return false;
+        check_file(typer, file);
         typer_restore_state(typer, current_state);
+        typer->enclosing_function_stack = current_state.enclosing_function_stack;
     }
     return true;
 }
@@ -472,7 +574,7 @@ bool check_namespace_import(Typer *typer, AstImport *import) {
     // import math.sin; or import math.sin as s;
     AstIdentifier *target = find_namespace_declaration(ns, import->name);
     if (target == NULL) {
-        report_error_ast(parser, LABEL_ERROR, (Ast *)import, "'%s' is not declared in the namespace '%s'", import->name, ns->name);
+        if (!is_poisoned_name(parser, import->name)) report_error_ast(parser, LABEL_ERROR, (Ast *)import, "'%s' is not declared in the namespace '%s'", import->name, ns->name);
         return false;
     }
     if (!report_if_not_visible(typer, target, (Ast *)import)) return false;
@@ -509,12 +611,11 @@ bool check_import(Typer *typer, AstImport *import) {
     // Go typecheck the imported file
     Typer current_state = *typer;
 
-    bool ok = check_file(typer, import->imported_file);
-    if (!ok) {
-        return false;
-    }
-
+    // A file with errors still gives its declarations, so the file that imports it doesn't get errors for them too
+    check_file(typer, import->imported_file);
     typer_restore_state(typer, current_state);
+    typer->enclosing_function_stack = current_state.enclosing_function_stack;
+    bool ok;
 
     // Copy all the declarations from the imported file into the current files scope
     ok = import_declarations(typer->parser, import, typer->current_file);
@@ -540,16 +641,24 @@ bool check_extern(Typer *typer, AstExtern *ast_extern) {
 }
 
 bool check_block(Typer *typer, AstBlock *block) {
-    bool ok;
-
     typer->current_scope = block;
+
+    // After an error the other statements are still checked, but not in an instance of a generic, which is checked for
+    // each set of type arguments
+    bool all_ok = true;
     for (int i = 0; i < block->statements.count; i++) {
         Ast *stmt = ((Ast **)block->statements.items)[i];
-        ok = check_statement(typer, stmt);
-        if (!ok) return false;
+        if (typer->generic_depth > 0) {
+            if (!check_statement(typer, stmt)) return false;
+            continue;
+        }
+        if (!check_statement_and_recover(typer, stmt)) {
+            all_ok = false;
+            typer->current_scope = block;
+        }
     }
+    if (!all_ok) return false;
     typer->current_scope = block->parent;
-
 
     return true;
 }
@@ -658,7 +767,7 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
         if (ident == NULL && strchr(instance->head.name, '.')) return NULL; // Reported by lookup_type_identifier
     }
     if (ident == NULL) {
-        report_error_ast(parser, LABEL_ERROR, (Ast *)(instance), "Unknown type '%s'", instance->head.name);
+        if (!is_poisoned_name(parser, instance->head.name)) report_error_ast(parser, LABEL_ERROR, (Ast *)(instance), "Unknown type '%s'", instance->head.name);
         return NULL;
     }
 
@@ -1260,7 +1369,7 @@ bool register_generic_method(Typer *typer, AstFunctionDefn *generic) {
 
     AstIdentifier *struct_ident = lookup_from_scope(parser, generic->body->parent, instance->head.name);
     if (struct_ident == NULL) {
-        report_error_ast(parser, LABEL_ERROR, (Ast *)instance, "Unknown type '%s'", instance->head.name);
+        if (!is_poisoned_name(parser, instance->head.name)) report_error_ast(parser, LABEL_ERROR, (Ast *)instance, "Unknown type '%s'", instance->head.name);
         return false;
     }
     if (struct_ident->type == NULL || struct_ident->type->kind != TYPE_STRUCT || ((TypeStruct *)struct_ident->type)->node->type_params.count == 0) {
@@ -1361,25 +1470,38 @@ bool register_method_early(Typer *typer, AstFile *file, AstDeclaration *decl) {
     return true;
 }
 
+// A method that can't be registered is poisoned, and the others are still registered
+static bool register_method_or_poison(Typer *typer, AstFile *file, AstDeclaration *decl) {
+    TyperState state = save_typer_state(typer);
+    if (register_method_early(typer, file, decl)) return true;
+    restore_typer_state(typer, &state);
+    poison_declaration(typer->parser, decl);
+    for (int i = 0; i < decl->idents.count; i++) {
+        AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+        if (typer->parser->poisoned_names.capacity == 0) typer->parser->poisoned_names = da_init(16, sizeof(char *));
+        da_append(&typer->parser->poisoned_names, ident->name); // e.g 'm.size()' of a method size that has an error
+    }
+    return false;
+}
+
 bool register_methods_early(Typer *typer, AstFile *file) {
+    bool all_ok = true;
     for (int i = 0; i < file->statements.count; i++) {
         Ast *stmt = ((Ast **)file->statements.items)[i];
 
         if (stmt->kind == AST_STRUCT) {
             AstStruct *ast_struct = (AstStruct *)stmt;
             for (int j = 0; j < ast_struct->inside_methods.count; j++) {
-                bool ok = register_method_early(typer, file, ((AstDeclaration **)ast_struct->inside_methods.items)[j]);
-                if (!ok) return false;
+                if (!register_method_or_poison(typer, file, ((AstDeclaration **)ast_struct->inside_methods.items)[j])) all_ok = false;
             }
             continue;
         }
 
         if (stmt->kind != AST_DECLARATION || !(stmt->flags & AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN)) continue;
 
-        bool ok = register_method_early(typer, file, (AstDeclaration *)stmt);
-        if (!ok) return false;
+        if (!register_method_or_poison(typer, file, (AstDeclaration *)stmt)) all_ok = false;
     }
-    return true;
+    return all_ok;
 }
 
 // The methods declared inside a struct are checked as if they were declared right after it
@@ -1804,9 +1926,10 @@ Type *resolve_type(Typer *typer, Type *type) {
         AstIdentifier *ident = lookup_type_identifier(typer, type->name, (Ast *)type);
         if (ident == NULL && strchr(type->name, '.')) return NULL; // Reported by lookup_type_identifier
         if (ident == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Unknown type '%s'", type_to_str(type));
+            if (!is_poisoned_name(typer->parser, type->name)) report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "Unknown type '%s'", type_to_str(type));
             return NULL;
         }
+        if (is_poisoned(ident)) return NULL;
         report_if_deprecated(typer, ident, (Ast *)type);
 
         if (ident->flags & IDENTIFIER_IS_AMBIGUOUS) {
@@ -1998,7 +2121,7 @@ unsigned long long max_integer_value(TypePrimitive *type) {
     case PRIMITIVE_I64: return S64_MAX;
     case PRIMITIVE_UNTYPED_INT: return U64_MAX;
     default:
-        printf("Internal compiler error: Unknown type kind %d in max_integer_value()", type->kind);
+        fprintf(stderr, "Internal compiler error: Unknown type kind %d in max_integer_value()", type->kind);
         return U64_MAX;
     }
 }
@@ -2128,6 +2251,7 @@ TypeTuple *make_tuple_type_from_type_list(Typer *typer, DynamicArray types) {
 }
 
 void reserve_space_for_runtime_any_value(Typer *typer, Type *value_type) {
+    if (typer->enclosing_function == NULL) return; // e.g a global variable 'a: any = ...', which is an error as it isn't constant
 
     // 16 bytes for preserving the destination address + value across a function call
     reserve_temporary_storage(typer->enclosing_function, 16);
@@ -2354,7 +2478,7 @@ AstIdentifier *resolve_qualified_name(Typer *typer, AstExpr *expr, bool *failed)
 
     AstIdentifier *ident = find_namespace_declaration(ns, names[count - 1]);
     if (ident == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "'%s' is not declared in the namespace '%s'", names[count - 1], ns->name);
+        if (!is_poisoned_name(typer->parser, names[count - 1])) report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "'%s' is not declared in the namespace '%s'", names[count - 1], ns->name);
         *failed = true;
         return NULL;
     }
@@ -2391,7 +2515,7 @@ AstIdentifier *lookup_type_identifier(Typer *typer, char *name, Ast *site) {
 
     AstIdentifier *ident = find_namespace_declaration(ns, names[count - 1]);
     if (ident == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, site, "'%s' is not declared in the namespace '%s'", names[count - 1], ns->name);
+        if (!is_poisoned_name(typer->parser, names[count - 1])) report_error_ast(typer->parser, LABEL_ERROR, site, "'%s' is not declared in the namespace '%s'", names[count - 1], ns->name);
         return NULL;
     }
     if (!report_if_not_visible(typer, ident, site)) return NULL;
@@ -2442,6 +2566,7 @@ bool identifier_is_type(AstIdentifier *ident) {
 // Checks the declaration of an identifier from where it is declared, if it has not been checked yet e.g a type alias declared further down
 bool check_declaration_of(Typer *typer, AstIdentifier *ident) {
     if (ident->decl == NULL || (ident->decl->head.flags & AST_FLAG_IS_TYPE_CHECKED)) return true;
+    if (ident->decl->head.flags & AST_FLAG_HAS_ERRORS) return ident->type != NULL && !is_poisoned(ident); // Reported when it was checked
 
     Typer saved_state = *typer;
     typer->current_scope = ident->scope ? ident->scope : typer->current_scope;
@@ -2455,6 +2580,7 @@ bool check_declaration_of(Typer *typer, AstIdentifier *ident) {
     }
 
     bool ok = check_declaration(typer, ident->decl);
+    if (!ok) poison_declaration(typer->parser, ident->decl);
 
     DynamicArray stack = typer->enclosing_function_stack; // Might have been reallocated while checking
     typer_restore_state(typer, saved_state);
@@ -2802,6 +2928,14 @@ check_identifiers_vs_values:
         return true;
     } else {
         // A global variable e.g 'count := 0;'. It lives in the data of the program, so its start value is written there when compiling
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+            if (ident->type && ident->type->kind == TYPE_ANY) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ident, "A global variable can't be of type any yet");
+                report_error_ast(typer->parser, LABEL_HINT, NULL, "Give it the type of its value, or make it a local variable");
+                return false;
+            }
+        }
         for (int i = 0; i < decl->values.count; i++) {
             AstExpr *value = ((AstExpr **)decl->values.items)[i];
             if (!is_constant_value(value)) {
@@ -2822,6 +2956,7 @@ check_identifiers_vs_values:
 
 bool types_are_equal(Type *lhs, Type *rhs) {
     if (lhs->kind == TYPE_NAME || rhs->kind == TYPE_NAME) {
+        if (errors_reported()) return false; // e.g the type of a member that has an error
         // Type names should have been resolved at this point
         assert(false && "Comparing an unresolved struct or enum in types_are_equal()"); 
     }
@@ -3062,15 +3197,24 @@ int get_alignment_of_type(Type *type) {
 bool check_struct_members(Typer *typer, AstStruct *ast_struct);
 
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
+    int waiting = typer->struct_wait_list.count;
     typer->struct_check_depth += 1;
     bool ok = check_struct_members(typer, ast_struct);
     typer->struct_check_depth -= 1;
+    if (!ok) {
+        // Reported once. The structs that wait for it to be sized fail too, without another error
+        ast_struct->head.flags |= AST_FLAG_HAS_ERRORS;
+        typer->struct_wait_list.count = waiting;
+    }
     return ok;
 }
 
 bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
     if (ast_struct->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return true;
+    }
+    if (ast_struct->head.flags & AST_FLAG_HAS_ERRORS) {
+        return false;
     }
 
     if (ast_struct->type_params.count > 0) {
@@ -3562,12 +3706,12 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
     // Cross-match the types evaluated from the return values against the defined return types of the function
     for (int i = 0; i < ast_return->values.count; i++) {
         AstExpr *return_value = ((AstExpr **)ast_return->values.items)[i];
-        Type    *wanted_type  = ((Type **)ef->return_types.items)[i];
+        Type    *wanted_type  = i < ef->return_types.count ? ((Type **)ef->return_types.items)[i] : NULL; // Too many values are reported below
 
         Type *ok = check_expression(typer, return_value, wanted_type);
         if (!ok) return false;
 
-        if (!types_are_equal(wanted_type, return_value->type)) {
+        if (wanted_type && !types_are_equal(wanted_type, return_value->type)) {
             AstExpr *slice = collection_as_slice(typer, return_value, wanted_type);
             if (slice) {
                 ((AstExpr **)ast_return->values.items)[i] = slice;
@@ -4206,6 +4350,10 @@ bool always_returns(Ast *stmt) {
 }
 
 bool check_if_function_needs_a_return(Typer *typer, AstFunctionDefn *func_defn) {
+    // Statements of a file with syntax errors were skipped, e.g a 'return' after a missing '}'
+    AstFile *file = func_defn->head.head.file;
+    if (file && file->has_syntax_errors) return true;
+
     bool has_return = always_returns((Ast *)func_defn->body);
 
     Type *return_type_0 = ((Type **)func_defn->return_types.items)[0];
@@ -4976,7 +5124,18 @@ int get_unique_symbol_id(Typer *typer) {
     return typer->next_unique_symbol_id;
 }
 
+static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *func_defn);
+
+// A function whose signature has an error is reported once. One with an error in its body can still be called, as its
+// type is known
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
+    if (func_defn->head.head.flags & AST_FLAG_HAS_ERRORS) return NULL;
+    Type *type = check_function_signature_and_body(typer, func_defn);
+    if (type == NULL && !(func_defn->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) func_defn->head.head.flags |= AST_FLAG_HAS_ERRORS;
+    return type;
+}
+
+static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *func_defn) {
     if (func_defn->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return func_defn->head.type;
     }
@@ -5109,7 +5268,8 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     if (func_defn->is_lambda) {
 
         if (func_defn->is_method) {
-            XXX;
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)func_defn, "A method can't be declared inside a function");
+            return NULL;
         } else {
 
             // @Cleanup @Speed: Use a string buffer located in Parser to allocate the strings instead of malloc
@@ -6138,6 +6298,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         else if (is_static_member_access && struct_type->node->is_union && union_variant(struct_type, member_name)) {
             // A variant without a value e.g Shape.empty
             AstIdentifier *variant = union_variant(struct_type, member_name);
+            if (variant->type == NULL) return NULL; // The union has an error, which is reported
             if (variant->type->kind != TYPE_VOID) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)rhs, "The variant '%s' needs a value", member_name);
                 report_error_ast(typer->parser, LABEL_HINT, NULL, "e.g %s{%s: ...}", type_to_str((Type *)struct_type), member_name);
@@ -6167,6 +6328,12 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         else {
             member = get_struct_member(struct_type->node, member_name);
             ma->access_kind = MEMBER_ACCESS_STRUCT_MEMBER;
+
+            // A member whose type has an error, e.g 'color: Colr;'. That is reported, so its uses fail without errors
+            if (member && (member->type == NULL || member->type->kind == TYPE_NAME) && errors_reported()) {
+                index_identifier_use((Ast *)rhs, member);
+                return NULL;
+            }
 
             // The variants of a union are read with a switch, which knows which one the union holds
             if (member && struct_type->node->is_union && !(ma->head.head.flags & AST_FLAG_COMPILER_GENERATED)) {
@@ -6226,7 +6393,7 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         if (is_static_member_access) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a static member of '%s'", member_name, type_to_str((Type *)struct_type));
         } else {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a member of '%s'", member_name, type_to_str((Type *)struct_type));
+            if (!is_poisoned_name(typer->parser, member_name)) report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a member of '%s'", member_name, type_to_str((Type *)struct_type));
         }
 
         if (type_lhs->kind == TYPE_ARRAY) {
@@ -6269,6 +6436,8 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     }
 
     if (!member->type) {
+        // A member of a struct with an error, which is reported
+        if (errors_reported()) return NULL;
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)member, "Compiler Error: Member has no type in 'check_member_access()'");
         return NULL;
     }
@@ -6404,7 +6573,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         }
 
         if (ctx_type->kind == TYPE_NAME) {
-            printf("%s:%d: Internal Compiler Error: Struct or enum type was not specialized before infering the struct literal", __FILE__, __LINE__);
+            fprintf(stderr, "%s:%d: Internal Compiler Error: Struct or enum type was not specialized before infering the struct literal", __FILE__, __LINE__);
             report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(literal), "... while infering this struct literal of type '%s'", type_to_str(ctx_type));
             return NULL;
         }
@@ -6429,7 +6598,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         if (init->designator != NULL) {
             AstIdentifier *member = get_struct_member(struct_defn->node, init->designator->name);
             if (member == NULL) {
-                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->designator), "'%s' is not a member of '%s'", init->designator->name, struct_defn->identifier->name);
+                if (!is_poisoned_name(typer->parser, init->designator->name)) report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->designator), "'%s' is not a member of '%s'", init->designator->name, struct_defn->identifier->name);
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
                 return NULL;
             }
@@ -6611,7 +6780,8 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
     
     if (is_bitwise_operator(binary->operator)) {
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
-        XXX;
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)binary, "The operator '%s' is only for integers. Here it has %s and %s", token_type_to_str((TokenType) binary->operator), type_to_str(ti_lhs), type_to_str(ti_rhs));
+        return NULL;
     }
 
     if (strchr("&|", binary->operator)) {
@@ -6954,7 +7124,7 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         }
 
         if (ident == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared identifier '%s'", ident_name);
+            if (!is_poisoned_name(typer->parser, ident_name)) report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared identifier '%s'", ident_name);
 
             // Inside a method declared in a struct, the members are only reached through self
             for (AstFunctionDefn *func = typer->enclosing_function; func; func = func->parent_function) {
@@ -6965,6 +7135,8 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             }
             return NULL;
         }
+
+        if (is_poisoned(ident)) return NULL; // Its declaration has an error, which is reported
 
         if (ident->flags & IDENTIFIER_IS_NAMESPACE) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)literal, "'%s' is a namespace, not a value", ident->name);
@@ -7118,6 +7290,7 @@ void reserve_local_storage(AstFunctionDefn *func_defn, int size) {
 }
 
 void reserve_temporary_storage(AstFunctionDefn *func_defn, int size) {
+    if (func_defn == NULL) return; // Outside a function, e.g a global variable 'a: any = ...', which is an error as it isn't constant
     func_defn->temp_ptr += size;
     
     if (func_defn->temp_ptr > func_defn->num_bytes_temporaries) {

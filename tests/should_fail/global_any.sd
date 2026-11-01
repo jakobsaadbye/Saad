@@ -1,0 +1,6 @@
+// expect-error: A global variable can't be of type any yet
+
+value: any = 5;
+
+main :: () {
+}

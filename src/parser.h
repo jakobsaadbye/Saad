@@ -35,6 +35,8 @@ typedef struct Parser {
     char *builtin_string_file_path;
 
     jmp_buf *syntax_error; // Where parse_file() continues after a syntax error, see stop_parsing()
+    int          skipped_statements; // How many statements with syntax errors were skipped
+    DynamicArray poisoned_names; // of char *. Names declared by statements with syntax errors. See is_poisoned_name()
 
     char *(*read_source)(const char *path); // Reads a file to parse. NULL means read_entire_file(), 'saad index --overlay' gives the text of an editor
 } Parser;
@@ -43,6 +45,7 @@ Parser   parser_init(Lexer *lexer);
 Namespace *find_namespace(Parser *parser, const char *name);
 Namespace *add_namespace(Parser *parser, const char *name);
 AstFile *parse_file(Parser *parser, char *file_path);
+bool     is_poisoned_name(Parser *parser, const char *name);
 
 AstIdentifier  *generate_identifier(Parser *parser, char *ident_name, Type *type, IdentifierFlags flags);
 TypeStruct     *generate_struct_type_with_data_and_count(Parser *parser, Type *type_pointed_to_by_data, char *struct_name);

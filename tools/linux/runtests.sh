@@ -78,6 +78,28 @@ if command -v python3 > /dev/null; then
         failed=$((failed + 1))
     fi
 
+    # After a mistake, the compiler reports it and goes on, so the index has the rest of the program
+    printf "%-56s " "error recovery (check_recovery.py)"
+    if output=$(python3 "$HERE/check_recovery.py" 2>&1); then
+        echo "${GREEN}OK${RESET}"
+        passed=$((passed + 1))
+    else
+        echo "${RED}FAILED${RESET}"
+        echo "$output" | grep -A3 FAILED | head -10 | sed 's/^/    /'
+        failed=$((failed + 1))
+    fi
+
+    # Broken programs don't crash the compiler (a fixed seed, so the run is the same each time)
+    printf "%-56s " "error recovery (fuzz_recovery.py 150 cases)"
+    if output=$(timeout 300 python3 "$HERE/fuzz_recovery.py" 150 1 2>&1); then
+        echo "${GREEN}OK${RESET}"
+        passed=$((passed + 1))
+    else
+        echo "${RED}FAILED${RESET}"
+        echo "$output" | tail -5 | sed 's/^/    /'
+        failed=$((failed + 1))
+    fi
+
     # The language server (lsp/), talked to like an editor does
     printf "%-56s " "language server lsp/"
     if output=$(bash "$HERE/build_lsp.sh" 2>&1 > /dev/null && timeout 120 python3 "$HERE/check_lsp.py" "$REPO/build/linux/saad-lsp" 2>&1); then

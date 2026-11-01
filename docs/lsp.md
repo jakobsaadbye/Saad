@@ -22,8 +22,8 @@ editor ── LSP (JSON-RPC over stdin/stdout) ──> lsp/ (Saad)
    find references, hover, the outline of a file and workspace symbols.
 3. **The server** (done) in `lsp/`, with `std/io` (bytes on stdin and stdout), `os.output` (running a command and
    reading its output) and `os.args`. See `lsp/README.md`.
-4. **Error recovery**: the typer goes on with the next declaration after an error, and the parser skips to the next
-   top-level declaration after a syntax error, so the index stays useful while the code is being typed.
+4. **Error recovery** (done): after an error, the parser and the typer go on with the next statement, so the index
+   and the errors cover the whole program while the code is being typed. See "Error recovery" below.
 5. Later: completion, signature help, semantic tokens.
 
 ## saad check
@@ -80,7 +80,7 @@ diagnostics of `saad check`:
 * `--overlay path=file` reads `file` instead of `path`, for the text an editor hasn't saved. It can be given more
   than once.
 * A name in a function that is never type checked isn't in the index, e.g in a generic function that is never called,
-  or after an error in the same declaration (until phase 4).
+  or after an error in the same statement.
 
 In the compiler, the typer calls `index_identifier_use()` and friends (src/index.h) where it finds out what a name is,
 e.g for an identifier, a member, an enum value, a type name or a named argument. A symbol is known by the file and the
@@ -113,3 +113,35 @@ lsp/
 * The server writes its log to stderr. VS Code shows it in the Output panel (Saad).
 
 `tools/linux/check_lsp.py` talks to the server like an editor, and checks every feature on `tests/index.sd`.
+
+## Error recovery
+
+One mistake gives one error, and the rest of the program is still checked and indexed.
+
+* **Lexer.** An unknown character is reported and skipped, e.g `Unknown character 'ø'`.
+* **Parser.** Before each statement of a file or a block, the parser saves its state. A syntax error jumps back to it
+  (`stop_parsing()`), and `skip_failed_statement()` skips to the end of the statement: after its `;` (only braces are
+  counted, so a missing `)` ends at the `;`), after the `}` of its block, or to the `}` of the block it is in. At the
+  top of a file, it also stops at the next declaration at the start of a line. A declaration at the start of a line
+  inside a block means its `}` is missing, e.g `This '{' has no '}'`, and the block ends there. Statements that only go
+  in a function (`for`, `return`, ...) are an error at the top of a file.
+* **Typer.** Before each statement, the typer saves its state (the scope, the function, the loop, ...). When the
+  statement fails, the state is put back and the next statement is checked (`check_statement_and_recover()`). This is
+  done in files and in blocks, but not in the instances of generics, which are checked once for each set of type
+  arguments. A method whose signature has an error is skipped, and the other methods are still registered.
+* **Poisoning.** The names of a statement that failed are *poisoned*, so using them fails without another error:
+  * A declaration that failed gets `AST_FLAG_HAS_ERRORS`, and isn't checked again. Its names get
+    `IDENTIFIER_IS_POISONED`, except a function that has a type, which can still be called (an error in its body
+    doesn't stop its callers).
+  * The names of a statement with a syntax error are taken out of the scope, as their declaration isn't whole, and put
+    in `parser->poisoned_names`. "Undeclared identifier", "Unknown type", "is not a member of" and "is not declared in
+    the namespace" are not reported for those names (`is_poisoned_name()`).
+  * A struct that failed to check is reported once, and the structs that need it fail without an error. The uses of a
+    member whose type has an error fail without an error.
+* A file with errors still gives its declarations to the files that import it. The program fails when any error was
+  reported (`error_count()` in compiler.c), so code is never generated from a program with errors.
+
+`tools/linux/check_recovery.py` makes typical mistakes in `tests/index.sd` and checks that there is one error and the
+names after it are still in the index. `tools/linux/fuzz_recovery.py` breaks real programs in random ways (deleting a
+`}` or `;`, renaming names, cutting files off, junk) and checks that the compiler never crashes and always writes an
+index. Both run in `tools/linux/runtests.sh`.

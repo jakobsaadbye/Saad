@@ -51,8 +51,14 @@ StringBuilder *sb_new(int init_capicity) {
 }
 
 void sb_vappend(StringBuilder *sb, const char *template, va_list args) {
-    char *string = (char *)(malloc(MAX_STRING_LEN));
-    int   string_len = vsprintf(string, template, args);
+    // The length first, so a text of any length fits
+    va_list counting;
+    va_copy(counting, args);
+    int   string_len = vsnprintf(NULL, 0, template, counting);
+    va_end(counting);
+    if (string_len < 0) return;
+    char *string = (char *)(malloc(string_len + 1));
+    vsnprintf(string, string_len + 1, template, args);
 
     if ((sb->cursor + string_len) < sb->capacity) {
         char *dst = &sb->buffer[sb->cursor];

@@ -124,6 +124,7 @@ bool lex_file(Lexer *lexer) {
     lexer->char_idx    = 0;
     lexer->col         = 1;
     lexer->line_number = 1;
+    lexer->had_errors  = false;
 
     while (peek_next_char(lexer) != '\0') {
         
@@ -268,8 +269,21 @@ bool lex_file(Lexer *lexer) {
             continue;
         }
 
-        report_error_here(lexer, "Syntax Error: Unknown character: %d", (int) c);
-        return false;
+        // The character is skipped, so the rest of the file is still read. A character of UTF-8 is all of its bytes
+        int length = 1;
+        unsigned char lead = (unsigned char) c;
+        if      (lead >= 0xF0) length = 4;
+        else if (lead >= 0xE0) length = 3;
+        else if (lead >= 0xC0) length = 2;
+        char text[8] = {0};
+        for (int i = 0; i < length && peek_char(lexer, i) != '\0'; i++) text[i] = peek_char(lexer, i);
+        if (lead >= 0x80) {
+            report_error_here(lexer, "Syntax Error: Unknown character '%s'. Names can only have the letters a-z and A-Z, digits and '_'", text);
+        } else {
+            report_error_here(lexer, "Syntax Error: Unknown character '%s' (%d)", text, (int) c);
+        }
+        for (int i = 0; i < length && peek_next_char(lexer) != '\0'; i++) eat_character(lexer);
+        lexer->had_errors = true;
     }
 
     Pos here = get_current_position(lexer);
@@ -701,6 +715,8 @@ static void add_diagnostic(char *file_path, const char *label, Pos start, Pos en
 
 #define MAX_ERROR_LEN 512
 void report_error_helper(char *file_path, char *file_text, const char* label, Pos start, Pos end, const char *template, va_list args) {
+    if (diagnostics.muted > 0) return;
+
     char message[MAX_ERROR_LEN];
     vsnprintf(message, MAX_ERROR_LEN, template, args);
 

@@ -188,6 +188,161 @@ bool is_file_below_collections(Parser *parser, char *file_path) {
     return is_below;
 }
 
+//
+// Recovering from syntax errors. A statement with a syntax error is skipped, and parsing goes on with the next one, so
+// one mistake doesn't hide the rest of the file from the typer and an editor. The names the statement declared are
+// poisoned: using them fails without another error
+//
+
+typedef struct ParserState {
+    int              token_index;
+    AstBlock        *scope;
+    int              scope_identifiers; // The number of names in the scope
+    AstFunctionDefn *enclosing_function;
+    bool             inside_statement_header;
+    bool             inside_parameter_list;
+    bool             inside_argument_list;
+    bool             inside_extern_block;
+    AstStruct       *reparse_self_struct;
+} ParserState;
+
+static ParserState save_parser_state(Parser *parser) {
+    return (ParserState){
+        .token_index             = parser->current_token_index,
+        .scope                   = parser->current_scope,
+        .scope_identifiers       = parser->current_scope->identifiers.count,
+        .enclosing_function      = parser->enclosing_function,
+        .inside_statement_header = parser->inside_statement_header,
+        .inside_parameter_list   = parser->inside_parameter_list,
+        .inside_argument_list    = parser->inside_argument_list,
+        .inside_extern_block     = parser->inside_extern_block,
+        .reparse_self_struct     = parser->reparse_self_struct,
+    };
+}
+
+// A declaration at the start of a line e.g 'main :: () {', 'Point :: struct {', 'count := 0;' or '@private'. By the style
+// of Saad, only the declarations at the top of a file start there
+static bool starts_top_level_declaration(Parser *parser, int lookahead) {
+    Token token = peek_token(parser, lookahead);
+    if (token.start.col != 1) return false;
+    if (token.type == TOKEN_IMPORT || token.type == TOKEN_USE || token.type == TOKEN_EXTERN || token.type == '@') return true;
+    if (token.type != TOKEN_LITERAL_IDENTIFIER) return false;
+    Token after = peek_token(parser, lookahead + 1);
+    return after.type == TOKEN_DOUBLE_COLON || after.type == ':' || after.type == TOKEN_COLON_EQUAL;
+}
+
+// Goes back to the state before the statement, and skips the rest of it: to after its ';', or after the '}' of its block,
+// or to the '}' of the block it is in. At the top of a file, also to the next declaration at the start of a line
+static void skip_failed_statement(Parser *parser, ParserState *state, bool top_level) {
+    int failed_at = parser->current_token_index;
+    parser->skipped_statements += 1;
+
+    // The names it declared are taken out, as their declarations are not whole. Using them gives no error
+    for (int i = state->scope_identifiers; i < state->scope->identifiers.count; i++) {
+        AstIdentifier *ident = ((AstIdentifier **)state->scope->identifiers.items)[i];
+        if (parser->poisoned_names.capacity == 0) parser->poisoned_names = da_init(16, sizeof(char *));
+        da_append(&parser->poisoned_names, ident->name);
+    }
+    if (state->scope->identifiers.count > state->scope_identifiers) state->scope->identifiers.count = state->scope_identifiers;
+
+    // And the names the statement starts with, e.g 'Limit' of 'Limit :: ;', which isn't in the scope before it is whole
+    for (int i = state->token_index; ; i += 2) {
+        Token *tokens = (Token *)parser->lexer->tokens.items;
+        if (i + 1 >= parser->lexer->tokens.count || tokens[i].type != TOKEN_LITERAL_IDENTIFIER) break;
+        TokenType after = tokens[i + 1].type;
+        if (after != ',' && after != ':' && after != TOKEN_DOUBLE_COLON && after != TOKEN_COLON_EQUAL) break;
+        if (parser->poisoned_names.capacity == 0) parser->poisoned_names = da_init(16, sizeof(char *));
+        da_append(&parser->poisoned_names, tokens[i].as_value.value.identifier.name);
+        if (after != ',') break;
+    }
+
+    parser->current_scope           = state->scope;
+    parser->enclosing_function      = state->enclosing_function;
+    parser->inside_statement_header = state->inside_statement_header;
+    parser->inside_parameter_list   = state->inside_parameter_list;
+    parser->inside_argument_list    = state->inside_argument_list;
+    parser->inside_extern_block     = state->inside_extern_block;
+    parser->reparse_self_struct     = state->reparse_self_struct;
+    parser->split_shift_right_token = 0;
+
+    // Only braces count: a statement can't end inside a '(' or '[', but one that is missing a ')' ends at its ';'
+    parser->current_token_index = state->token_index;
+    int depth = 0;
+    while (true) {
+        Token token = peek_next_token(parser);
+        if (token.type == TOKEN_END) break;
+
+        // A statement that was parsed to its end, and then found to be wrong, e.g 'struct' in a struct
+        if (parser->current_token_index == failed_at && failed_at > state->token_index && depth == 0) {
+            Token previous = peek_token(parser, -1);
+            if (previous.type == ';' || previous.type == '}') break;
+        }
+
+        bool past_error = parser->current_token_index > failed_at;
+        if (top_level && past_error && depth > 0 && starts_top_level_declaration(parser, 0)) break; // e.g a '}' is missing
+
+        if (token.type == '{') depth += 1;
+        if (token.type == '}') {
+            if (depth == 0 && top_level) { eat_token(parser); break; } // A '}' too many
+            if (depth == 0) break; // The end of the block the statement is in
+            depth -= 1;
+            if (depth == 0 && past_error) {
+                eat_token(parser);
+                // e.g 'if x { ... }' ends here, but 'a := Point{ ... };' goes on to its ';'
+                if (peek_next_token(parser).type == ';') eat_token(parser);
+                break;
+            }
+        }
+        if (token.type == ';' && depth == 0 && parser->current_token_index >= failed_at) {
+            eat_token(parser);
+            break;
+        }
+        eat_token(parser);
+    }
+
+    // Always move on. In a block, its '}' ends it
+    Token at = peek_next_token(parser);
+    if (parser->current_token_index <= state->token_index && at.type != TOKEN_END && (top_level || at.type != '}')) {
+        parser->current_token_index = state->token_index + 1;
+    }
+}
+
+// A name that was declared by a statement with a syntax error. An error about it not being declared is not reported
+bool is_poisoned_name(Parser *parser, const char *name) {
+    if (name == NULL) return false;
+    for (int i = 0; i < parser->poisoned_names.count; i++) {
+        if (strcmp(((char **)parser->poisoned_names.items)[i], name) == 0) return true;
+    }
+    return false;
+}
+
+// 'a := ;' has no value
+static bool has_values(Parser *parser, AstDeclaration *decl) {
+    for (int i = 0; i < decl->values.count; i++) {
+        AstExpr *value = ((AstExpr **)decl->values.items)[i];
+        if (value->head.kind == AST_SEMICOLON_EXPR) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)value, "Syntax Error: Expected a value before the ';'");
+            return false;
+        }
+    }
+    return true;
+}
+
+// e.g 'for', 'return' or 'x = 1;', which can only be inside a function
+static bool is_statement_of_a_function(Ast *stmt) {
+    switch (stmt->kind) {
+    case AST_RETURN: case AST_IF: case AST_SWITCH: case AST_FOR: case AST_WHILE: case AST_BREAK_OR_CONTINUE:
+    case AST_BLOCK: case AST_ASSIGNMENT: case AST_ASSERT:
+        return true;
+    case AST_EXPR_STMT: {
+        AstExpr *expr = ((AstExprStmt *)stmt)->expr;
+        return expr && expr->head.kind != AST_SEMICOLON_EXPR; // A ';' on its own is fine, e.g after 'Kind :: enum { ... };'
+    }
+    default:
+        return false;
+    }
+}
+
 AstFile *parse_file(Parser *parser, char *file_path) {
 
     // printf("Parsing '%s' ...\n", file_path);
@@ -265,28 +420,37 @@ AstFile *parse_file(Parser *parser, char *file_path) {
         da_append(&file->ns->files, file);
     }
 
-    // A syntax error that can't be returned from (see stop_parsing) jumps back here, and the file fails to parse
+    // A syntax error that can't be returned from (see stop_parsing) jumps back here, and the statement is skipped
     jmp_buf  on_syntax_error;
     jmp_buf *outer_syntax_error = parser->syntax_error;
     parser->syntax_error = &on_syntax_error;
-    if (setjmp(on_syntax_error)) {
-        parser->syntax_error = outer_syntax_error;
-        return NULL;
-    }
 
     while (true) {
-        next = peek_next_token(parser);
-        if (next.type == TOKEN_END) break;
+        if (peek_next_token(parser).type == TOKEN_END) break;
+
+        ParserState state = save_parser_state(parser);
+        if (setjmp(on_syntax_error)) {
+            parser->syntax_error = &on_syntax_error;
+            skip_failed_statement(parser, &state, true);
+            file->has_syntax_errors = true;
+            continue;
+        }
 
         Ast *stmt = parse_statement(parser);
+        if (stmt && is_statement_of_a_function(stmt)) {
+            report_error_ast(parser, LABEL_ERROR, stmt, "Syntax Error: Only declarations can be at the top of a file, e.g 'main :: () { ... }'. This must be inside a function");
+            stmt = NULL;
+        }
         if (!stmt) {
-            parser->syntax_error = outer_syntax_error;
-            return NULL;
+            skip_failed_statement(parser, &state, true);
+            file->has_syntax_errors = true;
+            continue;
         }
 
         da_append(&file->statements, stmt);
     }
     parser->syntax_error = outer_syntax_error;
+    if (parser->lexer->had_errors) file->has_syntax_errors = true;
 
     // Eat the end token
     eat_token(parser);
@@ -513,6 +677,8 @@ AstDeclaration *add_union_member(Parser *parser, AstIdentifier *ident, Type *typ
     return decl;
 }
 
+static Ast *block_statement(Parser *parser, AstBlock *block);
+
 AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
     AstBlock *block;
     if (inject_into_scope) {
@@ -525,11 +691,70 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
     expect(parser, start_token, '{');
     eat_token(parser);
 
+    // A statement with a syntax error is skipped, see skip_failed_statement()
+    jmp_buf  on_syntax_error;
+    jmp_buf *outer_syntax_error = parser->syntax_error;
+    bool     recovers = outer_syntax_error != NULL;
+    if (recovers) parser->syntax_error = &on_syntax_error;
+    bool     missing_close = false;
+
     Token next;
     while (true) {
         next = peek_next_token(parser);
         if (next.type == '}' || next.type == TOKEN_END) break;
 
+        // A declaration at the start of a line is at the top of the file, so the '}' of this block is missing
+        if (recovers && !parser->inside_extern_block && starts_top_level_declaration(parser, 0)) {
+            report_error_token(parser, LABEL_ERROR, start_token, "Syntax Error: This '{' has no '}'");
+            report_error_token(parser, LABEL_NOTE, next, "The block should end before this declaration");
+            parser->current_file->has_syntax_errors = true;
+            missing_close = true;
+            break;
+        }
+
+        ParserState state = save_parser_state(parser);
+        if (recovers && setjmp(on_syntax_error)) {
+            parser->syntax_error = &on_syntax_error;
+            skip_failed_statement(parser, &state, false);
+            parser->current_file->has_syntax_errors = true;
+            continue;
+        }
+        Ast *stmt = block_statement(parser, block);
+        if (!stmt) {
+            if (!recovers) return NULL;
+            skip_failed_statement(parser, &state, false);
+            parser->current_file->has_syntax_errors = true;
+            continue;
+        }
+        da_append(&block->statements, stmt);
+    }
+    parser->syntax_error = outer_syntax_error;
+
+    if (!missing_close) {
+        expect(parser, next, '}');
+        eat_token(parser);
+    } else {
+        next = peek_token(parser, -1);
+    }
+
+    block->head.kind  = AST_BLOCK;  
+    block->head.file  = parser->current_file;
+    block->head.start = start_token.start;
+    block->head.end   = next.end;
+
+    if (inject_into_scope) {
+        // Closing the scope is done by the caller of parse_block
+    } else {
+        close_block(parser);
+    }
+
+    return block;
+}
+
+// A statement of a block, or NULL after a syntax error
+static Ast *block_statement(Parser *parser, AstBlock *block) {
+    Token next = peek_next_token(parser);
+    {
         // A variant of a union without a value e.g 'empty;'
         AstStruct *owner = block->belongs_to_struct;
         if (owner && owner->is_union && next.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == ';') {
@@ -537,12 +762,15 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
             eat_token(parser);
             AstIdentifier *variant = make_identifier_from_token(parser, next, NULL);
             AstDeclaration *decl = add_union_member(parser, variant, primitive_type(PRIMITIVE_VOID));
-            if (!decl) return NULL;
-            da_append(&block->statements, decl);
-            continue;
+            return (Ast *)decl;
         }
-
-        Ast *stmt = parse_statement(parser);
+    }
+    Ast *stmt = parse_statement(parser);
+    if (stmt && stmt->kind == AST_IMPORT) {
+        report_error_ast(parser, LABEL_ERROR, stmt, "Syntax Error: 'import' and 'use' can only be at the top of a file");
+        return NULL;
+    }
+    {
         if (!stmt) return NULL;
 
         if (block->kind == BLOCK_DECLARATIVE) {
@@ -572,24 +800,8 @@ AstBlock *parse_block(Parser *parser, AstBlock *inject_into_scope) {
                 return NULL;
             }
         }
-
-        da_append(&block->statements, stmt);
     }
-    expect(parser, next, '}');
-    eat_token(parser);
-
-    block->head.kind  = AST_BLOCK;  
-    block->head.file  = parser->current_file;
-    block->head.start = start_token.start;
-    block->head.end   = next.end;
-
-    if (inject_into_scope) {
-        // Closing the scope is done by the caller of parse_block
-    } else {
-        close_block(parser);
-    }
-
-    return block;
+    return stmt;
 }
 
 bool starts_declaration(Parser *parser, Token token, int start_lookahead) {
@@ -2372,7 +2584,10 @@ AstExpr *parse_range_or_normal_expression(Parser *parser) {
 }
 
 AstReturn *parse_return(Parser *parser) {
-    assert(parser->enclosing_function);
+    if (parser->enclosing_function == NULL) {
+        report_error_token(parser, LABEL_ERROR, peek_next_token(parser), "Syntax Error: 'return' outside of a function");
+        return NULL;
+    }
 
     AstReturn *ast_return = (AstReturn *)(ast_allocate(parser, sizeof(AstReturn)));
     ast_return->values = da_init(2, sizeof(AstExpr *));
@@ -2583,7 +2798,8 @@ AstFunctionCall *parse_function_call(Parser *parser, AstExpr *lhs) {
     call->arguments       = da_init(2, sizeof(AstArgument *));
 
     if (lhs == NULL || (lhs->head.kind != AST_LITERAL && lhs->head.kind != AST_MEMBER_ACCESS)) {
-        XXX;
+        report_error_token(parser, LABEL_ERROR, peek_next_token(parser), "Syntax Error: Only a function, by its name, can be called here");
+        stop_parsing(parser);
     }
 
     Token next = peek_next_token(parser);
@@ -2925,7 +3141,19 @@ AstFunctionDefn *reparse_generic_function(Parser *parser, AstFunctionDefn *gener
     parser->split_shift_right_token = 0;
     parser->reparse_self_struct     = generic->self_struct;
 
-    AstFunctionDefn *instance = parse_function_defn(parser);
+    // A syntax error in it was reported when the file was parsed, so it isn't reported again
+    jmp_buf  on_syntax_error;
+    jmp_buf *saved_syntax_error = parser->syntax_error;
+    parser->syntax_error = &on_syntax_error;
+    diagnostics.muted += 1;
+    int skipped = parser->skipped_statements;
+    AstFunctionDefn *volatile instance = NULL;
+    if (setjmp(on_syntax_error) == 0) {
+        instance = parse_function_defn(parser);
+    }
+    if (parser->skipped_statements != skipped) instance = NULL; // It isn't whole, so it isn't checked
+    diagnostics.muted -= 1;
+    parser->syntax_error = saved_syntax_error;
     parser->reparse_self_struct     = NULL;
 
     parser->current_token_index     = saved_token_index;
@@ -2954,7 +3182,16 @@ bool reparse_default_values(Parser *parser, AstDeclaration *generic_decl, AstBlo
     parser->current_file            = generic_decl->head.file;
     parser->split_shift_right_token = 0;
 
-    bool ok = parse_expression_list(parser, values);
+    jmp_buf  on_syntax_error;
+    jmp_buf *saved_syntax_error = parser->syntax_error;
+    parser->syntax_error = &on_syntax_error;
+    diagnostics.muted += 1;
+    volatile bool ok = false;
+    if (setjmp(on_syntax_error) == 0) {
+        ok = parse_expression_list(parser, values);
+    }
+    diagnostics.muted -= 1;
+    parser->syntax_error = saved_syntax_error;
 
     parser->current_token_index     = saved_token_index;
     parser->current_scope           = saved_scope;
@@ -3342,7 +3579,7 @@ AstDeclaration *parse_declaration(Parser *parser) {
 
         decl->values_token_index = parser->current_token_index; // Instances of generic structs parse the default values of members again
         bool ok = parse_expression_list(parser, &decl->values);
-        if (!ok) return NULL;
+        if (!ok || !has_values(parser, decl)) return NULL;
     }
     // Typed. 'a: int = b' or 'a: int'
     else if (next.type == ':') {
@@ -3360,7 +3597,7 @@ AstDeclaration *parse_declaration(Parser *parser) {
 
             decl->values_token_index = parser->current_token_index; // Instances of generic structs parse the default values of members again
             bool ok = parse_expression_list(parser, &decl->values);
-            if (!ok) return NULL;
+            if (!ok || !has_values(parser, decl)) return NULL;
 
         } 
         else {
@@ -3398,7 +3635,7 @@ AstDeclaration *parse_declaration(Parser *parser) {
 
         eat_token(parser);
         bool ok = parse_expression_list(parser, &decl->values);
-        if (!ok) return NULL;
+        if (!ok || !has_values(parser, decl)) return NULL;
 
         // Mark all the identifiers as constant
         for (int i = 0; i < decl->idents.count; i++) {
@@ -3689,7 +3926,7 @@ AstExpr *parse_leaf(Parser *parser) {
     }
 
     if (t.type == ';') {
-        // We intentionally don't eat the semicolon because we want the expression to end right after this @Bug; "a := ;" currently doesn't produce a parse error
+        // We intentionally don't eat the semicolon because we want the expression to end right after this. 'a := ;' is an error, see has_values()
         AstSemicolonExpr *sce = ast_allocate(parser, sizeof(AstSemicolonExpr));
         sce->head.head.kind   = AST_SEMICOLON_EXPR;
         sce->head.head.file   = parser->current_file;

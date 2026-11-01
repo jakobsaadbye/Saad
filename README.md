@@ -4,6 +4,17 @@ A just for fun compiler
 
 # Changelog
 
+## Update v0.8.3 - 1. Nov 2026
+
+* The compiler goes on after an error. A statement with a syntax error is skipped, and so is one that fails to type
+  check, and the next one is checked. So `saad build` reports the errors of the whole program at once, and the
+  language server can still go to definition, find references and hover in code with errors
+* One mistake gives one error: the names of a declaration with an error don't give more errors where they are used
+* An unknown character is skipped, e.g `Unknown character 'ø'`, and a missing `}` is found at the next declaration,
+  e.g `This '{' has no '}'`
+* Fixes: `a := ;` is an error, a `for` or `return` at the top of a file is an error instead of a crash, returning too
+  many values no longer crashes the compiler, and a long list of errors no longer overflows a buffer
+
 ## Update v0.8.2 - 1. Nov 2026
 
 * A language server for Saad, written in Saad, in `lsp/`: errors while typing (also of unsaved text), go to

@@ -284,7 +284,7 @@ char *type_to_str(Type *type) {
     }
     }
 
-    printf("Internal Compiler Error: Unknown type kind: %d in type_to_str()", type->kind);
+    fprintf(stderr, "Internal Compiler Error: Unknown type kind: %d in type_to_str()", type->kind);
     exit(1);
 }
 

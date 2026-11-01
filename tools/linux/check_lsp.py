@@ -166,6 +166,13 @@ def main():
         want = position_of(broken, 57, "undefinedName")
         check(diagnostics[0]["range"]["start"] == want, f"UTF-16 position {diagnostics[0]['range']['start']} is {want}")
 
+    print("navigation below an error")
+    m = client.request("textDocument/definition", {"textDocument": doc, "position": position_of(broken, 61, "swapped")})
+    loc = m["result"]
+    check(loc and loc["range"]["start"] == {"line": 33, "character": 0}, f"definition of swapped below the error: {loc}")
+    m = client.request("textDocument/hover", {"textDocument": doc, "position": position_of(broken, 71, "drawnName")})
+    check(m["result"] is not None, "hover below the error")
+
     print("didChange back")
     client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 3}, "contentChanges": [{"text": text}]})
     check(client.diagnostics(uri) == [], "the error is cleared")

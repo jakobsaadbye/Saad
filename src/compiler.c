@@ -579,6 +579,15 @@ static int severity_of(Diagnostic *d) {
 }
 
 // The diagnostics as a JSON array
+// The errors that were reported, so far
+static int error_count(void) {
+    int count = 0;
+    for (int i = 0; i < diagnostics.count; i++) {
+        if (diagnostics.items[i].label == LABEL_ERROR) count++;
+    }
+    return count;
+}
+
 void write_diagnostics_array(StringBuilder *out) {
     StringBuilder sb = sb_init(1024);
     sb_append(&sb, "[");
@@ -673,7 +682,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
 
     // ----------- Typecheck -----------
     report.typer_time_start = clock();
-    bool typed = check_file(&typer, main_file);
+    bool typed = check_file(&typer, main_file) && error_count() == 0; // Statements with errors were skipped, so the others were still checked
     index_declarations(parsed_files); // For 'saad index', also when there are errors, so an editor can still find what was checked
     if (!typed) {
         cleanup();

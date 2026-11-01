@@ -185,6 +185,8 @@ typedef struct Lexer {
     int char_idx;
     int line_number;
     int col;
+
+    bool had_errors; // Characters were skipped
 } Lexer;
 
 typedef struct KeywordMatch {
@@ -232,6 +234,7 @@ typedef struct Diagnostic {
 } Diagnostic;
 
 typedef struct Diagnostics {
+    int  muted;  // While above 0, nothing is reported, e.g when a generic is parsed again, as it was reported the first time
     bool        print;     // Print them as they are reported (the default)
     Diagnostic *items;
     int         count;
