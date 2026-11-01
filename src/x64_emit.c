@@ -1047,6 +1047,64 @@ static void x64_emit_global_data(X64Emitter *x, StringBuilder *sb, IrGlobal *glo
     if (global->size == 0) sb_append(sb, "\tdb 0\n");
 }
 
+//////////////////////////////////////////////////////////////////////////////////////////
+// The runtime: functions the generated code calls, written here so no runtime library is linked
+//////////////////////////////////////////////////////////////////////////////////////////
+
+// int runtime_compare_strings(string *a, string *b): <0, 0 or >0, comparing the bytes as signed chars like C
+static const char *x64_runtime_compare_strings =
+    "\n$runtime_compare_strings:\n"
+    "\tmov         r8, qword [rcx+8]\n"
+    "\tmov         r9, qword [rdx+8]\n"
+    "\tmov         r10, qword [rcx]\n"
+    "\tmov         r11, qword [rdx]\n"
+    "\txor         eax, eax\n"
+    ".Lloop:\n"
+    "\tcmp         rax, r8\n"
+    "\tjge         .Lend\n"
+    "\tcmp         rax, r9\n"
+    "\tjge         .Lend\n"
+    "\tmovsx       ecx, byte [r10 + rax]\n"
+    "\tmovsx       edx, byte [r11 + rax]\n"
+    "\tcmp         ecx, edx\n"
+    "\tjne         .Ldiffer\n"
+    "\tadd         rax, 1\n"
+    "\tjmp         .Lloop\n"
+    ".Ldiffer:\n"
+    "\tmov         eax, 1\n"
+    "\tjg          .Lreturn\n"
+    "\tmov         eax, -1\n"
+    ".Lreturn:\n"
+    "\tret\n"
+    ".Lend:\n"
+    "\txor         eax, eax\n"
+    "\tcmp         r8, r9\n"
+    "\tje          .Lreturn\n"
+    "\tmov         eax, -1\n"
+    "\tjl          .Lreturn\n"
+    "\tmov         eax, 1\n"
+    "\tret\n";
+
+// void runtime_builtin_assert(bool condition, string *file, u64 line): prints where and ends the program when false
+static const char *x64_runtime_builtin_assert =
+    "\n$runtime_builtin_assert:\n"
+    "\ttest        cl, cl\n"
+    "\tjz          .Lfailed\n"
+    "\tret\n"
+    ".Lfailed:\n"
+    "\tpush        rbp\n"
+    "\tmov         rbp, rsp\n"
+    "\tsub         rsp, 32\n"
+    "\tmov         rdx, qword [rdx]\n"
+    "\tlea         rcx, [rel __assert_message]\n"
+    "\tcall        $printf\n"
+    "\tmov         ecx, 1\n"
+    "\tcall        $exit\n";
+
+static bool x64_is_runtime_function(const char *name) {
+    return strcmp(name, "runtime_compare_strings") == 0 || strcmp(name, "runtime_builtin_assert") == 0;
+}
+
 typedef struct X64Output {
     StringBuilder assembly;
     StringBuilder regalloc_dump;
@@ -1063,6 +1121,19 @@ X64Output x64_emit_module(IrModule *module) {
     ir_find_or_add_extern(module, "memcpy");
     ir_find_or_add_extern(module, "memset");
 
+    // The runtime functions the program uses, and what they use
+    bool uses_compare = false, uses_assert = false;
+    for (int i = 0; i < module->globals.count; i++) {
+        IrGlobal *global = module->globals.items[i];
+        if (global->kind != IR_GLOBAL_EXTERN) continue;
+        if (strcmp(global->name, "runtime_compare_strings") == 0) uses_compare = true;
+        if (strcmp(global->name, "runtime_builtin_assert") == 0)  uses_assert = true;
+    }
+    if (uses_assert) {
+        ir_find_or_add_extern(module, "printf");
+        ir_find_or_add_extern(module, "exit");
+    }
+
     for (int i = 0; i < module->functions.count; i++) {
         x64_emit_function(x, module->functions.items[i]);
     }
@@ -1074,7 +1145,7 @@ X64Output x64_emit_module(IrModule *module) {
 
     for (int i = 0; i < module->globals.count; i++) {
         IrGlobal *global = module->globals.items[i];
-        if (global->kind == IR_GLOBAL_EXTERN) sb_append(&out, "extern %s\n", x64_symbol(x, i));
+        if (global->kind == IR_GLOBAL_EXTERN && !x64_is_runtime_function(global->name)) sb_append(&out, "extern %s\n", x64_symbol(x, i));
         if (global->kind == IR_GLOBAL_FUNCTION && global->function->is_entry_point) sb_append(&out, "global %s\n", x64_symbol(x, i));
     }
 
@@ -1087,6 +1158,12 @@ X64Output x64_emit_module(IrModule *module) {
     sb_append(&out, "\nsection .rdata\n");
     sb_append(&out, "\talign 16\n__sign_mask_f32:\n\tdd 0x80000000, 0, 0, 0\n");
     sb_append(&out, "\talign 16\n__sign_mask_f64:\n\tdq 0x8000000000000000, 0\n");
+    if (uses_assert) {
+        const char *message = "%s:%llu Assertion failed!\n";
+        sb_append(&out, "__assert_message:\n\tdb ");
+        for (const char *c = message; *c; c++) sb_append(&out, "%d, ", (unsigned char)*c);
+        sb_append(&out, "0\n");
+    }
     for (int i = 0; i < x->float_constants.count; i++) {
         X64FloatConstant *c = &x->float_constants.items[i];
         if (c->size == 4) sb_append(&out, "\talign 4\n__float%d:\n\tdd 0x%08x\n", c->id, (uint32_t) c->bits);
@@ -1099,6 +1176,8 @@ X64Output x64_emit_module(IrModule *module) {
 
     sb_append(&out, "\nsection .text\n");
     sb_copy(&out, x->text.buffer, (int) x->text.cursor);
+    if (uses_compare) sb_append(&out, "%s", x64_runtime_compare_strings);
+    if (uses_assert)  sb_append(&out, "%s", x64_runtime_builtin_assert);
 
     X64Output output = { out, x->regalloc_dump };
     return output;

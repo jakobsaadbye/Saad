@@ -396,6 +396,7 @@ typedef struct AstFunctionDefn {
     bool            is_method;
     bool            is_lambda;
     bool            is_extern;
+    char           *extern_library; // The library of an extern function, e.g "kernel32.dll". NULL for the C runtime
     bool            is_variadic;
     bool            has_default_parameters;
 
@@ -896,6 +897,8 @@ typedef struct CompilerConfig {
     bool               run_program;        // Run the executable after a successful build
     bool               check_only;         // Stop after type checking: 'saad check'
     bool               json;               // Write the diagnostics as JSON: 'saad check --json'
+    bool               debug;              // Make the program with nasm and gcc, with debug information: 'saad build --debug'
+    bool               emit_elf;           // Write ./build/out.o for Linux instead of out.exe: 'saad build --elf' (tools/linux)
 } CompilerConfig;
 
 typedef struct Relocation {

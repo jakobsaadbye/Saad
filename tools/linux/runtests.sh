@@ -4,7 +4,7 @@
 #
 #   tools/linux/runtests.sh
 #
-# Requirements: gcc and nasm. Builds the compiler with ./build.sh first.
+# Requirements: gcc. Builds the compiler with ./build.sh first.
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -17,13 +17,13 @@ passed=0; failed=0
 
 for f in tests/*.sd tests/std/*.sd tests/backend/*.sd; do
     printf "%-56s " "$f"
-    if ! output=$(./bin/saad build "$f" 2>&1); then
+    if ! output=$(./bin/saad build "$f" --elf 2>&1); then
         echo "${RED}COMPILE ERROR${RESET}"
         echo "$output" | grep -iE 'error' | head -3 | sed 's/^/    /'
         failed=$((failed + 1))
         continue
     fi
-    if output=$("$HERE/run.sh" "$(dirname "$f")/build/out.asm" 2>&1); then
+    if output=$("$HERE/run.sh" "$(dirname "$f")/build/out.o" 2>&1); then
         echo "${GREEN}OK${RESET}"
         passed=$((passed + 1))
     else

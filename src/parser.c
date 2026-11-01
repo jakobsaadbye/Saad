@@ -614,17 +614,22 @@ AstExtern *parse_extern(Parser *parser) {
     
     char *extern_string = extern_string_token.as_value.value.string.data;
     
-    if (strcmp(extern_string, "C") != 0) {
-        report_error_token(parser, LABEL_ERROR, extern_string_token, "Only extern \"C\" is supported as external functions");
+    // extern "C" is the C runtime (msvcrt.dll). Functions of another library name it, e.g extern "kernel32.dll"
+    size_t length = strlen(extern_string);
+    bool is_library = length > 4 && strcmp(extern_string + length - 4, ".dll") == 0;
+    if (strcmp(extern_string, "C") != 0 && !is_library) {
+        report_error_token(parser, LABEL_ERROR, extern_string_token, "An extern block is extern \"C\" for the C runtime, or names the library of its functions, e.g extern \"kernel32.dll\"");
         return NULL;
     }
     eat_token(parser);
 
     // Let all function definitions inside the extern block be visible in the outer scope
     parser->inside_extern_block = true;
+    parser->extern_library = is_library ? extern_string : NULL;
     AstBlock *block = parse_block(parser, parser->current_scope);
-    if (block == NULL) return NULL;
     parser->inside_extern_block = false;
+    parser->extern_library = NULL;
+    if (block == NULL) return NULL;
 
     AstExtern *ast_extern     = ast_allocate(parser, sizeof(AstExtern));
     ast_extern->head.kind     = AST_EXTERN;
@@ -3119,6 +3124,7 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
     if (parser->inside_extern_block) {
         func_defn->calling_convention = CALLING_CONV_MSVC;
         func_defn->is_extern = true;
+        func_defn->extern_library = parser->extern_library;
     }
 
     if (!func_defn->is_extern) {
