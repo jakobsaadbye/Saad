@@ -2,9 +2,10 @@ namespace json;
 
 // Reads JSON text into a value through reflection, e.g
 //
-//     person: Person;
-//     err := json.decode(text, &person);
+//     person, err := json.decode<Person>(text);
 //     if err != "" { fmt.print("Bad JSON: %", err); }
+//
+//     err2 := json.decodeInto(text, &settings);   // Into a value that exists, e.g to keep what the JSON doesn't have
 
 import fmt;
 use c;
@@ -17,7 +18,14 @@ use c;
 // * A null leaves the value as it is, except for pointers, which become null
 // * Strings, slices, lists, maps and the values of pointers are allocated with malloc
 // * Enums are read from the name of the value, e.g "open", or its number
-decode :: <T>(text: string, value: *T, options := Options{}) -> string {
+decode :: <T>(text: string, options := Options{}) -> T, string {
+    value: T;
+    err := decodeInto(text, &value, options);
+    return value, err;
+}
+
+// Like decode, but into a value that exists. Members that are not in the JSON keep their value
+decodeInto :: <T>(text: string, value: *T, options := Options{}) -> string {
     root, err := parse(text);
     if err != "" {
         return err;

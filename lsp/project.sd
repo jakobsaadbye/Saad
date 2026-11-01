@@ -81,8 +81,7 @@ run :: method (p: *Project, compiler: string, overlays: string) -> bool {
         return false;
     }
 
-    index: Index;
-    err := json.decode(text, &index);
+    index, err := json.decode<Index>(text);
     text.free();
     if err != "" {
         rpc.log(fmt.sprint("The compiler didn't write an index for %: %", p.root, err));
@@ -133,7 +132,7 @@ complete :: method (p: *Project, compiler: string, overlays: string, path: strin
         rpc.log(fmt.sprint("Couldn't run the compiler (exit code %): %", code, command));
         return result, false;
     }
-    err := json.decode(text, &result);
+    err := json.decodeInto(text, &result);
     text.free();
     if err != "" {
         rpc.log(fmt.sprint("The compiler didn't write completions: %", err));

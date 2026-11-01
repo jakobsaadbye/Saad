@@ -1,0 +1,12 @@
+// The T of a method of List<T> comes from the list, so only the method's own type parameters can be given
+// expect-error: 'first' takes no type arguments, as its receiver decides its type parameters
+
+Box :: struct <T> {
+    value: T;
+    first :: method () -> T { return self.value; }
+}
+
+main :: () {
+    b := Box<int>{value: 1};
+    x := b.first<int>();
+}

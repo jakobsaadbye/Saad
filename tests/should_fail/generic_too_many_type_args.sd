@@ -1,0 +1,10 @@
+// expect-error: 'max' takes 1 type argument, but 2 were given
+
+max :: <T>(a: T, b: T) -> T {
+    if a > b { return a; }
+    return b;
+}
+
+main :: () {
+    x := max<int, int>(1, 2);
+}

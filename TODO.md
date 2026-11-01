@@ -63,7 +63,7 @@ Future development
   [x] Dynamic arrays as List<T> in std/prelude/collections.sd, with an initial capacity (reserve), more methods and allocators
   [x] Map<K, V> with [k: v] literals
   [x] for key, value in m
-  [] map / filter (needs methods with type parameters of their own)
+  [x] map / filter / reduce / find / some / every on slices, arrays and lists
   [] Hashing pointers and enums without writing a hash method
   [] Map.remove in O(1) while keeping the order (tombstones)
   [] Decide on implicit narrowing of arguments and return values (i64 to i32 is allowed today)
@@ -106,9 +106,9 @@ Future development
   [x] For functions (type arguments inferred from the call)
   [x] For structs
   [x] Methods on generic types (outside the struct with explicit type parameters, or inside the struct with an implicit self)
-  [] Generic methods with type parameters of their own e.g map :: method <U>(f: (V) -> U) -> Map<K, U>
-  [] Explicit type arguments at call sites e.g max<f64>(a, b)
-  [] Generic functions as values (needs explicit type arguments)
+  [x] Generic methods with type parameters of their own e.g map :: method <U>(f: (V) -> U) -> Map<K, U>
+  [x] Explicit type arguments at call sites e.g max<f64>(a, b)
+  [] Generic functions as values, e.g f := max<int>; (calls can give type arguments, values not yet)
   [] Constraints on type parameters
   [] Constants and function type members in generic structs
   [x] Type aliases e.g Byte :: u8; MyList :: List<int>
@@ -194,6 +194,5 @@ Found while writing std/json:
 - An untyped constant can't initialize a typed variable: `open: u8 = OpenBracket;` (works for literals and arguments)
 - `return f();` of a function with more than one return value is not supported by the IR backend yet
 - All the return values have to be taken: `ok := two();` is an error when `two` returns two values
-- No `?:` and no character literals ('a'), so std/json names the characters it uses as constants
-- Methods of a generic struct with type parameters of their own (e.g `map :: method <U>` on a `List<T>`)
+- No `?:`
 - Global variables can't start with a value that is computed when the program starts, e.g `rng := newRandom(clock());`

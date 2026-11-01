@@ -457,6 +457,8 @@ typedef struct AstFunctionCall {
     bool             is_member_call;    // If the function is called on a member of a struct. Member calls does not take an implicit 'self' parameter
     bool             is_lambda_call;    // If the function symbol name is not known at compile time, and we only have a function pointer. Some languages calls these annonymous functions
     bool             has_positional_arguments;
+    bool             is_slice_method_call; // e.g xs.sort(), which is the call sort(xs)
+    DynamicArray     type_args;              // of *Type. The type arguments given at the call e.g the f64 in max<f64>(a, b)
 
     DynamicArray     lowered_arguments;      // of *AstExpr. A lowered representation of the argument list including hidden return arguments
 } AstFunctionCall;

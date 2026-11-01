@@ -1,0 +1,9 @@
+// expect-error: Type parameter 'T' is already a type parameter of 'Box'
+
+Box :: struct <T> {
+    value: T;
+    convert :: method <T> (f: (x: T) -> T) -> T { return f(self.value); }
+}
+
+main :: () {
+}

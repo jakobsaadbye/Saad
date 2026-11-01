@@ -1,0 +1,144 @@
+// Type arguments given at a call, methods with type parameters of their own, and map, filter and reduce
+
+use fmt;
+
+max :: <T>(a: T, b: T) -> T {
+    if a > b { return a; }
+    return b;
+}
+
+// T is only in the return type, so a call has to give it
+zero :: <T>() -> T {
+    value: T;
+    return value;
+}
+
+Pair :: struct <A, B> { first: A; second: B; }
+
+pairOf :: <A, B>(first: A) -> Pair<A, B> {
+    p: Pair<A, B>;
+    p.first = first;
+    return p;
+}
+
+Box :: struct <T> {
+    value: T;
+
+    // A method with a type parameter of its own, U, besides the T of the struct
+    convert :: method <U> (f: (T) -> U) -> Box<U> {
+        result: Box<U>;
+        result.value = f(self.value);
+        return result;
+    }
+
+    // Given at the call: box.to<f64>()
+    to :: method <U> () -> U {
+        return self.value as U;
+    }
+}
+
+// The same, declared outside the struct
+describe :: method <T, U>(b: Box<T>, label: U) -> string {
+    return sprint("% %", label, b.value);
+}
+
+// A struct that isn't generic, with a generic method
+Store :: struct { count: int; }
+make :: method <T>(s: *Store) -> [..]T {
+    s.count += 1;
+    items: [..]T;
+    return items;
+}
+
+User :: struct { name: string; age: int; }
+
+double  :: (x: int) -> int { return x * 2; }
+isEven  :: (x: int) -> bool { return x % 2 == 0; }
+toText  :: (x: int) -> string { return sprint("#%", x); }
+nameOf  :: (u: User) -> string { return u.name; }
+isAdult :: (u: User) -> bool { return u.age >= 18; }
+add     :: (sum: int, x: int) -> int { return sum + x; }
+
+// A function type with only the types of its parameters
+apply :: (f: (int, int) -> int, a: int, b: int) -> int { return f(a, b); }
+
+main :: () {
+    // Type arguments at a call
+    {
+        a := max<f64>(1, 2.5);           // The untyped literals become f64
+        assert(a == 2.5 && typeof(a) == "f64");
+        b := max<i64>(3, 4);
+        assert(b == 4 && typeof(b) == "i64");
+        assert(max(3, 4) == 4);          // Still inferred without them
+
+        s := zero<string>();
+        assert(s == "" && typeof(s) == "string");
+        assert(zero<int>() == 0);
+
+        p := pairOf<int, string>(7);     // B can only be given
+        assert(p.first == 7 && p.second == "" && typeof(p) == "Pair<int, string>");
+
+        // Comparisons still work
+        x := 1;
+        y := 2;
+        assert(x < y && (x < y) == (y > x));
+    }
+
+    // Methods with type parameters of their own
+    {
+        box := Box<int>{value: 21};
+        doubled := box.convert(double);
+        assert(doubled.value == 42 && typeof(doubled) == "Box<int>");
+        text := box.convert(toText);
+        assert(text.value == "#21" && typeof(text) == "Box<string>");
+        half := box.convert((x: int) -> f64 { return x as f64 / 2.0; });
+        assert(half.value == 10.5 && typeof(half) == "Box<f64>");
+
+        assert(box.to<f64>() == 21.0);
+        assert(box.to<u8>() == 21);
+        assert(box.describe("value") == "value 21");
+        assert(box.describe<f64>(2) == "2.000000 21");
+
+        store: Store;
+        names := store.make<string>();
+        names.add("a");
+        numbers := store.make<int>();
+        assert(store.count == 2 && names.count == 1 && numbers.count == 0);
+        assert(typeof(names) == "List<string>");
+    }
+
+    // map, filter and the others on slices, arrays and lists
+    {
+        xs := [1, 2, 3, 4, 5];
+        assert(sprint("%", xs.map(double)) == "[2, 4, 6, 8, 10]");
+        assert(sprint("%", xs.filter(isEven)) == "[2, 4]");
+        assert(xs.reduce(0, add) == 15);
+        assert(xs.map(toText)[4] == "#5");
+        assert(typeof(xs.map(toText)) == "List<string>");
+        assert(xs.map<f64>((x: int) -> f64 { return x as f64; })[1] == 2.0);
+
+        first, found := xs.find(isEven);
+        assert(found && first == 2);
+        _, none := xs.find((x: int) -> bool { return x > 10; });
+        assert(!none);
+        assert(xs.findIndex(isEven) == 1);
+        assert(xs.some(isEven) && !xs.every(isEven));
+        assert(xs.every((x: int) -> bool { return x > 0; }));
+        assert(xs.countWhere(isEven) == 2);
+
+        empty: []int;
+        assert(empty.map(double).count == 0 && empty.every(isEven) && !empty.some(isEven));
+
+        users: [..]User;
+        users.add(User{"Ada", 36});
+        users.add(User{"Bob", 12});
+        users.add(User{"Cy", 18});
+        assert(sprint("%", users.filter(isAdult).map(nameOf)) == "[\"Ada\", \"Cy\"]");
+        oldest := users.reduce(0, (best: int, u: User) -> int { return max(best, u.age); });
+        assert(oldest == 36);
+
+        assert(apply(add, 2, 3) == 5);
+    }
+
+    print("generic type arguments ok");
+}
