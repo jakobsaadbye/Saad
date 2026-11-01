@@ -2,7 +2,32 @@
 
 A just for fun compiler
 
+## Getting started
+
+Build the compiler with `make.bat` (Windows, needs gcc) or `./build.sh` (Linux). Then:
+
+```
+saad run main.sd          # compile and run
+saad build main.sd        # compile to build/out.exe
+saad check main.sd        # only check for errors
+```
+
+The compiler makes `out.exe` itself, so nothing else has to be installed: `saad.exe`, `std/` and `packages/` are all it
+needs. `saad build main.sd --debug` uses nasm and gcc instead, for a program with debug information for gdb. See
+`docs/backend.md`, and `lsp/README.md` for the editor support.
+
 # Changelog
+
+## Update v0.9.0 - 1. Nov 2026
+
+* The compiler makes `out.exe` itself, with its own assembler and its own writer of Windows programs. nasm and gcc are no
+  longer needed to compile a program, and they were the slow part: `lsp/main.sd` compiles in 0.18 seconds instead of
+  2.6, where assembling and linking went from 2.5 seconds to 0.04. See `docs/backend.md`
+* `saad build --debug` makes the program with nasm and gcc as before, with debug information for gdb
+* An extern block names the DLL of its functions, e.g `extern "kernel32.dll" { ... }` and `extern "raylib.dll" { ... }`.
+  `extern "C"` is the C runtime. A DLL of `packages/` is copied next to `out.exe`, e.g raylib.dll
+* The runtime functions (comparing strings, failed asserts) are part of the program, so there is no runtime library
+* The compiler can make a Windows program on Linux too
 
 ## Update v0.8.6 - 1. Nov 2026
 

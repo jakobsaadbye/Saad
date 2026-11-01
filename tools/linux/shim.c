@@ -1,8 +1,8 @@
 //////////////////////////////////////////////////////////////////////////////////////////
 // Linux test harness: runs Win64-ABI code produced by the Saad backend on Linux.
 //
-// The program's asm (build/out.asm) is assembled as ELF with every global/extern symbol
-// prefixed with "ms_" (nasm --prefix ms_). This file provides those ms_ symbols as
+// The program is written as an ELF object by 'saad build --elf' (or build/out.asm is assembled with
+// 'nasm -felf64 --prefix ms_'), with every global/extern symbol prefixed with "ms_". This file provides those ms_ symbols as
 // __attribute__((ms_abi)) wrappers around the real C functions, so gcc takes care of the
 // Win64 calling convention at the boundary (shadow space, register usage, varargs).
 //
@@ -13,7 +13,10 @@
 #include <stdarg.h>
 #include <math.h>
 #include <stdint.h>
-#include "runtime_support.c"   // compiled normally (SysV), wrapped below
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
 
 // ---- printf family: walk the format and fetch each argument from the ms va_list ----
 static int ms_vformat(char *out, size_t out_cap, FILE *f, const char *fmt, __builtin_ms_va_list ap) {
@@ -106,10 +109,6 @@ MS int ms__pclose(FILE *f) { int s = pclose(f); return WIFEXITED(s) ? WEXITSTATU
 static int saved_argc; static char **saved_argv;
 extern char **environ;
 MS int ms___getmainargs(int *argc, char ***argv, char ***env, int wild, void *info) { *argc = saved_argc; *argv = saved_argv; *env = environ; return 0; }
-
-// ---- runtime_support.c ----
-MS void ms_runtime_builtin_assert(bool c, RawString f, uint64_t l) { fflush(stdout); runtime_builtin_assert(c, f, l); }
-MS int  ms_runtime_compare_strings(RawString *a, RawString *b) { return runtime_compare_strings(a, b); }
 
 // ---- entry ----
 MS int ms_main(void);

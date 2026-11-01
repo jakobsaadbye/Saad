@@ -19,6 +19,7 @@ typedef struct Parser {
     bool inside_parameter_list;
     bool inside_argument_list;
     bool inside_extern_block;
+    char *extern_library;  // The library of the extern block that is parsed, e.g "kernel32.dll". NULL for extern "C"
     bool reported_error;
 
     int split_shift_right_token; // Index + 1 of a '>>' token whose first '>' has been eaten as the end of a list of type arguments e.g List<List<int>>. 0 if none
