@@ -27,6 +27,15 @@ Next steps:
 []: Compile-time interpreter on top of the IR
 
 
+
+Missing features:
+[]: Have a new enum type for enum flags. Declared as `MyFlags :: enum flags {UnionFlag, OptionalFlag}` which will increment by powers of 2
+    and has some standard methods for doing set and get tests. This is mostly to get rid of `flags: int` being used currently for this which hides the options.
+[]: It would be nice with a way to allocate single objects with some kind of syntax. Currently parts of the standard library simply uses malloc or calloc, but it would
+    be good if user programs doesn't need to do this. Example syntax `myObject := new(Object)`. Allowing also for a custom allocator to allocate the object
+[]: 
+
+
 []: Disallow integer and floating point arithmetic
 a := 3;
 b := 4.5 as f64;
