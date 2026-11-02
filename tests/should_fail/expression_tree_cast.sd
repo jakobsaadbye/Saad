@@ -1,0 +1,6 @@
+// expect-error: A cast can't be a part of an expression tree (Expr), where it uses the parameters of the lambda
+User :: struct { age: int; }
+where :: (f: Expr<(User) -> bool>) {}
+main :: () {
+    where(x => x.age as float > 1.5);
+}

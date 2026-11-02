@@ -1,0 +1,7 @@
+// expect-error: 'agee' is not a member of 'User'
+User :: struct { age: int; }
+where :: (f: Expr<(User) -> bool>) {}
+main :: () {
+    limit := 3;
+    where(x => x.agee > limit);
+}

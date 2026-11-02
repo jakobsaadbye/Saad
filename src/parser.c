@@ -1931,6 +1931,9 @@ int scan_type_arguments(Parser *parser, int lookahead) {
         case '[':
         case ']':
         case ',':
+        case '(':  // A function type e.g Expr<(User) -> bool>
+        case ')':
+        case TOKEN_RIGHT_ARROW:
             break;
         default:
             if (is_primitive_type_token(token)) break;
@@ -3259,7 +3262,19 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
 
 // Parses a generic function again from its first token, giving a new copy of it to use as an instance. The type parameters
 // of the instance are bound in 'scope', which must have the scope of the generic function as its parent
+static AstFunctionDefn *parse_short_lambda(Parser *parser);
+static AstFunctionDefn *reparse_function(Parser *parser, AstFunctionDefn *generic, AstBlock *scope);
+
 AstFunctionDefn *reparse_generic_function(Parser *parser, AstFunctionDefn *generic, AstBlock *scope) {
+    return reparse_function(parser, generic, scope);
+}
+
+// Parses a short lambda again, for a copy of its AST e.g to make an expression tree of. 'scope' is the scope around it
+AstFunctionDefn *reparse_short_lambda(Parser *parser, AstFunctionDefn *lambda, AstBlock *scope) {
+    return reparse_function(parser, lambda, scope);
+}
+
+static AstFunctionDefn *reparse_function(Parser *parser, AstFunctionDefn *generic, AstBlock *scope) {
     int              saved_token_index        = parser->current_token_index;
     AstBlock        *saved_scope              = parser->current_scope;
     AstFile         *saved_file               = parser->current_file;
@@ -3289,7 +3304,7 @@ AstFunctionDefn *reparse_generic_function(Parser *parser, AstFunctionDefn *gener
     int skipped = parser->skipped_statements;
     AstFunctionDefn *volatile instance = NULL;
     if (setjmp(on_syntax_error) == 0) {
-        instance = parse_function_defn(parser);
+        instance = generic->is_short_lambda ? parse_short_lambda(parser) : parse_function_defn(parser);
     }
     if (parser->skipped_statements != skipped) instance = NULL; // It isn't whole, so it isn't checked
     diagnostics.muted -= 1;

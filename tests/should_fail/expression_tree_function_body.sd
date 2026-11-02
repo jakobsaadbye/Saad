@@ -1,0 +1,6 @@
+// expect-error: is made from a lambda of one expression e.g x => x.age > 18
+User :: struct { age: int; }
+where :: (f: Expr<(User) -> bool>) {}
+main :: () {
+    where((x: User) -> bool { return x.age > 1; });
+}

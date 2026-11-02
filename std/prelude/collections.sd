@@ -511,3 +511,112 @@ Map :: struct <K, V> {
         }
     }
 }
+
+//
+// Expression trees
+//
+
+// The kinds of the parts of an expression tree
+ExprKind :: enum { parameter, member, value, unary, binary, call, object }
+
+// A part of the tree of an Expr. What the members mean depends on the kind:
+//   parameter   index and name: the parameter of the lambda, e.g the x of x => ...
+//   member      left.name, e.g x.age
+//   value       value: a literal, or what a part without the parameters gave when the tree was made, e.g a variable
+//               around the lambda. An empty value (type null) is null
+//   unary       op left, e.g !x.active or -x.age
+//   binary      left op right, e.g x.age >= 18, a && b, x.email ?? ""
+//   call        left.name(args...), or name(args...) when left is null, e.g x.name.startsWith("A")
+//   object      a struct literal {names[0]: args[0], ...}, e.g {name: x.name}
+ExprNode :: struct {
+    kind:  ExprKind;
+    name:  string;
+    op:    string;
+    index: int;
+    left:  *ExprNode;
+    right: *ExprNode;
+    args:  [..]*ExprNode;
+    names: [..]string;
+    value: any;
+}
+
+// A lambda given as the tree of what it does instead of as a function, e.g for a query to make SQL of. A parameter of
+// type Expr<(T) -> bool> takes a lambda like x => x.age >= minAge. It can use the variables around it, as their values
+// are put in the tree when it is made
+Expr :: struct <F> {
+    root:       *ExprNode;
+    parameters: [..]string;
+}
+
+// The functions that the compiler makes an Expr with
+exprNode :: (kind: ExprKind) -> *ExprNode {
+    node := calloc(1, sizeof(ExprNode)) as *ExprNode;
+    node.kind = kind;
+    return node;
+}
+
+exprParameter :: (index: int, name: string) -> *ExprNode {
+    node := exprNode(.parameter);
+    node.index = index;
+    node.name  = name;
+    return node;
+}
+
+exprMember :: (left: *ExprNode, name: string) -> *ExprNode {
+    node := exprNode(.member);
+    node.left = left;
+    node.name = name;
+    return node;
+}
+
+// A copy of the value, so the tree can outlive it
+exprValue :: (value: any) -> *ExprNode {
+    node := exprNode(.value);
+    node.value.type = value.type;
+    if value.type != null && value.data != null {
+        copy := calloc(1, value.type.size) as *u8;
+        from := value.data as *u8;
+        for i in 0..value.type.size {
+            copy[i] = from[i];
+        }
+        node.value.data = copy;
+    }
+    return node;
+}
+
+exprNull :: () -> *ExprNode {
+    return exprNode(.value);
+}
+
+exprUnary :: (op: string, operand: *ExprNode) -> *ExprNode {
+    node := exprNode(.unary);
+    node.op   = op;
+    node.left = operand;
+    return node;
+}
+
+exprBinary :: (op: string, left: *ExprNode, right: *ExprNode) -> *ExprNode {
+    node := exprNode(.binary);
+    node.op    = op;
+    node.left  = left;
+    node.right = right;
+    return node;
+}
+
+exprCall :: (left: *ExprNode, name: string) -> *ExprNode {
+    node := exprNode(.call);
+    node.left = left;
+    node.name = name;
+    return node;
+}
+
+// Adds an argument to a call, or a member to an object
+exprArgument :: (node: *ExprNode, name: string, value: *ExprNode) -> *ExprNode {
+    node.args.add(value);
+    node.names.add(name);
+    return node;
+}
+
+exprObject :: () -> *ExprNode {
+    return exprNode(.object);
+}

@@ -98,6 +98,16 @@ ada  := {name: "Ada", age: 36};                       // a struct { name: string
 rows := users.map(u => {name: u.name, older: u.age + 1});
 ```
 
+* Expression trees: a short lambda given for an `Expr<F>` is the tree of what it does, for a library to read, e.g to
+  make SQL of. It can use the variables around it, as their values are put in the tree. See `docs/expression_trees.md`
+
+```odin
+where :: (f: Expr<(User) -> bool>) -> string { ... f.root ... }
+where(u => u.age >= minAge && u.name.startsWith("A"));
+```
+
+* Function types can be type arguments, e.g `Expr<(User) -> bool>`
+
 ## Update v0.9.6 - 2. Nov 2026
 
 * Saving changes, like `SaveChanges` of Entity Framework: `create()` (a new row to fill in), `update` and `delete` of a

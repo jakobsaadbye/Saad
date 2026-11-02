@@ -1,0 +1,6 @@
+// expect-error: Return type mismatch. Wanted type bool, got type int
+User :: struct { age: int; }
+where :: (f: Expr<(User) -> bool>) {}
+main :: () {
+    where(x => x.age + 1);
+}
