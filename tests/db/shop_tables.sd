@@ -22,63 +22,138 @@ main :: () {
 
     db := database.open(&conn);
 
-    // Insert gives back what the database made: the key from the serial and created_at from now()
-    ada, e1 := db.users.insert(User{name: "Ada", email: "ada@example.com", age: 36, role: .admin});
-    assert(e1 == "");
-    assert(ada.id == 1 && ada.name == "Ada" && ada.role == .admin);
-    assert(ada.createdAt.len > 0);
-    assert(ada.active && ada.score == 0.0); // The defaults of the database are the defaults of the struct
+    // create gives a new row with the defaults, and keeps the change until saveChanges, which writes back what the
+    // database made: the key from the serial, and created_at from now()
+    ada := db.users.create();
+    assert(ada.role == .guest && ada.active); // The defaults of the database are the defaults of the struct
+    ada.name  = "Ada";
+    ada.email = "ada@example.com";
+    ada.age   = 36;
+    ada.role  = .admin;
+    bo := db.users.create();
+    bo.name = "Bo";
+    assert(db.pendingChanges() == 2 && ada.id == 0);
+    count0, _ := db.users.count();
+    assert(count0 == 0); // Nothing is written yet
 
-    bo, e2 := db.users.insert(User{name: "Bo"});
-    assert(e2 == "" && bo.id == 2 && bo.email == null && bo.age == null && bo.role == .guest);
+    assert(db.saveChanges() == "");
+    assert(db.pendingChanges() == 0);
+    assert(ada.id == 1 && bo.id == 2 && ada.createdAt.len > 0);
+    assert(ada.active && ada.score == 0.0); // The defaults of the database are the defaults of the struct
+    assert(bo.email == null && bo.age == null && bo.role == .guest);
 
     count, e3 := db.users.count();
     assert(e3 == "" && count == 2);
     assert(rowsOf(&db.users) == 2);
 
-    // get gives an optional
+    // get gives a pointer, null when there is no row
     found, e4 := db.users.get(ada.id);
-    assert(e4 == "" && found?.name == "Ada" && found?.email == "ada@example.com");
+    assert(e4 == "" && found != null && found.name == "Ada" && found.email == "ada@example.com");
     missing, e5 := db.users.get(99);
     assert(e5 == "" && missing == null);
 
     // update writes the row with its key
-    bo.email = "bo@example.com";
+    found.email = "ada@lovelace.org";
     bo.active = false;
-    changed, e6 := db.users.update(bo);
-    assert(e6 == "" && changed == 1);
+    db.users.update(found);
+    db.users.update(bo);
+    assert(db.saveChanges() == "");
     again, _ := db.users.get(bo.id);
-    assert(again?.email == "bo@example.com" && again?.active == false);
+    assert(again.active == false);
+    ada2, _ := db.users.get(ada.id);
+    assert(ada2.email == "ada@lovelace.org");
 
     // Enums, numeric as text, a varchar with a default, and a column named with a keyword
-    order, e7 := db.orders.insert(Order{userId: ada.id, status: .in_transit, total: "12.50", type: "gift"});
-    assert(e7 == "");
+    order := db.orders.create();
+    order.userId = ada.id;
+    order.status = .in_transit;
+    order.total  = "12.50";
+    order.type   = "gift";
+    assert(db.saveChanges() == "");
     assert(order.id == 1 && order.status == .in_transit && order.total == "12.50" && order.note == "none" && order.type == "gift");
 
-    // A table with a key of two columns has insert and all
-    _, e8 := db.orderItems.insert(OrderItem{orderId: order.id, product: "tea", quantity: 3});
-    _, e9 := db.orderItems.insert(OrderItem{orderId: order.id, product: "cake"});
-    assert(e8 == "" && e9 == "");
+    // A table with a key of two columns has create and all
+    tea := db.orderItems.create();
+    tea.orderId  = order.id;
+    tea.product  = "tea";
+    tea.quantity = 3;
+    cake := db.orderItems.create();
+    cake.orderId = order.id;
+    cake.product = "cake";
+    assert(db.saveChanges() == "");
     items, e10 := db.orderItems.all();
     assert(e10 == "" && items.count == 2);
     quantities := items.reduce(0, (sum: int, item: OrderItem) -> int { return sum + item.quantity; });
     assert(quantities == 4);
 
     // A text key, and the column "for", which is the member for_
-    category, e11 := db.categories.insert(Category{code: "books", for_: "readers"});
-    assert(e11 == "" && category.code == "books" && category.for_ == "readers" && category.uid == null);
-    books, _ := db.categories.get("books");
-    assert(books?.for_ ?? "" == "readers");
+    books := db.categories.create();
+    books.code = "books";
+    books.for_ = "readers";
+    assert(db.saveChanges() == "");
+    stored, _ := db.categories.get("books");
+    assert(stored?.for_ ?? "" == "readers" && stored.uid == null);
 
-    // delete
-    removed, e12 := db.categories.delete("books");
-    assert(e12 == "" && removed == 1);
+    // delete, by the key
+    db.categories.delete("books");
+    assert(db.saveChanges() == "");
     gone, _ := db.categories.get("books");
     assert(gone == null);
 
-    // Errors of the database come back as errors, e.g the user of an order must exist
-    _, e13 := db.orders.insert(Order{userId: 999});
-    assert(e13.startsWith("ERROR:") && e13.indexOf("foreign key") >= 0);
+    // One change that fails undoes all of them, says which one it was, and keeps the changes
+    cy := db.users.create();
+    cy.name = "Cy";
+    bad := db.orders.create();
+    bad.userId = 999;    // No such user
+    e13 := db.saveChanges();
+    assert(e13.startsWith("create in orders (change 2 of 2): ERROR:") && e13.indexOf("foreign key") >= 0);
+    assert(cy.id == 0 && db.pendingChanges() == 2);
+    count2, _ := db.users.count();
+    assert(count2 == 2); // Cy wasn't written either
+    db.discardChanges();
+    assert(db.pendingChanges() == 0);
+
+    // Changing or removing a row that isn't there is an error
+    db.users.delete(12345);
+    assert(db.saveChanges() == "delete in users (change 1 of 1): No row has the key 12345");
+    db.discardChanges();
+
+    // Tracking: the rows of get and all are saved without update, only the columns that changed
+    dbUser, _ := db.users.get(ada.id);
+    dbUser.score = 4.5;
+    assert(db.pendingChanges() == 1);
+    assert(db.saveChanges() == "");
+    check, _ := db.users.get(ada.id);
+    assert(check.score == 4.5);
+
+    everyone, _ := db.users.all();
+    for i in 0..everyone.count {
+        everyone.indexRef(i).active = true;
+    }
+    assert(db.saveChanges() == "");
+    activeCount, _, _ := conn.queryOne<i64>("SELECT count(*) FROM saad_shop.users WHERE active");
+    assert(activeCount == 2);
+
+    // Many creates of one table are one INSERT, and each row gets its own id back, in order
+    names := ["Eve", "Finn", "Gus", "Hal"];
+    created: [..]*User;
+    for name in names {
+        row := db.users.create();
+        row.name = name;
+        created.add(row);
+    }
+    assert(db.saveChanges() == "");
+    for row, i in created {
+        stored, _ := db.users.get(row.id);
+        assert(stored.name == names[i]);
+    }
+    assert(created[0].id + 3 == created[3].id);
+    created[1].email = "finn@example.com";   // and tracked after they are saved
+    assert(db.saveChanges() == "");
+    finn, _ := db.users.get(created[1].id);
+    assert(finn.email == "finn@example.com");
+    for row in created { db.users.delete(row.id); }
+    assert(db.saveChanges() == "");
 
     // all, with the methods of lists
     users, e14 := db.users.all();

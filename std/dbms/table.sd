@@ -2,24 +2,28 @@ namespace dbms;
 
 // The rows of one table, as structs of T, e.g
 //
-//     users := dbms.keyedTable<User, i64>(&conn, "users", "id");    // the key column and its type
-//     users.generated = ["id", "created_at"];                     // what the database makes, e.g a serial or now()
+//     context := dbms.newContext(&conn);
+//     users := dbms.keyedTable<User, i64>(context, "users", "id");   // the column of the key, and its type
+//     users.generated = ["id", "created_at"];                        // what the database makes, e.g a serial or now()
 //
 //     all, err := users.all();
-//     ada, err2 := users.get(1);                                  // a ?User, empty when no row has the key 1
-//     saved, err3 := users.insert(User{name: "Ada"});             // with the id and created_at the database made
-//     changed, err4 := users.update(saved);
-//     removed, err5 := users.delete(saved.id);
+//     ada, err2 := users.get(1);              // a *User, null when no row has the key 1
+//     row := users.create();                  // a new *User. The changes are kept by the context ...
+//     row.name = "Bo";
+//     users.update(ada);
+//     users.delete(7);
+//     err3 := context.saveChanges();          // ... and written by saveChanges, in one transaction. See context.sd
 //
 // The columns are the members of T, in snake case: createdAt is created_at, and a _ at the end is left out, so for_
-// is the column for. The generated columns are left to the database by insert and update, and read back.
-// @dbms.Column on a member says the same for a struct written by hand. std/dbms/tools/generate.sd writes the structs
-// and tables of a database
+// is the column for. The generated columns are left to the database by create and update, and read back by
+// saveChanges. @dbms.Column on a member says the same for a struct written by hand. std/dbms/tools/generate.sd writes
+// the structs and tables of a database
 import fmt;
+use c;
 
-// A table of rows without a key of one column: all, insert and count. See KeyedTable for get, update and delete
+// A table of rows without a key of one column: all, count and create. See KeyedTable for get, update and delete
 Table :: struct <T> {
-    conn:      *Connection;
+    context:   *Context;
     name:      string;      // e.g users
     schema:    string;      // e.g sales. Empty is the schema the connection uses, e.g public
     generated: [..]string;  // The columns the database makes, e.g id and created_at
@@ -27,55 +31,32 @@ Table :: struct <T> {
     // Every row
     all :: method () -> ([..]T, string) {
         sql := fmt.sprint("SELECT * FROM %", qualifiedName(self.schema, self.name));
-        rows, err := self.conn.query<T>(sql);
+        rows, err := self.context.conn.query<T>(sql);
         sql.free();
         return rows, err;
-    }
-
-    // Adds the row and gives it back as the database stored it, e.g with its generated id
-    insert :: method (row: T) -> (T, string) {
-        columns := columnsOf(rowType<T>(), self.generated, "");
-        args: [..]any;
-        sb: fmt.StringBuilder;
-        sb.add("INSERT INTO %", qualifiedName(self.schema, self.name));
-
-        names: fmt.StringBuilder;
-        values: fmt.StringBuilder;
-        for column in columns {
-            if column.generated { continue; }
-            if args.count > 0 {
-                names.addString(", ");
-                values.addString(", ");
-            }
-            args.add(valueOf(column, &row));
-            names.addString(quoted(column.name));
-            values.add("$%", args.count);
-        }
-        if args.count == 0 {
-            sb.addString(" DEFAULT VALUES");
-        } else {
-            sb.add(" (%) VALUES (%)", names.toString(), values.toString());
-        }
-        sb.addString(" RETURNING *");
-
-        saved, found, err := self.conn.queryOne<T>(sb.toString(), ...args.elements());
-        sb.free();
-        names.free();
-        values.free();
-        args.free();
-        columns.free();
-        if err == "" && !found {
-            err = fmt.sprint("Inserting into % gave no row back", self.name);
-        }
-        return saved, err;
     }
 
     // The number of rows
     count :: method () -> (i64, string) {
         sql := fmt.sprint("SELECT count(*) FROM %", qualifiedName(self.schema, self.name));
-        n, _, err := self.conn.queryOne<i64>(sql);
+        n, _, err := self.context.conn.queryOne<i64>(sql);
         sql.free();
         return n, err;
+    }
+
+    // A new row with the defaults of T, which is added when the context saves its changes. Set its members before
+    // that. Then what the database made, e.g its id, is written into it. It is made with the allocator of the connection
+    create :: method () -> *T {
+        empty: T;
+        row := resizeMemory(self.context.conn.allocator, null, sizeof(T)) as *T;
+        *row = empty;
+        none: any;
+        self.context.record(.create, self.info(""), row, none);
+        return row;
+    }
+
+    info :: method (key: string) -> TableInfo {
+        return TableInfo{name: self.name, schema: self.schema, key: key, generated: self.generated, type: rowType<T>()};
     }
 }
 
@@ -84,74 +65,74 @@ KeyedTable :: struct <T, K> {
     @embed table: Table<T>;
     key: string;            // The column of the key, e.g id
 
-    // The row with the key, or empty when there is none
-    get :: method (key: K) -> (?T, string) {
+    // A new row, like create of Table, which is tracked after it is saved
+    create :: method () -> *T {
+        empty: T;
+        row := resizeMemory(self.context.conn.allocator, null, sizeof(T)) as *T;
+        *row = empty;
+        none: any;
+        self.context.record(.create, self.info(self.key), row, none);
+        return row;
+    }
+
+    // Every row. They are tracked, so what is changed on them is saved by saveChanges, unless context.track is false.
+    // Don't add to the list then, as its rows can move
+    all :: method () -> ([..]T, string) {
+        rows, err := self.table.all();
+        for i in 0..rows.count {
+            self.context.trackRow(self.info(self.key), rows.indexRef(i));
+        }
+        return rows, err;
+    }
+
+    // The row with the key, or null when there is none. It is made with the allocator of the connection, and tracked, so
+    // what is changed on it is saved by saveChanges, unless context.track is false
+    get :: method (key: K) -> (*T, string) {
         sql := fmt.sprint("SELECT * FROM % WHERE % = $1", qualifiedName(self.schema, self.name), quoted(self.key));
-        row, found, err := self.conn.queryOne<T>(sql, key);
+        conn := self.context.conn;
+        row, found, err := conn.queryOne<T>(sql, key);
         sql.free();
-        if !found {
+        if !found || err != "" {
             return null, err;
         }
-        return row, err;
+        stored := resizeMemory(conn.allocator, null, sizeof(T)) as *T;
+        *stored = row;
+        self.context.trackRow(self.info(self.key), stored);
+        return stored, "";
     }
 
-    // Writes every column of the row that isn't the key or generated, to the row with its key. Gives the number of rows
-    // changed, which is 0 when there is no row with the key
-    update :: method (row: T) -> (i64, string) {
-        columns := columnsOf(rowType<T>(), self.generated, self.key);
-        keyColumn, hasKey := keyOf(columns);
-        if !hasKey {
-            columns.free();
-            return 0, fmt.sprint("The row of % has no member for its key %", self.name, self.key);
-        }
-
-        args: [..]any;
-        sb: fmt.StringBuilder;
-        sb.add("UPDATE % SET ", qualifiedName(self.schema, self.name));
-        for column in columns {
-            if column.generated || column.key { continue; }
-            if args.count > 0 { sb.addString(", "); }
-            args.add(valueOf(column, &row));
-            sb.add("% = $%", quoted(column.name), args.count);
-        }
-        if args.count == 0 {
-            sb.free();
-            args.free();
-            columns.free();
-            return 0, "";
-        }
-        args.add(valueOf(keyColumn, &row));
-        sb.add(" WHERE % = $%", quoted(self.key), args.count);
-
-        changed, err := self.conn.exec(sb.toString(), ...args.elements());
-        sb.free();
-        args.free();
-        columns.free();
-        return changed, err;
+    // Writes the row to the row with its key when the context saves its changes: every column that isn't the key or
+    // generated. It is read then, so it must still be there. A row that get or all gave doesn't need it, as it is tracked
+    update :: method (row: *T) {
+        none: any;
+        self.context.record(.update, self.info(self.key), row, none);
     }
 
-    // Removes the row with the key. Gives the number of rows removed, 0 or 1
-    delete :: method (key: K) -> (i64, string) {
-        sql := fmt.sprint("DELETE FROM % WHERE % = $1", qualifiedName(self.schema, self.name), quoted(self.key));
-        removed, err := self.conn.exec(sql, key);
-        sql.free();
-        return removed, err;
+    // Removes the row with the key when the context saves its changes
+    delete :: method (key: K) {
+        copy := resizeMemory(self.context.conn.allocator, null, sizeof(K)) as *K;
+        *copy = key;
+        boxed: any = key;
+        stored: any;
+        stored.type = boxed.type;
+        stored.data = copy;
+        self.context.record(.delete, self.info(self.key), null, stored);
     }
 }
 
-// The table of the name, e.g dbms.table<OrderItem>(&conn, "order_items")
-table :: <T>(conn: *Connection, name: string, schema := "") -> Table<T> {
+// The table of the name, e.g dbms.table<OrderItem>(context, "order_items")
+table :: <T>(context: *Context, name: string, schema := "") -> Table<T> {
     t: Table<T>;
-    t.conn   = conn;
-    t.name   = name;
-    t.schema = schema;
+    t.context = context;
+    t.name    = name;
+    t.schema  = schema;
     return t;
 }
 
-// The table of the name, with the column of its key and the type of the key, e.g dbms.keyedTable<User, i64>(&conn, "users", "id")
-keyedTable :: <T, K>(conn: *Connection, name: string, key: string, schema := "") -> KeyedTable<T, K> {
+// The table of the name, with the column of its key and the type of the key, e.g dbms.keyedTable<User, i64>(context, "users", "id")
+keyedTable :: <T, K>(context: *Context, name: string, key: string, schema := "") -> KeyedTable<T, K> {
     t: KeyedTable<T, K>;
-    t.table = table<T>(conn, name, schema);
+    t.table = table<T>(context, name, schema);
     t.key   = key;
     return t;
 }

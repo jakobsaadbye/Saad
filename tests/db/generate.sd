@@ -56,9 +56,9 @@ main :: () {
     assert(!os.fileExists(sprint("%/entity/category.sd", folder)) && os.fileExists(sprint("%/entity/mine.sd", folder)));
     os.removeFile(sprint("%/entity/mine.sd", folder));
 
-    // A schema that doesn't exist has only a database.sd, with no tables
+    // A schema that doesn't exist has only a database.sd, with no tables but the context
     empty, err3 := postgres.generate(&conn, postgres.GenerateOptions{schema: "no_such_schema"});
-    assert(err3 == "" && empty.count == 1 && empty[0].code.indexOf("Database :: struct {\n}") >= 0);
+    assert(err3 == "" && empty.count == 1 && empty[0].code.indexOf("Database :: struct {\n    @embed context: *dbms.Context;\n}") >= 0);
 
     conn.close();
     print("generate ok");

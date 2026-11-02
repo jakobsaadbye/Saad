@@ -1,0 +1,203 @@
+// dbms.Context without a database: a driver of its own records the SQL that saveChanges sends, and answers with the rows
+// it is given. tests/db/shop_tables.sd does the same with Postgres
+
+import dbms;
+use fmt;
+use c;
+
+User :: struct {
+    id:    i64;
+    name:  string;
+    email: ?string;
+    cache: int = 5;    // Not a column of the answer, so it keeps its value
+}
+
+// The fake database: what it was sent, and what it answers
+Fake :: struct {
+    sent:     [..]string;  // Each statement with its parameters, e.g INSERT ... [Ada, NULL]
+    columns:  []string;
+    cells:    []*u8;
+    affected: i64 = 1;
+}
+
+fakeExecute :: (conn: *void, sql: *u8, params: []*u8, err: *string) -> *void {
+    fake := conn as *Fake;
+    sb: StringBuilder;
+    sb.addString(fromCString(sql));
+    if params.count > 0 {
+        sb.addString(" [");
+        for p, i in params {
+            if i > 0 { sb.addString(", "); }
+            if p == null { sb.addString("NULL"); }
+            else         { sb.addString(fromCString(p)); }
+        }
+        sb.addChar(']');
+    }
+    statement := sb.toString();
+    fake.sent.add(statement);
+    if statement.indexOf("Mallory") >= 0 {
+        *err = "ERROR: no Mallory";
+        return null;
+    }
+    return fake;
+}
+fakeRowCount    :: (result: *void) -> i64 { f := result as *Fake; return f.cells.count / f.columns.count; }
+fakeColumnCount :: (result: *void) -> i64 { return (result as *Fake).columns.count; }
+fakeColumnName  :: (result: *void, column: i64) -> *u8 { return (result as *Fake).columns[column].data; }
+fakeValue       :: (result: *void, row: i64, column: i64) -> *u8 { f := result as *Fake; return f.cells[row * f.columns.count + column]; }
+fakeAffected    :: (result: *void) -> i64 { return (result as *Fake).affected; }
+fakeFreeResult  :: (result: *void) {}
+
+// What the fake database answers: a row of id, name and a NULL email for each
+answer :: (fake: *Fake, ids: []string, names: []string) {
+    cells: [..]*u8;
+    for id, i in ids {
+        cells.add(id.data);
+        cells.add(names[i].data);
+        cells.add(null);
+    }
+    fake.cells = cells.elements();
+}
+fakeClose       :: (conn: *void) {}
+
+main :: () {
+    columns := ["id", "name", "email"];
+    fake := Fake{columns: columns};
+
+    driver: dbms.Driver;
+    driver.name        = "fake";
+    driver.execute     = fakeExecute;
+    driver.rowCount    = fakeRowCount;
+    driver.columnCount = fakeColumnCount;
+    driver.columnName  = fakeColumnName;
+    driver.value       = fakeValue;
+    driver.affected    = fakeAffected;
+    driver.freeResult  = fakeFreeResult;
+    driver.close       = fakeClose;
+    conn := dbms.Connection{driver: &driver, handle: &fake};
+
+    context := dbms.newContext(&conn);
+    users := dbms.keyedTable<User, i64>(context, "users", "id", schema: "shop");
+    users.generated = ["id"];
+
+    // Nothing is sent until saveChanges. Creates that follow each other in a table are one INSERT
+    answer(&fake, ["7", "8"], ["Ada", "Bo"]);
+    ada := users.create();
+    assert(ada.cache == 5);    // The defaults of User
+    ada.name  = "Ada";
+    ada.cache = 9;
+    bo := users.create();
+    bo.name  = "Bo";
+    bo.email = "bo@example.com";
+    users.delete(3);
+    assert(fake.sent.count == 0 && context.pendingChanges() == 3);
+    assert(context.saveChanges() == "");
+
+    assert(fake.sent.count == 4);
+    assert(fake.sent[0] == "BEGIN");
+    assert(fake.sent[1] == "INSERT INTO \"shop\".\"users\" (\"name\", \"email\", \"cache\") VALUES ($1, $2, $3), ($4, $5, $6) RETURNING * [Ada, NULL, 9, Bo, bo@example.com, 5]");
+    assert(fake.sent[2] == "DELETE FROM \"shop\".\"users\" WHERE \"id\" = $1 [3]");
+    assert(fake.sent[3] == "COMMIT");
+
+    // What the database stored is written back, in the order of the rows. A member that isn't in the answer keeps its value
+    assert(ada.id == 7 && ada.name == "Ada" && ada.email == null && ada.cache == 9);
+    assert(bo.id == 8 && bo.email == null);
+    assert(context.pendingChanges() == 0);
+
+    // The created rows are tracked now: a change is saved without update, and only the columns that changed
+    fake.sent.clear();
+    ada.email = "ada@example.com";
+    assert(context.pendingChanges() == 1);
+    assert(context.saveChanges() == "");
+    assert(fake.sent.count == 3);
+    assert(fake.sent[1] == "UPDATE \"shop\".\"users\" SET \"email\" = $1 WHERE \"id\" = $2 [ada@example.com, 7]");
+    assert(context.pendingChanges() == 0);
+
+    // Setting the same value again is no change
+    fake.sent.clear();
+    ada.email = "ada@example.com";
+    assert(context.pendingChanges() == 0 && context.saveChanges() == "" && fake.sent.count == 0);
+
+    // A row of get is tracked
+    answer(&fake, ["2"], ["Cy"]);
+    cy, e1 := users.get(2);
+    assert(e1 == "" && cy.name == "Cy");
+    fake.sent.clear();
+    cy.name = "Cyril";
+    assert(context.saveChanges() == "");
+    assert(fake.sent[1] == "UPDATE \"shop\".\"users\" SET \"name\" = $1 WHERE \"id\" = $2 [Cyril, 2]");
+
+    // A tracked row that is also given to update is written once, with every column
+    fake.sent.clear();
+    cy.name = "C";
+    users.update(cy);
+    assert(context.pendingChanges() == 2); // The update, and the tracked row, which is the same row
+    assert(context.saveChanges() == "");
+    assert(fake.sent.count == 3);
+    assert(fake.sent[1] == "UPDATE \"shop\".\"users\" SET \"name\" = $1, \"email\" = $2, \"cache\" = $3 WHERE \"id\" = $4 [C, NULL, 5, 2]");
+
+    // A tracked row that is deleted isn't updated, and isn't tracked any more
+    fake.sent.clear();
+    cy.name = "X";
+    users.delete(2);
+    assert(context.saveChanges() == "");
+    assert(fake.sent.count == 3 && fake.sent[1] == "DELETE FROM \"shop\".\"users\" WHERE \"id\" = $1 [2]");
+    cy.name = "Y";
+    assert(context.pendingChanges() == 0);
+
+    // discardChanges forgets the changes of tracked rows too
+    ada.email = "nobody";
+    assert(context.pendingChanges() == 1);
+    context.discardChanges();
+    assert(context.pendingChanges() == 0);
+
+    // Without tracking, get doesn't track
+    context.track = false;
+    answer(&fake, ["4"], ["Di"]);
+    di, _ := users.get(4);
+    di.name = "Diana";
+    assert(context.pendingChanges() == 0);
+    context.track = true;
+
+    // Creates of other tables in between are INSERTs of their own, to keep the order of the changes
+    admins := dbms.keyedTable<User, i64>(context, "admins", "id", schema: "shop");
+    admins.generated = ["id"];
+    fake.sent.clear();
+    answer(&fake, ["9"], ["E"]);
+    e := users.create();
+    e.name = "E";
+    f := admins.create();
+    f.name = "F";
+    g := users.create();
+    g.name = "G";
+    assert(context.saveChanges() == "");
+    assert(fake.sent.count == 5);
+    assert(fake.sent[1].startsWith("INSERT INTO \"shop\".\"users\"") && fake.sent[2].startsWith("INSERT INTO \"shop\".\"admins\"") && fake.sent[3].startsWith("INSERT INTO \"shop\".\"users\""));
+    context.untrackAll();
+
+    // A failing change rolls back, and nothing is written back
+    fake.sent.clear();
+    answer(&fake, ["10", "11"], ["Cy", "Mallory"]);
+    cy2 := users.create();
+    cy2.name = "Cy";
+    mallory := users.create();
+    mallory.name = "Mallory";
+    err := context.saveChanges();
+    assert(err == "create in users (changes 1 to 2 of 2): ERROR: no Mallory");
+    assert(fake.sent.count == 3 && fake.sent[2] == "ROLLBACK");
+    assert(cy2.id == 0 && context.pendingChanges() == 2);
+    context.discardChanges();
+
+    // A row that isn't there
+    fake.affected = 0;
+    users.delete(4);
+    assert(context.saveChanges() == "delete in users (change 1 of 1): No row has the key 4");
+    context.discardChanges();
+    fake.affected = 1;
+
+    // Nothing to save sends nothing
+    fake.sent.clear();
+    assert(context.saveChanges() == "" && fake.sent.count == 0);
+
+    print("dbms context ok");
+}

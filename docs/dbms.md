@@ -50,8 +50,12 @@ main :: () {
     conn, err := postgres.connect("host=localhost dbname=shop user=postgres password=secret");
     db := database.open(&conn);
 
-    ada, err1 := db.users.insert(User{name: "Ada", role: .admin});   // gives back the id the database made
-    found, err2 := db.users.get(ada.id);                              // a ?User
+    ada := db.users.create();                    // a new *User with the defaults, kept until saveChanges
+    ada.name = "Ada";
+    ada.role = .admin;
+    err1 := db.saveChanges();                    // writes the changes in one transaction, and the id into ada
+
+    found, err2 := db.users.get(ada.id);         // a *User, null when there is none
     users, err3 := db.users.all();
 }
 ```
@@ -193,10 +197,10 @@ complete driver of 20 lines.
 
 1. **Done** `dbms.postgres`: connect, run SQL with parameters, read rows, close.
 2. **Done** Rows into structs with `query` and `queryOne`, transactions, `conn.allocator`, `mem.Arena`.
-3. **Done** `dbms.Table<T>` and a generator that writes the tables as structs.
+3. **Done** `dbms.Table<T>`, `dbms.KeyedTable<T, K>` and a generator that writes the tables as structs.
 4. A typed query builder on the generated code: `db.users.where(...).select<User>()`.
-5. A unit of work: change, add and remove rows in memory and write them all with `db.saveChanges()`, in one
-   transaction, instead of one statement for each change.
+5. **Done** A unit of work: `create`, `update` and `delete` keep the changes, and `db.saveChanges()` writes them all
+   in one transaction.
 6. Later: joins, a pool of connections, a SQLite driver, migrations, and Postgres
    spoken directly over a socket instead of libpq.
 
@@ -207,26 +211,34 @@ complete driver of 20 lines.
 The rows of one table, as structs of `T`:
 
 ```odin
-users := dbms.keyedTable<User, i64>(&conn, "users", "id");     // the column of the key, and its type
-users.generated = ["id", "created_at"];                     // the columns the database makes
+context := dbms.newContext(&conn);                              // keeps the changes until saveChanges
+users := dbms.keyedTable<User, i64>(context, "users", "id");    // the column of the key, and its type
+users.generated = ["id", "created_at"];                         // the columns the database makes
 
-all, err := users.all();
-ada, err2 := users.get(1);                                  // ?User, empty when no row has the key 1
-saved, err3 := users.insert(User{name: "Ada"});             // with the id and created_at the database made
-changed, err4 := users.update(saved);                       // the row with its key. 1, or 0 when there is none
-removed, err5 := users.delete(saved.id);
-n, err6 := users.count();
+all, err := users.all();                    // reads go to the database at once
+ada, err2 := users.get(1);                  // a *User, null when no row has the key 1
+n, err3 := users.count();
 
-items := dbms.table<OrderItem>(&conn, "order_items");         // no key of one column: all, insert and count
+row := users.create();                      // a new *User. Changes are kept ...
+row.name = "Bo";
+ada.email = "ada@example.com";
+users.update(ada);                          // the row with its key
+users.delete(7);                            // by the key
+err4 := context.saveChanges();              // ... and written in one transaction. row.id is set now
+
+items := dbms.table<OrderItem>(context, "order_items");    // no key of one column: all, count and create
 ```
 
-* `dbms.Table<T>` has `all`, `insert` and `count`. `dbms.KeyedTable<T, K>` embeds a `dbms.Table<T>` (see
+* `dbms.Table<T>` has `all`, `count` and `create`. `dbms.KeyedTable<T, K>` embeds a `dbms.Table<T>` (see
   `docs/embedding.md`) and adds `get`, `update` and `delete`, which take a key of type `K`, so `users.get("1")` is a
   compile error. A `*dbms.KeyedTable<T, K>` is a `*dbms.Table<T>` where one is wanted.
-* `schema:` gives another schema than the one of the connection, e.g `dbms.table<Sale>(&conn, "sales", schema: "shop")`.
+* `get` gives a pointer to the row, made with the allocator of the connection, or `null` when no row has the key.
+  The error is only for what failed, e.g a lost connection.
+* `schema:` gives another schema than the one of the connection, e.g `dbms.table<Sale>(context, "sales", schema: "shop")`.
 * The columns are the members of `T`, in snake case: `createdAt` is `created_at`. A `_` at the end of a name is left
   out, so the member `for_` is the column `for`.
-* The `generated` columns are left out of `insert` and `update`, and `insert` reads them back (`RETURNING *`).
+* The `generated` columns are left out of `create` and `update`, and `saveChanges` reads them back into the created
+  rows (`RETURNING *`).
 * For a struct written by hand, `@dbms.Column(name: "mail", key: true, generated: true, skip: true)` says the same on a
   member.
 * Names are quoted in the SQL, so columns like `order` or `for` work.
@@ -281,19 +293,22 @@ import dbms;
 use entities;
 
 Database :: struct {
+    @embed context: *dbms.Context;    // so db.saveChanges() is db.context.saveChanges()
+
     orderItems: OrderItemsTable;
     users:      UsersTable;
 }
 
 open :: (conn: *dbms.Connection) -> Database {
     tables: Database;
-    tables.orderItems.table = dbms.table<OrderItem>(conn, "order_items");
-    tables.users.table      = dbms.keyedTable<User, i64>(conn, "users", "id");
+    tables.context = dbms.newContext(conn);
+    tables.orderItems.table = dbms.table<OrderItem>(tables.context, "order_items");
+    tables.users.table      = dbms.keyedTable<User, i64>(tables.context, "users", "id");
     tables.users.generated = ["id", "created_at"];
     return tables;
 }
 
-// The rows of users: all, get, insert, update, delete and count of dbms.KeyedTable
+// The rows of users: all, get, count, and create, update and delete of dbms.KeyedTable
 UsersTable :: struct {
     @embed table: dbms.KeyedTable<User, i64>;
 }
@@ -308,7 +323,10 @@ use entities;
 
 conn, err := postgres.connect("host=localhost dbname=shop user=postgres");
 db := database.open(&conn);
-ada, err2 := db.users.insert(User{name: "Ada", role: .admin});
+ada := db.users.create();
+ada.name = "Ada";
+ada.role = .admin;
+err2 := db.saveChanges();
 ```
 
 | Postgres | Saad |
@@ -337,6 +355,64 @@ ada, err2 := db.users.insert(User{name: "Ada", role: .admin});
 * Building a program needs no database: a change of the database is a diff of these files.
 * Typed query columns (`dbms.Field<T>`) come with step 4, as members of the table types next to the embedded table.
 
+### 5. Saving changes
+
+`create`, `update` and `delete` don't write anything. They add a change to the context of the tables, a
+`dbms.Context`, which the generated `Database` embeds. The rows that `get` and `all` give are tracked. `saveChanges`
+writes all of it, like `SaveChanges` of Entity Framework:
+
+```odin
+db := database.open(&conn);
+
+ada := db.users.create();     // a new *User with the defaults of User
+ada.name = "Ada";
+bo, err := db.users.get(2);   // tracked
+bo.active = false;            // so this is saved without an update
+db.categories.delete("books");
+
+err2 := db.saveChanges();     // BEGIN, the changes in the order they were made, the tracked rows, COMMIT
+print("%", ada.id);           // what the database made, e.g the serial id and created_at, is in ada now
+```
+
+* `saveChanges` writes the changes in the order they were made, and then the tracked rows that changed, in one
+  transaction. When one fails, it rolls back, so none of them are written, and the error says which one, e.g
+  `create in orders (change 2 of 2): ERROR:  insert or update on table "orders" violates foreign key constraint ...`.
+  The changes are kept then, so they can be fixed and saved again, or forgotten with `db.discardChanges()`.
+* An `update` or `delete` of a key that no row has is an error too: `delete in users (change 1 of 1): No row has the
+  key 12345`.
+* `create()` gives a new row, with the defaults of the struct (which are the constant defaults of the database), made
+  with the allocator of the connection. Set its members before `saveChanges`. After the commit, the row as the database
+  stored it (with its generated columns) is written into it. Nothing is written into it when the save fails.
+* Creates of one table that follow each other are one `INSERT ... VALUES (...), (...) RETURNING *`, of at most
+  `dbms.MaxRowsInInsert` (1000) rows, and fewer when the rows have so many columns that they would take more than the
+  65535 parameters Postgres allows. Postgres gives the rows back in the order of the values, so each row gets its own
+  id. A create of another table in between starts a new `INSERT`, so the order of the changes stays the same.
+* `update` takes a pointer to a row and writes every column that isn't the key or generated. It is for a row that
+  isn't tracked: a row that `get` or `all` gave is saved without it.
+* `delete` takes the key, which is copied.
+* `db.pendingChanges()` is the number of changes that `saveChanges` would write, with the tracked rows that changed.
+* The context, its list of changes and the copies of the tracked rows are made with the allocator of the connection.
+
+#### Tracking
+
+* `get` and `all` of a table with a key track the rows they give: the context keeps a copy of each. `saveChanges`
+  compares each tracked row with its copy and writes an `UPDATE` of only the columns that changed, to the row with the
+  key it was read with. Strings and optionals are compared by their values.
+* The created rows are tracked after they are saved, so a change after `saveChanges` is saved by the next one.
+* A tracked row that is also given to `update` is written once, by the `update`. A tracked row that is deleted isn't
+  updated, and isn't tracked any more.
+* After a save, the copies are the rows as they are, so only what changes after it is saved next time.
+  `discardChanges()` does the same without saving: what was set on the rows stays, but isn't saved.
+* `db.track = false` (it is a member of the embedded context) turns tracking off, e.g before reading many rows that
+  won't change. `db.untrackAll()` forgets the tracked rows, e.g before the list that `all` gave is freed.
+* The rows of `all` are in the list it gives, so they must still be there at `saveChanges`. Don't add to that list, as
+  its rows can move.
+
+Not yet:
+
+* Rows that refer to rows made in the same save: `order.userId = ada.id` is 0 before `ada` is saved. Save the user
+  first. Later, the generator can read the foreign keys and fill in `userId` when the insert of `ada` gives its id.
+
 ### 4. The typed query builder
 
 C#'s LINQ turns `u => u.Age > 30` into a tree that a library can read. Saad has no closures, and no code that
@@ -363,7 +439,7 @@ db.users.age.atLeast("18");   // A compile error: wants an i32
   and `and`, `or`, `not` on conditions.
 * The builder writes the SQL with parameters, `WHERE age >= $1 AND name LIKE $2`, and runs it with `query`.
   `select` reads the rows like `query` does, so the struct decides which columns are read.
-* `first<T>()`, `count()`, `exists()`, and later `insert(row)`, `update().set(field, value)` and `delete()`.
+* `first<T>()`, `count()`, `exists()`, and later `update().set(field, value)` and `delete()` of the rows a query finds.
 * Plain SQL stays for everything the builder can't say.
 
 ## Gaps in the language

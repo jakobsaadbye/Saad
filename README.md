@@ -78,6 +78,32 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.9.6 - 2. Nov 2026
+
+* Saving changes, like `SaveChanges` of Entity Framework: `create()` (a new row to fill in), `update` and `delete` of a
+  table keep the change, and `db.saveChanges()` writes all of them in one transaction. When one fails, none are written
+  and the error says which. What the database makes, e.g serial ids, is written back into the created rows. See
+  `docs/dbms.md`
+
+```odin
+db := database.open(&conn);
+
+ada := db.users.create();          // a new *User with the defaults
+ada.name = "Ada";
+bo, err := db.users.get(2);        // a *User, null when there is none. Tracked
+bo.active = false;                 // so this is saved without an update
+db.categories.delete("books");
+
+err2 := db.saveChanges();          // BEGIN, the 3 changes, COMMIT
+print("%", ada.id);
+```
+
+* Changed: tables don't write at once any more (`insert`, `update` and `delete` are gone), and `get` gives a pointer
+  instead of an optional. The generated `Database` embeds a `dbms.Context`, and the tables are made with it
+* The rows of `get` and `all` are tracked: `saveChanges` writes the columns that changed, without an `update`. Turn it
+  off with `db.track = false`
+* Creates of one table that follow each other are one `INSERT ... VALUES (...), (...) RETURNING *`
+
 ## Update v0.9.5 - 1. Nov 2026
 
 * Embedding: `@embed` on a struct member lends its members and methods to the struct it is in, like Go's embedding or

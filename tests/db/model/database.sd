@@ -7,11 +7,15 @@ use entities;
 
 // Files: entity/order_status.sd, entity/role.sd, entity/category.sd, entity/order_item.sd, entity/order.sd, entity/user.sd, database.sd
 
-// The tables of the schema saad_shop, e.g
+// The tables of the schema saad_shop, and the changes to them, which saveChanges writes in one transaction, e.g
 //
 //     db := database.open(&conn);
 //     rows, err := db.categories.all();
+//     row := db.categories.create();
+//     err2 := db.saveChanges();
 Database :: struct {
+    @embed context: *dbms.Context;
+
     categories: CategoriesTable;
     orderItems: OrderItemsTable;
     orders:     OrdersTable;
@@ -21,31 +25,32 @@ Database :: struct {
 // The tables on the connection
 open :: (conn: *dbms.Connection) -> Database {
     tables: Database;
-    tables.categories.table = dbms.keyedTable<Category, string>(conn, "categories", "code", schema: "saad_shop");
-    tables.orderItems.table = dbms.table<OrderItem>(conn, "order_items", schema: "saad_shop");
-    tables.orders.table     = dbms.keyedTable<Order, i32>(conn, "orders", "id", schema: "saad_shop");
-    tables.users.table      = dbms.keyedTable<User, i64>(conn, "users", "id", schema: "saad_shop");
+    tables.context = dbms.newContext(conn);
+    tables.categories.table = dbms.keyedTable<Category, string>(tables.context, "categories", "code", schema: "saad_shop");
+    tables.orderItems.table = dbms.table<OrderItem>(tables.context, "order_items", schema: "saad_shop");
+    tables.orders.table     = dbms.keyedTable<Order, i32>(tables.context, "orders", "id", schema: "saad_shop");
+    tables.users.table      = dbms.keyedTable<User, i64>(tables.context, "users", "id", schema: "saad_shop");
     tables.orders.generated = ["id"];
     tables.users.generated = ["id", "created_at"];
     return tables;
 }
 
-// The rows of categories: all, get, insert, update, delete and count of dbms.KeyedTable
+// The rows of categories: all, get, count, and create, update and delete of dbms.KeyedTable
 CategoriesTable :: struct {
     @embed table: dbms.KeyedTable<Category, string>;
 }
 
-// The rows of order_items: all, insert and count of dbms.Table. It has no key of one column, so no get, update and delete
+// The rows of order_items: all, count and create of dbms.Table. It has no key of one column, so no get, update and delete
 OrderItemsTable :: struct {
     @embed table: dbms.Table<OrderItem>;
 }
 
-// The rows of orders: all, get, insert, update, delete and count of dbms.KeyedTable
+// The rows of orders: all, get, count, and create, update and delete of dbms.KeyedTable
 OrdersTable :: struct {
     @embed table: dbms.KeyedTable<Order, i32>;
 }
 
-// The rows of users: all, get, insert, update, delete and count of dbms.KeyedTable
+// The rows of users: all, get, count, and create, update and delete of dbms.KeyedTable
 UsersTable :: struct {
     @embed table: dbms.KeyedTable<User, i64>;
 }
