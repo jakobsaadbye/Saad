@@ -14,6 +14,7 @@ namespace json;
 //     text := json.encode(person, json.Pretty); // over more lines, see options.sd
 
 import fmt;
+import time;
 use c;
 
 // How a struct member is written and read. Without it, a member is written with its own name
@@ -255,6 +256,11 @@ writeAny :: method (w: *Writer, data: *void, type: *Type) {
                 value, valueType, present := (type as *TypeStruct).optionalValue(data);
                 if present { w.writeAny(value, valueType); }
                 else       { w.sb.addString("null"); }
+            } else if type.name == "time.Time" {
+                // As RFC 3339 text, e.g "2026-11-02T10:15:00Z"
+                text := (*(data as *time.Time)).toString();
+                w.writeString(text);
+                text.free();
             } else {
                 w.writeStruct(data, type as *TypeStruct);
             }
@@ -415,6 +421,7 @@ fieldOf :: (member: *StructMember) -> Field, bool {
     if !named {
         field.name = member.name;
     }
+    if member.isHidden() { field.skip = true; }   // e.g the link of a row of dbms
     return field, named;
 }
 

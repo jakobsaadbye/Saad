@@ -268,7 +268,8 @@ def main():
     encode_uri = uri_of(encode)
     client.notify("textDocument/didOpen", {"textDocument": {"uri": encode_uri, "languageId": "saad", "version": 1, "text": encode_text}})
     check(client.diagnostics_until(encode_uri, lambda d: d == []) == [], "no errors in std/json/encode.sd")
-    m = client.request("textDocument/hover", {"textDocument": {"uri": encode_uri}, "position": position_of(encode_text, 36, "encode")})
+    encode_line = next(i + 1 for i, line in enumerate(encode_text.split("\n")) if line.startswith("encode ::"))
+    m = client.request("textDocument/hover", {"textDocument": {"uri": encode_uri}, "position": position_of(encode_text, encode_line, "encode")})
     value = m["result"]["contents"]["value"] if m["result"] else ""
     check("options := Options{}" in value, f"hover of json.encode shows its default: {value!r}")
     m = client.request("textDocument/documentSymbol", {"textDocument": {"uri": encode_uri}})

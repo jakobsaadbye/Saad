@@ -1,0 +1,103 @@
+// std/time.sd: dates and times like Go's time package
+import time;
+import json;
+use fmt;
+
+// A struct with times, and a member that isn't data
+Event :: struct {
+    name: string;
+    at:   time.Time;
+    end:  ?time.Time;
+    @Hidden cache: int = 3;
+}
+
+main :: () {
+    // A date and its parts. 1815-12-10 was a sunday
+    ada := time.date(1815, 12, 10, 14, 30, 5);
+    assert(ada.year() == 1815 && ada.month() == 12 && ada.day() == 10);
+    assert(ada.hour() == 14 && ada.minute() == 30 && ada.second() == 5);
+    assert(ada.weekday() == .sunday && ada.yearDay() == 344);
+
+    // The epoch, and seconds since it
+    epoch := time.fromUnix(0);
+    assert(epoch.isZero() && epoch.year() == 1970 && epoch.weekday() == .thursday);
+    t := time.fromUnix(1762078500, 250000000);       // 2025-11-02 10:15:00.25 UTC
+    assert(t.format(time.DateTime) == "2025-11-02 10:15:00" && t.unix() == 1762078500 && t.unixMilli() == 1762078500250);
+
+    // Formats, by Go's layout of Mon Jan 2 15:04:05 2006 -07:00
+    assert(t.format("Monday, January 2 2006") == "Sunday, November 2 2025");
+    assert(t.format("Mon _2 Jan 06 3:04PM") == "Sun  2 Nov 25 10:15AM");
+    assert(t.format("15:04:05.000") == "10:15:00.250");
+    assert(t.format("15:04:05.999") == "10:15:00.25");
+    assert(t.toString() == "2025-11-02T10:15:00.25Z");
+    assert(t.format(time.RFC3339) == "2025-11-02T10:15:00Z");
+    assert(t.format("002") == "306");
+
+    // Zones are offsets: the same instant, shown elsewhere
+    copenhagen := t.inOffset(3600);
+    assert(copenhagen.hour() == 11 && copenhagen.equal(t) && copenhagen.format("15:04 -07:00") == "11:15 +01:00");
+    india := t.inOffset(5 * 3600 + 1800);
+    assert(india.format("Z07:00") == "+05:30" && india.format("-0700") == "+0530" && t.format("-07") == "+00");
+    late := time.date(2025, 12, 31, 23, 30, 0, 0, -3600);    // 23:30 at -01:00 is 00:30 UTC the next year
+    assert(late.year() == 2025 && late.utc().year() == 2026 && late.utc().hour() == 0);
+
+    // Arithmetic. A Duration is nanoseconds
+    later := t.add(90 * time.Minute);
+    assert(later.format("15:04") == "11:45" && later.sub(t) == 90 * time.Minute && later.after(t) && t.before(later));
+    assert(t.add(-11 * time.Hour).format(time.DateTime) == "2025-11-01 23:15:00");
+    assert(t.add(-300 * time.Millisecond).format("05.000") == "59.950");
+    assert(t.compare(later) == -1 && later.compare(t) == 1 && t.compare(t) == 0);
+    assert(time.durationText(later.sub(t)) == "1h30m0s");
+    assert(time.durationText(1500 * time.Millisecond) == "1.5s" && time.durationText(2500 * time.Microsecond) == "2.5ms");
+    assert(time.durationText(-time.Second) == "-1s" && time.durationText(0) == "0s");
+
+    // addDate carries over like Go: October 31 and a month is December 1
+    assert(time.date(2025, 10, 31).addDate(0, 1, 0).format(time.DateOnly) == "2025-12-01");
+    assert(time.date(2024, 2, 28).addDate(0, 0, 1).format(time.DateOnly) == "2024-02-29");       // A leap year
+    assert(time.date(2025, 2, 28).addDate(0, 0, 1).format(time.DateOnly) == "2025-03-01");
+    assert(time.date(2025, 1, 15, 8).addDate(1, -1, 0).format(time.DateTime) == "2025-12-15 08:00:00");
+    assert(time.date(2025, 13, 0).format(time.DateOnly) == "2025-12-31");
+    assert(t.startOfDay().format(time.RFC3339) == "2025-11-02T00:00:00Z");
+    assert(time.date(1969, 12, 31, 23, 59, 59).unix() == -1);
+    assert(time.date(1, 1, 1).format(time.DateOnly) == "0001-01-01");
+
+    // Reading times, like Postgres and RFC 3339 write them
+    p1, ok1 := time.parse("2025-11-02T10:15:00Z");
+    assert(ok1 && p1.equal(time.fromUnix(1762078500)));
+    p2, ok2 := time.parse("2025-11-02 11:15:00.25+01");
+    assert(ok2 && p2.equal(t) && p2.hour() == 11 && p2.nanosecond() == 250000000);
+    p3, ok3 := time.parse("2025-11-02 15:45:00.123456+05:30");
+    assert(ok3 && p3.utc().format("15:04:05.000000") == "10:15:00.123456");
+    p4, ok4 := time.parse("2025-11-02");
+    assert(ok4 && p4.format(time.DateTime) == "2025-11-02 00:00:00");
+    p5, ok5 := time.parse("2025-11-02T10:15-0130");
+    assert(ok5 && p5.utc().format("15:04") == "11:45");
+    _, bad1 := time.parse("2025-13-02");
+    _, bad2 := time.parse("yesterday");
+    _, bad3 := time.parse("2025-11-02T10");
+    _, bad4 := time.parse("2025-11-02 10:15:00 extra");
+    assert(!bad1 && !bad2 && !bad3 && !bad4);
+    roundTrip, ok6 := time.parse(india.toString());
+    assert(ok6 && roundTrip == india);
+
+    // The clock
+    now := time.now();
+    assert(now.year() >= 2025 && now.after(t) && time.since(t) > 0);
+    start := time.clock();
+    assert(time.clock() >= start);
+
+    // fmt prints a time as RFC 3339 text, and leaves out @Hidden members
+    e := Event{name: "launch", at: t.inOffset(3600), cache: 9};
+    assert(sprint("%", t) == "2025-11-02T10:15:00.25Z");
+    assert(sprint("%", e) == "Event{name: \"launch\", at: 2025-11-02T11:15:00.25+01:00, end: null}");
+
+    // json writes and reads times as RFC 3339 strings, and skips @Hidden members
+    text := json.encode(e);
+    assert(text == "{\"name\":\"launch\",\"at\":\"2025-11-02T11:15:00.25+01:00\",\"end\":null}");
+    back, err := json.decode<Event>(text);
+    assert(err == "" && back.at == e.at && back.end == null && back.cache == 3);
+    _, err2 := json.decode<Event>("{\"name\": \"x\", \"at\": \"soon\"}");
+    assert(err2 == "at: \"soon\" is not a time like 2026-11-02T10:15:00Z");
+
+    print("time ok");
+}

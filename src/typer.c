@@ -2974,6 +2974,8 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
                 // @Speed? @Note - We might in the future cleanup the already allocated expression tree as its no longer needed after this swap.
                 //                 We might be taking many cache misses if we leave big gaps in the allocated ast nodes, so something like packing the ast nodes could be
                 //                 a thing?
+                // The folded value keeps the type of the expression, e.g Minute :: 60 * Second is an i64 when Second is
+                if (const_expr != value && expr_type->kind == TYPE_INTEGER && !is_untyped_type(expr_type)) const_expr->type = expr_type;
                 *value_ptr = const_expr;
             }
             else if (const_expr->head.kind == AST_FUNCTION_DEFN) {

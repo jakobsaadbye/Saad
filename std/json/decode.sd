@@ -8,6 +8,7 @@ namespace json;
 //     err2 := json.decodeInto(text, &settings);   // Into a value that exists, e.g to keep what the JSON doesn't have
 
 import fmt;
+import time;
 use c;
 
 // Reads the JSON into the value. err is empty when it worked, otherwise it tells what is wrong and where.
@@ -157,6 +158,14 @@ assign :: (v: Value, data: *void, type: *Type, path: string, options: *Options) 
             return assignArray(v, data, type as *TypeArray, path, options);
         }
         case .struct {
+            if type.name == "time.Time" {
+                // RFC 3339 text, e.g "2026-11-02T10:15:00Z"
+                if v.kind != .string { return mismatch(path, "a time as a string", v); }
+                t, ok := time.parse(v.text);
+                if !ok { return failAt(path, fmt.sprint("\"%\" is not a time like 2026-11-02T10:15:00Z", v.text)); }
+                *(data as *time.Time) = t;
+                return "";
+            }
             return assignStruct(v, data, type as *TypeStruct, path, options);
         }
         else {

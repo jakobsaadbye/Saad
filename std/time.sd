@@ -1,22 +1,338 @@
 namespace time;
 
-// Clocks, stopwatches and sleeping
+// Dates and times like the time package of Go, clocks, stopwatches and sleeping, e.g
+//
+//     t := time.now();                                   // a time.Time, in UTC
+//     due := t.add(2 * time.Hour).addDate(0, 1, 0);      // in a month and two hours
+//     print(due.format("Mon 2 Jan 2006 15:04"));          // e.g Wed 2 Dec 2026 10:15
+//     birthday := time.date(1815, 12, 10);
+//     age := t.year() - birthday.year();
+//     parsed, ok := time.parse("2026-11-02T10:15:00+01:00");
+//     if parsed.before(t) { ... }
+//     waited := time.since(t);                            // a Duration, in nanoseconds
+//
+// A Time is an instant: seconds since January 1, 1970 UTC and the nanoseconds after them. It also has the offset of the
+// zone it is shown in, e.g +01:00, which year(), hour(), format(), ... use. There are no named zones (yet), only offsets.
+// The zero Time is January 1, 1970 UTC
 
 import os.windows;
 
-// Seconds since some point in the past, with a high resolution. Use it to measure how long something takes
-now :: () -> f64 {
+// A span of time in nanoseconds, e.g 90 * time.Minute. It is an i64, so the arithmetic of numbers works on it
+Duration :: i64;
+
+Nanosecond  :: 1 as Duration;
+Microsecond :: 1000 as Duration;
+Millisecond :: 1000000 as Duration;
+Second      :: 1000000000 as Duration;
+Minute      :: 60 * Second;
+Hour        :: 60 * Minute;
+
+// Layouts for format, as Go writes them: with the numbers of Mon Jan 2 15:04:05 2006 in the zone -07:00
+RFC3339  :: "2006-01-02T15:04:05Z07:00";
+DateTime :: "2006-01-02 15:04:05";
+DateOnly :: "2006-01-02";
+TimeOnly :: "15:04:05";
+
+Weekday :: enum { sunday, monday, tuesday, wednesday, thursday, friday, saturday }
+
+Time :: struct {
+    seconds:     i64;  // Since January 1, 1970 UTC
+    nanoseconds: i32;  // After the seconds, 0 to 999999999
+    offset:      i32;  // Of the zone it is shown in, in seconds east of UTC, e.g 3600 for +01:00
+
+    // The parts of the date and the clock, in the zone of the time
+    year :: method () -> int {
+        y, _, _ := civilFromDays(self.days());
+        return y as int;
+    }
+    month :: method () -> int {    // 1 to 12
+        _, m, _ := civilFromDays(self.days());
+        return m as int;
+    }
+    day :: method () -> int {      // 1 to 31
+        _, _, d := civilFromDays(self.days());
+        return d as int;
+    }
+    hour   :: method () -> int { return (self.secondOfDay() / 3600) as int; }
+    minute :: method () -> int { return (self.secondOfDay() % 3600 / 60) as int; }
+    second :: method () -> int { return (self.secondOfDay() % 60) as int; }
+    nanosecond :: method () -> int { return self.nanoseconds as int; }
+
+    weekday :: method () -> Weekday {
+        // January 1, 1970 was a thursday
+        return ((self.days() % 7 + 11) % 7) as Weekday;
+    }
+
+    // The day of the year, 1 to 366
+    yearDay :: method () -> int {
+        y, _, _ := civilFromDays(self.days());
+        return (self.days() - daysFromCivil(y, 1, 1) + 1) as int;
+    }
+
+    // Seconds since January 1, 1970 UTC
+    unix :: method () -> i64 { return self.seconds; }
+    unixMilli :: method () -> i64 { return self.seconds * 1000 + (self.nanoseconds / 1000000) as i64; }
+
+    // The time after the duration, which can be negative
+    add :: method (d: Duration) -> Time {
+        total := self.nanoseconds as i64 + d % Second;
+        t := *self;
+        t.seconds = self.seconds + d / Second + floorDiv(total, Second);
+        t.nanoseconds = floorMod(total, Second) as i32;
+        return t;
+    }
+
+    // The duration from u to the time, e.g end.sub(start)
+    sub :: method (u: Time) -> Duration {
+        return (self.seconds - u.seconds) * Second + (self.nanoseconds - u.nanoseconds) as i64;
+    }
+
+    // The date that many years, months and days later, at the same clock, e.g t.addDate(0, 1, 0) for a month later.
+    // Like Go, October 31 and a month is December 1, as November 31 is
+    addDate :: method (years: int, months: int, days: int) -> Time {
+        y, m, d := civilFromDays(self.days());
+        t := date(y as int + years, m as int + months, d as int + days, 0, 0, 0, 0, self.offset as int);
+        t.seconds += self.secondOfDay();
+        t.nanoseconds = self.nanoseconds;
+        return t;
+    }
+
+    before :: method (u: Time) -> bool { return self.compare(u) < 0; }
+    after  :: method (u: Time) -> bool { return self.compare(u) > 0; }
+    // The same instant, also in different zones. == also compares the zones
+    equal  :: method (u: Time) -> bool { return self.compare(u) == 0; }
+
+    // -1 when the time is before u, 0 when it is the same instant, and 1 when it is after
+    compare :: method (u: Time) -> int {
+        if self.seconds != u.seconds { if self.seconds < u.seconds { return -1; } return 1; }
+        if self.nanoseconds != u.nanoseconds { if self.nanoseconds < u.nanoseconds { return -1; } return 1; }
+        return 0;
+    }
+
+    isZero :: method () -> bool { return self.seconds == 0 && self.nanoseconds == 0; }
+
+    // The same instant, shown in UTC
+    utc :: method () -> Time {
+        t := *self;
+        t.offset = 0;
+        return t;
+    }
+
+    // The same instant, shown in the zone that many seconds east of UTC, e.g t.inOffset(2 * 3600) for +02:00
+    inOffset :: method (seconds: int) -> Time {
+        t := *self;
+        t.offset = seconds as i32;
+        return t;
+    }
+
+    // The start of the day of the time, in its zone
+    startOfDay :: method () -> Time {
+        t := *self;
+        t.seconds = self.seconds - self.secondOfDay();
+        t.nanoseconds = 0;
+        return t;
+    }
+
+    // The time as text by a layout like Go's, which writes the numbers of Mon Jan 2 15:04:05 2006 in the zone -07:00:
+    //
+    //     2006 06         year            Monday Mon      weekday
+    //     01 1 Jan January month          15 03 3         hour, 24 or 12 hours
+    //     02 2 _2         day             04 4            minute
+    //     002             day of year     05 5            second
+    //     PM pm           AM or PM        .000 .000000 .000000000   fractions of a second, .999 without zeros at the end
+    //     -07:00 -0700 -07  the offset    Z07:00 Z0700 Z07          Z for UTC, or the offset
+    //
+    // e.g t.format("2006-01-02 15:04") or t.format(time.RFC3339). The text is allocated with malloc
+    format :: method (layout: string) -> string {
+        y, mo, d := civilFromDays(self.days());
+        out: Text;
+        i := 0;
+        n := layout.len as int;
+        while i < n {
+            rest := layout.slice(i);
+            if rest.startsWith("January")  { out.add(MonthNames[mo - 1]); i += 7; continue; }
+            if rest.startsWith("Jan")      { out.add(MonthNames[mo - 1].slice(0, 3)); i += 3; continue; }
+            if rest.startsWith("Monday")   { out.add(DayNames[self.weekday() as int]); i += 6; continue; }
+            if rest.startsWith("Mon")      { out.add(DayNames[self.weekday() as int].slice(0, 3)); i += 3; continue; }
+            if rest.startsWith("2006")     { out.number(y, 4); i += 4; continue; }
+            if rest.startsWith("002")      { out.number(self.yearDay() as i64, 3); i += 3; continue; }
+            if rest.startsWith("01")       { out.number(mo, 2); i += 2; continue; }
+            if rest.startsWith("02")       { out.number(d, 2); i += 2; continue; }
+            if rest.startsWith("03")       { out.number(hour12(self.hour()), 2); i += 2; continue; }
+            if rest.startsWith("04")       { out.number(self.minute() as i64, 2); i += 2; continue; }
+            if rest.startsWith("05")       { out.number(self.second() as i64, 2); i += 2; continue; }
+            if rest.startsWith("06")       { out.number(floorMod(y, 100), 2); i += 2; continue; }
+            if rest.startsWith("_2")       { if d < 10 { out.add(" "); } out.number(d, 1); i += 2; continue; }
+            if rest.startsWith("15")       { out.number(self.hour() as i64, 2); i += 2; continue; }
+            if rest.startsWith("1")        { out.number(mo, 1); i += 1; continue; }
+            if rest.startsWith("2")        { out.number(d, 1); i += 1; continue; }
+            if rest.startsWith("3")        { out.number(hour12(self.hour()), 1); i += 1; continue; }
+            if rest.startsWith("4")        { out.number(self.minute() as i64, 1); i += 1; continue; }
+            if rest.startsWith("5")        { out.number(self.second() as i64, 1); i += 1; continue; }
+            if rest.startsWith("PM")       { if self.hour() < 12 { out.add("AM"); } else { out.add("PM"); } i += 2; continue; }
+            if rest.startsWith("pm")       { if self.hour() < 12 { out.add("am"); } else { out.add("pm"); } i += 2; continue; }
+            if rest.startsWith("Z07:00")   { out.zone(self.offset, true, true, true); i += 6; continue; }
+            if rest.startsWith("Z0700")    { out.zone(self.offset, true, false, true); i += 5; continue; }
+            if rest.startsWith("Z07")      { out.zone(self.offset, true, false, false); i += 3; continue; }
+            if rest.startsWith("-07:00")   { out.zone(self.offset, false, true, true); i += 6; continue; }
+            if rest.startsWith("-0700")    { out.zone(self.offset, false, false, true); i += 5; continue; }
+            if rest.startsWith("-07")      { out.zone(self.offset, false, false, false); i += 3; continue; }
+            if (rest.startsWith(".0") || rest.startsWith(".9")) && i > 0 {
+                digit := rest[1];
+                digits := 1;
+                while digits + 1 < rest.len as int && rest[digits + 1] == digit { digits += 1; }
+                out.fraction(self.nanoseconds, digits, digit == '9');
+                i += digits + 1;
+                continue;
+            }
+            out.bytes.add(layout[i] as u8);
+            i += 1;
+        }
+        return out.toString();
+    }
+
+    // The time as RFC 3339 text, with the fraction of a second when there is one, e.g 2026-11-02T10:15:00.5+01:00
+    toString :: method () -> string {
+        return self.format("2006-01-02T15:04:05.999999999Z07:00");
+    }
+
+    // Days since January 1, 1970, in the zone of the time
+    days :: method () -> i64 {
+        return floorDiv(self.seconds + self.offset as i64, 86400);
+    }
+
+    secondOfDay :: method () -> i64 {
+        return floorMod(self.seconds + self.offset as i64, 86400);
+    }
+}
+
+// The time now, in UTC
+now :: () -> Time {
+    fileTime: u64;
+    windows.GetSystemTimeAsFileTime(&fileTime);
+    // 100 nanoseconds since January 1, 1601
+    ticks := fileTime as i64 - 116444736000000000;
+    return Time{seconds: floorDiv(ticks, 10000000), nanoseconds: (floorMod(ticks, 10000000) * 100) as i32};
+}
+
+// The time of a date and a clock, in the zone that many seconds east of UTC. Values out of their range carry over, like
+// Go, e.g a month of 13 is January the year after, and a day of 0 is the last day of the month before
+date :: (year: int, month: int, day: int, hour := 0, minute := 0, second := 0, nanosecond := 0, offset := 0) -> Time {
+    y := year as i64 + floorDiv(month as i64 - 1, 12);
+    m := floorMod(month as i64 - 1, 12) + 1;
+    days := daysFromCivil(y, m, 1) + day as i64 - 1;
+    local := days * 86400 + hour as i64 * 3600 + minute as i64 * 60 + second as i64;
+    t := Time{seconds: local - offset as i64, offset: offset as i32};
+    return t.add(nanosecond as i64);
+}
+
+// The time of seconds (and nanoseconds) since January 1, 1970 UTC
+fromUnix :: (seconds: i64, nanoseconds: i64 = 0) -> Time {
+    t := Time{seconds: seconds};
+    return t.add(nanoseconds);
+}
+
+// The duration since a time, e.g time.since(start) / time.Millisecond
+since :: (t: Time) -> Duration {
+    return now().sub(t);
+}
+
+// Reads a time of RFC 3339 and ISO 8601, like Postgres writes them: 2026-11-02, 2026-11-02T10:15:00Z,
+// 2026-11-02 10:15:00.123456+01, 2026-11-02 10:15+05:30. Without an offset it is UTC. ok is false for other text
+parse :: (text: string) -> (Time, bool) {
+    none: Time;
+    r := Reader{text: text};
+    year  := r.digits(4);
+    if year < 0 || !r.eat('-') { return none, false; }
+    month := r.digits(2);
+    if month < 1 || month > 12 || !r.eat('-') { return none, false; }
+    day := r.digits(2);
+    if day < 1 || day > 31 { return none, false; }
+
+    hour, minute, second, nanosecond: i64;
+    offset: i64;
+    if r.eat('T') || r.eat('t') || r.eat(' ') {
+        hour = r.digits(2);
+        if hour < 0 || hour > 24 || !r.eat(':') { return none, false; }
+        minute = r.digits(2);
+        if minute < 0 || minute > 59 { return none, false; }
+        if r.eat(':') {
+            second = r.digits(2);
+            if second < 0 || second > 60 { return none, false; }
+            if r.eat('.') || r.eat(',') {
+                scale: i64 = 100000000;
+                count := 0;
+                while r.at < r.text.len as int && r.text[r.at] >= '0' && r.text[r.at] <= '9' {
+                    nanosecond += (r.text[r.at] - '0') as i64 * scale;
+                    scale /= 10;
+                    r.at += 1;
+                    count += 1;
+                }
+                if count == 0 { return none, false; }
+            }
+        }
+        if r.eat('Z') || r.eat('z') {
+            offset = 0;
+        } else if r.at < r.text.len as int && (r.text[r.at] == '+' || r.text[r.at] == '-') {
+            sign: i64 = 1;
+            if r.text[r.at] == '-' { sign = -1; }
+            r.at += 1;
+            hours := r.digits(2);
+            if hours < 0 { return none, false; }
+            minutes: i64 = 0;
+            r.eat(':');
+            if r.at < r.text.len as int { minutes = r.digits(2); }
+            if minutes < 0 || minutes > 59 { return none, false; }
+            offset = sign * (hours * 3600 + minutes * 60);
+        }
+    }
+    if r.at != r.text.len as int { return none, false; }
+
+    t := date(year as int, month as int, day as int, hour as int, minute as int, second as int, nanosecond as int, offset as int);
+    return t, true;
+}
+
+// A duration as text, like Go, e.g 1h2m3.5s, 1.5ms or 0s
+durationText :: (d: Duration) -> string {
+    out: Text;
+    if d == 0 { return "0s"; }
+    if d < 0 {
+        out.add("-");
+        d = -d;
+    }
+    if d < Second {
+        unit := "ns";
+        size: i64 = 1;
+        if d >= Millisecond      { unit = "ms"; size = Millisecond; }
+        else if d >= Microsecond { unit = "us"; size = Microsecond; }
+        out.number(d / size, 1);
+        out.decimals(d % size, size);
+        out.add(unit);
+        return out.toString();
+    }
+    hours := d >= Hour;
+    if hours {
+        out.number(d / Hour, 1);
+        out.add("h");
+        d %= Hour;
+    }
+    if d >= Minute || hours {
+        out.number(d / Minute, 1);
+        out.add("m");
+        d %= Minute;
+    }
+    out.number(d / Second, 1);
+    out.decimals(d % Second, Second);
+    out.add("s");
+    return out.toString();
+}
+
+// Seconds from a high resolution clock that starts at some point in the past. Use it to measure how long something takes
+clock :: () -> f64 {
     counter, frequency: i64;
     windows.QueryPerformanceCounter(&counter);
     windows.QueryPerformanceFrequency(&frequency);
     return counter as f64 / frequency as f64;
-}
-
-// Seconds since January 1, 1970 (UTC)
-unix :: () -> i64 {
-    fileTime: u64;
-    windows.GetSystemTimeAsFileTime(&fileTime);
-    return (fileTime / 10000000) as i64 - 11644473600;
 }
 
 // Pauses the program
@@ -34,17 +350,192 @@ Stopwatch :: struct {
 }
 
 startStopwatch :: () -> Stopwatch {
-    return Stopwatch{start: now()};
+    return Stopwatch{start: clock()};
 }
 
 restart :: method (watch: *Stopwatch) {
-    watch.start = now();
+    watch.start = clock();
 }
 
 seconds :: method (watch: Stopwatch) -> f64 {
-    return now() - watch.start;
+    return clock() - watch.start;
 }
 
 milliseconds :: method (watch: Stopwatch) -> f64 {
-    return (now() - watch.start) * 1000.0;
+    return (clock() - watch.start) * 1000.0;
+}
+
+@private
+MonthNames :: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+@private
+DayNames :: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// Days since January 1, 1970 of a date, by Howard Hinnant's algorithm
+@private
+daysFromCivil :: (year: i64, month: i64, day: i64) -> i64 {
+    y := year;
+    if month <= 2 { y -= 1; }
+    era := floorDiv(y, 400);
+    yearOfEra := y - era * 400;
+    shifted := month - 3;
+    if month <= 2 { shifted = month + 9; }
+    dayOfYear := (153 * shifted + 2) / 5 + day - 1;
+    dayOfEra := yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+    return era * 146097 + dayOfEra - 719468;
+}
+
+@private
+civilFromDays :: (days: i64) -> (i64, i64, i64) {
+    z := days + 719468;
+    era := floorDiv(z, 146097);
+    dayOfEra := z - era * 146097;
+    yearOfEra := (dayOfEra - dayOfEra / 1460 + dayOfEra / 36524 - dayOfEra / 146096) / 365;
+    dayOfYear := dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100);
+    mp := (5 * dayOfYear + 2) / 153;
+    day := dayOfYear - (153 * mp + 2) / 5 + 1;
+    month := mp + 3;
+    if mp >= 10 { month = mp - 9; }
+    year := yearOfEra + era * 400;
+    if month <= 2 { year += 1; }
+    return year, month, day;
+}
+
+@private
+floorDiv :: (a: i64, b: i64) -> i64 {
+    q := a / b;
+    if (a % b != 0) && ((a < 0) != (b < 0)) { q -= 1; }
+    return q;
+}
+
+@private
+floorMod :: (a: i64, b: i64) -> i64 {
+    return a - floorDiv(a, b) * b;
+}
+
+@private
+hour12 :: (hour: int) -> i64 {
+    h := hour % 12;
+    if h == 0 { h = 12; }
+    return h as i64;
+}
+
+// The text that format writes, without fmt, which uses this namespace
+@private
+Text :: struct {
+    bytes: [..]u8;
+
+    add :: method * (s: string) {
+        for c in s { self.bytes.add(c as u8); }
+    }
+
+    // At least width digits, with zeros in front
+    number :: method * (value: i64, width: int) {
+        v := value;
+        if v < 0 {
+            self.bytes.add('-');
+            v = -v;
+        }
+        digits: [20]u8;
+        count := 0;
+        while v > 0 || count == 0 {
+            digits[count] = (v % 10) as u8 + '0';
+            v /= 10;
+            count += 1;
+        }
+        for i in count..width { self.bytes.add('0'); }
+        for i in 0..count { self.bytes.add(digits[count - 1 - i]); }
+    }
+
+    // A fraction of a second with that many digits. With trim, the zeros at its end are left out, and the dot too when
+    // nothing is left
+    fraction :: method * (nanoseconds: i32, digits: int, trim: bool) {
+        n := digits;
+        if n > 9 { n = 9; }
+        value := nanoseconds as i64;
+        for i in n..9 { value /= 10; }
+        if trim {
+            while n > 0 && value % 10 == 0 {
+                value /= 10;
+                n -= 1;
+            }
+            if n == 0 { return; }
+        }
+        self.bytes.add('.');
+        self.number(value, n);
+    }
+
+    // The fraction of a unit, e.g .5 of 1500 ms, without zeros at its end
+    decimals :: method * (rest: i64, unit: i64) {
+        if rest == 0 { return; }
+        digits := 0;
+        size := unit;
+        while size > 1 {
+            size /= 10;
+            digits += 1;
+        }
+        value := rest;
+        while value % 10 == 0 {
+            value /= 10;
+            digits -= 1;
+        }
+        self.bytes.add('.');
+        self.number(value, digits);
+    }
+
+    // An offset as +01:00, +0100 or +01, or Z for UTC
+    zone :: method * (offset: i32, z: bool, colon: bool, minutes: bool) {
+        if z && offset == 0 {
+            self.bytes.add('Z');
+            return;
+        }
+        total := offset as i64;
+        if total < 0 {
+            self.bytes.add('-');
+            total = -total;
+        } else {
+            self.bytes.add('+');
+        }
+        self.number(total / 3600, 2);
+        if minutes || total % 3600 != 0 {
+            if colon { self.bytes.add(':'); }
+            self.number(total % 3600 / 60, 2);
+        }
+    }
+
+    toString :: method () -> string {
+        s: string;
+        s.data = malloc(self.bytes.count + 1) as *u8;
+        for b, i in self.bytes { s.data[i] = b; }
+        s.len = self.bytes.count;
+        return s;
+    }
+}
+
+// Reads the text of parse
+@private
+Reader :: struct {
+    text: string;
+    at:   int;
+
+    eat :: method * (c: u8) -> bool {
+        if self.at < self.text.len as int && self.text[self.at] == c {
+            self.at += 1;
+            return true;
+        }
+        return false;
+    }
+
+    // A number of exactly that many digits, or -1
+    digits :: method * (count: int) -> i64 {
+        value: i64 = 0;
+        for i in 0..count {
+            if self.at >= self.text.len as int { return -1; }
+            c := self.text[self.at];
+            if c < '0' || c > '9' { return -1; }
+            value = value * 10 + (c - '0') as i64;
+            self.at += 1;
+        }
+        return value;
+    }
 }

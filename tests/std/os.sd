@@ -58,7 +58,7 @@ main :: () {
         assert(os.run("exit 0") == 0);
     }
     {
-        assert(time.unix() > 1700000000);
+        assert(time.now().unix() > 1700000000);
 
         watch := time.startStopwatch();
         time.sleep(20);

@@ -78,6 +78,17 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.9.8 - 2. Nov 2026
+
+* `time.Time`, like Go: `time.now()`, `time.date(...)`, `t.year()`, `t.add(90 * time.Minute)`, `t.addDate(0, 1, 0)`,
+  `t.sub(u)`, `before`/`after`, `t.format("2006-01-02 15:04")`, `time.parse(text)` and offsets. `fmt` prints it as
+  RFC 3339 text, and `json` writes and reads it as a string. See `docs/standard_library.md`
+* Changed: `time.now()` gives a `time.Time`. The high resolution clock is `time.clock()`, and `time.unix()` is
+  `time.now().unix()`
+* `@Hidden` on a member leaves it out of `fmt`, `json` and `dbms`
+* Fix: a constant folded from a typed constant, e.g `Minute :: 60 * Second` with `Second :: 1000000000 as i64`, was
+  checked as an `int`
+
 ## Update v0.9.7 - 2. Nov 2026
 
 * Short lambdas: `x => expr`. The types of the parameters come from where it is used, and the result type from the
