@@ -12,6 +12,15 @@ namespace dbms;
 // a copy, so post.author() twice gives the same *Author
 import fmt;
 
+// A foreign key of a table to one row of another, e.g posts.author_id to authors.id. The generator writes them in
+// database.open. A query can use the members of the row it refers to, e.g p.author().name, which is a join
+Relation :: struct {
+    name:       string;   // The method of the rows, e.g author
+    column:     string;   // The column of the foreign key, e.g author_id
+    table:      string;   // The table it refers to, e.g authors
+    references: string;   // The column it refers to, e.g id
+}
+
 // The context of the database that a row came from. A row has it as a member marked with @Hidden, e.g
 // '@Hidden dbLink: dbms.Link;', so it isn't a column, and fmt and json leave it out
 Link :: struct {

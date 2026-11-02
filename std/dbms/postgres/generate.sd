@@ -487,6 +487,19 @@ databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]Generate
         }
     }
 
+    // The foreign keys to one row, for the members of that row in queries, e.g p.author().name
+    for table in tables {
+        relations: [..]string;
+        for r in table.relations {
+            if r.toMany { continue; }
+            relations.add(fmt.sprint("dbms.Relation{name: %, column: %, table: %, references: %}",
+                saadString(r.name), saadString(r.column), saadString(r.otherTable), saadString(r.otherColumn)));
+        }
+        if relations.count > 0 {
+            sb.addLine("    tables.%.relations = [%];", camelCase(table.name), fmt.join(relations.elements(), ", "));
+        }
+    }
+
     // The tables, for the relations of the rows
     for table in tables {
         sb.addLine("    tables.%.register(tables.%.tableInfo());", context, camelCase(table.name));

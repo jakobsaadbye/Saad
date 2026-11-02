@@ -61,7 +61,8 @@ main :: () {
 
     minAge := 18;
     adults, err4 := db.users.where(u => u.age ?? 0 >= minAge).orderBy(u => u.name).all();
-    names, err5  := db.users.where(u => u.role == .admin).select(u => {name: u.name, email: u.email}).all();
+    names, err5  := db.users.where(u => u.role == .admin).select(u => {u.name, u.email}).all();
+    posts, err6  := db.posts.select(p => {p.title, authorName: p.author().name}).all();   // a join
 }
 ```
 
@@ -440,7 +441,7 @@ ada, err2  := db.users.where(u => u.email == email).first();          // a *User
 n, err3    := db.users.where(u => u.email == null).count();           // IS NULL
 admins, err4 := db.users.where(u => u.role == .admin).exists();
 
-rows, err5  := db.users.select(u => {name: u.name, nextYear: (u.age ?? 0) + 1}).all();   // [..]struct { name: string; nextYear: i32; }
+rows, err5  := db.users.select(u => {u.name, nextYear: (u.age ?? 0) + 1}).all();   // [..]struct { name: string; nextYear: i32; }
 names, err6 := db.users.orderByDescending(u => u.id).select(u => u.name).all();          // [..]string
 
 db.users.where(u => u.age >= "18");   // A compile error, as the lambda is checked like any other
@@ -456,8 +457,10 @@ db.users.where(u => u.age >= "18");   // A compile error, as the lambda is check
   another method, is an error that `all` gives. A part without the row, e.g `minAge - 1` or `now()`, is a value.
 * The rows of `all` and `first` of a keyed table are tracked, like those of `get`, so changes to them are saved by
   `saveChanges`. The rows of `select` are not: they are anonymous structs or values made of some columns.
-* `select` gives a struct literal with names, whose names are the columns of the result, or one value. A `where`
-  after `select` is an error; put it before.
+* `select` gives a struct literal, whose names are the columns of the result, or one value. A member without a name
+  gets the name of the member it reads, so `{u.name, u.email}` is `{name: u.name, email: u.email}`, and
+  `{p.title, p.author().name}` has `title` and `name`. Two members that would get the same name are an error: name
+  one of them. A `where` after `select` is an error; put it before.
 
 ### 6. Relations
 
@@ -504,6 +507,38 @@ count, err3 := author.posts().count();
   the error `dbms.NoLinkError`. `database.open` registers the tables with the context, so the link finds them.
 * Under the hood: `dbms.related<T>(link, table, column, value)` and `dbms.relatedRows<T>(link, table)`, in
   `std/dbms/relations.sd`.
+
+#### Relations in queries
+
+A lambda of a query can use the row that a foreign key refers to, like a navigation property in C#. It is a join:
+
+```odin
+posts, err := db.posts.where(p => p.authorId == authorId).select(p => {
+    p.title,
+    p.body,
+    p.publishedAt,
+    authorName: p.author().name,
+    p.author().email,
+}).all();
+// SELECT t0."title" AS "title", t0."body" AS "body", t0."published_at" AS "publishedAt", t1."name" AS "authorName",
+//        t1."email" AS "email"
+// FROM "saad_blog"."posts" AS t0 LEFT JOIN "saad_blog"."authors" AS t1 ON t1."id" = t0."author_id"
+// WHERE ((t0."author_id" = $1))
+
+byAda, err2 := db.posts.where(p => p.author().email == "ada@example.com").count();
+onAda, err3 := db.comments.where(c => c.post().author().name.startsWith("Ada")).select(c => {c.body, c.post().slug}).all();
+```
+
+* Each relation of a query is joined once, also when it is used more than once, and a relation of a relation, e.g
+  `c.post().author()`, is joined after it. Without a relation the SQL is as before, without the names of the tables.
+* It is a `LEFT JOIN`, so a row whose foreign key is `NULL` is still there, and the members of the row it refers to
+  are `NULL`, which gives the default of the type, e.g `""`, or an empty optional for an optional.
+* In the lambda, `p.author()` is the `*Author` and not `(*Author, string)`, as the lambda is made into SQL and not
+  run. The row itself can't be a value, only its members: `p.author() == null` is a compile error.
+* Only the end with one row: `author.posts()` is a query of its own, not a member of a row. A query of the rows of
+  the other end, e.g the number of posts of each author, is plain SQL for now.
+* `database.open` gives the tables their relations (`tables.posts.relations = [dbms.Relation{...}]`), and registers
+  the tables with the context, where the joins find the table of a relation.
 
 ## Gaps in the language
 

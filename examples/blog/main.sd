@@ -1,6 +1,6 @@
 // A small blog on Postgres with std/dbms: the tables are written as Saad by the generator (examples/blog/db), rows are
 // made and changed as plain structs, saveChanges writes them, queries are lambdas that are made into SQL, and the
-// foreign keys are methods like post.author() and author.posts().
+// foreign keys are methods like post.author() and author.posts(), which queries can use too, e.g p.author().name.
 // See README.md for how to run it, and docs/dbms.md for all of dbms
 //
 //     saad run examples/blog/main.sd -- "host=localhost dbname=postgres user=postgres"
@@ -141,6 +141,26 @@ main :: () {
     tags, e16 := engine.postTags().orderBy(t => t.tag).select(t => t.tag).all();
     check(e16);
     print("Tags of '%': %", engine.slug, tags);
+
+    // A query can use the row that a foreign key refers to, e.g p.author().name, which is a join in SQL. A member
+    // without a name gets the name of the member it reads: {p.title, p.author().email} has title and email
+    withAuthors, e20 := db.posts.where(p => p.status == .published).orderBy(p => p.title).select(p => {
+        p.title,
+        p.publishedAt,
+        authorName: p.author().name,
+        p.author().email,
+    }).all();
+    check(e20);
+    print("\nPublished posts with their authors:");
+    for row in withAuthors {
+        print("  '%' by % (%) on %", row.title, row.authorName, row.email, row.publishedAt?.format("2006-01-02") ?? "-");
+    }
+    byAda, e21 := db.posts.where(p => p.author().email == "ada@example.com").count();
+    check(e21);
+    print("Posts by the author with the email ada@example.com: %", byAda);
+    onAda, e22 := db.comments.where(c => c.post().author().name.startsWith("Ada")).select(c => {c.body, c.post().slug}).all();
+    check(e22);
+    print("Comments on the posts of Ada: %", onAda.count);
 
     //
     // 4. Changing rows. The rows of get, all and first are tracked: what is changed on them is saved by saveChanges,

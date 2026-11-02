@@ -5,6 +5,8 @@
 #
 # With SAAD_TEST_POSTGRES set to a connection string (e.g "host=localhost dbname=test user=postgres"), that
 # server is used. Otherwise a throwaway server is made in a temporary folder and removed afterwards.
+# With SAAD_UPDATE_GENERATED=1, the files the generator writes (tests/db/model and examples/blog/db) are written
+# again from the schemas, e.g after changing std/dbms/postgres/generate.sd. Look at the diff before committing
 # Requirements: gcc, PostgreSQL (initdb, pg_ctl) and libpq-dev, e.g 'apt install postgresql libpq-dev'
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -41,6 +43,15 @@ if [ -z "$SAAD_TEST_POSTGRES" ]; then
     }
     trap stop_server EXIT
     export SAAD_TEST_POSTGRES="host=localhost port=$PORT dbname=postgres user=postgres"
+fi
+
+if [ "$SAAD_UPDATE_GENERATED" = 1 ]; then
+    export SAAD_UPDATE_GOLDEN=1   # tests/db/generate.sd writes tests/db/model
+    PSQL="psql"
+    [ -n "$BIN" ] && [ -x "$BIN/psql" ] && PSQL="$BIN/psql"
+    "$PSQL" "$SAAD_TEST_POSTGRES" -q -v ON_ERROR_STOP=1 -f examples/blog/schema.sql > /dev/null || exit 1
+    rm -rf examples/blog/db && bash "$HERE/run.sh" std/dbms/tools/generate.sd "$SAAD_TEST_POSTGRES" examples/blog/db saad_blog > /dev/null || exit 1
+    echo "Wrote examples/blog/db again"
 fi
 
 passed=0; failed=0
