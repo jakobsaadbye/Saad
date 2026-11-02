@@ -35,7 +35,7 @@ get the prelude, as the prelude is built on them.
 ```odin
 fmt.print("% is % years old", name, age);          // with a newline
 fmt.print("no newline", newline: false);
-fmt.print("100%% done");                            // %% is a %
+fmt.print("% is 100\% done", name);                // \% is a %, and %% two values
 text := fmt.sprint("Score: %", score);              // like print, but returns the text
 text.free();
 joined := fmt.join(["a", "b", "c"], ", ");          // "a, b, c"

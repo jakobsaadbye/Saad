@@ -15,7 +15,6 @@ OrderItem :: struct {
 
     // The row of orders that orderId refers to, or null
     order :: method () -> (*Order, string) {
-        row, err := dbms.related<Order>(self.dbLink, "orders", "id", self.orderId);
-        return row, err;
+        return dbms.related<Order>(self.dbLink, "orders", "id", self.orderId);
     }
 }

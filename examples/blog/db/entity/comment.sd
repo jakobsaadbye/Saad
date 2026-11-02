@@ -19,7 +19,6 @@ Comment :: struct {
 
     // The row of posts that postId refers to, or null
     post :: method () -> (*Post, string) {
-        row, err := dbms.related<Post>(self.dbLink, "posts", "id", self.postId);
-        return row, err;
+        return dbms.related<Post>(self.dbLink, "posts", "id", self.postId);
     }
 }

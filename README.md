@@ -78,6 +78,18 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.9.11 - 2. Nov 2026
+
+* `defer`: a statement that runs when its block is left, also by `return`, `break` and `continue`, the last one first
+
+```odin
+p := mem.allocate(64);
+defer mem.free(p);
+```
+
+* `return f()` of a call that gives several values, e.g `return divide(a, 2);` in a function returning `(int, string)`
+* Changed: in a format of `fmt`, `\%` is a `%`, and `%%` is two values. A `%` after the last value stays a `%`
+
 ## Update v0.9.10 - 2. Nov 2026
 
 * Numbers in hex, binary and octal, and with `_` between digits: `0xdeadbeef`, `0b0001_0111`, `0o755`, `1_000_000`
@@ -339,7 +351,7 @@ switch c {
 ```
 
 * The StringBuilder is ready to use without `newStringBuilder`, and has `addLine`, `addRepeated`, `removeLast`,
-  `endsWith`, `length` and `isEmpty`. `%%` in a format is a `%`. `fmt.join(parts, ", ")` joins strings.
+  `endsWith`, `length` and `isEmpty`. `\%` in a format is a `%` (it was `%%`). `fmt.join(parts, ", ")` joins strings.
   `addAnyValue` is now `addValue`. See `docs/standard_library.md`
 * Fixes: `sb.clear()` didn't empty the text, `sb.add()` leaked a list on every call, and a variadic parameter that got
   no arguments, as the last parameter, had a garbage count

@@ -1,0 +1,39 @@
+// return f() of a call that gives several values
+use fmt;
+
+divide :: (a: int, b: int) -> (int, string) {
+    if b == 0 { return 0, "division by zero"; }
+    return a / b, "";
+}
+
+// Gives the values of divide as its own
+half :: (a: int) -> (int, string) {
+    return divide(a, 2);
+}
+
+Pair :: struct { first: string; second: string; }
+
+names :: () -> (Pair, int, bool) {
+    return Pair{"Ada", "Bo"}, 2, true;
+}
+
+forward :: () -> (Pair, int, bool) {
+    return names();
+}
+
+Box :: struct {
+    n: int;
+    split :: method () -> (int, int) { return self.n / 10, self.n % 10; }
+    parts :: method () -> (int, int) { return self.split(); }
+}
+
+main :: () {
+    h, err := half(9);
+    assert(h == 4 && err == "");
+    pair, count, ok := forward();
+    assert(pair.second == "Bo" && count == 2 && ok);
+    b := Box{47};
+    tens, ones := b.parts();
+    assert(tens == 4 && ones == 7);
+    print("return of a multi-value call ok");
+}

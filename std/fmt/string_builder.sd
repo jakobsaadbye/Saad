@@ -93,18 +93,20 @@ addRepeated :: method (sb: *StringBuilder, c: u8, count: int) {
     sb.buffer[sb.cursor] = 0;
 }
 
-// Adds the format with each % replaced by the next argument, written like fmt.print writes it. %% adds a %
+// Adds the format with each % replaced by the next argument, written like fmt.print writes it. \% adds a %, e.g
+// sprint("% is 100\% done", name). A % after the last argument stays a %, e.g print("100%")
 add :: method (sb: *StringBuilder, format: string, args: ...any) {
     next := 0;   // The next argument
     start := 0;  // The text since the last %
     i := 0;
     while i < format.len {
-        if format[i] != '%' {
+        isEscape := format[i] == '\\' && i + 1 < format.len && format[i + 1] == '%';
+        if format[i] != '%' && !isEscape {
             i += 1;
             continue;
         }
         sb.addStringSlice(format, start, i as int);
-        if i + 1 < format.len && format[i + 1] == '%' {
+        if isEscape {
             sb.addChar('%');
             i += 2;
         } else {

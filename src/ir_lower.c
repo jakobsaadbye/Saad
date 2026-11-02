@@ -44,6 +44,7 @@ typedef struct LoopTargets {
     void    *loop;           // AstFor* or AstWhile*
     IrBlock *break_block;
     IrBlock *continue_block;
+    int      defer_count;    // The defers that are active outside of the loop. break and continue run the ones above
 } LoopTargets;
 
 typedef struct PtrMapEntry {
@@ -72,6 +73,7 @@ typedef struct Lowerer {
     AstFunctionDefn *ast_func;
     PtrMap           locals;          // AstIdentifier* -> slot index
     IrArray(LoopTargets) loops;
+    IrArray(Ast *)   defers;          // The deferred statements of the blocks that are being lowered, innermost last
     int              line;
 
     // Module state
@@ -2361,8 +2363,19 @@ static void lower_if(Lowerer *L, AstIf *ast_if) {
 }
 
 static void push_loop(Lowerer *L, void *loop, IrBlock *break_block, IrBlock *continue_block) {
-    LoopTargets targets = { loop, break_block, continue_block };
+    LoopTargets targets = { loop, break_block, continue_block, L->defers.count };
     ir_array_push(L->loops, targets);
+}
+
+static void lower_statement(Lowerer *L, Ast *stmt);
+
+// Runs the deferred statements above 'down_to', the last one first, e.g on the way out of a block or for a return.
+// They stay active, as another way out of the block runs them too
+static void emit_defers(Lowerer *L, int down_to) {
+    for (int i = L->defers.count - 1; i >= down_to; i--) {
+        if (block_is_terminated(L)) return;
+        lower_statement(L, L->defers.items[i]);
+    }
 }
 
 static void lower_while(Lowerer *L, AstWhile *ast_while) {
@@ -2528,6 +2541,7 @@ static void lower_break_or_continue(Lowerer *L, AstBreakOrContinue *boc) {
     for (int i = L->loops.count - 1; i >= 0; i--) {
         if (L->loops.items[i].loop == key) {
             bool is_break = boc->token.type == TOKEN_BREAK;
+            emit_defers(L, L->loops.items[i].defer_count);
             terminate_jmp(L, is_break ? L->loops.items[i].break_block : L->loops.items[i].continue_block);
             start_unreachable_block(L);
             return;
@@ -2543,8 +2557,24 @@ static void lower_return(Lowerer *L, AstReturn *ret) {
         AstExpr *value = da_get_deref(ret->values, i);
         if (value->type->kind == TYPE_VOID) continue; // `return;`
 
+        // return f() of a function that gives several values: they are the values of this one
         if (value->type->kind == TYPE_TUPLE) {
-            LOWER_NOT_IMPLEMENTED(L, value, "returning the result of a multi-value call directly");
+            if (value->head.kind != AST_FUNCTION_CALL || ret->values.count != 1) {
+                LOWER_NOT_IMPLEMENTED(L, value, "returning several values of a call together with other values");
+            }
+            TypeTuple *tuple = (TypeTuple *) value->type;
+            if (tuple->types.count != func_defn->lowered_return_params.count) {
+                lower_fail(L, (Ast *) value, "Compiler Error: The call gives %d values, and the function returns %d", tuple->types.count, func_defn->lowered_return_params.count);
+            }
+            int ret_slots[16];
+            lower_call(L, (AstFunctionCall *) value, ret_slots, 16);
+            for (int j = 0; j < tuple->types.count; j++) {
+                AstIdentifier *ret_param = da_get_deref(func_defn->lowered_return_params, j);
+                Type *ret_type = da_get_deref(func_defn->return_types, j);
+                int out_ptr = emit_load(L, IR_PTR, addr_slot(local_slot(L, ret_param), 0));
+                store_value(L, addr_vreg(out_ptr, 0), ret_type, value_place(addr_slot(ret_slots[j], 0), da_get_deref(tuple->types, j)), (Ast *) value);
+            }
+            break;
         }
         if (i >= func_defn->lowered_return_params.count) {
             lower_fail(L, (Ast *) value, "Compiler Error: More return values than return parameters");
@@ -2556,6 +2586,8 @@ static void lower_return(Lowerer *L, AstReturn *ret) {
         store_expr(L, addr_vreg(out_ptr, 0), ret_type, value, false);
     }
 
+    // The values are taken before the deferred statements run
+    emit_defers(L, 0);
     terminate_ret(L, IR_NO_VREG);
     start_unreachable_block(L);
 }
@@ -2581,6 +2613,7 @@ static void lower_statement(Lowerer *L, Ast *stmt) {
     case AST_FOR:               lower_for(L, (AstFor *) stmt); return;
     case AST_BREAK_OR_CONTINUE: lower_break_or_continue(L, (AstBreakOrContinue *) stmt); return;
     case AST_RETURN:            lower_return(L, (AstReturn *) stmt); return;
+    case AST_DEFER:             ir_array_push(L->defers, ((AstDefer *) stmt)->statement); return; // Runs when the block is left
 
     // Declarations that produce no code at the point where they appear
     case AST_STRUCT:
@@ -2598,9 +2631,12 @@ static void lower_statement(Lowerer *L, Ast *stmt) {
 }
 
 static void lower_block(Lowerer *L, AstBlock *block) {
+    int defers = L->defers.count;
     for (int i = 0; i < block->statements.count; i++) {
         lower_statement(L, da_get_deref(block->statements, i));
     }
+    emit_defers(L, defers); // At the end of the block. A return, break or continue in it ran them already
+    L->defers.count = defers;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -2656,6 +2692,7 @@ static void lower_function(Lowerer *L, AstFunctionDefn *func_defn) {
     L->ast_func = func_defn;
     L->line     = func_defn->head.head.start.line;
     L->loops.count = 0;
+    L->defers.count = 0;
     ptr_map_clear(&L->locals);
 
     IrBlock *entry = create_block(L, "entry");

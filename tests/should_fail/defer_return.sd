@@ -1,0 +1,8 @@
+// expect-error: A deferred statement can't return
+
+f :: () -> int {
+    defer { return 1; }
+    return 0;
+}
+
+main :: () { f(); }

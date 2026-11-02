@@ -169,26 +169,22 @@ Query :: struct <T> {
 
     // The sum of a value of the rows, e.g db.posts.sum(p => p.views). 0 when there are no rows
     sum :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
-        value, err := self.aggregate<K>("coalesce(sum(\"value\"), 0)", f);
-        return value, err;
+        return self.aggregate<K>("coalesce(sum(\"value\"), 0)", f);
     }
 
     // The smallest of a value of the rows, e.g db.posts.min(p => p.createdAt). The zero value when there are no rows
     min :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
-        value, err := self.aggregate<K>("min(\"value\")", f);
-        return value, err;
+        return self.aggregate<K>("min(\"value\")", f);
     }
 
     // The largest of a value of the rows. The zero value when there are no rows
     max :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
-        value, err := self.aggregate<K>("max(\"value\")", f);
-        return value, err;
+        return self.aggregate<K>("max(\"value\")", f);
     }
 
     // The average of a value of the rows, e.g db.posts.average(p => p.views). 0 when there are no rows
     average :: method <K> (f: Expr<(T) -> K>) -> (f64, string) {
-        value, err := self.aggregate<f64>("coalesce(avg(\"value\"), 0)::double precision", f);
-        return value, err;
+        return self.aggregate<f64>("coalesce(avg(\"value\"), 0)::double precision", f);
     }
 
     // An aggregate of SQL over the values that f gives of the rows, which are the column "value"
@@ -544,8 +540,7 @@ SqlWriter :: struct {
         }
         relation, found := relationNamed(table, call.name);
         if !found || relation.many { return none, false; }
-        other, known := self.context.tableNamed(relation.table);
-        return other, known;
+        return self.context.tableNamed(relation.table);
     }
 
     // A subquery of the rows of a relation: 'node' is the call that gives a value of them, e.g count() of

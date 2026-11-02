@@ -250,12 +250,10 @@ parseValue :: method (p: *Parser, depth: int) -> Value, bool {
     ch := p.peek();
     switch ch {
         case '{' {
-            object, ok := p.parseObject(depth);
-            return object, ok;
+            return p.parseObject(depth);
         }
         case '[' {
-            array, ok := p.parseArray(depth);
-            return array, ok;
+            return p.parseArray(depth);
         }
         case '"' {
             s, ok := p.parseString();
@@ -263,8 +261,7 @@ parseValue :: method (p: *Parser, depth: int) -> Value, bool {
         }
         case '-'
         case '0'...'9' {
-            number, ok := p.parseNumber();
-            return number, ok;
+            return p.parseNumber();
         }
     }
     if p.eatWord("true")  { return Value{kind: .bool, boolean: true}, true; }

@@ -404,8 +404,7 @@ writeRelations :: method (w: *Writer, sb: *fmt.StringBuilder, table: SchemaTable
             row := rowTypeName(r.otherTable);
             sb.addLine("    // The row of % that % refers to, or null", r.otherTable, memberName(r.column));
             sb.addLine("    % :: method () -> (*%, string) {", r.name, row);
-            sb.addLine("        row, err := dbms.related<%>(self.%, %, %, self.%);", row, link, saadString(r.otherTable), saadString(r.otherColumn), memberName(r.column));
-            sb.addLine("        return row, err;");
+            sb.addLine("        return dbms.related<%>(self.%, %, %, self.%);", row, link, saadString(r.otherTable), saadString(r.otherColumn), memberName(r.column));
         }
         sb.addLine("    }");
     }
@@ -742,7 +741,7 @@ enumValueName :: (label: string) -> string {
 
 @private
 isKeyword :: (name: string) -> bool {
-    keywords := ["if", "else", "for", "while", "return", "break", "continue", "in", "as", "xx", "new", "assert", "typeof", "sizeof",
+    keywords := ["if", "else", "for", "while", "return", "defer", "break", "continue", "in", "as", "xx", "new", "assert", "typeof", "sizeof",
                  "struct", "enum", "union", "method", "switch", "case", "import", "use", "namespace", "extern", "any", "string",
                  "true", "false", "null", "int", "uint", "float", "char", "bool", "void", "u8", "u16", "u32", "u64",
                  "i8", "i16", "i32", "i64", "f32", "f64"];
