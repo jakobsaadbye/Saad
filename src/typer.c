@@ -146,6 +146,7 @@ AstFunctionDefn *readonly_self_place(Typer *typer, AstExpr *expr);
 void report_readonly_self(Typer *typer, Ast *at, AstFunctionDefn *method, const char *action, AstExpr *place);
 void append_place_text(StringBuilder *sb, AstExpr *expr);
 bool check_declaration(Typer *typer, AstDeclaration *decl);
+bool check_defer(Typer *typer, AstDefer *defer);
 bool identifier_is_type(AstIdentifier *ident);
 Type *resolve_anonymous_type(Typer *typer, Type *type);
 AstExpr *member_default_value(AstIdentifier *member);
@@ -4671,6 +4672,7 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_BREAK_OR_CONTINUE: return check_break_or_continue(typer, (AstBreakOrContinue *)(stmt));
     case AST_EXPR_STMT:         return check_expr_stmt(typer, (AstExprStmt *)(stmt));
     case AST_RETURN:            return check_return(typer, (AstReturn *)(stmt));
+    case AST_DEFER:             return check_defer(typer, (AstDefer *)(stmt));
     case AST_ASSERT:            return check_assert(typer, (AstAssert *)(stmt));
     case AST_IF:                return check_if(typer, (AstIf *)(stmt));
     case AST_SWITCH:            return check_switch(typer, (AstSwitch *)(stmt));
@@ -4689,6 +4691,52 @@ bool check_break_or_continue(Typer *typer, AstBreakOrContinue *boc) {
     boc->enclosing_loop = typer->enclosing_loop;
 
     return true;
+}
+
+// A deferred statement runs on the way out of its block, so it can't leave it itself: no return in it, and no break or
+// continue but of a loop inside it. 'loops' is the number of loops of the defer around the statement
+static Ast *leaves_defer(Ast *stmt, int loops) {
+    if (stmt == NULL) return NULL;
+    switch (stmt->kind) {
+    case AST_RETURN: return stmt;
+    case AST_BREAK_OR_CONTINUE: return loops == 0 ? stmt : NULL;
+    case AST_BLOCK: {
+        AstBlock *block = (AstBlock *)stmt;
+        for (int i = 0; i < block->statements.count; i++) {
+            Ast *found = leaves_defer(((Ast **)block->statements.items)[i], loops);
+            if (found) return found;
+        }
+        return NULL;
+    }
+    case AST_IF: {
+        AstIf *ast_if = (AstIf *)stmt;
+        Ast *found = leaves_defer((Ast *)ast_if->then_block, loops);
+        for (int i = 0; !found && i < ast_if->else_ifs.count; i++) found = leaves_defer(((Ast **)ast_if->else_ifs.items)[i], loops);
+        if (!found) found = leaves_defer((Ast *)ast_if->else_block, loops);
+        return found;
+    }
+    case AST_FOR:   return leaves_defer((Ast *)((AstFor *)stmt)->body, loops + 1);
+    case AST_WHILE: return leaves_defer((Ast *)((AstWhile *)stmt)->body, loops + 1);
+    default: return NULL;
+    }
+}
+
+bool check_defer(Typer *typer, AstDefer *defer) {
+    Ast *leaves = leaves_defer(defer->statement, 0);
+    if (leaves) {
+        report_error_ast(typer->parser, LABEL_ERROR, leaves, "A deferred statement can't %s, as it runs while its block is left", leaves->kind == AST_RETURN ? "return" : "break or continue the loop around it");
+        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)defer, "Here is the defer");
+        return false;
+    }
+    if (defer->statement->kind == AST_DEFER) {
+        report_error_ast(typer->parser, LABEL_ERROR, defer->statement, "A defer in a defer would run right away. Put both after the first 'defer' in a block");
+        return false;
+    }
+    if (defer->statement->kind == AST_DECLARATION) {
+        report_error_ast(typer->parser, LABEL_ERROR, defer->statement, "A deferred declaration would be gone right after it runs");
+        return false;
+    }
+    return check_statement(typer, defer->statement);
 }
 
 // True if every way through the statement ends in a return, e.g an if with an else, or a switch, where every branch returns

@@ -279,7 +279,7 @@ static void skip_failed_statement(Parser *parser, ParserState *state, bool top_l
         }
         Token head = all[first];
         Token after = first + 1 < parser->lexer->tokens.count ? all[first + 1] : (Token){0};
-        bool starts_statement = head.type == TOKEN_IF || head.type == TOKEN_FOR || head.type == TOKEN_WHILE || head.type == TOKEN_RETURN ||
+        bool starts_statement = head.type == TOKEN_IF || head.type == TOKEN_FOR || head.type == TOKEN_WHILE || head.type == TOKEN_RETURN || head.type == TOKEN_DEFER ||
                                 head.type == TOKEN_SWITCH || head.type == TOKEN_BREAK || head.type == TOKEN_CONTINUE ||
                                 (head.type == TOKEN_LITERAL_IDENTIFIER && (after.type == TOKEN_COLON_EQUAL || after.type == ':' ||
                                  after.type == TOKEN_DOUBLE_COLON || after.type == '(' || is_assignment_operator(after)));
@@ -355,7 +355,7 @@ static bool has_values(Parser *parser, AstDeclaration *decl) {
 // e.g 'for', 'return' or 'x = 1;', which can only be inside a function
 static bool is_statement_of_a_function(Ast *stmt) {
     switch (stmt->kind) {
-    case AST_RETURN: case AST_IF: case AST_SWITCH: case AST_FOR: case AST_WHILE: case AST_BREAK_OR_CONTINUE:
+    case AST_RETURN: case AST_DEFER: case AST_IF: case AST_SWITCH: case AST_FOR: case AST_WHILE: case AST_BREAK_OR_CONTINUE:
     case AST_BLOCK: case AST_ASSIGNMENT: case AST_ASSERT:
         return true;
     case AST_EXPR_STMT: {
@@ -1171,6 +1171,24 @@ Ast *parse_statement(Parser *parser) {
         stmt = (Ast *)(parse_return(parser));
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
+    }
+
+    // defer free(p); or defer { ... }
+    else if (token.type == TOKEN_DEFER) {
+        eat_token(parser);
+        if (parser->enclosing_function == NULL) {
+            report_error_token(parser, LABEL_ERROR, token, "Syntax Error: 'defer' is only in a function");
+            return NULL;
+        }
+        Ast *deferred = parse_statement(parser);
+        if (!deferred) return NULL;
+        AstDefer *defer = ast_allocate(parser, sizeof(AstDefer));
+        defer->head.kind  = AST_DEFER;
+        defer->head.file  = parser->current_file;
+        defer->head.start = token.start;
+        defer->head.end   = deferred->end;
+        defer->statement  = deferred;
+        return (Ast *)defer; // The statement has its own ';'
     }
 
     else if (token.type == TOKEN_BREAK || token.type == TOKEN_CONTINUE) {

@@ -52,6 +52,7 @@ typedef enum AstKind {
     AST_EXTERN,
     AST_ASSERT,
     AST_RETURN,
+    AST_DEFER,
     AST_BREAK_OR_CONTINUE,
     AST_IF,
     AST_SWITCH,
@@ -494,6 +495,12 @@ typedef struct AstSizeof {
     AstExpr  head;
     Type    *type;
 } AstSizeof;
+
+// defer statement; or defer { ... }: the statement runs when the block it is in ends, also by return, break or continue
+typedef struct AstDefer {
+    Ast  head;
+    Ast *statement;
+} AstDefer;
 
 typedef struct AstReturn {
     Ast              head;

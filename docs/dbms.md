@@ -577,6 +577,5 @@ Found while writing this, in the order they would help:
 
 * Assigning several results to existing variables, `count, err = conn.exec(...)`. Today each call needs new
   names (`err1`, `err2`, ...) or a function around it.
-* `defer`, to free a result on every return.
 * Attributes on structs, e.g `@dbms.Table("users")`, for tables written by hand.
 * Types for decimals and UUIDs. They are strings for now. Times are `time.Time`, but without named zones.

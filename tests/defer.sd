@@ -1,0 +1,81 @@
+// defer: a statement that runs when its block is left, also by return, break and continue
+use fmt;
+
+log: [..]string;
+
+note :: (text: string) { log.add(text); }
+
+steps :: () {
+    defer note("first deferred, runs last");
+    defer note("second deferred, runs first");
+    note("body");
+}
+
+// The values of a return are taken before the deferred statements run
+counter := 0;
+early :: (stop: bool) -> int {
+    counter = 1;
+    defer counter = 10;
+    if stop {
+        return counter;      // 1, and then counter is 10
+    }
+    counter = 2;
+    return counter;
+}
+
+loops :: () {
+    for i in 0..4 {
+        defer note(sprint("end of %", i));
+        if i == 1 { continue; }
+        if i == 3 { break; }
+        note(sprint("loop %", i));
+    }
+}
+
+blocks :: () {
+    {
+        defer note("inner block");
+        note("in block");
+    }
+    note("after block");
+    defer {
+        note("a deferred block");
+        for j in 0..2 {
+            if j == 1 { break; } // A loop inside the defer can break
+            note("in the deferred loop");
+        }
+    }
+}
+
+// Freeing on every way out
+Buffer :: struct { data: *u8; }
+freed := 0;
+release :: (b: *Buffer) { freed += 1; }
+
+work :: (fail: bool) -> (int, string) {
+    b := Buffer{};
+    defer release(&b);
+    if fail { return 0, "failed"; }
+    return 42, "";
+}
+
+main :: () {
+    steps();
+    assert(sprint("%", log) == "[\"body\", \"second deferred, runs first\", \"first deferred, runs last\"]");
+
+    assert(early(true) == 1 && counter == 10);
+    assert(early(false) == 2 && counter == 10);
+
+    log.clear();
+    loops();
+    assert(sprint("%", log) == "[\"loop 0\", \"end of 0\", \"end of 1\", \"loop 2\", \"end of 2\", \"end of 3\"]");
+
+    log.clear();
+    blocks();
+    assert(sprint("%", log) == "[\"in block\", \"inner block\", \"after block\", \"a deferred block\", \"in the deferred loop\"]");
+
+    _, err := work(true);
+    n, _ := work(false);
+    assert(err == "failed" && n == 42 && freed == 2);
+    print("defer ok");
+}
