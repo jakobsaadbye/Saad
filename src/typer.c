@@ -608,6 +608,7 @@ bool check_namespace_import(Typer *typer, AstImport *import) {
 }
 
 bool check_import(Typer *typer, AstImport *import) {
+    if (import->failed) return true; // Reported when the files were loaded
     if (import->kind != IMPORT_FILE) {
         // import "fmt"; of a namespace of the standard library
         if (import->path_token.type == TOKEN_LITERAL_STRING) {
@@ -2731,7 +2732,8 @@ AstIdentifier *lookup_type_identifier(Typer *typer, char *name, Ast *site) {
 
     Namespace *ns = namespace_of_names(typer, names, count - 1);
     if (ns == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, site, "Unknown namespace in the type '%s'", name);
+        if (!is_poisoned_name(typer->parser, names[0])) report_error_ast(typer->parser, LABEL_ERROR, site, "Unknown namespace in the type '%s'", name);
+        free(copy);
         return NULL;
     }
 

@@ -29,6 +29,7 @@ Document :: struct {
 documents: [..]Document;
 projects:  [..]project.Project;
 texts:     Map<string, source.Text>;  // Files that are not open, read from disk. By key
+owners:    Map<string, string>;       // The program (the key of its main file) a file is part of, once it is known. By key
 
 generation    := 0;       // Goes up when a document changes, so the projects know they are out of date
 compiler      := "saad";
@@ -231,17 +232,13 @@ findDocument :: (key: string) -> *Document {
     return null;
 }
 
-// Checks the projects with the file again, and sends their diagnostics
+// Checks the program of the file again, and the other programs that have it, and sends their diagnostics
 refresh :: (key: string, path: string) {
-    found := false;
+    projectFor(key, path);
     for p, i in projects {
-        if p.fileNumber(key) >= 0 {
+        if !p.retired && p.fileNumber(key) >= 0 {
             update(i);
-            found = true;
         }
-    }
-    if !found {
-        projectFor(key, path);
     }
 }
 
@@ -258,11 +255,25 @@ projectFor :: (key: string, path: string) -> int {
         return i;
     }
 
+    // The program it was part of. A program with errors keeps its files even when the errors leave one out for now,
+    // e.g while an import of it is being written, so the file isn't answered as a program of its own meanwhile
+    if owners.has(key) {
+        i := projectOf(owners.get(key, ""));
+        update(i);
+        owner := projects.indexRef(i);
+        if owner.fileNumber(key) >= 0 || owner.index.diagnostics.count > 0 {
+            return i;
+        }
+        rpc.log(fmt.sprint("% isn't part of % anymore", path, owner.root));
+        owners.remove(key);
+    }
+
     // A program that has the file, other than the file on its own
     for p, i in projects {
-        if p.fileNumber(key) >= 0 && source.keyOf(p.root) != key {
+        if !p.retired && p.fileNumber(key) >= 0 && source.keyOf(p.root) != key {
             update(i);
             if projects[i].fileNumber(key) >= 0 {
+                own(key, i as int);
                 return i as int;
             }
         }
@@ -279,6 +290,7 @@ projectFor :: (key: string, path: string) -> int {
             i := projectOf(candidate);
             update(i);
             if projects[i].fileNumber(key) >= 0 {
+                own(key, i);
                 return i;
             }
         }
@@ -292,6 +304,34 @@ projectFor :: (key: string, path: string) -> int {
     i := projectOf(path);
     update(i);
     return i;
+}
+
+// The file is part of the program. The project of the file on its own, if there is one, isn't needed anymore: its
+// diagnostics are cleared, as the program sends the file's
+own :: (key: string, program: int) {
+    owners.set(key.copy(), source.keyOf(projects[program].root));
+    for p, i in projects {
+        if i != program && !p.retired && source.keyOf(p.root) == key {
+            alone := projects.indexRef(i);
+            alone.retired = true;
+            alone.generation = -1;
+            for published in alone.published {
+                if published != key {
+                    rpc.notify("textDocument/publishDiagnostics", fmt.sprint("{\"uri\":%,\"diagnostics\":[]}", json.encode(uriFor(published, published))));
+                }
+            }
+            alone.published.clear();
+            rpc.log(fmt.sprint("% is part of %", alone.root, projects[program].root));
+        }
+    }
+}
+
+// If the program sends the diagnostics of the file: it is the file's program, or the file has none yet
+isOwnerOf :: (p: *project.Project, key: string) -> bool {
+    if !owners.has(key) {
+        return true;
+    }
+    return owners.get(key, "") == source.keyOf(p.root);
 }
 
 // If the file is in the standard library, which is the std folder next to the bin folder of the compiler
@@ -309,6 +349,7 @@ projectOf :: (root: string) -> int {
     key := source.keyOf(root);
     for p, i in projects {
         if source.keyOf(p.root) == key {
+            projects.indexRef(i).retired = false;
             return i as int;
         }
     }
@@ -359,7 +400,7 @@ publishDiagnostics :: (p: *project.Project) {
         path := d.file;
         if path == "" { path = p.root; }
         key := source.keyOf(path);
-        if !keys.contains(key) {
+        if !keys.contains(key) && isOwnerOf(p, key) {
             keys.add(key);
             paths.add(path);
         }
@@ -368,7 +409,7 @@ publishDiagnostics :: (p: *project.Project) {
     // An open file of the project gets them too when it has none, so the editor clears what it shows
     with := keys.count;
     for doc in documents {
-        if p.fileNumber(doc.key) >= 0 && !keys.contains(doc.key) {
+        if p.fileNumber(doc.key) >= 0 && !keys.contains(doc.key) && isOwnerOf(p, doc.key) {
             keys.add(doc.key);
             paths.add(doc.path);
         }
@@ -392,7 +433,7 @@ publishDiagnostics :: (p: *project.Project) {
     }
 
     for key in p.published {
-        if !keys.contains(key) {
+        if !keys.contains(key) && isOwnerOf(p, key) {
             rpc.notify("textDocument/publishDiagnostics", fmt.sprint("{\"uri\":%,\"diagnostics\":[]}", json.encode(uriFor(key, key))));
         }
     }
@@ -682,6 +723,9 @@ workspaceSymbols :: (m: rpc.Message) {
     sb.addChar('[');
     seen: [..]string;  // A symbol can be in more than one project
     for _, i in projects {
+        if projects[i].retired {
+            continue;
+        }
         update(i);
         p := projects.indexRef(i);
         for sym in p.index.symbols {
@@ -736,10 +780,12 @@ completionsAt :: (params: json.Value) -> project.Completions, bool {
     // The compiler checks the text as it is now, so the project isn't indexed first. That is done when the typing stops
     key := source.keyOf(path);
     program := -1;
+    if owners.has(key) {
+        program = projectOf(owners.get(key, ""));
+    }
     for p, i in projects {
-        if p.fileNumber(key) >= 0 {
+        if program < 0 && !p.retired && p.fileNumber(key) >= 0 {
             program = i as int;
-            break;
         }
     }
     if program < 0 {
