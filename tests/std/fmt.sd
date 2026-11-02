@@ -125,12 +125,14 @@ builderTest :: () {
     sb.add("% + % = %", 1, 2, 3);
     assert(sb.toString() == "1 + 2 = 3");
 
-    // %% is a %, and a % without an argument stays
+    // \% is a %, %% is two arguments, and a % without an argument stays
     sb.clear();
     assert(sb.isEmpty());
-    sb.add("100%% of %", "it");
+    sb.add("100\% of %", "it");
     sb.add(" %");
     assert(sb.toString() == "100% of it %");
+    assert(sprint("%%", "a", "b") == "ab" && sprint("\"%\" %%", 1, 2, 3) == "\"1\" 23");
+    assert(sprint("100%") == "100%" && sprint("% \%", 50) == "50 %");
 
     sb.clear();
     sb.addLine("a");
