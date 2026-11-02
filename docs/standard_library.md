@@ -21,7 +21,7 @@ std/
   vendor/       Bindings for libraries the standard library doesn't own
     raylib.sd       namespace raylib
   math.sd       namespace math
-  mem.sd        namespace mem: arenas
+  mem.sd        namespace mem: allocate, resize, free, copy, set, equal, and arenas
   random.sd     namespace random
   time.sd       namespace time
 ```
@@ -282,10 +282,31 @@ value.toJson();
 `users, err := conn.query<User>("SELECT * FROM users WHERE id > $1", 10)` reads rows into structs, `conn.exec` runs
 statements and `conn.queryOne` reads one row or value. `dbms.postgres` connects to Postgres. See `docs/dbms.md`.
 
+## new
+
+`new` makes one value in memory of its own and gives a pointer to it. The memory comes from an `Allocator`, the heap
+when none is given, so a program doesn't need `malloc`:
+
+```odin
+p := new(Player);                  // a *Player with the defaults of Player, e.g health: int = 100
+q := new(Player, &allocator);      // from an allocator, e.g of an arena
+r := new Point{3, 4};              // a copy of a value, also new(Point{3, 4})
+n := new(int);
+freeMemory(p);                     // or mem.free(p), with the allocator it came from
+```
+
+`new(T, allocator)` is `allocateNew<T>(allocator)` and `new value` is `allocateCopy(value)`, functions of the prelude
+(`std/prelude/collections.sd`) that take the memory with `resizeMemory`.
+
 ## math, mem, c
 
 * `math`: the functions of C's `math.h` (`sin`, `sqrt`, `pow`, ...).
-* `mem`: `Arena`, memory that is freed all at once, and the sizes `Kilobyte` and `Megabyte`. The zero value is
+* `mem`: memory, so the standard library and programs don't call C for it. `mem.allocate(size, allocator)` gives
+  zeroed memory, `mem.resize(p, size, allocator)` is like `realloc`, `mem.free(p, allocator)`, and `mem.copy(to, from,
+  n)`, `mem.set(to, byte, n)` and `mem.equal(a, b, n)` are like `memcpy`, `memset` and `memcmp`. The allocator is
+  optional, the heap when there is none. The standard library uses these and `new`; `mem` and the prelude are the
+  only places that call C for memory.
+* `mem.Arena`: memory that is freed all at once, and the sizes `Kilobyte` and `Megabyte`. The zero value is
   ready to use: `arena.allocate(size)` gives zeroed memory, `arena.allocator()` an `Allocator` for lists, maps and
   `dbms.Connection`, and `arena.clear()` and `arena.free()` free all of it.
 
@@ -296,7 +317,7 @@ names: [..]string;
 names.allocator = &alloc;      // the list grows inside the arena
 arena.free();
 ```
-* `c`: `printf`, `fopen`, `malloc`, `memcpy`, `strlen`, ... Use it when nothing else fits. Sizes that are
+* `c`: `printf`, `fopen`, `strlen`, ... Use it when nothing else fits; for memory, use `new` and `mem`. Sizes that are
   `size_t` in C are `i64` here.
 
 ## Ideas for later
