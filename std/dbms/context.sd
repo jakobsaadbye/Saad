@@ -5,8 +5,8 @@ namespace dbms;
 //
 //     db := database.open(&conn);          // a Database embeds its *dbms.Context
 //
-//     ada := User{name: "Ada"};
-//     db.users.create(&ada);               // nothing is sent yet
+//     ada := db.users.create();            // a new *User with the defaults. Nothing is sent yet
+//     ada.name = "Ada";
 //     bo, err := db.users.get(2);          // reads go to the database at once
 //     bo.email = "bo@example.com";
 //     db.users.update(bo);
@@ -15,7 +15,8 @@ namespace dbms;
 //     err2 := db.saveChanges();            // BEGIN, the 3 statements in the order they were made, COMMIT
 //     print("%", ada.id);                  // what the database made, e.g the id, is written back into ada
 //
-// The rows given to create and update are read when saveChanges runs, so they must still be there then
+// The rows of create and update are read when saveChanges runs, so what is set on them until then is saved too. The
+// rows of create are made with the allocator of the connection, and a row given to update must still be there then
 
 import fmt;
 use c;

@@ -8,7 +8,8 @@ namespace dbms;
 //
 //     all, err := users.all();
 //     ada, err2 := users.get(1);              // a *User, null when no row has the key 1
-//     users.create(&row);                     // the changes are kept by the context ...
+//     row := users.create();                  // a new *User. The changes are kept by the context ...
+//     row.name = "Bo";
 //     users.update(ada);
 //     users.delete(7);
 //     err3 := context.saveChanges();          // ... and written by saveChanges, in one transaction. See context.sd
@@ -43,11 +44,15 @@ Table :: struct <T> {
         return n, err;
     }
 
-    // Adds the row when the context saves its changes. Then what the database made, e.g its id, is written into it,
-    // so the row must still be there
-    create :: method (row: *T) {
+    // A new row with the defaults of T, which is added when the context saves its changes. Set its members before
+    // that. Then what the database made, e.g its id, is written into it. It is made with the allocator of the connection
+    create :: method () -> *T {
+        empty: T;
+        row := resizeMemory(self.context.conn.allocator, null, sizeof(T)) as *T;
+        *row = empty;
         none: any;
         self.context.record(.create, self.info(""), row, none);
+        return row;
     }
 
     info :: method (key: string) -> TableInfo {

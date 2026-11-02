@@ -80,15 +80,16 @@ saad check main.sd        # only check for errors
 
 ## Update v0.9.6 - 2. Nov 2026
 
-* Saving changes, like `SaveChanges` of Entity Framework: `create`, `update` and `delete` of a table keep the change, and
-  `db.saveChanges()` writes all of them in one transaction. When one fails, none are written and the error says which.
-  What the database makes, e.g serial ids, is written back into the created rows. See `docs/dbms.md`
+* Saving changes, like `SaveChanges` of Entity Framework: `create()` (a new row to fill in), `update` and `delete` of a
+  table keep the change, and `db.saveChanges()` writes all of them in one transaction. When one fails, none are written
+  and the error says which. What the database makes, e.g serial ids, is written back into the created rows. See
+  `docs/dbms.md`
 
 ```odin
 db := database.open(&conn);
 
-ada := User{name: "Ada"};
-db.users.create(&ada);
+ada := db.users.create();          // a new *User with the defaults
+ada.name = "Ada";
 bo, err := db.users.get(2);        // a *User, null when there is none
 bo.active = false;
 db.users.update(bo);

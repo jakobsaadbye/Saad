@@ -302,7 +302,7 @@ databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]Generate
     sb.addLine("//     db := %.open(&conn);", w.options.database);
     if tables.count > 0 {
         sb.addLine("//     rows, err := db.%.all();", camelCase(tables[0].name));
-        sb.addLine("//     db.%.create(&row);", camelCase(tables[0].name));
+        sb.addLine("//     row := db.%.create();", camelCase(tables[0].name));
     }
     sb.addLine("//     err2 := db.saveChanges();");
     sb.addLine("Database :: struct {");

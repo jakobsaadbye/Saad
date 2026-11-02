@@ -22,12 +22,16 @@ main :: () {
 
     db := database.open(&conn);
 
-    // create keeps the change until saveChanges, which writes back what the database made: the key from the serial,
-    // and created_at from now()
-    ada := User{name: "Ada", email: "ada@example.com", age: 36, role: .admin};
-    bo := User{name: "Bo"};
-    db.users.create(&ada);
-    db.users.create(&bo);
+    // create gives a new row with the defaults, and keeps the change until saveChanges, which writes back what the
+    // database made: the key from the serial, and created_at from now()
+    ada := db.users.create();
+    assert(ada.role == .guest && ada.active); // The defaults of the database are the defaults of the struct
+    ada.name  = "Ada";
+    ada.email = "ada@example.com";
+    ada.age   = 36;
+    ada.role  = .admin;
+    bo := db.users.create();
+    bo.name = "Bo";
     assert(db.pendingChanges() == 2 && ada.id == 0);
     count0, _ := db.users.count();
     assert(count0 == 0); // Nothing is written yet
@@ -52,7 +56,7 @@ main :: () {
     found.email = "ada@lovelace.org";
     bo.active = false;
     db.users.update(found);
-    db.users.update(&bo);
+    db.users.update(bo);
     assert(db.saveChanges() == "");
     again, _ := db.users.get(bo.id);
     assert(again.active == false);
@@ -60,16 +64,22 @@ main :: () {
     assert(ada2.email == "ada@lovelace.org");
 
     // Enums, numeric as text, a varchar with a default, and a column named with a keyword
-    order := Order{userId: ada.id, status: .in_transit, total: "12.50", type: "gift"};
-    db.orders.create(&order);
+    order := db.orders.create();
+    order.userId = ada.id;
+    order.status = .in_transit;
+    order.total  = "12.50";
+    order.type   = "gift";
     assert(db.saveChanges() == "");
     assert(order.id == 1 && order.status == .in_transit && order.total == "12.50" && order.note == "none" && order.type == "gift");
 
     // A table with a key of two columns has create and all
-    tea := OrderItem{orderId: order.id, product: "tea", quantity: 3};
-    cake := OrderItem{orderId: order.id, product: "cake"};
-    db.orderItems.create(&tea);
-    db.orderItems.create(&cake);
+    tea := db.orderItems.create();
+    tea.orderId  = order.id;
+    tea.product  = "tea";
+    tea.quantity = 3;
+    cake := db.orderItems.create();
+    cake.orderId = order.id;
+    cake.product = "cake";
     assert(db.saveChanges() == "");
     items, e10 := db.orderItems.all();
     assert(e10 == "" && items.count == 2);
@@ -77,8 +87,9 @@ main :: () {
     assert(quantities == 4);
 
     // A text key, and the column "for", which is the member for_
-    books := Category{code: "books", for_: "readers"};
-    db.categories.create(&books);
+    books := db.categories.create();
+    books.code = "books";
+    books.for_ = "readers";
     assert(db.saveChanges() == "");
     stored, _ := db.categories.get("books");
     assert(stored?.for_ ?? "" == "readers" && stored.uid == null);
@@ -90,10 +101,10 @@ main :: () {
     assert(gone == null);
 
     // One change that fails undoes all of them, says which one it was, and keeps the changes
-    cy := User{name: "Cy"};
-    bad := Order{userId: 999};    // No such user
-    db.users.create(&cy);
-    db.orders.create(&bad);
+    cy := db.users.create();
+    cy.name = "Cy";
+    bad := db.orders.create();
+    bad.userId = 999;    // No such user
     e13 := db.saveChanges();
     assert(e13.startsWith("create in orders (change 2 of 2): ERROR:") && e13.indexOf("foreign key") >= 0);
     assert(cy.id == 0 && db.pendingChanges() == 2);

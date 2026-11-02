@@ -50,8 +50,9 @@ main :: () {
     conn, err := postgres.connect("host=localhost dbname=shop user=postgres password=secret");
     db := database.open(&conn);
 
-    ada := User{name: "Ada", role: .admin};
-    db.users.create(&ada);                       // kept until saveChanges
+    ada := db.users.create();                    // a new *User with the defaults, kept until saveChanges
+    ada.name = "Ada";
+    ada.role = .admin;
     err1 := db.saveChanges();                    // writes the changes in one transaction, and the id into ada
 
     found, err2 := db.users.get(ada.id);         // a *User, null when there is none
@@ -218,8 +219,8 @@ all, err := users.all();                    // reads go to the database at once
 ada, err2 := users.get(1);                  // a *User, null when no row has the key 1
 n, err3 := users.count();
 
-row := User{name: "Ada"};
-users.create(&row);                         // changes are kept ...
+row := users.create();                      // a new *User. Changes are kept ...
+row.name = "Bo";
 ada.email = "ada@example.com";
 users.update(ada);                          // the row with its key
 users.delete(7);                            // by the key
@@ -322,8 +323,9 @@ use entities;
 
 conn, err := postgres.connect("host=localhost dbname=shop user=postgres");
 db := database.open(&conn);
-ada := User{name: "Ada", role: .admin};
-db.users.create(&ada);
+ada := db.users.create();
+ada.name = "Ada";
+ada.role = .admin;
 err2 := db.saveChanges();
 ```
 
@@ -362,8 +364,8 @@ Framework:
 ```odin
 db := database.open(&conn);
 
-ada := User{name: "Ada"};
-db.users.create(&ada);
+ada := db.users.create();     // a new *User with the defaults of User
+ada.name = "Ada";
 bo, err := db.users.get(2);
 bo.active = false;
 db.users.update(bo);
@@ -379,9 +381,12 @@ print("%", ada.id);           // what the database made, e.g the serial id and c
   The changes are kept then, so they can be fixed and saved again, or forgotten with `db.discardChanges()`.
 * An `update` or `delete` of a key that no row has is an error too: `delete in users (change 1 of 1): No row has the
   key 12345`.
-* `create` and `update` take a pointer to the row, which is read when `saveChanges` runs, so changes made to it after
-  `create` are written too, and it must still be there then. After the commit, the row as the database stored it
-  (with its generated columns) is written into the created row. Nothing is written into it when the save fails.
+* `create()` gives a new row, with the defaults of the struct (which are the constant defaults of the database), made
+  with the allocator of the connection. Set its members before `saveChanges`. After the commit, the row as the database
+  stored it (with its generated columns) is written into it. Nothing is written into it when the save fails.
+* `update` takes a pointer to a row, e.g the one `get` gave. The rows of `create` and `update` are read when
+  `saveChanges` runs, so what is set on them until then is written too, and a row given to `update` must still be
+  there then.
 * `delete` takes the key, which is copied.
 * `db.pendingChanges()` is the number of changes that aren't saved.
 * The context and its list of changes are made with the allocator of the connection.

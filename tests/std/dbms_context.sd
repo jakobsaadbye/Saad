@@ -73,8 +73,10 @@ main :: () {
     users.generated = ["id"];
 
     // Nothing is sent until saveChanges
-    ada := User{name: "Ada", cache: 9};
-    users.create(&ada);
+    ada := users.create();
+    assert(ada.cache == 5);    // The defaults of User
+    ada.name  = "Ada";
+    ada.cache = 9;
     bo := User{id: 2, name: "Bo", email: "bo@example.com"};
     users.update(&bo);
     users.delete(3);
@@ -94,10 +96,10 @@ main :: () {
 
     // A failing change rolls back, and nothing is written back
     fake.sent.clear();
-    cy := User{name: "Cy"};
-    mallory := User{name: "Mallory"};
-    users.create(&cy);
-    users.create(&mallory);
+    cy := users.create();
+    cy.name = "Cy";
+    mallory := users.create();
+    mallory.name = "Mallory";
     err := context.saveChanges();
     assert(err == "create in users (change 2 of 2): ERROR: no Mallory");
     assert(fake.sent.count == 4 && fake.sent[3] == "ROLLBACK");

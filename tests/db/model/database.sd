@@ -11,7 +11,7 @@ use entities;
 //
 //     db := database.open(&conn);
 //     rows, err := db.categories.all();
-//     db.categories.create(&row);
+//     row := db.categories.create();
 //     err2 := db.saveChanges();
 Database :: struct {
     @embed context: *dbms.Context;
