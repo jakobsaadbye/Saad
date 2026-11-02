@@ -116,6 +116,9 @@ ada, err2   := db.users.where(u => u.email == email).first();
 rows, err3  := db.users.where(u => u.role == .admin).select(u => {name: u.name, email: u.email}).all();
 ```
 
+* `examples/blog`: a blog on Postgres, from the schema and the code the generator writes of it, to creating, querying,
+  changing and removing rows. It runs in `tools/linux/dbtests.sh`
+
 ## Update v0.9.6 - 2. Nov 2026
 
 * Saving changes, like `SaveChanges` of Entity Framework: `create()` (a new row to fill in), `update` and `delete` of a

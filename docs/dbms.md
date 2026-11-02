@@ -38,7 +38,8 @@ Status: steps 1 to 5 of the plan below are done: `dbms`, `dbms.postgres`, rows i
 allocators, `dbms.Table<T>`, the generator that writes the tables of a database as Saad, queries with lambdas, and
 saving changes.
 
-With the generator, the same program is:
+`examples/blog` is a whole program: a schema, the code the generator writes of it, and an app that creates,
+queries, changes and removes rows. With the generator, the program above is:
 
 ```odin
 import dbms;

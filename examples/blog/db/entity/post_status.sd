@@ -1,0 +1,6 @@
+// Made by std/dbms/tools/generate.sd from the schema saad_blog of a Postgres database. Make it again
+// instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
+namespace entities;
+
+// The enum post_status
+PostStatus :: enum { draft, published, archived }
