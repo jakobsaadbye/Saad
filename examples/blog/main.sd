@@ -1,5 +1,6 @@
 // A small blog on Postgres with std/dbms: the tables are written as Saad by the generator (examples/blog/db), rows are
-// made and changed as plain structs, saveChanges writes them, and queries are lambdas that are made into SQL.
+// made and changed as plain structs, saveChanges writes them, queries are lambdas that are made into SQL, and the
+// foreign keys are methods like post.author() and author.posts().
 // See README.md for how to run it, and docs/dbms.md for all of dbms
 //
 //     saad run examples/blog/main.sd -- "host=localhost dbname=postgres user=postgres"
@@ -7,6 +8,7 @@
 import dbms;
 import dbms.postgres;
 import os;
+import time;
 import database;      // examples/blog/db/database.sd: Database, open and the tables
 use entities;         // examples/blog/db/entity: Author, Post, Comment, PostTag and PostStatus
 use fmt;
@@ -42,7 +44,8 @@ main :: () {
 
     print("% changes to save", db.pendingChanges());
     check(db.saveChanges());
-    print("Saved authors % (id %) and % (id %), who joined at %", ada.name, ada.id, grace.name, grace.id, ada.joinedAt);
+    print("Saved authors % (id %) and % (id %)", ada.name, ada.id, grace.name, grace.id);
+    print("% joined at % (a time.Time, as the column is a timestamptz)", ada.name, ada.joinedAt.format("15:04 on Monday"));
 
     // The posts need the ids of their authors, so they come after the authors are saved
     engine   := newPost(&db, ada,   "Notes on the Analytical Engine", "analytical-engine", "It weaves algebraic patterns.");
@@ -50,10 +53,10 @@ main :: () {
     compilers := newPost(&db, grace, "Why we need compilers",          "compilers",         "People should write in words.");
     moth      := newPost(&db, grace, "The first actual bug",           "first-bug",         "It was a moth.");
     engine.status    = .published;
-    engine.publishedAt = "2026-10-01 09:00:00+00";
+    engine.publishedAt = time.date(2026, 10, 1, 9);
     engine.views     = 120;
     compilers.status = .published;
-    compilers.publishedAt = "2026-10-15 12:30:00+00";
+    compilers.publishedAt = time.date(2026, 10, 15, 12, 30);
     compilers.views  = 300;
     moth.status = .archived;
     check(db.saveChanges());     // The four posts are one INSERT
@@ -77,7 +80,7 @@ main :: () {
     check(e1);
     print("\nPublished, newest first:");
     for post in published {
-        print("  % (% views)", post.title, post.views);
+        print("  % (% views, published %)", post.title, post.views, (post.publishedAt ?? post.createdAt).format("Jan 2"));
     }
 
     // Some columns, into an anonymous struct: struct { title: string; slug: string; popular: bool; }
@@ -96,6 +99,12 @@ main :: () {
     check(e3);
     print("\nPosts about '%': %", term, titles);
 
+    // Times are values too. publishedAt can be NULL, so ?. and ?? say what it is then
+    since := time.date(2026, 10, 10);
+    recent, e12 := db.posts.where(p => p.publishedAt?.after(since) ?? false).select(p => p.title).all();
+    check(e12);
+    print("Published after %: %", since.format("January 2"), recent);
+
     // count and exists
     comments, e4 := db.comments.where(c => c.postId == engine.id).count();
     check(e4);
@@ -109,13 +118,38 @@ main :: () {
     print("Page 2 of the posts, by two: %", page);
 
     //
-    // 3. Changing rows. The rows of get, all and first are tracked: what is changed on them is saved by saveChanges,
+    // 3. Relations, from the foreign keys: posts.author_id refers to authors.id, so a Post has author() and an Author
+    //    has posts(). author() gives the row, and posts() a query, which can be narrowed and sorted like any other
+    //
+    writer, e13 := moth.author();
+    check(e13);
+    print("\n'%' is by %", moth.title, writer.name);
+    again, _ := moth.author();
+    print("Asking again gives the same row, as it is tracked: %", again == writer);
+
+    adaPublished, e14 := ada.posts().where(p => p.status == .published).orderBy(p => p.title).select(p => p.title).all();
+    check(e14);
+    print("Published by %: %", ada.name, adaPublished);
+
+    discussion, e15 := engine.comments().orderBy(c => c.id).all();
+    check(e15);
+    print("Comments on '%':", engine.title);
+    for comment in discussion {
+        post, _ := comment.post();
+        print("  % on '%': %", comment.authorName, post.slug, comment.body);
+    }
+    tags, e16 := engine.postTags().orderBy(t => t.tag).select(t => t.tag).all();
+    check(e16);
+    print("Tags of '%': %", engine.slug, tags);
+
+    //
+    // 4. Changing rows. The rows of get, all and first are tracked: what is changed on them is saved by saveChanges,
     //    without calling update, and only the columns that changed
     //
     post, e7 := db.posts.where(p => p.slug == "bernoulli").first();   // A *Post, or null when there is none
     check(e7);
     post.status      = .published;
-    post.publishedAt = "2026-11-02 08:00:00+00";
+    post.publishedAt = time.now();
 
     reader, e8 := db.posts.get(engine.id);
     check(e8);
@@ -128,7 +162,7 @@ main :: () {
     print("Drafts left: %", stillDraft);
 
     //
-    // 4. Removing rows, by their key
+    // 5. Removing rows, by their key
     //
     db.comments.delete(spam.id);
     check(db.saveChanges());
@@ -137,7 +171,7 @@ main :: () {
     print("\nRemoved the spam, % comments are left", left);
 
     //
-    // 5. A change that fails undoes all of the changes of the save, and they are kept until they are fixed or discarded
+    // 6. A change that fails undoes all of the changes of the save, and they are kept until they are fixed or discarded
     //
     copycat := db.authors.create();
     copycat.name  = "Ada again";
@@ -147,7 +181,7 @@ main :: () {
     db.discardChanges();
 
     //
-    // 6. Plain SQL stays for everything else, like this join
+    // 7. Plain SQL stays for everything else, like this join
     //
     stats, e11 := conn.query<AuthorStats>(
         "SELECT a.name, count(p.id) AS posts, coalesce(sum(p.views), 0) AS views

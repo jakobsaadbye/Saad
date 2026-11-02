@@ -16,6 +16,7 @@ namespace dbms;
 // doesn't depend on any of them. See docs/dbms.md
 
 import fmt;
+import time;
 use c;
 
 // What a database implements. The handles are the driver's own, e.g a PGconn and a PGresult of libpq.
@@ -259,6 +260,13 @@ paramText :: (arg: any) -> *u8, bool {
             sb.addString(name);
         }
         case .struct {
+            // A time as RFC 3339, e.g 2026-11-02T10:15:00.25+01:00
+            if arg.type.name == "time.Time" {
+                text := (*(arg.data as *time.Time)).toString();
+                result := text.toCString();
+                text.free();
+                return result, true;
+            }
             // An optional: empty is NULL, otherwise its value
             if !arg.type.isOptional() {
                 return null, false;
@@ -430,6 +438,17 @@ readValue :: method (conn: *Connection, text: *u8, data: *void, type: *Type, col
         }
         case .enum {
             return readEnum(value, data, type as *TypeEnum, column);
+        }
+        case .struct {
+            // A timestamp or a date, e.g 2026-11-02 10:15:00.25+01, or 2026-11-02 for a date, which is midnight UTC.
+            // A timestamp without a time zone is UTC
+            if type.name == "time.Time" {
+                t, ok := time.parse(value);
+                if !ok { return fmt.sprint("%: '%' is not a time", column, value); }
+                *(data as *time.Time) = t;
+                return "";
+            }
+            return fmt.sprint("%: Can't read a column into a %", column, type.name);
         }
         case .pointer {
             pointee := (type as *TypePointer).pointerTo;

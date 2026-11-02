@@ -78,6 +78,29 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.9.8 - 2. Nov 2026
+
+* `time.Time`, like Go: `time.now()`, `time.date(...)`, `t.year()`, `t.add(90 * time.Minute)`, `t.addDate(0, 1, 0)`,
+  `t.sub(u)`, `before`/`after`, `t.format("2006-01-02 15:04")`, `time.parse(text)` and offsets. `fmt` prints it as
+  RFC 3339 text, and `json` writes and reads it as a string. See `docs/standard_library.md`
+* Changed: `time.now()` gives a `time.Time`. The high resolution clock is `time.clock()`, and `time.unix()` is
+  `time.now().unix()`
+* `dbms`: relations from the foreign keys, like the navigation properties of Entity Framework. For `posts.author_id`,
+  the generator gives a `Post` the method `author()` and an `Author` the method `posts()`, a query. Rows that are
+  tracked already are given again instead of copies. See `docs/dbms.md`
+
+```odin
+author, err := post.author();
+published, err2 := author.posts().where(p => p.status == .published).orderBy(p => p.title).all();
+```
+
+* `@Hidden` on a member leaves it out of `fmt`, `json` and `dbms`
+* `dbms` reads `timestamptz`, `timestamp` and `date` columns into `time.Time`, and the generator writes them so. In
+  queries, `after`, `before` and `equal` of times are comparisons, and `?.` works on a column that can be `NULL`:
+  `db.posts.where(p => p.publishedAt?.after(since) ?? false)`
+* Fix: a constant folded from a typed constant, e.g `Minute :: 60 * Second` with `Second :: 1000000000 as i64`, was
+  checked as an `int`
+
 ## Update v0.9.7 - 2. Nov 2026
 
 * Short lambdas: `x => expr`. The types of the parameters come from where it is used, and the result type from the

@@ -15,7 +15,7 @@ User :: struct {
     name:      string;
     email:     ?string;    // NULL is empty
     role:      Role;       // a Postgres enum, read by name
-    createdAt: string;     // reads the column created_at
+    createdAt: time.Time;  // reads the column created_at
 }
 
 main :: () {
@@ -101,7 +101,8 @@ User :: struct {
 | `bigint`, `int`, `smallint`, `serial` | any integer type. A value that doesn't fit is an error |
 | `double precision`, `real`, `numeric` | `f64`, `f32` |
 | `boolean` | `bool` (`t`/`f`) |
-| `text`, `varchar`, and everything else | `string`, as Postgres writes it, e.g a `timestamptz` as `2026-11-01 10:00:00+01` |
+| `timestamptz`, `timestamp`, `date` | `time.Time`. A `timestamp` without a zone is UTC, and a `date` is midnight UTC. It is sent as RFC 3339 text |
+| `text`, `varchar`, and everything else | `string`, as Postgres writes it, e.g a `numeric` as `12.50` |
 | a Postgres enum, or a number | an enum: its name (case and `_` don't matter) or its number |
 | a column that can be `NULL` | an optional, e.g `?string` or `?i64`, which is empty for `NULL` (see `docs/optionals.md`) |
 
@@ -206,8 +207,9 @@ complete driver of 20 lines.
 4. **Done** Queries with lambdas, like LINQ: `db.users.where(u => u.age >= 18).select(u => {name: u.name}).all()`.
 5. **Done** A unit of work: `create`, `update` and `delete` keep the changes, and `db.saveChanges()` writes them all
    in one transaction.
-6. Later: joins, a pool of connections, a SQLite driver, migrations, and Postgres
-   spoken directly over a socket instead of libpq.
+6. **Done** Relations from the foreign keys: `post.author()` and `author.posts()`.
+7. Later: loading relations with a join (like `Include` of Entity Framework), a pool of connections, a SQLite driver,
+   migrations, and Postgres spoken directly over a socket instead of libpq.
 
 ### 3. Tables and the generator
 
@@ -283,7 +285,7 @@ User :: struct {
     age:       ?i32;
     role:      Role = .guest;
     active:    bool = true;
-    createdAt: string;        // timestamp with time zone
+    createdAt: time.Time;
 }
 ```
 
@@ -341,7 +343,8 @@ err2 := db.saveChanges();
 | `boolean` | `bool` |
 | an enum of the schema | an enum, with the labels as they are when they are names |
 | `text`, `varchar`, `char` | `string` |
-| anything else, e.g `numeric`, `timestamptz`, `uuid`, `json` | `string`, with the type of the column as a comment |
+| `timestamptz`, `timestamp`, `date` | `time.Time`, and the file imports `time` |
+| anything else, e.g `numeric`, `uuid`, `json` | `string`, with the type of the column as a comment |
 | a column that can be `NULL` | `?T` |
 
 * The rows are plain structs: no attributes. What the tables need to know (the key, and the columns the database
@@ -448,12 +451,59 @@ db.users.where(u => u.age >= "18");   // A compile error, as the lambda is check
   query of every row, and `query.toSql()` gives the SQL and its parameters.
 * In a lambda the members of the row are its columns. These can be made into SQL: `==` (`=`), `!=`, `<`, `<=`, `>`,
   `>=`, `&&` (`AND`), `||` (`OR`), `!` (`NOT`), `+`, `-`, `*`, `/`, `%`, `??` (`coalesce`), `== null` (`IS NULL`),
-  and on text `startsWith(s)`, `endsWith(s)`, `indexOf(s)`, `toLower()`, `toUpper()` and `.len`. Anything else, e.g
+  on text `startsWith(s)`, `endsWith(s)`, `indexOf(s)`, `toLower()`, `toUpper()` and `.len`, and on times `after(t)`,
+  `before(t)` and `equal(t)`. A column that can be `NULL` takes `?.`, e.g `p.publishedAt?.after(since) ?? false`. Anything else, e.g
   another method, is an error that `all` gives. A part without the row, e.g `minAge - 1` or `now()`, is a value.
 * The rows of `all` and `first` of a keyed table are tracked, like those of `get`, so changes to them are saved by
   `saveChanges`. The rows of `select` are not: they are anonymous structs or values made of some columns.
 * `select` gives a struct literal with names, whose names are the columns of the result, or one value. A `where`
   after `select` is an error; put it before.
+
+### 6. Relations
+
+The generator reads the foreign keys of one column, and writes a method for each end on the rows. For
+`posts.author_id`, which refers to `authors.id`:
+
+```odin
+Post :: struct {
+    ...
+    authorId: i64;
+
+    @Hidden dbLink: dbms.Link;   // The database it came from. Not a column, and fmt and json leave it out
+
+    // The row of authors that authorId refers to, or null
+    author :: method () -> (*Author, string) { ... }
+}
+
+Author :: struct {
+    ...
+    // The rows of posts whose author_id is the id of this one, as a query
+    posts :: method () -> dbms.Query<Post> { ... }
+}
+```
+
+so a program has
+
+```odin
+author, err := post.author();
+published, err2 := author.posts().where(p => p.status == .published).orderBy(p => p.title).all();
+count, err3 := author.posts().count();
+```
+
+* The row a relation gives is tracked like the row of `get`, so changes to it are saved by `saveChanges`. A row that
+  is tracked already is given again, instead of a copy: `post.author()` twice gives the same `*Author`, and so does
+  the author that was just created and saved.
+* The many end is a `dbms.Query<T>`, so it is narrowed, sorted, counted or selected from like any query.
+* A foreign key that can be `NULL` gives null when it is `NULL`, e.g `user.referredByRow()`.
+* Names: `author_id` gives `author()`; a column without `_id`, e.g `referred_by`, gives `referredByRow()`. The other
+  end is the name of the table, e.g `posts()`, or with the column when a table has two foreign keys to the same
+  table, or to itself, e.g `postsByEditor()` and `usersByReferredBy()`. A name that a member has gets `Row` or
+  `Rows` at its end.
+* The rows know their database through a hidden member, a `dbms.Link`, which the tables set on the rows they give:
+  `create`, `get`, `all` and the queries. A row made otherwise, e.g `Post{...}`, has none, and its relations give
+  the error `dbms.NoLinkError`. `database.open` registers the tables with the context, so the link finds them.
+* Under the hood: `dbms.related<T>(link, table, column, value)` and `dbms.relatedRows<T>(link, table)`, in
+  `std/dbms/relations.sd`.
 
 ## Gaps in the language
 
@@ -463,4 +513,4 @@ Found while writing this, in the order they would help:
   names (`err1`, `err2`, ...) or a function around it.
 * `defer`, to free a result on every return.
 * Attributes on structs, e.g `@dbms.Table("users")`, for tables written by hand.
-* Types for dates, decimals and UUIDs. They are strings for now.
+* Types for decimals and UUIDs. They are strings for now. Times are `time.Time`, but without named zones.

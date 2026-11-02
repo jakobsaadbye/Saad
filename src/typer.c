@@ -2974,6 +2974,8 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
                 // @Speed? @Note - We might in the future cleanup the already allocated expression tree as its no longer needed after this swap.
                 //                 We might be taking many cache misses if we leave big gaps in the allocated ast nodes, so something like packing the ast nodes could be
                 //                 a thing?
+                // The folded value keeps the type of the expression, e.g Minute :: 60 * Second is an i64 when Second is
+                if (const_expr != value && expr_type->kind == TYPE_INTEGER && !is_untyped_type(expr_type)) const_expr->type = expr_type;
                 *value_ptr = const_expr;
             }
             else if (const_expr->head.kind == AST_FUNCTION_DEFN) {
@@ -5636,7 +5638,7 @@ static const char *tree_operator(TokenType op) {
 
 static void report_not_in_tree(Typer *typer, AstExpr *expr, const char *what) {
     report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "%s can't be a part of an expression tree (Expr), where it uses the parameters of the lambda", what);
-    report_error_ast(typer->parser, LABEL_NOTE, NULL, "An Expr can have members of the parameters, comparisons, && || !, arithmetic, ??, method calls, struct literals with names, and values");
+    report_error_ast(typer->parser, LABEL_NOTE, NULL, "An Expr can have members of the parameters (also with ?.), comparisons, && || !, arithmetic, ??, method calls, struct literals with names, and values");
 }
 
 // The calls that build the tree of an expression of the second parse 'b' of the lambda. 'a' is the same expression in the
@@ -5664,7 +5666,7 @@ static AstExpr *tree_of(Typer *typer, AstFunctionDefn *copy, AstExpr *b, AstExpr
     }
     case AST_MEMBER_ACCESS: {
         AstMemberAccess *ma = (AstMemberAccess *)b;
-        if (ma->flags & MEMBER_ACCESS_FLAGS_OPTIONAL_CHAIN) { report_not_in_tree(typer, b, "?."); return NULL; }
+        // a?.b is a.b, as a part of SQL is NULL when a is
         if (ma->right->head.kind != AST_LITERAL || ((AstLiteral *)ma->right)->kind != LITERAL_IDENTIFIER) { report_not_in_tree(typer, b, "This member access"); return NULL; }
         AstExpr *left = tree_of(typer, copy, ma->left, a ? ((AstMemberAccess *)a)->left : NULL);
         if (!left) return NULL;
@@ -5698,7 +5700,7 @@ static AstExpr *tree_of(Typer *typer, AstFunctionDefn *copy, AstExpr *b, AstExpr
         char    *name   = NULL;
         if (call->expression->head.kind == AST_MEMBER_ACCESS) {
             AstMemberAccess *ma = (AstMemberAccess *)call->expression;
-            if (ma->flags & MEMBER_ACCESS_FLAGS_OPTIONAL_CHAIN || ma->right->head.kind != AST_LITERAL) { report_not_in_tree(typer, b, "This call"); return NULL; }
+            if (ma->right->head.kind != AST_LITERAL) { report_not_in_tree(typer, b, "This call"); return NULL; } // a?.m() is a.m()
             name   = ((AstLiteral *)ma->right)->as.value.identifier.name;
             object = tree_of(typer, copy, ma->left, NULL);
             if (!object) return NULL;

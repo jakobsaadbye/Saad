@@ -1,5 +1,6 @@
 // The SQL that dbms.Query makes of lambdas, without a database. tests/db/shop_tables.sd runs queries on Postgres
 import dbms;
+import time;
 use fmt;
 
 Role :: enum { guest, admin }
@@ -10,7 +11,8 @@ User :: struct {
     age:       ?int;
     role:      Role;
     email:     ?string;
-    createdAt: string;
+    createdAt: time.Time;
+    seenAt:    ?time.Time;
 }
 
 main :: () {
@@ -20,9 +22,9 @@ main :: () {
 
     // The values are parameters, the members are columns, in snake case
     minAge := 18;
-    sql, args, err := users.where(u => u.age ?? 0 >= minAge && u.createdAt != "").toSql();
+    sql, args, err := users.where(u => u.age ?? 0 >= minAge && u.name != "").toSql();
     assert(err == "" && args.count == 3);
-    assert(sql == "SELECT * FROM \"shop\".\"users\" WHERE (((coalesce(\"age\", $1) >= $2) AND (\"created_at\" <> $3)))");
+    assert(sql == "SELECT * FROM \"shop\".\"users\" WHERE (((coalesce(\"age\", $1) >= $2) AND (\"name\" <> $3)))");
     assert(*(args[1].data as *int) == 18);
 
     // where again is AND, and null and empty optionals are IS NULL
@@ -30,6 +32,13 @@ main :: () {
     sql2, args2, _ := users.where(u => u.email == null).where(u => !(u.email != noEmail) || u.role == .admin).toSql();
     assert(sql2 == "SELECT * FROM \"shop\".\"users\" WHERE ((\"email\" IS NULL)) AND ((NOT ((\"email\" IS NOT NULL)) OR (\"role\" = $1)))");
     assert(args2.count == 1 && args2[0].type.kind == .enum);
+
+    // Times: after, before and equal are comparisons, ?. of a column that can be NULL is the column, and the time is a
+    // parameter of RFC 3339 text
+    since := time.date(2026, 11, 2, 10, 15);
+    sqlTime, argsTime, _ := users.where(u => u.createdAt.after(since) && (u.seenAt?.before(since) ?? true)).toSql();
+    assert(sqlTime == "SELECT * FROM \"shop\".\"users\" WHERE (((\"created_at\" > $1) AND coalesce((\"seen_at\" < $2), $3)))");
+    assert(argsTime[0].type.name == "time.Time" && (*(argsTime[0].data as *time.Time)).toString() == "2026-11-02T10:15:00Z");
 
     // Sorting and a part of the rows
     sql3, _, _ := users.orderBy(u => u.name.toLower()).orderByDescending(u => u.id).limit(10).offset(20).toSql();

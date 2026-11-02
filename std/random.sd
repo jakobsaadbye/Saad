@@ -46,8 +46,8 @@ defaultRandom: Random; // A state of 0 means it isn't seeded yet
 @private
 generator :: () -> *Random {
     if defaultRandom.state == 0 {
-        nanoseconds := (time.now() * 1000000000.0) as u64;
-        defaultRandom = newRandom(time.unix() as u64 ^ nanoseconds);
+        nanoseconds := (time.clock() * 1000000000.0) as u64;
+        defaultRandom = newRandom(time.now().unix() as u64 ^ nanoseconds);
     }
     return &defaultRandom;
 }

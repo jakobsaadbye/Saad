@@ -1,5 +1,6 @@
 namespace fmt; // StringBuilder and the formatting of values for fmt
 
+import time;
 use c;
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -292,6 +293,12 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
                     sb.addValueIn(value, inside);
                 }
             }
+            else if arg.type.name == "time.Time" {
+                // As text, e.g 2026-11-02T10:15:00Z
+                text := (*(arg.data as *time.Time)).toString();
+                sb.addString(text);
+                text.free();
+            }
             else if arg.type.isUnion()                { sb.addUnion(arg.data, arg.type as *TypeStruct); }
             else if arg.type.name.startsWith("List<") { sb.addList(arg.data, arg.type as *TypeStruct); }
             else                                      { sb.addStruct(arg.data, arg.type as *TypeStruct); }
@@ -431,10 +438,14 @@ addUnion :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
 addStruct :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
     sb.addTypeName(&type.head);
     sb.addChar('{');
-    for member, i in type.members {
-        if i > 0 {
+    first := true;
+    for i in 0..type.members.count {
+        member := type.members[i];
+        if type.members[i].isHidden() { continue; }   // e.g the link of a row of dbms
+        if !first {
             sb.addString(", ");
         }
+        first = false;
         sb.addString(member.name);
         sb.addString(": ");
 

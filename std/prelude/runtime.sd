@@ -166,6 +166,17 @@ valueIn :: method (member: *StructMember, data: *void) -> *void {
     return address;
 }
 
+// A member that isn't a part of the data of its struct, e.g a link to where it came from: fmt doesn't print it, json
+// neither writes nor reads it, and dbms doesn't make it a column
+@attribute
+Hidden :: struct {}
+
+// True for a member marked with @Hidden
+isHidden :: method (member: *StructMember) -> bool {
+    hidden: Hidden;
+    return attributeOf(member, &hidden);
+}
+
 // Gets the value of the attribute of type T on the member, e.g
 //
 //     field: json.Field;

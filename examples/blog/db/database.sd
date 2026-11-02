@@ -33,6 +33,10 @@ open :: (conn: *dbms.Connection) -> Database {
     tables.authors.generated = ["id", "joined_at"];
     tables.comments.generated = ["id", "created_at"];
     tables.posts.generated = ["id", "created_at"];
+    tables.context.register(tables.authors.tableInfo());
+    tables.context.register(tables.comments.tableInfo());
+    tables.context.register(tables.postTags.tableInfo());
+    tables.context.register(tables.posts.tableInfo());
     return tables;
 }
 

@@ -43,7 +43,8 @@ binary &&
   | a call `x.name.startsWith(p)` or `f(x.age)` | `call`, with `left` (null for a function), `name` and `args` |
   | a struct literal with names `{name: x.name}` | `object`, with `names` and `args` |
 
-  Anything else, e.g a cast, `?.`, indexing or another lambda, is an error.
+  `a?.b` and `a?.m()` are the same nodes as `a.b` and `a.m()`: a reader like SQL gives NULL when `a` is. Anything
+  else, e.g a cast, indexing or another lambda, is an error.
 * `null` is a `value` node whose `value.type` is null. An enum value like `.admin` is a value of the enum it is
   compared with.
 * The tree types are in `std/prelude/collections.sd`: `Expr<F>{root, parameters}` and `ExprNode`.

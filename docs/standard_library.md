@@ -115,9 +115,41 @@ don't mix it with `io.write`.
 
 ## time
 
+Dates and times like the time package of Go:
+
 ```odin
-start := time.now();                // seconds, high resolution, for measuring
-seconds := time.unix();             // seconds since 1970 (UTC)
+t := time.now();                                // a time.Time, in UTC
+birthday := time.date(1815, 12, 10);             // also hour, minute, second, nanosecond and offset
+t.year(); t.month(); t.day(); t.hour(); t.weekday(); t.yearDay();
+
+due := t.add(90 * time.Minute).addDate(0, 1, 0); // a Duration is nanoseconds: an i64
+waited := due.sub(t);                            // a Duration
+if due.after(t) { ... }                          // also before, equal and compare
+fmt.print(time.durationText(waited));            // e.g 1h30m0s
+
+fmt.print(t.format("Mon 2 Jan 2006 15:04"));     // Go's layout of Mon Jan 2 15:04:05 2006 -07:00
+fmt.print(t.format(time.RFC3339));               // also DateTime, DateOnly and TimeOnly
+parsed, ok := time.parse("2026-11-02 10:15:00.25+01");   // RFC 3339 and ISO 8601, like Postgres writes them
+copenhagen := t.inOffset(3600);                  // the same instant, shown at +01:00
+
+seconds := t.unix();
+again := time.fromUnix(seconds);
+elapsed := time.since(start);
+```
+
+* A `Time` is seconds since January 1, 1970 UTC, the nanoseconds after them, and the offset of the zone it is shown
+  in. There are no named zones yet, only offsets. The zero `Time` is January 1, 1970 UTC.
+* `==` compares the zone too; `equal` compares the instant.
+* `fmt` prints a `Time` as RFC 3339 text, and `json` writes and reads it as a string. `dbms` reads timestamp and date
+  columns into it.
+* The layouts of `format`: `2006 06` year, `01 1 Jan January` month, `02 2 _2` day, `002` day of the year,
+  `Monday Mon` weekday, `15 03 3` hour, `04 4` minute, `05 5` second, `PM pm`, `.000` (or `.999` without zeros at the
+  end) fractions, `-07:00 -0700 -07` the offset, and `Z07:00 Z0700 Z07` with `Z` for UTC.
+
+For measuring and waiting:
+
+```odin
+start := time.clock();              // seconds, high resolution
 time.sleep(100);                    // milliseconds
 
 watch := time.startStopwatch();

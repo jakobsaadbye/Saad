@@ -157,7 +157,7 @@ didOpen :: (params: json.Value) {
         d.path = path;
         d.key  = source.keyOf(path);
         overlayCount += 1;
-        d.overlay = fmt.sprint("%/saad-lsp-%-%.sd", overlayFolder, time.unix(), overlayCount);
+        d.overlay = fmt.sprint("%/saad-lsp-%-%.sd", overlayFolder, time.now().unix(), overlayCount);
         documents.add(d);
         doc = documents.indexRef(documents.count - 1);
     }

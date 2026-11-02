@@ -1,0 +1,109 @@
+namespace dbms;
+
+// Relations between the rows of tables, from their foreign keys, like the navigation properties of Entity Framework.
+// The generator writes methods for them on the rows, e.g for posts.author_id, which refers to authors.id:
+//
+//     author, err := post.author();                    // the *Author of the post, or null
+//     recent, err2 := author.posts().where(p => p.status == .published).orderBy(p => p.title).all();
+//
+// A row knows its database through a hidden member, a dbms.Link, which the tables set on the rows they give: create,
+// get, all, and the queries. A row made otherwise, e.g Post{...}, has no link, and its relations give an error.
+// The rows of a relation are tracked like the rows of get, and a row that is tracked already is given again instead of
+// a copy, so post.author() twice gives the same *Author
+import fmt;
+
+// The context of the database that a row came from. A row has it as a member marked with @Hidden, e.g
+// '@Hidden dbLink: dbms.Link;', so it isn't a column, and fmt and json leave it out
+Link :: struct {
+    context: *Context;
+}
+
+NoLinkError :: "The row has no link to a database, as it wasn't made by create, get, all or a query of a table";
+
+// The row of a table whose column has the value, e.g the author of a post. Null when there is none, or when the value
+// is an empty optional, e.g of a column that can be NULL
+related :: <T>(link: Link, table: string, column: string, value: any) -> (*T, string) {
+    if link.context == null { return null, NoLinkError; }
+    context := link.context;
+    info, found := context.tableNamed(table);
+    if !found { return null, fmt.sprint("The table % isn't a table of the database", table); }
+
+    if value.type.isOptional() {
+        inner, innerType, present := (value.type as *TypeStruct).optionalValue(value.data);
+        if !present { return null, ""; }
+        value.type = innerType;
+        value.data = inner;
+    }
+
+    // A tracked row with the key is the row
+    if column == info.key {
+        for *t in context.tracked {
+            if sameTable(t.table, info) && sameKey(t, value) { return t.row as *T, ""; }
+        }
+    }
+
+    q := queryOf<T>(context, info);
+    q.conditions.add(exprBinary("==", exprMember(exprParameter(0, "row"), memberOfColumn(info, column)), exprValue(value)));
+    row, err := q.first();
+    return row, err;
+}
+
+// The query of the rows of a table, to be narrowed to the ones that refer to a row, e.g
+// relatedRows<Post>(self.dbLink, "posts").where(row => row.authorId == self.id)
+relatedRows :: <T>(link: Link, table: string) -> Query<T> {
+    q: Query<T>;
+    if link.context == null {
+        q.failure = NoLinkError;
+        return q;
+    }
+    info, found := link.context.tableNamed(table);
+    if !found {
+        q.context = link.context;
+        q.failure = fmt.sprint("The table % isn't a table of the database", table);
+        return q;
+    }
+    return queryOf<T>(link.context, info);
+}
+
+// Makes the tables known to the context, so that the relations of the rows find them. database.open does it
+register :: method (context: *Context, table: TableInfo) {
+    for *t in context.tables {
+        if t.name == table.name {
+            *t = table;
+            return;
+        }
+    }
+    context.tables.add(table);
+}
+
+tableNamed :: method (context: *Context, name: string) -> (TableInfo, bool) {
+    for t in context.tables {
+        if t.name == name { return t, true; }
+    }
+    none: TableInfo;
+    return none, false;
+}
+
+// Sets the link of a row to the context, if its struct has one
+@private
+linkRow :: (context: *Context, type: *TypeStruct, row: *void) {
+    for i in 0..type.members.count {
+        member := &type.members[i];
+        if member.type.name == "dbms.Link" {
+            (member.valueIn(row) as *Link).context = context;
+            return;
+        }
+    }
+}
+
+// The member of a column of the rows of the table
+@private
+memberOfColumn :: (info: TableInfo, column: string) -> string {
+    columns := columnsOf(info.type, info.generated, info.key);
+    name := column;
+    for c in columns {
+        if c.name == column { name = c.member.name; }
+    }
+    columns.free();
+    return name;
+}

@@ -2,9 +2,20 @@
 // instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
 namespace entities;
 
+import dbms;
+
 // A row of order_items
 OrderItem :: struct {
     orderId:  i32;
     product:  string;
     quantity: i16 = 1;
+
+    // The database it came from, for order()
+    @Hidden dbLink: dbms.Link;
+
+    // The row of orders that orderId refers to, or null
+    order :: method () -> (*Order, string) {
+        row, err := dbms.related<Order>(self.dbLink, "orders", "id", self.orderId);
+        return row, err;
+    }
 }
