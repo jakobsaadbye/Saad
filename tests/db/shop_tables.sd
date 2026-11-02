@@ -16,6 +16,13 @@ rowsOf :: (table: *dbms.Table<User>) -> i64 {
     return n;
 }
 
+// A row of a query with a struct of its own. A field that the query doesn't give keeps its default
+UserSummary :: struct {
+    name:   string;
+    orders: i64;
+    label:  string = "user";
+}
+
 main :: () {
     conn, err := postgres.connect(fromCString(getenv(xx "SAAD_TEST_POSTGRES")));
     assert(err == "");
@@ -226,6 +233,9 @@ main :: () {
     }).all();
     assert(e30 == "");
     assert(sprint("%", perUser) == "[{name: \"Ada\", orders: 1, items: 1, referred: 1, firstItem: \"none\"}, {name: \"Bo\", orders: 0, items: 0, referred: 0, firstItem: null}]");
+    summaries, e37 := db.users.orderBy(u => u.name).select(u => UserSummary{u.name, orders: u.orders().count()}).all();
+    assert(e37 == "" && summaries.count == 2);
+    assert(summaries[0].name == "Ada" && summaries[0].orders == 1 && summaries[1].orders == 0 && summaries[0].label == "user");
     buyers, e31 := db.users.where(u => u.orders().where(o => o.orderItems().sum(i => i.quantity) > 1).exists()).select(u => u.name).all();
     assert(e31 == "" && buyers.count == 1 && buyers[0] == "Ada");
     quantity, e32 := db.orderItems.sum(i => i.quantity);

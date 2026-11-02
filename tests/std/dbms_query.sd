@@ -42,6 +42,11 @@ Group :: struct {
     title: string;
 }
 
+TeamSize :: struct {
+    name: string;
+    size: i64;
+}
+
 main :: () {
     conn: dbms.Connection;
     context := dbms.newContext(&conn);
@@ -135,6 +140,10 @@ main :: () {
     assert(sql16 == "SELECT t0.* FROM \"shop\".\"users\" AS t0 LEFT JOIN \"shop\".\"teams\" AS t1 ON t1.\"id\" = t0.\"team_id\" WHERE (((SELECT count(*) FROM \"shop\".\"users\" AS t2 WHERE t2.\"team_id\" = t1.\"id\") > $1))");
     _, _, err17 := teams.select(t => t.members().first().name.len).toSql();
     assert(err17 == "");
+
+    // A struct of the program for the rows: the names of its fields are the columns
+    sql19, _, err19 := teams.select(t => TeamSize{t.name, size: t.members().count()}).toSql();
+    assert(err19 == "" && sql19.startsWith("SELECT t0.\"name\" AS \"name\", (SELECT count(*) FROM") && sql19.indexOf(" AS \"size\" FROM") > 0);
 
     // A method that isn't a relation of the table is an error of the query
     groups.relations.clear();

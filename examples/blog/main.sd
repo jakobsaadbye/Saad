@@ -13,6 +13,14 @@ import database;      // examples/blog/db/database.sd: Database, open and the ta
 use entities;         // examples/blog/db/entity: Author, Post, Comment, PostTag and PostStatus
 use fmt;
 
+// A row of a query with a struct of its own
+Stats :: struct {
+    name:     string;
+    posts:    i64;
+    views:    i32;
+    mostRead: string;
+}
+
 // A row of plain SQL, for what the queries of the tables can't say yet, like a GROUP BY
 StatusCount :: struct {
     status: PostStatus;
@@ -200,10 +208,11 @@ main :: () {
     db.discardChanges();
 
     //
-    // 7. The rows that refer to a row can be counted and summed in a query too: a.posts() is a subquery
+    // 7. The rows that refer to a row can be counted and summed in a query too: a.posts() is a subquery. The rows can
+    //    be a struct of the program, like Stats, or an anonymous struct, like the ones above
     //
-    stats, e11 := db.authors.orderBy(a => a.name).select(a => {
-        a.name,
+    stats, e11 := db.authors.orderBy(a => a.name).select(a => Stats{
+        name: a.name,
         posts: a.posts().where(p => p.status == .published).count(),
         views: a.posts().where(p => p.status == .published).sum(p => p.views),
         mostRead: a.posts().orderByDescending(p => p.views).first().title,
