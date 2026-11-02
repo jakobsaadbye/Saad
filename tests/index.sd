@@ -68,4 +68,10 @@ main :: () {
     assert(other == .closed);
     assert(size(s) > 0.0 && q.first == 2 && w.x == 3 && total == 11);
     fmt.print("%", drawnName(Body{}));
+    assert(matching(x => x.radius > 1.0) == 1);
+}
+
+// A lambda given as the tree of what it does
+matching :: (f: Expr<(Circle) -> bool>) -> int {
+    return f.parameters.count as int;
 }

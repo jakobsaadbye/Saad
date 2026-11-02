@@ -211,6 +211,16 @@ def main():
     items = complete_at("    p2 := Pair<int>{first: 1, |};")
     check([(i["label"], i.get("insertText")) for i in items] == [("second", "second: ")], f"the field of a struct literal that isn't written: {items}")
 
+    print("completion of half-written lines, expression trees and inferred struct literals")
+    labels = [item["label"] for item in complete_at("    big := [c].filter(x => x.|")]
+    check(labels[:2] == ["radius", "area"], f"the members of a lambda's parameter, while the call isn't closed: {labels}")
+    labels = [item["label"] for item in complete_at("    k := matching(x => x.radius > 1.0 && x.|")]
+    check(labels[:2] == ["radius", "area"], f"the members in an expression tree: {labels}")
+    items = complete_at("    cs: []Circle = [{radius: 1.0}, {|")
+    check([i["label"] for i in items] == ["radius"], f"the fields of an inferred struct literal: {[i['label'] for i in items]}")
+    labels = [item["label"] for item in complete_at("    e := |")]
+    check("exprMember" not in labels and "Expr" in labels, f"the functions that build expression trees aren't offered: {labels[:40]}")
+
     print("semanticTokens")
     client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 21}, "contentChanges": [{"text": text}]})
     m = client.request("textDocument/semanticTokens/full", {"textDocument": doc})
@@ -233,13 +243,12 @@ def main():
     check(token(54, "open") == "enumMember", f"open is an enum member: {token(54, 'open')}")
     check(token(38, "c") == "parameter", f"c is a parameter: {token(38, 'c')}")
     # The diagnostics of the changes above, until the ones of the text as it is again
-    for _ in range(10):
-        if client.diagnostics(uri) == []:
-            break
+    client.diagnostics_until(uri, lambda d: d == [], tries=40)
 
     print("didChange back")
     client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 3}, "contentChanges": [{"text": text}]})
-    check(client.diagnostics(uri) == [], "the error is cleared")
+    leftover = client.diagnostics_until(uri, lambda d: d == [], tries=40)
+    check(leftover == [], f"the error is cleared: {leftover}")
 
     print("typing: changes that come one after the other are checked once")
     indexed = sum("Indexed" in line for line in client.log)
@@ -257,8 +266,48 @@ def main():
     runs = sum("Indexed" in line for line in client.log) - indexed
     check(runs <= 2, f"checked {runs} times for 5 changes")  # Once, or twice when a change arrives while the first check runs
 
+    print("hover of self")
+    m = client.request("textDocument/hover", {"textDocument": doc, "position": position_of(text, 19, "self")})
+    value = m["result"]["contents"]["value"] if m["result"] else ""
+    check("self: *Circle" in value, f"hover of the self of a method in a struct: {value!r}")
+    m = client.request("textDocument/definition", {"textDocument": doc, "position": position_of(text, 19, "radius")})
+    loc = m["result"]
+    check(loc and loc["range"]["start"] == {"line": 15, "character": 4}, f"definition of self.radius: {loc}")
+
+    print("rename")
+    m = client.request("textDocument/prepareRename", {"textDocument": doc, "position": position_of(text, 51, "radius")})
+    check(m.get("result") and m["result"]["placeholder"] == "radius", f"prepareRename of radius: {m}")
+    m = client.request("textDocument/rename", {"textDocument": doc, "position": position_of(text, 51, "radius"), "newName": "r"})
+    edits = m["result"]["changes"].get(uri, []) if m.get("result") else []
+    lines = sorted(e["range"]["start"]["line"] + 1 for e in edits)
+    check(lines == [16, 19, 19, 39, 51, 71], f"the edits of renaming radius: {lines}")
+    check(all(e["newText"] == "r" for e in edits), "the new name")
+    m = client.request("textDocument/rename", {"textDocument": doc, "position": position_of(text, 70, "print"), "newName": "show"})
+    check("standard library" in m.get("error", {}).get("message", ""), f"a name of the standard library is renamed there: {m}")
+    m = client.request("textDocument/rename", {"textDocument": doc, "position": position_of(text, 60, "swapped"), "newName": "for"})
+    check("error" in m, f"a keyword isn't a new name: {m}")
+
+    print("code action: the missing cases of a switch")
+    missing = text.replace("        case .closed { total += 2; }\n", "")
+    client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 40}, "contentChanges": [{"text": missing}]})
+    diagnostics = client.diagnostics_until(uri, lambda d: any("doesn't handle" in x["message"] for x in d))
+    m = client.request("textDocument/codeAction", {"textDocument": doc, "range": diagnostics[0]["range"] if diagnostics else {}, "context": {"diagnostics": diagnostics}})
+    actions = m.get("result") or []
+    new_text = actions[0]["edit"]["changes"][uri][0]["newText"] if actions else ""
+    check(new_text == "        case .closed { }\n", f"the case that is added: {new_text!r}")
+
+    print("a broken import keeps the names")
+    broken = text.replace("import geometry;", "import geometr;")
+    client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 41}, "contentChanges": [{"text": broken}]})
+    diagnostics = client.diagnostics_until(uri, lambda d: any("geometr" in x["message"] for x in d))
+    check(any("Unknown namespace 'geometr'" in x["message"] for x in diagnostics), f"the error of the import: {[x['message'] for x in diagnostics]}")
+    m = client.request("textDocument/hover", {"textDocument": doc, "position": position_of(text, 44, "area")})
+    check(m["result"] is not None, "hover while an import is broken")
+    m = client.request("textDocument/definition", {"textDocument": doc, "position": position_of(text, 62, "Origin")})
+    check(m["result"] and m["result"]["uri"].endswith("/shapes.sd"), f"a name of the broken import still goes to its declaration: {m['result']}")
+
     print("didSave")
-    client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 9}, "contentChanges": [{"text": text}]})
+    client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 50}, "contentChanges": [{"text": text}]})
     client.notify("textDocument/didSave", {"textDocument": {"uri": uri}})
     check(client.diagnostics_until(uri, lambda d: d == []) == [], "saved without errors")
 
