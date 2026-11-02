@@ -76,7 +76,8 @@ Query :: struct <T> {
     }
 
     // Rows of only some columns, or values made of them, e.g u => {name: u.name, nextYear: u.age + 1}, which gives a
-    // [..]struct { name: string; nextYear: int; }, or u => u.name, which gives a [..]string. They aren't tracked
+    // [..]struct { name: string; nextYear: int; }, u => Summary{name: u.name, ...}, which gives a [..]Summary, or
+    // u => u.name, which gives a [..]string. They aren't tracked. A field of a struct that isn't given keeps its default
     select :: method <U> (f: Expr<(T) -> U>) -> Query<U> {
         q: Query<U>;
         q.context    = self.context;
@@ -92,7 +93,7 @@ Query :: struct <T> {
         boxed: any = empty;
         q.single = boxed.type.kind != .struct;
         if !q.single && f.root.kind != .object && q.failure == "" {
-            q.failure = "select gives a struct literal with names, e.g u => {name: u.name}, or one value, e.g u => u.name";
+            q.failure = "select gives a struct literal, e.g u => {u.name} or u => Summary{name: u.name}, or one value, e.g u => u.name";
         }
         return q;
     }

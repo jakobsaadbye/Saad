@@ -459,7 +459,9 @@ db.users.where(u => u.age >= "18");   // A compile error, as the lambda is check
   another method, is an error that `all` gives. A part without the row, e.g `minAge - 1` or `now()`, is a value.
 * The rows of `all` and `first` of a keyed table are tracked, like those of `get`, so changes to them are saved by
   `saveChanges`. The rows of `select` are not: they are anonymous structs or values made of some columns.
-* `select` gives a struct literal, whose names are the columns of the result, or one value. A member without a name
+* `select` gives a struct literal, whose names are the columns of the result, or one value. The struct can be one of
+  the program, e.g `select(u => Summary{name: u.name, orders: u.orders().count()})` gives a `[..]Summary`, also
+  with values without names, which are for its fields in order. A field that isn't given keeps its default. A member without a name
   gets the name of the member it reads, so `{u.name, u.email}` is `{name: u.name, email: u.email}`, and
   `{p.title, p.author().name}` has `title` and `name`. Two members that would get the same name are an error: name
   one of them. A `where` after `select` is an error; put it before.

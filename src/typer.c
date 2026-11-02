@@ -5751,20 +5751,47 @@ static AstExpr *tree_of(Typer *typer, AstFunctionDefn *copy, AstExpr *b, AstExpr
     }
     case AST_STRUCT_LITERAL: {
         AstStructLiteral *literal = (AstStructLiteral *)b;
-        if (literal->explicit_type) { report_not_in_tree(typer, b, "A struct literal with a type"); return NULL; }
+        // A struct literal with a type, e.g Stats{name: a.name, posts: a.posts().count()}, is an object with the names of
+        // its fields. A value without a name is for the field after the one before it, like when it is checked
+        AstStruct *typed = NULL;
+        if (literal->explicit_type) {
+            AstStructLiteral *checked = a && a->head.kind == AST_STRUCT_LITERAL ? (AstStructLiteral *)a : NULL;
+            Type *type = checked ? checked->explicit_type : NULL;
+            if (!type || type->kind != TYPE_STRUCT || ((TypeStruct *)type)->node->is_union) { report_not_in_tree(typer, b, "A literal of this type"); return NULL; }
+            typed = ((TypeStruct *)type)->node;
+        }
+        int next_field = 0;
         AstExpr *node = tree_call(typer, "exprObject", NULL, 0, at);
         for (int i = 0; node && i < literal->initializers.count; i++) {
             AstStructInitializer *init = ((AstStructInitializer **)literal->initializers.items)[i];
-            AstLiteral *implied = init->designator ? NULL : implied_member_name(init->value);
-            if (init->designator == NULL && implied == NULL) { report_not_in_tree(typer, init->value, "A member without a name"); return NULL; }
-            char *member_name = init->designator ? init->designator->name : implied->as.value.identifier.name;
+            char *member_name = NULL;
+            if (typed) {
+                // The fields of the struct, without its methods
+                int field = 0;
+                for (int k = 0; k < typed->members->identifiers.count; k++) {
+                    AstIdentifier *member = ((AstIdentifier **)typed->members->identifiers.items)[k];
+                    if ((member->flags & IDENTIFIER_IS_STRUCT_METHOD) || (member->type && member->type->kind == TYPE_FUNCTION)) continue;
+                    if (init->designator ? strcmp(member->name, init->designator->name) == 0 : field == next_field) {
+                        member_name = member->name;
+                        next_field  = field + 1;
+                        break;
+                    }
+                    field++;
+                }
+                if (!member_name) { report_not_in_tree(typer, init->value, "A value for a field that isn't there"); return NULL; }
+            } else {
+                AstLiteral *implied = init->designator ? NULL : implied_member_name(init->value);
+                if (init->designator == NULL && implied == NULL) { report_not_in_tree(typer, init->value, "A member without a name"); return NULL; }
+                member_name = init->designator ? init->designator->name : implied->as.value.identifier.name;
+            }
             // The same member of the checked literal, whose members are sorted, gives the types, e.g of an enum value
             AstExpr *a_value = NULL;
             if (a && a->head.kind == AST_STRUCT_LITERAL) {
                 AstStructLiteral *checked = (AstStructLiteral *)a;
                 for (int j = 0; j < checked->initializers.count; j++) {
                     AstStructInitializer *c = ((AstStructInitializer **)checked->initializers.items)[j];
-                    if (c->designator && strcmp(c->designator->name, member_name) == 0) a_value = c->value;
+                    char *checked_name = c->member ? c->member->name : c->designator ? c->designator->name : NULL;
+                    if (checked_name && strcmp(checked_name, member_name) == 0) a_value = c->value;
                 }
             }
             AstExpr *value = tree_of(typer, copy, init->value, a_value);

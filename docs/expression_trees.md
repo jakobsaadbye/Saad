@@ -42,6 +42,7 @@ binary &&
   | `a == b`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `\|\|`, `+`, `-`, `*`, `/`, `%`, `??` | `binary`, with `op`, `left` and `right` |
   | a call `x.name.startsWith(p)` or `f(x.age)` | `call`, with `left` (null for a function), `name` and `args` |
   | a struct literal `{name: x.name}`, or `{x.name}`, whose member gets the name of the member it reads | `object`, with `names` and `args` |
+  | a struct literal with a type `Stats{name: x.name}` or `Stats{x.name}`, with the names of the fields | `object`, with `names` and `args` |
   | a lambda in the lambda, given to a call, e.g the `p => p.views > 10` of `a.posts().where(p => p.views > 10)` | `lambda`, with `names[0]` (its parameter) and `left` (its body) |
 
   A call that gives a value and an error, e.g `p.author()` of `(*Author, string)` or `count()` of `(i64, string)`, is

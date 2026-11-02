@@ -67,6 +67,15 @@ Owner :: struct {
 owners :: (f: Expr<(Owner) -> bool>) -> string { return show(f.root); }
 ownerRows :: <U>(f: Expr<(Owner) -> U>) -> string { return show(f.root); }
 
+// A struct of its own for the rows
+PetCount :: struct {
+    name: string;
+    pets: int;
+    note: string = "-";
+
+    describe :: method () -> string { return self.name; }
+}
+
 where :: (f: Expr<(User) -> bool>) -> string { return show(f.root); }
 
 // Generic, like a query of rows of T: T comes from the receiver, U from the lambda
@@ -110,6 +119,11 @@ main :: () {
     // A lambda in the lambda, and a call that gives a value and an error, which is its value in a tree
     assert(owners(o => o.pets().where(p => p.age > minAge && p.name != o.name).count() > 1) == "(o.pets().where(p => ((p.age > 18) && (p.name != o.name))).count() > 1)");
     assert(ownerRows(o => {o.name, pets: o.pets().count()}) == "{name: o.name, pets: o.pets().count()}");
+
+    // A struct literal with a type is an object with the names of its fields, also for values without names
+    assert(ownerRows(o => PetCount{name: o.name, pets: o.pets().count()}) == "{name: o.name, pets: o.pets().count()}");
+    assert(ownerRows(o => PetCount{o.name, o.pets().count()}) == "{name: o.name, pets: o.pets().count()}");
+    assert(ownerRows(o => PetCount{pets: o.pets().count(), note: o.name}) == "{pets: o.pets().count(), note: o.name}");
 
     print("expression trees ok");
 }
