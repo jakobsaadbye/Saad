@@ -83,7 +83,7 @@ main :: () {
     assert(db.saveChanges() == "");
     items, e10 := db.orderItems.all();
     assert(e10 == "" && items.count == 2);
-    quantities := items.reduce(0, (sum: int, item: OrderItem) -> int { return sum + item.quantity; });
+    quantities := items.reduce(0, (sum, item) => sum + item.quantity);
     assert(quantities == 4);
 
     // A text key, and the column "for", which is the member for_
@@ -158,7 +158,7 @@ main :: () {
     // all, with the methods of lists
     users, e14 := db.users.all();
     assert(e14 == "" && users.count == 2);
-    admins := users.filter((u: User) -> bool { return u.role == .admin; }).map((u: User) -> string { return u.name; });
+    admins := users.filter(u => u.role == .admin).map(u => u.name);
     assert(admins.count == 1 && admins[0] == "Ada");
 
     conn.close();

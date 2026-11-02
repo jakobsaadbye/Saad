@@ -111,6 +111,8 @@ void append_mangled_name(StringBuilder *sb, char *name);
 Type *solidify_untyped_type(Type *untyped_type);
 Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic);
 AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall *call, AstFunctionDefn *generic);
+Type *check_short_lambda(Typer *typer, AstFunctionDefn *lambda, Type **param_types, int count, Type *return_type);
+Type *check_lambda_expression(Typer *typer, AstFunctionDefn *lambda, Type *ctx_type);
 bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver_struct);
 TypeStruct *method_holder_of(Typer *typer, Type *type);
 PrimitiveKind canonical_primitive_kind(PrimitiveKind kind);
@@ -1672,6 +1674,104 @@ AstFunctionDefn *instantiate_generic_function(Typer *typer, AstFunctionDefn *gen
 }
 
 // Infers the type arguments of a call to a generic function from the arguments and returns the instance to call
+// Resolves a type as written in the signature of a generic function, where its names are declared
+static Type *resolve_type_in_generic(Typer *typer, AstFunctionDefn *generic, Type *type) {
+    AstBlock *scope       = typer->current_scope;
+    AstFile  *file        = typer->current_file;
+    AstFile  *parser_file = typer->parser->current_file;
+    typer->current_scope = generic->body;
+    if (generic->head.head.file) {
+        typer->current_file         = generic->head.head.file;
+        typer->parser->current_file = generic->head.head.file;
+    }
+    Type *resolved = resolve_type(typer, type);
+    typer->current_scope        = scope;
+    typer->current_file         = file;
+    typer->parser->current_file = parser_file;
+    return resolved;
+}
+
+// The type of a parameter of a generic function as written e.g []T, with the type parameters that are bound so far put in.
+// NULL when it mentions one that isn't bound yet, or one in a way that isn't followed here
+static Type *bound_param_type(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindings, Type *type) {
+    if (!type_mentions_any_type_param(type, generic->type_params)) return resolve_type_in_generic(typer, generic, type);
+
+    switch (type->kind) {
+    case TYPE_NAME: {
+        int index = type_param_index(generic->type_params, type->name);
+        if (index == -1 || bindings[index].kind == BINDING_NONE) return NULL;
+        if (bindings[index].kind == BINDING_UNTYPED_INT)   return solidify_untyped_type(bindings[index].type);
+        if (bindings[index].kind == BINDING_UNTYPED_FLOAT) return primitive_type(PRIMITIVE_FLOAT);
+        return bindings[index].type;
+    }
+    case TYPE_POINTER: {
+        Type *to = bound_param_type(typer, generic, bindings, ((TypePointer *)type)->pointer_to);
+        return to ? (Type *)generate_pointer_to_type(typer->parser, to) : NULL;
+    }
+    case TYPE_ARRAY: {
+        TypeArray *array = (TypeArray *)type;
+        if (array->array_kind != ARRAY_SLICE) return NULL;
+        Type *elem = bound_param_type(typer, generic, bindings, array->elem_type);
+        return elem ? resolve_type(typer, (Type *)generate_slice_of(typer->parser, elem)) : NULL;
+    }
+    case TYPE_GENERIC_INSTANCE: {
+        TypeGenericInstance *instance = (TypeGenericInstance *)type;
+        TypeGenericInstance *copy = ast_allocate(typer->parser, sizeof(TypeGenericInstance));
+        *copy = *instance;
+        copy->type_args = da_init(instance->type_args.count, sizeof(Type *));
+        for (int i = 0; i < instance->type_args.count; i++) {
+            Type *arg = bound_param_type(typer, generic, bindings, ((Type **)instance->type_args.items)[i]);
+            if (!arg) return NULL;
+            da_append(&copy->type_args, arg);
+        }
+        return resolve_type_in_generic(typer, generic, (Type *)copy);
+    }
+    default:
+        return NULL;
+    }
+}
+
+// True for a short lambda that isn't checked yet e.g the x => x.name of users.map(x => x.name)
+static bool is_unchecked_short_lambda(AstExpr *expr) {
+    return expr->head.kind == AST_FUNCTION_DEFN && ((AstFunctionDefn *)expr)->is_short_lambda && !(expr->head.flags & AST_FLAG_IS_TYPE_CHECKED);
+}
+
+// Gives a short lambda passed to a generic function its types: those of its parameters from the type parameters that the
+// other arguments bound, and its result type, which may bind more of them e.g the U of map(f: (T) -> U)
+static bool check_short_lambda_argument(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindings, AstFunctionDefn *lambda, AstIdentifier *param) {
+    Type *wanted = param->type;
+    if (wanted->kind == TYPE_GENERIC_INSTANCE && strcmp(wanted->name, "Expr") == 0 && ((TypeGenericInstance *)wanted)->type_args.count == 1) {
+        wanted = ((Type **)((TypeGenericInstance *)wanted)->type_args.items)[0]; // Expr<(T) -> bool> is checked like (T) -> bool
+    }
+    if (wanted->kind != TYPE_FUNCTION) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)lambda, "A lambda is given for the parameter '%s' of '%s', which is of type %s", param->name, generic->identifier->name, text_bold(type_to_str(param->type)));
+        return false;
+    }
+
+    AstFunctionDefn *signature = ((TypeFunction *)wanted)->node;
+    Type *param_types[32];
+    int count = signature->parameters.count < 32 ? signature->parameters.count : 32;
+    for (int i = 0; i < count; i++) {
+        Type *written = ((AstIdentifier **)signature->parameters.items)[i]->type;
+        param_types[i] = bound_param_type(typer, generic, bindings, written);
+        if (param_types[i] == NULL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)lambda, "Can't infer the type of the parameter %d of the lambda, which is %s for '%s'", i + 1, text_bold(type_to_str(written)), generic->identifier->name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Give the type arguments at the call e.g %s<int>(...), or write the lambda with types e.g (x: int) -> int { return x; }", generic->identifier->name);
+            return false;
+        }
+    }
+
+    Type *return_type = NULL;
+    if (signature->return_types.count == 1) {
+        Type *written = ((Type **)signature->return_types.items)[0];
+        return_type = bound_param_type(typer, generic, bindings, written); // NULL when it is to be inferred from the expression
+    }
+
+    Type *lambda_type = check_short_lambda(typer, lambda, param_types, count, return_type);
+    if (!lambda_type) return false;
+    return unify_types(typer, generic, bindings, wanted, lambda_type, (AstExpr *)lambda, param);
+}
+
 AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall *call, AstFunctionDefn *generic) {
     Parser *parser = typer->parser;
 
@@ -1735,6 +1835,8 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
         free(own);
     }
 
+    DynamicArray lambdas       = da_init(1, sizeof(AstArgument *));
+    DynamicArray lambda_params = da_init(1, sizeof(AstIdentifier *));
     for (int i = 0; i < call->arguments.count; i++) {
         AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
 
@@ -1783,6 +1885,13 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
         }
         if (all_bound) continue;
 
+        // A short lambda gets its types from the other arguments, so it is checked after them
+        if (is_unchecked_short_lambda(value)) {
+            da_append(&lambdas, arg);
+            da_append(&lambda_params, param);
+            continue;
+        }
+
         Type *arg_type = check_expression(typer, arg->value, NULL);
         if (!arg_type) return NULL;
 
@@ -1801,6 +1910,12 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
 
         bool unified = unify_types(typer, generic, bindings, param->type, arg_type, arg->value, param);
         if (!unified) return NULL;
+    }
+
+    for (int i = 0; i < lambdas.count; i++) {
+        AstArgument   *arg   = ((AstArgument **)lambdas.items)[i];
+        AstIdentifier *param = ((AstIdentifier **)lambda_params.items)[i];
+        if (!check_short_lambda_argument(typer, generic, bindings, (AstFunctionDefn *)arg->value, param)) return NULL;
     }
 
     DynamicArray type_args = da_init(generic->type_params.count, sizeof(Type *));
@@ -3893,6 +4008,40 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
 
     ast_return->enclosing_function = ef;
 
+    // The expression of a short lambda e.g x => x * 2. Its type is the return type, unless the type is known from where it is used
+    if (ef->is_short_lambda && ast_return->values.count == 1) {
+        AstExpr *value  = ((AstExpr **)ast_return->values.items)[0];
+        Type    *wanted = ((Type **)ef->return_types.items)[0];
+        if (ef->infer_return_type) {
+            Type *type = check_expression(typer, value, NULL);
+            if (!type) return false;
+            if (type->kind == TYPE_TUPLE) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "A lambda of one expression gives one value, but this gives %s", text_bold(type_to_str(type)));
+                return false;
+            }
+            if (is_untyped_type(type)) type = solidify_untyped_type(type); // Like x := 1
+            ((Type **)ef->return_types.items)[0] = type;
+            ef->infer_return_type = false;
+            wanted = type;
+        }
+
+        // A lambda that gives nothing e.g x => print(x), is a call and not a return of a value
+        if (wanted->kind == TYPE_VOID) {
+            if (value->type == NULL && !check_expression(typer, value, NULL)) return false;
+            AstExprStmt *stmt = ast_allocate(typer->parser, sizeof(AstExprStmt));
+            stmt->head.head.kind  = AST_EXPR_STMT;
+            stmt->head.head.file  = value->head.file;
+            stmt->head.head.start = value->head.start;
+            stmt->head.head.end   = value->head.end;
+            stmt->expr = value;
+            DynamicArray *statements = &ef->body->statements;
+            for (int i = 0; i < statements->count; i++) {
+                if (((Ast **)statements->items)[i] == (Ast *)ast_return) ((Ast **)statements->items)[i] = (Ast *)stmt;
+            }
+            return true; // e.g x => x * 2 for a (int) -> void leaves the value unused, like a statement does
+        }
+    }
+
     // Cross-match the types evaluated from the return values against the defined return types of the function
     for (int i = 0; i < ast_return->values.count; i++) {
         AstExpr *return_value = ((AstExpr **)ast_return->values.items)[i];
@@ -5339,6 +5488,68 @@ static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *fu
 
 // A function whose signature has an error is reported once. One with an error in its body can still be called, as its
 // type is known
+// Checks a short lambda e.g x => x * 2, with the types of its parameters, and its return type, or NULL to take the type of its expression
+Type *check_short_lambda(Typer *typer, AstFunctionDefn *lambda, Type **param_types, int count, Type *return_type) {
+    if (lambda->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) return lambda->head.type;
+    if (lambda->head.head.flags & AST_FLAG_HAS_ERRORS) return NULL;
+
+    if (count != lambda->parameters.count) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)lambda, "The lambda has %d parameter%s, but a function of %d is wanted here", lambda->parameters.count, lambda->parameters.count == 1 ? "" : "s", count);
+        lambda->head.head.flags |= AST_FLAG_HAS_ERRORS;
+        return NULL;
+    }
+
+    for (int i = 0; i < count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)lambda->parameters.items)[i];
+        if (param_types[i]->kind == TYPE_ARRAY && ((TypeArray *)param_types[i])->array_kind == ARRAY_FIXED) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)param, "The parameter '%s' of the lambda would be the fixed size array %s, which can't be a parameter", param->name, text_bold(type_to_str(param_types[i])));
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Use a slice or a list for the elements e.g [..][..]int");
+            lambda->head.head.flags |= AST_FLAG_HAS_ERRORS;
+            return NULL;
+        }
+        param->type       = param_types[i];
+        param->decl->type = param_types[i];
+    }
+
+    if (return_type) {
+        ((Type **)lambda->return_types.items)[0] = return_type;
+        lambda->infer_return_type = false;
+    }
+    return check_function_defn(typer, lambda);
+}
+
+// A lambda used where a function of some type is wanted. A short lambda takes the types of its parameters from it
+Type *check_lambda_expression(Typer *typer, AstFunctionDefn *lambda, Type *ctx_type) {
+    if (!lambda->is_short_lambda || (lambda->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) return check_function_defn(typer, lambda);
+
+    if (ctx_type && ctx_type->kind == TYPE_GENERIC_INSTANCE) ctx_type = resolve_type(typer, ctx_type);
+    if (ctx_type && ctx_type->kind == TYPE_FUNCTION) {
+        AstFunctionDefn *signature = ((TypeFunction *)ctx_type)->node;
+        if (signature->return_types.count > 1) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)lambda, "A lambda of one expression gives one value, but here a function of type %s is wanted", text_bold(type_to_str(ctx_type)));
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Write it as a function with a body e.g (x: int) -> (int, int) { return x, x; }");
+            return NULL;
+        }
+
+        Type *param_types[32];
+        int count = signature->parameters.count < 32 ? signature->parameters.count : 32;
+        for (int i = 0; i < count; i++) {
+            Type *type = ((AstIdentifier **)signature->parameters.items)[i]->type;
+            param_types[i] = type ? resolve_type(typer, type) : NULL;
+            if (param_types[i] == NULL) return NULL;
+        }
+        Type *return_type = signature->return_types.count == 1 ? resolve_type(typer, ((Type **)signature->return_types.items)[0]) : NULL;
+        return check_short_lambda(typer, lambda, param_types, count, return_type);
+    }
+
+    if (lambda->parameters.count == 0) return check_short_lambda(typer, lambda, NULL, 0, NULL); // () => expr needs nothing from where it is used
+
+    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)lambda, "Can't infer the types of the parameters of the lambda, as no function type is wanted here");
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "Give the variable a type e.g f: (int) -> int = x => x * 2, or write the types e.g (x: int) -> int { return x * 2; }");
+    lambda->head.head.flags |= AST_FLAG_HAS_ERRORS;
+    return NULL;
+}
+
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     if (func_defn->head.head.flags & AST_FLAG_HAS_ERRORS) return NULL;
     Type *type = check_function_signature_and_body(typer, func_defn);
@@ -6303,7 +6514,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
     else if (expr->head.kind == AST_CAST)           result = check_cast(typer, (AstCast *)(expr), ctx_type);
     else if (expr->head.kind == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
-    else if (expr->head.kind == AST_FUNCTION_DEFN)  result = check_function_defn(typer, (AstFunctionDefn *)(expr));
+    else if (expr->head.kind == AST_FUNCTION_DEFN)  result = check_lambda_expression(typer, (AstFunctionDefn *)(expr), ctx_type);
     else if (expr->head.kind == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), ctx_type);
     else if (expr->head.kind == AST_SWITCH) result = check_switch_expression(typer, (AstSwitch *)(expr), ctx_type);
     else if (expr->head.kind == AST_ARRAY_LITERAL)  result = check_array_literal(typer, (AstArrayLiteral *)(expr), ctx_type);
@@ -7575,7 +7786,11 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 
         if (!is_non_constant_identifier_found_inside_current_function(typer, ident)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)literal, "Undeclared identifier '%s'", ident->name);
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)typer->enclosing_function, "If you intended to use identifier '%s' inside this function then specify it as a parameter", ident->name, typer->enclosing_function->identifier->name);
+            if (typer->enclosing_function->is_short_lambda) {
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)typer->enclosing_function, "A lambda can't use the variables of the function around it, only its parameters, constants and globals");
+            } else {
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)typer->enclosing_function, "If you intended to use identifier '%s' inside this function then specify it as a parameter", ident->name, typer->enclosing_function->identifier->name);
+            }
             return NULL;
         }
 

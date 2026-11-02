@@ -400,6 +400,8 @@ typedef struct AstFunctionDefn {
     CallingConv     calling_convention;
     bool            is_method;
     bool            is_lambda;
+    bool            is_short_lambda;     // x => expr. The types of its parameters come from where it is used
+    bool            infer_return_type;   // The return type is the type of the expression of a short lambda
     bool            is_extern;
     char           *extern_library; // The library of an extern function, e.g "kernel32.dll". NULL for the C runtime
     bool            is_variadic;

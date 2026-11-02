@@ -1,0 +1,5 @@
+// expect-error: Return type mismatch. Wanted type bool, got type int
+main :: () {
+    xs := [1, 2, 3];
+    ys := xs.filter(x => x + 1);
+}

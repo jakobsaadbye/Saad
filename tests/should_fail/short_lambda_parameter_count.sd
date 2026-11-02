@@ -1,0 +1,5 @@
+// expect-error: The lambda has 2 parameters, but a function of 1 is wanted here
+main :: () {
+    xs := [1, 2, 3];
+    ys := xs.map((a, b) => a + b);
+}

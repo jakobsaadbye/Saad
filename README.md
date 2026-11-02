@@ -78,6 +78,17 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.9.7 - 2. Nov 2026
+
+* Short lambdas: `x => expr`. The types of the parameters come from where it is used, and the result type from the
+  expression. See `docs/generics.md`
+
+```odin
+adults := users.filter(u => u.age >= 18).map(u => u.name);   // a [..]string
+total  := prices.reduce(0.0, (sum, p) => sum + p);
+double: (int) -> int = x => x * 2;
+```
+
 ## Update v0.9.6 - 2. Nov 2026
 
 * Saving changes, like `SaveChanges` of Entity Framework: `create()` (a new row to fill in), `update` and `delete` of a

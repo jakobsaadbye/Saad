@@ -1,0 +1,7 @@
+// expect-error: Undeclared identifier 'limit'
+// expect-error: A lambda can't use the variables of the function around it
+main :: () {
+    limit := 3;
+    xs := [1, 2, 3, 4];
+    big := xs.filter(x => x > limit);
+}
