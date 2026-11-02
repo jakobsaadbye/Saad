@@ -159,11 +159,55 @@ bool lex_file(Lexer *lexer) {
             }
         }
 
+        // 0xff, 0b1010 and 0o17, with '_' between digits, e.g 0xdead_beef
+        if (c == '0' && strchr("xXbBoO", peek_char(lexer, 1)) && peek_char(lexer, 1) != '\0') {
+            Pos pos_start = get_current_position(lexer);
+            char prefix = (char)tolower((unsigned char)peek_char(lexer, 1));
+            int  base   = prefix == 'x' ? 16 : prefix == 'b' ? 2 : 8;
+            eat_characters(lexer, 2);
+            unsigned long long value = 0;
+            bool overflow = false, bad_digit = false;
+            int  digits = 0;
+            while (true) {
+                char d = peek_next_char(lexer);
+                if (d == '_') { eat_character(lexer); continue; }
+                int digit = -1;
+                if (isdigit((unsigned char)d)) digit = d - '0';
+                else if (isalpha((unsigned char)d)) digit = tolower((unsigned char)d) - 'a' + 10;
+                else break;
+                if (digit >= base) bad_digit = true;
+                if (value > (~0ULL - (unsigned long long)digit) / (unsigned long long)base) overflow = true;
+                value = value * base + (digit >= 0 ? digit : 0);
+                digits++;
+                eat_character(lexer);
+            }
+            const char *name = base == 16 ? "hex" : base == 2 ? "binary" : "octal";
+            if (digits == 0) {
+                report_error_here(lexer, "Syntax Error: A %s number needs digits after 0%c, e.g %s", name, prefix, base == 16 ? "0xff" : base == 2 ? "0b1010" : "0o17");
+                lexer->had_errors = true;
+            } else if (bad_digit) {
+                report_error_here(lexer, "Syntax Error: A %s number has only the digits %s", name, base == 16 ? "0-9 and a-f" : base == 2 ? "0 and 1" : "0-7");
+                lexer->had_errors = true;
+            } else if (overflow) {
+                report_error_here(lexer, "Syntax Error: The number is bigger than 64 bits");
+                lexer->had_errors = true;
+            }
+
+            Token token = {0};
+            token.type  = TOKEN_LITERAL_INTEGER;
+            token.start = pos_start;
+            token.end   = get_current_position(lexer);
+            token.as_value.value.integer = (long long)value;
+            if (value > S64_MAX) token.as_value.flags |= VALUE_IS_BIGGER_THAN_SIGNED_64_BIT_INTEGER;
+            push_token(lexer, token);
+            continue;
+        }
+
         if (is_digit(c)) {
             Pos pos_start = get_current_position(lexer);
             eat_character(lexer);
             char next = peek_next_char(lexer);
-            while (is_digit(next)) {
+            while (is_digit(next) || (next == '_' && is_digit(peek_char(lexer, 1)))) {
                 eat_character(lexer);
                 next = peek_next_char(lexer);
             }
@@ -178,7 +222,7 @@ bool lex_file(Lexer *lexer) {
                 eat_character(lexer);
                 next = peek_next_char(lexer);
 
-                while (is_digit(next)) {
+                while (is_digit(next) || (next == '_' && is_digit(peek_char(lexer, 1)))) {
                     eat_character(lexer);
                     next = peek_next_char(lexer);
                 }
@@ -547,8 +591,9 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
         const char *src = &lexer->file_text[pos_start.input_idx];
         int len = pos_end.input_idx - pos_start.input_idx;
         char *val_str = calloc(len + 1, 1); // Literals can be longer than any fixed buffer
-        memcpy(val_str, src, len);
-        unsigned long long val = strtoull(val_str, NULL, 0);
+        int kept = 0;
+        for (int i = 0; i < len; i++) if (src[i] != '_') val_str[kept++] = src[i]; // 1_000_000
+        unsigned long long val = strtoull(val_str, NULL, 10); // 010 is ten, not an octal 8 like in C
         free(val_str);
 
         result.type = token_type;
@@ -564,7 +609,8 @@ void make_literal(Lexer *lexer, TokenType token_type, Pos pos_start, Pos pos_end
         const char *src = &lexer->file_text[pos_start.input_idx];
         int len = pos_end.input_idx - pos_start.input_idx;
         char *val_str = calloc(len + 1, 1); // Literals can be longer than any fixed buffer
-        memcpy(val_str, src, len);
+        int kept = 0;
+        for (int i = 0; i < len; i++) if (src[i] != '_') val_str[kept++] = src[i];
         double val = atof(val_str);
         free(val_str);
 

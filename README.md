@@ -78,6 +78,11 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.9.10 - 2. Nov 2026
+
+* Numbers in hex, binary and octal, and with `_` between digits: `0xdeadbeef`, `0b0001_0111`, `0o755`, `1_000_000`
+* Changed: a number with a leading zero is decimal, `010` is ten (it was an octal 8, like in C)
+
 ## Update v0.9.9 - 2. Nov 2026
 
 * `enum flags`: options in one value. The values are 1, 2, 4, ..., combined with `|`, `&`, `^` and `~`, and have

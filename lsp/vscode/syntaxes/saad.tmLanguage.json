@@ -149,6 +149,10 @@
           "match": "\\b0b[01_]+\\b"
         },
         {
+          "name": "constant.numeric.octal.saad",
+          "match": "\\b0o[0-7_]+\\b"
+        },
+        {
           "name": "constant.numeric.saad",
           "match": "\\b[0-9][0-9_]*(\\.[0-9]+)?([eE][+-]?[0-9]+)?\\b"
         }

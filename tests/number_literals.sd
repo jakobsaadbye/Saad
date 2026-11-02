@@ -1,0 +1,20 @@
+// Numbers in hex, binary and octal, and with '_' between digits
+use fmt;
+
+main :: () {
+    assert(0xff == 255 && 0xFF == 255 && 0x10 == 16);
+    assert(0xdeadbeef == 3735928559);
+    assert(0b000111 == 7 && 0b1010_1010 == 170);
+    assert(0o17 == 15 && 0o777 == 511);
+    assert(1_000_000 == 1000000 && 0xdead_beef == 0xdeadbeef);
+    assert(1_000.5 == 1000.5);
+    assert(010 == 10);                       // A leading zero is still decimal, unlike C
+
+    mask: u8 = 0b1111_0000;
+    assert(mask & 0x0F == 0 && mask >> 4 == 0b1111);
+    big: u64 = 0xFFFF_FFFF_FFFF_FFFF;
+    assert(big == 18446744073709551615);
+    x := 0x7fff_ffff_ffff_ffff;
+    assert(x == 9223372036854775807);
+    print("number literals ok");
+}
