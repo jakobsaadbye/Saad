@@ -16,6 +16,13 @@ namespace dbms;
 //     x.name.startsWith(s)  x.name.endsWith(s)  x.name.indexOf(s)  x.name.toLower()  x.name.toUpper()  x.name.len
 //     x.createdAt.after(t)  x.createdAt.before(t)  x.createdAt.equal(t)
 //     x.publishedAt?.after(t) ?? false, for a column that can be NULL
+//
+// The rows that a foreign key refers to can be used too, e.g p.author().name, which joins the table of the authors:
+//
+//     posts, err := db.posts.where(p => p.author().name == "Ada").select(p => {p.title, p.author().email}).all();
+//
+// A member of a struct literal without a name gets the name of the member it reads, so the rows above are
+// struct { title: string; email: string; }. The join is a LEFT JOIN: a post without an author gives the defaults
 import fmt;
 
 // A query of the rows of a table. The methods that add to it give a new query, so a query can be the start of others
@@ -172,15 +179,30 @@ Query :: struct <T> {
 
     // The SQL of the query, and its parameters
     toSql :: method () -> (string, [..]any, string) {
+        sql, args, err, joins := self.sqlWith(false);
+        if err == "" && joins > 0 {
+            // A relation is joined, so the columns are written with the table they are of, e.g t0."title"
+            sql.free();
+            args.free();
+            sql2, args2, err2, _ := self.sqlWith(true);
+            return sql2, args2, err2;
+        }
+        return sql, args, err;
+    }
+
+    // The SQL, the parameters, the error and the number of joins. 'qualified' writes the columns as t0."title"
+    sqlWith :: method (qualified: bool) -> (string, [..]any, string, int) {
         w: SqlWriter;
-        w.table = self.table;
+        w.table     = self.table;
+        w.context   = self.context;
+        w.qualified = qualified;
         if self.failure != "" {
-            return "", w.args, self.failure;
+            return "", w.args, self.failure, 0;
         }
 
-        w.sb.addString("SELECT ");
+        // The columns, then the conditions and the order. The joins they need come after FROM, so they are written last
         if self.selection == null {
-            w.sb.addString("*");
+            if qualified { w.sb.addString("t0.*"); } else { w.sb.addString("*"); }
         } else if self.single {
             w.write(self.selection);
             w.sb.addString(" AS \"value\"");
@@ -192,8 +214,8 @@ Query :: struct <T> {
                 w.sb.addString(quoted(self.selection.names[i]));
             }
         }
-        w.sb.addString(" FROM ");
-        w.sb.addString(qualifiedName(self.table.schema, self.table.name));
+        columns := w.sb.toString();
+        w.sb = fmt.StringBuilder{};
 
         for condition, i in self.conditions {
             if i == 0 { w.sb.addString(" WHERE "); } else { w.sb.addString(" AND "); }
@@ -211,9 +233,29 @@ Query :: struct <T> {
 
         if w.err != "" {
             w.sb.free();
-            return "", w.args, w.err;
+            columns.free();
+            return "", w.args, w.err, 0;
         }
-        return w.sb.toString(), w.args, "";
+        rest := w.sb.toString();
+
+        sql: fmt.StringBuilder;
+        sql.addString("SELECT ");
+        sql.addString(columns);
+        sql.addString(" FROM ");
+        sql.addString(qualifiedName(self.table.schema, self.table.name));
+        if qualified { sql.addString(" AS t0"); }
+        for join in w.joins {
+            sql.addString(" LEFT JOIN ");
+            sql.addString(qualifiedName(join.table.schema, join.table.name));
+            sql.addString(" AS ");
+            sql.addString(join.alias);
+            sql.addString(" ON ");
+            sql.addString(join.on);
+        }
+        sql.addString(rest);
+        columns.free();
+        rest.free();
+        return sql.toString(), w.args, "", w.joins.count as int;
     }
 
     copy :: method () -> Query<T> {
@@ -256,13 +298,25 @@ copyList :: <E>(list: [..]E) -> [..]E {
     return copy;
 }
 
+// A table joined to the rows of the query for a relation, e.g authors for p.author().name
+@private
+Join :: struct {
+    path:  string;     // The relations from the row, e.g "author", or "post.author" for c.post().author()
+    alias: string;     // e.g t1. The rows of the query are t0
+    table: TableInfo;
+    on:    string;     // e.g t1."id" = t0."author_id"
+}
+
 // Writes an expression tree as SQL
 @private
 SqlWriter :: struct {
-    sb:    fmt.StringBuilder;
-    args:  [..]any;
-    table: TableInfo;
-    err:   string;
+    sb:      fmt.StringBuilder;
+    args:    [..]any;
+    table:   TableInfo;
+    context:   *Context;
+    joins:     [..]Join;
+    qualified: bool;      // The columns are written with their table, e.g t0."title", as a relation is joined
+    err:       string;
 
     write :: method * (node: *ExprNode) {
         if self.err != "" { return; }
@@ -306,11 +360,71 @@ SqlWriter :: struct {
             self.sb.addChar(')');
             return;
         }
+        // A member of the row that a relation gives, e.g p.author().name
+        if node.left.kind == .call {
+            join, ok := self.joinOf(node.left);
+            if !ok { return; }
+            self.sb.addString(join.alias);
+            self.sb.addChar('.');
+            self.sb.addString(quoted(columnIn(join.table, node.name)));
+            return;
+        }
         if node.left.kind != .parameter {
             self.fail(fmt.sprint("Only the members of the row are columns, so .% of something else isn't supported", node.name));
             return;
         }
-        self.sb.addString(quoted(self.columnOf(node.name)));
+        if self.qualified { self.sb.addString("t0."); }
+        self.sb.addString(quoted(columnIn(self.table, node.name)));
+    }
+
+    // The join of a relation, e.g of p.author() or c.post().author(). It is added the first time
+    @private
+    joinOf :: method * (call: *ExprNode) -> (Join, bool) {
+        none: Join;
+        if call.args.count != 0 {
+            self.fail(fmt.sprint("% of a query is a relation, which has no arguments", call.name));
+            return none, false;
+        }
+        from: Join;
+        from.alias = "t0";
+        from.table = self.table;
+        if call.left.kind == .call {
+            outer, ok := self.joinOf(call.left);
+            if !ok { return none, false; }
+            from = outer;
+        } else if call.left.kind != .parameter {
+            self.fail(fmt.sprint("The relation % is called on the row of the query, e.g p.%().name", call.name, call.name));
+            return none, false;
+        }
+
+        relation: Relation;
+        found := false;
+        for r in from.table.relations {
+            if r.name == call.name { relation = r; found = true; }
+        }
+        if !found {
+            self.fail(fmt.sprint("% isn't a relation of % to one row. A query can use the rows that a foreign key refers to, e.g p.author().name, but not yet the rows that refer to a row, e.g author.posts()", call.name, from.table.name));
+            return none, false;
+        }
+
+        path := call.name;
+        if from.path != "" { path = fmt.sprint("%.%", from.path, call.name); }
+        for join in self.joins {
+            if join.path == path { return join, true; }
+        }
+
+        other, known := self.context.tableNamed(relation.table);
+        if !known {
+            self.fail(fmt.sprint("The table % of the relation % isn't known. database.open registers the tables", relation.table, call.name));
+            return none, false;
+        }
+        join: Join;
+        join.path  = path;
+        join.alias = fmt.sprint("t%", self.joins.count + 1);
+        join.table = other;
+        join.on    = fmt.sprint("%.% = %.%", join.alias, quoted(relation.references), from.alias, quoted(relation.column));
+        self.joins.add(join);
+        return join, true;
     }
 
     writeBinary :: method * (node: *ExprNode) {
@@ -403,17 +517,18 @@ SqlWriter :: struct {
     fail :: method * (message: string) {
         if self.err == "" { self.err = message; }
     }
+}
 
-    // The column of a member of the rows of the table
-    columnOf :: method (member: string) -> string {
-        columns := columnsOf(self.table.type, self.table.generated, self.table.key);
-        name := columnName(member);
-        for column in columns {
-            if column.member.name == member { name = column.name; }
-        }
-        columns.free();
-        return name;
+// The column of a member of the rows of the table
+@private
+columnIn :: (table: TableInfo, member: string) -> string {
+    columns := columnsOf(table.type, table.generated, table.key);
+    name := columnName(member);
+    for column in columns {
+        if column.member.name == member { name = column.name; }
     }
+    columns.free();
+    return name;
 }
 
 // null, or an empty optional

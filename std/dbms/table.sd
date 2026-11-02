@@ -28,6 +28,7 @@ Table :: struct <T> {
     schema:    string;      // e.g sales. Empty is the schema the connection uses, e.g public
     generated: [..]string;  // The columns the database makes, e.g id and created_at
     keyColumn: string;      // The key of a KeyedTable, so that the rows of its queries are tracked
+    relations: [..]Relation; // The foreign keys to one row of another table, for p.author().name in a query
 
     // A query of the rows, e.g users.query().orderBy(u => u.name).limit(10).all(). See query.sd
     query :: method () -> Query<T> {
@@ -89,7 +90,7 @@ Table :: struct <T> {
     }
 
     info :: method (key: string) -> TableInfo {
-        return TableInfo{name: self.name, schema: self.schema, key: key, generated: self.generated, type: rowType<T>()};
+        return TableInfo{name: self.name, schema: self.schema, key: key, generated: self.generated, type: rowType<T>(), relations: self.relations};
     }
 }
 

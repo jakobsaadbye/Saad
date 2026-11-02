@@ -36,5 +36,13 @@ main :: () {
     assert(rows[1].email ?? "" == "bo@example.com");
     assert(sprint("%", rows[1]) == "{name: \"Bo\", nextYear: 18, email: \"bo@example.com\"}");
 
+    // A member without a name gets the name of the member it reads: {u.name, u.age} is {name: u.name, age: u.age}
+    short := users.map(u => {u.name, u.email, older: u.age + 1});
+    assert(typeof(short[0]) == "struct { name: string; email: Optional<string>; older: int; }");
+    assert(short[1].name == "Bo" && short[1].older == 18);
+    first := users[0];
+    copy := {first.name, n: 1};
+    assert(copy.name == "Ada");
+
     print("inferred struct literals ok");
 }

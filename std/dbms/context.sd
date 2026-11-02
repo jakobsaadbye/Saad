@@ -57,6 +57,7 @@ TableInfo :: struct {
     key:       string;
     generated: [..]string;
     type:      *TypeStruct;   // Of the rows
+    relations: [..]Relation;
 }
 
 // The most rows of one INSERT. Postgres takes at most 65535 parameters in a statement, so wide rows give fewer

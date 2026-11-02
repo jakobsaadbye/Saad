@@ -1,0 +1,7 @@
+// expect-error: Type of struct literal could not be infered from the context
+
+main :: () {
+    x := 1;
+    y := 2;
+    p := {x, y}; // Only variables: a literal of a type that is wanted, e.g Point{x, y}, not a struct of their names
+}

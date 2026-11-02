@@ -13,6 +13,27 @@ User :: struct {
     email:     ?string;
     createdAt: time.Time;
     seenAt:    ?time.Time;
+    teamId:    ?i64;
+
+    // A relation like the generator writes. In a query it is a join, so its body doesn't matter here
+    team :: method () -> (*Team, string) {
+        return null, "";
+    }
+}
+
+Team :: struct {
+    id:      i64;
+    name:    string;
+    groupId: i64;
+
+    group :: method () -> (*Group, string) {
+        return null, "";
+    }
+}
+
+Group :: struct {
+    id:    i64;
+    title: string;
 }
 
 main :: () {
@@ -66,6 +87,37 @@ main :: () {
     b, _, _ := adults.where(u => u.role == .guest).limit(1).toSql();
     c, _, _ := adults.toSql();
     assert(a.indexOf("LIMIT") < 0 && b.indexOf("LIMIT 1") > 0 && c.indexOf("role") < 0);
+
+    // The row that a foreign key refers to is a join, and the columns are written with their table then
+    teams  := dbms.keyedTable<Team, i64>(context, "teams", "id", schema: "shop");
+    groups := dbms.keyedTable<Group, i64>(context, "groups", "id", schema: "shop");
+    users.relations = [dbms.Relation{name: "team", column: "team_id", table: "teams", references: "id"}];
+    teams.relations = [dbms.Relation{name: "group", column: "group_id", table: "groups", references: "id"}];
+    context.register(users.tableInfo());
+    context.register(teams.tableInfo());
+    context.register(groups.tableInfo());
+
+    sql9, _, err9 := users.where(u => u.age ?? 0 >= 18).select(u => {u.name, teamName: u.team().name, u.team().group().title}).toSql();
+    assert(err9 == "");
+    assert(sql9 == "SELECT t0.\"name\" AS \"name\", t1.\"name\" AS \"teamName\", t2.\"title\" AS \"title\" FROM \"shop\".\"users\" AS t0 LEFT JOIN \"shop\".\"teams\" AS t1 ON t1.\"id\" = t0.\"team_id\" LEFT JOIN \"shop\".\"groups\" AS t2 ON t2.\"id\" = t1.\"group_id\" WHERE ((coalesce(t0.\"age\", $1) >= $2))");
+    sql10, _, _ := users.where(u => u.team().name == "Core" && u.team().id > 1).toSql();
+    assert(sql10 == "SELECT t0.* FROM \"shop\".\"users\" AS t0 LEFT JOIN \"shop\".\"teams\" AS t1 ON t1.\"id\" = t0.\"team_id\" WHERE (((t1.\"name\" = $1) AND (t1.\"id\" > $2)))");
+    sql11, _, _ := users.orderBy(u => u.team().name).select(u => u.team().group().title).toSql();
+    assert(sql11.startsWith("SELECT t2.\"title\" AS \"value\" FROM \"shop\".\"users\" AS t0 LEFT JOIN") && sql11.endsWith(" ORDER BY t1.\"name\""));
+
+    // A member without a name gets the name of the member it reads
+    named := {u: 1}.u;
+    p := User{name: "Ada"};
+    q := {p.name, p.age, years: 3};
+    assert(q.name == "Ada" && q.years == 3 && named == 1);
+
+    // A method that isn't a relation of the table is an error of the query
+    groups.relations.clear();
+    context.register(groups.tableInfo());
+    teams.relations.clear();
+    context.register(teams.tableInfo());
+    _, _, err12 := users.select(u => u.team().group().title).toSql();
+    assert(err12.startsWith("group isn't a relation of teams to one row"));
 
     print("dbms query ok");
 }

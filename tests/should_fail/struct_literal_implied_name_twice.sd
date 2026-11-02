@@ -1,0 +1,9 @@
+// expect-error: Give one of them a name of its own
+
+Person :: struct { name: string; friend: *Person; }
+
+main :: () {
+    ada := Person{name: "Ada"};
+    bo := Person{name: "Bo", friend: &ada};
+    row := {bo.name, bo.friend.name};
+}

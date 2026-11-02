@@ -41,7 +41,10 @@ binary &&
   | `!a`, `-a` | `unary`, with `op` and `left` |
   | `a == b`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `\|\|`, `+`, `-`, `*`, `/`, `%`, `??` | `binary`, with `op`, `left` and `right` |
   | a call `x.name.startsWith(p)` or `f(x.age)` | `call`, with `left` (null for a function), `name` and `args` |
-  | a struct literal with names `{name: x.name}` | `object`, with `names` and `args` |
+  | a struct literal `{name: x.name}`, or `{x.name}`, whose member gets the name of the member it reads | `object`, with `names` and `args` |
+
+  A call that gives a value and an error, e.g `p.author()` of `(*Author, string)`, is its value when a member of it
+  is used, e.g `p.author().name`, as the tree isn't run.
 
   `a?.b` and `a?.m()` are the same nodes as `a.b` and `a.m()`: a reader like SQL gives NULL when `a` is. Anything
   else, e.g a cast, indexing or another lambda, is an error.
