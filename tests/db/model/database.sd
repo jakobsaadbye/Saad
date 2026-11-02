@@ -33,8 +33,8 @@ open :: (conn: *dbms.Connection) -> Database {
     tables.orders.generated = ["id"];
     tables.users.generated = ["id", "created_at"];
     tables.orderItems.relations = [dbms.Relation{name: "order", column: "order_id", table: "orders", references: "id"}];
-    tables.orders.relations = [dbms.Relation{name: "user", column: "user_id", table: "users", references: "id"}];
-    tables.users.relations = [dbms.Relation{name: "referredByRow", column: "referred_by", table: "users", references: "id"}];
+    tables.orders.relations = [dbms.Relation{name: "orderItems", column: "order_id", table: "order_items", references: "id", many: true}, dbms.Relation{name: "user", column: "user_id", table: "users", references: "id"}];
+    tables.users.relations = [dbms.Relation{name: "orders", column: "user_id", table: "orders", references: "id", many: true}, dbms.Relation{name: "referredByRow", column: "referred_by", table: "users", references: "id"}, dbms.Relation{name: "usersByReferredBy", column: "referred_by", table: "users", references: "id", many: true}];
     tables.context.register(tables.categories.tableInfo());
     tables.context.register(tables.orderItems.tableInfo());
     tables.context.register(tables.orders.tableInfo());

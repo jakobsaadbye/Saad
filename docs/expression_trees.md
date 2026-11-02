@@ -42,9 +42,14 @@ binary &&
   | `a == b`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `\|\|`, `+`, `-`, `*`, `/`, `%`, `??` | `binary`, with `op`, `left` and `right` |
   | a call `x.name.startsWith(p)` or `f(x.age)` | `call`, with `left` (null for a function), `name` and `args` |
   | a struct literal `{name: x.name}`, or `{x.name}`, whose member gets the name of the member it reads | `object`, with `names` and `args` |
+  | a lambda in the lambda, given to a call, e.g the `p => p.views > 10` of `a.posts().where(p => p.views > 10)` | `lambda`, with `names[0]` (its parameter) and `left` (its body) |
 
-  A call that gives a value and an error, e.g `p.author()` of `(*Author, string)`, is its value when a member of it
-  is used, e.g `p.author().name`, as the tree isn't run.
+  A call that gives a value and an error, e.g `p.author()` of `(*Author, string)` or `count()` of `(i64, string)`, is
+  its value, as the tree isn't run. One that doesn't use the parameters, and so would be a value of the tree, is an
+  error: call it before the lambda.
+
+  A lambda in the lambda has one parameter and one expression. In its body, its parameter and those of the lambdas
+  around it are `parameter` nodes, which a reader tells apart by their names.
 
   `a?.b` and `a?.m()` are the same nodes as `a.b` and `a.m()`: a reader like SQL gives NULL when `a` is. Anything
   else, e.g a cast, indexing or another lambda, is an error.
@@ -54,6 +59,7 @@ binary &&
 
 ## How it works
 
+* A lambda inside the lambda of a tree, e.g of `where` in `a => a.posts().where(p => ...)`, is checked, but its tree isn't made on its own: it is a part of the tree around it (`inner_tree_lambdas` in `tree_of()`).
 * `check_lambda_expression()` sees that an `Expr<F>` of the prelude is wanted (`expression_tree_type()`). A short
   lambda given to a generic function for an `Expr<...>` is checked like one given for the function type inside it, so
   `T` and `U` are inferred, e.g the `U` of `select(f: Expr<(T) -> U>)`.

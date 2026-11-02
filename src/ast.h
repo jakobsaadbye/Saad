@@ -128,6 +128,7 @@ typedef enum AstFlags {
     AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN        = 1 << 8, // Set on constant identifiers having a function as value
     AST_FLAG_IS_BEING_CHECKED                      = 1 << 9, // Set on a type alias while its type is resolved, to find aliases that refer to themselves
     AST_FLAG_HAS_ERRORS                            = 1 << 10, // Type checking it failed. It isn't checked again, see check_declaration_of()
+    AST_FLAG_TREE_VALUE_OF_RESULTS                 = 1 << 11, // A call in an expression tree that gives a value and an error, which is its value, e.g a.posts().count()
 } AstFlags;
 
 typedef struct Ast {

@@ -13,11 +13,10 @@ import database;      // examples/blog/db/database.sd: Database, open and the ta
 use entities;         // examples/blog/db/entity: Author, Post, Comment, PostTag and PostStatus
 use fmt;
 
-// A row of plain SQL, for what the queries of the tables can't say yet, like a join
-AuthorStats :: struct {
-    name:  string;
-    posts: i64;
-    views: i64;
+// A row of plain SQL, for what the queries of the tables can't say yet, like a GROUP BY
+StatusCount :: struct {
+    status: PostStatus;
+    posts:  i64;
 }
 
 main :: () {
@@ -201,16 +200,33 @@ main :: () {
     db.discardChanges();
 
     //
-    // 7. Plain SQL stays for everything else, like this join
+    // 7. The rows that refer to a row can be counted and summed in a query too: a.posts() is a subquery
     //
-    stats, e11 := conn.query<AuthorStats>(
-        "SELECT a.name, count(p.id) AS posts, coalesce(sum(p.views), 0) AS views
-         FROM saad_blog.authors a LEFT JOIN saad_blog.posts p ON p.author_id = a.id AND p.status = $1
-         GROUP BY a.name ORDER BY a.name", PostStatus.published);
+    stats, e11 := db.authors.orderBy(a => a.name).select(a => {
+        a.name,
+        posts: a.posts().where(p => p.status == .published).count(),
+        views: a.posts().where(p => p.status == .published).sum(p => p.views),
+        mostRead: a.posts().orderByDescending(p => p.views).first().title,
+    }).all();
     check(e11);
     print("\nPublished posts per author:");
     for s in stats {
         print("  %: % posts, % views", s.name, s.posts, s.views);
+    }
+    print("Most read: %", stats.map(s => s.mostRead));
+    withComments, e23 := db.posts.where(p => p.comments().exists()).select(p => p.slug).all();
+    check(e23);
+    total, e24 := db.posts.sum(p => p.views);
+    check(e24);
+    print("Posts with comments: %. Views of all posts: %", withComments, total);
+
+    //
+    // 8. Plain SQL stays for everything else, e.g a GROUP BY
+    //
+    counts, e25 := conn.query<StatusCount>("SELECT status, count(*) AS posts FROM saad_blog.posts GROUP BY status ORDER BY status");
+    check(e25);
+    for c in counts {
+        print("  %: %", c.status, c.posts);
     }
 
     conn.close();

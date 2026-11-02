@@ -3,7 +3,7 @@
 // Every file imports this file like the rest of the prelude. The compiler builds an Expr<F> with the functions below
 
 // The kinds of the parts of an expression tree
-ExprKind :: enum { parameter, member, value, unary, binary, call, object }
+ExprKind :: enum { parameter, member, value, unary, binary, call, object, lambda }
 
 // A part of the tree of an Expr. What the members mean depends on the kind:
 //   parameter   index and name: the parameter of the lambda, e.g the x of x => ...
@@ -14,6 +14,8 @@ ExprKind :: enum { parameter, member, value, unary, binary, call, object }
 //   binary      left op right, e.g x.age >= 18, a && b, x.email ?? ""
 //   call        left.name(args...), or name(args...) when left is null, e.g x.name.startsWith("A")
 //   object      a struct literal {names[0]: args[0], ...}, e.g {name: x.name}
+//   lambda      names[0] => left, a lambda in the lambda, e.g the p => p.status == .published of
+//               a => a.posts().where(p => p.status == .published).count(). Its parameter is a parameter node by its name
 ExprNode :: struct {
     kind:  ExprKind;
     name:  string;
@@ -105,4 +107,11 @@ exprArgument :: (node: *ExprNode, name: string, value: *ExprNode) -> *ExprNode {
 
 exprObject :: () -> *ExprNode {
     return exprNode(.object);
+}
+
+exprLambda :: (parameter: string, body: *ExprNode) -> *ExprNode {
+    node := exprNode(.lambda);
+    node.names.add(parameter);
+    node.left = body;
+    return node;
 }

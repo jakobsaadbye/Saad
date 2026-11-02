@@ -440,6 +440,7 @@ adults, err := db.users
 ada, err2  := db.users.where(u => u.email == email).first();          // a *User, null when there is none
 n, err3    := db.users.where(u => u.email == null).count();           // IS NULL
 admins, err4 := db.users.where(u => u.role == .admin).exists();
+total, err7  := db.orders.where(o => o.status == .paid).sum(o => o.amount);  // also min, max and average
 
 rows, err5  := db.users.select(u => {u.name, nextYear: (u.age ?? 0) + 1}).all();   // [..]struct { name: string; nextYear: i32; }
 names, err6 := db.users.orderByDescending(u => u.id).select(u => u.name).all();          // [..]string
@@ -448,7 +449,8 @@ db.users.where(u => u.age >= "18");   // A compile error, as the lambda is check
 ```
 
 * `where`, `orderBy`, `orderByDescending`, `limit`, `offset` and `select` give a new `dbms.Query<T>`, so a query can
-  be the start of others. Nothing is sent before `all`, `first`, `count` or `exists`. `db.users.query()` is the
+  be the start of others. Nothing is sent before `all`, `first`, `count`, `exists`, `sum`, `min`, `max` or
+  `average`. `sum` of no rows is 0, `min` and `max` of no rows the zero value, and `average` is an `f64`. `db.users.query()` is the
   query of every row, and `query.toSql()` gives the SQL and its parameters.
 * In a lambda the members of the row are its columns. These can be made into SQL: `==` (`=`), `!=`, `<`, `<=`, `>`,
   `>=`, `&&` (`AND`), `||` (`OR`), `!` (`NOT`), `+`, `-`, `*`, `/`, `%`, `??` (`coalesce`), `== null` (`IS NULL`),
@@ -535,10 +537,37 @@ onAda, err3 := db.comments.where(c => c.post().author().name.startsWith("Ada")).
   are `NULL`, which gives the default of the type, e.g `""`, or an empty optional for an optional.
 * In the lambda, `p.author()` is the `*Author` and not `(*Author, string)`, as the lambda is made into SQL and not
   run. The row itself can't be a value, only its members: `p.author() == null` is a compile error.
-* Only the end with one row: `author.posts()` is a query of its own, not a member of a row. A query of the rows of
-  the other end, e.g the number of posts of each author, is plain SQL for now.
-* `database.open` gives the tables their relations (`tables.posts.relations = [dbms.Relation{...}]`), and registers
-  the tables with the context, where the joins find the table of a relation.
+* The other end, the rows that refer to a row, e.g `a.posts()`, is a subquery. See below.
+* `database.open` gives the tables their relations (`tables.posts.relations = [dbms.Relation{...}]`, with
+  `many: true` for the other end), and registers the tables with the context, where the joins find the table of a
+  relation.
+
+The rows that refer to a row are a query, so in a lambda they give a value with `count()`, `exists()`, `sum(f)`,
+`min(f)`, `max(f)`, `average(f)`, or `first()` and a member, after `where`, `orderBy` and `orderByDescending`. Each is
+a subquery of the row it is of:
+
+```odin
+stats, err := db.authors.orderBy(a => a.name).select(a => {
+    a.name,
+    posts: a.posts().where(p => p.status == .published).count(),
+    views: a.posts().where(p => p.status == .published).sum(p => p.views),
+    mostRead: a.posts().orderByDescending(p => p.views).first().title,
+}).all();
+// SELECT t0."name" AS "name",
+//        (SELECT count(*) FROM "saad_blog"."posts" AS t1 WHERE t1."author_id" = t0."id" AND ((t1."status" = $1))) AS "posts",
+//        (SELECT coalesce(sum(t2."views"), 0) FROM ... ) AS "views",
+//        (SELECT t3."title" FROM "saad_blog"."posts" AS t3 WHERE t3."author_id" = t0."id" ORDER BY t3."views" DESC LIMIT 1) AS "mostRead"
+// FROM "saad_blog"."authors" AS t0 ORDER BY t0."name"
+
+commented, err2 := db.posts.where(p => p.comments().exists()).all();
+busy, err3 := db.users.where(u => u.orders().where(o => o.orderItems().sum(i => i.quantity) > 10).exists()).all();
+```
+
+* The lambda of a `where` in the lambda can use the row around it too, e.g
+  `a.posts().where(p => p.title != a.name).count()`.
+* In the lambda, `count()` is the `i64`, not `(i64, string)`: a call that gives a value and an error is its value in
+  an expression tree, as it is made into SQL and not run.
+* `first().title` of no rows is `NULL`, which gives the default of the type, or an empty optional.
 
 ## Gaps in the language
 
