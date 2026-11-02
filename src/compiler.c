@@ -75,8 +75,10 @@ static const char *source_path(const char *path) {
     return path;
 }
 
+char *repair_for_completion(const char *path, char *text); // complete.c
+
 static char *read_source(const char *path) {
-    return read_entire_file(source_path(path));
+    return repair_for_completion(path, read_entire_file(source_path(path)));
 }
 
 static char *read_namespace_declaration(const char *path) {

@@ -223,7 +223,11 @@ int index_identifier(AstIdentifier *ident) {
     if (!program_index.enabled || ident == NULL) return -1;
     ident = declaration_of(ident);
     if (!has_position((Ast *)ident) || ident->name == NULL || ident->name[0] == '$') return -1;
-    if (!spells(ident->head.file, ident->head.start, ident->head.end, ident->name, true)) return -1;
+
+    // The 'self' of a method written in a struct isn't written: the compiler declares it at 'method'. It is a symbol
+    // with an empty name there, so 'self' has a hover and goes to its method
+    bool implicit_self = strcmp(ident->name, "self") == 0 && ident->decl && (ident->decl->flags & DECLARATION_IS_COMPILER_GENERATED);
+    if (!implicit_self && !spells(ident->head.file, ident->head.start, ident->head.end, ident->name, true)) return -1;
     if (ident->flags & (IDENTIFIER_IS_NAMESPACE | IDENTIFIER_IS_AMBIGUOUS)) return -1;
 
     int existing = find_symbol(ident->head.file, ident->head.start.input_idx);
@@ -239,6 +243,13 @@ int index_identifier(AstIdentifier *ident) {
     symbol.kind       = kind_of(ident);
     symbol.detail     = detail_of(ident, symbol.kind);
     symbol.container  = -1;
+    if (implicit_self) {
+        symbol.name_end = symbol.name_start;
+        symbol.end      = symbol.start;
+        symbol.kind     = "parameter";
+        int id = add_symbol(symbol);
+        return id;
+    }
 
     // The whole declaration
     Ast *whole = NULL;
@@ -339,6 +350,44 @@ void index_identifier_use(Ast *site, AstIdentifier *ident) {
 void index_enumerator_use(Ast *site, AstEnumerator *etor) {
     if (!program_index.enabled || !has_position(site) || etor == NULL) return;
     add_reference(site->file, site->start, site->end, index_enumerator(etor), etor->name);
+}
+
+static int index_namespace(Namespace *ns);
+
+// A type by its name. 'time.Time' is a use of the namespace time and of the struct Time, each with its own range
+void index_type_name_use(Ast *site, AstIdentifier *ident) {
+    if (!program_index.enabled || !has_position(site) || ident == NULL) return;
+    AstFile *file = site->file;
+    int start = site->start.input_idx;
+    int end   = site->end.input_idx;
+    int dot   = -1;
+    if (file->text && site->start.line == site->end.line) {
+        for (int p = start; p < end; p++) {
+            if (file->text[p] == '.') dot = p;
+            else if (!isalnum((unsigned char)file->text[p]) && file->text[p] != '_') { dot = -1; break; }
+        }
+    }
+    if (dot < 0) {
+        index_identifier_use(site, ident);
+        return;
+    }
+    Pos name_start = site->start;
+    name_start.input_idx = dot + 1;
+    name_start.col      += dot + 1 - start;
+    add_reference(file, name_start, site->end, index_identifier(ident), ident->name);
+
+    AstIdentifier *declared = declaration_of(ident);
+    Namespace *ns = declared->head.file ? declared->head.file->ns : NULL;
+    if (ns) {
+        Pos ns_end = site->start;
+        ns_end.input_idx = dot;
+        ns_end.col      += dot - start;
+        char spelled[256];
+        int length = dot - start < (int)sizeof(spelled) - 1 ? dot - start : (int)sizeof(spelled) - 1;
+        memcpy(spelled, &file->text[start], length);
+        spelled[length] = 0;
+        add_reference(file, site->start, ns_end, index_namespace(ns), spelled);
+    }
 }
 
 // A namespace is declared by the 'namespace a.b;' of its first file

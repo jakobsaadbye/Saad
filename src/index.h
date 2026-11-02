@@ -40,6 +40,7 @@ typedef struct Index {
 extern Index program_index;
 
 void index_identifier_use(Ast *site, AstIdentifier *ident);
+void index_type_name_use(Ast *site, AstIdentifier *ident);
 void index_name_use(Ast *site, Pos start, Pos end, AstIdentifier *ident);
 void index_enumerator_use(Ast *site, AstEnumerator *etor);
 int  index_identifier(AstIdentifier *ident);

@@ -355,9 +355,18 @@ static bool is_visible_name(const char *name) {
     return name && name[0] && name[0] != '$' && name[0] != '_';
 }
 
+// The functions the compiler builds an expression tree with (std/prelude/expression_trees.sd), e.g exprMember. A program
+// doesn't call them, so they aren't offered
+static bool is_compiler_helper(Typer *typer, AstIdentifier *declared) {
+    AstFile *trees = typer ? typer->parser->expression_trees_file : NULL;
+    return trees && declared->head.file == trees && declared->type && declared->type->kind == TYPE_FUNCTION;
+}
+static Typer *completing_typer;
+
 static void add_identifier(AstIdentifier *ident) {
     AstIdentifier *declared = ident->imported_from ? ident->imported_from : ident;
     if (!is_visible_name(ident->name) || (declared->flags & IDENTIFIER_IS_POISONED) || !can_use(declared)) return;
+    if (is_compiler_helper(completing_typer, declared)) return;
 
     const char *kind = (declared->flags & IDENTIFIER_IS_NAMESPACE) ? "namespace" : kind_of(declared);
     char *detail = (declared->flags & IDENTIFIER_IS_NAMESPACE) ? "namespace" : detail_of(declared, kind);
@@ -707,6 +716,22 @@ static bool literal_at(Typer *typer, AstFile *file, int offset, Literal *literal
     // The type before the '{', e.g Point, geometry.Vec2 or Pair<int>
     int end = open;
     skip_spaces_back(text, &end);
+
+    // No type: it comes from where the literal is written, e.g '[{...}, {|' for a []Person
+    bool has_type_name = end > 0 && (is_name_char(text[end - 1]) || text[end - 1] == '>');
+    if (!has_type_name || (end >= 2 && text[end - 1] == '>' && text[end - 2] == '=')) {
+        for (int i = 0; i < inferred_literals.count; i++) {
+            InferredLiteral *inferred = &((InferredLiteral *)inferred_literals.items)[i];
+            if (inferred->file == file && inferred->open == open) {
+                literal->node = inferred->node;
+                break;
+            }
+        }
+        if (!literal->node) return false;
+        literal->open = open;
+        goto names;
+    }
+
     if (end > 0 && text[end - 1] == '>') {
         int angle = 0;
         for (end--; end >= 0; end--) {
@@ -725,6 +750,7 @@ static bool literal_at(Typer *typer, AstFile *file, int offset, Literal *literal
     literal->node = ((TypeStruct *)type)->node;
     literal->open = open;
 
+names:;
     // 'name: value' or just a name
     int colon = -1;
     for (int p = element; p < offset; p++) {
@@ -885,6 +911,108 @@ static void add_values_of(Type *type) {
     }
 }
 
+//
+// Repairing the line that is being written, so it can be checked. 'isAdult(x => x.' is read as
+// 'isAdult(x => x.complete__);': the lambda is then checked, and the type of x is known. The text before the position
+// stays the same, so the offsets of the program are the same
+//
+
+#define COMPLETION_PLACEHOLDER "complete__"
+
+// The brackets that are open at 'end' on the line from 'start', skipping strings and characters. Returns how many
+static int open_brackets(const char *text, int start, int end, char *stack, int max) {
+    int count = 0;
+    for (int p = start; p < end; p++) {
+        char c = text[p];
+        if (c == '"' || c == '\'') {
+            for (p++; p < end && text[p] != c; p++) {
+                if (text[p] == '\\') p++;
+            }
+            continue;
+        }
+        if (c == '/' && p + 1 < end && text[p + 1] == '/') break; // A comment
+        if (c == '(' || c == '[' || c == '{') {
+            if (count < max) stack[count] = c;
+            count++;
+        }
+        else if (c == ')' || c == ']' || c == '}') {
+            if (count > 0) count--;
+        }
+    }
+    return count < max ? count : max;
+}
+
+static char closer_of(char open) {
+    return open == '(' ? ')' : open == '[' ? ']' : '}';
+}
+
+char *repair_for_completion(const char *path, char *text) {
+    if (!text || !program_completion.enabled || !program_completion.path) return text;
+    char *absolute = get_absolute_path(path);
+    bool is_file = same_path(path, program_completion.path) || (absolute && same_path(absolute, program_completion.path));
+    free(absolute);
+    if (!is_file) return text;
+
+    int length = strlen(text);
+    int offset = offset_of(text, program_completion.line, program_completion.character);
+    if (offset > length) return text;
+    int line_start = offset;
+    while (line_start > 0 && text[line_start - 1] != '\n') line_start--;
+    int line_end = offset;
+    while (line_end < length && text[line_end] != '\n') line_end++;
+
+    // A comment or a string at the position isn't code
+    for (int p = line_start; p + 1 < offset; p++) {
+        if (text[p] == '/' && text[p + 1] == '/') return text;
+    }
+
+    int start = offset;
+    while (start > 0 && is_name_char(text[start - 1])) start--;
+    bool needs_name = start == offset && start > 0 && text[start - 1] == '.' && !(start > 1 && text[start - 2] == '.');
+
+    // The brackets still open at the position, less the ones closed after it on the line, e.g by the editor
+    char stack[32];
+    int  open = open_brackets(text, line_start, offset, stack, 32);
+    bool in_brackets = open > 0;
+    int  rest_end = line_end;
+    while (rest_end > offset && isspace((unsigned char)text[rest_end - 1])) rest_end--;
+    for (int p = offset; p < rest_end && open > 0; p++) {
+        char c = text[p];
+        if (c == '"' || c == '\'') {
+            for (p++; p < rest_end && text[p] != c; p++) {
+                if (text[p] == '\\') p++;
+            }
+            continue;
+        }
+        if (c == '(' || c == '[' || c == '{') { if (open < 32) stack[open++] = c; }
+        else if (c == ')' || c == ']' || c == '}') open--;
+    }
+    // A '{' alone that ends the line opens a block, e.g 'if x {', and isn't closed here. One after '=', ',', '(',
+    // '[' or ':' is a struct literal, e.g 'p: Point = {'
+    if (open == 1 && stack[0] == '{' && rest_end == offset) {
+        int q = offset;
+        while (q > line_start && isspace((unsigned char)text[q - 1])) q--;
+        if (q > line_start && text[q - 1] == '{') {
+            int b = q - 1;
+            while (b > line_start && isspace((unsigned char)text[b - 1])) b--;
+            char before = b > line_start ? text[b - 1] : 0;
+            if (!strchr("=,([:", before) || before == 0) open = 0;
+        }
+    }
+    if (!needs_name && open == 0) return text;
+
+    bool ends_statement = rest_end > offset && (text[rest_end - 1] == ';' || text[rest_end - 1] == '{');
+    StringBuilder sb = sb_init(length + 64);
+    sb_append(&sb, "%.*s", offset, text);
+    if (needs_name) sb_append(&sb, "%s", COMPLETION_PLACEHOLDER);
+    sb_append(&sb, "%.*s", rest_end - offset, &text[offset]);
+    for (int i = open - 1; i >= 0; i--) sb_append(&sb, "%c", closer_of(stack[i]));
+    if (in_brackets && open >= 0 && !ends_statement) sb_append(&sb, ";");
+    sb_append(&sb, "%s", &text[rest_end]);
+    free(text);
+    return sb.buffer;
+}
+
 // Called by compile_program() after the program is checked
 void complete_program(Typer *typer, DynamicArray files) {
     program_completion.items = sb_init(4096);
@@ -898,6 +1026,7 @@ void complete_program(Typer *typer, DynamicArray files) {
     AstBlock *scope = scope_at(file, offset);
     completing_file   = file;
     completing_offset = offset;
+    completing_typer  = typer;
     typer->current_file = file;
     typer->parser->current_file = file;
 

@@ -166,6 +166,7 @@ int main(int argc, char const *argv[]) {
         }
         diagnostics.print = false;
         program_completion.enabled = true;
+        keep_inferred_literals     = true;
         compile_program(&config, main_file_path_abs, false);
         write_completion_json(stdout);
         return 0;

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # Checks the JSON of 'saad index' (on stdin) for a file:
-#   * every declaration spells its name where the index says it is
+#   * every declaration spells its name where the index says it is (but the self of a method in a struct, which has an empty name)
 #   * every identifier in the file is a declaration or a use of one, except the ones that have no declaration in Saad
 # Usage: bin/saad index tests/index.sd | tools/linux/check_index.py tests/index.sd
 import json, re, sys
 
-NO_DECLARATION = {'self', 'kind', 'count', 'data', 'it', '_', 'assert', 'typeof', 'sizeof'}
+NO_DECLARATION = {'kind', 'count', 'data', 'it', '_', 'assert', 'typeof', 'sizeof'}
 KEYWORDS = set('if else for while return break continue struct enum union method switch case in as use import namespace '
                'null true false int i8 i16 i32 i64 u8 u16 u32 u64 uint f32 f64 float bool string void any char xx'.split())
 
@@ -26,6 +26,7 @@ for s in d['symbols']:
     st, en = s['nameRange']['start'], s['nameRange']['end']
     if s['kind'] == 'namespace': continue
     text = lines(s['file'])[st['line']][st['character']:en['character']]
+    if s['name'] == 'self' and st == en: continue  # The self of a method in a struct, which isn't written
     if text != s['name']: problems.append(f"declaration {s['name']} spells {text!r}")
 
 covered = set()

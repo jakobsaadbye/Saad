@@ -2170,7 +2170,7 @@ Type *resolve_type(Typer *typer, Type *type) {
             if (!ok) return NULL;
         }
 
-        index_identifier_use((Ast *)type, ident);
+        index_type_name_use((Ast *)type, ident);
 
         if (ident->type == NULL || !identifier_is_type(ident)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "'%s' is not a type", type->name);
@@ -7526,6 +7526,16 @@ static bool is_inferable_struct_literal(AstStructLiteral *literal) {
     return true;
 }
 
+// The struct literals whose type comes from where they are written, e.g the {...} of 'people: []Person = [{...}]'.
+// 'saad complete' gives the fields of such a literal (complete.c)
+typedef struct InferredLiteral {
+    AstFile   *file;
+    int        open;   // The offset of its '{'
+    AstStruct *node;
+} InferredLiteral;
+DynamicArray inferred_literals; // of InferredLiteral
+bool         keep_inferred_literals;
+
 Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_type) {
     TypeStruct *struct_defn = NULL;
     if (literal->explicit_type == NULL && (ctx_type == NULL || ctx_type->kind == TYPE_ANY) && is_inferable_struct_literal(literal)) {
@@ -7586,6 +7596,11 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         }
 
         struct_defn = (TypeStruct *)(ctx_type);
+        if (keep_inferred_literals) {
+            if (inferred_literals.items == NULL) inferred_literals = da_init(16, sizeof(InferredLiteral));
+            InferredLiteral inferred = { literal->head.head.file, literal->head.head.start.input_idx, struct_defn->node };
+            da_append(&inferred_literals, inferred);
+        }
     }
 
     if (struct_defn->node->is_union && !(literal->head.head.flags & AST_FLAG_COMPILER_GENERATED)) {
