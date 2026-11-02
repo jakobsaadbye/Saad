@@ -4,6 +4,8 @@
 //   * errors and warnings as the code is written (diagnostics)
 //   * go to definition, find references and hover
 //   * the outline of a file (document symbols) and the symbols of the workspace
+//   * completion, signature help and semantic tokens
+//   * rename, and a quick fix for the missing cases of a switch
 //
 // Build it with 'saad build lsp/main.sd'. Usage: saad-lsp [--compiler path/to/saad]
 
@@ -29,6 +31,7 @@ Document :: struct {
 documents: [..]Document;
 projects:  [..]project.Project;
 texts:     Map<string, source.Text>;  // Files that are not open, read from disk. By key
+owners:    Map<string, string>;       // The program (the key of its main file) a file is part of, once it is known. By key
 
 generation    := 0;       // Goes up when a document changes, so the projects know they are out of date
 compiler      := "saad";
@@ -84,6 +87,9 @@ handle :: (m: rpc.Message) {
         case "textDocument/completion"   { completion(m); }
         case "textDocument/signatureHelp" { signatureHelp(m); }
         case "textDocument/semanticTokens/full" { semanticTokens(m); }
+        case "textDocument/prepareRename" { prepareRename(m); }
+        case "textDocument/rename"       { rename(m); }
+        case "textDocument/codeAction"   { codeActions(m); }
         else {
             if rpc.isRequest(m) {
                 rpc.fail(m.id, rpc.MethodNotFound, fmt.sprint("% is not supported", m.name));
@@ -111,9 +117,9 @@ initialize :: (m: rpc.Message) {
     }
     rpc.log(fmt.sprint("The workspace is '%'. The compiler is %", workspaceRoot, compiler));
 
-    capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]},\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":%,\"tokenModifiers\":%},\"full\":true}}";
+    capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]},\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":%,\"tokenModifiers\":%},\"full\":true},\"renameProvider\":{\"prepareProvider\":true},\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\"]}}";
     capabilities = fmt.sprint(capabilities, json.encode(TokenTypes), json.encode(TokenModifiers));
-    rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.2.0\"}}", capabilities));
+    rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.3.0\"}}", capabilities));
 }
 
 // The editor asks the server to end after asking it to shut down. Otherwise the server ends with an error
@@ -231,17 +237,13 @@ findDocument :: (key: string) -> *Document {
     return null;
 }
 
-// Checks the projects with the file again, and sends their diagnostics
+// Checks the program of the file again, and the other programs that have it, and sends their diagnostics
 refresh :: (key: string, path: string) {
-    found := false;
+    projectFor(key, path);
     for p, i in projects {
-        if p.fileNumber(key) >= 0 {
+        if !p.retired && p.fileNumber(key) >= 0 {
             update(i);
-            found = true;
         }
-    }
-    if !found {
-        projectFor(key, path);
     }
 }
 
@@ -251,18 +253,40 @@ refresh :: (key: string, path: string) {
 
 // The project to answer a question about a file with. It is updated. -1 if there is none
 projectFor :: (key: string, path: string) -> int {
-    // A file of the standard library is its own program. A program that uses it only has the parts it uses in its index
+    // The standard library is one program, so the uses of a name in all of it are found. A program that uses it only
+    // has the parts it uses in its index
     if isInStandardLibrary(key) {
+        for p, i in projects {
+            if p.options == AllStd {
+                update(i);
+                return i as int;
+            }
+        }
         i := projectOf(path);
+        projects.indexRef(i).options = AllStd;
         update(i);
         return i;
     }
 
+    // The program it was part of. A program with errors keeps its files even when the errors leave one out for now,
+    // e.g while an import of it is being written, so the file isn't answered as a program of its own meanwhile
+    if owners.has(key) {
+        i := projectOf(owners.get(key, ""));
+        update(i);
+        owner := projects.indexRef(i);
+        if owner.fileNumber(key) >= 0 || owner.index.diagnostics.count > 0 {
+            return i;
+        }
+        rpc.log(fmt.sprint("% isn't part of % anymore", path, owner.root));
+        owners.remove(key);
+    }
+
     // A program that has the file, other than the file on its own
     for p, i in projects {
-        if p.fileNumber(key) >= 0 && source.keyOf(p.root) != key {
+        if !p.retired && p.fileNumber(key) >= 0 && source.keyOf(p.root) != key {
             update(i);
             if projects[i].fileNumber(key) >= 0 {
+                own(key, i as int);
                 return i as int;
             }
         }
@@ -279,6 +303,7 @@ projectFor :: (key: string, path: string) -> int {
             i := projectOf(candidate);
             update(i);
             if projects[i].fileNumber(key) >= 0 {
+                own(key, i);
                 return i;
             }
         }
@@ -292,6 +317,36 @@ projectFor :: (key: string, path: string) -> int {
     i := projectOf(path);
     update(i);
     return i;
+}
+
+AllStd :: " --all-std";
+
+// The file is part of the program. The project of the file on its own, if there is one, isn't needed anymore: its
+// diagnostics are cleared, as the program sends the file's
+own :: (key: string, program: int) {
+    owners.set(key.copy(), source.keyOf(projects[program].root));
+    for p, i in projects {
+        if i != program && !p.retired && source.keyOf(p.root) == key {
+            alone := projects.indexRef(i);
+            alone.retired = true;
+            alone.generation = -1;
+            for published in alone.published {
+                if published != key {
+                    rpc.notify("textDocument/publishDiagnostics", fmt.sprint("{\"uri\":%,\"diagnostics\":[]}", json.encode(uriFor(published, published))));
+                }
+            }
+            alone.published.clear();
+            rpc.log(fmt.sprint("% is part of %", alone.root, projects[program].root));
+        }
+    }
+}
+
+// If the program sends the diagnostics of the file: it is the file's program, or the file has none yet
+isOwnerOf :: (p: *project.Project, key: string) -> bool {
+    if !owners.has(key) {
+        return true;
+    }
+    return owners.get(key, "") == source.keyOf(p.root);
 }
 
 // If the file is in the standard library, which is the std folder next to the bin folder of the compiler
@@ -309,6 +364,7 @@ projectOf :: (root: string) -> int {
     key := source.keyOf(root);
     for p, i in projects {
         if source.keyOf(p.root) == key {
+            projects.indexRef(i).retired = false;
             return i as int;
         }
     }
@@ -359,7 +415,7 @@ publishDiagnostics :: (p: *project.Project) {
         path := d.file;
         if path == "" { path = p.root; }
         key := source.keyOf(path);
-        if !keys.contains(key) {
+        if !keys.contains(key) && isOwnerOf(p, key) {
             keys.add(key);
             paths.add(path);
         }
@@ -368,7 +424,7 @@ publishDiagnostics :: (p: *project.Project) {
     // An open file of the project gets them too when it has none, so the editor clears what it shows
     with := keys.count;
     for doc in documents {
-        if p.fileNumber(doc.key) >= 0 && !keys.contains(doc.key) {
+        if p.fileNumber(doc.key) >= 0 && !keys.contains(doc.key) && isOwnerOf(p, doc.key) {
             keys.add(doc.key);
             paths.add(doc.path);
         }
@@ -392,7 +448,7 @@ publishDiagnostics :: (p: *project.Project) {
     }
 
     for key in p.published {
-        if !keys.contains(key) {
+        if !keys.contains(key) && isOwnerOf(p, key) {
             rpc.notify("textDocument/publishDiagnostics", fmt.sprint("{\"uri\":%,\"diagnostics\":[]}", json.encode(uriFor(key, key))));
         }
     }
@@ -682,6 +738,9 @@ workspaceSymbols :: (m: rpc.Message) {
     sb.addChar('[');
     seen: [..]string;  // A symbol can be in more than one project
     for _, i in projects {
+        if projects[i].retired {
+            continue;
+        }
         update(i);
         p := projects.indexRef(i);
         for sym in p.index.symbols {
@@ -736,10 +795,12 @@ completionsAt :: (params: json.Value) -> project.Completions, bool {
     // The compiler checks the text as it is now, so the project isn't indexed first. That is done when the typing stops
     key := source.keyOf(path);
     program := -1;
+    if owners.has(key) {
+        program = projectOf(owners.get(key, ""));
+    }
     for p, i in projects {
-        if p.fileNumber(key) >= 0 {
+        if program < 0 && !p.retired && p.fileNumber(key) >= 0 {
             program = i as int;
-            break;
         }
     }
     if program < 0 {
@@ -852,6 +913,303 @@ tokenType :: (kind: string) -> int {
         case "typeParameter" => 10;
         else                 => 8;  // variable, global and constant
     };
+}
+
+//
+// Rename: the declaration of the name at the position and every use of it, in every file of the program
+//
+
+// Where the name is in a range of a use, e.g the 'print' of 'fmt.print'. ok is false when it isn't written there, e.g
+// a use through the alias of an import
+nameIn :: (key: string, path: string, r: project.Range, name: string) -> project.Range, bool {
+    if r.start.line != r.end.line {
+        return r, false;
+    }
+    line := textOf(key, path).line(r.start.line);
+    if r.start.character < 0 || r.end.character > line.len || r.end.character - r.start.character < name.len {
+        return r, false;
+    }
+    text := line.slice(r.start.character, r.end.character);
+    if text == name {
+        return r, true;
+    }
+    // 'ns.name': the name after the last '.'
+    if text.endsWith(name) && text[text.len - name.len - 1] == '.' {
+        found := r;
+        found.start.character = r.end.character - name.len as int;
+        return found, true;
+    }
+    return r, false;
+}
+
+// The symbol to rename at the place, or null with why not
+renameTarget :: (place: Place) -> *project.Symbol, string {
+    sym := symbolAt(place);
+    if sym == null {
+        return null, "There is no name here to rename";
+    }
+    if sym.kind == "namespace" {
+        return null, "A namespace is renamed by the 'namespace' line of its files";
+    }
+    if sym.name == "self" {
+        return null, "'self' can't be renamed";
+    }
+    p := projects.indexRef(place.program);
+    declaredIn := source.keyOf(p.index.files[sym.file]);
+    if isInStandardLibrary(declaredIn) && p.options != AllStd {
+        return null, fmt.sprint("'%' is in the standard library. Rename it in a file of the standard library, where all of its uses are known", sym.name);
+    }
+    return sym, "";
+}
+
+prepareRename :: (m: rpc.Message) {
+    place := placeOf(m.params);
+    sym, why := renameTarget(place);
+    if sym == null {
+        rpc.fail(m.id, rpc.RequestFailed, why);
+        return;
+    }
+    // The name under the cursor
+    p := projects.indexRef(place.program);
+    path := p.index.files[place.file];
+    key := source.keyOf(path);
+    for ref in p.index.references {
+        if ref.file == place.file && ref.symbol == sym.id && project.contains(ref.range, place.at, true) {
+            r, ok := nameIn(key, path, ref.range, sym.name);
+            if ok {
+                rpc.respond(m.id, fmt.sprint("{\"range\":%,\"placeholder\":%}", rangeJson(key, path, r), json.encode(sym.name)));
+                return;
+            }
+        }
+    }
+    rpc.respond(m.id, fmt.sprint("{\"range\":%,\"placeholder\":%}", rangeJson(source.keyOf(p.index.files[sym.file]), p.index.files[sym.file], sym.nameRange), json.encode(sym.name)));
+}
+
+rename :: (m: rpc.Message) {
+    newName := m.params.get("newName").asString();
+    if !isName(newName) {
+        rpc.fail(m.id, rpc.RequestFailed, fmt.sprint("'%' isn't a name", newName));
+        return;
+    }
+    place := placeOf(m.params);
+    sym, why := renameTarget(place);
+    if sym == null {
+        rpc.fail(m.id, rpc.RequestFailed, why);
+        return;
+    }
+    p := projects.indexRef(place.program);
+
+    // The edits of each file, as JSON
+    files: [..]int;
+    edits: [..]fmt.StringBuilder;
+    seen:  [..]string;
+    places: [..]project.Reference;
+    places.add(project.Reference{file: sym.file, range: sym.nameRange, symbol: sym.id});
+    for ref in p.index.references {
+        if ref.symbol == sym.id {
+            places.add(ref);
+        }
+    }
+    for at in places {
+        path := p.index.files[at.file];
+        key := source.keyOf(path);
+        r, ok := nameIn(key, path, at.range, sym.name);
+        if !ok {
+            continue;
+        }
+        id := fmt.sprint("%:%:%", at.file, r.start.line, r.start.character);
+        if seen.contains(id) {
+            continue;
+        }
+        seen.add(id);
+        k := files.indexOf(at.file);
+        if k < 0 {
+            files.add(at.file);
+            edits.add(fmt.newStringBuilder(256));
+            k = (files.count - 1) as int;
+        } else {
+            edits.indexRef(k).addChar(',');
+        }
+        edits.indexRef(k).add("{\"range\":%,\"newText\":%}", rangeJson(key, path, r), json.encode(newName));
+    }
+
+    sb := fmt.newStringBuilder(1024);
+    sb.addString("{\"changes\":{");
+    for file, k in files {
+        if k > 0 { sb.addChar(','); }
+        path := p.index.files[file];
+        sb.add("%:[%]", json.encode(uriFor(source.keyOf(path), path)), edits[k].toString());
+    }
+    sb.addString("}}");
+    rpc.respond(m.id, sb.toString());
+}
+
+// If the text is a name that isn't a keyword, e.g a new name for a rename
+isName :: (text: string) -> bool {
+    if text.len == 0 {
+        return false;
+    }
+    for ch, i in text {
+        letter := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_';
+        digit  := ch >= '0' && ch <= '9';
+        if !letter && !(digit && i > 0) {
+            return false;
+        }
+    }
+    return !Keywords.contains(text);
+}
+
+Keywords :: ["if", "else", "for", "while", "in", "switch", "case", "return", "break", "continue", "struct", "union", "enum",
+             "method", "import", "use", "namespace", "extern", "as", "new", "assert", "typeof", "sizeof", "true", "false",
+             "null", "self", "int", "uint", "float", "bool", "string", "any", "void", "u8", "u16", "u32", "u64", "i8", "i16",
+             "i32", "i64", "f32", "f64", "xx"];
+
+//
+// Code actions: the missing cases of a switch
+//
+
+// For the error "The switch doesn't handle .closed, .locked of Status", the cases .closed and .locked are added before
+// the '}' of the switch
+codeActions :: (m: rpc.Message) {
+    uri  := m.params.get("textDocument").get("uri").asString();
+    path := source.pathOf(uri);
+    key  := source.keyOf(path);
+    diagnostics := m.params.get("context").get("diagnostics");
+
+    sb := fmt.newStringBuilder(512);
+    sb.addChar('[');
+    count := 0;
+    for d in 0..diagnostics.length() {
+        diagnostic := diagnostics.at(d);
+        message := diagnostic.get("message").asString();
+        prefix := "The switch doesn't handle ";
+        if !message.startsWith(prefix) {
+            continue;
+        }
+        end := message.indexOf(" of ");
+        if end < 0 {
+            continue;
+        }
+        values := message.slice(prefix.len as int, end).split(", ");
+        start := diagnostic.get("range").get("start");
+        edit, ok := missingCasesEdit(key, path, start.get("line").asNumber() as int, start.get("character").asNumber() as int, values);
+        if !ok {
+            continue;
+        }
+        if count > 0 { sb.addChar(','); }
+        count += 1;
+        title := "Add the missing case";
+        if values.count > 1 { title = "Add the missing cases"; }
+        sb.add("{\"title\":%,\"kind\":\"quickfix\",\"isPreferred\":true,\"diagnostics\":[%],\"edit\":{\"changes\":{%:[%]}}}",
+            json.encode(title), json.encode(diagnostic), json.encode(uri), edit);
+    }
+    sb.addChar(']');
+    rpc.respond(m.id, sb.toString());
+}
+
+// The edit that adds the cases to the switch whose value starts at the position (UTF-16). ok is false when the switch
+// isn't found
+missingCasesEdit :: (key: string, path: string, line: int, utf16: int, values: [..]string) -> string, bool {
+    text := textOf(key, path);
+    if line < 0 || line >= text.lines.count {
+        return "", false;
+    }
+    at := text.lines[line] + source.toByte(text.line(line), utf16);
+
+    // The '{' of the switch, then its '}'
+    open := -1;
+    for i in at..text.text.len {
+        if text.text[i] == '{' { open = i as int; break; }
+        if text.text[i] == ';' || text.text[i] == '}' { break; }
+    }
+    if open < 0 {
+        return "", false;
+    }
+    close := matchingBrace(text.text, open);
+    if close < 0 {
+        return "", false;
+    }
+
+    // The line of the '}' and its indentation, and the indentation of the cases
+    closeLine := lineOf(text, close);
+    lineStart := text.lines[closeLine];
+    indent := text.text.slice(lineStart as int, lineStart as int + leadingSpaces(text.line(closeLine)));
+    caseIndent := fmt.sprint("%    ", indent);
+    isExpression := false;
+    body := text.text.slice(open + 1, close);
+    caseAt := body.indexOf("case ");
+    if caseAt >= 0 {
+        lineBegin := caseAt;
+        while lineBegin > 0 && body[lineBegin - 1] != '\n' { lineBegin -= 1; }
+        caseIndent = body.slice(lineBegin, caseAt);
+        isExpression = body.indexOf("=>") >= 0;
+    }
+    onItsOwnLine := text.text.slice(lineStart as int, close).len == leadingSpaces(text.line(closeLine));
+
+    insert := fmt.newStringBuilder(128);
+    if !onItsOwnLine {
+        insert.addChar('\n');
+    }
+    for value in values {
+        if isExpression {
+            insert.add("%case % => \n", caseIndent, value);
+        } else {
+            insert.add("%case % { }\n", caseIndent, value);
+        }
+    }
+    if !onItsOwnLine {
+        insert.addString(indent);
+    }
+    position := closeLine;
+    character := 0;
+    if !onItsOwnLine {
+        character = source.toUtf16(text.line(closeLine), close - lineStart as int);
+    }
+    return fmt.sprint("{\"range\":{\"start\":{\"line\":%,\"character\":%},\"end\":{\"line\":%,\"character\":%}},\"newText\":%}",
+        position, character, position, character, json.encode(insert.toString())), true;
+}
+
+// The '}' of the '{' at open, skipping strings, characters and comments. -1 when there is none
+matchingBrace :: (text: string, open: int) -> int {
+    depth := 0;
+    i := open;
+    while i < text.len {
+        ch := text[i];
+        if ch == '"' || ch == '\'' {
+            i += 1;
+            while i < text.len && text[i] != ch && text[i] != '\n' {
+                if text[i] == '\\' { i += 1; }
+                i += 1;
+            }
+        } else if ch == '/' && i + 1 < text.len && text[i + 1] == '/' {
+            while i < text.len && text[i] != '\n' { i += 1; }
+        } else if ch == '{' {
+            depth += 1;
+        } else if ch == '}' {
+            depth -= 1;
+            if depth == 0 {
+                return i as int;
+            }
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+lineOf :: (text: *source.Text, offset: int) -> int {
+    line := 0;
+    for start, n in text.lines {
+        if start <= offset {
+            line = n as int;
+        }
+    }
+    return line;
+}
+
+leadingSpaces :: (line: string) -> int {
+    n := 0;
+    while n < line.len && (line[n] == ' ' || line[n] == '\t') { n += 1; }
+    return n;
 }
 
 // A name of the file, in bytes as the compiler counts

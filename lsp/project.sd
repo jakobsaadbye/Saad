@@ -69,12 +69,14 @@ Project :: struct {
     keys:       [..]string;  // source.keyOf() of each file of the index
     generation: int = -1;    // The generation of the documents it was indexed at
     published:  [..]string;  // The files it has sent diagnostics for, as keys
+    retired:    bool;        // A file on its own whose program was found later. It isn't checked or asked
+    options:    string;      // More options for the compiler, e.g " --all-std" for the standard library
 }
 
 // Runs 'saad index' on the main file. overlays are the --overlay options for the text the editor hasn't saved.
 // Returns false if the compiler couldn't be run or didn't write an index
 run :: method (p: *Project, compiler: string, overlays: string) -> bool {
-    command := fmt.sprint("\"%\" index \"%\"%", compiler, p.root, overlays);
+    command := fmt.sprint("\"%\" index \"%\"% %", compiler, p.root, p.options, overlays);
     text, code := os.output(command);
     if text.len == 0 {
         rpc.log(fmt.sprint("Couldn't run the compiler (exit code %): %", code, command));
@@ -82,10 +84,22 @@ run :: method (p: *Project, compiler: string, overlays: string) -> bool {
     }
 
     index, err := json.decode<Index>(text);
-    text.free();
     if err != "" {
-        rpc.log(fmt.sprint("The compiler didn't write an index for %: %", p.root, err));
+        rpc.log(fmt.sprint("The compiler didn't write an index for %: % (% bytes: %)", p.root, err, text.len, text.slice(0, 60)));
+        text.free();
         return false;
+    }
+    text.free();
+
+    // When an error leaves files out, e.g an import that is being written, the names of the last index are kept, so
+    // going to definitions and hovering still work in those files while the error is fixed. Its diagnostics are new
+    if index.diagnostics.count > 0 && index.files.count < p.index.files.count {
+        rpc.log(fmt.sprint("The index of % has % of % files. The names of the last index are kept", p.root, index.files.count, p.index.files.count));
+        p.index.diagnostics.free();
+        p.index.diagnostics = index.diagnostics;
+        index.symbols.free();
+        index.references.free();
+        return true;
     }
 
     p.index.free();
@@ -125,7 +139,7 @@ Completions :: struct {
 
 // Asks the compiler what can be written at the position of the file. ok is false if it didn't answer
 complete :: method (p: *Project, compiler: string, overlays: string, path: string, at: Position) -> Completions, bool {
-    command := fmt.sprint("\"%\" complete \"%\" --at \"%:%:%\"%", compiler, p.root, path, at.line, at.character, overlays);
+    command := fmt.sprint("\"%\" complete \"%\" --at \"%:%:%\"% %", compiler, p.root, path, at.line, at.character, p.options, overlays);
     text, code := os.output(command);
     result: Completions;
     if text.len == 0 {
@@ -169,7 +183,9 @@ symbolAt :: method (p: *Project, file: int, at: Position) -> int {
             }
         }
         for sym in p.index.symbols {
-            if sym.file == file && contains(sym.nameRange, at, inclusive) {
+            // A symbol without a name there, e.g the self of a method in a struct, is only found by its uses
+            empty := sym.nameRange.start.line == sym.nameRange.end.line && sym.nameRange.start.character == sym.nameRange.end.character;
+            if sym.file == file && !empty && contains(sym.nameRange, at, inclusive) {
                 return sym.id;
             }
         }

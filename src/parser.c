@@ -423,6 +423,16 @@ AstFile *parse_file(Parser *parser, char *file_path) {
         if (!ok) return NULL;
         prelude = ((AstImport **)file->imports.items)[file->imports.count - 1];
         prelude->is_prelude = true;
+
+        if (parser->expression_trees_file_path && strcmp(file_path, parser->expression_trees_file_path) == 0) {
+            parser->expression_trees_file = file;
+        }
+        else if (parser->expression_trees_file_path) {
+            ok = generate_and_add_import(parser, "expression_trees", parser->expression_trees_file_path);
+            if (!ok) return NULL;
+            prelude = ((AstImport **)file->imports.items)[file->imports.count - 1];
+            prelude->is_prelude = true;
+        }
     }
 
     // namespace game.physics;

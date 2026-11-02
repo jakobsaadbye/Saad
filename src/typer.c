@@ -473,6 +473,7 @@ bool is_prelude_identifier(Typer *typer, AstIdentifier *ident) {
     AstFile *file  = ident->head.file;
     if (file == NULL) return false;
     if (file == parser->collections_file) return true;
+    if (file == parser->expression_trees_file) return true;
     if (parser->runtime_file_path && strcmp(file->absolute_path, parser->runtime_file_path) == 0) return true;
     if (parser->builtin_string_file_path && strcmp(file->absolute_path, parser->builtin_string_file_path) == 0) return true;
     if (parser->slices_file_path && strcmp(file->absolute_path, parser->slices_file_path) == 0) return true;
@@ -607,6 +608,7 @@ bool check_namespace_import(Typer *typer, AstImport *import) {
 }
 
 bool check_import(Typer *typer, AstImport *import) {
+    if (import->failed) return true; // Reported when the files were loaded
     if (import->kind != IMPORT_FILE) {
         // import "fmt"; of a namespace of the standard library
         if (import->path_token.type == TOKEN_LITERAL_STRING) {
@@ -2169,7 +2171,7 @@ Type *resolve_type(Typer *typer, Type *type) {
             if (!ok) return NULL;
         }
 
-        index_identifier_use((Ast *)type, ident);
+        index_type_name_use((Ast *)type, ident);
 
         if (ident->type == NULL || !identifier_is_type(ident)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(type), "'%s' is not a type", type->name);
@@ -2730,7 +2732,8 @@ AstIdentifier *lookup_type_identifier(Typer *typer, char *name, Ast *site) {
 
     Namespace *ns = namespace_of_names(typer, names, count - 1);
     if (ns == NULL) {
-        report_error_ast(typer->parser, LABEL_ERROR, site, "Unknown namespace in the type '%s'", name);
+        if (!is_poisoned_name(typer->parser, names[0])) report_error_ast(typer->parser, LABEL_ERROR, site, "Unknown namespace in the type '%s'", name);
+        free(copy);
         return NULL;
     }
 
@@ -5504,7 +5507,7 @@ static TypeStruct *expression_tree_type(Typer *typer, Type *type) {
     if (type->kind != TYPE_STRUCT) return NULL;
     AstStruct *generic = ((TypeStruct *)type)->node->generic_struct;
     if (generic == NULL || strcmp(generic->identifier->name, "Expr") != 0) return NULL;
-    if (typer->parser->collections_file == NULL || generic->head.file != typer->parser->collections_file) return NULL;
+    if (typer->parser->expression_trees_file == NULL || generic->head.file != typer->parser->expression_trees_file) return NULL;
     return (TypeStruct *)type;
 }
 
@@ -5594,7 +5597,7 @@ static AstExpr *tree_null(Typer *typer, Ast *at) {
 // A call of one of the functions in the prelude that build a tree e.g exprMember(left, "age")
 static AstExpr *tree_call(Typer *typer, char *name, AstExpr **args, int count, Ast *at) {
     Parser *parser = typer->parser;
-    AstIdentifier *function = lookup_from_scope(parser, parser->collections_file->scope, name);
+    AstIdentifier *function = parser->expression_trees_file ? lookup_from_scope(parser, parser->expression_trees_file->scope, name) : NULL;
     if (function == NULL) {
         report_error_ast(parser, LABEL_ERROR, at, "Compiler Error: '%s' of the expression trees isn't in the prelude", name);
         return NULL;
@@ -7525,6 +7528,16 @@ static bool is_inferable_struct_literal(AstStructLiteral *literal) {
     return true;
 }
 
+// The struct literals whose type comes from where they are written, e.g the {...} of 'people: []Person = [{...}]'.
+// 'saad complete' gives the fields of such a literal (complete.c)
+typedef struct InferredLiteral {
+    AstFile   *file;
+    int        open;   // The offset of its '{'
+    AstStruct *node;
+} InferredLiteral;
+DynamicArray inferred_literals; // of InferredLiteral
+bool         keep_inferred_literals;
+
 Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_type) {
     TypeStruct *struct_defn = NULL;
     if (literal->explicit_type == NULL && (ctx_type == NULL || ctx_type->kind == TYPE_ANY) && is_inferable_struct_literal(literal)) {
@@ -7585,6 +7598,11 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         }
 
         struct_defn = (TypeStruct *)(ctx_type);
+        if (keep_inferred_literals) {
+            if (inferred_literals.items == NULL) inferred_literals = da_init(16, sizeof(InferredLiteral));
+            InferredLiteral inferred = { literal->head.head.file, literal->head.head.start.input_idx, struct_defn->node };
+            da_append(&inferred_literals, inferred);
+        }
     }
 
     if (struct_defn->node->is_union && !(literal->head.head.flags & AST_FLAG_COMPILER_GENERATED)) {

@@ -28,6 +28,9 @@ Everything it does:
   known (`status == .`, `case .`, `f(.`), and the fields of a struct literal that aren't written yet
 * signature help: the parameters of the call that is being written
 * semantic highlighting: names colored by what they are, e.g a struct, a field, a parameter or an enum value
+* rename (F2): a name where it is declared and everywhere it is used. A name of the standard library is renamed from a
+  file of it, where all of its uses are known
+* quick fix: the missing cases of a switch, for "The switch doesn't handle .closed of Status"
 
 The compiler does the work: the server runs `saad index` and answers from what it writes. See `docs/lsp.md`.
 
@@ -49,8 +52,8 @@ its own for the file, as with the default theme (Seti).
 ```
 cd lsp/vscode
 npm install
-npx @vscode/vsce package         # saad-0.1.0.vsix
-code --install-extension saad-0.1.0.vsix
+npx @vscode/vsce package         # saad-0.2.0.vsix
+code --install-extension saad-0.2.0.vsix
 ```
 
 Or open `lsp/vscode` in VS Code and press F5 to run it in a new window.

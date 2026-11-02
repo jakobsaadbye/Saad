@@ -2,7 +2,7 @@
   "name": "saad",
   "displayName": "Saad",
   "description": "The Saad language: highlighting, errors as you type, go to definition, find references, hover and outline",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "saad",
   "license": "MIT",
   "engines": {

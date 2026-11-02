@@ -16,6 +16,7 @@ namespace time;
 // The zero Time is January 1, 1970 UTC
 
 import os.windows;
+use c;
 
 // A span of time in nanoseconds, e.g 90 * time.Minute. It is an i64, so the arithmetic of numbers works on it
 Duration :: i64;

@@ -75,8 +75,10 @@ static const char *source_path(const char *path) {
     return path;
 }
 
+char *repair_for_completion(const char *path, char *text); // complete.c
+
 static char *read_source(const char *path) {
-    return read_entire_file(source_path(path));
+    return repair_for_completion(path, read_entire_file(source_path(path)));
 }
 
 static char *read_namespace_declaration(const char *path) {
@@ -377,11 +379,40 @@ void write_text_file(const char *path, StringBuilder sb) {
     fclose(f);
 }
 
+// An import that failed is reported, and taken out of the file, so the rest of the program is still checked and an editor
+// still has an index. Its names are poisoned: using them fails without another error, e.g 'projec.Project' after
+// 'import projec;'
+static void drop_failed_import(Parser *parser, AstFile *file, int index) {
+    AstImport *import = ((AstImport **)file->imports.items)[index];
+    if (parser->poisoned_names.capacity == 0) parser->poisoned_names = da_init(16, sizeof(char *));
+    if (import->alias) da_append(&parser->poisoned_names, import->alias);
+    if (import->path) {
+        char *path  = strdup(import->path);
+        char *first = path;
+        char *dot   = strchr(path, '.');
+        char *last_dot = strrchr(path, '.');
+        char *name  = last_dot ? strdup(last_dot + 1) : path;
+        da_append(&parser->poisoned_names, name);
+        if (dot) { *dot = '\0'; da_append(&parser->poisoned_names, first); }
+    }
+    import->failed = true;
+    da_remove(&file->imports, index);
+    file->has_syntax_errors = true;
+}
+
 // Parses the main file and every file it imports (directly or indirectly). The main file is parsed_files[0]
 static bool parse_all_files(CompilerConfig *config, Parser *parser, const char *main_path, DynamicArray *parsed_files) {
     DynamicArray paths_to_visit = da_init(8, sizeof(char *));
     DynamicArray parsed_paths   = da_init(8, sizeof(char *)); // The absolute paths of the parsed files, as the same file can be reached by different paths
     da_append(&paths_to_visit, main_path);
+
+    // 'saad index --all-std': every namespace of the standard library is part of the program
+    if (program_index.all_std) {
+        for (int i = 0; i < parser->namespaces.count; i++) {
+            Namespace *ns = ((Namespace **)parser->namespaces.items)[i];
+            if (ns->is_standard) visit_namespace(&paths_to_visit, ns);
+        }
+    }
 
     for (int cursor = 0; cursor < paths_to_visit.count; cursor++) {
         char *path = ((char **)paths_to_visit.items)[cursor];
@@ -427,13 +458,13 @@ static bool parse_all_files(CompilerConfig *config, Parser *parser, const char *
             AstImport *import = ((AstImport **)file->imports.items)[i];
 
             if (import->kind != IMPORT_FILE) {
-                if (!resolve_namespace_import(parser, import)) return false;
+                if (!resolve_namespace_import(parser, import)) { drop_failed_import(parser, file, i); i--; continue; }
                 visit_namespace(&paths_to_visit, import->ns);
                 continue;
             }
 
             // @Improve: These error messages when we get a proper module system
-            if (!resolve_import(config, parser, import, file)) return false;
+            if (!resolve_import(config, parser, import, file)) { drop_failed_import(parser, file, i); i--; continue; }
             if (import->kind != IMPORT_FILE) {
                 visit_namespace(&paths_to_visit, import->ns);
                 continue;
@@ -765,6 +796,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     parser.builtin_string_file_path = join_path(prelude_path, "string.sd");
     parser.collections_file_path    = join_path(prelude_path, "collections.sd");
     parser.slices_file_path         = join_path(prelude_path, "slices.sd");
+    parser.expression_trees_file_path = join_path(prelude_path, "expression_trees.sd");
     parser.c_bindings_path          = get_absolute_path(c_bindings_path);
     parser.read_source              = read_source;
     ConstEvaluator ce     = const_evaluator_init(&parser);
@@ -786,7 +818,14 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
 
     // ----------- Typecheck -----------
     report.typer_time_start = clock();
-    bool typed = check_file(&typer, main_file) && error_count() == 0; // Statements with errors were skipped, so the others were still checked
+    bool typed = check_file(&typer, main_file);
+    if (program_index.all_std) {
+        for (int i = 0; i < parser.namespaces.count; i++) {
+            Namespace *ns = ((Namespace **)parser.namespaces.items)[i];
+            if (ns->is_standard) check_namespace_files(&typer, ns);
+        }
+    }
+    typed = typed && error_count() == 0; // Statements with errors were skipped, so the others were still checked
     index_declarations(parsed_files); // For 'saad index', also when there are errors, so an editor can still find what was checked
     if (program_completion.enabled) complete_program(&typer, parsed_files); // For 'saad complete', also when there are errors
     if (!typed) {

@@ -47,7 +47,7 @@ binary &&
   else, e.g a cast, indexing or another lambda, is an error.
 * `null` is a `value` node whose `value.type` is null. An enum value like `.admin` is a value of the enum it is
   compared with.
-* The tree types are in `std/prelude/collections.sd`: `Expr<F>{root, parameters}` and `ExprNode`.
+* The tree types are in `std/prelude/expression_trees.sd`: `Expr<F>{root, parameters}` and `ExprNode`. Every file imports it, like the rest of the prelude.
 
 ## How it works
 
