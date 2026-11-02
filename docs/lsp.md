@@ -25,7 +25,8 @@ editor ── LSP (JSON-RPC over stdin/stdout) ──> lsp/ (Saad)
 4. **Error recovery** (done): after an error, the parser and the typer go on with the next statement, so the index
    and the errors cover the whole program while the code is being typed. See "Error recovery" below.
 5. **Completion, signature help and semantic tokens** (done): `saad complete` and the index. See below.
-6. Later: rename, go to the definition of a type, code actions, formatting.
+6. **Rename and code actions** (done): rename from the index, and a quick fix for the missing cases of a switch.
+7. Later: go to the definition of a type, more code actions, formatting.
 
 ## saad check
 
@@ -77,7 +78,12 @@ diagnostics of `saad check`:
 * A **reference** is a use of a symbol: go to definition is the symbol of the reference under the cursor, and find
   references is every reference of a symbol. A declaration is not a reference of itself.
 * By default the index has the program's files, and the symbols of the standard library that the program uses.
-  `--std` also writes the rest of the standard library.
+  `--std` also writes the rest of the standard library. `--all-std` checks every namespace of the standard library
+  with the program, so the uses of a name in all of it are known. The server uses it for the files of `std/`.
+* An import that can't be found is an error, but the rest of the program is still checked and indexed. The names of
+  the import are poisoned (see "Error recovery").
+* The `self` of a method written in a struct isn't written, so its symbol has an empty `nameRange` at `method`. Its
+  uses have a hover and go to the method. `time.Time` is a use of the namespace `time` and of the struct `Time`.
 * `--overlay path=file` reads `file` instead of `path`, for the text an editor hasn't saved. It can be given more
   than once.
 * A name in a function that is never type checked isn't in the index, e.g in a generic function that is never called,
@@ -104,7 +110,13 @@ lsp/
 
 * **Projects.** A file is answered with the program it is part of: a program the server already indexed that has the
   file, else the `main.sd` of its folder or a folder above it (up to the workspace), else the file on its own. A
-  project is indexed again when a document has changed since, and when a document is saved.
+  project is indexed again when a document has changed since, and when a document is saved. The files of `std/` are
+  one project, indexed with `--all-std`.
+* **A file keeps its program.** Once a file is found in a program, the server remembers it (`owners`). While an error
+  leaves the file out, e.g an import that is being written, it is still answered by that program instead of becoming a
+  program of its own, and only that program sends its diagnostics. A project of the file on its own that was made
+  before is retired. When a new index has errors and fewer files than the last one, the names of the last one are kept,
+  so hover and go to definition keep working while the error is fixed.
 * **Unsaved text.** Every open document is written to a file in the temporary folder, and given to the compiler with
   `--overlay`. After a change, the program is checked again when no more messages are waiting (`io.hasInput()`), so
   typing doesn't queue up a check for every key.
@@ -112,6 +124,12 @@ lsp/
 * **Positions.** The compiler counts bytes and the editor UTF-16 units, so `source` converts each position with the
   line it is on (`positionEncoding` is `utf-16`).
 * The server writes its log to stderr. VS Code shows it in the Output panel (Saad).
+
+* **Rename** edits the declaration and every reference of the symbol whose text is the name (the `print` of
+  `fmt.print`). A reference through another name, e.g the alias of an import, is left alone. A name of the standard
+  library is only renamed from a file of it, as a program only has the uses of the parts it uses.
+* **Code actions.** For "The switch doesn't handle .a, .b of T", the quick fix adds `case .a { }` and `case .b { }`
+  before the `}` of the switch (`case .a => ` in a switch expression), indented like the other cases.
 
 `tools/linux/check_lsp.py` talks to the server like an editor, and checks every feature on `tests/index.sd`.
 
@@ -165,7 +183,10 @@ like `saad index`.
 ```
 
 The program is checked first, and, as the compiler goes on after errors (phase 4), the code around the position is
-checked even when the line that is being written isn't whole. Then the text before the position says what is wanted
+checked even when the line that is being written isn't whole. Before that, the line at the position is repaired
+(`repair_for_completion()`): a `.` with no name after it gets a placeholder name, and the brackets that are open on
+the line are closed, so `xs.where(u => u.age > 3 && u.` is checked as a whole call and `u` has its type. The text
+before the position stays the same. Then the text before the position says what is wanted
 (src/complete.c):
 
 * After a `.`, the chain before it (`a.b[0].c().`) is followed from the scope at the position: a namespace gives its
@@ -178,7 +199,10 @@ checked even when the line that is being written isn't whole. Then the text befo
   `a: Status = .` (the type of the place), `case .` (the type of what the switch is on), `f(x, .` (the type of the
   parameter), `return .` (the return type of the function) and `Point{kind: .` (the type of the field).
 * In a struct literal, e.g `Point{x: 1, |`, the fields that aren't written yet (the variants for a union), with
-  `insert` set to e.g `"y: "`. After `name:`, a value is written, so it is the names in scope.
+  `insert` set to e.g `"y: "`. After `name:`, a value is written, so it is the names in scope. A literal without a
+  type, e.g `people: []Person = [{...}, {|` or `p: Person = {|`, has the type the typer gave it from where it is
+  written (`inferred_literals`).
+* The functions that build expression trees (`exprMember`, ...) aren't offered: the compiler calls them.
 * Otherwise, the names in scope: the locals declared above the position and the parameters, the declarations and
   imports of the file, and the keywords.
 * In a call, `signature` is the function of the last `(` that isn't closed, and `active` the argument at the

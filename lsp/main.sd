@@ -4,6 +4,8 @@
 //   * errors and warnings as the code is written (diagnostics)
 //   * go to definition, find references and hover
 //   * the outline of a file (document symbols) and the symbols of the workspace
+//   * completion, signature help and semantic tokens
+//   * rename, and a quick fix for the missing cases of a switch
 //
 // Build it with 'saad build lsp/main.sd'. Usage: saad-lsp [--compiler path/to/saad]
 
@@ -117,7 +119,7 @@ initialize :: (m: rpc.Message) {
 
     capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]},\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":%,\"tokenModifiers\":%},\"full\":true},\"renameProvider\":{\"prepareProvider\":true},\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\"]}}";
     capabilities = fmt.sprint(capabilities, json.encode(TokenTypes), json.encode(TokenModifiers));
-    rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.2.0\"}}", capabilities));
+    rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.3.0\"}}", capabilities));
 }
 
 // The editor asks the server to end after asking it to shut down. Otherwise the server ends with an error
