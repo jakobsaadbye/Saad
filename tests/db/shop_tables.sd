@@ -6,6 +6,7 @@ import dbms.postgres;
 import database;
 use entities;
 import shopsetup;
+import time;
 use fmt;
 use c;
 
@@ -38,7 +39,8 @@ main :: () {
 
     assert(db.saveChanges() == "");
     assert(db.pendingChanges() == 0);
-    assert(ada.id == 1 && bo.id == 2 && ada.createdAt.len > 0);
+    assert(ada.id == 1 && bo.id == 2 && ada.createdAt.year() >= 2025);   // A timestamptz is a time.Time
+    assert(time.since(ada.createdAt) < time.Hour && !bo.createdAt.before(ada.createdAt));
     assert(ada.active && ada.score == 0.0); // The defaults of the database are the defaults of the struct
     assert(bo.email == null && bo.age == null && bo.role == .guest);
 
@@ -161,6 +163,13 @@ main :: () {
     assert(e15 == "" && older.count == 1 && older[0].name == "Ada");
     withoutEmail, e16 := db.users.where(u => u.email == null).count();
     assert(e16 == "" && withoutEmail == 1);
+
+    // Times are parameters too, and after, before and equal are comparisons
+    lastWeek := time.now().addDate(0, 0, -7);
+    newUsers, e22 := db.users.where(u => u.createdAt.after(lastWeek) && !u.createdAt.before(ada.createdAt)).count();
+    assert(e22 == "" && newUsers == 2);
+    sameTime, _ := db.users.where(u => u.createdAt.equal(ada.createdAt)).select(u => u.name).all();
+    assert(sameTime.contains("Ada"));
 
     // first gives a pointer, and its row is tracked
     admin, e17 := db.users.where(u => u.role == .admin && u.name.startsWith("A")).first();

@@ -15,7 +15,7 @@ User :: struct {
     name:      string;
     email:     ?string;    // NULL is empty
     role:      Role;       // a Postgres enum, read by name
-    createdAt: string;     // reads the column created_at
+    createdAt: time.Time;  // reads the column created_at
 }
 
 main :: () {
@@ -101,7 +101,8 @@ User :: struct {
 | `bigint`, `int`, `smallint`, `serial` | any integer type. A value that doesn't fit is an error |
 | `double precision`, `real`, `numeric` | `f64`, `f32` |
 | `boolean` | `bool` (`t`/`f`) |
-| `text`, `varchar`, and everything else | `string`, as Postgres writes it, e.g a `timestamptz` as `2026-11-01 10:00:00+01` |
+| `timestamptz`, `timestamp`, `date` | `time.Time`. A `timestamp` without a zone is UTC, and a `date` is midnight UTC. It is sent as RFC 3339 text |
+| `text`, `varchar`, and everything else | `string`, as Postgres writes it, e.g a `numeric` as `12.50` |
 | a Postgres enum, or a number | an enum: its name (case and `_` don't matter) or its number |
 | a column that can be `NULL` | an optional, e.g `?string` or `?i64`, which is empty for `NULL` (see `docs/optionals.md`) |
 
@@ -283,7 +284,7 @@ User :: struct {
     age:       ?i32;
     role:      Role = .guest;
     active:    bool = true;
-    createdAt: string;        // timestamp with time zone
+    createdAt: time.Time;
 }
 ```
 
@@ -341,7 +342,8 @@ err2 := db.saveChanges();
 | `boolean` | `bool` |
 | an enum of the schema | an enum, with the labels as they are when they are names |
 | `text`, `varchar`, `char` | `string` |
-| anything else, e.g `numeric`, `timestamptz`, `uuid`, `json` | `string`, with the type of the column as a comment |
+| `timestamptz`, `timestamp`, `date` | `time.Time`, and the file imports `time` |
+| anything else, e.g `numeric`, `uuid`, `json` | `string`, with the type of the column as a comment |
 | a column that can be `NULL` | `?T` |
 
 * The rows are plain structs: no attributes. What the tables need to know (the key, and the columns the database
@@ -448,7 +450,8 @@ db.users.where(u => u.age >= "18");   // A compile error, as the lambda is check
   query of every row, and `query.toSql()` gives the SQL and its parameters.
 * In a lambda the members of the row are its columns. These can be made into SQL: `==` (`=`), `!=`, `<`, `<=`, `>`,
   `>=`, `&&` (`AND`), `||` (`OR`), `!` (`NOT`), `+`, `-`, `*`, `/`, `%`, `??` (`coalesce`), `== null` (`IS NULL`),
-  and on text `startsWith(s)`, `endsWith(s)`, `indexOf(s)`, `toLower()`, `toUpper()` and `.len`. Anything else, e.g
+  on text `startsWith(s)`, `endsWith(s)`, `indexOf(s)`, `toLower()`, `toUpper()` and `.len`, and on times `after(t)`,
+  `before(t)` and `equal(t)`. A column that can be `NULL` takes `?.`, e.g `p.publishedAt?.after(since) ?? false`. Anything else, e.g
   another method, is an error that `all` gives. A part without the row, e.g `minAge - 1` or `now()`, is a value.
 * The rows of `all` and `first` of a keyed table are tracked, like those of `get`, so changes to them are saved by
   `saveChanges`. The rows of `select` are not: they are anonymous structs or values made of some columns.
@@ -463,4 +466,4 @@ Found while writing this, in the order they would help:
   names (`err1`, `err2`, ...) or a function around it.
 * `defer`, to free a result on every return.
 * Attributes on structs, e.g `@dbms.Table("users")`, for tables written by hand.
-* Types for dates, decimals and UUIDs. They are strings for now.
+* Types for decimals and UUIDs. They are strings for now. Times are `time.Time`, but without named zones.

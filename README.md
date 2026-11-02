@@ -86,6 +86,9 @@ saad check main.sd        # only check for errors
 * Changed: `time.now()` gives a `time.Time`. The high resolution clock is `time.clock()`, and `time.unix()` is
   `time.now().unix()`
 * `@Hidden` on a member leaves it out of `fmt`, `json` and `dbms`
+* `dbms` reads `timestamptz`, `timestamp` and `date` columns into `time.Time`, and the generator writes them so. In
+  queries, `after`, `before` and `equal` of times are comparisons, and `?.` works on a column that can be `NULL`:
+  `db.posts.where(p => p.publishedAt?.after(since) ?? false)`
 * Fix: a constant folded from a typed constant, e.g `Minute :: 60 * Second` with `Second :: 1000000000 as i64`, was
   checked as an `int`
 

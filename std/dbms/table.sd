@@ -187,6 +187,7 @@ columnsOf :: (type: *TypeStruct, generated: [..]string, key: string) -> [..]Tabl
         attribute: Column;
         hasAttribute := attributeOf(member, &attribute);
         if hasAttribute && attribute.skip { continue; }
+        if member.isHidden() { continue; }    // e.g the link of a row to its context
 
         column := TableColumn{member: member};
         column.name = columnName(member.name);

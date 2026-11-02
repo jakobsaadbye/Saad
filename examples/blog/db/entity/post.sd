@@ -2,6 +2,8 @@
 // instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
 namespace entities;
 
+import time;
+
 // A row of posts
 Post :: struct {
     id:          i64;
@@ -11,6 +13,6 @@ Post :: struct {
     body:        string = "";
     status:      PostStatus = .draft;
     views:       i32 = 0;
-    publishedAt: ?string;             // timestamp with time zone
-    createdAt:   string;              // timestamp with time zone
+    publishedAt: ?time.Time;
+    createdAt:   time.Time;
 }

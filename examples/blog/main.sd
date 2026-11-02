@@ -7,6 +7,7 @@
 import dbms;
 import dbms.postgres;
 import os;
+import time;
 import database;      // examples/blog/db/database.sd: Database, open and the tables
 use entities;         // examples/blog/db/entity: Author, Post, Comment, PostTag and PostStatus
 use fmt;
@@ -42,7 +43,8 @@ main :: () {
 
     print("% changes to save", db.pendingChanges());
     check(db.saveChanges());
-    print("Saved authors % (id %) and % (id %), who joined at %", ada.name, ada.id, grace.name, grace.id, ada.joinedAt);
+    print("Saved authors % (id %) and % (id %)", ada.name, ada.id, grace.name, grace.id);
+    print("% joined at % (a time.Time, as the column is a timestamptz)", ada.name, ada.joinedAt.format("15:04 on Monday"));
 
     // The posts need the ids of their authors, so they come after the authors are saved
     engine   := newPost(&db, ada,   "Notes on the Analytical Engine", "analytical-engine", "It weaves algebraic patterns.");
@@ -50,10 +52,10 @@ main :: () {
     compilers := newPost(&db, grace, "Why we need compilers",          "compilers",         "People should write in words.");
     moth      := newPost(&db, grace, "The first actual bug",           "first-bug",         "It was a moth.");
     engine.status    = .published;
-    engine.publishedAt = "2026-10-01 09:00:00+00";
+    engine.publishedAt = time.date(2026, 10, 1, 9);
     engine.views     = 120;
     compilers.status = .published;
-    compilers.publishedAt = "2026-10-15 12:30:00+00";
+    compilers.publishedAt = time.date(2026, 10, 15, 12, 30);
     compilers.views  = 300;
     moth.status = .archived;
     check(db.saveChanges());     // The four posts are one INSERT
@@ -77,7 +79,7 @@ main :: () {
     check(e1);
     print("\nPublished, newest first:");
     for post in published {
-        print("  % (% views)", post.title, post.views);
+        print("  % (% views, published %)", post.title, post.views, (post.publishedAt ?? post.createdAt).format("Jan 2"));
     }
 
     // Some columns, into an anonymous struct: struct { title: string; slug: string; popular: bool; }
@@ -95,6 +97,12 @@ main :: () {
     titles, e3 := db.posts.where(p => p.title.toLower().indexOf(term) >= 0 || p.body.toLower().indexOf(term) >= 0).select(p => p.title).all();
     check(e3);
     print("\nPosts about '%': %", term, titles);
+
+    // Times are values too. publishedAt can be NULL, so ?. and ?? say what it is then
+    since := time.date(2026, 10, 10);
+    recent, e12 := db.posts.where(p => p.publishedAt?.after(since) ?? false).select(p => p.title).all();
+    check(e12);
+    print("Published after %: %", since.format("January 2"), recent);
 
     // count and exists
     comments, e4 := db.comments.where(c => c.postId == engine.id).count();
@@ -115,7 +123,7 @@ main :: () {
     post, e7 := db.posts.where(p => p.slug == "bernoulli").first();   // A *Post, or null when there is none
     check(e7);
     post.status      = .published;
-    post.publishedAt = "2026-11-02 08:00:00+00";
+    post.publishedAt = time.now();
 
     reader, e8 := db.posts.get(engine.id);
     check(e8);

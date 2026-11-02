@@ -14,6 +14,8 @@ namespace dbms;
 //
 //     ==  !=  <  <=  >  >=  &&  ||  !  +  -  *  /  %     x.email == null is IS NULL, and ?? is coalesce
 //     x.name.startsWith(s)  x.name.endsWith(s)  x.name.indexOf(s)  x.name.toLower()  x.name.toUpper()  x.name.len
+//     x.createdAt.after(t)  x.createdAt.before(t)  x.createdAt.equal(t)
+//     x.publishedAt?.after(t) ?? false, for a column that can be NULL
 import fmt;
 
 // A query of the rows of a table. The methods that add to it give a new query, so a query can be the start of others
@@ -355,6 +357,17 @@ SqlWriter :: struct {
             return;
         }
         if arguments != 1 { self.failCall(node); return; }
+        // Times, e.g p.publishedAt.after(since)
+        if node.name == "after" || node.name == "before" || node.name == "equal" {
+            self.sb.addChar('(');
+            self.write(node.left);
+            if node.name == "after"  { self.sb.addString(" > "); }
+            if node.name == "before" { self.sb.addString(" < "); }
+            if node.name == "equal"  { self.sb.addString(" = "); }
+            self.write(node.args[0]);
+            self.sb.addChar(')');
+            return;
+        }
         if node.name == "startsWith" || node.name == "endsWith" {
             // left(x, length(s)) = s, so that % and _ in s are no wildcards
             if node.name == "startsWith" { self.sb.addString("(left("); } else { self.sb.addString("(right("); }
@@ -378,7 +391,7 @@ SqlWriter :: struct {
     }
 
     failCall :: method * (node: *ExprNode) {
-        self.fail(fmt.sprint("The method % can't be made into SQL. These can: startsWith(s), endsWith(s), indexOf(s), toLower(), toUpper()", node.name));
+        self.fail(fmt.sprint("The method % can't be made into SQL. These can: startsWith(s), endsWith(s), indexOf(s), toLower(), toUpper(), and after(t), before(t) and equal(t) of times", node.name));
     }
 
     fail :: method * (message: string) {

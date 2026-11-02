@@ -2,11 +2,13 @@
 // instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
 namespace entities;
 
+import time;
+
 // A row of authors
 Author :: struct {
     id:       i64;
     name:     string;
     email:    string;
     bio:      ?string;
-    joinedAt: string;  // timestamp with time zone
+    joinedAt: time.Time;
 }

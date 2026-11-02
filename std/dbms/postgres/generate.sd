@@ -246,13 +246,15 @@ rowFile :: method (w: *Writer, table: SchemaTable) -> string {
 
     sb: fmt.StringBuilder;
     w.header(&sb, w.options.entities);
+    usesDbms := false;
+    usesTime := false;
     for m in members {
-        if m.attribute.len > 0 {
-            sb.addLine("import dbms;"); // For @dbms.Column
-            sb.addLine("");
-            break;
-        }
+        if m.attribute.len > 0 { usesDbms = true; }  // For @dbms.Column
+        if m.type.indexOf("time.Time") >= 0 { usesTime = true; }
     }
+    if usesDbms { sb.addLine("import dbms;"); }
+    if usesTime { sb.addLine("import time;"); }
+    if usesDbms || usesTime { sb.addLine(""); }
     sb.addLine("// A row of %", table.name);
     sb.addLine("% :: struct {", rowTypeName(table.name));
     for m in members {
@@ -396,10 +398,12 @@ memberOf :: method (w: *Writer, column: SchemaColumn) -> Member {
         m.type = fmt.sprint("?%", base);
     }
 
-    // What isn't text in Postgres, but is a string here, e.g a timestamp
+    // What isn't text in Postgres, but is a string here, e.g numeric, and times that aren't timestamptz
     if base == "string" && column.udtName != "text" && column.udtName != "varchar" && column.udtName != "bpchar" {
         m.comment = column.dataType;
     }
+    if column.udtName == "timestamp" { m.comment = "timestamp without time zone, which is UTC"; }
+    if column.udtName == "date"      { m.comment = "date, at midnight UTC"; }
 
     // A default that is a constant becomes the default of the member. One that is computed, e.g nextval(...) of a
     // serial or now(), is made by the database
@@ -427,12 +431,13 @@ baseTypeOf :: method (w: *Writer, column: SchemaColumn) -> string {
     if udt == "float4" { return "f32"; }
     if udt == "float8" { return "f64"; }
     if udt == "bool"   { return "bool"; }
+    if udt == "timestamptz" || udt == "timestamp" || udt == "date" { return "time.Time"; }
     if column.dataType == "USER-DEFINED" {
         for e in w.enums {
             if e.name == column.udtName { return pascalCase(e.name); }
         }
     }
-    return "string"; // Text, and what is written as text, e.g timestamps, numeric, uuid and json
+    return "string"; // Text, and what is written as text, e.g numeric, uuid and json
 }
 
 // The default of a column as Saad, if it is a constant, e.g 'guest'::role is .guest, true is true and 0 is 0

@@ -2,6 +2,8 @@
 // instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
 namespace entities;
 
+import time;
+
 // A row of comments
 Comment :: struct {
     id:         i64;
@@ -9,5 +11,5 @@ Comment :: struct {
     authorName: string;
     body:       string;
     likes:      i32 = 0;
-    createdAt:  string;  // timestamp with time zone
+    createdAt:  time.Time;
 }
