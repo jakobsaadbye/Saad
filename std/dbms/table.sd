@@ -54,23 +54,19 @@ Table :: struct <T> {
 
     // Of a value of every row, e.g users.sum(u => u.age). See query.sd
     sum :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
-        value, err := self.query().sum(f);
-        return value, err;
+        return self.query().sum(f);
     }
 
     min :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
-        value, err := self.query().min(f);
-        return value, err;
+        return self.query().min(f);
     }
 
     max :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
-        value, err := self.query().max(f);
-        return value, err;
+        return self.query().max(f);
     }
 
     average :: method <K> (f: Expr<(T) -> K>) -> (f64, string) {
-        value, err := self.query().average(f);
-        return value, err;
+        return self.query().average(f);
     }
 
     // Every row

@@ -2543,8 +2543,24 @@ static void lower_return(Lowerer *L, AstReturn *ret) {
         AstExpr *value = da_get_deref(ret->values, i);
         if (value->type->kind == TYPE_VOID) continue; // `return;`
 
+        // return f() of a function that gives several values: they are the values of this one
         if (value->type->kind == TYPE_TUPLE) {
-            LOWER_NOT_IMPLEMENTED(L, value, "returning the result of a multi-value call directly");
+            if (value->head.kind != AST_FUNCTION_CALL || ret->values.count != 1) {
+                LOWER_NOT_IMPLEMENTED(L, value, "returning several values of a call together with other values");
+            }
+            TypeTuple *tuple = (TypeTuple *) value->type;
+            if (tuple->types.count != func_defn->lowered_return_params.count) {
+                lower_fail(L, (Ast *) value, "Compiler Error: The call gives %d values, and the function returns %d", tuple->types.count, func_defn->lowered_return_params.count);
+            }
+            int ret_slots[16];
+            lower_call(L, (AstFunctionCall *) value, ret_slots, 16);
+            for (int j = 0; j < tuple->types.count; j++) {
+                AstIdentifier *ret_param = da_get_deref(func_defn->lowered_return_params, j);
+                Type *ret_type = da_get_deref(func_defn->return_types, j);
+                int out_ptr = emit_load(L, IR_PTR, addr_slot(local_slot(L, ret_param), 0));
+                store_value(L, addr_vreg(out_ptr, 0), ret_type, value_place(addr_slot(ret_slots[j], 0), da_get_deref(tuple->types, j)), (Ast *) value);
+            }
+            break;
         }
         if (i >= func_defn->lowered_return_params.count) {
             lower_fail(L, (Ast *) value, "Compiler Error: More return values than return parameters");

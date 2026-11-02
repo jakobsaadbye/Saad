@@ -55,8 +55,7 @@ related :: <T>(link: Link, table: string, column: string, value: any) -> (*T, st
 
     q := queryOf<T>(context, info);
     q.conditions.add(exprBinary("==", exprMember(exprParameter(0, "row"), memberOfColumn(info, column)), exprValue(value)));
-    row, err := q.first();
-    return row, err;
+    return q.first();
 }
 
 // The query of the rows of a table, to be narrowed to the ones that refer to a row, e.g

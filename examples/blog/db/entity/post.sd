@@ -22,8 +22,7 @@ Post :: struct {
 
     // The row of authors that authorId refers to, or null
     author :: method () -> (*Author, string) {
-        row, err := dbms.related<Author>(self.dbLink, "authors", "id", self.authorId);
-        return row, err;
+        return dbms.related<Author>(self.dbLink, "authors", "id", self.authorId);
     }
 
     // The rows of comments whose post_id is the id of this one, as a query, e.g post.comments().all()

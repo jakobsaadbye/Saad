@@ -279,8 +279,7 @@ paramText :: (arg: any) -> *u8, bool {
             inner: any;
             inner.type = valueType;
             inner.data = value;
-            text, ok := paramText(inner);
-            return text, ok;
+            return paramText(inner);
         }
         case .pointer {
             // null is NULL, otherwise the value it points to
@@ -295,8 +294,7 @@ paramText :: (arg: any) -> *u8, bool {
             inner: any;
             inner.type = pointee;
             inner.data = pointer;
-            text, ok := paramText(inner);
-            return text, ok;
+            return paramText(inner);
         }
         else {
             return null, false;

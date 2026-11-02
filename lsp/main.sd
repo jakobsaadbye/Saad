@@ -815,8 +815,7 @@ completionsAt :: (params: json.Value) -> project.Completions, bool {
     at.line = position.get("line").asNumber() as int;
     at.character = source.toByte(textOf(key, path).line(at.line), position.get("character").asNumber() as int);
     p := projects.indexRef(program);
-    result, ok := p.complete(compiler, overlayOptions(), path, at);
-    return result, ok;
+    return p.complete(compiler, overlayOptions(), path, at);
 }
 
 // The CompletionItemKind of LSP
