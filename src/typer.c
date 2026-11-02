@@ -7084,8 +7084,116 @@ AstStructLiteral *make_union_literal(Typer *typer, TypeStruct *union_type, AstId
     return literal;
 }
 
+// A struct literal without a type, where no type is wanted e.g {name: u.name, age: u.age}. Its type is the anonymous struct
+// of the names and the types of the values: struct { name: string; age: int; }
+static Type *check_inferred_struct_literal(Typer *typer, AstStructLiteral *literal) {
+    Parser *parser = typer->parser;
+
+    AstStruct *node      = ast_allocate(parser, sizeof(AstStruct));
+    node->head.kind      = AST_STRUCT;
+    node->head.file      = literal->head.head.file;
+    node->head.start     = literal->head.head.start;
+    node->head.end       = literal->head.head.end;
+    node->type_params    = da_init(1, sizeof(AstIdentifier *));
+    node->instances      = da_init(1, sizeof(TypeStruct *));
+    node->inside_methods = da_init(1, sizeof(AstDeclaration *));
+    node->is_anonymous   = true;
+    node->members        = make_empty_struct_scope(parser, node);
+    node->members->head.kind  = AST_BLOCK;
+    node->members->head.file  = node->head.file;
+    node->members->statements = da_init(literal->initializers.count, sizeof(Ast *));
+    node->members->parent     = typer->current_scope;
+    node->static_members = make_empty_struct_scope(parser, node);
+    node->methods        = make_empty_struct_scope(parser, node);
+
+    for (int i = 0; i < literal->initializers.count; i++) {
+        AstStructInitializer *init = ((AstStructInitializer **)literal->initializers.items)[i];
+        Type *type = check_expression(typer, init->value, NULL);
+        if (!type) return NULL;
+        if (is_untyped_type(type)) type = solidify_untyped_type(type); // Like x := 1
+
+        bool fixed_array = type->kind == TYPE_ARRAY && ((TypeArray *)type)->array_kind == ARRAY_FIXED;
+        if (is_null_type(type)) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)init->value, "The member '%s' is null, which doesn't say its type, so the type of the struct can't be inferred", init->designator->name);
+            report_error_ast(parser, LABEL_HINT, NULL, "Give the struct a type e.g struct { %s: ?int; } {...}", init->designator->name);
+            return NULL;
+        }
+        if (type->kind == TYPE_VOID || type->kind == TYPE_TUPLE || fixed_array) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)init->value, "The member '%s' can't be a %s, so the type of the struct can't be inferred", init->designator->name, text_bold(type_to_str(type)));
+            report_error_ast(parser, LABEL_HINT, NULL, "Give the struct a type e.g struct { %s: ...; } {...}", init->designator->name);
+            return NULL;
+        }
+
+        AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
+        decl->head.kind  = AST_DECLARATION;
+        decl->head.file  = init->head.file;
+        decl->head.start = init->head.start;
+        decl->head.end   = init->head.end;
+        decl->idents     = da_init(1, sizeof(AstIdentifier *));
+        decl->values     = da_init(1, sizeof(AstExpr *));
+        decl->type       = type;
+        decl->flags      = DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_STRUCT_MEMBER;
+
+        AstIdentifier *member = ast_allocate(parser, sizeof(AstIdentifier));
+        *member = *init->designator;
+        member->type = type;
+        member->decl = decl;
+        da_append(&decl->idents, member);
+        if (add_declaration_to_scope(parser, node->members, decl) != NULL) return NULL; // Reported e.g {a: 1, a: 2}
+        da_append(&node->members->statements, decl);
+    }
+
+    AstIdentifier *ident = ast_allocate(parser, sizeof(AstIdentifier));
+    ident->head.kind  = AST_IDENTIFIER;
+    ident->head.file  = node->head.file;
+    ident->head.start = node->head.start;
+    ident->head.end   = node->head.end;
+    ident->name       = "struct {...}";
+    ident->flags      = IDENTIFIER_IS_RESOLVED | IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_CONSTANT;
+    node->identifier  = ident;
+
+    TypeStruct *type_struct      = ast_allocate(parser, sizeof(TypeStruct));
+    type_struct->head.head.kind  = AST_TYPE;
+    type_struct->head.head.file  = node->head.file;
+    type_struct->head.head.start = node->head.start;
+    type_struct->head.head.end   = node->head.end;
+    type_struct->head.kind       = TYPE_STRUCT;
+    type_struct->head.name       = ident->name;
+    type_struct->identifier      = ident;
+    type_struct->node            = node;
+    ident->type = (Type *)type_struct;
+
+    Type *resolved = resolve_type(typer, (Type *)type_struct);
+    if (!resolved) return NULL;
+    TypeStruct *struct_defn = (TypeStruct *)resolved;
+
+    for (int i = 0; i < literal->initializers.count; i++) {
+        AstStructInitializer *init = ((AstStructInitializer **)literal->initializers.items)[i];
+        init->member = get_struct_member(struct_defn->node, init->designator->name);
+        index_identifier_use((Ast *)init->designator, init->member);
+    }
+    qsort(literal->initializers.items, literal->initializers.count, sizeof(AstStructInitializer *), compare_struct_initializers);
+
+    literal->explicit_type = resolved;
+    literal->head.head.flags |= AST_FLAG_IS_TYPE_CHECKED;
+    if (typer->enclosing_function) reserve_temporary_storage(typer->enclosing_function, struct_defn->head.size);
+    return resolved;
+}
+
+// True for {a: x, b: y}: a struct literal without a type, that names each member
+static bool is_inferable_struct_literal(AstStructLiteral *literal) {
+    if (literal->explicit_type || literal->initializers.count == 0) return false;
+    for (int i = 0; i < literal->initializers.count; i++) {
+        if (((AstStructInitializer **)literal->initializers.items)[i]->designator == NULL) return false;
+    }
+    return true;
+}
+
 Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_type) {
     TypeStruct *struct_defn = NULL;
+    if (literal->explicit_type == NULL && (ctx_type == NULL || ctx_type->kind == TYPE_ANY) && is_inferable_struct_literal(literal)) {
+        return check_inferred_struct_literal(typer, literal);
+    }
     if (literal->explicit_type) {
         // Explicit type is used
         Type *type = literal->explicit_type;
@@ -7125,6 +7233,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         // Type is inferred from the type on the declaration
         if (ctx_type == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Type of struct literal could not be infered from the context");
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Give it a type e.g Point{1, 2}, or name each member e.g {x: 1, y: 2} to make it an anonymous struct");
             return NULL;
         }
 

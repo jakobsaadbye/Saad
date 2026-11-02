@@ -1,0 +1,5 @@
+// expect-error: Type of struct literal could not be infered from the context
+// expect-error: name each member e.g {x: 1, y: 2}
+main :: () {
+    p := {name: "Ada", 36};
+}

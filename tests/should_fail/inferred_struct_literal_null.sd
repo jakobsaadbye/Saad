@@ -1,0 +1,4 @@
+// expect-error: The member 'email' is null, which doesn't say its type
+main :: () {
+    p := {name: "Ada", email: null};
+}

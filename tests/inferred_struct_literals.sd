@@ -1,0 +1,40 @@
+// A struct literal without a type that names its members, where no type is wanted, is an anonymous struct of the
+// names and the types of the values
+use fmt;
+
+User :: struct {
+    name:  string;
+    age:   int;
+    email: ?string;
+}
+
+nameOf :: (p: struct { name: string; age: int; }) -> string { return p.name; }
+
+main :: () {
+    ada := {name: "Ada", age: 36};
+    assert(ada.name == "Ada" && ada.age == 36);
+    assert(typeof(ada) == "struct { name: string; age: int; }");
+
+    // The same names and types are the same type, also as written
+    bo := {name: "Bo", age: 17};
+    ada = bo;
+    written: struct { name: string; age: int; } = ada;
+    assert(nameOf(ada) == "Bo" && written.age == 17);
+    people: [..]struct { name: string; age: int; };
+    people.add(ada);
+    people.add({name: "Cy", age: 50});
+    assert(people.count == 2 && people[1].name == "Cy");
+
+    // The values of the members can be anything with a type, also other such structs and optionals
+    nested := {who: {first: "A", n: 1}, ok: true, ratio: 0.5};
+    assert(nested.who.n == 1 && nested.ok && nested.ratio == 0.5);
+
+    // A select of some members, with a short lambda
+    users := [User{"Ada", 36, null}, User{"Bo", 17, "bo@example.com"}];
+    rows := users.map(u => {name: u.name, nextYear: u.age + 1, email: u.email});
+    assert(rows[0].nextYear == 37 && rows[0].email == null);
+    assert(rows[1].email ?? "" == "bo@example.com");
+    assert(sprint("%", rows[1]) == "{name: \"Bo\", nextYear: 18, email: \"bo@example.com\"}");
+
+    print("inferred struct literals ok");
+}

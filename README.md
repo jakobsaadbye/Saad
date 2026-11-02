@@ -89,6 +89,15 @@ total  := prices.reduce(0.0, (sum, p) => sum + p);
 double: (int) -> int = x => x * 2;
 ```
 
+* A struct literal without a type that names each member is an anonymous struct, where no type is wanted. Its type
+  is made of the names and the types of the values, so literals with the same members have the same type, also
+  the same as a written `struct { ... }`
+
+```odin
+ada  := {name: "Ada", age: 36};                       // a struct { name: string; age: int; }
+rows := users.map(u => {name: u.name, older: u.age + 1});
+```
+
 ## Update v0.9.6 - 2. Nov 2026
 
 * Saving changes, like `SaveChanges` of Entity Framework: `create()` (a new row to fill in), `update` and `delete` of a
