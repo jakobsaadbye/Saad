@@ -34,9 +34,9 @@ main :: () {
 }
 ```
 
-Status: steps 1 to 3 of the plan below are done: `dbms`, `dbms.postgres`, rows into structs, transactions,
-allocators, `dbms.Table<T>` and the generator that writes the tables of a database as Saad. The typed query
-builder (step 4) is designed below, but not written yet.
+Status: steps 1 to 5 of the plan below are done: `dbms`, `dbms.postgres`, rows into structs, transactions,
+allocators, `dbms.Table<T>`, the generator that writes the tables of a database as Saad, queries with lambdas, and
+saving changes.
 
 With the generator, the same program is:
 
@@ -57,6 +57,10 @@ main :: () {
 
     found, err2 := db.users.get(ada.id);         // a *User, null when there is none
     users, err3 := db.users.all();
+
+    minAge := 18;
+    adults, err4 := db.users.where(u => u.age ?? 0 >= minAge).orderBy(u => u.name).all();
+    names, err5  := db.users.where(u => u.role == .admin).select(u => {name: u.name, email: u.email}).all();
 }
 ```
 
@@ -198,7 +202,7 @@ complete driver of 20 lines.
 1. **Done** `dbms.postgres`: connect, run SQL with parameters, read rows, close.
 2. **Done** Rows into structs with `query` and `queryOne`, transactions, `conn.allocator`, `mem.Arena`.
 3. **Done** `dbms.Table<T>`, `dbms.KeyedTable<T, K>` and a generator that writes the tables as structs.
-4. A typed query builder on the generated code: `db.users.where(...).select<User>()`.
+4. **Done** Queries with lambdas, like LINQ: `db.users.where(u => u.age >= 18).select(u => {name: u.name}).all()`.
 5. **Done** A unit of work: `create`, `update` and `delete` keep the changes, and `db.saveChanges()` writes them all
    in one transaction.
 6. Later: joins, a pool of connections, a SQLite driver, migrations, and Postgres
@@ -413,34 +417,42 @@ Not yet:
 * Rows that refer to rows made in the same save: `order.userId = ada.id` is 0 before `ada` is saved. Save the user
   first. Later, the generator can read the foreign keys and fill in `userId` when the insert of `ada` gives its id.
 
-### 4. The typed query builder
+### 4. Queries with lambdas
 
-C#'s LINQ turns `u => u.Age > 30` into a tree that a library can read. Saad has no closures, and no code that
-reads code, so the generated `Field`s stand in for the members, and their methods build the conditions:
+Like LINQ of C#: the lambdas are expression trees (`Expr<F>`, see `docs/expression_trees.md`) that `std/dbms/query.sd`
+makes into SQL. The values they use are parameters, so `minAge` below is sent as `$1`.
 
 ```odin
 db := database.open(&conn);
+minAge := 18;
 
 adults, err := db.users
-    .where(db.users.age.atLeast(18).and(db.users.name.like("A%")))
-    .orderBy(db.users.name)
+    .where(u => u.age ?? 0 >= minAge && u.name.startsWith("A"))
+    .orderBy(u => u.name)
     .limit(20)
-    .select<User>();
+    .all();                                   // SELECT * FROM users WHERE ... ORDER BY "name" LIMIT 20
 
-// Only the columns of a smaller struct: SELECT id, name
-Name :: struct { id: i64; name: string; }
-names, err2 := db.users.where(db.users.email.isNull()).select<Name>();
+ada, err2  := db.users.where(u => u.email == email).first();          // a *User, null when there is none
+n, err3    := db.users.where(u => u.email == null).count();           // IS NULL
+admins, err4 := db.users.where(u => u.role == .admin).exists();
 
-db.users.age.atLeast("18");   // A compile error: wants an i32
+rows, err5  := db.users.select(u => {name: u.name, nextYear: (u.age ?? 0) + 1}).all();   // [..]struct { name: string; nextYear: i32; }
+names, err6 := db.users.orderByDescending(u => u.id).select(u => u.name).all();          // [..]string
+
+db.users.where(u => u.age >= "18");   // A compile error, as the lambda is checked like any other
 ```
 
-* `atLeast :: method <T>(f: dbms.Field<T>, value: T) -> dbms.Condition` is what makes `"18"` a type error.
-  Likewise `equals`, `notEquals`, `lessThan`, `atMost`, `greaterThan`, `between`, `like`, `isNull`, `oneOf`,
-  and `and`, `or`, `not` on conditions.
-* The builder writes the SQL with parameters, `WHERE age >= $1 AND name LIKE $2`, and runs it with `query`.
-  `select` reads the rows like `query` does, so the struct decides which columns are read.
-* `first<T>()`, `count()`, `exists()`, and later `update().set(field, value)` and `delete()` of the rows a query finds.
-* Plain SQL stays for everything the builder can't say.
+* `where`, `orderBy`, `orderByDescending`, `limit`, `offset` and `select` give a new `dbms.Query<T>`, so a query can
+  be the start of others. Nothing is sent before `all`, `first`, `count` or `exists`. `db.users.query()` is the
+  query of every row, and `query.toSql()` gives the SQL and its parameters.
+* In a lambda the members of the row are its columns. These can be made into SQL: `==` (`=`), `!=`, `<`, `<=`, `>`,
+  `>=`, `&&` (`AND`), `||` (`OR`), `!` (`NOT`), `+`, `-`, `*`, `/`, `%`, `??` (`coalesce`), `== null` (`IS NULL`),
+  and on text `startsWith(s)`, `endsWith(s)`, `indexOf(s)`, `toLower()`, `toUpper()` and `.len`. Anything else, e.g
+  another method, is an error that `all` gives. A part without the row, e.g `minAge - 1` or `now()`, is a value.
+* The rows of `all` and `first` of a keyed table are tracked, like those of `get`, so changes to them are saved by
+  `saveChanges`. The rows of `select` are not: they are anonymous structs or values made of some columns.
+* `select` gives a struct literal with names, whose names are the columns of the result, or one value. A `where`
+  after `select` is an error; put it before.
 
 ## Gaps in the language
 
@@ -449,6 +461,5 @@ Found while writing this, in the order they would help:
 * Assigning several results to existing variables, `count, err = conn.exec(...)`. Today each call needs new
   names (`err1`, `err2`, ...) or a function around it.
 * `defer`, to free a result on every return.
-* Operators on structs, so `db.users.age >= 18` could be a condition instead of `atLeast(18)`.
 * Attributes on structs, e.g `@dbms.Table("users")`, for tables written by hand.
 * Types for dates, decimals and UUIDs. They are strings for now.

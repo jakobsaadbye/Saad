@@ -27,6 +27,29 @@ Table :: struct <T> {
     name:      string;      // e.g users
     schema:    string;      // e.g sales. Empty is the schema the connection uses, e.g public
     generated: [..]string;  // The columns the database makes, e.g id and created_at
+    keyColumn: string;      // The key of a KeyedTable, so that the rows of its queries are tracked
+
+    // A query of the rows, e.g users.query().orderBy(u => u.name).limit(10).all(). See query.sd
+    query :: method () -> Query<T> {
+        return queryOf<T>(self.context, self.info(self.keyColumn));
+    }
+
+    // The rows that the condition is true for, e.g users.where(u => u.age >= 18).all(). See query.sd
+    where :: method (condition: Expr<(T) -> bool>) -> Query<T> {
+        return self.query().where(condition);
+    }
+
+    orderBy :: method <K> (by: Expr<(T) -> K>) -> Query<T> {
+        return self.query().orderBy(by);
+    }
+
+    orderByDescending :: method <K> (by: Expr<(T) -> K>) -> Query<T> {
+        return self.query().orderByDescending(by);
+    }
+
+    select :: method <U> (f: Expr<(T) -> U>) -> Query<U> {
+        return self.query().select(f);
+    }
 
     // Every row
     all :: method () -> ([..]T, string) {
@@ -134,6 +157,7 @@ keyedTable :: <T, K>(context: *Context, name: string, key: string, schema := "")
     t: KeyedTable<T, K>;
     t.table = table<T>(context, name, schema);
     t.key   = key;
+    t.table.keyColumn = key;
     return t;
 }
 

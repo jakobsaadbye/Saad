@@ -107,6 +107,14 @@ where(u => u.age >= minAge && u.name.startsWith("A"));
 ```
 
 * Function types can be type arguments, e.g `Expr<(User) -> bool>`
+* `dbms`: queries with lambdas, like LINQ. The lambdas are made into SQL, and the values they use are parameters.
+  The rows of `all` and `first` are tracked like those of `get`. See `docs/dbms.md`
+
+```odin
+adults, err := db.users.where(u => u.age ?? 0 >= minAge).orderBy(u => u.name).limit(20).all();
+ada, err2   := db.users.where(u => u.email == email).first();
+rows, err3  := db.users.where(u => u.role == .admin).select(u => {name: u.name, email: u.email}).all();
+```
 
 ## Update v0.9.6 - 2. Nov 2026
 
