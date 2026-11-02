@@ -2,6 +2,7 @@
 // instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
 namespace entities;
 
+import dbms;
 import time;
 
 // A row of authors
@@ -11,4 +12,12 @@ Author :: struct {
     email:    string;
     bio:      ?string;
     joinedAt: time.Time;
+
+    // The database it came from, for posts()
+    @Hidden dbLink: dbms.Link;
+
+    // The rows of posts whose author_id is the id of this one, as a query, e.g author.posts().all()
+    posts :: method () -> dbms.Query<Post> {
+        return dbms.relatedRows<Post>(self.dbLink, "posts").where(row => row.authorId == self.id);
+    }
 }

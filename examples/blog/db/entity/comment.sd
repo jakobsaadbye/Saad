@@ -2,6 +2,7 @@
 // instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
 namespace entities;
 
+import dbms;
 import time;
 
 // A row of comments
@@ -12,4 +13,13 @@ Comment :: struct {
     body:       string;
     likes:      i32 = 0;
     createdAt:  time.Time;
+
+    // The database it came from, for post()
+    @Hidden dbLink: dbms.Link;
+
+    // The row of posts that postId refers to, or null
+    post :: method () -> (*Post, string) {
+        row, err := dbms.related<Post>(self.dbLink, "posts", "id", self.postId);
+        return row, err;
+    }
 }

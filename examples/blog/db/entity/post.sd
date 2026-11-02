@@ -2,6 +2,7 @@
 // instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
 namespace entities;
 
+import dbms;
 import time;
 
 // A row of posts
@@ -15,4 +16,23 @@ Post :: struct {
     views:       i32 = 0;
     publishedAt: ?time.Time;
     createdAt:   time.Time;
+
+    // The database it came from, for author(), comments(), postTags()
+    @Hidden dbLink: dbms.Link;
+
+    // The row of authors that authorId refers to, or null
+    author :: method () -> (*Author, string) {
+        row, err := dbms.related<Author>(self.dbLink, "authors", "id", self.authorId);
+        return row, err;
+    }
+
+    // The rows of comments whose post_id is the id of this one, as a query, e.g post.comments().all()
+    comments :: method () -> dbms.Query<Comment> {
+        return dbms.relatedRows<Comment>(self.dbLink, "comments").where(row => row.postId == self.id);
+    }
+
+    // The rows of post_tags whose post_id is the id of this one, as a query, e.g post.postTags().all()
+    postTags :: method () -> dbms.Query<PostTag> {
+        return dbms.relatedRows<PostTag>(self.dbLink, "post_tags").where(row => row.postId == self.id);
+    }
 }

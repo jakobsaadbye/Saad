@@ -85,6 +85,15 @@ saad check main.sd        # only check for errors
   RFC 3339 text, and `json` writes and reads it as a string. See `docs/standard_library.md`
 * Changed: `time.now()` gives a `time.Time`. The high resolution clock is `time.clock()`, and `time.unix()` is
   `time.now().unix()`
+* `dbms`: relations from the foreign keys, like the navigation properties of Entity Framework. For `posts.author_id`,
+  the generator gives a `Post` the method `author()` and an `Author` the method `posts()`, a query. Rows that are
+  tracked already are given again instead of copies. See `docs/dbms.md`
+
+```odin
+author, err := post.author();
+published, err2 := author.posts().where(p => p.status == .published).orderBy(p => p.title).all();
+```
+
 * `@Hidden` on a member leaves it out of `fmt`, `json` and `dbms`
 * `dbms` reads `timestamptz`, `timestamp` and `date` columns into `time.Time`, and the generator writes them so. In
   queries, `after`, `before` and `equal` of times are comparisons, and `?.` works on a column that can be `NULL`:

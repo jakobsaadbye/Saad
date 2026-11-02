@@ -195,6 +195,43 @@ main :: () {
     _, e21 := db.users.where(u => u.name.reverse() == "adA").all();
     assert(e21.startsWith("The method reverse can't be made into SQL"));
 
+    // Relations, from the foreign keys. orders.user_id refers to users.id, so an Order has user() and a User orders()
+    buyer, e23 := order.user();
+    assert(e23 == "" && buyer == ada);              // ada is tracked since she was saved, so she is the row
+    adaOrders, e24 := ada.orders().count();
+    assert(e24 == "" && adaOrders == 1);
+    lines, e25 := order.orderItems().orderBy(i => i.product).all();
+    assert(e25 == "" && lines.count == 2 && lines[0].product == "cake");
+    owner, _ := lines[1].order();
+    assert(owner == order);
+    assert(sprint("%", *order).indexOf("dbLink") < 0);   // The link isn't data
+
+    // A foreign key that can be NULL, to the same table: users.referred_by
+    bo.referredBy = ada.id;
+    assert(db.saveChanges() == "");
+    referrer, e26 := bo.referredByRow();
+    assert(e26 == "" && referrer == ada);
+    noReferrer, e27 := ada.referredByRow();
+    assert(e27 == "" && noReferrer == null);
+    referred, _ := ada.usersByReferredBy().select(u => u.name).all();
+    assert(referred.count == 1 && referred[0] == "Bo");
+
+    // The rows of a relation are tracked
+    lines[0].quantity = 7;
+    assert(db.pendingChanges() == 0);    // order_items has no key of one column, so its rows aren't tracked
+    item, _ := cake.order();
+    item.note = "gift wrapped";
+    assert(db.pendingChanges() == 1 && db.saveChanges() == "");
+    noted, _ := db.orders.get(order.id);
+    assert(noted.note ?? "" == "gift wrapped");
+
+    // A row that wasn't made by a table has no link
+    stray := Order{userId: ada.id};
+    _, e28 := stray.user();
+    assert(e28 == dbms.NoLinkError);
+    _, e29 := stray.orderItems().all();
+    assert(e29 == dbms.NoLinkError);
+
     // all, with the methods of lists
     users, e14 := db.users.all();
     assert(e14 == "" && users.count == 2);

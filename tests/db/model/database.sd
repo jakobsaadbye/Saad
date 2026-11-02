@@ -32,6 +32,10 @@ open :: (conn: *dbms.Connection) -> Database {
     tables.users.table      = dbms.keyedTable<User, i64>(tables.context, "users", "id", schema: "saad_shop");
     tables.orders.generated = ["id"];
     tables.users.generated = ["id", "created_at"];
+    tables.context.register(tables.categories.tableInfo());
+    tables.context.register(tables.orderItems.tableInfo());
+    tables.context.register(tables.orders.tableInfo());
+    tables.context.register(tables.users.tableInfo());
     return tables;
 }
 

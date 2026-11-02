@@ -207,8 +207,9 @@ complete driver of 20 lines.
 4. **Done** Queries with lambdas, like LINQ: `db.users.where(u => u.age >= 18).select(u => {name: u.name}).all()`.
 5. **Done** A unit of work: `create`, `update` and `delete` keep the changes, and `db.saveChanges()` writes them all
    in one transaction.
-6. Later: joins, a pool of connections, a SQLite driver, migrations, and Postgres
-   spoken directly over a socket instead of libpq.
+6. **Done** Relations from the foreign keys: `post.author()` and `author.posts()`.
+7. Later: loading relations with a join (like `Include` of Entity Framework), a pool of connections, a SQLite driver,
+   migrations, and Postgres spoken directly over a socket instead of libpq.
 
 ### 3. Tables and the generator
 
@@ -457,6 +458,52 @@ db.users.where(u => u.age >= "18");   // A compile error, as the lambda is check
   `saveChanges`. The rows of `select` are not: they are anonymous structs or values made of some columns.
 * `select` gives a struct literal with names, whose names are the columns of the result, or one value. A `where`
   after `select` is an error; put it before.
+
+### 6. Relations
+
+The generator reads the foreign keys of one column, and writes a method for each end on the rows. For
+`posts.author_id`, which refers to `authors.id`:
+
+```odin
+Post :: struct {
+    ...
+    authorId: i64;
+
+    @Hidden dbLink: dbms.Link;   // The database it came from. Not a column, and fmt and json leave it out
+
+    // The row of authors that authorId refers to, or null
+    author :: method () -> (*Author, string) { ... }
+}
+
+Author :: struct {
+    ...
+    // The rows of posts whose author_id is the id of this one, as a query
+    posts :: method () -> dbms.Query<Post> { ... }
+}
+```
+
+so a program has
+
+```odin
+author, err := post.author();
+published, err2 := author.posts().where(p => p.status == .published).orderBy(p => p.title).all();
+count, err3 := author.posts().count();
+```
+
+* The row a relation gives is tracked like the row of `get`, so changes to it are saved by `saveChanges`. A row that
+  is tracked already is given again, instead of a copy: `post.author()` twice gives the same `*Author`, and so does
+  the author that was just created and saved.
+* The many end is a `dbms.Query<T>`, so it is narrowed, sorted, counted or selected from like any query.
+* A foreign key that can be `NULL` gives null when it is `NULL`, e.g `user.referredByRow()`.
+* Names: `author_id` gives `author()`; a column without `_id`, e.g `referred_by`, gives `referredByRow()`. The other
+  end is the name of the table, e.g `posts()`, or with the column when a table has two foreign keys to the same
+  table, or to itself, e.g `postsByEditor()` and `usersByReferredBy()`. A name that a member has gets `Row` or
+  `Rows` at its end.
+* The rows know their database through a hidden member, a `dbms.Link`, which the tables set on the rows they give:
+  `create`, `get`, `all` and the queries. A row made otherwise, e.g `Post{...}`, has none, and its relations give
+  the error `dbms.NoLinkError`. `database.open` registers the tables with the context, so the link finds them.
+* Under the hood: `dbms.related<T>(link, table, column, value)` and `dbms.relatedRows<T>(link, table)`, in
+  `std/dbms/relations.sd`.
 
 ## Gaps in the language
 

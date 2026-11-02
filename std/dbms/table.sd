@@ -56,6 +56,10 @@ Table :: struct <T> {
         sql := fmt.sprint("SELECT * FROM %", qualifiedName(self.schema, self.name));
         rows, err := self.context.conn.query<T>(sql);
         sql.free();
+        type := rowType<T>();
+        for i in 0..rows.count {
+            linkRow(self.context, type, rows.indexRef(i) as *void);
+        }
         return rows, err;
     }
 
@@ -73,9 +77,15 @@ Table :: struct <T> {
         empty: T;
         row := resizeMemory(self.context.conn.allocator, null, sizeof(T)) as *T;
         *row = empty;
+        linkRow(self.context, rowType<T>(), row as *void);
         none: any;
         self.context.record(.create, self.info(""), row, none);
         return row;
+    }
+
+    // The table, as the context knows it
+    tableInfo :: method () -> TableInfo {
+        return self.info(self.keyColumn);
     }
 
     info :: method (key: string) -> TableInfo {
@@ -93,6 +103,7 @@ KeyedTable :: struct <T, K> {
         empty: T;
         row := resizeMemory(self.context.conn.allocator, null, sizeof(T)) as *T;
         *row = empty;
+        linkRow(self.context, rowType<T>(), row as *void);
         none: any;
         self.context.record(.create, self.info(self.key), row, none);
         return row;
@@ -120,6 +131,7 @@ KeyedTable :: struct <T, K> {
         }
         stored := resizeMemory(conn.allocator, null, sizeof(T)) as *T;
         *stored = row;
+        linkRow(self.context, rowType<T>(), stored as *void);
         self.context.trackRow(self.info(self.key), stored);
         return stored, "";
     }

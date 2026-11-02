@@ -2,16 +2,37 @@
 // instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
 namespace entities;
 
+import dbms;
 import time;
 
 // A row of users
 User :: struct {
-    id:        i64;
-    name:      string;
-    email:     ?string;
-    age:       ?i32;
-    role:      Role = .guest;
-    active:    bool = true;
-    score:     f64 = 0.0;
-    createdAt: time.Time;
+    id:         i64;
+    name:       string;
+    email:      ?string;
+    age:        ?i32;
+    role:       Role = .guest;
+    active:     bool = true;
+    score:      f64 = 0.0;
+    createdAt:  time.Time;
+    referredBy: ?i64;
+
+    // The database it came from, for referredByRow(), orders(), usersByReferredBy()
+    @Hidden dbLink: dbms.Link;
+
+    // The row of users that referredBy refers to, or null
+    referredByRow :: method () -> (*User, string) {
+        row, err := dbms.related<User>(self.dbLink, "users", "id", self.referredBy);
+        return row, err;
+    }
+
+    // The rows of orders whose user_id is the id of this one, as a query, e.g user.orders().all()
+    orders :: method () -> dbms.Query<Order> {
+        return dbms.relatedRows<Order>(self.dbLink, "orders").where(row => row.userId == self.id);
+    }
+
+    // The rows of users whose referred_by is the id of this one, as a query, e.g user.usersByReferredBy().all()
+    usersByReferredBy :: method () -> dbms.Query<User> {
+        return dbms.relatedRows<User>(self.dbLink, "users").where(row => row.referredBy == self.id);
+    }
 }

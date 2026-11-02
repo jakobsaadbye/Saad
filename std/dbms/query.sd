@@ -139,6 +139,12 @@ Query :: struct <T> {
 
         rows, e := self.context.conn.query<T>(sql, ...args.elements());
         sql.free();
+        if self.selection == null {
+            type := rowType<T>();
+            for i in 0..rows.count {
+                linkRow(self.context, type, rows.indexRef(i) as *void);
+            }
+        }
         return rows, e;
     }
 

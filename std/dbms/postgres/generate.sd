@@ -41,6 +41,8 @@ generate :: (conn: *dbms.Connection, options: GenerateOptions) -> ([..]Generated
     if err2 != "" { return files, err2; }
     enumLabels, err3 := conn.query<SchemaEnumLabel>(EnumsSql, options.schema);
     if err3 != "" { return files, err3; }
+    foreignKeys, err4 := conn.query<SchemaForeignKey>(ForeignKeysSql, options.schema);
+    if err4 != "" { return files, err4; }
 
     // The enums with their labels, and the tables with their columns, in the order of their names
     enums: [..]SchemaEnum;
@@ -72,6 +74,7 @@ generate :: (conn: *dbms.Connection, options: GenerateOptions) -> ([..]Generated
     }
 
     w := Writer{options: options, enums: enums};
+    w.relationsOf(&tables, foreignKeys);
     for e in enums {
         files.add(GeneratedFile{name: w.fileNameOf(e.name, true), code: w.enumFile(e)});
     }
@@ -136,6 +139,30 @@ KeysSql :: "SELECT k.table_name, k.column_name FROM information_schema.table_con
 @private
 EnumsSql :: "SELECT t.typname AS type_name, e.enumlabel AS label FROM pg_type t JOIN pg_enum e ON e.enumtypid = t.oid JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = $1 ORDER BY t.typname, e.enumsortorder";
 
+// The foreign keys of one column, to a table of the same schema
+@private
+ForeignKeysSql :: "SELECT tc.constraint_name, kcu.table_name, kcu.column_name, ccu.table_name AS foreign_table, ccu.column_name AS foreign_column FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON kcu.constraint_schema = tc.constraint_schema AND kcu.constraint_name = tc.constraint_name JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_schema = tc.constraint_schema AND ccu.constraint_name = tc.constraint_name WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = $1 AND ccu.table_schema = $1 ORDER BY kcu.table_name, kcu.column_name, tc.constraint_name";
+
+@private
+SchemaForeignKey :: struct {
+    constraintName: string;
+    tableName:      string;   // e.g posts
+    columnName:     string;   // e.g author_id
+    foreignTable:   string;   // e.g authors
+    foreignColumn:  string;   // e.g id
+}
+
+// A method of a row for a foreign key: the row it refers to, e.g post.author(), or the rows that refer to it, e.g
+// author.posts()
+@private
+Relation :: struct {
+    name:         string;   // e.g author or posts
+    toMany:       bool;     // The rows that refer to this one
+    otherTable:   string;   // e.g authors, or posts
+    column:       string;   // The column of the foreign key, e.g author_id of posts
+    otherColumn:  string;   // The column it refers to, e.g id of authors
+}
+
 @private
 SchemaColumn :: struct {
     tableName:     string;
@@ -168,9 +195,10 @@ SchemaEnum :: struct {
 
 @private
 SchemaTable :: struct {
-    name:    string;
-    columns: [..]SchemaColumn;
-    key:     string;   // The column of its key, or empty
+    name:      string;
+    columns:   [..]SchemaColumn;
+    key:       string;   // The column of its key, or empty
+    relations: [..]Relation;
 }
 
 //
@@ -246,7 +274,7 @@ rowFile :: method (w: *Writer, table: SchemaTable) -> string {
 
     sb: fmt.StringBuilder;
     w.header(&sb, w.options.entities);
-    usesDbms := false;
+    usesDbms := table.relations.count > 0;   // For dbms.Link and the relations
     usesTime := false;
     for m in members {
         if m.attribute.len > 0 { usesDbms = true; }  // For @dbms.Column
@@ -271,8 +299,116 @@ rowFile :: method (w: *Writer, table: SchemaTable) -> string {
         }
         sb.addLine("");
     }
+    if table.relations.count > 0 {
+        w.writeRelations(&sb, table);
+    }
     sb.addLine("}");
     return sb.toString();
+}
+
+// The relations of the tables from the foreign keys of one column. A foreign key from posts.author_id to authors.id gives
+// author() to a Post and posts() to an Author. A table with two foreign keys to the same table, e.g editor_id too, gives
+// postsByAuthor() and postsByEditor(). A name that a member has already gets Row or Rows at its end
+@private
+relationsOf :: method (w: *Writer, tables: *[..]SchemaTable, foreignKeys: [..]SchemaForeignKey) {
+    // Only foreign keys of one column
+    keys: [..]SchemaForeignKey;
+    for fk, i in foreignKeys {
+        columns := 0;
+        for other in foreignKeys {
+            if other.constraintName == fk.constraintName { columns += 1; }
+        }
+        if columns == 1 { keys.add(fk); }
+    }
+
+    for fk in keys {
+        from := tableIndex(tables, fk.tableName);
+        to   := tableIndex(tables, fk.foreignTable);
+        if from < 0 || to < 0 { continue; }
+
+        // How many foreign keys the table has to the same table
+        sameTarget := 0;
+        for other in keys {
+            if other.tableName == fk.tableName && other.foreignTable == fk.foreignTable { sameTarget += 1; }
+        }
+
+        // e.g author_id is author
+        stem := fk.columnName;
+        if stem.len > 3 && stem.slice(stem.len as int - 3) == "_id" { stem = stem.slice(0, stem.len as int - 3); }
+
+        forward := Relation{toMany: false, otherTable: fk.foreignTable, column: fk.columnName, otherColumn: fk.foreignColumn};
+        forward.name = memberName(stem);
+        if stem == fk.columnName { forward.name = fmt.sprint("%Row", memberName(stem)); }
+        tables.indexRef(from).relations.add(forward);
+
+        back := Relation{toMany: true, otherTable: fk.tableName, column: fk.columnName, otherColumn: fk.foreignColumn};
+        back.name = camelCase(fk.tableName);
+        if sameTarget > 1 || fk.tableName == fk.foreignTable { back.name = fmt.sprint("%By%", camelCase(fk.tableName), pascalCase(stem)); }
+        tables.indexRef(to).relations.add(back);
+    }
+
+    // Names that the members have already
+    for *table in tables {
+        for *relation in table.relations {
+            for column in table.columns {
+                if memberName(column.columnName) == relation.name {
+                    if relation.toMany { relation.name = fmt.sprint("%Rows", relation.name); }
+                    else               { relation.name = fmt.sprint("%Row", relation.name); }
+                }
+            }
+        }
+    }
+}
+
+@private
+tableIndex :: (tables: *[..]SchemaTable, name: string) -> int {
+    for i in 0..tables.count {
+        if tables.indexRef(i).name == name { return i as int; }
+    }
+    return -1;
+}
+
+// The member of a row that links it to its database, for its relations
+@private
+linkName :: (table: SchemaTable) -> string {
+    for column in table.columns {
+        if memberName(column.columnName) == "dbLink" { return "dbLink_"; }
+    }
+    return "dbLink";
+}
+
+// The methods of the relations of a row
+@private
+writeRelations :: method (w: *Writer, sb: *fmt.StringBuilder, table: SchemaTable) {
+    link := linkName(table);
+
+    // The rows it refers to first, then the rows that refer to it
+    relations: [..]Relation;
+    for r in table.relations { if !r.toMany { relations.add(r); } }
+    for r in table.relations { if r.toMany  { relations.add(r); } }
+
+    names: [..]string;
+    for r in relations { names.add(fmt.sprint("%()", r.name)); }
+    sb.addLine("");
+    sb.addLine("    // The database it came from, for %", fmt.join(names.elements(), ", "));
+    sb.addLine("    @Hidden %: dbms.Link;", link);
+
+    for r in relations {
+        sb.addLine("");
+        if r.toMany {
+            row := rowTypeName(r.otherTable);
+            sb.addLine("    // The rows of % whose % is the % of this one, as a query, e.g %.%().all()", r.otherTable, r.column, r.otherColumn, camelCase(singular(table.name)), r.name);
+            sb.addLine("    % :: method () -> dbms.Query<%> {", r.name, row);
+            sb.addLine("        return dbms.relatedRows<%>(self.%, %).where(row => row.% == self.%);", row, link, saadString(r.otherTable), memberName(r.column), memberName(r.otherColumn));
+        } else {
+            row := rowTypeName(r.otherTable);
+            sb.addLine("    // The row of % that % refers to, or null", r.otherTable, memberName(r.column));
+            sb.addLine("    % :: method () -> (*%, string) {", r.name, row);
+            sb.addLine("        row, err := dbms.related<%>(self.%, %, %, self.%);", row, link, saadString(r.otherTable), saadString(r.otherColumn), memberName(r.column));
+            sb.addLine("        return row, err;");
+        }
+        sb.addLine("    }");
+    }
 }
 
 // The types of the tables, the Database with them, and open
@@ -349,6 +485,11 @@ databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]Generate
         if generated.count > 0 {
             sb.addLine("    tables.%.generated = [%];", camelCase(table.name), fmt.join(generated.elements(), ", "));
         }
+    }
+
+    // The tables, for the relations of the rows
+    for table in tables {
+        sb.addLine("    tables.%.register(tables.%.tableInfo());", context, camelCase(table.name));
     }
     sb.addLine("    return tables;");
     sb.addLine("}");

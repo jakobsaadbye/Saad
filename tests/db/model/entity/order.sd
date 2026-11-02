@@ -2,6 +2,8 @@
 // instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
 namespace entities;
 
+import dbms;
+
 // A row of orders
 Order :: struct {
     id:     i32;
@@ -10,4 +12,18 @@ Order :: struct {
     total:  ?string;             // numeric
     note:   ?string = "none";
     type:   ?string;
+
+    // The database it came from, for user(), orderItems()
+    @Hidden dbLink: dbms.Link;
+
+    // The row of users that userId refers to, or null
+    user :: method () -> (*User, string) {
+        row, err := dbms.related<User>(self.dbLink, "users", "id", self.userId);
+        return row, err;
+    }
+
+    // The rows of order_items whose order_id is the id of this one, as a query, e.g order.orderItems().all()
+    orderItems :: method () -> dbms.Query<OrderItem> {
+        return dbms.relatedRows<OrderItem>(self.dbLink, "order_items").where(row => row.orderId == self.id);
+    }
 }

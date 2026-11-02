@@ -30,6 +30,7 @@ Context :: struct {
     changes: [..]Change;    // In the order they were made
     tracked: [..]Tracked;   // The rows that saveChanges compares with how they were read
     track:   bool;          // If get and all track their rows. On in newContext
+    tables:  [..]TableInfo; // The tables of the database, for the relations of rows. See relations.sd
 }
 
 ChangeKind :: enum { create, update, delete }
@@ -69,6 +70,7 @@ newContext :: (conn: *Connection) -> *Context {
     context.track = true;
     context.changes.allocator = conn.allocator;
     context.tracked.allocator = conn.allocator;
+    context.tables.allocator  = conn.allocator;
     return context;
 }
 
