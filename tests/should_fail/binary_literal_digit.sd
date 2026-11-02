@@ -1,0 +1,2 @@
+// expect-error: A binary number has only the digits 0 and 1
+main :: () { x := 0b102; }

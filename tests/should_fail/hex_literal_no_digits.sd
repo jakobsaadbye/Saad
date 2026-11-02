@@ -1,0 +1,2 @@
+// expect-error: A hex number needs digits after 0x
+main :: () { x := 0x; }
