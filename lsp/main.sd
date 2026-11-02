@@ -248,9 +248,17 @@ refresh :: (key: string, path: string) {
 
 // The project to answer a question about a file with. It is updated. -1 if there is none
 projectFor :: (key: string, path: string) -> int {
-    // A file of the standard library is its own program. A program that uses it only has the parts it uses in its index
+    // The standard library is one program, so the uses of a name in all of it are found. A program that uses it only
+    // has the parts it uses in its index
     if isInStandardLibrary(key) {
+        for p, i in projects {
+            if p.options == AllStd {
+                update(i);
+                return i as int;
+            }
+        }
         i := projectOf(path);
+        projects.indexRef(i).options = AllStd;
         update(i);
         return i;
     }
@@ -305,6 +313,8 @@ projectFor :: (key: string, path: string) -> int {
     update(i);
     return i;
 }
+
+AllStd :: " --all-std";
 
 // The file is part of the program. The project of the file on its own, if there is one, isn't needed anymore: its
 // diagnostics are cleared, as the program sends the file's

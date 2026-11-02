@@ -406,6 +406,14 @@ static bool parse_all_files(CompilerConfig *config, Parser *parser, const char *
     DynamicArray parsed_paths   = da_init(8, sizeof(char *)); // The absolute paths of the parsed files, as the same file can be reached by different paths
     da_append(&paths_to_visit, main_path);
 
+    // 'saad index --all-std': every namespace of the standard library is part of the program
+    if (program_index.all_std) {
+        for (int i = 0; i < parser->namespaces.count; i++) {
+            Namespace *ns = ((Namespace **)parser->namespaces.items)[i];
+            if (ns->is_standard) visit_namespace(&paths_to_visit, ns);
+        }
+    }
+
     for (int cursor = 0; cursor < paths_to_visit.count; cursor++) {
         char *path = ((char **)paths_to_visit.items)[cursor];
         char *absolute = get_absolute_path(path);
@@ -810,7 +818,14 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
 
     // ----------- Typecheck -----------
     report.typer_time_start = clock();
-    bool typed = check_file(&typer, main_file) && error_count() == 0; // Statements with errors were skipped, so the others were still checked
+    bool typed = check_file(&typer, main_file);
+    if (program_index.all_std) {
+        for (int i = 0; i < parser.namespaces.count; i++) {
+            Namespace *ns = ((Namespace **)parser.namespaces.items)[i];
+            if (ns->is_standard) check_namespace_files(&typer, ns);
+        }
+    }
+    typed = typed && error_count() == 0; // Statements with errors were skipped, so the others were still checked
     index_declarations(parsed_files); // For 'saad index', also when there are errors, so an editor can still find what was checked
     if (program_completion.enabled) complete_program(&typer, parsed_files); // For 'saad complete', also when there are errors
     if (!typed) {

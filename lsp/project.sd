@@ -70,12 +70,13 @@ Project :: struct {
     generation: int = -1;    // The generation of the documents it was indexed at
     published:  [..]string;  // The files it has sent diagnostics for, as keys
     retired:    bool;        // A file on its own whose program was found later. It isn't checked or asked
+    options:    string;      // More options for the compiler, e.g " --all-std" for the standard library
 }
 
 // Runs 'saad index' on the main file. overlays are the --overlay options for the text the editor hasn't saved.
 // Returns false if the compiler couldn't be run or didn't write an index
 run :: method (p: *Project, compiler: string, overlays: string) -> bool {
-    command := fmt.sprint("\"%\" index \"%\"%", compiler, p.root, overlays);
+    command := fmt.sprint("\"%\" index \"%\"% %", compiler, p.root, p.options, overlays);
     text, code := os.output(command);
     if text.len == 0 {
         rpc.log(fmt.sprint("Couldn't run the compiler (exit code %): %", code, command));
@@ -83,11 +84,12 @@ run :: method (p: *Project, compiler: string, overlays: string) -> bool {
     }
 
     index, err := json.decode<Index>(text);
-    text.free();
     if err != "" {
-        rpc.log(fmt.sprint("The compiler didn't write an index for %: %", p.root, err));
+        rpc.log(fmt.sprint("The compiler didn't write an index for %: % (% bytes: %)", p.root, err, text.len, text.slice(0, 60)));
+        text.free();
         return false;
     }
+    text.free();
 
     // When an error leaves files out, e.g an import that is being written, the names of the last index are kept, so
     // going to definitions and hovering still work in those files while the error is fixed. Its diagnostics are new
@@ -137,7 +139,7 @@ Completions :: struct {
 
 // Asks the compiler what can be written at the position of the file. ok is false if it didn't answer
 complete :: method (p: *Project, compiler: string, overlays: string, path: string, at: Position) -> Completions, bool {
-    command := fmt.sprint("\"%\" complete \"%\" --at \"%:%:%\"%", compiler, p.root, path, at.line, at.character, overlays);
+    command := fmt.sprint("\"%\" complete \"%\" --at \"%:%:%\"% %", compiler, p.root, path, at.line, at.character, p.options, overlays);
     text, code := os.output(command);
     result: Completions;
     if text.len == 0 {

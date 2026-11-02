@@ -31,6 +31,7 @@ typedef struct IndexReference {
 typedef struct Index {
     bool         enabled;    // Only 'saad index' records anything
     bool         with_std;   // Also write the uses in the standard library, and its declarations that the program doesn't use: 'saad index --std'
+    bool         all_std;    // Check every namespace of the standard library with the program, so the uses in all of it are known: 'saad index --all-std'
     char        *std_path;   // Absolute path of the standard library
     AstFile     *main_file;  // A file of the standard library is part of the program when it is the main file or in its namespace
     DynamicArray symbols;    // of IndexSymbol

@@ -21,7 +21,7 @@ static Command commands[] = {
     { "build", COMMAND_BUILD, "Compile the program to ./build/out.exe without running it. --debug makes it with nasm and gcc, with debug information for gdb" },
     { "run",   COMMAND_RUN,   "Compile the program and run it in the current folder. Takes --debug too. Arguments after -- are for the program, e.g saad run tool.sd -- a.txt" },
     { "check", COMMAND_CHECK, "Check the program for errors without compiling it. With --json, the errors are written as JSON" },
-    { "index", COMMAND_INDEX, "Write where every name of the program is declared and used, and its errors, as JSON for an editor. --overlay path=file reads file instead of path. --std also writes the standard library" },
+    { "index", COMMAND_INDEX, "Write where every name of the program is declared and used, and its errors, as JSON for an editor. --overlay path=file reads file instead of path. --std also writes the standard library, and --all-std checks all of it with the program, e.g for an editor that has a file of it open" },
     { "complete", COMMAND_COMPLETE, "Write what can be written at --at file:line:character (from 0), and the signature of the call there, as JSON for an editor. Takes --overlay too" },
 };
 static const int commands_count = sizeof(commands) / sizeof(commands[0]);
@@ -58,6 +58,7 @@ bool parse_options(CompilerConfig *config, int argc, char const *argv[], int fir
         }
         if (strcmp(option, "--json") == 0) { config->json = true; continue; }
         if (strcmp(option, "--std") == 0)  { program_index.with_std = true; continue; }
+        if (strcmp(option, "--all-std") == 0) { program_index.with_std = true; program_index.all_std = true; continue; }
         if (strcmp(option, "--debug") == 0) { config->debug = true; continue; }
         if (strcmp(option, "--elf") == 0)   { config->emit_elf = true; continue; }
         if (strcmp(option, "--at") == 0 && i + 1 < argc) {
