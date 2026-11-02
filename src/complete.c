@@ -942,6 +942,31 @@ static int open_brackets(const char *text, int start, int end, char *stack, int 
     return count < max ? count : max;
 }
 
+// The bracket that the line at 'line_start' is in, from the lines above, e.g the '{' of a struct literal whose members
+// are on lines of their own. 0 when there is none. 'before' is the character before it, e.g '=' or '>' of '=>'
+static char enclosing_bracket(const char *text, int line_start, char *before) {
+    char stack[256];
+    int  at[256];
+    int  count = 0;
+    for (int p = 0; p < line_start; p++) {
+        char c = text[p];
+        if (c == '"' || c == '\'') {
+            for (p++; p < line_start && text[p] != c && text[p] != '\n'; p++) {
+                if (text[p] == '\\') p++;
+            }
+            continue;
+        }
+        if (c == '/' && text[p + 1] == '/') { while (p < line_start && text[p] != '\n') p++; continue; }
+        if (c == '(' || c == '[' || c == '{') { if (count < 256) { stack[count] = c; at[count] = p; } count++; }
+        else if ((c == ')' || c == ']' || c == '}') && count > 0) count--;
+    }
+    if (count == 0 || count > 256) return 0;
+    int b = at[count - 1];
+    while (b > 0 && isspace((unsigned char)text[b - 1])) b--;
+    *before = b > 0 ? text[b - 1] : 0;
+    return stack[count - 1];
+}
+
 static char closer_of(char open) {
     return open == '(' ? ')' : open == '[' ? ']' : '}';
 }
@@ -999,12 +1024,21 @@ char *repair_for_completion(const char *path, char *text) {
             if (!strchr("=,([:", before) || before == 0) open = 0;
         }
     }
-    if (!needs_name && open == 0) return text;
+    // A member or an argument on a line of its own, e.g in a struct literal over lines, ends with a ','
+    bool needs_comma = false;
+    bool after_dot = start > 0 && text[start - 1] == '.';
+    if (after_dot && open == 0 && rest_end == offset) {
+        char before = 0;
+        char bracket = enclosing_bracket(text, line_start, &before);
+        needs_comma = bracket == '(' || bracket == '[' || (bracket == '{' && before && strchr("=>,([:", before));
+    }
+    if (!needs_name && !needs_comma && open == 0) return text;
 
     bool ends_statement = rest_end > offset && (text[rest_end - 1] == ';' || text[rest_end - 1] == '{');
     StringBuilder sb = sb_init(length + 64);
     sb_append(&sb, "%.*s", offset, text);
-    if (needs_name) sb_append(&sb, "%s", COMPLETION_PLACEHOLDER);
+    if (needs_name)  sb_append(&sb, "%s", COMPLETION_PLACEHOLDER);
+    if (needs_comma) sb_append(&sb, ",");
     sb_append(&sb, "%.*s", rest_end - offset, &text[offset]);
     for (int i = open - 1; i >= 0; i--) sb_append(&sb, "%c", closer_of(stack[i]));
     if (in_brackets && open >= 0 && !ends_statement) sb_append(&sb, ";");

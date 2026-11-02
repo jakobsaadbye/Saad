@@ -96,6 +96,7 @@ AstIdentifier *union_variant(TypeStruct *union_type, char *name);
 AstExpr *union_kind_value(Typer *typer, AstIdentifier *variant, Ast *at);
 AstStructLiteral *make_union_literal(Typer *typer, TypeStruct *union_type, AstIdentifier *variant, Ast *at);
 AstIdentifier *make_identifier_from_string(Parser *parser, const char *name, Type *type);
+static AstLiteral *implied_member_name(AstExpr *value);
 bool check_union_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject, TypeStruct *union_type, bool by_pointer, AstBlock *lowered, AstBlock *scope_before);
 AstBinary *make_binary(Typer *typer, TokenType op, AstExpr *left, AstExpr *right, Ast *at);
 AstUnary *generate_address_of_value(Typer *typer, AstExpr *value);
@@ -5734,10 +5735,12 @@ static AstExpr *tree_of(Typer *typer, AstFunctionDefn *copy, AstExpr *b, AstExpr
         AstExpr *node = tree_call(typer, "exprObject", NULL, 0, at);
         for (int i = 0; node && i < literal->initializers.count; i++) {
             AstStructInitializer *init = ((AstStructInitializer **)literal->initializers.items)[i];
-            if (init->designator == NULL) { report_not_in_tree(typer, init->value, "A member without a name"); return NULL; }
+            AstLiteral *implied = init->designator ? NULL : implied_member_name(init->value);
+            if (init->designator == NULL && implied == NULL) { report_not_in_tree(typer, init->value, "A member without a name"); return NULL; }
+            char *member_name = init->designator ? init->designator->name : implied->as.value.identifier.name;
             AstExpr *value = tree_of(typer, copy, init->value, NULL);
             if (!value) return NULL;
-            AstExpr *add[3] = { node, tree_string(typer, init->designator->name, at), value };
+            AstExpr *add[3] = { node, tree_string(typer, member_name, at), value };
             node = tree_call(typer, "exprArgument", add, 3, at);
         }
         return node;
@@ -7063,6 +7066,16 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         }
     }
 
+    // In an expression tree, a call that gives a value and an error is its value, e.g the *Author of p.author().name: the
+    // tree is made into SQL, where it is a join, and isn't run
+    if (type_lhs->kind == TYPE_TUPLE && ma->left->head.kind == AST_FUNCTION_CALL && typer->enclosing_function && typer->enclosing_function->is_expression_tree) {
+        TypeTuple *tuple = (TypeTuple *)type_lhs;
+        if (tuple->types.count > 0) {
+            type_lhs = ((Type **)tuple->types.items)[0];
+            ma->left->type = type_lhs; // Also for a method called on it, e.g c.post().author()
+        }
+    }
+
     //
     // 2'nd case : Member access on struct
     //
@@ -7423,10 +7436,30 @@ AstStructLiteral *make_union_literal(Typer *typer, TypeStruct *union_type, AstId
     return literal;
 }
 
+// The name of a member of a struct literal without a type that isn't written: the name of the member or the variable its
+// value is, e.g title for {p.title}, name for {p.author().name} and count for {count}. NULL for other values
+static AstLiteral *implied_member_name(AstExpr *value) {
+    if (value->head.kind == AST_MEMBER_ACCESS) value = ((AstMemberAccess *)value)->right;
+    if (value->head.kind == AST_LITERAL && ((AstLiteral *)value)->kind == LITERAL_IDENTIFIER) return (AstLiteral *)value;
+    return NULL;
+}
+
 // A struct literal without a type, where no type is wanted e.g {name: u.name, age: u.age}. Its type is the anonymous struct
-// of the names and the types of the values: struct { name: string; age: int; }
+// of the names and the types of the values: struct { name: string; age: int; }. A member without a name gets the name of
+// the member it reads, e.g {p.title, p.body} is {title: p.title, body: p.body}
 static Type *check_inferred_struct_literal(Typer *typer, AstStructLiteral *literal) {
     Parser *parser = typer->parser;
+
+    for (int i = 0; i < literal->initializers.count; i++) {
+        AstStructInitializer *init = ((AstStructInitializer **)literal->initializers.items)[i];
+        if (init->designator) continue;
+        AstLiteral *name = implied_member_name(init->value);
+        AstIdentifier *designator = make_identifier_from_string(parser, name->as.value.identifier.name, NULL);
+        designator->head.file  = name->head.head.file;
+        designator->head.start = name->head.head.start;
+        designator->head.end   = name->head.head.end;
+        init->designator = designator;
+    }
 
     AstStruct *node      = ast_allocate(parser, sizeof(AstStruct));
     node->head.kind      = AST_STRUCT;
@@ -7478,7 +7511,11 @@ static Type *check_inferred_struct_literal(Typer *typer, AstStructLiteral *liter
         member->type = type;
         member->decl = decl;
         da_append(&decl->idents, member);
-        if (add_declaration_to_scope(parser, node->members, decl) != NULL) return NULL; // Reported e.g {a: 1, a: 2}
+        if (add_declaration_to_scope(parser, node->members, decl) != NULL) {
+            // Reported e.g {a: 1, a: 2}. Two members without names can read members of the same name
+            report_error_ast(parser, LABEL_HINT, NULL, "Give one of them a name of its own e.g {authorName: p.author().name, p.name}");
+            return NULL;
+        }
         da_append(&node->members->statements, decl);
     }
 
@@ -7519,13 +7556,18 @@ static Type *check_inferred_struct_literal(Typer *typer, AstStructLiteral *liter
     return resolved;
 }
 
-// True for {a: x, b: y}: a struct literal without a type, that names each member
+// True for {a: x, b: y} and {p.title, p.body}: a struct literal without a type, where each member has a name, written or
+// that of the member it reads
 static bool is_inferable_struct_literal(AstStructLiteral *literal) {
     if (literal->explicit_type || literal->initializers.count == 0) return false;
+    bool named = false;
     for (int i = 0; i < literal->initializers.count; i++) {
-        if (((AstStructInitializer **)literal->initializers.items)[i]->designator == NULL) return false;
+        AstStructInitializer *init = ((AstStructInitializer **)literal->initializers.items)[i];
+        if (init->designator) { named = true; continue; }
+        if (!implied_member_name(init->value)) return false;
+        if (init->value->head.kind == AST_MEMBER_ACCESS) named = true;
     }
-    return true;
+    return named; // {x, y} of only variables is a literal of a type that is wanted, e.g Point
 }
 
 // The struct literals whose type comes from where they are written, e.g the {...} of 'people: []Person = [{...}]'.
