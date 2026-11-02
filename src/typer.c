@@ -1740,6 +1740,19 @@ static bool is_unchecked_short_lambda(AstExpr *expr) {
     return expr->head.kind == AST_FUNCTION_DEFN && ((AstFunctionDefn *)expr)->is_short_lambda && !(expr->head.flags & AST_FLAG_IS_TYPE_CHECKED);
 }
 
+// An enum value without its enum, e.g .verbose, or flags of them, e.g .verbose | .color or ~.verbose, which need the enum
+// that is wanted
+static bool is_enum_values_expression(AstExpr *expr) {
+    if (expr->head.kind == AST_ENUM_LITERAL) return true;
+    if (expr->head.kind == AST_BINARY) {
+        int op = ((AstBinary *)expr)->operator;
+        if (op != '|' && op != '&' && op != '^') return false;
+        return is_enum_values_expression(((AstBinary *)expr)->left) && is_enum_values_expression(((AstBinary *)expr)->right);
+    }
+    if (expr->head.kind == AST_UNARY && ((AstUnary *)expr)->operator == OP_BITWISE_NOT) return is_enum_values_expression(((AstUnary *)expr)->expr);
+    return false;
+}
+
 // Gives a short lambda passed to a generic function its types: those of its parameters from the type parameters that the
 // other arguments bound, and its result type, which may bind more of them e.g the U of map(f: (T) -> U)
 static bool check_short_lambda_argument(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindings, AstFunctionDefn *lambda, AstIdentifier *param) {
@@ -1879,7 +1892,7 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
         // if its type parameters are already known e.g the T of add(value: T) from the receiver
         AstExpr *value = arg->value;
         bool needs_type = (value->head.kind == AST_STRUCT_LITERAL && ((AstStructLiteral *)value)->explicit_type == NULL) ||
-                          value->head.kind == AST_ARRAY_LITERAL || value->head.kind == AST_ENUM_LITERAL;
+                          value->head.kind == AST_ARRAY_LITERAL || is_enum_values_expression(value);
         bool all_bound = needs_type;
         for (int j = 0; j < generic->type_params.count; j++) {
             AstIdentifier *type_param = ((AstIdentifier **)generic->type_params.items)[j];
@@ -3423,7 +3436,14 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         return false;
     }
 
-    if (assign->op != '=') {
+    // options |= .verbose, options &= ~.verbose and options ^= .verbose of an enum flags
+    bool is_flags_assign = (assign->op == ASSIGN_OR_EQUAL || assign->op == ASSIGN_AND_EQUAL || assign->op == ASSIGN_XOR_EQUAL) &&
+                           lhs_type->kind == TYPE_ENUM && ((TypeEnum *)lhs_type)->node->is_flags;
+    if (is_flags_assign && !types_are_equal(lhs_type, expr_type)) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Operator '%s' takes a value of %s here, not %s", token_type_to_str((TokenType) assign->op), text_bold(type_to_str(lhs_type)), text_bold(type_to_str(expr_type)));
+        return false;
+    }
+    if (assign->op != '=' && !is_flags_assign) {
         bool is_integer_only = assign->op != ASSIGN_PLUS_EQUAL && assign->op != ASSIGN_MINUS_EQUAL && assign->op != ASSIGN_TIMES_EQUAL && assign->op != ASSIGN_DIVIDE_EQUAL;
         if (is_integer_only && (lhs_type->kind != TYPE_INTEGER || expr_type->kind != TYPE_INTEGER)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Operator '%s' is only allowed for integer types. Given type was '%s'", token_type_to_str((TokenType) assign->op), type_to_str(lhs_type->kind != TYPE_INTEGER ? lhs_type : expr_type));
@@ -3558,6 +3578,14 @@ bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *) member->decl, "Illegal recursive definition of type '%s'", struct_type->node->identifier->name);
             report_error_ast(typer->parser, LABEL_HINT, NULL, "Did you mean to give it type *%s?", struct_type->node->identifier->name);
             return false;
+        }
+
+        // An enum declared further down has no size before it is checked
+        if (member->type->kind == TYPE_ENUM && ((TypeEnum *)member->type)->node && !(((TypeEnum *)member->type)->node->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
+            Typer current_state = *typer;
+            Type *ok = check_enum_defn(typer, ((TypeEnum *)member->type)->node);
+            typer_restore_state(typer, current_state);
+            if (!ok) return false;
         }
 
         if (member->type->kind == TYPE_STRUCT) {
@@ -4838,6 +4866,37 @@ bool rewrite_as_method_call(Typer *typer, AstFunctionCall *func_call, AstMemberA
 }
 
 
+// The methods of an enum flags, e.g options.has(.verbose), are the functions of the prelude (runtime.sd) that take the flags
+// first, e.g flagsHas(options, .verbose), unless the enum has a method of that name itself
+static const char *flags_methods[][2] = { {"has", "flagsHas"}, {"hasAny", "flagsHasAny"}, {"with", "flagsWith"}, {"without", "flagsWithout"}, {"isEmpty", "flagsIsEmpty"} };
+
+static bool rewrite_flags_method_call(Typer *typer, AstFunctionCall *call, AstMemberAccess *ma, char *name, bool *rewritten) {
+    *rewritten = false;
+    const char *function = NULL;
+    for (size_t i = 0; i < sizeof(flags_methods) / sizeof(flags_methods[0]); i++) {
+        if (strcmp(flags_methods[i][0], name) == 0) function = flags_methods[i][1];
+    }
+    if (function == NULL) return true;
+
+    Type *type = check_expression(typer, ma->left, NULL);
+    if (!type) return false;
+    if (type->kind != TYPE_ENUM || !((TypeEnum *)type)->node->is_flags) return true;
+    TypeStruct *holder = ((TypeEnum *)type)->method_holder;
+    if (holder && get_struct_method(holder->node, name)) return true;
+
+    AstIdentifier *ident = lookup_from_scope(typer->parser, typer->current_scope, (char *)function);
+    if (ident == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ma->right, "Compiler Error: '%s' of enum flags isn't in the prelude", function);
+        return false;
+    }
+    call->expression = (AstExpr *)make_resolved_identifier_literal(typer, ident, (Ast *)ma->right);
+    call->is_slice_method_call = true;
+    AstArgument *receiver = generate_argument_from_expr(typer, ma->left);
+    da_insert(&call->arguments, receiver, 0);
+    *rewritten = true;
+    return true;
+}
+
 // xs.sort() on a slice, a fixed array or a collection (a struct with elements()) is the call sort(xs) of the method on slices,
 // unless the type has a member or method of that name itself
 bool rewrite_slice_method_call(Typer *typer, AstFunctionCall *call) {
@@ -4845,6 +4904,9 @@ bool rewrite_slice_method_call(Typer *typer, AstFunctionCall *call) {
     if (!is_literal_identifier(ma->right)) return true;
 
     char *name = ((AstLiteral *)ma->right)->as.value.identifier.name;
+    bool rewritten = false;
+    if (!rewrite_flags_method_call(typer, call, ma, name, &rewritten)) return false;
+    if (rewritten) return true;
     AstFunctionDefn *method = find_slice_method(typer, name);
     if (method == NULL) return true;
 
@@ -6273,6 +6335,11 @@ Type *check_enum_values(Typer *typer, AstEnum *ast_enum) {
 
             etor->value = ((AstLiteral *)(const_expr))->as.value.integer;
             auto_increment_value = etor->value + 1;
+        } else if (ast_enum->is_flags) {
+            // The next bit that no value before has, e.g 1, 2, 4, and 8 after all = 7
+            int64_t bit = 1;
+            while (bit <= max_value) bit <<= 1;
+            etor->value = bit;
         } else {
             etor->value = auto_increment_value;
             auto_increment_value++;
@@ -7877,11 +7944,12 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         }
     }
 
-    if (is_comparison_operator(binary->operator)) {
+    bool is_flags_operator = binary->operator == '|' || binary->operator == '&' || binary->operator == '^';
+    if (is_comparison_operator(binary->operator) || is_flags_operator) {
         // If one of the two sides contains an enum literal then use the other side to provide a potential enum
         // context type so that we can have expressions like this: "if x == .Some_Enum"
-        if (binary->left->head.kind == AST_ENUM_LITERAL || binary->right->head.kind == AST_ENUM_LITERAL) {
-            bool enum_lit_is_lhs = binary->left->head.kind == AST_ENUM_LITERAL;
+        if (is_enum_values_expression(binary->left) || is_enum_values_expression(binary->right)) {
+            bool enum_lit_is_lhs = is_enum_values_expression(binary->left);
             AstExpr *enum_side  = enum_lit_is_lhs ? binary->left  : binary->right;
             AstExpr *other_side = enum_lit_is_lhs ? binary->right : binary->left;
 
@@ -7981,6 +8049,21 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         }
     }
     
+    // Flags of an enum flags are combined with | & ^, e.g options | .verbose
+    if (is_flags_operator && (lhs == TYPE_ENUM || rhs == TYPE_ENUM)) {
+        TypeEnum *flags = (TypeEnum *)(lhs == TYPE_ENUM ? ti_lhs : ti_rhs);
+        if (!flags->node->is_flags) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)binary, "The operator '%c' is for the values of an enum flags, which %s isn't", binary->operator, text_bold(type_to_str((Type *)flags)));
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Declare it as '%s :: enum flags { ... }' to combine its values", flags->identifier ? flags->identifier->name : "Name");
+            return NULL;
+        }
+        if (lhs != TYPE_ENUM || rhs != TYPE_ENUM || !types_are_equal(ti_lhs, ti_rhs)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)binary, "The operator '%c' combines two values of the same enum flags. Here it has %s and %s", binary->operator, text_bold(type_to_str(ti_lhs)), text_bold(type_to_str(ti_rhs)));
+            return NULL;
+        }
+        return ti_lhs;
+    }
+
     if (is_bitwise_operator(binary->operator)) {
         if (lhs == TYPE_INTEGER && rhs == TYPE_INTEGER) return biggest_type(ti_lhs, ti_rhs);
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)binary, "The operator '%s' is only for integers. Here it has %s and %s", token_type_to_str((TokenType) binary->operator), type_to_str(ti_lhs), type_to_str(ti_rhs));
@@ -8055,6 +8138,7 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     }
 
     if (unary->operator == OP_BITWISE_NOT) {
+        if (type_kind == TYPE_ENUM && ((TypeEnum *)expr_type)->node->is_flags) return expr_type; // All the other flags
         if (type_kind != TYPE_INTEGER) { // Maybe give a warning when not applying bitwise not to an integer?
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Operator '~' expects expression to be an integer type. Got type %s\n", type_to_str(expr_type));
             return NULL;

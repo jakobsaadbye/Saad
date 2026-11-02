@@ -73,6 +73,26 @@ resizeMemory :: (allocator: *Allocator, memory: *void, size: i64) -> *void {
     return realloc(memory, size);
 }
 
+// The names of the flags of an enum flags that are set in the value, e.g ["verbose", "color"] of 3. A value that has a name
+// of its own, e.g all = 7, is that name. ok is false when bits are set that no flag has
+flagNames :: method (type: *TypeEnum, value: i64) -> ([..]string, bool) {
+    names: [..]string;
+    name, named := type.nameOf(value);
+    if named && value != 0 {
+        names.add(name);
+        return names, true;
+    }
+    rest := value;
+    for v in type.values {
+        isOneBit := v.value > 0 && (v.value & (v.value - 1)) == 0;
+        if isOneBit && (value & v.value) == v.value {
+            names.add(v.name);
+            rest = rest & ~v.value;
+        }
+    }
+    return names, rest == 0;
+}
+
 //
 // List
 //

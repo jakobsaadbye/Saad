@@ -1887,6 +1887,9 @@ static int type_info_global(Lowerer *L, Type *type) {
     case TYPE_ENUM: {
         TypeEnum *enum_type = (TypeEnum *) type;
         write_pointer_field(global, runtime_offset(L, "TypeEnum", "backingType"), type_info_global(L, enum_type->backing_type));
+        if (enum_type->node && enum_type->node->is_flags) {
+            write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], 4, 4); // TypeFlags.isFlags in runtime.sd
+        }
         int count = 0;
         int values = enum_values_global(L, enum_type, &count);
         write_slice_field(global, runtime_offset(L, "TypeEnum", "values"), values, count);
@@ -1899,10 +1902,10 @@ static int type_info_global(Lowerer *L, Type *type) {
         write_slice_field(global, runtime_offset(L, "TypeStruct", "members"), members, count);
         write_int_bytes(&global->data[runtime_offset(L, "TypeStruct", "alignment")], struct_type->alignment, 4);
         if (struct_type->node->is_union) {
-            write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], 1, 4); // UnionFlag in runtime.sd
+            write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], 1, 4); // TypeFlags.isUnion in runtime.sd
         }
         if (is_optional_type(type)) {
-            write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], 2, 4); // OptionalFlag in runtime.sd
+            write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], 2, 4); // TypeFlags.isOptional in runtime.sd
         }
         break;
     }

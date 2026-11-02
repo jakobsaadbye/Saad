@@ -371,6 +371,17 @@ assignMap :: (v: Value, data: *void, type: *TypeStruct, path: string, options: *
 @private
 assignEnum :: (v: Value, data: *void, type: *TypeEnum, path: string, options: *Options) -> string {
     value: i64 = 0;
+    // The flags of an enum flags are a list of their names, e.g ["verbose", "color"]
+    if v.kind == .array && type.head.flags.has(.isFlags) {
+        for item, i in v.items {
+            flag: i64 = 0;
+            err := assignEnum(item, (&flag) as *void, type, fmt.sprint("%[%]", path, i), options);
+            if err != "" { return err; }
+            value = value | flag;
+        }
+        writeBits(data, type.backingType.size, value as u64);
+        return "";
+    }
     switch v.kind {
         case .string {
             found := false;

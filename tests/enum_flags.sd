@@ -1,0 +1,68 @@
+// enum flags: values that are combined, 1, 2, 4, ...
+import json;
+use fmt;
+
+Options :: enum flags { verbose, color, quiet }
+
+// Explicit values are kept, and the next value is the next bit after them
+Access :: enum flags {
+    none  = 0,
+    read,
+    write,
+    all   = 3,
+    admin,
+}
+
+// A struct with an enum that is declared below it has the size of the enum. It was 0 before the enum was checked
+Later :: struct { a: int; mode: Mode; options: Options; }
+Mode :: enum { on, off }
+
+Settings :: struct {
+    name:    string;
+    options: Options;
+}
+
+main :: () {
+    assert(Options.verbose as int == 1 && Options.color as int == 2 && Options.quiet as int == 4);
+    assert(Access.read as int == 1 && Access.write as int == 2 && Access.admin as int == 4);
+
+    // | & ^ ~ combine flags of the same enum, and an enum value without its enum gets it from the other side
+    o := Options.verbose | .quiet;
+    assert(o as int == 5 && o.has(.verbose) && !o.has(.color) && o.has(.verbose | .quiet));
+    assert(o.hasAny(.color | .quiet) && !o.hasAny(.color));
+    o |= .color;
+    o &= ~.verbose;
+    assert(o == .color | .quiet);
+    o ^= .quiet;
+    assert(o == .color);
+
+    // with and without give new flags
+    p := o.with(.verbose).without(.color);
+    assert(p == .verbose && o == .color);
+    none: Options;
+    assert(none.isEmpty() && !o.isEmpty());
+
+    // fmt writes the flags that are set, and a value with a name of its own by that name
+    assert(sprint("%", Options.verbose | .quiet) == ".verbose | .quiet");
+    assert(sprint("%", Access.all) == ".all" && sprint("%", Access.read | .admin) == ".read | .admin");
+    assert(sprint("%", none) == "0");
+
+    // json writes the names of the flags that are set, and reads them back
+    text := json.encode(Settings{name: "a", options: .verbose | .color});
+    assert(text == "{\"name\":\"a\",\"options\":[\"verbose\",\"color\"]}");
+    back, err := json.decode<Settings>(text);
+    assert(err == "" && back.options == .verbose | .color);
+
+    // The runtime's own flags of a type are an enum flags
+    maybe: ?int;
+    boxed: any = maybe;
+    assert(boxed.type.isOptional() && boxed.type.flags.has(.isOptional) && !boxed.type.flags.has(.isUnion));
+
+    assert(sizeof(Later) == 3 * sizeof(int));
+
+    // The bitwise operators bind tighter than comparisons: x & 1 == 0 is (x & 1) == 0
+    x := 6;
+    assert(x & 1 == 0 && x | 1 == 7 && 3 ^ 1 == 2);
+
+    print("enum flags ok");
+}

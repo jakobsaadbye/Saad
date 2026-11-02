@@ -57,8 +57,15 @@ Type :: struct {
     name:  string;
     kind:  TypeKind;
     size:  int;
-    flags: int;
+    flags: TypeFlags;
 };
+
+// What else a Type is, in Type.flags
+TypeFlags :: enum flags {
+    isUnion,     // A union, a TypeStruct whose first member is the tag
+    isOptional,  // A ?T, which is a struct with the members item: T and present: bool
+    isFlags,     // An enum flags, a TypeEnum whose values are combined, e.g 3 is the first two values
+}
 
 TypePrimitive :: struct  {
     head: Type;
@@ -103,9 +110,6 @@ TypeStruct :: struct {
     members:   []StructMember;
     alignment: int;
 };
-
-UnionFlag    :: 1; // In Type.flags
-OptionalFlag :: 2; // A ?T, which is a struct with the members item: T and present: bool
 
 TypeAny :: struct {
     head: Type;
@@ -193,12 +197,31 @@ attributeOf :: <T>(member: *StructMember, value: *T) -> bool {
 }
 
 isUnion :: method (type: *Type) -> bool {
-    return (type.flags & UnionFlag) != 0;
+    return type.flags.has(.isUnion);
 }
 
 isOptional :: method (type: *Type) -> bool {
-    return (type.flags & OptionalFlag) != 0;
+    return type.flags.has(.isOptional);
 }
+
+//
+// The methods of an enum flags, e.g options.has(.verbose). The compiler calls these for them, e.g flagsHas(options, .verbose)
+//
+
+// If all of the flags are set, e.g options.has(.verbose | .color)
+flagsHas :: <F>(flags: F, flag: F) -> bool { return (flags & flag) == flag; }
+
+// If any of the flags is set
+flagsHasAny :: <F>(flags: F, flag: F) -> bool { return (flags & flag) as i64 != 0; }
+
+// The flags with these set too, e.g options.with(.verbose)
+flagsWith :: <F>(flags: F, flag: F) -> F { return flags | flag; }
+
+// The flags without these, e.g options.without(.verbose)
+flagsWithout :: <F>(flags: F, flag: F) -> F { return flags & ~flag; }
+
+// If no flag is set
+flagsIsEmpty :: <F>(flags: F) -> bool { return flags as i64 == 0; }
 
 // The value inside the optional (a ?T) stored at data, and its type T. present is false when it is empty
 optionalValue :: method (type: *TypeStruct, data: *void) -> (*void, *Type, bool) {

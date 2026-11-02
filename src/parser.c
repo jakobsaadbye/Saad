@@ -2358,6 +2358,14 @@ AstEnum *parse_enum_defn(Parser *parser) {
     eat_token(parser);
 
     AstEnum *ast_enum = (AstEnum *)(ast_allocate(parser, sizeof(AstEnum)));
+
+    // enum flags { ... }
+    Token flags = peek_next_token(parser);
+    if (flags.type == TOKEN_LITERAL_IDENTIFIER && strcmp(flags.as_value.value.identifier.name, "flags") == 0 && peek_token(parser, 1).type == '{') {
+        eat_token(parser);
+        ast_enum->is_flags = true;
+    }
+
     bool ok = parse_enumerators(parser, ast_enum);
     if (!ok) return NULL;
 
@@ -3940,25 +3948,27 @@ void expect(Parser *parser, Token given, TokenType expected_type) {
     // Everything's cool dude
 }
 
+// The bitwise operators bind tighter than the comparisons, like in Rust and Go and unlike C, so 'x & mask == 0' is
+// '(x & mask) == 0' and 'flags == .a | .b' is 'flags == (.a | .b)'
 int get_operator_precedence(OperatorType op) {
     switch (op) {
         case OP_LOGICAL_OR: 
             return 1;
         case OP_LOGICAL_AND: 
             return 2;
-        case OP_BITWISE_OR: 
-            return 3;
-        case OP_BITWISE_XOR: 
-            return 4;
-        case OP_BITWISE_AND: 
-            return 5;
         case OP_DOUBLE_EQUAL:
         case OP_NOT_EQUAL: 
-            return 6;
+            return 3;
         case OP_GREATER_THAN: 
         case OP_LESS_THAN:
         case OP_GREATER_THAN_EQUAL:
         case OP_LESS_THAN_EQUAL:
+            return 4;
+        case OP_BITWISE_OR: 
+            return 5;
+        case OP_BITWISE_XOR: 
+            return 6;
+        case OP_BITWISE_AND: 
             return 7;
         case OP_BITWISE_SHIFT_LEFT:
         case OP_BITWISE_SHIFT_RIGHT:
