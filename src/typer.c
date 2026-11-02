@@ -473,6 +473,7 @@ bool is_prelude_identifier(Typer *typer, AstIdentifier *ident) {
     AstFile *file  = ident->head.file;
     if (file == NULL) return false;
     if (file == parser->collections_file) return true;
+    if (file == parser->expression_trees_file) return true;
     if (parser->runtime_file_path && strcmp(file->absolute_path, parser->runtime_file_path) == 0) return true;
     if (parser->builtin_string_file_path && strcmp(file->absolute_path, parser->builtin_string_file_path) == 0) return true;
     if (parser->slices_file_path && strcmp(file->absolute_path, parser->slices_file_path) == 0) return true;
@@ -5504,7 +5505,7 @@ static TypeStruct *expression_tree_type(Typer *typer, Type *type) {
     if (type->kind != TYPE_STRUCT) return NULL;
     AstStruct *generic = ((TypeStruct *)type)->node->generic_struct;
     if (generic == NULL || strcmp(generic->identifier->name, "Expr") != 0) return NULL;
-    if (typer->parser->collections_file == NULL || generic->head.file != typer->parser->collections_file) return NULL;
+    if (typer->parser->expression_trees_file == NULL || generic->head.file != typer->parser->expression_trees_file) return NULL;
     return (TypeStruct *)type;
 }
 
@@ -5594,7 +5595,7 @@ static AstExpr *tree_null(Typer *typer, Ast *at) {
 // A call of one of the functions in the prelude that build a tree e.g exprMember(left, "age")
 static AstExpr *tree_call(Typer *typer, char *name, AstExpr **args, int count, Ast *at) {
     Parser *parser = typer->parser;
-    AstIdentifier *function = lookup_from_scope(parser, parser->collections_file->scope, name);
+    AstIdentifier *function = parser->expression_trees_file ? lookup_from_scope(parser, parser->expression_trees_file->scope, name) : NULL;
     if (function == NULL) {
         report_error_ast(parser, LABEL_ERROR, at, "Compiler Error: '%s' of the expression trees isn't in the prelude", name);
         return NULL;
