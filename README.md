@@ -78,6 +78,47 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.9.7 - 2. Nov 2026
+
+* Short lambdas: `x => expr`. The types of the parameters come from where it is used, and the result type from the
+  expression. See `docs/generics.md`
+
+```odin
+adults := users.filter(u => u.age >= 18).map(u => u.name);   // a [..]string
+total  := prices.reduce(0.0, (sum, p) => sum + p);
+double: (int) -> int = x => x * 2;
+```
+
+* A struct literal without a type that names each member is an anonymous struct, where no type is wanted. Its type
+  is made of the names and the types of the values, so literals with the same members have the same type, also
+  the same as a written `struct { ... }`
+
+```odin
+ada  := {name: "Ada", age: 36};                       // a struct { name: string; age: int; }
+rows := users.map(u => {name: u.name, older: u.age + 1});
+```
+
+* Expression trees: a short lambda given for an `Expr<F>` is the tree of what it does, for a library to read, e.g to
+  make SQL of. It can use the variables around it, as their values are put in the tree. See `docs/expression_trees.md`
+
+```odin
+where :: (f: Expr<(User) -> bool>) -> string { ... f.root ... }
+where(u => u.age >= minAge && u.name.startsWith("A"));
+```
+
+* Function types can be type arguments, e.g `Expr<(User) -> bool>`
+* `dbms`: queries with lambdas, like LINQ. The lambdas are made into SQL, and the values they use are parameters.
+  The rows of `all` and `first` are tracked like those of `get`. See `docs/dbms.md`
+
+```odin
+adults, err := db.users.where(u => u.age ?? 0 >= minAge).orderBy(u => u.name).limit(20).all();
+ada, err2   := db.users.where(u => u.email == email).first();
+rows, err3  := db.users.where(u => u.role == .admin).select(u => {name: u.name, email: u.email}).all();
+```
+
+* `examples/blog`: a blog on Postgres, from the schema and the code the generator writes of it, to creating, querying,
+  changing and removing rows. It runs in `tools/linux/dbtests.sh`
+
 ## Update v0.9.6 - 2. Nov 2026
 
 * Saving changes, like `SaveChanges` of Entity Framework: `create()` (a new row to fill in), `update` and `delete` of a

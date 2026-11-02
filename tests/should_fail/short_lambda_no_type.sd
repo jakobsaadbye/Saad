@@ -1,0 +1,4 @@
+// expect-error: Can't infer the types of the parameters of the lambda
+main :: () {
+    f := x => x * 2;
+}

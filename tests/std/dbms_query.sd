@@ -1,0 +1,62 @@
+// The SQL that dbms.Query makes of lambdas, without a database. tests/db/shop_tables.sd runs queries on Postgres
+import dbms;
+use fmt;
+
+Role :: enum { guest, admin }
+
+User :: struct {
+    id:        i64;
+    name:      string;
+    age:       ?int;
+    role:      Role;
+    email:     ?string;
+    createdAt: string;
+}
+
+main :: () {
+    conn: dbms.Connection;
+    context := dbms.newContext(&conn);
+    users := dbms.keyedTable<User, i64>(context, "users", "id", schema: "shop");
+
+    // The values are parameters, the members are columns, in snake case
+    minAge := 18;
+    sql, args, err := users.where(u => u.age ?? 0 >= minAge && u.createdAt != "").toSql();
+    assert(err == "" && args.count == 3);
+    assert(sql == "SELECT * FROM \"shop\".\"users\" WHERE (((coalesce(\"age\", $1) >= $2) AND (\"created_at\" <> $3)))");
+    assert(*(args[1].data as *int) == 18);
+
+    // where again is AND, and null and empty optionals are IS NULL
+    noEmail: ?string;
+    sql2, args2, _ := users.where(u => u.email == null).where(u => !(u.email != noEmail) || u.role == .admin).toSql();
+    assert(sql2 == "SELECT * FROM \"shop\".\"users\" WHERE ((\"email\" IS NULL)) AND ((NOT ((\"email\" IS NOT NULL)) OR (\"role\" = $1)))");
+    assert(args2.count == 1 && args2[0].type.kind == .enum);
+
+    // Sorting and a part of the rows
+    sql3, _, _ := users.orderBy(u => u.name.toLower()).orderByDescending(u => u.id).limit(10).offset(20).toSql();
+    assert(sql3 == "SELECT * FROM \"shop\".\"users\" ORDER BY lower(\"name\"), \"id\" DESC LIMIT 10 OFFSET 20");
+
+    // Strings
+    sql4, _, _ := users.where(u => u.name.startsWith("A") && u.name.indexOf("x") < 0 && u.name.len > 2).toSql();
+    assert(sql4 == "SELECT * FROM \"shop\".\"users\" WHERE ((((left(\"name\", length($1)) = $2) AND ((strpos(\"name\", $3) - 1) < $4)) AND (length(\"name\") > $5)))");
+
+    // select into an anonymous struct, or into one value
+    sql5, _, _ := users.where(u => u.id > 1).select(u => {name: u.name, older: (u.age ?? 0) + 1}).toSql();
+    assert(sql5 == "SELECT \"name\" AS \"name\", (coalesce(\"age\", $1) + $2) AS \"older\" FROM \"shop\".\"users\" WHERE ((\"id\" > $3))");
+    sql6, _, _ := users.select(u => u.name).toSql();
+    assert(sql6 == "SELECT \"name\" AS \"value\" FROM \"shop\".\"users\"");
+
+    // Mistakes are errors of the query
+    _, _, err7 := users.where(u => u.name.reverse() == "x").toSql();
+    assert(err7.startsWith("The method reverse can't be made into SQL"));
+    _, _, err8 := users.select(u => u.name).where(n => n == "x").toSql();
+    assert(err8 == "where after select isn't supported. Put the where before the select");
+
+    // A query is the start of others
+    adults := users.where(u => u.age ?? 0 >= 18);
+    a, _, _ := adults.where(u => u.role == .admin).toSql();
+    b, _, _ := adults.where(u => u.role == .guest).limit(1).toSql();
+    c, _, _ := adults.toSql();
+    assert(a.indexOf("LIMIT") < 0 && b.indexOf("LIMIT 1") > 0 && c.indexOf("role") < 0);
+
+    print("dbms query ok");
+}

@@ -1,0 +1,411 @@
+namespace dbms;
+
+// Queries with lambdas, like LINQ of C#, e.g
+//
+//     adults, err := db.users.where(u => u.age >= minAge && u.active).orderBy(u => u.name).limit(10).all();
+//     ada, err2   := db.users.where(u => u.email == email).first();        // a *User, null when there is none
+//     n, err3     := db.users.where(u => u.role == .admin).count();
+//     rows, err4  := db.users.where(u => u.age >= 18).select(u => {name: u.name, nextYear: u.age + 1}).all();
+//
+// The lambdas are expression trees (Expr, see docs/expression_trees.md), which are made into SQL. The values they use,
+// like minAge, are sent as parameters ($1, $2, ...). Nothing is sent before all, first, count or exists.
+//
+// In a lambda, the members of the row are its columns, and these work:
+//
+//     ==  !=  <  <=  >  >=  &&  ||  !  +  -  *  /  %     x.email == null is IS NULL, and ?? is coalesce
+//     x.name.startsWith(s)  x.name.endsWith(s)  x.name.indexOf(s)  x.name.toLower()  x.name.toUpper()  x.name.len
+import fmt;
+
+// A query of the rows of a table. The methods that add to it give a new query, so a query can be the start of others
+Query :: struct <T> {
+    context:    *Context;
+    table:      TableInfo;      // table.type is the struct of the rows of the table, which isn't T after a select
+    conditions: [..]*ExprNode;  // Of where, joined with AND
+    orderings:  [..]Ordering;
+    selection:  *ExprNode;      // Of select, or null for every column
+    single:     bool;           // select gave a value that isn't a struct, e.g u => u.name
+    take:       i64 = -1;       // limit, -1 for every row
+    skip:       i64 = 0;        // offset
+    failure:    string;         // A mistake in making the query, given by all, first, count and exists
+
+    // Only the rows that the condition is true for. More conditions are joined with AND
+    where :: method (condition: Expr<(T) -> bool>) -> Query<T> {
+        q := self.copy();
+        if q.selection != null && q.failure == "" {
+            q.failure = "where after select isn't supported. Put the where before the select";
+        }
+        q.conditions.add(condition.root);
+        return q;
+    }
+
+    // Sorted by the value, from the smallest. A second orderBy sorts the rows that the first one finds equal
+    orderBy :: method <K> (by: Expr<(T) -> K>) -> Query<T> {
+        q := self.copy();
+        q.orderings.add(Ordering{by.root, false});
+        return q;
+    }
+
+    // Sorted by the value, from the largest
+    orderByDescending :: method <K> (by: Expr<(T) -> K>) -> Query<T> {
+        q := self.copy();
+        q.orderings.add(Ordering{by.root, true});
+        return q;
+    }
+
+    // At most n rows
+    limit :: method (n: i64) -> Query<T> {
+        q := self.copy();
+        q.take = n;
+        return q;
+    }
+
+    // Without the first n rows
+    offset :: method (n: i64) -> Query<T> {
+        q := self.copy();
+        q.skip = n;
+        return q;
+    }
+
+    // Rows of only some columns, or values made of them, e.g u => {name: u.name, nextYear: u.age + 1}, which gives a
+    // [..]struct { name: string; nextYear: int; }, or u => u.name, which gives a [..]string. They aren't tracked
+    select :: method <U> (f: Expr<(T) -> U>) -> Query<U> {
+        q: Query<U>;
+        q.context    = self.context;
+        q.table      = self.table;
+        q.conditions = copyList(self.conditions);
+        q.orderings  = copyList(self.orderings);
+        q.take       = self.take;
+        q.skip       = self.skip;
+        q.failure    = self.failure;
+        q.selection  = f.root;
+
+        empty: U;
+        boxed: any = empty;
+        q.single = boxed.type.kind != .struct;
+        if !q.single && f.root.kind != .object && q.failure == "" {
+            q.failure = "select gives a struct literal with names, e.g u => {name: u.name}, or one value, e.g u => u.name";
+        }
+        return q;
+    }
+
+    // The rows. When the table has a key and nothing is selected, they are tracked like the rows of all of the table.
+    // Don't add to the list then, as its rows can move
+    all :: method () -> ([..]T, string) {
+        rows, err := self.fetch();
+        if err == "" && self.isTracked() {
+            for i in 0..rows.count {
+                self.context.trackRow(self.table, rows.indexRef(i) as *void);
+            }
+        }
+        return rows, err;
+    }
+
+    // The first row, or null when there are none. It is made with the allocator of the connection, and tracked like the
+    // rows of all
+    first :: method () -> (*T, string) {
+        q := self.limit(1);
+        rows, err := q.fetch();
+        if err != "" || rows.count == 0 {
+            rows.free();
+            return null, err;
+        }
+        row := resizeMemory(self.context.conn.allocator, null, sizeof(T)) as *T;
+        *row = rows[0];
+        rows.free();
+        if self.isTracked() {
+            self.context.trackRow(self.table, row as *void);
+        }
+        return row, "";
+    }
+
+    // The rows, without tracking them
+    fetch :: method () -> ([..]T, string) {
+        none: [..]T;
+        sql, args, err := self.toSql();
+        if err != "" { return none, err; }
+
+        if self.single {
+            values, e := self.context.conn.query<Single<T>>(sql, ...args.elements());
+            sql.free();
+            rows: [..]T;
+            rows.allocator = self.context.conn.allocator;
+            rows.reserve(values.count);
+            for v in values { rows.add(v.value); }
+            values.free();
+            return rows, e;
+        }
+
+        rows, e := self.context.conn.query<T>(sql, ...args.elements());
+        sql.free();
+        return rows, e;
+    }
+
+    // The number of rows
+    count :: method () -> (i64, string) {
+        sql, args, err := self.toSql();
+        if err != "" { return 0, err; }
+        counting := fmt.sprint("SELECT count(*) FROM (%) AS rows", sql);
+        sql.free();
+        n, _, e := self.context.conn.queryOne<i64>(counting, ...args.elements());
+        counting.free();
+        return n, e;
+    }
+
+    // True when there is a row
+    exists :: method () -> (bool, string) {
+        sql, args, err := self.toSql();
+        if err != "" { return false, err; }
+        asking := fmt.sprint("SELECT EXISTS (%)", sql);
+        sql.free();
+        found, _, e := self.context.conn.queryOne<bool>(asking, ...args.elements());
+        asking.free();
+        return found, e;
+    }
+
+    // The SQL of the query, and its parameters
+    toSql :: method () -> (string, [..]any, string) {
+        w: SqlWriter;
+        w.table = self.table;
+        if self.failure != "" {
+            return "", w.args, self.failure;
+        }
+
+        w.sb.addString("SELECT ");
+        if self.selection == null {
+            w.sb.addString("*");
+        } else if self.single {
+            w.write(self.selection);
+            w.sb.addString(" AS \"value\"");
+        } else {
+            for value, i in self.selection.args {
+                if i > 0 { w.sb.addString(", "); }
+                w.write(value);
+                w.sb.addString(" AS ");
+                w.sb.addString(quoted(self.selection.names[i]));
+            }
+        }
+        w.sb.addString(" FROM ");
+        w.sb.addString(qualifiedName(self.table.schema, self.table.name));
+
+        for condition, i in self.conditions {
+            if i == 0 { w.sb.addString(" WHERE "); } else { w.sb.addString(" AND "); }
+            w.sb.addChar('(');
+            w.write(condition);
+            w.sb.addChar(')');
+        }
+        for ordering, i in self.orderings {
+            if i == 0 { w.sb.addString(" ORDER BY "); } else { w.sb.addString(", "); }
+            w.write(ordering.by);
+            if ordering.descending { w.sb.addString(" DESC"); }
+        }
+        if self.take >= 0 { w.sb.addString(fmt.sprint(" LIMIT %", self.take)); }
+        if self.skip > 0  { w.sb.addString(fmt.sprint(" OFFSET %", self.skip)); }
+
+        if w.err != "" {
+            w.sb.free();
+            return "", w.args, w.err;
+        }
+        return w.sb.toString(), w.args, "";
+    }
+
+    copy :: method () -> Query<T> {
+        q := *self;
+        q.conditions = copyList(self.conditions);
+        q.orderings  = copyList(self.orderings);
+        return q;
+    }
+
+    isTracked :: method () -> bool {
+        return self.selection == null && self.table.key != "" && self.context.track;
+    }
+}
+
+// The query of every row of a table
+queryOf :: <T>(context: *Context, table: TableInfo) -> Query<T> {
+    q: Query<T>;
+    q.context = context;
+    q.table   = table;
+    return q;
+}
+
+@private
+Ordering :: struct {
+    by:         *ExprNode;
+    descending: bool;
+}
+
+// A row of one column, for a select of a value that isn't a struct
+@private
+Single :: struct <T> {
+    value: T;
+}
+
+@private
+copyList :: <E>(list: [..]E) -> [..]E {
+    copy: [..]E;
+    copy.reserve(list.count);
+    for e in list { copy.add(e); }
+    return copy;
+}
+
+// Writes an expression tree as SQL
+@private
+SqlWriter :: struct {
+    sb:    fmt.StringBuilder;
+    args:  [..]any;
+    table: TableInfo;
+    err:   string;
+
+    write :: method * (node: *ExprNode) {
+        if self.err != "" { return; }
+        switch node.kind {
+            case .parameter {
+                self.fail("A row can't be a value in SQL, only its members, e.g u.age");
+            }
+            case .member {
+                self.writeMember(node);
+            }
+            case .value {
+                if isNull(node) {
+                    self.sb.addString("NULL");
+                } else {
+                    self.args.add(node.value);
+                    self.sb.addString(fmt.sprint("$%", self.args.count));
+                }
+            }
+            case .unary {
+                if node.op == "!" { self.sb.addString("NOT ("); } else { self.sb.addString("-("); }
+                self.write(node.left);
+                self.sb.addChar(')');
+            }
+            case .binary {
+                self.writeBinary(node);
+            }
+            case .call {
+                self.writeCall(node);
+            }
+            case .object {
+                self.fail("A struct literal is only for select, e.g select(u => {name: u.name})");
+            }
+        }
+    }
+
+    writeMember :: method * (node: *ExprNode) {
+        // The length of a text column, e.g u.name.len
+        if node.left.kind == .member && node.name == "len" {
+            self.sb.addString("length(");
+            self.writeMember(node.left);
+            self.sb.addChar(')');
+            return;
+        }
+        if node.left.kind != .parameter {
+            self.fail(fmt.sprint("Only the members of the row are columns, so .% of something else isn't supported", node.name));
+            return;
+        }
+        self.sb.addString(quoted(self.columnOf(node.name)));
+    }
+
+    writeBinary :: method * (node: *ExprNode) {
+        // == null and != null are IS NULL and IS NOT NULL
+        if node.op == "==" || node.op == "!=" {
+            other: *ExprNode = null;
+            if isNull(node.right) { other = node.left; }
+            if isNull(node.left)  { other = node.right; }
+            if other != null {
+                self.sb.addChar('(');
+                self.write(other);
+                if node.op == "==" { self.sb.addString(" IS NULL)"); } else { self.sb.addString(" IS NOT NULL)"); }
+                return;
+            }
+        }
+        if node.op == "??" {
+            self.sb.addString("coalesce(");
+            self.write(node.left);
+            self.sb.addString(", ");
+            self.write(node.right);
+            self.sb.addChar(')');
+            return;
+        }
+
+        op := node.op;
+        if op == "==" { op = "="; }
+        if op == "!=" { op = "<>"; }
+        if op == "&&" { op = "AND"; }
+        if op == "||" { op = "OR"; }
+        self.sb.addChar('(');
+        self.write(node.left);
+        self.sb.addChar(' ');
+        self.sb.addString(op);
+        self.sb.addChar(' ');
+        self.write(node.right);
+        self.sb.addChar(')');
+    }
+
+    writeCall :: method * (node: *ExprNode) {
+        if node.left == null {
+            self.fail(fmt.sprint("The function % can't be made into SQL. Call it outside the lambda, and use its value", node.name));
+            return;
+        }
+        arguments := node.args.count;
+        if node.name == "toLower" || node.name == "toUpper" {
+            if arguments != 0 { self.failCall(node); return; }
+            if node.name == "toLower" { self.sb.addString("lower("); } else { self.sb.addString("upper("); }
+            self.write(node.left);
+            self.sb.addChar(')');
+            return;
+        }
+        if arguments != 1 { self.failCall(node); return; }
+        if node.name == "startsWith" || node.name == "endsWith" {
+            // left(x, length(s)) = s, so that % and _ in s are no wildcards
+            if node.name == "startsWith" { self.sb.addString("(left("); } else { self.sb.addString("(right("); }
+            self.write(node.left);
+            self.sb.addString(", length(");
+            self.write(node.args[0]);
+            self.sb.addString(")) = ");
+            self.write(node.args[0]);
+            self.sb.addChar(')');
+            return;
+        }
+        if node.name == "indexOf" {
+            self.sb.addString("(strpos(");
+            self.write(node.left);
+            self.sb.addString(", ");
+            self.write(node.args[0]);
+            self.sb.addString(") - 1)");
+            return;
+        }
+        self.failCall(node);
+    }
+
+    failCall :: method * (node: *ExprNode) {
+        self.fail(fmt.sprint("The method % can't be made into SQL. These can: startsWith(s), endsWith(s), indexOf(s), toLower(), toUpper()", node.name));
+    }
+
+    fail :: method * (message: string) {
+        if self.err == "" { self.err = message; }
+    }
+
+    // The column of a member of the rows of the table
+    columnOf :: method (member: string) -> string {
+        columns := columnsOf(self.table.type, self.table.generated, self.table.key);
+        name := columnName(member);
+        for column in columns {
+            if column.member.name == member { name = column.name; }
+        }
+        columns.free();
+        return name;
+    }
+}
+
+// null, or an empty optional
+@private
+isNull :: (node: *ExprNode) -> bool {
+    if node.kind != .value { return false; }
+    if node.value.type == null { return true; }
+    if node.value.type.kind == .pointer { return *(node.value.data as **void) == null; }
+    if node.value.type.isOptional() {
+        _, _, present := (node.value.type as *TypeStruct).optionalValue(node.value.data);
+        return !present;
+    }
+    return false;
+}

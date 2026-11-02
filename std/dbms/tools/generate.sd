@@ -16,7 +16,11 @@
 //     use entities;
 //
 //     db := database.open(&conn);
-//     ada, err := db.users.insert(User{name: "Ada"});
+//     ada := db.users.create();
+//     ada.name = "Ada";
+//     err := db.saveChanges();
+//
+// examples/blog is a whole program made this way
 //
 // Make them again when the database changes, instead of changing them: the files of tables that are gone are removed.
 // See docs/dbms.md

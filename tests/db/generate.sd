@@ -50,7 +50,7 @@ main :: () {
     assert(os.fileExists(sprint("%/entity/category.sd", folder)));
     assert(os.writeFile(sprint("%/entity/mine.sd", folder), "namespace entities;\n"));
 
-    fewer := files.filter((f: postgres.GeneratedFile) -> bool { return f.name != "entity/category.sd"; });
+    fewer := files.filter(f => f.name != "entity/category.sd");
     removed, e2 := postgres.writeFiles(folder, fewer);
     assert(e2 == "" && removed.count == 1 && removed[0] == "entity/category.sd");
     assert(!os.fileExists(sprint("%/entity/category.sd", folder)) && os.fileExists(sprint("%/entity/mine.sd", folder)));

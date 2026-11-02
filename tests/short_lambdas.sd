@@ -1,0 +1,71 @@
+// Lambdas of one expression, x => expr, whose types come from where they are used
+use fmt;
+
+User :: struct {
+    name: string;
+    age:  int;
+}
+
+Limit :: 3;
+
+twice :: (f: (int) -> int, x: int) -> int { return f(f(x)); }
+each  :: (xs: []int, f: (int) -> void) { for x in xs { f(x); } }
+
+seen: [..]int;
+
+main :: () {
+    xs := [1, 2, 3, 4, 5, 6];
+
+    // The parameter types come from the receiver, and the result type from the expression, e.g U = string for map
+    evens := xs.filter(x => x % 2 == 0);
+    assert(evens.count == 3 && evens[2] == 6);
+
+    users := [User{"Ada", 36}, User{"Bo", 17}];
+    names := users.map(u => u.name);
+    assert(names.count == 2 && names[1] == "Bo");
+
+    adult := users.find(u => u.age >= 18);
+    assert(adult?.name ?? "" == "Ada");
+    assert(users.some(u => u.age < 18) && !users.every(u => u.age < 18));
+
+    // Several parameters, and a result type from another argument
+    assert(xs.reduce(0, (sum, x) => sum + x) == 21);
+    assert(xs.reduce(0.5, (sum, x) => sum + x as float) == 21.5);
+
+    // A function type that is wanted: a variable, or a parameter
+    double: (int) -> int = x => x * 2;
+    assert(double(4) == 8);
+    assert(twice(x => x + 3, 1) == 7);
+    answer := () => 42;
+    assert(answer() == 42);
+
+    // A lambda that gives nothing
+    each(xs, x => seen.add(x));
+    assert(seen.count == 6);
+
+    // Constants and globals can be used, the variables of the function around it can't
+    big := xs.filter(x => x > Limit);
+    assert(big.count == 3);
+
+    // Nested, and chained
+    a: [..]int = [1, 2];
+    b: [..]int = [3];
+    rows: [..][..]int = [a, b];
+    assert(rows.map(row => row.count)[0] == 2);
+    assert(rows.filter(row => row.some(x => x > 2)).count == 1);
+    tens := rows.map(row => row.map(x => x * 10));
+    assert(tens[1][0] == 30);
+    long := ["a", "bb", "ccc"].map(w => w.len).filter(n => n > 1);
+    assert(long.count == 2);
+
+    // In the header of a statement, and next to the => of a switch
+    if xs.some(x => x > 5) { assert(true); } else { assert(false); }
+    for x in xs.filter(x => x > 5) { assert(x == 6); }
+    kind := switch xs.count {
+        case Limit => "three";
+        else       => "other";
+    };
+    assert(kind == "other");
+
+    print("short lambdas ok");
+}

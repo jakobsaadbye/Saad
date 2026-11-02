@@ -1,0 +1,57 @@
+// Made by std/dbms/tools/generate.sd from the schema saad_blog of a Postgres database. Make it again
+// instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
+namespace database;
+
+import dbms;
+use entities;
+
+// Files: entity/post_status.sd, entity/author.sd, entity/comment.sd, entity/post_tag.sd, entity/post.sd, database.sd
+
+// The tables of the schema saad_blog, and the changes to them, which saveChanges writes in one transaction, e.g
+//
+//     db := database.open(&conn);
+//     rows, err := db.authors.all();
+//     row := db.authors.create();
+//     err2 := db.saveChanges();
+Database :: struct {
+    @embed context: *dbms.Context;
+
+    authors:  AuthorsTable;
+    comments: CommentsTable;
+    postTags: PostTagsTable;
+    posts:    PostsTable;
+}
+
+// The tables on the connection
+open :: (conn: *dbms.Connection) -> Database {
+    tables: Database;
+    tables.context = dbms.newContext(conn);
+    tables.authors.table  = dbms.keyedTable<Author, i64>(tables.context, "authors", "id", schema: "saad_blog");
+    tables.comments.table = dbms.keyedTable<Comment, i64>(tables.context, "comments", "id", schema: "saad_blog");
+    tables.postTags.table = dbms.table<PostTag>(tables.context, "post_tags", schema: "saad_blog");
+    tables.posts.table    = dbms.keyedTable<Post, i64>(tables.context, "posts", "id", schema: "saad_blog");
+    tables.authors.generated = ["id", "joined_at"];
+    tables.comments.generated = ["id", "created_at"];
+    tables.posts.generated = ["id", "created_at"];
+    return tables;
+}
+
+// The rows of authors: all, get, count, and create, update and delete of dbms.KeyedTable
+AuthorsTable :: struct {
+    @embed table: dbms.KeyedTable<Author, i64>;
+}
+
+// The rows of comments: all, get, count, and create, update and delete of dbms.KeyedTable
+CommentsTable :: struct {
+    @embed table: dbms.KeyedTable<Comment, i64>;
+}
+
+// The rows of post_tags: all, count and create of dbms.Table. It has no key of one column, so no get, update and delete
+PostTagsTable :: struct {
+    @embed table: dbms.Table<PostTag>;
+}
+
+// The rows of posts: all, get, count, and create, update and delete of dbms.KeyedTable
+PostsTable :: struct {
+    @embed table: dbms.KeyedTable<Post, i64>;
+}

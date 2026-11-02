@@ -1,0 +1,217 @@
+// A small blog on Postgres with std/dbms: the tables are written as Saad by the generator (examples/blog/db), rows are
+// made and changed as plain structs, saveChanges writes them, and queries are lambdas that are made into SQL.
+// See README.md for how to run it, and docs/dbms.md for all of dbms
+//
+//     saad run examples/blog/main.sd -- "host=localhost dbname=postgres user=postgres"
+
+import dbms;
+import dbms.postgres;
+import os;
+import database;      // examples/blog/db/database.sd: Database, open and the tables
+use entities;         // examples/blog/db/entity: Author, Post, Comment, PostTag and PostStatus
+use fmt;
+
+// A row of plain SQL, for what the queries of the tables can't say yet, like a join
+AuthorStats :: struct {
+    name:  string;
+    posts: i64;
+    views: i64;
+}
+
+main :: () {
+    conn := connect();
+    db := database.open(&conn);
+
+    // Every run starts from an empty blog
+    _, err := conn.exec("TRUNCATE saad_blog.authors, saad_blog.posts, saad_blog.comments, saad_blog.post_tags RESTART IDENTITY");
+    check(err);
+
+    //
+    // 1. Creating rows. create() gives a new row with the defaults of the table, e.g status is .draft. Nothing is
+    //    written until saveChanges, which writes all changes in one transaction, and then what the database made, like
+    //    the ids and joined_at, into the rows
+    //
+    ada := db.authors.create();
+    ada.name  = "Ada Lovelace";
+    ada.email = "ada@example.com";
+    ada.bio   = "Writes about engines that weave numbers";
+
+    grace := db.authors.create();
+    grace.name  = "Grace Hopper";
+    grace.email = "grace@example.com";
+
+    print("% changes to save", db.pendingChanges());
+    check(db.saveChanges());
+    print("Saved authors % (id %) and % (id %), who joined at %", ada.name, ada.id, grace.name, grace.id, ada.joinedAt);
+
+    // The posts need the ids of their authors, so they come after the authors are saved
+    engine   := newPost(&db, ada,   "Notes on the Analytical Engine", "analytical-engine", "It weaves algebraic patterns.");
+    bernoulli := newPost(&db, ada,  "Computing Bernoulli numbers",    "bernoulli",         "Step by step, with the engine.");
+    compilers := newPost(&db, grace, "Why we need compilers",          "compilers",         "People should write in words.");
+    moth      := newPost(&db, grace, "The first actual bug",           "first-bug",         "It was a moth.");
+    engine.status    = .published;
+    engine.publishedAt = "2026-10-01 09:00:00+00";
+    engine.views     = 120;
+    compilers.status = .published;
+    compilers.publishedAt = "2026-10-15 12:30:00+00";
+    compilers.views  = 300;
+    moth.status = .archived;
+    check(db.saveChanges());     // The four posts are one INSERT
+
+    // Comments, and tags, whose table has no key of one column: it can only be read and created
+    addComment(&db, engine,    "Charles", "Brilliant work!");
+    addComment(&db, engine,    "Mary",    "When can I see it run?");
+    addComment(&db, compilers, "Alan",    "Agreed.");
+    spam := addComment(&db, compilers, "Spammer", "Buy cheap watches");
+    addTag(&db, engine, "history");
+    addTag(&db, engine, "math");
+    addTag(&db, compilers, "languages");
+    check(db.saveChanges());
+    print("Saved 4 posts, and comments and tags for them");
+
+    //
+    // 2. Querying. The lambdas are checked like any code, and made into SQL. The values they use, like minViews, are
+    //    sent as parameters
+    //
+    published, e1 := db.posts.where(p => p.status == .published).orderByDescending(p => p.publishedAt).all();
+    check(e1);
+    print("\nPublished, newest first:");
+    for post in published {
+        print("  % (% views)", post.title, post.views);
+    }
+
+    // Some columns, into an anonymous struct: struct { title: string; slug: string; popular: bool; }
+    minViews := 200;
+    summaries, e2 := db.posts.where(p => p.authorId == grace.id).orderBy(p => p.title).select(p => {title: p.title, slug: p.slug, popular: p.views >= minViews}).all();
+    check(e2);
+    print("\nPosts of %:", grace.name);
+    for s in summaries {
+        if s.popular { print("  /% % (popular)", s.slug, s.title); }
+        else         { print("  /% %", s.slug, s.title); }
+    }
+
+    // A search, into one value per row
+    term := "engine";
+    titles, e3 := db.posts.where(p => p.title.toLower().indexOf(term) >= 0 || p.body.toLower().indexOf(term) >= 0).select(p => p.title).all();
+    check(e3);
+    print("\nPosts about '%': %", term, titles);
+
+    // count and exists
+    comments, e4 := db.comments.where(c => c.postId == engine.id).count();
+    check(e4);
+    taken, e5 := db.posts.where(p => p.slug == "bernoulli").exists();
+    check(e5);
+    print("\n'%' has % comments, and the slug 'bernoulli' is taken: %", engine.title, comments, taken);
+
+    // A page of rows
+    page, e6 := db.posts.orderBy(p => p.id).offset(1).limit(2).select(p => p.slug).all();
+    check(e6);
+    print("Page 2 of the posts, by two: %", page);
+
+    //
+    // 3. Changing rows. The rows of get, all and first are tracked: what is changed on them is saved by saveChanges,
+    //    without calling update, and only the columns that changed
+    //
+    post, e7 := db.posts.where(p => p.slug == "bernoulli").first();   // A *Post, or null when there is none
+    check(e7);
+    post.status      = .published;
+    post.publishedAt = "2026-11-02 08:00:00+00";
+
+    reader, e8 := db.posts.get(engine.id);
+    check(e8);
+    reader.views += 1;
+
+    print("\n% changes to save: the post that is published, and the view", db.pendingChanges());
+    check(db.saveChanges());
+    stillDraft, e9 := db.posts.where(p => p.status == .draft).count();
+    check(e9);
+    print("Drafts left: %", stillDraft);
+
+    //
+    // 4. Removing rows, by their key
+    //
+    db.comments.delete(spam.id);
+    check(db.saveChanges());
+    left, e10 := db.comments.count();
+    check(e10);
+    print("\nRemoved the spam, % comments are left", left);
+
+    //
+    // 5. A change that fails undoes all of the changes of the save, and they are kept until they are fixed or discarded
+    //
+    copycat := db.authors.create();
+    copycat.name  = "Ada again";
+    copycat.email = "ada@example.com";     // email is UNIQUE
+    saveErr := db.saveChanges();
+    print("\nSaving a second author with the email of Ada fails: %", firstLine(saveErr));
+    db.discardChanges();
+
+    //
+    // 6. Plain SQL stays for everything else, like this join
+    //
+    stats, e11 := conn.query<AuthorStats>(
+        "SELECT a.name, count(p.id) AS posts, coalesce(sum(p.views), 0) AS views
+         FROM saad_blog.authors a LEFT JOIN saad_blog.posts p ON p.author_id = a.id AND p.status = $1
+         GROUP BY a.name ORDER BY a.name", PostStatus.published);
+    check(e11);
+    print("\nPublished posts per author:");
+    for s in stats {
+        print("  %: % posts, % views", s.name, s.posts, s.views);
+    }
+
+    conn.close();
+}
+
+// A new post of the author, saved by the next saveChanges
+newPost :: (db: *database.Database, author: *Author, title: string, slug: string, body: string) -> *Post {
+    post := db.posts.create();
+    post.authorId = author.id;
+    post.title    = title;
+    post.slug     = slug;
+    post.body     = body;
+    return post;
+}
+
+addComment :: (db: *database.Database, post: *Post, name: string, body: string) -> *Comment {
+    comment := db.comments.create();
+    comment.postId     = post.id;
+    comment.authorName = name;
+    comment.body       = body;
+    return comment;
+}
+
+addTag :: (db: *database.Database, post: *Post, tag: string) {
+    row := db.postTags.create();
+    row.postId = post.id;
+    row.tag    = tag;
+}
+
+// The connection of the first argument, or of SAAD_BLOG_POSTGRES
+connect :: () -> dbms.Connection {
+    args := os.args();
+    connection, found := os.getEnv("SAAD_BLOG_POSTGRES");
+    if args.count > 1 { connection = args[1]; found = true; }
+    if !found {
+        print("Usage: saad run examples/blog/main.sd -- \"host=localhost dbname=postgres user=postgres\"");
+        os.exit(2);
+    }
+    conn, err := postgres.connect(connection);
+    if err != "" {
+        print("Can't connect: %", err);
+        os.exit(1);
+    }
+    return conn;
+}
+
+check :: (err: string) {
+    if err != "" {
+        print("Error: %", err);
+        os.exit(1);
+    }
+}
+
+firstLine :: (text: string) -> string {
+    end := text.indexOf("\n");
+    if end < 0 { return text; }
+    return text.slice(0, end);
+}

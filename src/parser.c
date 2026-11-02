@@ -1931,6 +1931,9 @@ int scan_type_arguments(Parser *parser, int lookahead) {
         case '[':
         case ']':
         case ',':
+        case '(':  // A function type e.g Expr<(User) -> bool>
+        case ')':
+        case TOKEN_RIGHT_ARROW:
             break;
         default:
             if (is_primitive_type_token(token)) break;
@@ -3259,7 +3262,19 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
 
 // Parses a generic function again from its first token, giving a new copy of it to use as an instance. The type parameters
 // of the instance are bound in 'scope', which must have the scope of the generic function as its parent
+static AstFunctionDefn *parse_short_lambda(Parser *parser);
+static AstFunctionDefn *reparse_function(Parser *parser, AstFunctionDefn *generic, AstBlock *scope);
+
 AstFunctionDefn *reparse_generic_function(Parser *parser, AstFunctionDefn *generic, AstBlock *scope) {
+    return reparse_function(parser, generic, scope);
+}
+
+// Parses a short lambda again, for a copy of its AST e.g to make an expression tree of. 'scope' is the scope around it
+AstFunctionDefn *reparse_short_lambda(Parser *parser, AstFunctionDefn *lambda, AstBlock *scope) {
+    return reparse_function(parser, lambda, scope);
+}
+
+static AstFunctionDefn *reparse_function(Parser *parser, AstFunctionDefn *generic, AstBlock *scope) {
     int              saved_token_index        = parser->current_token_index;
     AstBlock        *saved_scope              = parser->current_scope;
     AstFile         *saved_file               = parser->current_file;
@@ -3289,7 +3304,7 @@ AstFunctionDefn *reparse_generic_function(Parser *parser, AstFunctionDefn *gener
     int skipped = parser->skipped_statements;
     AstFunctionDefn *volatile instance = NULL;
     if (setjmp(on_syntax_error) == 0) {
-        instance = parse_function_defn(parser);
+        instance = generic->is_short_lambda ? parse_short_lambda(parser) : parse_function_defn(parser);
     }
     if (parser->skipped_statements != skipped) instance = NULL; // It isn't whole, so it isn't checked
     diagnostics.muted -= 1;
@@ -4066,6 +4081,129 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
     return left;
 }
 
+// x => expr, (a, b) => expr or () => expr. Not in the header of a statement, e.g 'case Limit => ...', unless in the arguments
+// of a call there
+static bool starts_short_lambda(Parser *parser) {
+    if (parser->inside_statement_header && !parser->inside_argument_list) return false;
+    Token t = peek_token(parser, 0);
+    if (t.type == TOKEN_LITERAL_IDENTIFIER) return peek_token(parser, 1).type == TOKEN_FAT_ARROW;
+    if (t.type != '(') return false;
+    int i = 1;
+    if (peek_token(parser, i).type != ')') {
+        while (true) {
+            if (peek_token(parser, i).type != TOKEN_LITERAL_IDENTIFIER) return false;
+            i += 1;
+            if (peek_token(parser, i).type == ',') { i += 1; continue; }
+            break;
+        }
+        if (peek_token(parser, i).type != ')') return false;
+    }
+    return peek_token(parser, i + 1).type == TOKEN_FAT_ARROW;
+}
+
+// A short lambda: a function of one expression, whose types are given by where it is used, e.g filter(x => x.age > 18)
+static AstFunctionDefn *parse_short_lambda(Parser *parser) {
+    Token start = peek_next_token(parser);
+    AstFunctionDefn *func_defn = new_function_defn(parser);
+    func_defn->is_lambda         = true;
+    func_defn->is_short_lambda   = true;
+    func_defn->infer_return_type = true;
+    func_defn->first_token_index = parser->current_token_index;
+    func_defn->type_params = da_init(1, sizeof(AstIdentifier *));
+    func_defn->instances   = da_init(1, sizeof(AstFunctionDefn *));
+    func_defn->paren_start_token = start;
+    func_defn->default_parameter_index = -1;
+
+    // The names of the parameters
+    Token names[32];
+    int count = 0;
+    if (start.type == TOKEN_LITERAL_IDENTIFIER) {
+        names[count++] = start;
+        eat_token(parser);
+    } else {
+        eat_token(parser); // (
+        while (peek_next_token(parser).type == TOKEN_LITERAL_IDENTIFIER) {
+            if (count < 32) names[count++] = peek_next_token(parser);
+            eat_token(parser);
+            if (peek_next_token(parser).type == ',') eat_token(parser);
+        }
+        eat_token(parser); // )
+    }
+    Token arrow = peek_next_token(parser);
+    expect(parser, arrow, TOKEN_FAT_ARROW);
+    eat_token(parser);
+
+    AstFunctionDefn *saved_function = parser->enclosing_function;
+    bool saved_header   = parser->inside_statement_header;
+    bool saved_argument = parser->inside_argument_list;
+    parser->enclosing_function      = func_defn;
+    parser->inside_statement_header = false;
+    parser->inside_argument_list    = false;
+
+    func_defn->body = new_block(parser, BLOCK_IMPERATIVE);
+    for (int i = 0; i < count; i++) {
+        AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
+        decl->head.kind  = AST_DECLARATION;
+        decl->head.file  = parser->current_file;
+        decl->head.start = names[i].start;
+        decl->head.end   = names[i].end;
+        decl->idents     = da_init(1, sizeof(AstIdentifier *));
+        decl->values     = da_init(1, sizeof(AstExpr *));
+        decl->flags     |= DECLARATION_TYPED_NO_EXPR;
+
+        AstIdentifier *ident = make_identifier_from_token(parser, names[i], NULL); // The type is given by the typer
+        ident->decl = decl;
+        da_append(&decl->idents, ident);
+        if (add_declaration_to_scope(parser, parser->current_scope, decl) != NULL) return NULL;
+        da_append(&func_defn->parameters, ident);
+    }
+
+    AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
+    if (!expr) return NULL;
+
+    AstReturn *ast_return = ast_allocate(parser, sizeof(AstReturn));
+    ast_return->head.kind  = AST_RETURN;
+    ast_return->head.file  = parser->current_file;
+    ast_return->head.start = expr->head.start;
+    ast_return->head.end   = expr->head.end;
+    ast_return->values     = da_init(1, sizeof(AstExpr *));
+    da_append(&ast_return->values, expr);
+    ast_return->enclosing_function = func_defn;
+    da_append(&func_defn->body->statements, ast_return);
+    func_defn->body->head.start = arrow.start;
+    func_defn->body->head.end   = expr->head.end;
+    close_block(parser);
+
+    parser->enclosing_function      = saved_function;
+    parser->inside_statement_header = saved_header;
+    parser->inside_argument_list    = saved_argument;
+
+    // A placeholder, set by the typer from the expression
+    Type *void_type = primitive_type(PRIMITIVE_VOID);
+    da_append(&func_defn->return_types, void_type);
+
+    AstIdentifier *ident = make_identifier_from_string(parser, "lambda", NULL);
+    ident->flags |= IDENTIFIER_IS_NAME_OF_FUNCTION;
+
+    func_defn->head.head.kind  = AST_FUNCTION_DEFN;
+    func_defn->head.head.file  = parser->current_file;
+    func_defn->head.head.start = start.start;
+    func_defn->head.head.end   = expr->head.end;
+    func_defn->identifier      = ident;
+    func_defn->calling_convention = CALLING_CONV_SAAD;
+
+    TypeFunction *func_type    = type_alloc(&parser->type_table, sizeof(TypeFunction));
+    func_type->head.head.kind  = AST_TYPE;
+    func_type->head.head.file  = parser->current_file;
+    func_type->head.head.start = func_defn->head.head.start;
+    func_type->head.head.end   = func_defn->head.head.end;
+    func_type->head.kind       = TYPE_FUNCTION;
+    func_type->head.size       = 8;
+    func_type->node            = func_defn;
+    ident->type = (Type *)func_type;
+    return func_defn;
+}
+
 AstExpr *parse_leaf(Parser *parser) {
     Token t = peek_next_token(parser);
     if (t.type == TOKEN_LITERAL_BOOLEAN ||
@@ -4095,6 +4233,10 @@ AstExpr *parse_leaf(Parser *parser) {
         sce->head.head.start  = t.start;
         sce->head.head.end    = t.end;
         return (AstExpr *) sce;
+    }
+
+    if (starts_short_lambda(parser)) {
+        return (AstExpr *) parse_short_lambda(parser);
     }
 
     if (starts_function_defn(parser)) {

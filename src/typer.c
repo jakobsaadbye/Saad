@@ -111,6 +111,9 @@ void append_mangled_name(StringBuilder *sb, char *name);
 Type *solidify_untyped_type(Type *untyped_type);
 Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic);
 AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall *call, AstFunctionDefn *generic);
+Type *check_short_lambda(Typer *typer, AstFunctionDefn *lambda, Type **param_types, int count, Type *return_type);
+Type *check_lambda_expression(Typer *typer, AstFunctionDefn *lambda, Type *ctx_type);
+static Type *check_short_lambda_as(Typer *typer, AstFunctionDefn *lambda, Type *ctx_type);
 bool register_method(Typer *typer, AstFunctionDefn *method, TypeStruct *receiver_struct);
 TypeStruct *method_holder_of(Typer *typer, Type *type);
 PrimitiveKind canonical_primitive_kind(PrimitiveKind kind);
@@ -1672,6 +1675,105 @@ AstFunctionDefn *instantiate_generic_function(Typer *typer, AstFunctionDefn *gen
 }
 
 // Infers the type arguments of a call to a generic function from the arguments and returns the instance to call
+// Resolves a type as written in the signature of a generic function, where its names are declared
+static Type *resolve_type_in_generic(Typer *typer, AstFunctionDefn *generic, Type *type) {
+    AstBlock *scope       = typer->current_scope;
+    AstFile  *file        = typer->current_file;
+    AstFile  *parser_file = typer->parser->current_file;
+    typer->current_scope = generic->body;
+    if (generic->head.head.file) {
+        typer->current_file         = generic->head.head.file;
+        typer->parser->current_file = generic->head.head.file;
+    }
+    Type *resolved = resolve_type(typer, type);
+    typer->current_scope        = scope;
+    typer->current_file         = file;
+    typer->parser->current_file = parser_file;
+    return resolved;
+}
+
+// The type of a parameter of a generic function as written e.g []T, with the type parameters that are bound so far put in.
+// NULL when it mentions one that isn't bound yet, or one in a way that isn't followed here
+static Type *bound_param_type(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindings, Type *type) {
+    if (!type_mentions_any_type_param(type, generic->type_params)) return resolve_type_in_generic(typer, generic, type);
+
+    switch (type->kind) {
+    case TYPE_NAME: {
+        int index = type_param_index(generic->type_params, type->name);
+        if (index == -1 || bindings[index].kind == BINDING_NONE) return NULL;
+        if (bindings[index].kind == BINDING_UNTYPED_INT)   return solidify_untyped_type(bindings[index].type);
+        if (bindings[index].kind == BINDING_UNTYPED_FLOAT) return primitive_type(PRIMITIVE_FLOAT);
+        return bindings[index].type;
+    }
+    case TYPE_POINTER: {
+        Type *to = bound_param_type(typer, generic, bindings, ((TypePointer *)type)->pointer_to);
+        return to ? (Type *)generate_pointer_to_type(typer->parser, to) : NULL;
+    }
+    case TYPE_ARRAY: {
+        TypeArray *array = (TypeArray *)type;
+        if (array->array_kind != ARRAY_SLICE) return NULL;
+        Type *elem = bound_param_type(typer, generic, bindings, array->elem_type);
+        return elem ? resolve_type(typer, (Type *)generate_slice_of(typer->parser, elem)) : NULL;
+    }
+    case TYPE_GENERIC_INSTANCE: {
+        TypeGenericInstance *instance = (TypeGenericInstance *)type;
+        TypeGenericInstance *copy = ast_allocate(typer->parser, sizeof(TypeGenericInstance));
+        *copy = *instance;
+        copy->type_args = da_init(instance->type_args.count, sizeof(Type *));
+        for (int i = 0; i < instance->type_args.count; i++) {
+            Type *arg = bound_param_type(typer, generic, bindings, ((Type **)instance->type_args.items)[i]);
+            if (!arg) return NULL;
+            da_append(&copy->type_args, arg);
+        }
+        return resolve_type_in_generic(typer, generic, (Type *)copy);
+    }
+    default:
+        return NULL;
+    }
+}
+
+// True for a short lambda that isn't checked yet e.g the x => x.name of users.map(x => x.name)
+static bool is_unchecked_short_lambda(AstExpr *expr) {
+    return expr->head.kind == AST_FUNCTION_DEFN && ((AstFunctionDefn *)expr)->is_short_lambda && !(expr->head.flags & AST_FLAG_IS_TYPE_CHECKED);
+}
+
+// Gives a short lambda passed to a generic function its types: those of its parameters from the type parameters that the
+// other arguments bound, and its result type, which may bind more of them e.g the U of map(f: (T) -> U)
+static bool check_short_lambda_argument(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindings, AstFunctionDefn *lambda, AstIdentifier *param) {
+    Type *wanted = param->type;
+    if (wanted->kind == TYPE_GENERIC_INSTANCE && strcmp(wanted->name, "Expr") == 0 && ((TypeGenericInstance *)wanted)->type_args.count == 1) {
+        wanted = ((Type **)((TypeGenericInstance *)wanted)->type_args.items)[0]; // Expr<(T) -> bool> is checked like (T) -> bool
+        lambda->is_expression_tree = true;
+    }
+    if (wanted->kind != TYPE_FUNCTION) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)lambda, "A lambda is given for the parameter '%s' of '%s', which is of type %s", param->name, generic->identifier->name, text_bold(type_to_str(param->type)));
+        return false;
+    }
+
+    AstFunctionDefn *signature = ((TypeFunction *)wanted)->node;
+    Type *param_types[32];
+    int count = signature->parameters.count < 32 ? signature->parameters.count : 32;
+    for (int i = 0; i < count; i++) {
+        Type *written = ((AstIdentifier **)signature->parameters.items)[i]->type;
+        param_types[i] = bound_param_type(typer, generic, bindings, written);
+        if (param_types[i] == NULL) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)lambda, "Can't infer the type of the parameter %d of the lambda, which is %s for '%s'", i + 1, text_bold(type_to_str(written)), generic->identifier->name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Give the type arguments at the call e.g %s<int>(...), or write the lambda with types e.g (x: int) -> int { return x; }", generic->identifier->name);
+            return false;
+        }
+    }
+
+    Type *return_type = NULL;
+    if (signature->return_types.count == 1) {
+        Type *written = ((Type **)signature->return_types.items)[0];
+        return_type = bound_param_type(typer, generic, bindings, written); // NULL when it is to be inferred from the expression
+    }
+
+    Type *lambda_type = check_short_lambda(typer, lambda, param_types, count, return_type);
+    if (!lambda_type) return false;
+    return unify_types(typer, generic, bindings, wanted, lambda_type, (AstExpr *)lambda, param);
+}
+
 AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall *call, AstFunctionDefn *generic) {
     Parser *parser = typer->parser;
 
@@ -1735,6 +1837,8 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
         free(own);
     }
 
+    DynamicArray lambdas       = da_init(1, sizeof(AstArgument *));
+    DynamicArray lambda_params = da_init(1, sizeof(AstIdentifier *));
     for (int i = 0; i < call->arguments.count; i++) {
         AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
 
@@ -1783,6 +1887,13 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
         }
         if (all_bound) continue;
 
+        // A short lambda gets its types from the other arguments, so it is checked after them
+        if (is_unchecked_short_lambda(value)) {
+            da_append(&lambdas, arg);
+            da_append(&lambda_params, param);
+            continue;
+        }
+
         Type *arg_type = check_expression(typer, arg->value, NULL);
         if (!arg_type) return NULL;
 
@@ -1801,6 +1912,12 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
 
         bool unified = unify_types(typer, generic, bindings, param->type, arg_type, arg->value, param);
         if (!unified) return NULL;
+    }
+
+    for (int i = 0; i < lambdas.count; i++) {
+        AstArgument   *arg   = ((AstArgument **)lambdas.items)[i];
+        AstIdentifier *param = ((AstIdentifier **)lambda_params.items)[i];
+        if (!check_short_lambda_argument(typer, generic, bindings, (AstFunctionDefn *)arg->value, param)) return NULL;
     }
 
     DynamicArray type_args = da_init(generic->type_params.count, sizeof(Type *));
@@ -3893,6 +4010,40 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
 
     ast_return->enclosing_function = ef;
 
+    // The expression of a short lambda e.g x => x * 2. Its type is the return type, unless the type is known from where it is used
+    if (ef->is_short_lambda && ast_return->values.count == 1) {
+        AstExpr *value  = ((AstExpr **)ast_return->values.items)[0];
+        Type    *wanted = ((Type **)ef->return_types.items)[0];
+        if (ef->infer_return_type) {
+            Type *type = check_expression(typer, value, NULL);
+            if (!type) return false;
+            if (type->kind == TYPE_TUPLE) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "A lambda of one expression gives one value, but this gives %s", text_bold(type_to_str(type)));
+                return false;
+            }
+            if (is_untyped_type(type)) type = solidify_untyped_type(type); // Like x := 1
+            ((Type **)ef->return_types.items)[0] = type;
+            ef->infer_return_type = false;
+            wanted = type;
+        }
+
+        // A lambda that gives nothing e.g x => print(x), is a call and not a return of a value
+        if (wanted->kind == TYPE_VOID) {
+            if (value->type == NULL && !check_expression(typer, value, NULL)) return false;
+            AstExprStmt *stmt = ast_allocate(typer->parser, sizeof(AstExprStmt));
+            stmt->head.head.kind  = AST_EXPR_STMT;
+            stmt->head.head.file  = value->head.file;
+            stmt->head.head.start = value->head.start;
+            stmt->head.head.end   = value->head.end;
+            stmt->expr = value;
+            DynamicArray *statements = &ef->body->statements;
+            for (int i = 0; i < statements->count; i++) {
+                if (((Ast **)statements->items)[i] == (Ast *)ast_return) ((Ast **)statements->items)[i] = (Ast *)stmt;
+            }
+            return true; // e.g x => x * 2 for a (int) -> void leaves the value unused, like a statement does
+        }
+    }
+
     // Cross-match the types evaluated from the return values against the defined return types of the function
     for (int i = 0; i < ast_return->values.count; i++) {
         AstExpr *return_value = ((AstExpr **)ast_return->values.items)[i];
@@ -5339,6 +5490,400 @@ static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *fu
 
 // A function whose signature has an error is reported once. One with an error in its body can still be called, as its
 // type is known
+//
+// Expression trees: a short lambda given for an Expr<F> e.g users.where(u => u.age >= minAge) is made into the calls that
+// build its tree when it runs: exprBinary(">=", exprMember(exprParameter(0, "u"), "age"), exprValue(minAge)). The lambda is
+// checked as a function of type F for its types, but never compiled. The tree is made from a second parse of it, where
+// each part without the parameters is a value that is checked in the function around the lambda
+//
+
+// The Expr<F> of the prelude, if the type is an instance of it
+static TypeStruct *expression_tree_type(Typer *typer, Type *type) {
+    if (type->kind != TYPE_STRUCT) return NULL;
+    AstStruct *generic = ((TypeStruct *)type)->node->generic_struct;
+    if (generic == NULL || strcmp(generic->identifier->name, "Expr") != 0) return NULL;
+    if (typer->parser->collections_file == NULL || generic->head.file != typer->parser->collections_file) return NULL;
+    return (TypeStruct *)type;
+}
+
+static bool is_tree_parameter(AstFunctionDefn *copy, AstExpr *expr, int *index) {
+    if (expr->head.kind != AST_LITERAL || ((AstLiteral *)expr)->kind != LITERAL_IDENTIFIER) return false;
+    char *name = ((AstLiteral *)expr)->as.value.identifier.name;
+    for (int i = 0; i < copy->parameters.count; i++) {
+        if (strcmp(((AstIdentifier **)copy->parameters.items)[i]->name, name) == 0) {
+            if (index) *index = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+// True if the (unchecked) expression uses a parameter of the lambda. Kinds that aren't followed count as using one
+static bool mentions_tree_parameter(AstFunctionDefn *copy, AstExpr *expr) {
+    if (expr == NULL) return false;
+    switch (expr->head.kind) {
+    case AST_LITERAL:      return is_tree_parameter(copy, expr, NULL);
+    case AST_ENUM_LITERAL: return false;
+    case AST_BINARY:       return mentions_tree_parameter(copy, ((AstBinary *)expr)->left) || mentions_tree_parameter(copy, ((AstBinary *)expr)->right);
+    case AST_UNARY:        return mentions_tree_parameter(copy, ((AstUnary *)expr)->expr);
+    case AST_CAST:         return mentions_tree_parameter(copy, ((AstCast *)expr)->expr);
+    case AST_MEMBER_ACCESS: return mentions_tree_parameter(copy, ((AstMemberAccess *)expr)->left); // The right side is a name
+    case AST_ARRAY_ACCESS: return mentions_tree_parameter(copy, ((AstArrayAccess *)expr)->left) || mentions_tree_parameter(copy, ((AstArrayAccess *)expr)->index_expr);
+    case AST_FUNCTION_CALL: {
+        AstFunctionCall *call = (AstFunctionCall *)expr;
+        if (mentions_tree_parameter(copy, call->expression)) return true;
+        for (int i = 0; i < call->arguments.count; i++) {
+            if (mentions_tree_parameter(copy, ((AstArgument **)call->arguments.items)[i]->value)) return true;
+        }
+        return false;
+    }
+    case AST_STRUCT_LITERAL: {
+        AstStructLiteral *literal = (AstStructLiteral *)expr;
+        for (int i = 0; i < literal->initializers.count; i++) {
+            if (mentions_tree_parameter(copy, ((AstStructInitializer **)literal->initializers.items)[i]->value)) return true;
+        }
+        return false;
+    }
+    case AST_ARRAY_LITERAL: {
+        AstArrayLiteral *literal = (AstArrayLiteral *)expr;
+        for (int i = 0; i < literal->expressions.count; i++) {
+            if (mentions_tree_parameter(copy, ((AstExpr **)literal->expressions.items)[i])) return true;
+        }
+        return false;
+    }
+    case AST_SIZEOF:
+    case AST_TYPEOF:
+        return false;
+    default:
+        return true;
+    }
+}
+
+static AstExpr *tree_string(Typer *typer, char *text, Ast *at) {
+    AstLiteral *literal = ast_allocate(typer->parser, sizeof(AstLiteral));
+    literal->head.head       = *at;
+    literal->head.head.kind  = AST_LITERAL;
+    literal->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    literal->kind            = LITERAL_STRING;
+    literal->as.value.string.data   = text;
+    literal->as.value.string.length = (int)strlen(text);
+    return (AstExpr *)literal;
+}
+
+static AstExpr *tree_integer(Typer *typer, long long value, Ast *at) {
+    AstLiteral *literal = ast_allocate(typer->parser, sizeof(AstLiteral));
+    literal->head.head       = *at;
+    literal->head.head.kind  = AST_LITERAL;
+    literal->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    literal->kind            = LITERAL_INTEGER;
+    literal->as.value.integer = value;
+    return (AstExpr *)literal;
+}
+
+static AstExpr *tree_null(Typer *typer, Ast *at) {
+    AstLiteral *literal = ast_allocate(typer->parser, sizeof(AstLiteral));
+    literal->head.head       = *at;
+    literal->head.head.kind  = AST_LITERAL;
+    literal->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    literal->kind            = LITERAL_NULL;
+    return (AstExpr *)literal;
+}
+
+// A call of one of the functions in the prelude that build a tree e.g exprMember(left, "age")
+static AstExpr *tree_call(Typer *typer, char *name, AstExpr **args, int count, Ast *at) {
+    Parser *parser = typer->parser;
+    AstIdentifier *function = lookup_from_scope(parser, parser->collections_file->scope, name);
+    if (function == NULL) {
+        report_error_ast(parser, LABEL_ERROR, at, "Compiler Error: '%s' of the expression trees isn't in the prelude", name);
+        return NULL;
+    }
+
+    AstFunctionCall *call = ast_allocate(parser, sizeof(AstFunctionCall));
+    call->head.head       = *at;
+    call->head.head.kind  = AST_FUNCTION_CALL;
+    call->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    call->expression      = (AstExpr *)make_resolved_identifier_literal(typer, function, at);
+    call->arguments       = da_init(count > 0 ? count : 1, sizeof(AstArgument *));
+    call->type_args       = da_init(1, sizeof(Type *));
+    call->paren_start_token.start = at->start;
+    call->paren_start_token.end   = at->start;
+    for (int i = 0; i < count; i++) {
+        AstArgument *arg = generate_argument_from_expr(typer, args[i]);
+        da_append(&call->arguments, arg);
+    }
+    return (AstExpr *)call;
+}
+
+static const char *tree_operator(TokenType op) {
+    switch ((int)op) {
+    case TOKEN_LOGICAL_OR:    return "||";
+    case TOKEN_LOGICAL_AND:   return "&&";
+    case TOKEN_DOUBLE_EQUAL:  return "==";
+    case TOKEN_NOT_EQUAL:     return "!=";
+    case '<':                 return "<";
+    case '>':                 return ">";
+    case TOKEN_LESS_EQUAL:    return "<=";
+    case TOKEN_GREATER_EQUAL: return ">=";
+    case '+':                 return "+";
+    case '-':                 return "-";
+    case '*':                 return "*";
+    case '/':                 return "/";
+    case '%':                 return "%";
+    case TOKEN_DOUBLE_QUESTION: return "??";
+    default:                  return NULL;
+    }
+}
+
+static void report_not_in_tree(Typer *typer, AstExpr *expr, const char *what) {
+    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "%s can't be a part of an expression tree (Expr), where it uses the parameters of the lambda", what);
+    report_error_ast(typer->parser, LABEL_NOTE, NULL, "An Expr can have members of the parameters, comparisons, && || !, arithmetic, ??, method calls, struct literals with names, and values");
+}
+
+// The calls that build the tree of an expression of the second parse 'b' of the lambda. 'a' is the same expression in the
+// checked lambda, or NULL, which gives the types that a part without the parameters wants e.g the enum of .admin
+static AstExpr *tree_of(Typer *typer, AstFunctionDefn *copy, AstExpr *b, AstExpr *a) {
+    Ast *at = (Ast *)b;
+    if (a && a->head.kind != b->head.kind) a = NULL;
+
+    if (!mentions_tree_parameter(copy, b)) {
+        if (b->head.kind == AST_LITERAL && ((AstLiteral *)b)->kind == LITERAL_NULL) return tree_call(typer, "exprNull", NULL, 0, at);
+
+        // An enum value e.g .admin gets the type it has in the lambda, as the any of exprValue doesn't say it
+        if (b->head.kind == AST_ENUM_LITERAL && !((AstEnumLiteral *)b)->explicit_type && a && a->type && a->type->kind == TYPE_ENUM) {
+            ((AstEnumLiteral *)b)->explicit_type = a->type;
+        }
+        return tree_call(typer, "exprValue", &b, 1, at);
+    }
+
+    switch (b->head.kind) {
+    case AST_LITERAL: {
+        int index = 0;
+        is_tree_parameter(copy, b, &index);
+        AstExpr *args[2] = { tree_integer(typer, index, at), tree_string(typer, ((AstLiteral *)b)->as.value.identifier.name, at) };
+        return tree_call(typer, "exprParameter", args, 2, at);
+    }
+    case AST_MEMBER_ACCESS: {
+        AstMemberAccess *ma = (AstMemberAccess *)b;
+        if (ma->flags & MEMBER_ACCESS_FLAGS_OPTIONAL_CHAIN) { report_not_in_tree(typer, b, "?."); return NULL; }
+        if (ma->right->head.kind != AST_LITERAL || ((AstLiteral *)ma->right)->kind != LITERAL_IDENTIFIER) { report_not_in_tree(typer, b, "This member access"); return NULL; }
+        AstExpr *left = tree_of(typer, copy, ma->left, a ? ((AstMemberAccess *)a)->left : NULL);
+        if (!left) return NULL;
+        AstExpr *args[2] = { left, tree_string(typer, ((AstLiteral *)ma->right)->as.value.identifier.name, at) };
+        return tree_call(typer, "exprMember", args, 2, at);
+    }
+    case AST_UNARY: {
+        AstUnary *unary = (AstUnary *)b;
+        const char *op = unary->operator == OP_NOT ? "!" : unary->operator == OP_UNARY_MINUS ? "-" : NULL;
+        if (!op) { report_not_in_tree(typer, b, "This operator"); return NULL; }
+        AstExpr *operand = tree_of(typer, copy, unary->expr, a ? ((AstUnary *)a)->expr : NULL);
+        if (!operand) return NULL;
+        AstExpr *args[2] = { tree_string(typer, (char *)op, at), operand };
+        return tree_call(typer, "exprUnary", args, 2, at);
+    }
+    case AST_BINARY: {
+        AstBinary *binary = (AstBinary *)b;
+        const char *op = tree_operator(binary->operator);
+        if (!op) { report_not_in_tree(typer, b, "This operator"); return NULL; }
+        AstExpr *left  = tree_of(typer, copy, binary->left,  a ? ((AstBinary *)a)->left  : NULL);
+        if (!left) return NULL;
+        AstExpr *right = tree_of(typer, copy, binary->right, a ? ((AstBinary *)a)->right : NULL);
+        if (!right) return NULL;
+        AstExpr *args[3] = { tree_string(typer, (char *)op, at), left, right };
+        return tree_call(typer, "exprBinary", args, 3, at);
+    }
+    case AST_FUNCTION_CALL: {
+        AstFunctionCall *call   = (AstFunctionCall *)b;
+        AstFunctionCall *a_call = (AstFunctionCall *)a;
+        AstExpr *object = NULL;
+        char    *name   = NULL;
+        if (call->expression->head.kind == AST_MEMBER_ACCESS) {
+            AstMemberAccess *ma = (AstMemberAccess *)call->expression;
+            if (ma->flags & MEMBER_ACCESS_FLAGS_OPTIONAL_CHAIN || ma->right->head.kind != AST_LITERAL) { report_not_in_tree(typer, b, "This call"); return NULL; }
+            name   = ((AstLiteral *)ma->right)->as.value.identifier.name;
+            object = tree_of(typer, copy, ma->left, NULL);
+            if (!object) return NULL;
+        } else if (call->expression->head.kind == AST_LITERAL && ((AstLiteral *)call->expression)->kind == LITERAL_IDENTIFIER && !is_tree_parameter(copy, call->expression, NULL)) {
+            name   = ((AstLiteral *)call->expression)->as.value.identifier.name;
+            object = tree_null(typer, at);
+        } else {
+            report_not_in_tree(typer, b, "This call");
+            return NULL;
+        }
+
+        AstExpr *args[2] = { object, tree_string(typer, name, at) };
+        AstExpr *node = tree_call(typer, "exprCall", args, 2, at);
+        for (int i = 0; node && i < call->arguments.count; i++) {
+            AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
+            if (arg->ident) { report_not_in_tree(typer, (AstExpr *)arg->value, "A named argument"); return NULL; }
+            AstExpr *a_value = a_call && a_call->arguments.count == call->arguments.count ? ((AstArgument **)a_call->arguments.items)[i]->value : NULL;
+            AstExpr *value = tree_of(typer, copy, arg->value, a_value);
+            if (!value) return NULL;
+            AstExpr *add[3] = { node, tree_string(typer, "", at), value };
+            node = tree_call(typer, "exprArgument", add, 3, at);
+        }
+        return node;
+    }
+    case AST_STRUCT_LITERAL: {
+        AstStructLiteral *literal = (AstStructLiteral *)b;
+        if (literal->explicit_type) { report_not_in_tree(typer, b, "A struct literal with a type"); return NULL; }
+        AstExpr *node = tree_call(typer, "exprObject", NULL, 0, at);
+        for (int i = 0; node && i < literal->initializers.count; i++) {
+            AstStructInitializer *init = ((AstStructInitializer **)literal->initializers.items)[i];
+            if (init->designator == NULL) { report_not_in_tree(typer, init->value, "A member without a name"); return NULL; }
+            AstExpr *value = tree_of(typer, copy, init->value, NULL);
+            if (!value) return NULL;
+            AstExpr *add[3] = { node, tree_string(typer, init->designator->name, at), value };
+            node = tree_call(typer, "exprArgument", add, 3, at);
+        }
+        return node;
+    }
+    case AST_CAST:          report_not_in_tree(typer, b, "A cast"); return NULL;
+    case AST_ARRAY_ACCESS:  report_not_in_tree(typer, b, "Indexing"); return NULL;
+    case AST_FUNCTION_DEFN: report_not_in_tree(typer, b, "A lambda"); return NULL;
+    default:                report_not_in_tree(typer, b, "This expression"); return NULL;
+    }
+}
+
+// Checks a short lambda given for an Expr<F>, and makes the expression that builds its tree
+static Type *check_expression_tree(Typer *typer, AstFunctionDefn *lambda, TypeStruct *tree_type) {
+    Parser *parser = typer->parser;
+    if (lambda->head.replacement) return lambda->head.replacement->type;
+
+    if (!lambda->is_short_lambda) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)lambda, "An %s is made from a lambda of one expression e.g x => x.age > 18", text_bold(type_to_str((Type *)tree_type)));
+        return NULL;
+    }
+    Type *function_type = tree_type->node->type_args.count == 1 ? ((Type **)tree_type->node->type_args.items)[0] : NULL;
+    if (function_type == NULL || function_type->kind != TYPE_FUNCTION) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)lambda, "The type argument of an Expr is the type of a function e.g Expr<(User) -> bool>, not %s", function_type ? text_bold(type_to_str(function_type)) : "nothing");
+        return NULL;
+    }
+
+    lambda->is_expression_tree = true;
+    if (!(lambda->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
+        Type *ok = check_short_lambda_as(typer, lambda, function_type);
+        if (!ok) return NULL;
+    }
+    if (lambda->head.head.flags & AST_FLAG_HAS_ERRORS) return NULL;
+
+    Ast *checked = lambda->body->statements.count == 1 ? ((Ast **)lambda->body->statements.items)[0] : NULL;
+    if (checked == NULL || checked->kind != AST_RETURN) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)lambda, "The lambda of an Expr must give a value");
+        return NULL;
+    }
+    AstExpr *a = ((AstExpr **)((AstReturn *)checked)->values.items)[0];
+
+    AstFunctionDefn *copy = reparse_short_lambda(parser, lambda, typer->current_scope);
+    if (copy == NULL) return NULL;
+    AstExpr *b = ((AstExpr **)((AstReturn *)((Ast **)copy->body->statements.items)[0])->values.items)[0];
+
+    AstExpr *root = tree_of(typer, copy, b, a);
+    if (!root) return NULL;
+
+    // Expr<F>{root: ..., parameters: ["x", ...]}
+    AstArrayLiteral *names = ast_allocate(parser, sizeof(AstArrayLiteral));
+    names->head.head       = lambda->head.head;
+    names->head.head.kind  = AST_ARRAY_LITERAL;
+    names->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    names->expressions     = da_init(copy->parameters.count > 0 ? copy->parameters.count : 1, sizeof(AstExpr *));
+    for (int i = 0; i < copy->parameters.count; i++) {
+        AstExpr *name = tree_string(typer, ((AstIdentifier **)copy->parameters.items)[i]->name, (Ast *)lambda);
+        da_append(&names->expressions, name);
+    }
+
+    AstStructLiteral *tree = ast_allocate(parser, sizeof(AstStructLiteral));
+    tree->head.head       = lambda->head.head;
+    tree->head.head.kind  = AST_STRUCT_LITERAL;
+    tree->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    tree->initializers    = da_init(2, sizeof(AstStructInitializer *));
+    char   *member_names[2]  = { "root", "parameters" };
+    AstExpr *member_values[2] = { root, copy->parameters.count > 0 ? (AstExpr *)names : NULL };
+    for (int i = 0; i < 2; i++) {
+        if (member_values[i] == NULL) continue;
+        AstStructInitializer *init = ast_allocate(parser, sizeof(AstStructInitializer));
+        init->head       = lambda->head.head;
+        init->head.kind  = AST_STRUCT_INITIALIZER;
+        init->designator = make_identifier_from_string(parser, member_names[i], NULL);
+        init->value      = member_values[i];
+        da_append(&tree->initializers, init);
+    }
+
+    Type *type = check_expression(typer, (AstExpr *)tree, (Type *)tree_type);
+    if (!type) return NULL;
+    lambda->head.replacement = (AstExpr *)tree;
+    return type;
+}
+
+// Checks a short lambda e.g x => x * 2, with the types of its parameters, and its return type, or NULL to take the type of its expression
+Type *check_short_lambda(Typer *typer, AstFunctionDefn *lambda, Type **param_types, int count, Type *return_type) {
+    if (lambda->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) return lambda->head.type;
+    if (lambda->head.head.flags & AST_FLAG_HAS_ERRORS) return NULL;
+
+    if (count != lambda->parameters.count) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)lambda, "The lambda has %d parameter%s, but a function of %d is wanted here", lambda->parameters.count, lambda->parameters.count == 1 ? "" : "s", count);
+        lambda->head.head.flags |= AST_FLAG_HAS_ERRORS;
+        return NULL;
+    }
+
+    for (int i = 0; i < count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)lambda->parameters.items)[i];
+        if (param_types[i]->kind == TYPE_ARRAY && ((TypeArray *)param_types[i])->array_kind == ARRAY_FIXED) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)param, "The parameter '%s' of the lambda would be the fixed size array %s, which can't be a parameter", param->name, text_bold(type_to_str(param_types[i])));
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Use a slice or a list for the elements e.g [..][..]int");
+            lambda->head.head.flags |= AST_FLAG_HAS_ERRORS;
+            return NULL;
+        }
+        param->type       = param_types[i];
+        param->decl->type = param_types[i];
+    }
+
+    if (return_type) {
+        ((Type **)lambda->return_types.items)[0] = return_type;
+        lambda->infer_return_type = false;
+    }
+    return check_function_defn(typer, lambda);
+}
+
+// Checks a short lambda as a function of the given type
+static Type *check_short_lambda_as(Typer *typer, AstFunctionDefn *lambda, Type *ctx_type) {
+    AstFunctionDefn *signature = ((TypeFunction *)ctx_type)->node;
+    if (signature->return_types.count > 1) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)lambda, "A lambda of one expression gives one value, but here a function of type %s is wanted", text_bold(type_to_str(ctx_type)));
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Write it as a function with a body e.g (x: int) -> (int, int) { return x, x; }");
+        return NULL;
+    }
+
+    Type *param_types[32];
+    int count = signature->parameters.count < 32 ? signature->parameters.count : 32;
+    for (int i = 0; i < count; i++) {
+        Type *type = ((AstIdentifier **)signature->parameters.items)[i]->type;
+        param_types[i] = type ? resolve_type(typer, type) : NULL;
+        if (param_types[i] == NULL) return NULL;
+    }
+    Type *return_type = signature->return_types.count == 1 ? resolve_type(typer, ((Type **)signature->return_types.items)[0]) : NULL;
+    return check_short_lambda(typer, lambda, param_types, count, return_type);
+}
+
+static TypeStruct *expression_tree_type(Typer *typer, Type *type);
+static Type *check_expression_tree(Typer *typer, AstFunctionDefn *lambda, TypeStruct *tree_type);
+
+// A lambda used where a function of some type is wanted. A short lambda takes the types of its parameters from it
+Type *check_lambda_expression(Typer *typer, AstFunctionDefn *lambda, Type *ctx_type) {
+    if (ctx_type && ctx_type->kind == TYPE_GENERIC_INSTANCE) ctx_type = resolve_type(typer, ctx_type);
+    TypeStruct *tree_type = ctx_type ? expression_tree_type(typer, ctx_type) : NULL;
+    if (tree_type) return check_expression_tree(typer, lambda, tree_type);
+
+    if (!lambda->is_short_lambda || (lambda->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) return check_function_defn(typer, lambda);
+    if (ctx_type && ctx_type->kind == TYPE_FUNCTION) return check_short_lambda_as(typer, lambda, ctx_type);
+
+    if (lambda->parameters.count == 0) return check_short_lambda(typer, lambda, NULL, 0, NULL); // () => expr needs nothing from where it is used
+
+    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)lambda, "Can't infer the types of the parameters of the lambda, as no function type is wanted here");
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "Give the variable a type e.g f: (int) -> int = x => x * 2, or write the types e.g (x: int) -> int { return x * 2; }");
+    lambda->head.head.flags |= AST_FLAG_HAS_ERRORS;
+    return NULL;
+}
+
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     if (func_defn->head.head.flags & AST_FLAG_HAS_ERRORS) return NULL;
     Type *type = check_function_signature_and_body(typer, func_defn);
@@ -6303,7 +6848,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
     else if (expr->head.kind == AST_CAST)           result = check_cast(typer, (AstCast *)(expr), ctx_type);
     else if (expr->head.kind == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
-    else if (expr->head.kind == AST_FUNCTION_DEFN)  result = check_function_defn(typer, (AstFunctionDefn *)(expr));
+    else if (expr->head.kind == AST_FUNCTION_DEFN)  result = check_lambda_expression(typer, (AstFunctionDefn *)(expr), ctx_type);
     else if (expr->head.kind == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), ctx_type);
     else if (expr->head.kind == AST_SWITCH) result = check_switch_expression(typer, (AstSwitch *)(expr), ctx_type);
     else if (expr->head.kind == AST_ARRAY_LITERAL)  result = check_array_literal(typer, (AstArrayLiteral *)(expr), ctx_type);
@@ -6873,8 +7418,116 @@ AstStructLiteral *make_union_literal(Typer *typer, TypeStruct *union_type, AstId
     return literal;
 }
 
+// A struct literal without a type, where no type is wanted e.g {name: u.name, age: u.age}. Its type is the anonymous struct
+// of the names and the types of the values: struct { name: string; age: int; }
+static Type *check_inferred_struct_literal(Typer *typer, AstStructLiteral *literal) {
+    Parser *parser = typer->parser;
+
+    AstStruct *node      = ast_allocate(parser, sizeof(AstStruct));
+    node->head.kind      = AST_STRUCT;
+    node->head.file      = literal->head.head.file;
+    node->head.start     = literal->head.head.start;
+    node->head.end       = literal->head.head.end;
+    node->type_params    = da_init(1, sizeof(AstIdentifier *));
+    node->instances      = da_init(1, sizeof(TypeStruct *));
+    node->inside_methods = da_init(1, sizeof(AstDeclaration *));
+    node->is_anonymous   = true;
+    node->members        = make_empty_struct_scope(parser, node);
+    node->members->head.kind  = AST_BLOCK;
+    node->members->head.file  = node->head.file;
+    node->members->statements = da_init(literal->initializers.count, sizeof(Ast *));
+    node->members->parent     = typer->current_scope;
+    node->static_members = make_empty_struct_scope(parser, node);
+    node->methods        = make_empty_struct_scope(parser, node);
+
+    for (int i = 0; i < literal->initializers.count; i++) {
+        AstStructInitializer *init = ((AstStructInitializer **)literal->initializers.items)[i];
+        Type *type = check_expression(typer, init->value, NULL);
+        if (!type) return NULL;
+        if (is_untyped_type(type)) type = solidify_untyped_type(type); // Like x := 1
+
+        bool fixed_array = type->kind == TYPE_ARRAY && ((TypeArray *)type)->array_kind == ARRAY_FIXED;
+        if (is_null_type(type)) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)init->value, "The member '%s' is null, which doesn't say its type, so the type of the struct can't be inferred", init->designator->name);
+            report_error_ast(parser, LABEL_HINT, NULL, "Give the struct a type e.g struct { %s: ?int; } {...}", init->designator->name);
+            return NULL;
+        }
+        if (type->kind == TYPE_VOID || type->kind == TYPE_TUPLE || fixed_array) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)init->value, "The member '%s' can't be a %s, so the type of the struct can't be inferred", init->designator->name, text_bold(type_to_str(type)));
+            report_error_ast(parser, LABEL_HINT, NULL, "Give the struct a type e.g struct { %s: ...; } {...}", init->designator->name);
+            return NULL;
+        }
+
+        AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
+        decl->head.kind  = AST_DECLARATION;
+        decl->head.file  = init->head.file;
+        decl->head.start = init->head.start;
+        decl->head.end   = init->head.end;
+        decl->idents     = da_init(1, sizeof(AstIdentifier *));
+        decl->values     = da_init(1, sizeof(AstExpr *));
+        decl->type       = type;
+        decl->flags      = DECLARATION_TYPED_NO_EXPR | DECLARATION_IS_STRUCT_MEMBER;
+
+        AstIdentifier *member = ast_allocate(parser, sizeof(AstIdentifier));
+        *member = *init->designator;
+        member->type = type;
+        member->decl = decl;
+        da_append(&decl->idents, member);
+        if (add_declaration_to_scope(parser, node->members, decl) != NULL) return NULL; // Reported e.g {a: 1, a: 2}
+        da_append(&node->members->statements, decl);
+    }
+
+    AstIdentifier *ident = ast_allocate(parser, sizeof(AstIdentifier));
+    ident->head.kind  = AST_IDENTIFIER;
+    ident->head.file  = node->head.file;
+    ident->head.start = node->head.start;
+    ident->head.end   = node->head.end;
+    ident->name       = "struct {...}";
+    ident->flags      = IDENTIFIER_IS_RESOLVED | IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_CONSTANT;
+    node->identifier  = ident;
+
+    TypeStruct *type_struct      = ast_allocate(parser, sizeof(TypeStruct));
+    type_struct->head.head.kind  = AST_TYPE;
+    type_struct->head.head.file  = node->head.file;
+    type_struct->head.head.start = node->head.start;
+    type_struct->head.head.end   = node->head.end;
+    type_struct->head.kind       = TYPE_STRUCT;
+    type_struct->head.name       = ident->name;
+    type_struct->identifier      = ident;
+    type_struct->node            = node;
+    ident->type = (Type *)type_struct;
+
+    Type *resolved = resolve_type(typer, (Type *)type_struct);
+    if (!resolved) return NULL;
+    TypeStruct *struct_defn = (TypeStruct *)resolved;
+
+    for (int i = 0; i < literal->initializers.count; i++) {
+        AstStructInitializer *init = ((AstStructInitializer **)literal->initializers.items)[i];
+        init->member = get_struct_member(struct_defn->node, init->designator->name);
+        index_identifier_use((Ast *)init->designator, init->member);
+    }
+    qsort(literal->initializers.items, literal->initializers.count, sizeof(AstStructInitializer *), compare_struct_initializers);
+
+    literal->explicit_type = resolved;
+    literal->head.head.flags |= AST_FLAG_IS_TYPE_CHECKED;
+    if (typer->enclosing_function) reserve_temporary_storage(typer->enclosing_function, struct_defn->head.size);
+    return resolved;
+}
+
+// True for {a: x, b: y}: a struct literal without a type, that names each member
+static bool is_inferable_struct_literal(AstStructLiteral *literal) {
+    if (literal->explicit_type || literal->initializers.count == 0) return false;
+    for (int i = 0; i < literal->initializers.count; i++) {
+        if (((AstStructInitializer **)literal->initializers.items)[i]->designator == NULL) return false;
+    }
+    return true;
+}
+
 Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_type) {
     TypeStruct *struct_defn = NULL;
+    if (literal->explicit_type == NULL && (ctx_type == NULL || ctx_type->kind == TYPE_ANY) && is_inferable_struct_literal(literal)) {
+        return check_inferred_struct_literal(typer, literal);
+    }
     if (literal->explicit_type) {
         // Explicit type is used
         Type *type = literal->explicit_type;
@@ -6914,6 +7567,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
         // Type is inferred from the type on the declaration
         if (ctx_type == NULL) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Type of struct literal could not be infered from the context");
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Give it a type e.g Point{1, 2}, or name each member e.g {x: 1, y: 2} to make it an anonymous struct");
             return NULL;
         }
 
@@ -7453,8 +8107,12 @@ bool is_non_constant_identifier_found_inside_current_function(Typer *typer, AstI
     AstIdentifier *declared = ident->imported_from ? ident->imported_from : ident;
     if (declared->flags & IDENTIFIER_IS_GLOBAL) return true;
 
+    // A lambda for an Expr<F> can use the variables of the functions around it, as their values are put in the tree
+    AstFunctionDefn *current = typer->enclosing_function;
+    while (current && current->is_expression_tree && current != ident->scope->enclosing_function) current = current->parent_function;
+
     if (!(ident->flags & IDENTIFIER_IS_CONSTANT) 
-    && typer->enclosing_function && typer->enclosing_function != ident->scope->enclosing_function) 
+    && current && current != ident->scope->enclosing_function) 
     {
         return false;
     }
@@ -7575,7 +8233,11 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
 
         if (!is_non_constant_identifier_found_inside_current_function(typer, ident)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)literal, "Undeclared identifier '%s'", ident->name);
-            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)typer->enclosing_function, "If you intended to use identifier '%s' inside this function then specify it as a parameter", ident->name, typer->enclosing_function->identifier->name);
+            if (typer->enclosing_function->is_short_lambda) {
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)typer->enclosing_function, "A lambda can't use the variables of the function around it, only its parameters, constants and globals");
+            } else {
+                report_error_ast(typer->parser, LABEL_NOTE, (Ast *)typer->enclosing_function, "If you intended to use identifier '%s' inside this function then specify it as a parameter", ident->name, typer->enclosing_function->identifier->name);
+            }
             return NULL;
         }
 

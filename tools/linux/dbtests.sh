@@ -70,6 +70,29 @@ else
 fi
 rm -rf "$OUT"
 
+# The blog example: its schema, the files the generator writes of it, which must be the ones in examples/blog/db, and the app
+printf "%-56s " "examples/blog"
+PSQL="psql"
+[ -n "$BIN" ] && [ -x "$BIN/psql" ] && PSQL="$BIN/psql"
+OUT="$(mktemp -d)"
+if ! output=$("$PSQL" "$SAAD_TEST_POSTGRES" -q -v ON_ERROR_STOP=1 -f examples/blog/schema.sql 2>&1); then
+    echo "${RED}FAILED (schema.sql)${RESET}"
+    echo "$output" | tail -5 | sed 's/^/    /'
+    failed=$((failed + 1))
+elif ! output=$(bash "$HERE/run.sh" std/dbms/tools/generate.sd "$SAAD_TEST_POSTGRES" "$OUT/db" saad_blog 2>&1) || ! diff -r "$OUT/db" examples/blog/db > /dev/null; then
+    echo "${RED}FAILED (examples/blog/db is not what the generator writes)${RESET}"
+    diff -r "$OUT/db" examples/blog/db | head -10 | sed 's/^/    /'
+    failed=$((failed + 1))
+elif ! output=$(bash "$HERE/run.sh" examples/blog/main.sd "$SAAD_TEST_POSTGRES" 2>&1) || ! printf '%s' "$output" | grep -q "Grace Hopper: 1 posts, 300 views"; then
+    echo "${RED}FAILED${RESET}"
+    echo "$output" | tail -5 | sed 's/^/    /'
+    failed=$((failed + 1))
+else
+    echo "${GREEN}OK${RESET}"
+    passed=$((passed + 1))
+fi
+rm -rf "$OUT"
+
 echo
 echo "$passed passed, $failed failed"
 [ $failed -eq 0 ]

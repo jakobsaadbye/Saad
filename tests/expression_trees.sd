@@ -1,0 +1,96 @@
+// A short lambda given for an Expr<F> is the tree of what it does, e.g for a query to make SQL of. The parts without the
+// parameters are values, so the variables around the lambda can be used
+use fmt;
+
+Role :: enum { guest, admin }
+
+User :: struct {
+    name:  string;
+    age:   int;
+    role:  Role;
+    email: ?string;
+}
+
+// Writes a tree back as text
+show :: (node: *ExprNode) -> string {
+    switch node.kind {
+        case .parameter { return node.name; }
+        case .member    { return sprint("%.%", show(node.left), node.name); }
+        case .value {
+            if node.value.type == null { return "null"; }
+            if node.value.type.kind == .string { return sprint("\"%\"", node.value); }
+            return sprint("%", node.value);
+        }
+        case .unary  { return sprint("%(%)", node.op, show(node.left)); }
+        case .binary { return sprint("(% % %)", show(node.left), node.op, show(node.right)); }
+        case .call {
+            sb: StringBuilder;
+            if node.left != null {
+                sb.addString(show(node.left));
+                sb.addChar('.');
+            }
+            sb.addString(node.name);
+            sb.addChar('(');
+            for arg, i in node.args {
+                if i > 0 { sb.addString(", "); }
+                sb.addString(show(arg));
+            }
+            sb.addChar(')');
+            return sb.toString();
+        }
+        case .object {
+            sb: StringBuilder;
+            sb.addChar('{');
+            for arg, i in node.args {
+                if i > 0 { sb.addString(", "); }
+                sb.addString(sprint("%: %", node.names[i], show(arg)));
+            }
+            sb.addChar('}');
+            return sb.toString();
+        }
+    }
+    return "?";
+}
+
+where :: (f: Expr<(User) -> bool>) -> string { return show(f.root); }
+
+// Generic, like a query of rows of T: T comes from the receiver, U from the lambda
+Query :: struct <T> {
+    table: string;
+}
+filter :: method <T>(q: *Query<T>, f: Expr<(T) -> bool>) -> string { return show(f.root); }
+pick   :: method <T, U>(q: *Query<T>, f: Expr<(T) -> U>) -> (string, U) {
+    none: U;
+    return show(f.root), none;
+}
+
+// A tree outlives the variables it was made with
+makeFilter :: (minAge: int) -> Expr<(User) -> bool> {
+    return x => x.age >= minAge;
+}
+
+main :: () {
+    minAge := 18;
+    prefix := "A";
+
+    assert(where(x => x.age >= minAge) == "(x.age >= 18)");
+    assert(where(x => x.age >= minAge && x.name.startsWith(prefix)) == "((x.age >= 18) && x.name.startsWith(\"A\"))");
+    assert(where(u => u.role == .admin || !(u.email == null)) == "((u.role == .admin) || !((u.email == null)))");
+    assert(where(u => u.email ?? "" == "a@b") == "((u.email ?? \"\") == \"a@b\")");
+    assert(where(u => -u.age < minAge - 30) == "(-(u.age) < -12)");   // minAge - 30 has no parameter, so it is a value
+
+    q: Query<User>;
+    assert(q.filter(u => u.age * 2 + 1 > minAge) == "(((u.age * 2) + 1) > 18)");
+    text, row := q.pick(u => {name: u.name, older: u.age + 1});
+    assert(text == "{name: u.name, older: (u.age + 1)}");
+    assert(typeof(row) == "struct { name: string; older: int; }");
+
+    e: Expr<(User) -> bool> = x => x.name == "Ada";
+    assert(e.parameters.count == 1 && e.parameters[0] == "x");
+    assert(show(e.root) == "(x.name == \"Ada\")");
+
+    adults := makeFilter(21);
+    assert(show(adults.root) == "(x.age >= 21)");
+
+    print("expression trees ok");
+}

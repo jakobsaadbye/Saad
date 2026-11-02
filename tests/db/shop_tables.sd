@@ -83,7 +83,7 @@ main :: () {
     assert(db.saveChanges() == "");
     items, e10 := db.orderItems.all();
     assert(e10 == "" && items.count == 2);
-    quantities := items.reduce(0, (sum: int, item: OrderItem) -> int { return sum + item.quantity; });
+    quantities := items.reduce(0, (sum, item) => sum + item.quantity);
     assert(quantities == 4);
 
     // A text key, and the column "for", which is the member for_
@@ -155,10 +155,41 @@ main :: () {
     for row in created { db.users.delete(row.id); }
     assert(db.saveChanges() == "");
 
+    // Queries with lambdas, made into SQL. The values they use are parameters
+    minAge := 30;
+    older, e15 := db.users.where(u => u.age ?? 0 >= minAge).all();
+    assert(e15 == "" && older.count == 1 && older[0].name == "Ada");
+    withoutEmail, e16 := db.users.where(u => u.email == null).count();
+    assert(e16 == "" && withoutEmail == 1);
+
+    // first gives a pointer, and its row is tracked
+    admin, e17 := db.users.where(u => u.role == .admin && u.name.startsWith("A")).first();
+    assert(e17 == "" && admin != null && admin.name == "Ada");
+    admin.score = 5.0;
+    assert(db.saveChanges() == "");
+    isFive, _ := db.users.where(u => u.score == 5.0).exists();
+    assert(isFive);
+    nobody, e18 := db.users.where(u => u.name == "Nobody").first();
+    assert(e18 == "" && nobody == null);
+
+    // Sorted, a part of the rows, and select into values or anonymous structs, which aren't tracked
+    sorted, e19 := db.users.orderByDescending(u => u.name).select(u => u.name).all();
+    assert(e19 == "" && sorted.count == 2 && sorted[0] == "Bo" && sorted[1] == "Ada");
+    second, _ := db.users.orderBy(u => u.id).offset(1).limit(1).select(u => u.name.toUpper()).all();
+    assert(second.count == 1 && second[0] == "BO");
+    scores, e20 := db.users.where(u => u.name.toLower().endsWith("da")).select(u => {name: u.name, doubled: u.score * 2.0}).all();
+    assert(e20 == "" && scores.count == 1 && scores[0].name == "Ada" && scores[0].doubled == 10.0);
+    scores[0].name = "changed";
+    assert(db.pendingChanges() == 0);
+
+    // A mistake in a query is an error of all, first, count and exists
+    _, e21 := db.users.where(u => u.name.reverse() == "adA").all();
+    assert(e21.startsWith("The method reverse can't be made into SQL"));
+
     // all, with the methods of lists
     users, e14 := db.users.all();
     assert(e14 == "" && users.count == 2);
-    admins := users.filter((u: User) -> bool { return u.role == .admin; }).map((u: User) -> string { return u.name; });
+    admins := users.filter(u => u.role == .admin).map(u => u.name);
     assert(admins.count == 1 && admins[0] == "Ada");
 
     conn.close();

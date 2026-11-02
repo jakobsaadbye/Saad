@@ -71,6 +71,33 @@ names := users.map<string>(nameOf);                // only U: the T of map comes
   that the type of its receiver doesn't mention. The `T` of `List<T>` always comes from the list.
 * A type parameter that no parameter uses is allowed. A call that doesn't give it is an error with a hint.
 
+## Short lambdas
+
+```odin
+adults := users.filter(u => u.age >= 18);           // u is a User, from the T of filter
+names  := users.map(u => u.name);                   // U = string, from the expression
+total  := prices.reduce(0.0, (sum, p) => sum + p);  // Acc = f64 from the 0.0, so sum is an f64
+double: (int) -> int = x => x * 2;                  // the types from the type of the variable
+each(xs, x => print("%", x));                       // a lambda that gives nothing, for an (int) -> void
+answer := () => 42;                                 // no parameters, so nothing needs to be known
+```
+
+* `x => expr`, `(a, b) => expr` and `() => expr` are lambdas of one expression. The parser
+  (`parse_short_lambda()`) makes an `AstFunctionDefn` with `is_short_lambda`, parameters without types, and a body
+  that returns the expression. Before `=>` there must be one name, or names in parentheses, so `(a + b) => ...` is
+  not a lambda. In the header of a statement it is only a lambda inside the arguments of a call, so the `=>` of a
+  `case` is not taken for one.
+* The types come from where it is used. `check_lambda_expression()` takes them from the wanted function type, e.g
+  of a variable or a parameter. Without one, a lambda with parameters is an error with a hint.
+* The result type is the type of the expression when it isn't known (`infer_return_type`, set in `check_return()`).
+  A result of `void` makes the body a statement, so `x => print(x)` works for an `(int) -> void`.
+* At a call of a generic function, a short lambda is checked after the other arguments
+  (`check_short_lambda_argument()`). Its parameter types are the types as written (e.g `(T) -> U`) with the type
+  parameters that the other arguments bound put in (`bound_param_type()`), and the type of the checked lambda then
+  binds the rest through `unify_types()`, e.g the `U` of `map`. A parameter type that isn't known is an error.
+* Like other lambdas, it can use its parameters, constants and globals, but not the variables of the function
+  around it: there are no closures.
+
 ## Methods
 
 ```odin
