@@ -69,7 +69,6 @@ typedef enum AstKind {
     AST_CAST,
     AST_TYPEOF,
     AST_SIZEOF,
-    AST_NEW,
     AST_IDENTIFIER,
     AST_SUBSCRIPT,
     AST_ACCESSOR,
@@ -480,10 +479,6 @@ typedef struct AstExprStmt {
     AstExpr *expr;
 } AstExprStmt;
 
-typedef struct AstNew {
-    AstExpr  head;
-    AstExpr *expr;
-} AstNew;
 
 typedef struct AstAssert {
     Ast      head;

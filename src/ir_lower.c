@@ -2145,14 +2145,6 @@ static Value lower_expr(Lowerer *L, AstExpr *expr) {
         AstSizeof *ast_sizeof = (AstSizeof *) expr;
         return value_scalar(emit_const(L, ir_type_of(expr->type), ast_sizeof->type->size), expr->type);
     }
-    case AST_NEW: {
-        AstNew *ast_new = (AstNew *) expr;
-        Type *value_type = ast_new->expr->type;
-        int size = emit_const(L, IR_I64, value_type->size > 0 ? value_type->size : 1);
-        int ptr = emit_c_call(L, "malloc", IR_PTR, 1, &size);
-        store_expr(L, addr_vreg(ptr, 0), value_type, ast_new->expr, true);
-        return value_scalar(ptr, expr->type);
-    }
     case AST_SEMICOLON_EXPR:
         return value_none();
     case AST_SWITCH: {

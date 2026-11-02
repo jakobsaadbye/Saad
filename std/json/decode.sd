@@ -9,7 +9,7 @@ namespace json;
 
 import fmt;
 import time;
-use c;
+import mem;
 
 // Reads the JSON into the value. err is empty when it worked, otherwise it tells what is wrong and where.
 //
@@ -150,7 +150,7 @@ assign :: (v: Value, data: *void, type: *Type, path: string, options: *Options) 
             if pointee.kind == .void {
                 return failAt(path, "Can't read JSON into a *void");
             }
-            memory := calloc(1, pointee.size as int);
+            memory := mem.allocate(pointee.size as int);
             *(data as **void) = memory;
             return assign(v, memory, pointee, path, options);
         }
@@ -188,7 +188,7 @@ assignArray :: (v: Value, data: *void, type: *TypeArray, path: string, options: 
         }
         elements = data as *u8;
     } else {
-        elements = calloc(count as int + 1, elemSize) as *u8;
+        elements = mem.allocate((count as int + 1) * elemSize) as *u8;
         slice := data as *[]u8;
         slice.data  = elements;
         slice.count = count;
@@ -306,7 +306,7 @@ assignList :: (v: Value, data: *void, type: *TypeStruct, path: string, options: 
 
     elemType := (findMember(type, "data").type as *TypePointer).pointerTo;
     count    := v.items.count;
-    elements := calloc(count as int + 1, elemType.size) as *u8;
+    elements := mem.allocate((count as int + 1) * elemType.size) as *u8;
     for item, i in v.items {
         err := assign(item, &elements[i * elemType.size], elemType, indexPath(path, i), options);
         if err != "" { return err; }
@@ -334,7 +334,7 @@ assignMap :: (v: Value, data: *void, type: *TypeStruct, path: string, options: *
     }
 
     count   := v.fields.count;
-    entries := calloc(count as int + 1, entryType.head.size) as *u8;
+    entries := mem.allocate((count as int + 1) * entryType.head.size) as *u8;
     i: i64 = 0;
     for field in v.fields {
         entry := (&entries[i * entryType.head.size]) as *void;
@@ -351,7 +351,7 @@ assignMap :: (v: Value, data: *void, type: *TypeStruct, path: string, options: *
     while count * 10 > capacity * 7 {
         capacity *= 2;
     }
-    slots := calloc(capacity as int, 8) as *i64;
+    slots := mem.allocate(capacity as int * 8) as *i64;
     mask  := (capacity - 1) as u64;
     for index in 0..count {
         entry := (&entries[index * entryType.head.size]) as *void;

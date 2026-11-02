@@ -1,15 +1,55 @@
 namespace mem;
 
+// Memory: the standard library takes its memory from here (and from new), not from C, so a program can give it an
+// Allocator, and C is only called in one place
+//
+//     p := mem.allocate(64);              // 64 zeroed bytes from the heap, or mem.allocate(64, &allocator)
+//     p = mem.resize(p, 128);             // like realloc
+//     mem.copy(to, from, 16);             // like memcpy
+//     mem.free(p);
+//
 // Arenas: memory that is taken bit by bit and freed all at once, e.g for everything of one request
 //
 //     arena: mem.Arena;
 //     p := arena.allocate(64);
-//     alloc := arena.allocator();       // An Allocator for lists, maps and e.g dbms.Connection
+//     alloc := arena.allocator();       // An Allocator for lists, maps, new(T, &alloc) and e.g dbms.Connection
 //     arena.clear();                    // Everything is free to use again
 //     arena.free();
 
-use c;
-import fmt;
+import c;
+
+// Zeroed memory of the size, from the allocator (null is the heap). Free it with mem.free and the same allocator
+allocate :: (size: int, allocator: *Allocator = null) -> *void {
+    if size <= 0 { size = 1; }
+    memory := resizeMemory(allocator, null, size);
+    if memory != null { c.memset(memory, 0, size); }
+    return memory;
+}
+
+// The memory with a new size, keeping what fits of it, like realloc. A null memory is new memory, and a size of 0 frees it
+resize :: (memory: *void, size: int, allocator: *Allocator = null) -> *void {
+    return resizeMemory(allocator, memory, size);
+}
+
+// Gives back memory of allocate, resize or new to the allocator it came from (null is the heap)
+free :: (memory: *void, allocator: *Allocator = null) {
+    freeMemory(memory, allocator);
+}
+
+// Copies count bytes, like memcpy. The two may not overlap
+copy :: (to: *void, from: *void, count: int) {
+    if count > 0 { c.memcpy(to, from, count); }
+}
+
+// Sets count bytes to the value, like memset
+set :: (to: *void, value: u8, count: int) {
+    if count > 0 { c.memset(to, value as int, count); }
+}
+
+// If the count bytes are the same, like memcmp(a, b, count) == 0
+equal :: (a: *void, b: *void, count: int) -> bool {
+    return count <= 0 || c.memcmp(a, b, count) == 0;
+}
 
 Kilobyte :: 1024;
 Megabyte :: 1048576;
@@ -49,7 +89,7 @@ allocate :: method (arena: *Arena, size: int) -> *void {
     if chunk.cursor + size <= chunk.capacity {
         ptr := &chunk.data[chunk.cursor];
         chunk.cursor += size;
-        memset(ptr, 0, size);
+        c.memset(ptr, 0, size);
         return ptr;
     }
 
@@ -74,9 +114,9 @@ allocator :: method (arena: *Arena) -> Allocator {
 free :: method (arena: *Arena) {
     chunk := arena.currentChunk;
     while chunk != null {
-        free(chunk.data);
+        c.free(chunk.data);
         previous := chunk.prev;
-        free(chunk);
+        c.free(chunk);
         chunk = previous;
     }
     arena.currentChunk = null;
@@ -90,9 +130,9 @@ clear :: method (arena: *Arena) {
     }
     previous := chunk.prev;
     while previous != null {
-        free(previous.data);
+        c.free(previous.data);
         next := previous.prev;
-        free(previous);
+        c.free(previous);
         previous = next;
     }
     chunk.prev   = null;
@@ -111,13 +151,10 @@ used :: method (arena: *Arena) -> int {
 }
 
 newChunk :: (oldChunk: *Chunk, capacity: int) -> *Chunk {
-    chunk := malloc(sizeof(Chunk)) as *Chunk;
-    if chunk == null {
-        fmt.print("Failed to allocate a new chunk of memory for the arena");
-        exit(1);
-    }
-
-    chunk.data     = malloc(capacity) as *u8;
+    chunk := c.malloc(sizeof(Chunk)) as *Chunk;
+    assert(chunk != null); // Out of memory
+    chunk.data     = c.malloc(capacity) as *u8;
+    assert(chunk.data != null);
     chunk.cursor   = 0;
     chunk.capacity = capacity;
     chunk.prev     = oldChunk;
@@ -141,7 +178,7 @@ arenaResize :: (context: *void, memory: *void, size: i64) -> *void {
         if oldSize > size {
             oldSize = size;
         }
-        memcpy(result, memory, oldSize as int);
+        c.memcpy(result, memory, oldSize as int);
     }
     return result;
 }

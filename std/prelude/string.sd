@@ -1,7 +1,7 @@
 use c;
 
 toCString :: method (s: string) -> *u8 {
-    cstr := malloc(s.len + 1) as *u8;
+    cstr := resizeMemory(null, null, s.len + 1) as *u8;
     memcpy(cstr, s.data, s.len);
     cstr[s.len] = 0;
     return cstr;
@@ -36,7 +36,7 @@ free :: method (s: string) {
 copy :: method (s: string) -> string {
     result: string;
 
-    result.data = malloc(s.len);
+    result.data = resizeMemory(null, null, s.len) as *u8;
     memcpy(result.data, s.data, s.len);
 
     result.len = s.len;

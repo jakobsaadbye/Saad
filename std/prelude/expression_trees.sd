@@ -38,7 +38,7 @@ Expr :: struct <F> {
 
 // The functions that the compiler makes an Expr with
 exprNode :: (kind: ExprKind) -> *ExprNode {
-    node := calloc(1, sizeof(ExprNode)) as *ExprNode;
+    node := new(ExprNode);
     node.kind = kind;
     return node;
 }
@@ -62,7 +62,7 @@ exprValue :: (value: any) -> *ExprNode {
     node := exprNode(.value);
     node.value.type = value.type;
     if value.type != null && value.data != null {
-        copy := calloc(1, value.type.size) as *u8;
+        copy := resizeMemory(null, null, value.type.size) as *u8;
         from := value.data as *u8;
         for i in 0..value.type.size {
             copy[i] = from[i];

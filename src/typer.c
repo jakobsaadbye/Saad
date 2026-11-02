@@ -6966,25 +6966,6 @@ Type *check_sizeof(Typer *typer, AstSizeof *ast_sizeof) {
     return primitive_type(PRIMITIVE_INT);
 }
 
-Type *check_new(Typer *typer, AstNew *ast_new, Type *ctx_type) {
-    Type *expr_type = check_expression(typer, ast_new->expr, ctx_type);
-    if (!expr_type) return NULL;
-
-    if (expr_type->kind == TYPE_STRUCT) {
-        TypePointer *ptr_to_struct = generate_pointer_to_type(typer->parser, expr_type);
-        return (Type *) ptr_to_struct;
-    }
-
-    if (expr_type->kind == TYPE_ARRAY) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_new->expr, "Arrays cannot be newed. A dynamic array is a list");
-        report_error_ast(typer->parser, LABEL_HINT, NULL, "Make a list from a literal instead e.g xs: [..]int = [1, 2, 3];");
-        return NULL;
-    }
-
-    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_new->expr, "Invalid expression to new. Only arrays and structs can be newed");
-    return NULL;
-}
-
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     Type *result = NULL;
 
@@ -7011,7 +6992,6 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     else if (expr->head.kind == AST_ARRAY_ACCESS)   result = check_array_access(typer, (AstArrayAccess *)(expr));
     else if (expr->head.kind == AST_TYPEOF)         result = check_typeof(typer, (AstTypeof *)(expr));
     else if (expr->head.kind == AST_SIZEOF)         result = check_sizeof(typer, (AstSizeof *)(expr));
-    else if (expr->head.kind == AST_NEW)            result = check_new(typer, (AstNew *)(expr), ctx_type);
     else if (expr->head.kind == AST_RANGE_EXPR)     result = primitive_type(PRIMITIVE_I64); // @Investigate - Shouldn't this be checked for both sides being integers???
     else if (expr->head.kind == AST_SEMICOLON_EXPR) result = primitive_type(PRIMITIVE_VOID);
     else {

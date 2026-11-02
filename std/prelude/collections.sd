@@ -73,6 +73,33 @@ resizeMemory :: (allocator: *Allocator, memory: *void, size: i64) -> *void {
     return realloc(memory, size);
 }
 
+// What new(T) and new(T, allocator) are: a T with the defaults of its type, in memory of the allocator (null is the
+// heap). Free it with freeMemory(p, allocator), or with the arena it is in
+allocateNew :: <T>(allocator: *Allocator = null) -> *T {
+    size := sizeof(T);
+    if size == 0 { size = 1; }
+    memory := resizeMemory(allocator, null, size) as *T;
+    value: T;
+    *memory = value;
+    return memory;
+}
+
+// What new value is, e.g new Point{1, 2}: a copy of the value in memory of the allocator (null is the heap)
+allocateCopy :: <T>(value: T, allocator: *Allocator = null) -> *T {
+    size := sizeof(T);
+    if size == 0 { size = 1; }
+    memory := resizeMemory(allocator, null, size) as *T;
+    *memory = value;
+    return memory;
+}
+
+// Gives back memory of new or of resizeMemory to the allocator it came from (null is the heap)
+freeMemory :: (memory: *void, allocator: *Allocator = null) {
+    if memory != null {
+        resizeMemory(allocator, memory, 0);
+    }
+}
+
 // The names of the flags of an enum flags that are set in the value, e.g ["verbose", "color"] of 3. A value that has a name
 // of its own, e.g all = 7, is that name. ok is false when bits are set that no flag has
 flagNames :: method (type: *TypeEnum, value: i64) -> ([..]string, bool) {

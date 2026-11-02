@@ -16,7 +16,7 @@ namespace time;
 // The zero Time is January 1, 1970 UTC
 
 import os.windows;
-use c;
+import mem;
 
 // A span of time in nanoseconds, e.g 90 * time.Minute. It is an i64, so the arithmetic of numbers works on it
 Duration :: i64;
@@ -506,7 +506,7 @@ Text :: struct {
 
     toString :: method () -> string {
         s: string;
-        s.data = malloc(self.bytes.count + 1) as *u8;
+        s.data = mem.allocate(self.bytes.count + 1) as *u8;
         for b, i in self.bytes { s.data[i] = b; }
         s.len = self.bytes.count;
         return s;
