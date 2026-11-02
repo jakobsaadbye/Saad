@@ -358,25 +358,24 @@ err2 := db.saveChanges();
 ### 5. Saving changes
 
 `create`, `update` and `delete` don't write anything. They add a change to the context of the tables, a
-`dbms.Context`, which the generated `Database` embeds. `saveChanges` writes all of them, like `SaveChanges` of Entity
-Framework:
+`dbms.Context`, which the generated `Database` embeds. The rows that `get` and `all` give are tracked. `saveChanges`
+writes all of it, like `SaveChanges` of Entity Framework:
 
 ```odin
 db := database.open(&conn);
 
 ada := db.users.create();     // a new *User with the defaults of User
 ada.name = "Ada";
-bo, err := db.users.get(2);
-bo.active = false;
-db.users.update(bo);
+bo, err := db.users.get(2);   // tracked
+bo.active = false;            // so this is saved without an update
 db.categories.delete("books");
 
-err2 := db.saveChanges();     // BEGIN, the changes in the order they were made, COMMIT
+err2 := db.saveChanges();     // BEGIN, the changes in the order they were made, the tracked rows, COMMIT
 print("%", ada.id);           // what the database made, e.g the serial id and created_at, is in ada now
 ```
 
-* `saveChanges` writes the changes in the order they were made, in one transaction. When one fails, it rolls back, so
-  none of them are written, and the error says which one, e.g
+* `saveChanges` writes the changes in the order they were made, and then the tracked rows that changed, in one
+  transaction. When one fails, it rolls back, so none of them are written, and the error says which one, e.g
   `create in orders (change 2 of 2): ERROR:  insert or update on table "orders" violates foreign key constraint ...`.
   The changes are kept then, so they can be fixed and saved again, or forgotten with `db.discardChanges()`.
 * An `update` or `delete` of a key that no row has is an error too: `delete in users (change 1 of 1): No row has the
@@ -384,19 +383,35 @@ print("%", ada.id);           // what the database made, e.g the serial id and c
 * `create()` gives a new row, with the defaults of the struct (which are the constant defaults of the database), made
   with the allocator of the connection. Set its members before `saveChanges`. After the commit, the row as the database
   stored it (with its generated columns) is written into it. Nothing is written into it when the save fails.
-* `update` takes a pointer to a row, e.g the one `get` gave. The rows of `create` and `update` are read when
-  `saveChanges` runs, so what is set on them until then is written too, and a row given to `update` must still be
-  there then.
+* Creates of one table that follow each other are one `INSERT ... VALUES (...), (...) RETURNING *`, of at most
+  `dbms.MaxRowsInInsert` (1000) rows, and fewer when the rows have so many columns that they would take more than the
+  65535 parameters Postgres allows. Postgres gives the rows back in the order of the values, so each row gets its own
+  id. A create of another table in between starts a new `INSERT`, so the order of the changes stays the same.
+* `update` takes a pointer to a row and writes every column that isn't the key or generated. It is for a row that
+  isn't tracked: a row that `get` or `all` gave is saved without it.
 * `delete` takes the key, which is copied.
-* `db.pendingChanges()` is the number of changes that aren't saved.
-* The context and its list of changes are made with the allocator of the connection.
+* `db.pendingChanges()` is the number of changes that `saveChanges` would write, with the tracked rows that changed.
+* The context, its list of changes and the copies of the tracked rows are made with the allocator of the connection.
+
+#### Tracking
+
+* `get` and `all` of a table with a key track the rows they give: the context keeps a copy of each. `saveChanges`
+  compares each tracked row with its copy and writes an `UPDATE` of only the columns that changed, to the row with the
+  key it was read with. Strings and optionals are compared by their values.
+* The created rows are tracked after they are saved, so a change after `saveChanges` is saved by the next one.
+* A tracked row that is also given to `update` is written once, by the `update`. A tracked row that is deleted isn't
+  updated, and isn't tracked any more.
+* After a save, the copies are the rows as they are, so only what changes after it is saved next time.
+  `discardChanges()` does the same without saving: what was set on the rows stays, but isn't saved.
+* `db.track = false` (it is a member of the embedded context) turns tracking off, e.g before reading many rows that
+  won't change. `db.untrackAll()` forgets the tracked rows, e.g before the list that `all` gave is freed.
+* The rows of `all` are in the list it gives, so they must still be there at `saveChanges`. Don't add to that list, as
+  its rows can move.
 
 Not yet:
 
 * Rows that refer to rows made in the same save: `order.userId = ada.id` is 0 before `ada` is saved. Save the user
   first. Later, the generator can read the foreign keys and fill in `userId` when the insert of `ada` gives its id.
-* Batching the creates of a table into one `INSERT ... VALUES (...), (...)`.
-* Tracking: `db.users.track(&row)` could keep a copy, and save the changed columns without an `update`.
 
 ### 4. The typed query builder
 

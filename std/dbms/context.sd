@@ -7,16 +7,20 @@ namespace dbms;
 //
 //     ada := db.users.create();            // a new *User with the defaults. Nothing is sent yet
 //     ada.name = "Ada";
-//     bo, err := db.users.get(2);          // reads go to the database at once
-//     bo.email = "bo@example.com";
-//     db.users.update(bo);
+//     bo, err := db.users.get(2);          // reads go to the database at once, and the rows are tracked
+//     bo.email = "bo@example.com";         // so this is saved without an update
 //     db.categories.delete("books");
 //
-//     err2 := db.saveChanges();            // BEGIN, the 3 statements in the order they were made, COMMIT
+//     err2 := db.saveChanges();            // BEGIN, the changes in the order they were made, the tracked rows, COMMIT
 //     print("%", ada.id);                  // what the database made, e.g the id, is written back into ada
 //
-// The rows of create and update are read when saveChanges runs, so what is set on them until then is saved too. The
-// rows of create are made with the allocator of the connection, and a row given to update must still be there then
+// * Creates that follow each other in one table are one INSERT with a row of values for each
+// * The rows that get and all of a table with a key give are tracked: the context keeps a copy of each, and saveChanges
+//   writes the columns that are not the same any more. So are the created rows, after they are saved.
+//   context.track = false turns it off, e.g for reading many rows that won't change
+// * The rows of create, update and tracking are read when saveChanges runs, so what is set on them until then is saved
+//   too. The rows of create and get are made with the allocator of the connection. A row given to update, or a row of
+//   all, must still be there then: don't add to the list that all gave, as its rows can move
 
 import fmt;
 use c;
@@ -24,6 +28,8 @@ use c;
 Context :: struct {
     conn:    *Connection;
     changes: [..]Change;    // In the order they were made
+    tracked: [..]Tracked;   // The rows that saveChanges compares with how they were read
+    track:   bool;          // If get and all track their rows. On in newContext
 }
 
 ChangeKind :: enum { create, update, delete }
@@ -36,6 +42,13 @@ Change :: struct {
     key:   any;     // The key of a delete
 }
 
+// A row that saveChanges compares with how it was read or saved
+Tracked :: struct {
+    table:    TableInfo;
+    row:      *void;
+    snapshot: *void;   // A copy of the row when it was read or saved
+}
+
 // What a change needs to know about its table
 TableInfo :: struct {
     name:      string;
@@ -45,46 +58,92 @@ TableInfo :: struct {
     type:      *TypeStruct;   // Of the rows
 }
 
+// The most rows of one INSERT. Postgres takes at most 65535 parameters in a statement, so wide rows give fewer
+MaxRowsInInsert :: 1000;
+
 // A context for the connection, made with its allocator
 newContext :: (conn: *Connection) -> *Context {
     context := resizeMemory(conn.allocator, null, sizeof(Context)) as *Context;
     memset(context, 0, sizeof(Context));
-    context.conn = conn;
+    context.conn  = conn;
+    context.track = true;
     context.changes.allocator = conn.allocator;
+    context.tracked.allocator = conn.allocator;
     return context;
 }
 
-// The number of changes that are not saved yet
+// The number of changes that saveChanges would write: the ones made, and the tracked rows that changed
 pendingChanges :: method (context: *Context) -> i64 {
-    return context.changes.count;
+    n := context.changes.count;
+    for *t in context.tracked {
+        if context.isDirty(t) { n += 1; }
+    }
+    return n;
 }
 
-// Forgets the changes that are not saved yet
+// Forgets the changes that are not saved yet. The tracked rows keep what was set on them, but it isn't saved
 discardChanges :: method (context: *Context) {
     context.changes.clear();
+    for *t in context.tracked {
+        memcpy(t.snapshot, t.row, t.table.type.head.size);
+    }
 }
 
-// Writes all the changes, in the order they were made, in one transaction. When one of them fails, none of them are
-// written, the error says which one, and the changes are kept so that they can be fixed and saved again.
-// After the commit, what the database made for the created rows (e.g serial ids and defaults of now()) is in them
+// Writes all the changes, in one transaction: the ones made, in the order they were made, and then the tracked rows that
+// changed. When one of them fails, none of them are written, the error says which one, and the changes are kept so that
+// they can be fixed and saved again. After the commit, what the database made for the created rows (e.g serial ids and
+// defaults of now()) is in them
 saveChanges :: method (context: *Context) -> string {
-    if context.changes.count == 0 {
+    // The tracked rows to write: changed, and not updated or deleted by a change
+    dirty: [..]*Tracked;
+    for *t in context.tracked {
+        if context.isDirty(t) && !context.isChangedByChange(t) { dirty.add(t); }
+    }
+    total := context.changes.count + dirty.count;
+    if total == 0 {
+        dirty.free();
         return "";
     }
+
     conn := context.conn;
     err := conn.begin();
     if err != "" {
+        dirty.free();
         return err;
     }
 
     // The created rows as the database stored them, copied into the rows after the commit
     stored: [..]StoredRow;
     failed := "";
-    for change, i in context.changes {
-        e := context.apply(change, &stored);
+    i := 0;
+    while i < context.changes.count && failed == "" {
+        change := context.changes[i];
+        if change.kind == .create {
+            // The creates of the same table that follow each other are one INSERT
+            end := i + 1;
+            while end < context.changes.count && end - i < MaxRowsInInsert && context.changes[end].kind == .create && sameTable(context.changes[end].table, change.table) {
+                end += 1;
+            }
+            e := context.insertRows(i, end, &stored);
+            if e != "" {
+                which := fmt.sprint("change % of %", i + 1, total);
+                if end - i > 1 { which = fmt.sprint("changes % to % of %", i + 1, end, total); }
+                failed = fmt.sprint("create in % (%): %", change.table.name, which, e);
+            }
+            i = end;
+            continue;
+        }
+        e := context.apply(change);
         if e != "" {
-            failed = fmt.sprint("% in % (change % of %): %", kindName(change.kind), change.table.name, i + 1, context.changes.count, e);
-            break;
+            failed = fmt.sprint("% in % (change % of %): %", kindName(change.kind), change.table.name, i + 1, total, e);
+        }
+        i += 1;
+    }
+    for t, n in dirty {
+        if failed != "" { break; }
+        e := context.updateTracked(t);
+        if e != "" {
+            failed = fmt.sprint("update in % (change % of %, a tracked row): %", t.table.name, context.changes.count + n + 1, total, e);
         }
     }
 
@@ -94,13 +153,26 @@ saveChanges :: method (context: *Context) -> string {
     if failed != "" {
         conn.rollback();
         stored.free();
+        dirty.free();
         return failed;
     }
 
+    // Saved: the created rows get what the database made, the deleted rows are not tracked any more, and every tracked
+    // row is compared with how it is now from here on
     for s in stored {
         memcpy(s.row, s.copy, s.size);
     }
+    for change in context.changes {
+        if change.kind == .delete { context.untrackKey(change.table, change.key); }
+    }
+    for change in context.changes {
+        if change.kind == .create { context.trackRow(change.table, change.row); }
+    }
+    for *t in context.tracked {
+        memcpy(t.snapshot, t.row, t.table.type.head.size);
+    }
     stored.free();
+    dirty.free();
     context.changes.clear();
     return "";
 }
@@ -108,6 +180,26 @@ saveChanges :: method (context: *Context) -> string {
 // Records a change. The tables do, e.g create of a dbms.Table
 record :: method (context: *Context, kind: ChangeKind, table: TableInfo, row: *void, key: any) {
     context.changes.add(Change{kind: kind, table: table, row: row, key: key});
+}
+
+// Tracks a row of a table with a key, if the context tracks. The tables do, e.g get of a dbms.KeyedTable
+trackRow :: method (context: *Context, table: TableInfo, row: *void) {
+    if !context.track || table.key.len == 0 { return; }
+    size := table.type.head.size;
+    for *t in context.tracked {
+        if t.row == row {
+            memcpy(t.snapshot, row, size);
+            return;
+        }
+    }
+    snapshot := resizeMemory(context.conn.allocator, null, size as i64);
+    memcpy(snapshot, row, size);
+    context.tracked.add(Tracked{table: table, row: row, snapshot: snapshot});
+}
+
+// Stops tracking all rows, e.g before the rows of all are freed
+untrackAll :: method (context: *Context) {
+    context.tracked.clear();
 }
 
 @private
@@ -127,7 +219,228 @@ kindName :: (kind: ChangeKind) -> string {
 }
 
 @private
-apply :: method (context: *Context, change: Change, stored: *[..]StoredRow) -> string {
+sameTable :: (a: TableInfo, b: TableInfo) -> bool {
+    return a.name == b.name && a.schema == b.schema;
+}
+
+// If a tracked row isn't the same as when it was read or saved, in a column that isn't the key or generated
+@private
+isDirty :: method (context: *Context, t: *Tracked) -> bool {
+    columns := changedColumns(t);
+    dirty := columns.count > 0;
+    columns.free();
+    return dirty;
+}
+
+@private
+changedColumns :: (t: *Tracked) -> [..]TableColumn {
+    changed: [..]TableColumn;
+    columns := columnsOf(t.table.type, t.table.generated, t.table.key);
+    for column in columns {
+        if column.generated || column.key { continue; }
+        if !sameValue(column.member.type, column.member.valueIn(t.row), column.member.valueIn(t.snapshot)) {
+            changed.add(column);
+        }
+    }
+    columns.free();
+    return changed;
+}
+
+// The same value: strings by their text, optionals by their value, and the rest by their bytes
+@private
+sameValue :: (type: *Type, a: *void, b: *void) -> bool {
+    if type.kind == .string {
+        return *(a as *string) == *(b as *string);
+    }
+    if type.isOptional() {
+        valueA, inner, hasA := (type as *TypeStruct).optionalValue(a);
+        valueB, _, hasB := (type as *TypeStruct).optionalValue(b);
+        if hasA != hasB { return false; }
+        if !hasA { return true; }
+        return sameValue(inner, valueA, valueB);
+    }
+    return memcmp(a, b, type.size) == 0;
+}
+
+// If an update or a delete of the changes is for the tracked row, which then isn't written again
+@private
+isChangedByChange :: method (context: *Context, t: *Tracked) -> bool {
+    for change in context.changes {
+        if change.kind == .update && change.row == t.row { return true; }
+        if change.kind == .delete && sameTable(change.table, t.table) && sameKey(t, change.key) { return true; }
+    }
+    return false;
+}
+
+// If the key of the tracked row (as it was read) is the key
+@private
+sameKey :: (t: *Tracked, key: any) -> bool {
+    columns := columnsOf(t.table.type, t.table.generated, t.table.key);
+    keyColumn, hasKey := keyOf(columns);
+    columns.free();
+    if !hasKey { return false; }
+    a, okA := paramText(valueOf(keyColumn, t.snapshot));
+    b, okB := paramText(key);
+    same := okA && okB && a != null && b != null && fromCString(a) == fromCString(b);
+    free(a);
+    free(b);
+    return same;
+}
+
+@private
+untrackKey :: method (context: *Context, table: TableInfo, key: any) {
+    i := 0;
+    while i < context.tracked.count {
+        t := context.tracked.indexRef(i);
+        if sameTable(t.table, table) && sameKey(t, key) {
+            context.tracked.removeAt(i);
+            continue;
+        }
+        i += 1;
+    }
+}
+
+// The creates changes[from] to changes[to - 1], of one table, as one INSERT with a row of values for each
+@private
+insertRows :: method (context: *Context, from: int, to: int, stored: *[..]StoredRow) -> string {
+    conn  := context.conn;
+    table := context.changes[from].table;
+    type  := table.type;
+
+    columns := columnsOf(type, table.generated, "");
+    written: [..]TableColumn;
+    for column in columns {
+        if !column.generated { written.add(column); }
+    }
+
+    // A row of only generated columns has no values to write, so each is an INSERT of its own
+    if written.count == 0 {
+        columns.free();
+        written.free();
+        for i in from..to {
+            sql := fmt.sprint("INSERT INTO % DEFAULT VALUES RETURNING *", qualifiedName(table.schema, table.name));
+            result, err := conn.run(sql);
+            sql.free();
+            if err != "" { return err; }
+            e := conn.readStored(result, 0, context.changes[i].row, type, stored);
+            if e != "" { return e; }
+        }
+        return "";
+    }
+
+    // At most 65535 parameters in a statement
+    rowsPerInsert := to - from;
+    if rowsPerInsert * written.count > 65535 { rowsPerInsert = (65535 / written.count) as int; }
+
+    start := from;
+    err := "";
+    while start < to && err == "" {
+        end := start + rowsPerInsert;
+        if end > to { end = to; }
+
+        args: [..]any;
+        sb: fmt.StringBuilder;
+        sb.add("INSERT INTO % (", qualifiedName(table.schema, table.name));
+        for column, c in written {
+            if c > 0 { sb.addString(", "); }
+            sb.addString(quoted(column.name));
+        }
+        sb.addString(") VALUES ");
+        for i in start..end {
+            if i > start { sb.addString(", "); }
+            sb.addChar('(');
+            for column, c in written {
+                if c > 0 { sb.addString(", "); }
+                args.add(valueOf(column, context.changes[i].row));
+                sb.add("$%", args.count);
+            }
+            sb.addChar(')');
+        }
+        sb.addString(" RETURNING *");
+
+        result, e := conn.run(sb.toString(), ...args.elements());
+        sb.free();
+        args.free();
+        if e != "" {
+            err = e;
+            break;
+        }
+        // Postgres gives the rows of RETURNING in the order of the VALUES
+        given := conn.driver.rowCount(result);
+        if given != (end - start) as i64 {
+            conn.driver.freeResult(result);
+            err = fmt.sprint("The database gave % rows back for % rows", given, end - start);
+            break;
+        }
+        for i in start..end {
+            e2 := conn.readStoredRow(result, (i - start) as i64, context.changes[i].row, type, stored);
+            if e2 != "" { err = e2; break; }
+        }
+        conn.driver.freeResult(result);
+        start = end;
+    }
+    columns.free();
+    written.free();
+    return err;
+}
+
+// Reads the row of the result as it was stored into a copy of the row, so that members without a column keep their value,
+// and frees the result
+@private
+readStored :: method (conn: *Connection, result: *void, index: i64, row: *void, type: *TypeStruct, stored: *[..]StoredRow) -> string {
+    err := conn.readStoredRow(result, index, row, type, stored);
+    conn.driver.freeResult(result);
+    return err;
+}
+
+@private
+readStoredRow :: method (conn: *Connection, result: *void, index: i64, row: *void, type: *TypeStruct, stored: *[..]StoredRow) -> string {
+    size := type.head.size;
+    copy := resizeMemory(conn.allocator, null, size as i64);
+    memcpy(copy, row, size);
+    readColumns := conn.columnsOf(result, type);
+    err := conn.readRow(result, index, copy, type, readColumns);
+    readColumns.free();
+    if err != "" { return err; }
+    stored.add(StoredRow{row: row, copy: copy, size: size});
+    return "";
+}
+
+// An update of the columns of a tracked row that changed, to the row with the key it was read with
+@private
+updateTracked :: method (context: *Context, t: *Tracked) -> string {
+    changed := changedColumns(t);
+    columns := columnsOf(t.table.type, t.table.generated, t.table.key);
+    keyColumn, hasKey := keyOf(columns);
+    columns.free();
+    if !hasKey {
+        changed.free();
+        return fmt.sprint("The row has no member for the key %", t.table.key);
+    }
+
+    args: [..]any;
+    sb: fmt.StringBuilder;
+    sb.add("UPDATE % SET ", qualifiedName(t.table.schema, t.table.name));
+    for column, i in changed {
+        if i > 0 { sb.addString(", "); }
+        args.add(valueOf(column, t.row));
+        sb.add("% = $%", quoted(column.name), args.count);
+    }
+    key := valueOf(keyColumn, t.snapshot);
+    args.add(key);
+    sb.add(" WHERE % = $%", quoted(t.table.key), args.count);
+
+    n, err := context.conn.exec(sb.toString(), ...args.elements());
+    sb.free();
+    args.free();
+    changed.free();
+    if err != "" { return err; }
+    if n == 0 { return fmt.sprint("No row has the key %", key); }
+    return "";
+}
+
+@private
+apply :: method (context: *Context, change: Change) -> string {
     conn  := context.conn;
     table := change.table;
     type  := table.type;
@@ -135,42 +448,7 @@ apply :: method (context: *Context, change: Change, stored: *[..]StoredRow) -> s
 
     switch change.kind {
         case .create {
-            columns := columnsOf(type, table.generated, "");
-            args: [..]any;
-            names: fmt.StringBuilder;
-            values: fmt.StringBuilder;
-            for column in columns {
-                if column.generated { continue; }
-                if args.count > 0 {
-                    names.addString(", ");
-                    values.addString(", ");
-                }
-                args.add(valueOf(column, change.row));
-                names.addString(quoted(column.name));
-                values.add("$%", args.count);
-            }
-            sql := "";
-            if args.count == 0 { sql = fmt.sprint("INSERT INTO % DEFAULT VALUES RETURNING *", name); }
-            else               { sql = fmt.sprint("INSERT INTO % (%) VALUES (%) RETURNING *", name, names.toString(), values.toString()); }
-
-            result, err := conn.run(sql, ...args.elements());
-            names.free();
-            values.free();
-            args.free();
-            columns.free();
-            if err != "" { return err; }
-
-            // The row as it was stored, read into a copy of the row, so that members without a column keep their value
-            size := type.head.size;
-            copy := resizeMemory(conn.allocator, null, size as i64);
-            memcpy(copy, change.row, size);
-            readColumns := conn.columnsOf(result, type);
-            err = conn.readRow(result, 0, copy, type, readColumns);
-            readColumns.free();
-            conn.driver.freeResult(result);
-            if err != "" { return err; }
-            stored.add(StoredRow{row: change.row, copy: copy, size: size});
-            return "";
+            return "Compiler Error: creates are written by insertRows";
         }
         case .update {
             columns := columnsOf(type, table.generated, table.key);

@@ -90,9 +90,8 @@ db := database.open(&conn);
 
 ada := db.users.create();          // a new *User with the defaults
 ada.name = "Ada";
-bo, err := db.users.get(2);        // a *User, null when there is none
-bo.active = false;
-db.users.update(bo);
+bo, err := db.users.get(2);        // a *User, null when there is none. Tracked
+bo.active = false;                 // so this is saved without an update
 db.categories.delete("books");
 
 err2 := db.saveChanges();          // BEGIN, the 3 changes, COMMIT
@@ -101,6 +100,9 @@ print("%", ada.id);
 
 * Changed: tables don't write at once any more (`insert`, `update` and `delete` are gone), and `get` gives a pointer
   instead of an optional. The generated `Database` embeds a `dbms.Context`, and the tables are made with it
+* The rows of `get` and `all` are tracked: `saveChanges` writes the columns that changed, without an `update`. Turn it
+  off with `db.track = false`
+* Creates of one table that follow each other are one `INSERT ... VALUES (...), (...) RETURNING *`
 
 ## Update v0.9.5 - 1. Nov 2026
 

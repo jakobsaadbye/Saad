@@ -118,6 +118,43 @@ main :: () {
     assert(db.saveChanges() == "delete in users (change 1 of 1): No row has the key 12345");
     db.discardChanges();
 
+    // Tracking: the rows of get and all are saved without update, only the columns that changed
+    dbUser, _ := db.users.get(ada.id);
+    dbUser.score = 4.5;
+    assert(db.pendingChanges() == 1);
+    assert(db.saveChanges() == "");
+    check, _ := db.users.get(ada.id);
+    assert(check.score == 4.5);
+
+    everyone, _ := db.users.all();
+    for i in 0..everyone.count {
+        everyone.indexRef(i).active = true;
+    }
+    assert(db.saveChanges() == "");
+    activeCount, _, _ := conn.queryOne<i64>("SELECT count(*) FROM saad_shop.users WHERE active");
+    assert(activeCount == 2);
+
+    // Many creates of one table are one INSERT, and each row gets its own id back, in order
+    names := ["Eve", "Finn", "Gus", "Hal"];
+    created: [..]*User;
+    for name in names {
+        row := db.users.create();
+        row.name = name;
+        created.add(row);
+    }
+    assert(db.saveChanges() == "");
+    for row, i in created {
+        stored, _ := db.users.get(row.id);
+        assert(stored.name == names[i]);
+    }
+    assert(created[0].id + 3 == created[3].id);
+    created[1].email = "finn@example.com";   // and tracked after they are saved
+    assert(db.saveChanges() == "");
+    finn, _ := db.users.get(created[1].id);
+    assert(finn.email == "finn@example.com");
+    for row in created { db.users.delete(row.id); }
+    assert(db.saveChanges() == "");
+
     // all, with the methods of lists
     users, e14 := db.users.all();
     assert(e14 == "" && users.count == 2);

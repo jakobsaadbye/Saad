@@ -65,7 +65,28 @@ KeyedTable :: struct <T, K> {
     @embed table: Table<T>;
     key: string;            // The column of the key, e.g id
 
-    // The row with the key, or null when there is none. It is made with the allocator of the connection
+    // A new row, like create of Table, which is tracked after it is saved
+    create :: method () -> *T {
+        empty: T;
+        row := resizeMemory(self.context.conn.allocator, null, sizeof(T)) as *T;
+        *row = empty;
+        none: any;
+        self.context.record(.create, self.info(self.key), row, none);
+        return row;
+    }
+
+    // Every row. They are tracked, so what is changed on them is saved by saveChanges, unless context.track is false.
+    // Don't add to the list then, as its rows can move
+    all :: method () -> ([..]T, string) {
+        rows, err := self.table.all();
+        for i in 0..rows.count {
+            self.context.trackRow(self.info(self.key), rows.indexRef(i));
+        }
+        return rows, err;
+    }
+
+    // The row with the key, or null when there is none. It is made with the allocator of the connection, and tracked, so
+    // what is changed on it is saved by saveChanges, unless context.track is false
     get :: method (key: K) -> (*T, string) {
         sql := fmt.sprint("SELECT * FROM % WHERE % = $1", qualifiedName(self.schema, self.name), quoted(self.key));
         conn := self.context.conn;
@@ -76,11 +97,12 @@ KeyedTable :: struct <T, K> {
         }
         stored := resizeMemory(conn.allocator, null, sizeof(T)) as *T;
         *stored = row;
+        self.context.trackRow(self.info(self.key), stored);
         return stored, "";
     }
 
     // Writes the row to the row with its key when the context saves its changes: every column that isn't the key or
-    // generated. It is read then, so it must still be there
+    // generated. It is read then, so it must still be there. A row that get or all gave doesn't need it, as it is tracked
     update :: method (row: *T) {
         none: any;
         self.context.record(.update, self.info(self.key), row, none);
