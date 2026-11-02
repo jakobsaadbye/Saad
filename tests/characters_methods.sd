@@ -1,0 +1,30 @@
+// The methods of char in the prelude
+use fmt;
+
+main :: () {
+    assert('7'.isDigit() && !'x'.isDigit());
+    assert('q'.isLetter() && 'Q'.isLetter() && !'_'.isLetter() && !'3'.isLetter());
+    assert('3'.isLetterOrDigit() && !'-'.isLetterOrDigit());
+    assert('A'.isUpper() && !'a'.isUpper() && 'a'.isLower() && !'A'.isLower());
+    assert(' '.isSpace() && '\n'.isSpace() && '\t'.isSpace() && !'a'.isSpace());
+    assert('f'.isHexDigit() && 'C'.isHexDigit() && !'g'.isHexDigit());
+    assert('a'.toUpper() == 'A' && 'Z'.toLower() == 'z' && '1'.toUpper() == '1');
+    assert('7'.digitValue() == 7 && 'b'.digitValue() == 11 && 'F'.digitValue() == 15 && 'z'.digitValue() == -1);
+    assert('a'.isAscii());
+
+    // On the characters of a string
+    s := "Hello World 42";
+    upper := 0;
+    digits := 0;
+    for c in s {
+        if c.isUpper() { upper += 1; }
+        if c.isDigit() { digits += 1; }
+    }
+    assert(upper == 2 && digits == 2 && s[0].toLower() == 'h');
+
+    // Characters of other letters, e.g 'ø' (two bytes), are left alone
+    other := "ø";
+    assert(!other[0].isAscii() && !other[0].isLetter() && other[0].toUpper() == other[0]);
+
+    print("char methods ok");
+}

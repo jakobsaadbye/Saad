@@ -7,7 +7,8 @@ std/
     collections.sd  List<T> ([..]T) and Map<K, V>
     slices.sd       Methods on slices, arrays and lists: sort, reverse, indexOf, contains, ...
     expression_trees.sd  Expr<F> and ExprNode: a lambda as the tree of what it does (see docs/expression_trees.md)
-    string.sd       The methods of string (slice, split, indexOf, free, ...)
+    string.sd       The methods of string (slice, split, indexOf, free, ...) and of char (isDigit, isLetter, isSpace,
+                    toUpper, toLower, digitValue, ...)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
   dbms/         namespace dbms: run SQL and read rows into structs, dbms.Table<T> and dbms.KeyedTable<T, K> (see docs/dbms.md)
     postgres/       namespace dbms.postgres: the Postgres driver, through libpq.dll, and generate() and writeFiles()

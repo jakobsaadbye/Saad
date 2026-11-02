@@ -693,7 +693,7 @@ pascalCase :: (name: string) -> string {
     sb: fmt.StringBuilder;
     upper := true;
     for c in name {
-        if !isNameChar(c) || c == '_' {
+        if !(c.isLetterOrDigit() || c == '_') || c == '_' {
             upper = true;
             continue;
         }
@@ -732,17 +732,12 @@ memberName :: (column: string) -> string {
 enumValueName :: (label: string) -> string {
     sb: fmt.StringBuilder;
     for c in label {
-        if isNameChar(c) { sb.addChar(c); }
+        if (c.isLetterOrDigit() || c == '_') { sb.addChar(c); }
         else             { sb.addChar('_'); }
     }
     name := sb.toString();
     if name.len == 0 || (name[0] >= '0' && name[0] <= '9') || isKeyword(name) { return fmt.sprint("_%", name); }
     return name;
-}
-
-@private
-isNameChar :: (c: u8) -> bool {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 }
 
 @private
