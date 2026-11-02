@@ -25,9 +25,9 @@ main :: () {
     
     print("");
 
-    // // If no name for an iterator is given then the iterator will be named 'it'
-    for 0..10 {
-        print("%", it);
+    // // A loop that doesn't need the value doesn't name it
+    for 0..3 {
+        print("Hello");
     }
     
     print("");
@@ -35,8 +35,8 @@ main :: () {
     
     // // Looping over arrays has the same syntax
     x := [1, 1, 2, 3, 5, 8, 11, 19];
-    for x {
-        print("%", it);
+    for n in x {
+        print("%", n);
     }
 
     print("");

@@ -2616,7 +2616,7 @@ AstFor *parse_for(Parser *parser) {
         iterable = NULL;
         kind = FOR_INFINITY_AND_BEYOND;
     }
-    // `for xs {...}` (implicit 'it')
+    // `for xs {...}` and `for 0..10 {...}`, which don't name the value
     else {
         iterable = parse_range_or_normal_expression(parser);
         if (!iterable) return NULL;
@@ -2627,7 +2627,9 @@ AstFor *parse_for(Parser *parser) {
             return NULL;
         }
 
-        iterator = make_identifier_from_string(parser, "it", NULL); // type is set later
+        // The loop has an iterator, but without a name that can be written: a loop that uses the values names them,
+        // e.g for x in xs
+        iterator = make_identifier_from_string(parser, "$it", NULL); // type is set later
         kind = FOR_WITH_EXPR;
     }
 

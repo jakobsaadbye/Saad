@@ -1,0 +1,8 @@
+// expect-error: There is no implicit 'it'
+
+main :: () {
+    total := 0;
+    for 0..10 {
+        total += it;
+    }
+}

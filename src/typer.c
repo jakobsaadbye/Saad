@@ -8337,7 +8337,10 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         }
 
         if (ident == NULL) {
-            if (!is_poisoned_name(typer->parser, ident_name)) report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared identifier '%s'", ident_name);
+            if (!is_poisoned_name(typer->parser, ident_name)) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared identifier '%s'", ident_name);
+                if (strcmp(ident_name, "it") == 0) report_error_ast(typer->parser, LABEL_HINT, NULL, "A loop names its value, e.g 'for x in xs { ... }' or 'for i in 0..10 { ... }'. There is no implicit 'it'");
+            }
 
             // Inside a method declared in a struct, the members are only reached through self
             for (AstFunctionDefn *func = typer->enclosing_function; func; func = func->parent_function) {
