@@ -1,7 +1,7 @@
 use c;
 
 toCString :: method (s: string) -> *u8 {
-    cstr := malloc(s.len + 1) as *u8;
+    cstr := resizeMemory(null, null, s.len + 1) as *u8;
     memcpy(cstr, s.data, s.len);
     cstr[s.len] = 0;
     return cstr;
@@ -36,7 +36,7 @@ free :: method (s: string) {
 copy :: method (s: string) -> string {
     result: string;
 
-    result.data = malloc(s.len);
+    result.data = resizeMemory(null, null, s.len) as *u8;
     memcpy(result.data, s.data, s.len);
 
     result.len = s.len;
@@ -165,4 +165,56 @@ reverse :: method (s: string) -> string {
     }
 
     return result;
+}
+//
+// Characters. A char is a byte of the UTF-8 text, e.g 'a' or the s[i] of a string, so these know the ASCII letters,
+// digits and spaces, and leave the bytes of other characters (128 and up) alone
+//
+
+// '0' to '9'
+isDigit :: method (c: char) -> bool { return c >= '0' && c <= '9'; }
+
+// 'a' to 'z' and 'A' to 'Z'
+isLetter :: method (c: char) -> bool { return c.isLower() || c.isUpper(); }
+
+// A letter or a digit
+isLetterOrDigit :: method (c: char) -> bool { return c.isLetter() || c.isDigit(); }
+
+// 'A' to 'Z'
+isUpper :: method (c: char) -> bool { return c >= 'A' && c <= 'Z'; }
+
+// 'a' to 'z'
+isLower :: method (c: char) -> bool { return c >= 'a' && c <= 'z'; }
+
+// ' ', '\t', '\n', '\r', '\v' and '\f'
+isSpace :: method (c: char) -> bool {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\x0B' || c == '\x0C';
+}
+
+// '0' to '9', 'a' to 'f' and 'A' to 'F'
+isHexDigit :: method (c: char) -> bool {
+    return c.isDigit() || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+// A character of ASCII, below 128
+isAscii :: method (c: char) -> bool { return (c as u8) < 128; }
+
+// The uppercase letter of a lowercase one, e.g 'A' of 'a'. Other characters are themselves
+toUpper :: method (c: char) -> char {
+    if c.isLower() { return (c as u8 - 32) as char; }
+    return c;
+}
+
+// The lowercase letter of an uppercase one, e.g 'a' of 'A'. Other characters are themselves
+toLower :: method (c: char) -> char {
+    if c.isUpper() { return (c as u8 + 32) as char; }
+    return c;
+}
+
+// The value of a digit, e.g 7 of '7', or of a hex digit, e.g 10 of 'a' and 'A'. -1 for other characters
+digitValue :: method (c: char) -> int {
+    if c.isDigit() { return (c as u8 - '0') as int; }
+    if c >= 'a' && c <= 'f' { return (c as u8 - 'a' + 10) as int; }
+    if c >= 'A' && c <= 'F' { return (c as u8 - 'A' + 10) as int; }
+    return -1;
 }

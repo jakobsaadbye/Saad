@@ -104,7 +104,7 @@ pathOf :: (uri: string) -> string {
     while i < rest.len {
         ch := rest[i];
         if ch == '%' && i + 2 < rest.len {
-            sb.addChar((hexValue(rest[i + 1]) * 16 + hexValue(rest[i + 2])) as u8);
+            sb.addChar((max0(rest[i + 1].digitValue()) * 16 + max0(rest[i + 2].digitValue())) as u8);
             i += 3;
             continue;
         }
@@ -170,18 +170,15 @@ folderOf :: (path: string) -> string {
 
 @private
 isUriCharacter :: (ch: u8) -> bool {
-    if ch >= '0' && ch <= '9' { return true; }
-    if ch >= 'A' && ch <= 'Z' { return true; }
-    if ch >= 'a' && ch <= 'z' { return true; }
+    if ch.isLetterOrDigit() { return true; }
     return ch == '/' || ch == '-' || ch == '.' || ch == '_' || ch == '~' || ch == ':';
 }
 
+// The value of a digit, or 0 for a character that isn't one, e.g of a broken %-escape
 @private
-hexValue :: (ch: u8) -> int {
-    if ch >= '0' && ch <= '9' { return (ch - '0') as int; }
-    if ch >= 'A' && ch <= 'F' { return (ch - 'A' + 10) as int; }
-    if ch >= 'a' && ch <= 'f' { return (ch - 'a' + 10) as int; }
-    return 0;
+max0 :: (n: int) -> int {
+    if n < 0 { return 0; }
+    return n;
 }
 
 @private

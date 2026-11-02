@@ -23,7 +23,7 @@ namespace dbms;
 //   all, must still be there then: don't add to the list that all gave, as its rows can move
 
 import fmt;
-use c;
+import mem;
 
 Context :: struct {
     conn:    *Connection;
@@ -66,7 +66,7 @@ MaxRowsInInsert :: 1000;
 // A context for the connection, made with its allocator
 newContext :: (conn: *Connection) -> *Context {
     context := resizeMemory(conn.allocator, null, sizeof(Context)) as *Context;
-    memset(context, 0, sizeof(Context));
+    mem.set(context, 0, sizeof(Context));
     context.conn  = conn;
     context.track = true;
     context.changes.allocator = conn.allocator;
@@ -88,7 +88,7 @@ pendingChanges :: method (context: *Context) -> i64 {
 discardChanges :: method (context: *Context) {
     context.changes.clear();
     for *t in context.tracked {
-        memcpy(t.snapshot, t.row, t.table.type.head.size);
+        mem.copy(t.snapshot, t.row, t.table.type.head.size);
     }
 }
 
@@ -163,7 +163,7 @@ saveChanges :: method (context: *Context) -> string {
     // Saved: the created rows get what the database made, the deleted rows are not tracked any more, and every tracked
     // row is compared with how it is now from here on
     for s in stored {
-        memcpy(s.row, s.copy, s.size);
+        mem.copy(s.row, s.copy, s.size);
     }
     for change in context.changes {
         if change.kind == .delete { context.untrackKey(change.table, change.key); }
@@ -172,7 +172,7 @@ saveChanges :: method (context: *Context) -> string {
         if change.kind == .create { context.trackRow(change.table, change.row); }
     }
     for *t in context.tracked {
-        memcpy(t.snapshot, t.row, t.table.type.head.size);
+        mem.copy(t.snapshot, t.row, t.table.type.head.size);
     }
     stored.free();
     dirty.free();
@@ -191,12 +191,12 @@ trackRow :: method (context: *Context, table: TableInfo, row: *void) {
     size := table.type.head.size;
     for *t in context.tracked {
         if t.row == row {
-            memcpy(t.snapshot, row, size);
+            mem.copy(t.snapshot, row, size);
             return;
         }
     }
     snapshot := resizeMemory(context.conn.allocator, null, size as i64);
-    memcpy(snapshot, row, size);
+    mem.copy(snapshot, row, size);
     context.tracked.add(Tracked{table: table, row: row, snapshot: snapshot});
 }
 
@@ -262,7 +262,7 @@ sameValue :: (type: *Type, a: *void, b: *void) -> bool {
         if !hasA { return true; }
         return sameValue(inner, valueA, valueB);
     }
-    return memcmp(a, b, type.size) == 0;
+    return mem.equal(a, b, type.size);
 }
 
 // If an update or a delete of the changes is for the tracked row, which then isn't written again
@@ -285,8 +285,8 @@ sameKey :: (t: *Tracked, key: any) -> bool {
     a, okA := paramText(valueOf(keyColumn, t.snapshot));
     b, okB := paramText(key);
     same := okA && okB && a != null && b != null && fromCString(a) == fromCString(b);
-    free(a);
-    free(b);
+    mem.free(a);
+    mem.free(b);
     return same;
 }
 
@@ -400,7 +400,7 @@ readStored :: method (conn: *Connection, result: *void, index: i64, row: *void, 
 readStoredRow :: method (conn: *Connection, result: *void, index: i64, row: *void, type: *TypeStruct, stored: *[..]StoredRow) -> string {
     size := type.head.size;
     copy := resizeMemory(conn.allocator, null, size as i64);
-    memcpy(copy, row, size);
+    mem.copy(copy, row, size);
     readColumns := conn.columnsOf(result, type);
     err := conn.readRow(result, index, copy, type, readColumns);
     readColumns.free();

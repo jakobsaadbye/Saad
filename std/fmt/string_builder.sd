@@ -2,6 +2,7 @@ namespace fmt; // StringBuilder and the formatting of values for fmt
 
 import time;
 use c;
+import mem;
 
 ////////////////////////////////////////////////////////////////////////////////////
 //   StringBuilder
@@ -44,7 +45,7 @@ reserve :: method (sb: *StringBuilder, extra: int) {
         capacity *= 2;
     }
 
-    buffer := realloc(sb.buffer, capacity) as *u8;
+    buffer := mem.resize(sb.buffer, capacity) as *u8;
     if buffer == null {
         printf("Out of memory: a StringBuilder couldn't grow to %d bytes\n".data, capacity);
         exit(1);
@@ -60,7 +61,7 @@ addBytes :: method (sb: *StringBuilder, bytes: *u8, count: int) {
         return;
     }
     sb.reserve(count);
-    memcpy(&sb.buffer[sb.cursor], bytes, count);
+    mem.copy(&sb.buffer[sb.cursor], bytes, count);
     sb.cursor += count;
     sb.buffer[sb.cursor] = 0;
 }
@@ -87,7 +88,7 @@ addRepeated :: method (sb: *StringBuilder, c: u8, count: int) {
         return;
     }
     sb.reserve(count);
-    memset(&sb.buffer[sb.cursor], c, count);
+    mem.set(&sb.buffer[sb.cursor], c, count);
     sb.cursor += count;
     sb.buffer[sb.cursor] = 0;
 }
@@ -168,7 +169,7 @@ toString :: method (sb: StringBuilder) -> string {
 }
 
 free :: method (sb: *StringBuilder) {
-    free(sb.buffer);
+    mem.free(sb.buffer);
     sb.buffer   = null;
     sb.cursor   = 0;
     sb.capacity = 0;
@@ -267,7 +268,23 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
         }
         case .enum {
             enumType := arg.type as *TypeEnum;
-            name, ok := enumType.nameOf(enumType.readValue(arg.data));
+            value := enumType.readValue(arg.data);
+            if arg.type.flags.has(.isFlags) {
+                // The flags that are set, e.g .verbose | .color, or 0 when none is
+                names, ok := enumType.flagNames(value);
+                if !ok || names.count == 0 {
+                    sb.addInt64(value);
+                } else {
+                    for name, i in names {
+                        if i > 0 { sb.addString(" | "); }
+                        sb.addChar('.');
+                        sb.addString(name);
+                    }
+                }
+                names.free();
+                return;
+            }
+            name, ok := enumType.nameOf(value);
             sb.addChar('.');
             if ok { sb.addString(name); }
             else  { sb.addString("<invalid>"); }

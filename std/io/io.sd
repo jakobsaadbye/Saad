@@ -11,7 +11,7 @@ namespace io;
 
 import os.windows;
 import fmt;
-use c;
+import mem;
 
 @private BufferSize :: 65536;
 
@@ -61,7 +61,7 @@ readLine :: () -> string, bool {
 // The text is allocated with malloc
 read :: (count: i64) -> string, bool {
     text: string;
-    text.data = malloc(count + 1) as *u8;
+    text.data = mem.allocate(count + 1) as *u8;
     text.len  = 0;
     while text.len < count {
         if input.start == input.end && !fill() {
@@ -71,7 +71,7 @@ read :: (count: i64) -> string, bool {
         if n > count - text.len {
             n = count - text.len;
         }
-        memcpy(&text.data[text.len], &input.buffer[input.start], n);
+        mem.copy(&text.data[text.len], &input.buffer[input.start], n);
         text.len    += n;
         input.start += n;
     }
@@ -122,7 +122,7 @@ writeTo :: (stream: u32, text: string) -> bool {
 stdinHandle :: () -> *void {
     if input.handle == null {
         input.handle = windows.GetStdHandle(windows.StdInputHandle);
-        input.buffer = malloc(BufferSize) as *u8;
+        input.buffer = mem.allocate(BufferSize) as *u8;
     }
     return input.handle;
 }

@@ -69,7 +69,6 @@ typedef enum AstKind {
     AST_CAST,
     AST_TYPEOF,
     AST_SIZEOF,
-    AST_NEW,
     AST_IDENTIFIER,
     AST_SUBSCRIPT,
     AST_ACCESSOR,
@@ -358,6 +357,7 @@ typedef struct AstEnum {
     AstIdentifier *identifier;
     DynamicArray   enumerators; // of *AstEnumerator
     bool           is_anonymous; // e.g enum { open, closed }. Anonymous enums with the same enumerators are the same type
+    bool           is_flags;     // enum flags { a, b, c }: the values are 1, 2, 4, ..., and are combined with | & ^ ~
     bool           is_being_checked; // Set while check_enum_defn() runs, so a value can't make the enum check itself again
 } AstEnum;
 
@@ -479,10 +479,6 @@ typedef struct AstExprStmt {
     AstExpr *expr;
 } AstExprStmt;
 
-typedef struct AstNew {
-    AstExpr  head;
-    AstExpr *expr;
-} AstNew;
 
 typedef struct AstAssert {
     Ast      head;

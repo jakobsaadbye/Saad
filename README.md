@@ -78,6 +78,30 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.9.9 - 2. Nov 2026
+
+* `enum flags`: options in one value. The values are 1, 2, 4, ..., combined with `|`, `&`, `^` and `~`, and have
+  `has`, `hasAny`, `with`, `without` and `isEmpty`. `fmt` writes `.verbose | .color`, and `json` a list of names.
+  The runtime's `Type.flags` is one (`TypeFlags`). See `docs/enums.md`
+
+```odin
+Options :: enum flags { verbose, color, quiet }
+o := Options.verbose | .color;
+o |= .quiet;
+if o.has(.quiet) { ... }
+```
+
+* `new(T)`, `new(T, allocator)` and `new value` make one value in memory from an `Allocator` (the heap when there
+  is none), with the defaults of its type, e.g `p := new(Player, &allocator)`. `mem` has `allocate`, `resize`,
+  `free`, `copy`, `set` and `equal`, and the standard library uses them and `new` instead of `malloc`, `calloc`,
+  `realloc`, `memcpy` and `memset` of C
+* The methods of `char`: `isDigit`, `isLetter`, `isLetterOrDigit`, `isUpper`, `isLower`, `isSpace`, `isHexDigit`,
+  `isAscii`, `toUpper`, `toLower` and `digitValue`
+* Changed: no implicit `it` in `for` loops. A loop names its value, e.g `for x in xs`; `for 0..10 { ... }` still
+  loops without one
+* Changed: `|`, `^` and `&` bind tighter than the comparisons, like Rust and Go: `x & 1 == 0` is `(x & 1) == 0`
+* Fix: a struct with a member of an enum that is declared below it had the wrong size
+
 ## Update v0.9.8 - 2. Nov 2026
 
 * `time.Time`, like Go: `time.now()`, `time.date(...)`, `t.year()`, `t.add(90 * time.Minute)`, `t.addDate(0, 1, 0)`,

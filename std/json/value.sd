@@ -363,11 +363,6 @@ parseArray :: method (p: *Parser, depth: int) -> Value, bool {
 }
 
 @private
-isDigit :: (ch: u8) -> bool {
-    return ch >= '0' && ch <= '9';
-}
-
-@private
 parseNumber :: method (p: *Parser) -> Value, bool {
     start := p.at;
     if p.peek() == '-' { p.at += 1; }
@@ -375,8 +370,8 @@ parseNumber :: method (p: *Parser) -> Value, bool {
     // No leading zeros, e.g 012
     if p.peek() == '0' {
         p.at += 1;
-    } else if isDigit(p.peek()) {
-        while isDigit(p.peek()) { p.at += 1; }
+    } else if p.peek().isDigit() {
+        while p.peek().isDigit() { p.at += 1; }
     } else {
         p.fail("Expected a digit");
         return Value{}, false;
@@ -384,21 +379,21 @@ parseNumber :: method (p: *Parser) -> Value, bool {
 
     if p.peek() == '.' {
         p.at += 1;
-        if !isDigit(p.peek()) {
+        if !p.peek().isDigit() {
             p.fail("Expected a digit after the '.'");
             return Value{}, false;
         }
-        while isDigit(p.peek()) { p.at += 1; }
+        while p.peek().isDigit() { p.at += 1; }
     }
 
     if p.peek() == 'e' || p.peek() == 'E' {
         p.at += 1;
         if p.peek() == '+' || p.peek() == '-' { p.at += 1; }
-        if !isDigit(p.peek()) {
+        if !p.peek().isDigit() {
             p.fail("Expected a digit in the exponent");
             return Value{}, false;
         }
-        while isDigit(p.peek()) { p.at += 1; }
+        while p.peek().isDigit() { p.at += 1; }
     }
 
     text := p.text.slice(start as int, p.at as int).copy();

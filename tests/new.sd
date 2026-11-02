@@ -1,0 +1,62 @@
+// new(T), new(T, allocator) and new value: memory for one value, from an allocator (the heap when there is none)
+import mem;
+use fmt;
+
+Player :: struct {
+    name:   string = "nobody";
+    health: int    = 100;
+    pos:    Point;
+}
+
+Point :: struct { x: int; y: int; }
+
+main :: () {
+    // new(T) gives a *T with the defaults of T
+    p := new(Player);
+    assert(p.name == "nobody" && p.health == 100 && p.pos.x == 0);
+    p.health -= 10;
+    assert(p.health == 90);
+    freeMemory(p);
+
+    n := new(int);
+    *n = 7;
+    assert(*n == 7);
+    freeMemory(n);
+
+    // new of a value is a copy of it
+    q := new Point{3, 4};
+    assert(q.x == 3 && q.y == 4);
+    r := new(Point{5, 6});
+    assert(r.y == 6);
+
+    // From an arena: freed all at once
+    arena: mem.Arena;
+    allocator := arena.allocator();
+    players: [..]*Player;
+    for i in 0..10 {
+        one := new(Player, &allocator);
+        one.health = i;
+        players.add(one);
+    }
+    assert(players[9].health == 9 && players[0].name == "nobody");
+    arena.free();
+
+    // A type of a namespace, and a pointer type
+    other := new(mem.Arena);
+    assert(other.used() == 0);
+    pp := new(*Player);
+    assert(*pp == null);
+
+    // The memory of mem: zeroed, resized, copied and compared
+    bytes := mem.allocate(16) as *u8;
+    assert(bytes[0] == 0 && bytes[15] == 0);
+    mem.set(bytes, 7, 8);
+    bytes = mem.resize(bytes, 32) as *u8;
+    copy := mem.allocate(32) as *u8;
+    mem.copy(copy, bytes, 8);
+    assert(mem.equal(copy, bytes, 8) && copy[7] == 7 && copy[8] == 0);
+    mem.free(bytes);
+    mem.free(copy);
+
+    print("new ok");
+}

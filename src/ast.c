@@ -46,7 +46,6 @@ const char *ast_to_str(Ast *ast) {
     case AST_BINARY:             return "AST_BINARY";
     case AST_UNARY:              return "AST_UNARY";
     case AST_CAST:               return "AST_CAST";
-    case AST_NEW:                return "AST_NEW";
     case AST_LITERAL:            return "AST_LITERAL";
     case AST_SUBSCRIPT:          return "AST_SUBSCRIPT";
     case AST_ACCESSOR:           return "AST_ACCESSOR";

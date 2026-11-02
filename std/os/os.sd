@@ -5,6 +5,7 @@ namespace os;
 
 use c;
 import os.windows;
+import mem;
 
 // Ends the program right away with the exit code
 exit :: (code: int) {
@@ -15,7 +16,7 @@ exit :: (code: int) {
 run :: (command: string) -> int {
     cCommand := command.toCString();
     code := system(cCommand);
-    free(cCommand);
+    mem.free(cCommand);
     return code;
 }
 
@@ -27,15 +28,15 @@ run :: (command: string) -> int {
 // The shell is cmd.exe, which removes the first and the last quote of a command that starts with a quote. So the command
 // is put in quotes, and one that starts with a quoted path works: os.output("\"C:/Program Files/tool.exe\" \"my file.txt\"")
 output :: (command: string) -> string, int {
-    quoted := malloc(command.len + 3) as *u8;
+    quoted := mem.allocate(command.len + 3) as *u8;
     quoted[0] = '"';
-    memcpy(&quoted[1], command.data, command.len);
+    mem.copy(&quoted[1], command.data, command.len);
     quoted[command.len + 1] = '"';
     quoted[command.len + 2] = 0;
 
     mode := "rb";
     pipe := _popen(quoted, mode.data);
-    free(quoted);
+    mem.free(quoted);
     if pipe == null {
         return "", -1;
     }
@@ -53,7 +54,7 @@ args :: () -> []string {
     windows.__getmainargs(&argc, &argv, &env, 0, &startInfo);
 
     result: []string;
-    result.data  = malloc(argc as int * sizeof(string)) as *string;
+    result.data  = mem.allocate(argc as int * sizeof(string)) as *string;
     result.count = argc;
     for i in 0..argc {
         result[i] = fromCString(argv[i]);
@@ -65,7 +66,7 @@ args :: () -> []string {
 getEnv :: (name: string) -> string, bool {
     cName := name.toCString();
     value := getenv(cName);
-    free(cName);
+    mem.free(cName);
     if value == null {
         return "", false;
     }
@@ -90,11 +91,11 @@ readFile :: (path: string) -> string, bool {
 readAll :: (file: *void) -> string {
     capacity := 4096;
     count    := 0;
-    data     := malloc(capacity) as *u8;
+    data     := mem.allocate(capacity) as *u8;
     while true {
         if count == capacity {
             capacity *= 2;
-            data = realloc(data, capacity) as *u8;
+            data = mem.resize(data, capacity) as *u8;
         }
         read := fread(&data[count], 1, (capacity - count) as i64, file) as int;
         if read <= 0 {
@@ -123,7 +124,7 @@ appendFile :: (path: string, text: string) -> bool {
 makeDir :: (path: string) -> bool {
     cPath := path.toCString();
     made := windows.CreateDirectoryA(cPath, null);
-    free(cPath);
+    mem.free(cPath);
     return made || windows.GetLastError() == windows.ErrorAlreadyExists;
 }
 
@@ -140,7 +141,7 @@ fileExists :: (path: string) -> bool {
 removeFile :: (path: string) -> bool {
     cPath := path.toCString();
     result := remove(cPath);
-    free(cPath);
+    mem.free(cPath);
     return result == 0;
 }
 
@@ -149,8 +150,8 @@ renameFile :: (oldPath: string, newPath: string) -> bool {
     cOld := oldPath.toCString();
     cNew := newPath.toCString();
     result := rename(cOld, cNew);
-    free(cOld);
-    free(cNew);
+    mem.free(cOld);
+    mem.free(cNew);
     return result == 0;
 }
 
@@ -158,7 +159,7 @@ renameFile :: (oldPath: string, newPath: string) -> bool {
 openFile :: (path: string, mode: string) -> *void {
     cPath := path.toCString();
     file := fopen(cPath, mode.data);
-    free(cPath);
+    mem.free(cPath);
     return file;
 }
 

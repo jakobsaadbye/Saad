@@ -18,6 +18,7 @@ namespace dbms;
 import fmt;
 import time;
 use c;
+import mem;
 
 // What a database implements. The handles are the driver's own, e.g a PGconn and a PGresult of libpq.
 // Values are text, as written by the database, and parameters are given as text too
@@ -214,9 +215,9 @@ run :: method (conn: *Connection, sql: string, args: ...any) -> *void, string {
     if err == "" {
         query := sql.toCString();
         result = conn.driver.execute(conn.handle, query, params.elements(), &err);
-        free(query);
+        mem.free(query);
     }
-    for p in params { free(p); }
+    for p in params { mem.free(p); }
     params.free();
 
     if result == null {
@@ -456,7 +457,7 @@ readValue :: method (conn: *Connection, text: *u8, data: *void, type: *Type, col
                 return fmt.sprint("%: Can't read a column into a %", column, type.name);
             }
             memory := resizeMemory(conn.allocator, null, pointee.size as i64);
-            memset(memory, 0, pointee.size);
+            mem.set(memory, 0, pointee.size);
             *(data as **void) = memory;
             return conn.readValue(text, memory, pointee, column);
         }
@@ -471,7 +472,7 @@ readValue :: method (conn: *Connection, text: *u8, data: *void, type: *Type, col
 copyString :: method (conn: *Connection, s: string) -> string {
     copy: string;
     copy.data = resizeMemory(conn.allocator, null, s.len + 1) as *u8;
-    memcpy(copy.data, s.data, s.len);
+    mem.copy(copy.data, s.data, s.len);
     copy.data[s.len] = 0;
     copy.len = s.len;
     return copy;

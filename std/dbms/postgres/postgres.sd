@@ -13,7 +13,7 @@ namespace dbms.postgres;
 // See docs/dbms.md
 
 import dbms;
-use c;
+import mem;
 
 // Connects with a connection string of libpq, e.g "host=localhost dbname=app user=postgres", or a URL like
 // "postgresql://postgres@localhost/app". err is empty when it worked
@@ -21,7 +21,7 @@ connect :: (connectionString: string) -> dbms.Connection, string {
     conn: dbms.Connection;
     info := connectionString.toCString();
     handle := PQconnectdb(info);
-    free(info);
+    mem.free(info);
 
     if handle == null {
         return conn, "libpq couldn't make a connection";
@@ -40,7 +40,7 @@ connect :: (connectionString: string) -> dbms.Connection, string {
 // The driver for dbms.Connection
 driver :: () -> *dbms.Driver {
     if theDriver == null {
-        d := calloc(1, sizeof(dbms.Driver)) as *dbms.Driver;
+        d := new(dbms.Driver);
         d.name        = "postgres";
         d.execute     = execute;
         d.rowCount    = rowCount;

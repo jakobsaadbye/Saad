@@ -1,0 +1,7 @@
+// expect-error: The operator '|' is for the values of an enum flags
+
+Status :: enum { open, closed }
+
+main :: () {
+    s := Status.open | .closed;
+}

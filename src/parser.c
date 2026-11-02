@@ -21,7 +21,7 @@ AstFor          *parse_for(Parser *parser);
 AstWhile        *parse_while(Parser *parser);
 AstCast         *parse_auto_cast(Parser *parser);
 AstAssert       *parse_assert(Parser *parser);
-AstNew          *parse_new(Parser *parser);
+AstExpr         *parse_new(Parser *parser);
 AstTypeof       *parse_typeof(Parser *parser);
 AstReturn       *parse_return(Parser *parser);
 Type            *parse_type(Parser *parser);
@@ -2358,6 +2358,14 @@ AstEnum *parse_enum_defn(Parser *parser) {
     eat_token(parser);
 
     AstEnum *ast_enum = (AstEnum *)(ast_allocate(parser, sizeof(AstEnum)));
+
+    // enum flags { ... }
+    Token flags = peek_next_token(parser);
+    if (flags.type == TOKEN_LITERAL_IDENTIFIER && strcmp(flags.as_value.value.identifier.name, "flags") == 0 && peek_token(parser, 1).type == '{') {
+        eat_token(parser);
+        ast_enum->is_flags = true;
+    }
+
     bool ok = parse_enumerators(parser, ast_enum);
     if (!ok) return NULL;
 
@@ -2616,7 +2624,7 @@ AstFor *parse_for(Parser *parser) {
         iterable = NULL;
         kind = FOR_INFINITY_AND_BEYOND;
     }
-    // `for xs {...}` (implicit 'it')
+    // `for xs {...}` and `for 0..10 {...}`, which don't name the value
     else {
         iterable = parse_range_or_normal_expression(parser);
         if (!iterable) return NULL;
@@ -2627,7 +2635,9 @@ AstFor *parse_for(Parser *parser) {
             return NULL;
         }
 
-        iterator = make_identifier_from_string(parser, "it", NULL); // type is set later
+        // The loop has an iterator, but without a name that can be written: a loop that uses the values names them,
+        // e.g for x in xs
+        iterator = make_identifier_from_string(parser, "$it", NULL); // type is set later
         kind = FOR_WITH_EXPR;
     }
 
@@ -3566,22 +3576,91 @@ AstIf *parse_if(Parser *parser) {
     return ast_if;
 }
 
-AstNew *parse_new(Parser *parser) {
+// If 'new(' is followed by a type and ')' or ',', e.g new(Point) or new(game.Player, &arena) or new(*int). Otherwise it is
+// new of a value in parentheses, e.g new(Point{1, 2})
+static bool new_takes_type(Parser *parser) {
+    int k = 1; // After the '('
+    Token t = peek_token(parser, k);
+    if (t.type == '*' || t.type == '[' || t.type == '?') return true;
+    if (is_primitive_type_token(t)) return peek_token(parser, k + 1).type == ')' || peek_token(parser, k + 1).type == ','; // e.g int
+    if (t.type != TOKEN_LITERAL_IDENTIFIER) return false;
+    k++;
+    while (peek_token(parser, k).type == '.' && peek_token(parser, k + 1).type == TOKEN_LITERAL_IDENTIFIER) k += 2;
+    TokenType after = peek_token(parser, k).type;
+    return after == ')' || after == ',' || after == '<';
+}
+
+// A call of a function of the prelude by its name, e.g allocateNew, at the position of 'new'
+static AstFunctionCall *prelude_call(Parser *parser, const char *name, Token at) {
+    AstLiteral *callee = ast_allocate(parser, sizeof(AstLiteral));
+    callee->head.head.kind  = AST_LITERAL;
+    callee->head.head.file  = parser->current_file;
+    callee->head.head.start = at.start;
+    callee->head.head.end   = at.end;
+    callee->kind = LITERAL_IDENTIFIER;
+    callee->as.value.identifier.name   = (char *)name;
+    callee->as.value.identifier.length = (int)strlen(name);
+
+    AstFunctionCall *call = ast_allocate(parser, sizeof(AstFunctionCall));
+    call->head.head.kind  = AST_FUNCTION_CALL;
+    call->head.head.file  = parser->current_file;
+    call->head.head.start = at.start;
+    call->head.head.end   = at.end;
+    call->expression      = (AstExpr *)callee;
+    call->arguments       = da_init(2, sizeof(AstArgument *));
+    call->type_args       = da_init(1, sizeof(Type *));
+    call->first_positional_argument_index = -1;
+    return call;
+}
+
+static void add_call_argument(Parser *parser, AstFunctionCall *call, AstExpr *value) {
+    AstArgument *arg = ast_allocate(parser, sizeof(AstArgument));
+    arg->head.kind  = AST_ARGUMENT;
+    arg->head.file  = parser->current_file;
+    arg->head.start = value->head.start;
+    arg->head.end   = value->head.end;
+    arg->value      = value;
+    da_append(&call->arguments, arg);
+}
+
+// new(T), new(T, allocator) and new value, e.g new Point{1, 2}. They are calls of the prelude: allocateNew<T>(allocator)
+// and allocateCopy(value), so the memory comes from an Allocator (the heap when there is none)
+AstExpr *parse_new(Parser *parser) {
     Token start_token = peek_next_token(parser);
     expect(parser, start_token, TOKEN_NEW);
     eat_token(parser);
 
+    if (peek_next_token(parser).type == '(' && new_takes_type(parser)) {
+        eat_token(parser); // (
+        Type *type = parse_type(parser);
+        if (!type) return NULL;
+
+        AstFunctionCall *call = prelude_call(parser, "allocateNew", start_token);
+        da_append(&call->type_args, type);
+        if (peek_next_token(parser).type == ',') {
+            eat_token(parser);
+            AstExpr *allocator = parse_expression(parser, MIN_PRECEDENCE);
+            if (!allocator) return NULL;
+            add_call_argument(parser, call, allocator);
+        }
+        Token close = peek_next_token(parser);
+        if (close.type != ')') {
+            report_error_token(parser, LABEL_ERROR, close, "Expected a ')' after the type of new, e.g new(Point) or new(Point, &allocator)");
+            return NULL;
+        }
+        eat_token(parser);
+        call->paren_start_token = close;
+        call->head.head.end = close.end;
+        return (AstExpr *)call;
+    }
+
     AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
     if (!expr) return NULL;
 
-    AstNew *ast_new          = (AstNew *)(ast_allocate(parser, sizeof(AstNew)));
-    ast_new->head.head.kind  = AST_NEW;
-    ast_new->head.head.file  = parser->current_file;
-    ast_new->head.head.start = start_token.start;
-    ast_new->head.head.end   = expr->head.end;
-    ast_new->expr            = expr;
-
-    return ast_new;
+    AstFunctionCall *call = prelude_call(parser, "allocateCopy", start_token);
+    add_call_argument(parser, call, expr);
+    call->head.head.end = expr->head.end;
+    return (AstExpr *)call;
 }
 
 AstTypeof *parse_typeof(Parser *parser) {
@@ -3938,25 +4017,27 @@ void expect(Parser *parser, Token given, TokenType expected_type) {
     // Everything's cool dude
 }
 
+// The bitwise operators bind tighter than the comparisons, like in Rust and Go and unlike C, so 'x & mask == 0' is
+// '(x & mask) == 0' and 'flags == .a | .b' is 'flags == (.a | .b)'
 int get_operator_precedence(OperatorType op) {
     switch (op) {
         case OP_LOGICAL_OR: 
             return 1;
         case OP_LOGICAL_AND: 
             return 2;
-        case OP_BITWISE_OR: 
-            return 3;
-        case OP_BITWISE_XOR: 
-            return 4;
-        case OP_BITWISE_AND: 
-            return 5;
         case OP_DOUBLE_EQUAL:
         case OP_NOT_EQUAL: 
-            return 6;
+            return 3;
         case OP_GREATER_THAN: 
         case OP_LESS_THAN:
         case OP_GREATER_THAN_EQUAL:
         case OP_LESS_THAN_EQUAL:
+            return 4;
+        case OP_BITWISE_OR: 
+            return 5;
+        case OP_BITWISE_XOR: 
+            return 6;
+        case OP_BITWISE_AND: 
             return 7;
         case OP_BITWISE_SHIFT_LEFT:
         case OP_BITWISE_SHIFT_RIGHT:
@@ -4427,9 +4508,7 @@ AstExpr *parse_leaf(Parser *parser) {
     }
 
     if (t.type == TOKEN_NEW) {
-        AstNew *ast_new = parse_new(parser);
-        if (!ast_new) return NULL;
-        return (AstExpr *)(ast_new);
+        return parse_new(parser);
     }
 
     if (t.type == TOKEN_LITERAL_IDENTIFIER) {

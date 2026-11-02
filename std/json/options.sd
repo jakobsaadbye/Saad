@@ -57,24 +57,6 @@ styleName :: (name: string, style: NameStyle) -> string {
 }
 
 
-@private
-isUpper :: (ch: u8) -> bool { return ch >= 'A' && ch <= 'Z'; }
-
-@private
-isLower :: (ch: u8) -> bool { return ch >= 'a' && ch <= 'z'; }
-
-@private
-toUpper :: (ch: u8) -> u8 {
-    if isLower(ch) { return ch - 32; }
-    return ch;
-}
-
-@private
-toLower :: (ch: u8) -> u8 {
-    if isUpper(ch) { return ch + 32; }
-    return ch;
-}
-
 // Adds the name in the style. A new word starts at an uppercase letter after a lowercase letter or digit (fooBar), at the last
 // uppercase letter of a run that is followed by a lowercase one (HTTPServer is HTTP and Server), and after '_' and '-'
 @private
@@ -101,10 +83,10 @@ addStyledName :: (sb: *fmt.StringBuilder, name: string, style: NameStyle) {
         }
 
         startsWord := !inWord;
-        if inWord && isUpper(ch) && i > 0 {
+        if inWord && ch.isUpper() && i > 0 {
             previous := name[i - 1];
-            nextIsLower := i + 1 < name.len && isLower(name[i + 1]);
-            if !isUpper(previous) || nextIsLower {
+            nextIsLower := i + 1 < name.len && name[i + 1].isLower();
+            if !previous.isUpper() || nextIsLower {
                 startsWord = true;
             }
         }
@@ -118,11 +100,11 @@ addStyledName :: (sb: *fmt.StringBuilder, name: string, style: NameStyle) {
         // The first letter of a word
         if startsWord {
             capital := style == .pascalCase || style == .upperSnake || (style == .camelCase && word > 1);
-            if capital { sb.addChar(toUpper(ch)); }
-            else       { sb.addChar(toLower(ch)); }
+            if capital { sb.addChar(ch.toUpper()); }
+            else       { sb.addChar(ch.toLower()); }
         } else {
-            if style == .upperSnake { sb.addChar(toUpper(ch)); }
-            else                    { sb.addChar(toLower(ch)); }
+            if style == .upperSnake { sb.addChar(ch.toUpper()); }
+            else                    { sb.addChar(ch.toLower()); }
         }
     }
 }

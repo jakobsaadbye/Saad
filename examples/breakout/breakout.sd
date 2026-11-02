@@ -203,8 +203,8 @@ main :: () {
     ];
 
     // Scale each pickup texture
-    for 0..pickupTextures.count {
-        texture := &pickupTextures[it];
+    for i in 0..pickupTextures.count {
+        texture := &pickupTextures[i];
         texture.width  = PickupSize;
         texture.height = PickupSize;
     }
@@ -552,9 +552,9 @@ main :: () {
         // DrawFPS(WindowWidth - 100, 16);
 
         // Draw lives
-        for 0..player.lives {
+        for heart in 0..player.lives {
             padX := 6.0;
-            posX := (10.0 + (heartTexture.width + padX) * it) as int;
+            posX := (10.0 + (heartTexture.width + padX) * heart) as int;
 
             DrawTexture(heartTexture, posX, 16, Color{255, 255, 255, 255});
         }
@@ -572,8 +572,8 @@ main :: () {
 
     UnloadTexture(heartTexture);
 
-    for pickupTextures {
-        UnloadTexture(it);
+    for texture in pickupTextures {
+        UnloadTexture(texture);
     }
 
     CloseAudioDevice();

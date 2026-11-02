@@ -227,6 +227,23 @@ writeAny :: method (w: *Writer, data: *void, type: *Type) {
         case .enum {
             enumType := type as *TypeEnum;
             value := enumType.readValue(data);
+            if type.flags.has(.isFlags) && !w.options.enumsAsNumbers {
+                // The names of the flags that are set, e.g ["verbose", "color"]
+                names, all := enumType.flagNames(value);
+                if all {
+                    w.sb.addChar('[');
+                    for flag, i in names {
+                        if i > 0 { w.sb.addChar(','); }
+                        w.sb.addChar('"');
+                        addStyledName(&w.sb, flag, w.options.enumValues);
+                        w.sb.addChar('"');
+                    }
+                    w.sb.addChar(']');
+                    names.free();
+                    return;
+                }
+                names.free();
+            }
             name, ok := enumType.nameOf(value);
             if ok && !w.options.enumsAsNumbers {
                 w.sb.addChar('"');
