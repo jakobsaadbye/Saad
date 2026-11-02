@@ -216,6 +216,26 @@ main :: () {
     referred, _ := ada.usersByReferredBy().select(u => u.name).all();
     assert(referred.count == 1 && referred[0] == "Bo");
 
+    // The rows that refer to a row in a query are a subquery, and a self reference has its own alias
+    perUser, e30 := db.users.orderBy(u => u.name).select(u => {
+        u.name,
+        orders: u.orders().count(),
+        items: u.orders().where(o => o.orderItems().exists()).count(),
+        referred: u.usersByReferredBy().count(),
+        firstItem: u.orders().orderBy(o => o.id).first().note,
+    }).all();
+    assert(e30 == "");
+    assert(sprint("%", perUser) == "[{name: \"Ada\", orders: 1, items: 1, referred: 1, firstItem: \"none\"}, {name: \"Bo\", orders: 0, items: 0, referred: 0, firstItem: null}]");
+    buyers, e31 := db.users.where(u => u.orders().where(o => o.orderItems().sum(i => i.quantity) > 1).exists()).select(u => u.name).all();
+    assert(e31 == "" && buyers.count == 1 && buyers[0] == "Ada");
+    quantity, e32 := db.orderItems.sum(i => i.quantity);
+    most, e33 := db.orderItems.max(i => i.quantity);
+    least, e34 := db.orderItems.where(i => i.order().user().name == "Ada").min(i => i.quantity);
+    mean, e35 := db.orderItems.average(i => i.quantity);
+    none, e36 := db.orderItems.where(i => i.quantity > 100).sum(i => i.quantity);
+    assert(e32 == "" && e33 == "" && e34 == "" && e35 == "" && e36 == "");
+    assert(quantity == most + least && mean * 2.0 == quantity as f64 && none == 0);
+
     // The rows of a relation are tracked
     lines[0].quantity = 7;
     assert(db.pendingChanges() == 0);    // order_items has no key of one column, so its rows aren't tracked

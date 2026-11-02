@@ -1024,14 +1024,13 @@ char *repair_for_completion(const char *path, char *text) {
             if (!strchr("=,([:", before) || before == 0) open = 0;
         }
     }
-    // A member or an argument on a line of its own, e.g in a struct literal over lines, ends with a ','
+    // A member or an argument on a line of its own, e.g in a struct literal over lines, ends with a ',' instead of a ';'
+    char before = 0;
+    char bracket = enclosing_bracket(text, line_start, &before);
+    bool in_list = bracket == '(' || bracket == '[' || (bracket == '{' && before && strchr("=>,([:", before));
     bool needs_comma = false;
     bool after_dot = start > 0 && text[start - 1] == '.';
-    if (after_dot && open == 0 && rest_end == offset) {
-        char before = 0;
-        char bracket = enclosing_bracket(text, line_start, &before);
-        needs_comma = bracket == '(' || bracket == '[' || (bracket == '{' && before && strchr("=>,([:", before));
-    }
+    if (after_dot && open == 0 && rest_end == offset) needs_comma = in_list;
     if (!needs_name && !needs_comma && open == 0) return text;
 
     bool ends_statement = rest_end > offset && (text[rest_end - 1] == ';' || text[rest_end - 1] == '{');
@@ -1041,7 +1040,8 @@ char *repair_for_completion(const char *path, char *text) {
     if (needs_comma) sb_append(&sb, ",");
     sb_append(&sb, "%.*s", rest_end - offset, &text[offset]);
     for (int i = open - 1; i >= 0; i--) sb_append(&sb, "%c", closer_of(stack[i]));
-    if (in_brackets && open >= 0 && !ends_statement) sb_append(&sb, ";");
+    bool ends_member = rest_end > offset && text[rest_end - 1] == ',';
+    if (in_brackets && open >= 0 && !ends_statement && !ends_member) sb_append(&sb, in_list ? "," : ";");
     sb_append(&sb, "%s", &text[rest_end]);
     free(text);
     return sb.buffer;

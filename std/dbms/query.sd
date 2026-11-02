@@ -166,6 +166,47 @@ Query :: struct <T> {
         return n, e;
     }
 
+    // The sum of a value of the rows, e.g db.posts.sum(p => p.views). 0 when there are no rows
+    sum :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
+        value, err := self.aggregate<K>("coalesce(sum(\"value\"), 0)", f);
+        return value, err;
+    }
+
+    // The smallest of a value of the rows, e.g db.posts.min(p => p.createdAt). The zero value when there are no rows
+    min :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
+        value, err := self.aggregate<K>("min(\"value\")", f);
+        return value, err;
+    }
+
+    // The largest of a value of the rows. The zero value when there are no rows
+    max :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
+        value, err := self.aggregate<K>("max(\"value\")", f);
+        return value, err;
+    }
+
+    // The average of a value of the rows, e.g db.posts.average(p => p.views). 0 when there are no rows
+    average :: method <K> (f: Expr<(T) -> K>) -> (f64, string) {
+        value, err := self.aggregate<f64>("coalesce(avg(\"value\"), 0)::double precision", f);
+        return value, err;
+    }
+
+    // An aggregate of SQL over the values that f gives of the rows, which are the column "value"
+    @private
+    aggregate :: method <V, K> (of: string, f: Expr<(T) -> K>) -> (V, string) {
+        values := self.select(f);
+        values.single = true;
+        sql, args, err := values.toSql();
+        if err != "" {
+            zero: V;
+            return zero, err;
+        }
+        asking := fmt.sprint("SELECT % FROM (%) AS rows", of, sql);
+        sql.free();
+        value, _, e := self.context.conn.queryOne<V>(asking, ...args.elements());
+        asking.free();
+        return value, e;
+    }
+
     // True when there is a row
     exists :: method () -> (bool, string) {
         sql, args, err := self.toSql();
@@ -181,7 +222,7 @@ Query :: struct <T> {
     toSql :: method () -> (string, [..]any, string) {
         sql, args, err, joins := self.sqlWith(false);
         if err == "" && joins > 0 {
-            // A relation is joined, so the columns are written with the table they are of, e.g t0."title"
+            // A relation is joined or a subquery made, so the columns are written with their table, e.g t0."title"
             sql.free();
             args.free();
             sql2, args2, err2, _ := self.sqlWith(true);
@@ -192,10 +233,12 @@ Query :: struct <T> {
 
     // The SQL, the parameters, the error and the number of joins. 'qualified' writes the columns as t0."title"
     sqlWith :: method (qualified: bool) -> (string, [..]any, string, int) {
+        aliases := 0;
         w: SqlWriter;
         w.table     = self.table;
         w.context   = self.context;
         w.qualified = qualified;
+        w.aliases   = &aliases;
         if self.failure != "" {
             return "", w.args, self.failure, 0;
         }
@@ -255,7 +298,7 @@ Query :: struct <T> {
         sql.addString(rest);
         columns.free();
         rest.free();
-        return sql.toString(), w.args, "", w.joins.count as int;
+        return sql.toString(), w.args, "", aliases;
     }
 
     copy :: method () -> Query<T> {
@@ -301,21 +344,36 @@ copyList :: <E>(list: [..]E) -> [..]E {
 // A table joined to the rows of the query for a relation, e.g authors for p.author().name
 @private
 Join :: struct {
-    path:  string;     // The relations from the row, e.g "author", or "post.author" for c.post().author()
-    alias: string;     // e.g t1. The rows of the query are t0
+    path:  string;      // The row and the relations from it, e.g "t0.author", or "t0.post.author" for c.post().author()
+    alias: string;      // e.g t1. The rows of the query are t0
     table: TableInfo;
-    on:    string;     // e.g t1."id" = t0."author_id"
+    on:    string;      // e.g t1."id" = t0."author_id"
+    level: *SqlWriter;  // The query or the subquery whose FROM it is in
 }
 
-// Writes an expression tree as SQL
+// A row of a query or a subquery: its alias, its table, and the writer of that query
+@private
+Row :: struct {
+    path:  string;
+    alias: string;
+    table: TableInfo;
+    level: *SqlWriter;
+}
+
+// Writes an expression tree as SQL. A subquery, e.g of a.posts().count(), is written by a writer of its own, whose
+// outer is the writer of the query it is in, so its lambdas can use the rows of that query
 @private
 SqlWriter :: struct {
-    sb:      fmt.StringBuilder;
-    args:    [..]any;
-    table:   TableInfo;
+    sb:        fmt.StringBuilder;
+    args:      [..]any;
+    table:     TableInfo;
     context:   *Context;
     joins:     [..]Join;
-    qualified: bool;      // The columns are written with their table, e.g t0."title", as a relation is joined
+    alias:     string = "t0";  // Of the rows of this query
+    parameter: string;         // The parameter of the lambda that is written, in a subquery, e.g p of where(p => ...)
+    outer:     *SqlWriter;     // The query a subquery is in
+    aliases:   *int;           // The number of joins and subqueries of the whole query, for their aliases t1, t2, ...
+    qualified: bool;           // The columns are written with their table, e.g t0."title", as there are joins
     err:       string;
 
     write :: method * (node: *ExprNode) {
@@ -349,6 +407,9 @@ SqlWriter :: struct {
             case .object {
                 self.fail("A struct literal is only for select, e.g select(u => {name: u.name})");
             }
+            case .lambda {
+                self.fail("A lambda in a lambda is only for the rows of a relation, e.g a.posts().where(p => p.views > 10).count()");
+            }
         }
     }
 
@@ -360,71 +421,248 @@ SqlWriter :: struct {
             self.sb.addChar(')');
             return;
         }
+        // A member of the first of the rows of a relation, e.g a.posts().orderBy(p => p.views).first().title
+        if node.left.kind == .call && node.left.name == "first" && self.isManyRelation(node.left.left) {
+            self.writeSubquery(node.left, node.name);
+            return;
+        }
         // A member of the row that a relation gives, e.g p.author().name
         if node.left.kind == .call {
-            join, ok := self.joinOf(node.left);
+            row, ok := self.rowOfCall(node.left);
             if !ok { return; }
-            self.sb.addString(join.alias);
+            self.sb.addString(row.alias);
             self.sb.addChar('.');
-            self.sb.addString(quoted(columnIn(join.table, node.name)));
+            self.sb.addString(quoted(columnIn(row.table, node.name)));
             return;
         }
         if node.left.kind != .parameter {
             self.fail(fmt.sprint("Only the members of the row are columns, so .% of something else isn't supported", node.name));
             return;
         }
-        if self.qualified { self.sb.addString("t0."); }
-        self.sb.addString(quoted(columnIn(self.table, node.name)));
+        row := self.rowOf(node.left.name);
+        if row.level.qualified {
+            self.sb.addString(row.alias);
+            self.sb.addChar('.');
+        }
+        self.sb.addString(quoted(columnIn(row.table, node.name)));
     }
 
-    // The join of a relation, e.g of p.author() or c.post().author(). It is added the first time
+    // The row of a parameter: of the lambda of a subquery, or of a query around it, or the rows of the query
     @private
-    joinOf :: method * (call: *ExprNode) -> (Join, bool) {
-        none: Join;
+    rowOf :: method * (parameter: string) -> Row {
+        if self.outer != null && parameter != self.parameter {
+            return self.outer.rowOf(parameter);
+        }
+        return Row{path: self.alias, alias: self.alias, table: self.table, level: self};
+    }
+
+    // The row of a relation to one row, e.g of p.author() or c.post().author(). Its join is added the first time
+    @private
+    rowOfCall :: method * (call: *ExprNode) -> (Row, bool) {
+        none: Row;
         if call.args.count != 0 {
             self.fail(fmt.sprint("% of a query is a relation, which has no arguments", call.name));
             return none, false;
         }
-        from: Join;
-        from.alias = "t0";
-        from.table = self.table;
+        from: Row;
         if call.left.kind == .call {
-            outer, ok := self.joinOf(call.left);
+            outer, ok := self.rowOfCall(call.left);
             if !ok { return none, false; }
             from = outer;
-        } else if call.left.kind != .parameter {
+        } else if call.left.kind == .parameter {
+            from = self.rowOf(call.left.name);
+        } else {
             self.fail(fmt.sprint("The relation % is called on the row of the query, e.g p.%().name", call.name, call.name));
             return none, false;
         }
 
-        relation: Relation;
-        found := false;
-        for r in from.table.relations {
-            if r.name == call.name { relation = r; found = true; }
-        }
-        if !found {
-            self.fail(fmt.sprint("% isn't a relation of % to one row. A query can use the rows that a foreign key refers to, e.g p.author().name, but not yet the rows that refer to a row, e.g author.posts()", call.name, from.table.name));
+        relation, found := relationNamed(from.table, call.name);
+        if !found || relation.many {
+            if found {
+                self.fail(fmt.sprint("% gives the rows of % that refer to a row, so it is a query: count(), exists(), sum(f), min(f), max(f), average(f), or first() and a member, e.g a.%().count()", call.name, relation.table, call.name));
+            } else {
+                self.fail(fmt.sprint("% isn't a relation of %. A query can use the relations from the foreign keys, e.g p.author().name or a.posts().count()", call.name, from.table.name));
+            }
             return none, false;
         }
 
-        path := call.name;
-        if from.path != "" { path = fmt.sprint("%.%", from.path, call.name); }
-        for join in self.joins {
-            if join.path == path { return join, true; }
+        path := fmt.sprint("%.%", from.path, call.name);
+        level := from.level;
+        for join in level.joins {
+            if join.path == path { return Row{path: path, alias: join.alias, table: join.table, level: level}, true; }
         }
+        other, known := self.tableOf(relation, call.name);
+        if !known { return none, false; }
 
-        other, known := self.context.tableNamed(relation.table);
-        if !known {
-            self.fail(fmt.sprint("The table % of the relation % isn't known. database.open registers the tables", relation.table, call.name));
-            return none, false;
-        }
         join: Join;
         join.path  = path;
-        join.alias = fmt.sprint("t%", self.joins.count + 1);
+        join.alias = self.newAlias();
         join.table = other;
         join.on    = fmt.sprint("%.% = %.%", join.alias, quoted(relation.references), from.alias, quoted(relation.column));
-        self.joins.add(join);
-        return join, true;
+        join.level = level;
+        level.joins.add(join);
+        return Row{path: path, alias: join.alias, table: other, level: level}, true;
+    }
+
+    // If the call is of a relation to the rows that refer to a row, e.g a.posts(), maybe narrowed, e.g a.posts().where(...)
+    isManyRelation :: method * (call: *ExprNode) -> bool {
+        node := call;
+        while node != null && node.kind == .call && isQueryStep(node.name) { node = node.left; }
+        if node == null || node.kind != .call || node.args.count != 0 { return false; }
+        table := self.table;
+        if node.left.kind == .parameter {
+            table = self.rowOf(node.left.name).table;
+        } else if node.left.kind == .call {
+            if !self.isManyRelation(node.left) {
+                // A relation of a joined row, e.g c.post().comments()
+                relationOfJoin, ok := self.oneRelationTable(node.left);
+                if !ok { return false; }
+                table = relationOfJoin;
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        }
+        relation, found := relationNamed(table, node.name);
+        return found && relation.many;
+    }
+
+    // The table of the row of a chain of relations to one row, without joining it, e.g authors of p.author()
+    oneRelationTable :: method * (call: *ExprNode) -> (TableInfo, bool) {
+        none: TableInfo;
+        table := self.table;
+        if call.left.kind == .parameter {
+            table = self.rowOf(call.left.name).table;
+        } else if call.left.kind == .call {
+            outer, ok := self.oneRelationTable(call.left);
+            if !ok { return none, false; }
+            table = outer;
+        } else {
+            return none, false;
+        }
+        relation, found := relationNamed(table, call.name);
+        if !found || relation.many { return none, false; }
+        other, known := self.context.tableNamed(relation.table);
+        return other, known;
+    }
+
+    // A subquery of the rows of a relation: 'node' is the call that gives a value of them, e.g count() of
+    // a.posts().where(p => ...).count(). For first(), 'member' is the column of the first row that is the value
+    writeSubquery :: method * (node: *ExprNode, member: string) {
+        // The steps from the relation, e.g where and orderBy, and the relation, e.g posts of a.posts()
+        steps: [..]*ExprNode;
+        relationCall := node.left;
+        while relationCall.kind == .call && isQueryStep(relationCall.name) {
+            steps.add(relationCall);
+            relationCall = relationCall.left;
+        }
+        steps.reverse();   // In the order they are written
+        from: Row;
+        if relationCall.left.kind == .parameter {
+            from = self.rowOf(relationCall.left.name);
+        } else {
+            row, ok := self.rowOfCall(relationCall.left);
+            if !ok { return; }
+            from = row;
+        }
+        relation, _ := relationNamed(from.table, relationCall.name);
+        other, known := self.tableOf(relation, relationCall.name);
+        if !known { return; }
+
+        inner: SqlWriter;
+        inner.context   = self.context;
+        inner.table     = other;
+        inner.alias     = self.newAlias();
+        inner.outer     = self;
+        inner.aliases   = self.aliases;
+        inner.qualified = true;
+        inner.args      = self.args;   // The parameters go on, $1, $2, ...
+
+        // The value, e.g count(*) or sum(p.views)
+        aggregate := node.name;
+        if aggregate == "exists" {
+            inner.sb.addString("1");
+        } else if aggregate == "count" {
+            inner.sb.addString("count(*)");
+        } else if aggregate == "first" {
+            inner.sb.addString(inner.alias);
+            inner.sb.addChar('.');
+            inner.sb.addString(quoted(columnIn(other, member)));
+        } else {
+            f := lambdaOf(node);
+            if f == null {
+                self.fail(fmt.sprint("% of the rows of a relation takes a lambda of a column, e.g a.%().%(p => p.views)", aggregate, relationCall.name, aggregate));
+                return;
+            }
+            if aggregate == "sum"     { inner.sb.addString("coalesce(sum("); }
+            if aggregate == "min"     { inner.sb.addString("min("); }
+            if aggregate == "max"     { inner.sb.addString("max("); }
+            if aggregate == "average" { inner.sb.addString("avg("); }
+            inner.parameter = f.names[0];
+            inner.write(f.left);
+            if aggregate == "sum" { inner.sb.addString("), 0)"); } else { inner.sb.addChar(')'); }
+        }
+        value := inner.sb.toString();
+        inner.sb = fmt.StringBuilder{};
+
+        // The rows that refer to the row, and the conditions of the steps
+        inner.sb.addString(fmt.sprint(" WHERE %.% = %.%", inner.alias, quoted(relation.column), from.alias, quoted(relation.references)));
+        orderings := 0;
+        for step in steps {
+            f := lambdaOf(step);
+            if f == null { self.fail(fmt.sprint("% of the rows of a relation takes a lambda, e.g where(p => p.views > 10)", step.name)); return; }
+            inner.parameter = f.names[0];
+            if step.name == "where" {
+                inner.sb.addString(" AND (");
+                inner.write(f.left);
+                inner.sb.addChar(')');
+            }
+        }
+        for step in steps {
+            if step.name == "where" { continue; }
+            f := lambdaOf(step);
+            inner.parameter = f.names[0];
+            if orderings == 0 { inner.sb.addString(" ORDER BY "); } else { inner.sb.addString(", "); }
+            orderings += 1;
+            inner.write(f.left);
+            if step.name == "orderByDescending" { inner.sb.addString(" DESC"); }
+        }
+        if aggregate == "first" { inner.sb.addString(" LIMIT 1"); }
+        rest := inner.sb.toString();
+        self.args = inner.args;
+        if inner.err != "" {
+            self.fail(inner.err);
+            return;
+        }
+
+        if aggregate == "exists" { self.sb.addString("EXISTS "); }
+        self.sb.addString("(SELECT ");
+        self.sb.addString(value);
+        self.sb.addString(" FROM ");
+        self.sb.addString(qualifiedName(other.schema, other.name));
+        self.sb.addString(" AS ");
+        self.sb.addString(inner.alias);
+        for join in inner.joins {
+            self.sb.addString(fmt.sprint(" LEFT JOIN % AS % ON %", qualifiedName(join.table.schema, join.table.name), join.alias, join.on));
+        }
+        self.sb.addString(rest);
+        self.sb.addChar(')');
+        value.free();
+        rest.free();
+    }
+
+    newAlias :: method * () -> string {
+        *self.aliases += 1;
+        return fmt.sprint("t%", *self.aliases);
+    }
+
+    tableOf :: method * (relation: Relation, name: string) -> (TableInfo, bool) {
+        other, known := self.context.tableNamed(relation.table);
+        if !known {
+            self.fail(fmt.sprint("The table % of the relation % isn't known. database.open registers the tables", relation.table, name));
+        }
+        return other, known;
     }
 
     writeBinary :: method * (node: *ExprNode) {
@@ -464,6 +702,11 @@ SqlWriter :: struct {
     }
 
     writeCall :: method * (node: *ExprNode) {
+        // A value of the rows of a relation, e.g a.posts().count() or a.posts().sum(p => p.views)
+        if node.left != null && isAggregate(node.name) && self.isManyRelation(node.left) {
+            self.writeSubquery(node, "");
+            return;
+        }
         if node.left == null {
             self.fail(fmt.sprint("The function % can't be made into SQL. Call it outside the lambda, and use its value", node.name));
             return;
@@ -542,4 +785,32 @@ isNull :: (node: *ExprNode) -> bool {
         return !present;
     }
     return false;
+}
+
+// The steps of a query of the rows of a relation, e.g the where of a.posts().where(p => p.views > 10).count()
+@private
+isQueryStep :: (name: string) -> bool {
+    return name == "where" || name == "orderBy" || name == "orderByDescending";
+}
+
+// What a query of the rows of a relation gives in a lambda, e.g count of a.posts().count()
+@private
+isAggregate :: (name: string) -> bool {
+    return name == "count" || name == "exists" || name == "sum" || name == "min" || name == "max" || name == "average";
+}
+
+// The lambda that is the argument of a call, e.g p => p.views of sum(p => p.views), or null
+@private
+lambdaOf :: (call: *ExprNode) -> *ExprNode {
+    if call.args.count != 1 || call.args[0].kind != .lambda { return null; }
+    return call.args[0];
+}
+
+@private
+relationNamed :: (table: TableInfo, name: string) -> (Relation, bool) {
+    for r in table.relations {
+        if r.name == name { return r, true; }
+    }
+    none: Relation;
+    return none, false;
 }

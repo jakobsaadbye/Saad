@@ -12,13 +12,15 @@ namespace dbms;
 // a copy, so post.author() twice gives the same *Author
 import fmt;
 
-// A foreign key of a table to one row of another, e.g posts.author_id to authors.id. The generator writes them in
-// database.open. A query can use the members of the row it refers to, e.g p.author().name, which is a join
+// A relation of the rows of a table from a foreign key, e.g posts.author_id to authors.id gives the posts the relation
+// author, to one row, and the authors the relation posts, to the rows that refer to one. The generator writes them in
+// database.open. A query can use them: p.author().name is a join, and a.posts().count() a subquery
 Relation :: struct {
-    name:       string;   // The method of the rows, e.g author
-    column:     string;   // The column of the foreign key, e.g author_id
-    table:      string;   // The table it refers to, e.g authors
-    references: string;   // The column it refers to, e.g id
+    name:       string;   // The method of the rows, e.g author or posts
+    column:     string;   // The column of the foreign key, e.g author_id. Of this table, or of the other for many
+    table:      string;   // The other table, e.g authors, or posts for many
+    references: string;   // The column the foreign key refers to, e.g id. Of the other table, or of this one for many
+    many:       bool;     // The rows of the other table that refer to a row of this one, e.g author.posts()
 }
 
 // The context of the database that a row came from. A row has it as a member marked with @Hidden, e.g

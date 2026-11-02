@@ -48,9 +48,24 @@ show :: (node: *ExprNode) -> string {
             sb.addChar('}');
             return sb.toString();
         }
+        case .lambda { return sprint("% => %", node.names[0], show(node.left)); }
     }
     return "?";
 }
+
+// Rows that refer to a row, like the many end of a relation of dbms: a query with a where of its own, and a count that
+// gives a value and an error
+Pet :: struct { name: string; age: int; }
+Pets :: struct {
+    where :: method (f: Expr<(Pet) -> bool>) -> Pets { return *self; }
+    count :: method () -> (int, string) { return 0, ""; }
+}
+Owner :: struct {
+    name: string;
+    pets :: method () -> Pets { p: Pets; return p; }
+}
+owners :: (f: Expr<(Owner) -> bool>) -> string { return show(f.root); }
+ownerRows :: <U>(f: Expr<(Owner) -> U>) -> string { return show(f.root); }
 
 where :: (f: Expr<(User) -> bool>) -> string { return show(f.root); }
 
@@ -91,6 +106,10 @@ main :: () {
 
     adults := makeFilter(21);
     assert(show(adults.root) == "(x.age >= 21)");
+
+    // A lambda in the lambda, and a call that gives a value and an error, which is its value in a tree
+    assert(owners(o => o.pets().where(p => p.age > minAge && p.name != o.name).count() > 1) == "(o.pets().where(p => ((p.age > 18) && (p.name != o.name))).count() > 1)");
+    assert(ownerRows(o => {o.name, pets: o.pets().count()}) == "{name: o.name, pets: o.pets().count()}");
 
     print("expression trees ok");
 }

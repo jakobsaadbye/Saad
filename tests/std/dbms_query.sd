@@ -29,6 +29,12 @@ Team :: struct {
     group :: method () -> (*Group, string) {
         return null, "";
     }
+
+    // The many end of users.team_id. In a query it is a subquery
+    members :: method () -> dbms.Query<User> {
+        q: dbms.Query<User>;
+        return q;
+    }
 }
 
 Group :: struct {
@@ -111,13 +117,32 @@ main :: () {
     q := {p.name, p.age, years: 3};
     assert(q.name == "Ada" && q.years == 3 && named == 1);
 
+    // The rows that refer to a row are a subquery: count, exists, sum, min, max, average, and first with a member
+    teams.relations.add(dbms.Relation{name: "members", column: "team_id", table: "users", references: "id", many: true});
+    context.register(teams.tableInfo());
+    sql14, _, err14 := teams.select(t => {t.name, members: t.members().count()}).toSql();
+    assert(err14 == "");
+    assert(sql14 == "SELECT t0.\"name\" AS \"name\", (SELECT count(*) FROM \"shop\".\"users\" AS t1 WHERE t1.\"team_id\" = t0.\"id\") AS \"members\" FROM \"shop\".\"teams\" AS t0");
+    sql15, args15, _ := teams.where(t => t.members().where(u => u.role == .admin && u.name != t.name).exists()).select(t => {
+        t.name,
+        ages: t.members().where(u => u.age ?? 0 >= minAge).sum(u => u.age ?? 0),
+        oldest: t.members().orderByDescending(u => u.age ?? 0).first().name,
+        t.group().title,
+    }).toSql();
+    assert(sql15 == "SELECT t0.\"name\" AS \"name\", (SELECT coalesce(sum(coalesce(t1.\"age\", $1)), 0) FROM \"shop\".\"users\" AS t1 WHERE t1.\"team_id\" = t0.\"id\" AND ((coalesce(t1.\"age\", $2) >= $3))) AS \"ages\", (SELECT t2.\"name\" FROM \"shop\".\"users\" AS t2 WHERE t2.\"team_id\" = t0.\"id\" ORDER BY coalesce(t2.\"age\", $4) DESC LIMIT 1) AS \"oldest\", t3.\"title\" AS \"title\" FROM \"shop\".\"teams\" AS t0 LEFT JOIN \"shop\".\"groups\" AS t3 ON t3.\"id\" = t0.\"group_id\" WHERE (EXISTS (SELECT 1 FROM \"shop\".\"users\" AS t4 WHERE t4.\"team_id\" = t0.\"id\" AND (((t4.\"role\" = $5) AND (t4.\"name\" <> t0.\"name\")))))");
+    assert(args15.count == 5);
+    sql16, _, _ := users.where(u => u.team().members().count() > 3).toSql();
+    assert(sql16 == "SELECT t0.* FROM \"shop\".\"users\" AS t0 LEFT JOIN \"shop\".\"teams\" AS t1 ON t1.\"id\" = t0.\"team_id\" WHERE (((SELECT count(*) FROM \"shop\".\"users\" AS t2 WHERE t2.\"team_id\" = t1.\"id\") > $1))");
+    _, _, err17 := teams.select(t => t.members().first().name.len).toSql();
+    assert(err17 == "");
+
     // A method that isn't a relation of the table is an error of the query
     groups.relations.clear();
     context.register(groups.tableInfo());
     teams.relations.clear();
     context.register(teams.tableInfo());
     _, _, err12 := users.select(u => u.team().group().title).toSql();
-    assert(err12.startsWith("group isn't a relation of teams to one row"));
+    assert(err12.startsWith("group isn't a relation of teams"));
 
     print("dbms query ok");
 }

@@ -5512,9 +5512,22 @@ static TypeStruct *expression_tree_type(Typer *typer, Type *type) {
     return (TypeStruct *)type;
 }
 
+// The lambdas inside the lambda of a tree whose trees are being made, e.g the p => ... of a => a.posts().where(p => ...)
+static AstFunctionDefn *inner_tree_lambdas[16];
+static int              inner_tree_lambda_count;
+
 static bool is_tree_parameter(AstFunctionDefn *copy, AstExpr *expr, int *index) {
     if (expr->head.kind != AST_LITERAL || ((AstLiteral *)expr)->kind != LITERAL_IDENTIFIER) return false;
     char *name = ((AstLiteral *)expr)->as.value.identifier.name;
+    for (int k = inner_tree_lambda_count - 1; k >= 0; k--) {
+        AstFunctionDefn *inner = inner_tree_lambdas[k];
+        for (int i = 0; i < inner->parameters.count; i++) {
+            if (strcmp(((AstIdentifier **)inner->parameters.items)[i]->name, name) == 0) {
+                if (index) *index = i;
+                return true;
+            }
+        }
+    }
     for (int i = 0; i < copy->parameters.count; i++) {
         if (strcmp(((AstIdentifier **)copy->parameters.items)[i]->name, name) == 0) {
             if (index) *index = i;
@@ -5653,6 +5666,10 @@ static AstExpr *tree_of(Typer *typer, AstFunctionDefn *copy, AstExpr *b, AstExpr
 
     if (!mentions_tree_parameter(copy, b)) {
         if (b->head.kind == AST_LITERAL && ((AstLiteral *)b)->kind == LITERAL_NULL) return tree_call(typer, "exprNull", NULL, 0, at);
+        if (a && (a->head.flags & AST_FLAG_TREE_VALUE_OF_RESULTS)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)b, "This call gives a value and an error, so it can't be a value of the tree. Call it before the lambda, and use its value");
+            return NULL;
+        }
 
         // An enum value e.g .admin gets the type it has in the lambda, as the any of exprValue doesn't say it
         if (b->head.kind == AST_ENUM_LITERAL && !((AstEnumLiteral *)b)->explicit_type && a && a->type && a->type->kind == TYPE_ENUM) {
@@ -5706,7 +5723,8 @@ static AstExpr *tree_of(Typer *typer, AstFunctionDefn *copy, AstExpr *b, AstExpr
             AstMemberAccess *ma = (AstMemberAccess *)call->expression;
             if (ma->right->head.kind != AST_LITERAL) { report_not_in_tree(typer, b, "This call"); return NULL; } // a?.m() is a.m()
             name   = ((AstLiteral *)ma->right)->as.value.identifier.name;
-            object = tree_of(typer, copy, ma->left, NULL);
+            AstExpr *a_object = a_call && a_call->expression->head.kind == AST_MEMBER_ACCESS ? ((AstMemberAccess *)a_call->expression)->left : NULL;
+            object = tree_of(typer, copy, ma->left, a_object);
             if (!object) return NULL;
         } else if (call->expression->head.kind == AST_LITERAL && ((AstLiteral *)call->expression)->kind == LITERAL_IDENTIFIER && !is_tree_parameter(copy, call->expression, NULL)) {
             name   = ((AstLiteral *)call->expression)->as.value.identifier.name;
@@ -5721,7 +5739,9 @@ static AstExpr *tree_of(Typer *typer, AstFunctionDefn *copy, AstExpr *b, AstExpr
         for (int i = 0; node && i < call->arguments.count; i++) {
             AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
             if (arg->ident) { report_not_in_tree(typer, (AstExpr *)arg->value, "A named argument"); return NULL; }
-            AstExpr *a_value = a_call && a_call->arguments.count == call->arguments.count ? ((AstArgument **)a_call->arguments.items)[i]->value : NULL;
+            // A method call that was checked has its receiver as its first argument
+            int shift = a_call ? a_call->arguments.count - call->arguments.count : -1;
+            AstExpr *a_value = a_call && (shift == 0 || shift == 1) ? ((AstArgument **)a_call->arguments.items)[i + shift]->value : NULL;
             AstExpr *value = tree_of(typer, copy, arg->value, a_value);
             if (!value) return NULL;
             AstExpr *add[3] = { node, tree_string(typer, "", at), value };
@@ -5738,16 +5758,45 @@ static AstExpr *tree_of(Typer *typer, AstFunctionDefn *copy, AstExpr *b, AstExpr
             AstLiteral *implied = init->designator ? NULL : implied_member_name(init->value);
             if (init->designator == NULL && implied == NULL) { report_not_in_tree(typer, init->value, "A member without a name"); return NULL; }
             char *member_name = init->designator ? init->designator->name : implied->as.value.identifier.name;
-            AstExpr *value = tree_of(typer, copy, init->value, NULL);
+            // The same member of the checked literal, whose members are sorted, gives the types, e.g of an enum value
+            AstExpr *a_value = NULL;
+            if (a && a->head.kind == AST_STRUCT_LITERAL) {
+                AstStructLiteral *checked = (AstStructLiteral *)a;
+                for (int j = 0; j < checked->initializers.count; j++) {
+                    AstStructInitializer *c = ((AstStructInitializer **)checked->initializers.items)[j];
+                    if (c->designator && strcmp(c->designator->name, member_name) == 0) a_value = c->value;
+                }
+            }
+            AstExpr *value = tree_of(typer, copy, init->value, a_value);
             if (!value) return NULL;
             AstExpr *add[3] = { node, tree_string(typer, member_name, at), value };
             node = tree_call(typer, "exprArgument", add, 3, at);
         }
         return node;
     }
+    case AST_FUNCTION_DEFN: {
+        // A lambda in the lambda, e.g the p => p.status == .published of a => a.posts().where(p => ...).count(). Its
+        // parameter is a parameter of the tree in its body
+        AstFunctionDefn *inner   = (AstFunctionDefn *)b;
+        AstFunctionDefn *checked = a && a->head.kind == AST_FUNCTION_DEFN ? (AstFunctionDefn *)a : NULL;
+        if (!inner->is_short_lambda || inner->parameters.count != 1 || inner_tree_lambda_count == 16) { report_not_in_tree(typer, b, "A lambda that isn't of one parameter and one expression"); return NULL; }
+        Ast *statement = inner->body->statements.count == 1 ? ((Ast **)inner->body->statements.items)[0] : NULL;
+        if (!statement || statement->kind != AST_RETURN) { report_not_in_tree(typer, b, "This lambda"); return NULL; }
+        AstExpr *body = ((AstExpr **)((AstReturn *)statement)->values.items)[0];
+        AstExpr *checked_body = NULL;
+        if (checked && checked->body && checked->body->statements.count == 1) {
+            Ast *s = ((Ast **)checked->body->statements.items)[0];
+            if (s->kind == AST_RETURN) checked_body = ((AstExpr **)((AstReturn *)s)->values.items)[0];
+        }
+        inner_tree_lambdas[inner_tree_lambda_count++] = inner;
+        AstExpr *tree = tree_of(typer, copy, body, checked_body);
+        inner_tree_lambda_count--;
+        if (!tree) return NULL;
+        AstExpr *args[2] = { tree_string(typer, ((AstIdentifier **)inner->parameters.items)[0]->name, at), tree };
+        return tree_call(typer, "exprLambda", args, 2, at);
+    }
     case AST_CAST:          report_not_in_tree(typer, b, "A cast"); return NULL;
     case AST_ARRAY_ACCESS:  report_not_in_tree(typer, b, "Indexing"); return NULL;
-    case AST_FUNCTION_DEFN: report_not_in_tree(typer, b, "A lambda"); return NULL;
     default:                report_not_in_tree(typer, b, "This expression"); return NULL;
     }
 }
@@ -5773,6 +5822,9 @@ static Type *check_expression_tree(Typer *typer, AstFunctionDefn *lambda, TypeSt
         if (!ok) return NULL;
     }
     if (lambda->head.head.flags & AST_FLAG_HAS_ERRORS) return NULL;
+
+    // A lambda in the lambda of another tree is a part of that tree (see tree_of), and isn't made on its own
+    if (lambda->parent_function && lambda->parent_function->is_expression_tree) return (Type *)tree_type;
 
     Ast *checked = lambda->body->statements.count == 1 ? ((Ast **)lambda->body->statements.items)[0] : NULL;
     if (checked == NULL || checked->kind != AST_RETURN) {
@@ -6875,6 +6927,17 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
 
     if (result == NULL) {
         return NULL;
+    }
+
+    // In an expression tree, a call that gives a value and an error is its value, e.g the i64 of a.posts().count() or
+    // the *Author of p.author(): the tree is made into SQL, where it is a subquery or a join, and isn't run
+    if (expr->head.kind == AST_FUNCTION_CALL && result->kind == TYPE_TUPLE && typer->enclosing_function && typer->enclosing_function->is_expression_tree) {
+        TypeTuple *tuple = (TypeTuple *)result;
+        Type *second = tuple->types.count == 2 ? ((Type **)tuple->types.items)[1] : NULL;
+        if (second && second->kind == TYPE_STRING) {
+            result = ((Type **)tuple->types.items)[0];
+            expr->head.flags |= AST_FLAG_TREE_VALUE_OF_RESULTS;
+        }
     }
 
     expr->type = result;

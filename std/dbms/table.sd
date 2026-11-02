@@ -52,6 +52,27 @@ Table :: struct <T> {
         return self.query().select(f);
     }
 
+    // Of a value of every row, e.g users.sum(u => u.age). See query.sd
+    sum :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
+        value, err := self.query().sum(f);
+        return value, err;
+    }
+
+    min :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
+        value, err := self.query().min(f);
+        return value, err;
+    }
+
+    max :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
+        value, err := self.query().max(f);
+        return value, err;
+    }
+
+    average :: method <K> (f: Expr<(T) -> K>) -> (f64, string) {
+        value, err := self.query().average(f);
+        return value, err;
+    }
+
     // Every row
     all :: method () -> ([..]T, string) {
         sql := fmt.sprint("SELECT * FROM %", qualifiedName(self.schema, self.name));

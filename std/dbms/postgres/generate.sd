@@ -487,13 +487,14 @@ databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]Generate
         }
     }
 
-    // The foreign keys to one row, for the members of that row in queries, e.g p.author().name
+    // The relations, for queries that use them, e.g p.author().name and a.posts().count()
     for table in tables {
         relations: [..]string;
         for r in table.relations {
-            if r.toMany { continue; }
-            relations.add(fmt.sprint("dbms.Relation{name: %, column: %, table: %, references: %}",
-                saadString(r.name), saadString(r.column), saadString(r.otherTable), saadString(r.otherColumn)));
+            text := fmt.sprint("dbms.Relation{name: %, column: %, table: %, references: %",
+                saadString(r.name), saadString(r.column), saadString(r.otherTable), saadString(r.otherColumn));
+            if r.toMany { text = fmt.sprint("%, many: true", text); }
+            relations.add(fmt.sprint("%}", text));
         }
         if relations.count > 0 {
             sb.addLine("    tables.%.relations = [%];", camelCase(table.name), fmt.join(relations.elements(), ", "));
