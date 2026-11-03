@@ -168,3 +168,25 @@ MS int ms_pthread_cond_destroy(pthread_cond_t *c) { return pthread_cond_destroy(
 MS int ms_sched_yield(void) { return sched_yield(); }
 MS int ms_usleep(uint32_t microseconds) { return usleep(microseconds); }
 MS long ms_sysconf(int name) { return sysconf(name); }
+
+// ---- Sockets (std/net) ----
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+
+MS int     ms_socket(int domain, int type, int protocol) { return socket(domain, type, protocol); }
+MS int     ms_bind(int s, const struct sockaddr *address, uint32_t length) { return bind(s, address, length); }
+MS int     ms_listen(int s, int backlog) { return listen(s, backlog); }
+MS int     ms_accept(int s, struct sockaddr *address, uint32_t *length) { return accept(s, address, (socklen_t *)length); }
+MS int     ms_connect(int s, const struct sockaddr *address, uint32_t length) { return connect(s, address, length); }
+MS int64_t ms_recv(int s, void *buffer, uint64_t length, int flags) { return recv(s, buffer, length, flags); }
+MS int64_t ms_send(int s, const void *buffer, uint64_t length, int flags) { return send(s, buffer, length, flags); }
+MS int     ms_close(int s) { return close(s); }
+MS int     ms_shutdown(int s, int how) { return shutdown(s, how); }
+MS int     ms_setsockopt(int s, int level, int name, const void *value, uint32_t length) { return setsockopt(s, level, name, value, length); }
+MS int     ms_getsockname(int s, struct sockaddr *address, uint32_t *length) { return getsockname(s, address, (socklen_t *)length); }
+MS int     ms_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **result) { return getaddrinfo(node, service, hints, result); }
+MS void    ms_freeaddrinfo(struct addrinfo *info) { freeaddrinfo(info); }
+MS const char *ms_gai_strerror(int code) { return gai_strerror(code); }
+MS int    *ms___errno_location(void) { return __errno_location(); }
+MS char   *ms_strerror(int code) { return strerror(code); }

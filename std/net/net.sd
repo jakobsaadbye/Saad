@@ -1,0 +1,311 @@
+namespace net;
+
+// TCP over IPv4: a server listens and accepts connections, a client dials one, e.g
+//
+//     listener := net.listen(":8080");          // Thrown when the port is in use
+//     defer listener.close();
+//     while true {
+//         conn := listener.accept();
+//         buffer: [4096]u8;
+//         n, err := conn.read(buffer);          // err is of the kind net.Closed when the other end closed
+//         conn.write("hello\n");
+//         conn.close();
+//     }
+//
+//     conn := net.dial("example.com:80");
+//
+// Winsock (ws2_32.dll) on Windows and BSD sockets on Linux, through their typed bindings in net.sys. Errors are of the
+// kinds net.Timeout, net.Closed, net.Refused, net.InUse and net.NetError
+
+use c;
+import fmt;
+import thread;
+import net.sys;
+
+Timeout  :: ErrorKind{"net.Timeout"};   // A read or a write took longer than its timeout
+Closed   :: ErrorKind{"net.Closed"};    // The other end closed the connection, or it was reset
+Refused  :: ErrorKind{"net.Refused"};   // Nothing listens at the address
+InUse    :: ErrorKind{"net.InUse"};     // Something else listens at the port
+NetError :: ErrorKind{"net.Error"};     // Any other failure, e.g a name that can't be resolved
+
+//
+// Errors
+//
+
+// The error of the last call that failed, with what was being done, e.g "connect to 127.0.0.1:80"
+lastError :: (what: string) -> error {
+    #if OS == .windows {
+        code := sys.WSAGetLastError();
+        kind := switch code {
+            case sys.WsaeTimedOut => Timeout;
+            case sys.WsaeConnReset
+            case sys.WsaeConnAborted => Closed;
+            case sys.WsaeConnRefused => Refused;
+            case sys.WsaeAddrInUse => InUse;
+            else => NetError;
+        };
+        return newError(fmt.sprint("%: Winsock error %", what, code), kind);
+    } else {
+        code := *sys.__errno_location();
+        kind := switch code {
+            case sys.Eagain => Timeout;
+            case sys.EconnReset
+            case sys.Epipe => Closed;
+            case sys.EconnRefused => Refused;
+            case sys.EaddrInUse => InUse;
+            else => NetError;
+        };
+        return newError(fmt.sprint("%: %", what, sys.strerror(code).toString()), kind);
+    }
+}
+
+// Winsock is started once, before the first socket
+started := false;
+startMutex: thread.Mutex;
+
+startup :: () -> error {
+    #if OS == .windows {
+        startMutex.lock();
+        defer startMutex.unlock();
+        if started { return null; }
+        data: sys.WsaData;
+        code := sys.WSAStartup(0x0202, &data);   // Version 2.2
+        if code != 0 { return newError(fmt.sprint("Winsock couldn't start: error %", code), NetError); }
+        started = true;
+    }
+    return null;
+}
+
+//
+// Addresses
+//
+
+// An IPv4 address and a port, e.g 127.0.0.1:8080
+Addr :: struct {
+    ip:   [4]u8;
+    port: int;
+}
+
+toString :: method (a: *Addr) -> string {
+    return fmt.sprint("%.%.%.%:%", a.ip[0], a.ip[1], a.ip[2], a.ip[3], a.port);
+}
+
+toSockAddr :: method (a: *Addr) -> sys.SockAddrIn {
+    address: sys.SockAddrIn;
+    address.family = sys.AfInet;
+    address.port   = sys.toNetwork(a.port as u16);
+    address.addr   = a.ip;
+    return address;
+}
+
+fromSockAddr :: (address: *sys.SockAddrIn) -> Addr {
+    a: Addr;
+    a.ip   = address.addr;
+    a.port = sys.fromNetwork(address.port) as int;
+    return a;
+}
+
+// Splits "host:port" into its host and port. The host can be empty, e.g ":8080" for every address of the computer
+splitHostPort :: (address: string) -> string, int, error {
+    colon := -1;
+    for ch, i in address {
+        if ch == ':' { colon = i as int; }
+    }
+    if colon < 0 {
+        return "", 0, newError(fmt.sprint("'%' has no port, e.g localhost:8080", address), NetError);
+    }
+    host := address.slice(0, colon);
+    portText := address.slice(colon + 1);
+    if portText.len == 0 {
+        return "", 0, newError(fmt.sprint("'%' has no port, e.g localhost:8080", address), NetError);
+    }
+    port := 0;
+    for ch in portText {
+        if !ch.isDigit() { return "", 0, newError(fmt.sprint("The port of '%' isn't a number", address), NetError); }
+        port = port * 10 + ch.digitValue();
+        if port > 65535 { return "", 0, newError(fmt.sprint("The port of '%' is above 65535", address), NetError); }
+    }
+    return host, port, null;
+}
+
+// The IPv4 address of a host, e.g "localhost", "127.0.0.1" or "example.com". An empty host is every address (0.0.0.0)
+resolve :: (host: string, port: int) -> Addr, error {
+    result: Addr;
+    result.port = port;
+    if host == "" { return result, null; }   // 0.0.0.0
+
+    err := startup();
+    if err != null { return result, err; }
+
+    hints: sys.AddrInfo;
+    hints.family   = sys.AfInet;
+    hints.socktype = sys.SockStream;
+    found: *sys.AddrInfo;
+    name := host.toCString();
+    defer name.free();
+    code := sys.getaddrinfo(name, c.string{}, &hints, &found);
+    if code != 0 || found == null {
+        #if OS == .windows {
+            return result, newError(fmt.sprint("The address of '%' couldn't be found: error %", host, code), NetError);
+        } else {
+            return result, newError(fmt.sprint("The address of '%' couldn't be found: %", host, sys.gai_strerror(code).toString()), NetError);
+        }
+    }
+    result.ip = found.addr.addr;
+    sys.freeaddrinfo(found);
+    return result, null;
+}
+
+//
+// Listener
+//
+
+// A socket that accepts connections
+Listener :: struct {
+    socket: sys.Socket;
+    addr:   Addr;    // Where it listens, with the port the system chose for port 0
+}
+
+// Listens at "host:port", e.g ":8080", "127.0.0.1:8080", or ":0" for a port the system chooses (listener.addr.port)
+listen :: (address: string, backlog := 128) -> *Listener, error {
+    host, port, err := splitHostPort(address);
+    if err != null { return null, err; }
+    addr: Addr;
+    addr, err = resolve(host, port);
+    if err != null { return null, err; }
+    err = startup();
+    if err != null { return null, err; }
+
+    s := sys.socket(sys.AfInet, sys.SockStream, sys.IpprotoTcp);
+    if s == sys.InvalidSocket { return null, lastError("socket"); }
+
+    // A port that was just used can be listened at again right away
+    yes: sys.OptionValue = 1;
+    sys.setsockopt(s, sys.SolSocket, sys.SoReuseAddr, (&yes) as *u8, sizeof(sys.OptionValue) as sys.AddrLength);
+
+    sockAddr := addr.toSockAddr();
+    if sys.bind(s, &sockAddr, sys.addrLength()) != 0 || sys.listen(s, backlog as i32) != 0 {
+        failed := lastError(fmt.sprint("listen at %", address));
+        sys.closeSocket(s);
+        return null, failed;
+    }
+
+    // The port the system chose for port 0
+    bound: sys.SockAddrIn;
+    length := sys.addrLength();
+    sys.getsockname(s, &bound, &length);
+
+    listener := new(Listener);
+    listener.socket = s;
+    listener.addr   = fromSockAddr(&bound);
+    return listener, null;
+}
+
+// Waits for a connection. After close(), it gives an error of the kind net.Closed
+accept :: method (listener: *Listener) -> *Conn, error {
+    remote: sys.SockAddrIn;
+    length := sys.addrLength();
+    s := sys.accept(listener.socket, &remote, &length);
+    if s == sys.InvalidSocket {
+        if listener.socket == sys.InvalidSocket {
+            return null, newError("The listener is closed", Closed);
+        }
+        return null, lastError("accept");
+    }
+    conn := new(Conn);
+    conn.socket = s;
+    conn.remote = fromSockAddr(&remote);
+    return conn, null;
+}
+
+// Stops listening. An accept() that waits gives an error of the kind net.Closed
+close :: method (listener: *Listener) {
+    s := listener.socket;
+    if s == sys.InvalidSocket { return; }
+    listener.socket = sys.InvalidSocket;
+    sys.shutdown(s, sys.ShutdownBoth);   // Wakes an accept() that waits, on Linux
+    sys.closeSocket(s);
+}
+
+//
+// Conn
+//
+
+// A TCP connection
+Conn :: struct {
+    socket: sys.Socket;
+    remote: Addr;    // The other end
+}
+
+// Connects to "host:port", e.g "example.com:80". An empty host is this computer
+dial :: (address: string) -> *Conn, error {
+    host, port, err := splitHostPort(address);
+    if err != null { return null, err; }
+    if host == "" { host = "127.0.0.1"; }
+    addr: Addr;
+    addr, err = resolve(host, port);
+    if err != null { return null, err; }
+
+    s := sys.socket(sys.AfInet, sys.SockStream, sys.IpprotoTcp);
+    if s == sys.InvalidSocket { return null, lastError("socket"); }
+    sockAddr := addr.toSockAddr();
+    if sys.connect(s, &sockAddr, sys.addrLength()) != 0 {
+        failed := lastError(fmt.sprint("connect to %", address));
+        sys.closeSocket(s);
+        return null, failed;
+    }
+    conn := new(Conn);
+    conn.socket = s;
+    conn.remote = addr;
+    return conn, null;
+}
+
+// Reads what has come, at most buffer.count bytes. n is 0 with an error of the kind net.Closed when the other end
+// closed the connection, and net.Timeout after the read timeout
+read :: method (conn: *Conn, buffer: []u8) -> int, error {
+    if buffer.count == 0 { return 0, null; }
+    n := sys.recv(conn.socket, buffer.data, buffer.count as sys.Length, 0) as int;
+    if n == 0 { return 0, newError("The connection was closed", Closed); }
+    if n < 0  { return 0, lastError("read"); }
+    return n, null;
+}
+
+// Writes all of the bytes
+write :: method (conn: *Conn, data: string) -> error {
+    sent := 0;
+    while sent < data.len {
+        n := sys.send(conn.socket, &data.data[sent], (data.len - sent) as sys.Length, sys.SendFlags) as int;
+        if n <= 0 { return lastError("write"); }
+        sent += n;
+    }
+    return null;
+}
+
+// A read that waits longer than this gives an error of the kind net.Timeout. 0 waits for ever
+setReadTimeout :: method (conn: *Conn, milliseconds: int) {
+    setTimeout(conn.socket, sys.SoRcvTimeo, milliseconds);
+}
+
+setWriteTimeout :: method (conn: *Conn, milliseconds: int) {
+    setTimeout(conn.socket, sys.SoSndTimeo, milliseconds);
+}
+
+setTimeout :: (s: sys.Socket, option: i32, milliseconds: int) {
+    #if OS == .windows {
+        value := milliseconds as u32;   // A DWORD of milliseconds
+        sys.setsockopt(s, sys.SolSocket, option, (&value) as *u8, 4);
+    } else {
+        value: sys.TimeVal;
+        value.seconds      = (milliseconds / 1000) as i64;
+        value.microseconds = ((milliseconds % 1000) * 1000) as i64;
+        sys.setsockopt(s, sys.SolSocket, option, (&value) as *u8, sizeof(sys.TimeVal) as u32);
+    }
+}
+
+// Closes the connection
+close :: method (conn: *Conn) {
+    if conn.socket != sys.InvalidSocket {
+        sys.closeSocket(conn.socket);
+        conn.socket = sys.InvalidSocket;
+    }
+}

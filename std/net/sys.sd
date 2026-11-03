@@ -1,0 +1,164 @@
+namespace net.sys;
+
+// The bindings of the sockets of the system, for std/net: Winsock (ws2_32.dll) on Windows and BSD sockets on Linux. The
+// structs of their headers are written out, so the calls are typed. Use net, which is built on these
+
+use c;
+
+
+AfInet       :: 2;   // AF_INET, IPv4
+SockStream   :: 1;   // SOCK_STREAM, TCP
+IpprotoTcp   :: 6;
+ShutdownBoth :: 2;   // SD_BOTH, SHUT_RDWR
+
+// struct sockaddr_in, the same on Windows and Linux
+SockAddrIn :: struct {
+    family: u16;      // AfInet
+    port:   u16;      // In network byte order, see toNetwork()
+    addr:   [4]u8;    // The 4 numbers of the address
+    zero:   [8]u8;
+}
+
+#if OS == .windows {
+    // SOCKET
+    Socket :: u64;
+    Length :: i32;        // The int length of recv and send
+    OptionValue :: u32;   // A BOOL or DWORD option of setsockopt
+    InvalidSocket :: ~(0 as u64);   // INVALID_SOCKET
+
+    // struct WSAData, as Windows lays it out for 64-bit programs
+    WsaData :: struct {
+        version:      u16;
+        highVersion:  u16;
+        maxSockets:   u16;
+        maxUdpDg:     u16;
+        vendorInfo:   *u8;
+        description:  [257]u8;
+        systemStatus: [129]u8;
+    }
+
+    // struct addrinfo of ws2tcpip.h
+    AddrInfo :: struct {
+        flags:     i32;
+        family:    i32;
+        socktype:  i32;
+        protocol:  i32;
+        addrlen:   u64;
+        canonname: c.string;
+        addr:      *SockAddrIn;
+        next:      *AddrInfo;
+    }
+
+    SolSocket    :: 0xFFFF;   // SOL_SOCKET
+    SoReuseAddr  :: 4;
+    SoRcvTimeo   :: 0x1006;
+    SoSndTimeo   :: 0x1005;
+    SendFlags    :: 0;
+
+    extern "ws2_32.dll" {
+        WSAStartup      :: (version: u16, data: *WsaData) -> i32;
+        WSAGetLastError :: () -> i32;
+        socket          :: (family: i32, type: i32, protocol: i32) -> Socket;
+        bind            :: (s: Socket, address: *SockAddrIn, length: AddrLength) -> i32;
+        listen          :: (s: Socket, backlog: i32) -> i32;
+        accept          :: (s: Socket, address: *SockAddrIn, length: *AddrLength) -> Socket;
+        connect         :: (s: Socket, address: *SockAddrIn, length: AddrLength) -> i32;
+        recv            :: (s: Socket, buffer: *u8, length: Length, flags: i32) -> i32;
+        send            :: (s: Socket, buffer: *u8, length: Length, flags: i32) -> i32;
+        closesocket     :: (s: Socket) -> i32;
+        shutdown        :: (s: Socket, how: i32) -> i32;
+        setsockopt      :: (s: Socket, level: i32, name: i32, value: *u8, length: i32) -> i32;    // e.g a DWORD of milliseconds, or a BOOL
+        getsockname     :: (s: Socket, address: *SockAddrIn, length: *AddrLength) -> i32;
+        getaddrinfo     :: (node: c.string, service: c.string, hints: *AddrInfo, result: **AddrInfo) -> i32;
+        freeaddrinfo    :: (info: *AddrInfo);
+    }
+
+    WsaeTimedOut    :: 10060;
+    WsaeConnReset   :: 10054;
+    WsaeConnAborted :: 10053;
+    WsaeConnRefused :: 10061;
+    WsaeAddrInUse   :: 10048;
+} else {
+    // A file descriptor
+    Socket :: i32;
+    Length :: u64;        // The size_t length of recv and send
+    OptionValue :: i32;   // An int option of setsockopt
+    InvalidSocket :: -1 as i32;
+
+    // struct addrinfo of netdb.h. Its canonname is after addr, unlike on Windows
+    AddrInfo :: struct {
+        flags:     i32;
+        family:    i32;
+        socktype:  i32;
+        protocol:  i32;
+        addrlen:   u32;
+        addr:      *SockAddrIn;
+        canonname: c.string;
+        next:      *AddrInfo;
+    }
+
+    // struct timeval, for the timeouts
+    TimeVal :: struct {
+        seconds:      i64;
+        microseconds: i64;
+    }
+
+    SolSocket   :: 1;
+    SoReuseAddr :: 2;
+    SoRcvTimeo  :: 20;
+    SoSndTimeo  :: 21;
+    SendFlags   :: 0x4000;   // MSG_NOSIGNAL: a write to a closed connection is an error, not the end of the program
+
+    extern "C" {
+        socket       :: (family: i32, type: i32, protocol: i32) -> Socket;
+        bind         :: (s: Socket, address: *SockAddrIn, length: u32) -> i32;
+        listen       :: (s: Socket, backlog: i32) -> i32;
+        accept       :: (s: Socket, address: *SockAddrIn, length: *u32) -> Socket;
+        connect      :: (s: Socket, address: *SockAddrIn, length: u32) -> i32;
+        recv         :: (s: Socket, buffer: *u8, length: Length, flags: i32) -> i64;
+        send         :: (s: Socket, buffer: *u8, length: Length, flags: i32) -> i64;
+        close        :: (s: Socket) -> i32;
+        shutdown     :: (s: Socket, how: i32) -> i32;
+        setsockopt   :: (s: Socket, level: i32, name: i32, value: *u8, length: u32) -> i32;      // e.g a TimeVal, or an int
+        getsockname  :: (s: Socket, address: *SockAddrIn, length: *u32) -> i32;
+        getaddrinfo  :: (node: c.string, service: c.string, hints: *AddrInfo, result: **AddrInfo) -> i32;
+        freeaddrinfo :: (info: *AddrInfo);
+        gai_strerror :: (code: i32) -> c.string;
+        __errno_location :: () -> *i32;
+        strerror     :: (code: i32) -> c.string;
+    }
+
+    Eagain       :: 11;    // A timeout of SO_RCVTIMEO or SO_SNDTIMEO
+    Epipe        :: 32;
+    EconnReset   :: 104;
+    EconnRefused :: 111;
+    EaddrInUse   :: 98;
+}
+
+// A port in network byte order (big endian), and back
+toNetwork :: (port: u16) -> u16 {
+    return ((port & 0xFF) << 8) | (port >> 8);
+}
+
+fromNetwork :: (port: u16) -> u16 {
+    return toNetwork(port);
+}
+
+// The size of a SockAddrIn, in the type the calls take
+#if OS == .windows {
+    AddrLength :: i32;
+} else {
+    AddrLength :: u32;
+}
+
+addrLength :: () -> AddrLength {
+    return sizeof(SockAddrIn) as AddrLength;
+}
+
+closeSocket :: (s: Socket) {
+    #if OS == .windows {
+        closesocket(s);
+    } else {
+        close(s);
+    }
+}

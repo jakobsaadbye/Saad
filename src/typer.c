@@ -2487,8 +2487,9 @@ bool leads_to_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
             TypePrimitive *prim = (TypePrimitive *)lhs_type;
             unsigned long long max_value = max_integer_value(prim);
             bool is_signed = prim->kind == PRIMITIVE_I8 || prim->kind == PRIMITIVE_I16 || prim->kind == PRIMITIVE_I32 || prim->kind == PRIMITIVE_I64 || prim->kind == PRIMITIVE_INT || prim->kind == PRIMITIVE_UNTYPED_INT;
-            bool too_big   = n >= 0 && (unsigned long long) n > max_value;
-            bool too_small = n < 0 && (!is_signed || (unsigned long long)(-(n + 1)) > max_value);
+            bool big       = ((AstLiteral *)value)->as.flags & VALUE_IS_BIGGER_THAN_SIGNED_64_BIT_INTEGER; // e.g 0xFFFF_FFFF_FFFF_FFFF
+            bool too_big   = (n >= 0 || big) && (unsigned long long) n > max_value;
+            bool too_small = n < 0 && !big && (!is_signed || (unsigned long long)(-(n + 1)) > max_value);
             if (too_big || too_small) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)site, "Assignment produces an integer overflow. '%s' is %lld, which doesn't fit in %s", ident->name, n, text_bold(type_to_str(lhs_type)));
                 return false;
@@ -2513,7 +2514,8 @@ bool leads_to_integer_overflow(Typer *typer, Type *lhs_type, AstExpr *expr) {
             // A negative value, e.g a constant -5 that was folded into a literal, fits a signed type down to its minimum
             long long n = lit->as.value.integer;
             bool is_signed = prim_type->kind == PRIMITIVE_I8 || prim_type->kind == PRIMITIVE_I16 || prim_type->kind == PRIMITIVE_I32 || prim_type->kind == PRIMITIVE_I64 || prim_type->kind == PRIMITIVE_INT || prim_type->kind == PRIMITIVE_UNTYPED_INT;
-            if (n < 0 && is_signed) lit_value = (unsigned long long)(-(n + 1));
+            bool big = lit->as.flags & VALUE_IS_BIGGER_THAN_SIGNED_64_BIT_INTEGER;
+            if (n < 0 && is_signed && !big) lit_value = (unsigned long long)(-(n + 1));
 
             if (lit_value > max_value) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(lit), "Assignment produces an integer overflow. Max value of type %s is %llu", text_bold(type_to_str(lhs_type)), max_value);

@@ -1,0 +1,19 @@
+// A constant cast to an integer type keeps the type, and wraps like at runtime. ~ flips the bits in the type
+
+Big     :: 0xFFFF_FFFF_FFFF_FFFF;   // Above the biggest i64, so it is the bits of a u64
+AllOnes :: ~(0 as u64);
+Byte    :: ~(0 as u8);
+Wrapped :: 300 as u8;
+Minus   :: 255 as i8;
+
+main :: () {
+    a: u64 = Big;
+    b: u64 = AllOnes;
+    c: u8  = Byte;
+    d: u8  = Wrapped;
+    e: i8  = Minus;
+    f: i64 = ~0;
+    assert(a == b && a == a + 0);
+    assert(c == 255 && d == 44 && e == -1 && f == -1);
+    assert(a > 0 as u64);
+}
