@@ -1,0 +1,73 @@
+// Several places are given values at once: the values of a call, or a list of values
+
+import fmt;
+
+pair :: () -> int, string { return 7, "seven"; }
+
+parse :: (text: string) -> int, error {
+    if text == "" { return 0, newError("empty"); }
+    return text.len, null;
+}
+
+Point :: struct { x: int; y: int; }
+
+main :: () {
+    // The values of a call
+    n := 0;
+    name := "";
+    n, name = pair();
+    assert(n == 7 && name == "seven");
+
+    // An error that is taken is a value, also in a loop
+    total := 0;
+    err: error;
+    for text in ["ab", "cde", ""] {
+        count := 0;
+        count, err = parse(text);
+        if err != null { break; }
+        total += count;
+    }
+    assert(total == 5 && err != null && err.message == "empty");
+
+    // '_' leaves a value out
+    n, _ = pair();
+    _, name = pair();
+    assert(n == 7 && name == "seven");
+
+    // A list of values is taken first, so this swaps
+    a := 1;
+    b := 2;
+    a, b = b, a;
+    assert(a == 2 && b == 1);
+
+    // Members, elements and what a pointer points to
+    p: Point;
+    xs := [0, 0];
+    q := &p;
+    p.x, xs[1], q.y = 1, 2, 3;
+    assert(p.x == 1 && xs[1] == 2 && p.y == 3);
+    ptr := &n;
+    *ptr, name = 9, "nine";
+    assert(n == 9 && name == "nine");
+
+    // A value converts like in an assignment
+    f: f64 = 0.0;
+    f, n = 2, 3;
+    assert(f == 2.0 && n == 3);
+
+    // An error that isn't taken is thrown
+    caught := false;
+    try {
+        n = 0;
+        n, name = pair();
+        count, _ := parse("x");
+        n = count;
+        parsed := parse("");    // Not taken, so it throws
+        n = parsed;
+    } catch (e) {
+        caught = e.message == "empty";
+    }
+    assert(caught && n == 1);
+
+    fmt.print("multi assignment ok");
+}

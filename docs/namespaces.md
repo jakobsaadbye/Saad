@@ -68,7 +68,7 @@ Slot :: struct { index: int; }
 
 * Attributes go before a function, method (also inside a struct), struct, enum, constant, type alias or global
   variable, at the top of a file. Not inside functions. A struct member takes `@embed` and the values of attribute
-  structs.
+  structs, and so do functions and methods (see `docs/reflection.md`).
 * Unknown, repeated and misplaced attributes are errors.
 * Structs marked with `@attribute` are attributes of your own, which go on struct members and are read through
   reflection, e.g `@json.Field(name: "id")`. See `docs/reflection.md`.
@@ -79,6 +79,19 @@ Slot :: struct { index: int; }
 | `@deprecated("message")` | Using it gives a warning with the message. The message is optional |
 | `@attribute` | On a struct: its values can be given to struct members as attributes |
 | `@embed` | On a struct member: its members and methods can be used on the struct it is in. See `docs/embedding.md` |
+| `@threadLocal` | On a global variable: each thread has its own, which starts with the start value of the global. See below |
+
+### @threadLocal
+
+```odin
+@threadLocal requests := 0;     // Counted by each thread for itself
+```
+
+The `@threadLocal` globals of a program are laid out in one block, and each thread gets a copy of their start values
+the first time it runs a function that uses one (`newThreadBlock()` in `std/prelude/errors.sd`). A function that uses
+one looks up the block of its thread once, when it starts: `FlsGetValue` on Windows and `pthread_getspecific` on
+Linux. The block is freed when the thread ends. `thrownError` of the prelude is one, so threads throw and catch at the
+same time without seeing each other's errors.
 
 ## Not done yet
 

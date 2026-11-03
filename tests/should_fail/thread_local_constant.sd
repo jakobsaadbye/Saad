@@ -1,0 +1,4 @@
+// expect-error: @threadLocal is for global variables
+@threadLocal Limit :: 10;
+
+main :: () {}

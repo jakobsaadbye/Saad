@@ -1,0 +1,7 @@
+// expect-error: Have 3 places and 2 values
+pair :: () -> int, int { return 1, 2; }
+
+main :: () {
+    a := 0; b := 0; c := 0;
+    a, b, c = pair();
+}

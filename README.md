@@ -78,6 +78,30 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.11.0 - 3. Nov 2026
+
+* Several values are given to places that exist: `n, err = conn.read(buffer);`, `a, b = b, a;` (it swaps),
+  `p.x, xs[i] = 1, 2;`. `_` leaves a value out
+* `#if`: code for some targets only, e.g `#if OS == .windows { ... } else #if OS == .linux { ... }`, at the top of a
+  file and in blocks. What a branch declares is in the scope around it. See `docs/compile_time_if.md`
+* `@threadLocal` on a global variable: each thread has its own. The error that is being thrown is one
+* `thread`: `spawn` and `join`, `Mutex`, `Condition`, `WaitGroup`, `sleep` and `processorCount`, on Windows and Linux
+* `bytes.Buffer`: bytes written at the end and read from the front, e.g a line or the headers of a request at a time
+* Attribute values on functions and methods, e.g `@Route("POST", "/posts")`, listed by `attributedFunctions()`. Fixed:
+  an attribute value that gave a member with a default, e.g a string, got the default
+* A Saad function says in `eax` if an error left it, so the check after a call doesn't read memory. Programs that make
+  many calls are a bit faster
+
+```odin
+import thread;
+
+group: thread.WaitGroup;
+group.add(2);
+a := thread.spawn(work, &first);
+b := thread.spawn(work, &second);
+group.wait();
+```
+
 ## Update v0.10.3 - 3. Nov 2026
 
 * Language server, completion: the namespaces of the standard library that a file doesn't import are offered too, and

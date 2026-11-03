@@ -1,0 +1,6 @@
+// expect-error: not @private, @deprecated, @attribute or @threadLocal
+Counter :: struct {
+    @threadLocal count: int;
+}
+
+main :: () {}

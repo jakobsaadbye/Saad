@@ -84,6 +84,7 @@ void report_error_range(Parser *parser, Pos start, Pos end, const char *message,
 void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const char *message, ...);
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
 static void report_missing_semicolon(Parser *parser);
+AstBlock *parse_multi_assignment(Parser *parser, AstExpr *first);
 
 
 Parser parser_init(Lexer *lexer) {
@@ -97,6 +98,8 @@ Parser parser_init(Lexer *lexer) {
     parser.inside_statement_header = false;
     parser.inside_parameter_list   = false;
     parser.namespaces    = da_init(16, sizeof(Namespace *));
+    parser.thread_locals = da_init(4, sizeof(AstIdentifier *));
+    parser.attributed_functions = da_init(4, sizeof(AstIdentifier *));
 
     return parser;
 }
@@ -368,6 +371,199 @@ static bool is_statement_of_a_function(Ast *stmt) {
     }
 }
 
+//
+// #if: code that is only compiled for a target, e.g
+//
+//   #if OS == .windows {
+//       extern "ws2_32.dll" { ... }
+//   } else #if OS == .linux {
+//       extern "C" { ... }
+//   } else {
+//       ...
+//   }
+//
+// It works on the tokens of a file before it is parsed: the tokens of a branch that holds are kept, without the braces
+// of the #if, and the others are left out. So a branch can have declarations at the top of a file and statements in a
+// block, and what it declares is in the scope around the #if. A branch that is left out isn't checked, but its braces
+// must match. A condition is made of 'OS' and 'ARCH' compared with a name, e.g 'OS != .linux', 'true', 'false', '!',
+// '&&', '||' and parentheses
+//
+
+const char *target_os   = "windows";
+const char *target_arch = "x64";
+
+typedef struct IfPass {
+    Parser *parser;
+    Token  *in;
+    int     end;     // Of the tokens of the file
+    Token  *out;
+    int     count;
+    bool    failed;  // An error was reported
+    bool    bad;     // The condition that is being read has an error. It is false then
+} IfPass;
+
+static void if_error(IfPass *pass, Token at, const char *message) {
+    if (!pass->bad) report_error_token(pass->parser, LABEL_ERROR, at, "%s", message);
+    pass->failed = true;
+    pass->bad    = true;
+}
+
+static bool if_condition_or(IfPass *pass, int *i);
+
+static bool if_condition_primary(IfPass *pass, int *i) {
+    Token token = pass->in[*i];
+    if (token.type == '!') {
+        *i += 1;
+        return !if_condition_primary(pass, i);
+    }
+    if (token.type == '(') {
+        *i += 1;
+        bool value = if_condition_or(pass, i);
+        if (pass->in[*i].type != ')') { if_error(pass, pass->in[*i], "Syntax Error: Expected a ')' in the condition of #if"); return false; }
+        *i += 1;
+        return value;
+    }
+    if (token.type == TOKEN_LITERAL_BOOLEAN) {
+        *i += 1;
+        return token.as_value.value.boolean;
+    }
+    if (token.type == TOKEN_LITERAL_IDENTIFIER) {
+        char *name = token.as_value.value.identifier.name;
+        const char *actual = strcmp(name, "OS") == 0 ? target_os : strcmp(name, "ARCH") == 0 ? target_arch : NULL;
+        if (actual == NULL) {
+            if (!pass->bad) report_error_token(pass->parser, LABEL_ERROR, token, "'%s' isn't known to #if, which knows OS and ARCH", name);
+            pass->failed = pass->bad = true;
+            return false;
+        }
+        Token op = pass->in[*i + 1], dot = pass->in[*i + 2], value = pass->in[*i + 3];
+        if ((op.type != TOKEN_DOUBLE_EQUAL && op.type != TOKEN_NOT_EQUAL) || dot.type != '.' || value.type != TOKEN_LITERAL_IDENTIFIER) {
+            if_error(pass, op, "Syntax Error: #if compares OS or ARCH with a name, e.g OS == .windows");
+            return false;
+        }
+        char *wanted = value.as_value.value.identifier.name;
+        const char *known = strcmp(name, "OS") == 0 ? "|windows|linux|" : "|x64|";
+        char key[64];
+        snprintf(key, sizeof(key), "|%s|", wanted);
+        if (!strstr(known, key)) {
+            if (!pass->bad) report_error_token(pass->parser, LABEL_ERROR, value, "'%s' isn't a value of %s, which is one of %s", wanted, name,
+                strcmp(name, "OS") == 0 ? ".windows and .linux" : ".x64");
+            pass->failed = pass->bad = true;
+            return false;
+        }
+        *i += 4;
+        bool same = strcmp(actual, wanted) == 0;
+        return op.type == TOKEN_DOUBLE_EQUAL ? same : !same;
+    }
+    if_error(pass, token, "Syntax Error: Expected a condition after #if, e.g OS == .windows");
+    return false;
+}
+
+static bool if_condition_and(IfPass *pass, int *i) {
+    bool value = if_condition_primary(pass, i);
+    while (!pass->bad && pass->in[*i].type == TOKEN_LOGICAL_AND) {
+        *i += 1;
+        bool right = if_condition_primary(pass, i);
+        value = value && right;
+    }
+    return value;
+}
+
+static bool if_condition_or(IfPass *pass, int *i) {
+    bool value = if_condition_and(pass, i);
+    while (!pass->bad && pass->in[*i].type == TOKEN_LOGICAL_OR) {
+        *i += 1;
+        bool right = if_condition_and(pass, i);
+        value = value || right;
+    }
+    return value;
+}
+
+// The index of the '}' that closes the '{' at i, or -1
+static int if_matching_brace(IfPass *pass, int i) {
+    int depth = 0;
+    for (int k = i; k < pass->end; k++) {
+        if (pass->in[k].type == '{') depth++;
+        if (pass->in[k].type == '}' && --depth == 0) return k;
+    }
+    return -1;
+}
+
+static int if_tokens(IfPass *pass, int i, int end, bool keep);
+
+// The #if at i, with its else branches. Returns the index after it
+static int if_directive(IfPass *pass, int i, bool keep) {
+    Token hash = pass->in[i];
+    i += 2; // # if
+    pass->bad = false;
+    bool holds = if_condition_or(pass, &i);
+    if (pass->bad) {
+        // A condition with an error is false. Its branch starts at the next '{'
+        holds = false;
+        while (i < pass->end && pass->in[i].type != '{' && pass->in[i].type != ';' && pass->in[i].type != '}') i++;
+    }
+    if (pass->in[i].type != '{') {
+        if_error(pass, pass->in[i], "Syntax Error: Expected a '{' after the condition of #if");
+        return i; // The tokens after it are kept
+    }
+    int close = if_matching_brace(pass, i);
+    if (close < 0) { if_error(pass, hash, "Syntax Error: The '{' of this #if isn't closed"); return pass->end; }
+    if_tokens(pass, i + 1, close, keep && holds);
+    i = close + 1;
+
+    if (i < pass->end && pass->in[i].type == TOKEN_ELSE) {
+        Token after = pass->in[i + 1];
+        if (after.type == '#' && pass->in[i + 2].type == TOKEN_IF) {
+            return if_directive(pass, i + 1, keep && !holds);
+        }
+        if (after.type != '{') {
+            pass->bad = false;
+            if_error(pass, after, "Syntax Error: The else of an #if is followed by '{' or '#if'");
+            return i + 1; // Without the else
+        }
+        int else_close = if_matching_brace(pass, i + 1);
+        if (else_close < 0) { if_error(pass, after, "Syntax Error: The '{' of this else isn't closed"); return pass->end; }
+        if_tokens(pass, i + 2, else_close, keep && !holds);
+        i = else_close + 1;
+    }
+    return i;
+}
+
+// Copies the tokens from i to end, without the #if branches that don't hold
+static int if_tokens(IfPass *pass, int i, int end, bool keep) {
+    while (i < end) {
+        if (pass->in[i].type == '#' && i + 1 < end && pass->in[i + 1].type == TOKEN_IF) {
+            i = if_directive(pass, i, keep);
+            continue;
+        }
+        if (keep) pass->out[pass->count++] = pass->in[i];
+        i++;
+    }
+    return i;
+}
+
+static bool apply_compile_time_ifs(Parser *parser, int first) {
+    DynamicArray *tokens = &parser->lexer->tokens;
+    Token *all = (Token *)tokens->items;
+    bool has_if = false;
+    for (int i = first; i + 1 < tokens->count; i++) {
+        if (all[i].type == '#' && all[i + 1].type == TOKEN_IF) { has_if = true; break; }
+    }
+    if (!has_if) return true;
+
+    IfPass pass = { parser, all, tokens->count, NULL, 0, false, false };
+    pass.in  = malloc(sizeof(Token) * tokens->count);
+    memcpy(pass.in, all, sizeof(Token) * tokens->count);
+    pass.out = all;
+    pass.count = first;
+    if_tokens(&pass, first, tokens->count, true);
+    if (pass.count == first || ((Token *)tokens->items)[pass.count - 1].type != TOKEN_END) {
+        all[pass.count++] = pass.in[tokens->count - 1]; // The end of the file, e.g after an #if that isn't closed
+    }
+    tokens->count = pass.count;
+    free(pass.in);
+    return !pass.failed;
+}
+
 AstFile *parse_file(Parser *parser, char *file_path) {
 
     // printf("Parsing '%s' ...\n", file_path);
@@ -382,6 +578,7 @@ AstFile *parse_file(Parser *parser, char *file_path) {
     parser->lexer->file_path = file_path;
     parser->lexer->file_text = file_text;
 
+    int first_token = parser->lexer->tokens.count;
     bool ok = lex_file(parser->lexer);
     if (!ok) {
         return NULL;
@@ -402,6 +599,9 @@ AstFile *parse_file(Parser *parser, char *file_path) {
 
     parser->current_file  = file;
     parser->current_scope = file->scope;
+
+    // #if: only the tokens of the branches that hold are parsed
+    if (!apply_compile_time_ifs(parser, first_token)) file->has_syntax_errors = true;
 
     // Add import to the runtime library
     if (parser->runtime_file_path == NULL || strcmp(parser->current_file->absolute_path, parser->runtime_file_path) != 0) {
@@ -952,7 +1152,7 @@ bool starts_function_defn_at(Parser *parser, int cursor) {
 
 // The attributes of the language e.g @private and @deprecated("use add instead"). Any other attribute is the value of a struct
 // marked with @attribute e.g @json.Field(name: "id")
-static const char *known_attributes[] = { "private", "deprecated", "attribute", "embed" };
+static const char *known_attributes[] = { "private", "deprecated", "attribute", "embed", "threadLocal" };
 
 // Parses the attributes in front of a declaration and the declaration, and gives the attributes to the declared identifier
 Ast *parse_attributed_declaration(Parser *parser) {
@@ -962,6 +1162,7 @@ Ast *parse_attributed_declaration(Parser *parser) {
     bool  is_deprecated = false;
     bool  is_attribute = false;
     bool  is_embed = false;
+    bool  is_thread_local = false;
     char *deprecated_message = NULL;
     Token first_builtin = {0};
     DynamicArray custom = da_init(1, sizeof(AstStructLiteral *));
@@ -1017,6 +1218,13 @@ Ast *parse_attributed_declaration(Parser *parser) {
         }
         if (strcmp(name, "embed") == 0) {
             is_embed = true;
+        }
+        if (strcmp(name, "threadLocal") == 0) {
+            if (is_thread_local) {
+                report_error_range(parser, at.start, name_token.end, "The attribute '@threadLocal' is given more than once");
+                return NULL;
+            }
+            is_thread_local = true;
         }
         if (strcmp(name, "private") == 0) {
             is_private = true;
@@ -1075,8 +1283,8 @@ Ast *parse_attributed_declaration(Parser *parser) {
     }
     else if (stmt->kind == AST_DECLARATION && (((AstDeclaration *)stmt)->flags & DECLARATION_IS_STRUCT_MEMBER)) {
         // A struct member takes @embed and the values of attribute structs
-        if (is_private || is_deprecated || is_attribute) {
-            report_error_token(parser, LABEL_ERROR, first_builtin, "Struct members take @embed and the values of attribute structs, not @private, @deprecated or @attribute");
+        if (is_private || is_deprecated || is_attribute || is_thread_local) {
+            report_error_token(parser, LABEL_ERROR, first_builtin, "Struct members take @embed and the values of attribute structs, not @private, @deprecated, @attribute or @threadLocal");
             report_error_ast(parser, LABEL_HINT, NULL, "e.g @embed table: dbms.Table<User>; or @json.Field(name: \"id\")");
             return NULL;
         }
@@ -1097,11 +1305,28 @@ Ast *parse_attributed_declaration(Parser *parser) {
         report_error_token(parser, LABEL_ERROR, first, "@embed is for struct members, e.g @embed table: dbms.Table<User>;");
         return NULL;
     }
+    if (is_thread_local) {
+        bool is_global = stmt->kind == AST_DECLARATION && !(((AstDeclaration *)stmt)->flags & DECLARATION_CONSTANT);
+        if (!is_global) {
+            report_error_token(parser, LABEL_ERROR, first, "@threadLocal is for global variables, e.g @threadLocal count := 0;");
+            return NULL;
+        }
+        for (int i = 0; i < count; i++) {
+            idents[i]->flags |= IDENTIFIER_IS_THREAD_LOCAL;
+            da_append(&parser->thread_locals, idents[i]);
+        }
+    }
+    // A function or a method takes the values of attribute structs, e.g @Route("/posts"). attributedFunctions() lists them
+    if (custom.count > 0 && stmt->kind == AST_DECLARATION && (stmt->flags & AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN) && count == 1) {
+        idents[0]->attributes = custom;
+        da_append(&parser->attributed_functions, idents[0]);
+        custom.count = 0;
+    }
     if (custom.count > 0) {
         AstStructLiteral *value = ((AstStructLiteral **)custom.items)[0];
         report_error_ast(parser, LABEL_ERROR, (Ast *)value, "Unknown attribute '@%s'", type_to_str(value->explicit_type));
-        report_error_ast(parser, LABEL_HINT, NULL, "The attributes of the language are @private, @deprecated(\"message\"), @attribute and @embed");
-        report_error_ast(parser, LABEL_NOTE, NULL, "The values of structs marked with @attribute can only be given to struct members");
+        report_error_ast(parser, LABEL_HINT, NULL, "The attributes of the language are @private, @deprecated(\"message\"), @attribute, @embed and @threadLocal");
+        report_error_ast(parser, LABEL_NOTE, NULL, "The values of structs marked with @attribute can only be given to struct members, functions and methods");
         return NULL;
     }
     if (is_attribute) {
@@ -1167,7 +1392,7 @@ Ast *parse_statement(Parser *parser) {
     }
 
     else if (token.type == '#') {
-        report_error_token(parser, LABEL_ERROR, token, "'#' is reserved for compile-time features");
+        report_error_token(parser, LABEL_ERROR, token, "'#' is for compile-time features, e.g #if OS == .windows { ... }");
         report_error_ast(parser, LABEL_HINT, NULL, "#import is replaced by 'import name;', and #extern by an 'extern \"C\" { ... }' block");
         return NULL;
     }
@@ -1322,7 +1547,13 @@ Ast *parse_statement(Parser *parser) {
         }
 
         Token next = peek_next_token(parser);
-        if (is_assignment_operator(next)) {
+        if (next.type == ',') {
+            // a, b = f(); or a, b = b, a;
+            stmt = (Ast *)parse_multi_assignment(parser, lhs);
+            statement_ends_with_semicolon = true;
+            matched_a_statement = true; // An error is reported
+        }
+        else if (is_assignment_operator(next)) {
             eat_token(parser);
             stmt = (Ast *)(parse_assignment(parser, lhs, next));
             if (stmt) {
@@ -2592,6 +2823,150 @@ AstStruct *parse_struct_defn(Parser *parser) {
     ident->flags |= IDENTIFIER_IS_RESOLVED | IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_CONSTANT;
 
     return struct_defn;
+}
+
+static bool is_place_expression(AstExpr *lhs) {
+    if (lhs->head.kind == AST_LITERAL) return ((AstLiteral *)lhs)->kind == LITERAL_IDENTIFIER;
+    return lhs->head.kind == AST_MEMBER_ACCESS || lhs->head.kind == AST_ARRAY_ACCESS || lhs->head.kind == AST_UNARY;
+}
+
+static bool is_discard(AstExpr *lhs) {
+    return lhs->head.kind == AST_LITERAL && ((AstLiteral *)lhs)->kind == LITERAL_IDENTIFIER && strcmp(((AstLiteral *)lhs)->as.value.identifier.name, "_") == 0;
+}
+
+// A value that reads nothing, so it can be assigned after the others, and gets the type of its place, e.g 2 for an f64,
+// .open for a Status or {1, 2} for a Point
+static bool reads_nothing(AstExpr *value) {
+    switch (value->head.kind) {
+    case AST_LITERAL:        return ((AstLiteral *)value)->kind != LITERAL_IDENTIFIER;
+    case AST_ENUM_LITERAL:   return true;
+    case AST_FUNCTION_DEFN:  return true;
+    case AST_UNARY:          return reads_nothing(((AstUnary *)value)->expr);
+    default:                 return false;
+    }
+}
+
+// An identifier that the compiler wrote, at the position of 'at'. It isn't in the index
+static AstLiteral *generated_identifier_literal(Parser *parser, char *name, Ast *at) {
+    AstLiteral *literal = ast_allocate(parser, sizeof(AstLiteral));
+    literal->head.head.kind  = AST_LITERAL;
+    literal->head.head.file  = parser->current_file;
+    literal->head.head.start = at->start;
+    literal->head.head.end   = at->end;
+    literal->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    literal->kind = LITERAL_IDENTIFIER;
+    literal->as.value.identifier.name   = name;
+    literal->as.value.identifier.length = (int)strlen(name);
+    return literal;
+}
+
+// 'a, b = f();', 'x, err = conn.read(buf);' or 'a, b = b, a;': the values are given to places that exist. It is made
+// into a block that takes the values first, and then assigns them, so 'a, b = b, a' swaps:
+//
+//   { $1, $2 := f(); a = $1; b = $2; }
+//
+// '_' leaves a value out, e.g 'n, _ = conn.read(buf);'
+AstBlock *parse_multi_assignment(Parser *parser, AstExpr *first) {
+    DynamicArray places = da_init(4, sizeof(AstExpr *));
+    da_append(&places, first);
+    while (peek_next_token(parser).type == ',') {
+        eat_token(parser);
+        AstExpr *place = parse_expression(parser, MIN_PRECEDENCE);
+        if (!place) return NULL;
+        da_append(&places, place);
+    }
+    for (int i = 0; i < places.count; i++) {
+        AstExpr *place = ((AstExpr **)places.items)[i];
+        if (!is_place_expression(place)) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)place, "Syntax Error: Only a variable, a member, an element or a '*p' can be given a value");
+            return NULL;
+        }
+    }
+
+    Token op = peek_next_token(parser);
+    if (op.type != '=') {
+        if (op.type == TOKEN_COLON_EQUAL) {
+            report_error_token(parser, LABEL_ERROR, op, "Syntax Error: ':=' declares names, so the names before it can't be members or elements");
+        } else if (is_assignment_operator(op)) {
+            report_error_token(parser, LABEL_ERROR, op, "Syntax Error: Several places are given values with '=', not '%s'", token_type_to_str(op.type));
+        } else {
+            report_error_token(parser, LABEL_ERROR, op, "Syntax Error: Expected '=' after the places, e.g a, b = f();");
+        }
+        return NULL;
+    }
+    eat_token(parser);
+
+    AstBlock *block = new_block(parser, BLOCK_IMPERATIVE);
+    block->head.start = first->head.start;
+
+    AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
+    decl->head.kind = AST_DECLARATION;
+    decl->head.file = parser->current_file;
+    decl->head.flags = AST_FLAG_COMPILER_GENERATED;
+    decl->flags     = DECLARATION_INFER;
+    decl->idents    = da_init(places.count, sizeof(AstIdentifier *));
+    decl->values    = da_init(2, sizeof(AstExpr *));
+    decl->values_token_index = parser->current_token_index;
+    bool ok = parse_expression_list(parser, &decl->values);
+    if (!ok) { close_block(parser); return NULL; }
+    if (decl->values.count != 1 && decl->values.count != places.count) {
+        AstExpr *value = ((AstExpr **)decl->values.items)[0];
+        report_error_ast(parser, LABEL_ERROR, (Ast *)value, "%d places are given %d values", places.count, decl->values.count);
+        report_error_ast(parser, LABEL_HINT, NULL, "Give each place a value, or call a function that gives %d values", places.count);
+        close_block(parser);
+        return NULL;
+    }
+    AstExpr *last = ((AstExpr **)decl->values.items)[decl->values.count - 1];
+    decl->head.start = first->head.start;
+    decl->head.end   = last->head.end;
+
+    // The value of each place: a name that holds it, or the value itself when it reads nothing
+    bool from_call = decl->values.count == 1 && places.count > 1;
+    DynamicArray all_values = decl->values;
+    decl->values = da_init(all_values.count, sizeof(AstExpr *));
+    AstExpr **given = calloc(places.count, sizeof(AstExpr *));
+    static int counter = 0;
+    for (int i = 0; i < places.count; i++) {
+        AstExpr *value = ((AstExpr **)all_values.items)[from_call ? 0 : i];
+        if (!from_call && reads_nothing(value)) {
+            given[i] = value;
+            continue;
+        }
+        char *name = malloc(24);
+        snprintf(name, 24, "$value%d", ++counter);
+        AstIdentifier *ident = make_identifier_from_string(parser, name, NULL);
+        ident->head.start  = value->head.start;
+        ident->head.end    = value->head.end;
+        ident->head.flags |= AST_FLAG_COMPILER_GENERATED;
+        ident->decl        = decl;
+        da_append(&decl->idents, ident);
+        if (!from_call || i == 0) da_append(&decl->values, value);
+        given[i] = (AstExpr *)generated_identifier_literal(parser, ident->name, (Ast *)ident);
+    }
+    if (decl->idents.count > 0) {
+        if (add_declaration_to_scope(parser, block, decl) != NULL) { close_block(parser); return NULL; }
+        da_append(&block->statements, decl);
+    }
+
+    for (int i = 0; i < places.count; i++) {
+        AstExpr *place = ((AstExpr **)places.items)[i];
+        if (is_discard(place)) continue;
+
+        AstAssignment *assign = ast_allocate(parser, sizeof(AstAssignment));
+        assign->head.kind  = AST_ASSIGNMENT;
+        assign->head.file  = parser->current_file;
+        assign->head.start = place->head.start;
+        assign->head.end   = last->head.end;
+        assign->lhs        = place;
+        assign->op         = (AssignOp)'=';
+        assign->expr       = given[i];
+        da_append(&block->statements, assign);
+    }
+    free(given);
+
+    block->head.end = last->head.end;
+    close_block(parser);
+    return block;
 }
 
 AstAssignment *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token) {

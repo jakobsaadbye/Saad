@@ -1,0 +1,181 @@
+namespace bytes;
+
+import mem;
+
+// Buffer: bytes that are written at the end and read from the front, like Go's bytes.Buffer and bufio. E.g the bytes of
+// a socket, read a line at a time:
+//
+//     buffer: bytes.Buffer;
+//     space := buffer.space(4096);              // Room at the end, to read into
+//     n := conn.read(space);
+//     buffer.wrote(n);                          // The bytes that were written into it
+//     while true {
+//         line, found := buffer.readLine();     // Without the \n or \r\n
+//         if !found { break; }                  // Not all of it is there yet
+//         ...
+//     }
+//     buffer.free();
+//
+// What a read gives is a view of the buffer, without a copy, so it changes when the buffer does: copy() it to keep it.
+// The zero value is ready to use. An allocator can be given, e.g of an arena for a request.
+Buffer :: struct {
+    data:      *u8;
+    length:    int;          // The bytes in it, read or not
+    capacity:  int;
+    position:  int;          // Where the next read starts
+    allocator: *Allocator;   // Null for the heap
+}
+
+newBuffer :: (capacity := 256, allocator: *Allocator = null) -> Buffer {
+    b: Buffer;
+    b.allocator = allocator;
+    b.reserve(capacity);
+    return b;
+}
+
+// The bytes that aren't read yet
+unread :: method (b: *Buffer) -> string {
+    result: string;
+    result.data = &b.data[b.position];
+    result.len  = b.length - b.position;
+    if b.data == null { result.data = null; }
+    return result;
+}
+
+// How many bytes aren't read yet
+available :: method (b: *Buffer) -> int {
+    return b.length - b.position;
+}
+
+// All the bytes, also the ones that are read
+toString :: method (b: *Buffer) -> string {
+    result: string;
+    result.data = b.data;
+    result.len  = b.length;
+    return result;
+}
+
+// Makes room for at least 'extra' more bytes at the end. The bytes that are read are dropped first when that is enough
+reserve :: method (b: *Buffer, extra: int) {
+    if b.length + extra <= b.capacity { return; }
+    if b.position > 0 && b.length - b.position + extra <= b.capacity {
+        b.compact();
+        return;
+    }
+    capacity := b.capacity * 2;
+    if capacity < 64 { capacity = 64; }
+    while capacity < b.length + extra { capacity *= 2; }
+    b.data = resizeMemory(b.allocator, b.data, capacity) as *u8;
+    b.capacity = capacity;
+}
+
+// Moves the bytes that aren't read to the front
+compact :: method (b: *Buffer) {
+    if b.position == 0 { return; }
+    left := b.length - b.position;
+    if left > 0 { mem.copy(b.data, &b.data[b.position], left); }
+    b.length = left;
+    b.position = 0;
+}
+
+//
+// Writing
+//
+
+write :: method (b: *Buffer, text: string) {
+    if text.len == 0 { return; }
+    b.reserve(text.len as int);
+    mem.copy(&b.data[b.length], text.data, text.len);
+    b.length += text.len as int;
+}
+
+writeByte :: method (b: *Buffer, byte: u8) {
+    b.reserve(1);
+    b.data[b.length] = byte;
+    b.length += 1;
+}
+
+// Room at the end for at least 'size' bytes, to write into, e.g with the read of a socket. wrote(n) adds them
+space :: method (b: *Buffer, size: int) -> []u8 {
+    b.reserve(size);
+    result: []u8;
+    result.data  = &b.data[b.length];
+    result.count = b.capacity - b.length;
+    return result;
+}
+
+// Adds the n bytes that were written into space()
+wrote :: method (b: *Buffer, n: int) {
+    assert(n >= 0 && b.length + n <= b.capacity);
+    b.length += n;
+}
+
+//
+// Reading. A read gives a view of the bytes, and found is false when they aren't all there yet, so nothing is read
+//
+
+// The next n bytes
+read :: method (b: *Buffer, n: int) -> string, bool {
+    if b.available() < n {
+        none: string;
+        return none, false;
+    }
+    result := b.unread().slice(0, n);
+    b.position += n;
+    return result, true;
+}
+
+// The bytes up to the separator, which is read but not given, e.g "\r\n\r\n" at the end of the headers of HTTP
+readUntil :: method (b: *Buffer, separator: string) -> string, bool {
+    left := b.unread();
+    at := left.indexOf(separator);
+    if at < 0 {
+        none: string;
+        return none, false;
+    }
+    result := left.slice(0, at);
+    b.position += at + separator.len as int;
+    return result, true;
+}
+
+// The next line, without its \n or \r\n
+readLine :: method (b: *Buffer) -> string, bool {
+    line, found := b.readUntil("\n");
+    if found && line.len > 0 && line[line.len - 1] == '\r' {
+        line = line.slice(0, line.len - 1);
+    }
+    return line, found;
+}
+
+readByte :: method (b: *Buffer) -> u8, bool {
+    if b.available() == 0 { return 0, false; }
+    byte := b.data[b.position];
+    b.position += 1;
+    return byte, true;
+}
+
+// The next byte without reading it, or 0 and false
+peekByte :: method (b: *Buffer) -> u8, bool {
+    if b.available() == 0 { return 0, false; }
+    return b.data[b.position], true;
+}
+
+// Reads n bytes without looking at them
+skip :: method (b: *Buffer, n: int) {
+    if n > b.available() { n = b.available(); }
+    b.position += n;
+}
+
+// Empties it, and keeps the memory
+clear :: method (b: *Buffer) {
+    b.length = 0;
+    b.position = 0;
+}
+
+free :: method (b: *Buffer) {
+    if b.data != null { resizeMemory(b.allocator, b.data, 0); }
+    b.data = null;
+    b.length = 0;
+    b.capacity = 0;
+    b.position = 0;
+}

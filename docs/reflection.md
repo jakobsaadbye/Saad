@@ -68,5 +68,31 @@ for member in (rowAny.type as *TypeStruct).members {
   the parentheses can be left out. Members without an argument get their default value.
 * The arguments must be known when compiling: literals, enum values and constants. The values are constants in
   the program, made by the compiler.
-* The attributes of the language (`@private`, `@deprecated`, `@attribute`) go on declarations. Attribute values
-  only go on struct members for now.
+* The attributes of the language (`@private`, `@deprecated`, `@attribute`) go on declarations. Attribute values go
+  on struct members, and on functions and methods (below).
+
+### On functions
+
+Attribute values on functions and methods are listed by `attributedFunctions()`, e.g to register the routes of a
+server without listing them by hand:
+
+```odin
+@attribute
+Route :: struct { verb: string = "GET"; path: string; }
+
+@Route("POST", "/posts")
+createPost :: (request: *Request) { ... }
+
+for f in attributedFunctions() {     // []AttributedFunction: name, namespaceName, function and attributes
+    route: Route;
+    if f.attribute(&route) {
+        handler := f.function as (request: *Request);   // The address, cast to the type the program knows
+        handler(&request);
+    }
+}
+```
+
+* The compiler writes the list, and compiles the functions on it, when the program uses `attributedFunctions()`.
+* A generic function can't have attribute values, as it is a function for each set of types.
+* `*void` and a function type can be cast to each other, as a function value is its address. The program must give
+  the right type.

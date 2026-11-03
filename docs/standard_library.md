@@ -18,8 +18,10 @@ std/
   json/         namespace json: encode, decode, parse and json.Value
   os/           namespace os: files, environment variables, processes
     windows.sd      namespace os.windows: the Windows API (threads, Sleep, ...)
+  thread/       namespace thread: threads, Mutex, Condition and WaitGroup, on Windows and Linux
   vendor/       Bindings for libraries the standard library doesn't own
     raylib.sd       namespace raylib
+  bytes.sd      namespace bytes: Buffer, bytes written at the end and read from the front
   math.sd       namespace math
   mem.sd        namespace mem: allocate, resize, free, copy, set, equal, and arenas
   random.sd     namespace random
@@ -159,6 +161,60 @@ watch := time.startStopwatch();
 ...
 fmt.print("took % ms", watch.milliseconds());   // also seconds() and restart()
 ```
+
+## bytes
+
+`bytes.Buffer`: bytes that are written at the end and read from the front, like Go's `bytes.Buffer` and `bufio`, e.g
+the bytes of a socket.
+
+```odin
+buffer: bytes.Buffer;                      // Ready to use, or bytes.newBuffer(capacity, allocator)
+space := buffer.space(4096);               // Room at the end ([]u8), to read into
+buffer.wrote(n);                           // The n bytes that were read into it
+line, found := buffer.readLine();          // Without \n or \r\n. found is false when the line isn't all there
+headers, ended := buffer.readUntil("\r\n\r\n");
+body, ok := buffer.read(length);
+```
+
+* Writing: `write(text)`, `writeByte(b)`, and `space(n)` with `wrote(n)`.
+* Reading: `read(n)`, `readUntil(separator)`, `readLine()`, `readByte()`, `peekByte()` and `skip(n)`. A read gives
+  a view of the buffer, without a copy, so it changes when the buffer does: `copy()` it to keep it. Nothing is read
+  when the bytes aren't all there yet.
+* `unread()`, `available()`, `toString()`, `clear()`, `compact()` and `free()`. When it grows, the bytes that are
+  read are dropped first.
+
+## thread
+
+Threads, and what they share safely. On Windows (`CreateThread`, `SRWLOCK`, `CONDITION_VARIABLE`) and Linux
+(`pthread`), with `#if` (see `docs/compile_time_if.md`).
+
+```odin
+import thread;
+
+work :: (argument: *void) {
+    job := argument as *Job;
+    ...
+    job.group.done();
+}
+
+group: thread.WaitGroup;
+group.add(jobs.count);
+for i in 0..jobs.count {
+    t := thread.spawn(work, &jobs[i]);   // A Thread, or an error when it can't be started
+}
+group.wait();
+
+counter.mutex.lock();
+counter.value += 1;
+counter.mutex.unlock();
+```
+
+* `spawn(function, argument)` starts a thread that runs `function(argument)`, and `t.join()` waits for it to end.
+  An error that the function doesn't catch ends the program, with its trace, like one in `main`.
+* `Mutex` (`lock`, `unlock`), `Condition` (`wait(&mutex)`, `signal`, `broadcast`) and `WaitGroup` (`add`, `done`,
+  `wait`). Their zero values are ready to use. Don't copy one that is in use.
+* `sleep(milliseconds)`, `yield()`, `currentId()` and `processorCount()`.
+* Each thread has its own `@threadLocal` globals (see `docs/namespaces.md`), e.g the error that is being thrown.
 
 ## random
 

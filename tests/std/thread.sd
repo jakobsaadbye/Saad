@@ -1,0 +1,113 @@
+// Threads: a shared counter behind a Mutex, @threadLocal globals, errors thrown on many threads at once, a queue with a
+// Condition, and a WaitGroup
+
+import thread;
+import fmt;
+
+@threadLocal mine := 0;      // Each thread counts its own
+@threadLocal label: string = "start";
+
+Shared :: struct {
+    mutex: thread.Mutex;
+    total: int;
+    group: thread.WaitGroup;
+}
+
+Job :: struct {
+    id:     int;
+    shared: *Shared;
+    ok:     bool;
+}
+
+failing :: (id: int, round: int) -> int, error {
+    if round % 2 == 0 { return 0, fmt.errorf("job % round %", id, round); }
+    return round, null;
+}
+
+work :: (argument: *void) {
+    job := argument as *Job;
+    assert(mine == 0 && label == "start");   // The start values, in a new thread
+    label = fmt.sprint("job %", job.id);
+    ok := true;
+    for round in 0..2000 {
+        mine += 1;
+        job.shared.mutex.lock();
+        job.shared.total += 1;
+        job.shared.mutex.unlock();
+
+        // Throwing and catching at the same time as the other threads: each catches its own error
+        try {
+            n := failing(job.id, round);
+            if n != round { ok = false; }
+        } catch (err) {
+            if err.message != fmt.sprint("job % round %", job.id, round) { ok = false; }
+        }
+        if round % 500 == 0 { thread.yield(); }
+    }
+    job.ok = ok && mine == 2000 && label == fmt.sprint("job %", job.id);
+    job.shared.group.done();
+}
+
+// A queue of numbers that a producer fills and a consumer empties
+Queue :: struct {
+    mutex: thread.Mutex;
+    ready: thread.Condition;
+    items: [..]int;
+    closed: bool;
+    sum:   int;
+}
+
+consume :: (argument: *void) {
+    queue := argument as *Queue;
+    queue.mutex.lock();
+    while true {
+        while queue.items.count == 0 && !queue.closed {
+            queue.ready.wait(&queue.mutex);
+        }
+        if queue.items.count == 0 { break; }
+        queue.sum += queue.items[queue.items.count - 1];
+        queue.items.removeAt(queue.items.count - 1);
+    }
+    queue.mutex.unlock();
+}
+
+main :: () {
+    assert(thread.processorCount() >= 1);
+
+    shared: Shared;
+    jobs: [8]Job;
+    threads: [..]thread.Thread;
+    shared.group.add(jobs.count);
+    for i in 0..jobs.count {
+        jobs[i] = Job{id: i, shared: &shared};
+        t := thread.spawn(work, &jobs[i]);
+        threads.add(t);
+    }
+    shared.group.wait();
+    for i in 0..threads.count { threads.indexRef(i).join(); }
+
+    assert(shared.total == 8 * 2000);
+    for job in jobs { assert(job.ok); }
+    assert(mine == 0 && label == "start");   // The threads changed their own
+
+    queue: Queue;
+    consumer := thread.spawn(consume, &queue);
+    expected := 0;
+    for i in 1..1001 {
+        queue.mutex.lock();
+        queue.items.add(i);
+        queue.ready.signal();
+        queue.mutex.unlock();
+        expected += i;
+    }
+    queue.mutex.lock();
+    queue.closed = true;
+    queue.ready.broadcast();
+    queue.mutex.unlock();
+    consumer.join();
+    assert(queue.sum == expected);
+
+    thread.sleep(1);
+    assert(thread.currentId() != 0);
+    fmt.print("thread ok");
+}

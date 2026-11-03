@@ -1,0 +1,5 @@
+// expect-error: Several places are given values with '=', not '+='
+main :: () {
+    a := 0; b := 0;
+    a, b += 1, 2;
+}

@@ -1,0 +1,6 @@
+// expect-error: 'DEBUG' isn't known to #if, which knows OS and ARCH
+main :: () {
+    #if DEBUG {
+        x := 1;
+    }
+}

@@ -88,6 +88,11 @@ typedef struct Lowerer {
     int              assert_filename_global; // Cached per file
     AstFile         *assert_filename_file;
 
+    int              thread_block_slot; // Per function: the slot with the block of the @threadLocal globals of the thread, or -1
+    PtrMap           thread_offsets;    // AstIdentifier* -> offset of a @threadLocal global in the block
+    int              thread_template;   // The global with the start values of the @threadLocal globals
+    int              thread_block_size;
+
     AstBlock        *runtime_scope;   // The declarations of runtime.sd, for the layouts of the type descriptors
     IrArray(TypeInfoEntry) type_infos; // The descriptor of each type, by the name of the type
 
@@ -444,6 +449,16 @@ static void terminate_ret(Lowerer *L, int value) {
     if (block_is_terminated(L)) return;
     L->block->term.kind  = IR_TERM_RET;
     L->block->term.value = value;
+}
+
+static int emit_const(Lowerer *L, IrType type, int64_t value);
+
+// A Saad function returns its values through out-pointers, so eax says if an error left it: 0 when it returns, 1 when
+// it was thrown out of it. The check after a call looks at eax, and not at thrownError, which is in the block of the
+// thread (see emit_throw_check)
+static void terminate_return(Lowerer *L, bool threw) {
+    if (block_is_terminated(L)) return;
+    terminate_ret(L, emit_const(L, IR_I32, threw ? 1 : 0));
 }
 
 // After a jump that ends control flow (return, break, continue) any following statements are
@@ -831,7 +846,7 @@ static void emit_errors_call(Lowerer *L, const char *name, int arg_count, int *a
 bool bounds_checks = true; // Indexes of arrays, slices, lists and strings are checked, unless built with --unchecked
 static void emit_trace_frame(Lowerer *L, int line);
 static void emit_unwind(Lowerer *L);
-static void emit_throw_check(Lowerer *L);
+static void emit_throw_check(Lowerer *L, int threw, bool confirm);
 static void emit_throw(Lowerer *L, int err);
 static void  lower_declaration(Lowerer *L, AstDeclaration *decl);
 static int   lower_scalar_as(Lowerer *L, AstExpr *expr, Type *target);
@@ -1251,9 +1266,19 @@ static void write_default_constants(Lowerer *L, IrGlobal *global, int offset, Ty
 }
 
 // The global holding a global variable e.g 'count := 0;', with its start value
+static void write_attributed_functions(Lowerer *L, IrGlobal *list);
+
 static int global_variable(Lowerer *L, AstIdentifier *ident) {
     int cached = ptr_map_get(&L->const_globals, ident);
     if (cached >= 0) return cached;
+
+    // attributedFunctionList of runtime.sd: the functions with attribute values
+    if (L->runtime_scope && strcmp(ident->name, "attributedFunctionList") == 0 && find_identifier_in_scope(L->runtime_scope, ident->name) == ident) {
+        IrGlobal *list = ir_global_data(L->module, ident->name, NULL, 16, 8, false);
+        ptr_map_put(&L->const_globals, ident, list->index);
+        write_attributed_functions(L, list);
+        return list->index;
+    }
 
     Type *type = ident->type;
     int size = type_storage_size(type);
@@ -1270,6 +1295,96 @@ static int global_variable(Lowerer *L, AstIdentifier *ident) {
     return global->index;
 }
 
+//
+// @threadLocal globals: each thread has a block of them, a copy of their start values (L->thread_template). A function
+// that uses one loads the block of its thread when it starts, into a slot, in a block of its own before the others
+// (lower_function). The block is made the first time a thread needs it, by newThreadBlock() of std/prelude/errors.sd,
+// and main sets up the key of the blocks with startThreadBlocks() first. thrownError is one of them
+//
+
+static void layout_thread_locals(Lowerer *L) {
+    DynamicArray locals = L->parser->thread_locals;
+    int size = 0;
+    for (int i = 0; i < locals.count; i++) {
+        AstIdentifier *ident = da_get_deref(locals, i);
+        if (ident->type == NULL || (ident->flags & IDENTIFIER_IS_POISONED)) continue;
+        int align = type_alignment(ident->type);
+        if (align < 1) align = 1;
+        size = (size + align - 1) / align * align;
+        ptr_map_put(&L->thread_offsets, ident, size);
+        size += type_storage_size(ident->type);
+    }
+    L->thread_block_size = size;
+    IrGlobal *template = ir_global_data(L->module, "thread_locals", NULL, size > 0 ? size : 8, 16, false);
+    L->thread_template = template->index;
+    for (int i = 0; i < locals.count; i++) {
+        AstIdentifier *ident = da_get_deref(locals, i);
+        int offset = ptr_map_get(&L->thread_offsets, ident);
+        if (offset < 0) continue;
+        AstExpr *value = NULL;
+        AstDeclaration *decl = ident->decl;
+        for (int k = 0; decl && k < decl->idents.count && k < decl->values.count; k++) {
+            if (da_get_deref(decl->idents, k) == ident) value = da_get_deref(decl->values, k);
+        }
+        if (value) write_constant(L, template, offset, value, ident->type);
+        else       write_default_constants(L, template, offset, ident->type);
+    }
+}
+
+static AstIdentifier *errors_declaration(Lowerer *L, const char *name);
+static void emit_errors_call(Lowerer *L, const char *name, int arg_count, int *args);
+
+// Looks up the block of the thread, and makes it the first time: FlsGetValue or pthread_getspecific with the key of
+// startThreadBlocks(), and newThreadBlock() when there is none yet
+static int emit_lookup_thread_block(Lowerer *L) {
+    bool windows = strcmp(target_os, "windows") == 0;
+    AstIdentifier *get = errors_declaration(L, windows ? "FlsGetValue" : "pthread_getspecific");
+    int get_global = function_global(L, ((TypeFunction *)get->type)->node);
+    AstIdentifier *key_ident = errors_declaration(L, "threadBlockKey");
+    int slot = ir_new_slot(L->func, 8, 8, "thread block");
+
+    int key = emit_load(L, IR_I32, addr_global(global_variable(L, key_ident), 0));
+    IrCall *call = new_call(L, IR_CALLEE_DIRECT, get_global, IR_PTR, 1);
+    call_add_arg(call, key, false);
+    int block = emit_call(L, call);
+    emit_store(L, IR_PTR, addr_slot(slot, 0), block);
+    IrBlock *make = create_block(L, "new thread block");
+    IrBlock *done = create_block(L, "thread block");
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_EQ, IR_PTR, block, emit_const(L, IR_PTR, 0)), make, done);
+
+    // The first function of a thread that uses the block
+    set_block(L, make);
+    emit_errors_call(L, "newThreadBlock", 0, NULL);
+    key = emit_load(L, IR_I32, addr_global(global_variable(L, key_ident), 0));
+    call = new_call(L, IR_CALLEE_DIRECT, get_global, IR_PTR, 1);
+    call_add_arg(call, key, false);
+    emit_store(L, IR_PTR, addr_slot(slot, 0), emit_call(L, call));
+    terminate_jmp(L, done);
+
+    set_block(L, done);
+    return emit_load(L, IR_PTR, addr_slot(slot, 0));
+}
+
+// The block of the @threadLocal globals of the thread. A function that uses a @threadLocal global of the program looks
+// it up once, when it starts (the prologue of lower_function). Where an error is thrown or caught, it is looked up
+// there, as that is rare
+static int thread_block(Lowerer *L, bool rare) {
+    if (rare) return emit_lookup_thread_block(L);
+    if (L->thread_block_slot < 0) L->thread_block_slot = ir_new_slot(L->func, 8, 8, "thread block");
+    return emit_load(L, IR_PTR, addr_slot(L->thread_block_slot, 0));
+}
+
+// Where a global variable is: in the data of the program, or in the block of the thread
+static IrAddr global_variable_addr_of(Lowerer *L, AstIdentifier *ident, bool rare) {
+    int offset = (ident->flags & IDENTIFIER_IS_THREAD_LOCAL) ? ptr_map_get(&L->thread_offsets, ident) : -1;
+    if (offset >= 0) return addr_vreg(thread_block(L, rare), offset);
+    return addr_global(global_variable(L, ident), 0);
+}
+
+static IrAddr global_variable_addr(Lowerer *L, AstIdentifier *ident) {
+    return global_variable_addr_of(L, ident, false);
+}
+
 static Value lower_identifier(Lowerer *L, AstLiteral *lit) {
     AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
     if (ident == NULL) lower_fail(L, (Ast *) lit, "Compiler Error: Unresolved identifier");
@@ -1281,7 +1396,7 @@ static Value lower_identifier(Lowerer *L, AstLiteral *lit) {
 
     AstIdentifier *declared = ident->imported_from ? ident->imported_from : ident;
     if (declared->flags & IDENTIFIER_IS_GLOBAL) {
-        return value_place(addr_global(global_variable(L, declared), 0), declared->type);
+        return value_place(global_variable_addr(L, declared), declared->type);
     }
 
     int slot = local_slot(L, ident);
@@ -1828,14 +1943,59 @@ static int attribute_value_global(Lowerer *L, AstStructLiteral *value) {
     Type *type = value->head.type;
     IrGlobal *global = ir_global_data(L->module, "attribute", NULL, type->size > 0 ? type->size : 1, type_alignment(type), true);
 
+    // The default of a member that isn't given. Not both, as a pointer, e.g of a string, is a relocation, and the first
+    // one written at an offset would win
     DynamicArray members = ((TypeStruct *) type)->node->members->identifiers;
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = da_get_deref(members, i);
+        bool given = false;
+        for (int k = 0; k < value->initializers.count; k++) {
+            AstStructInitializer *init = da_get_deref(value->initializers, k);
+            if (init->member == member) given = true;
+        }
         AstExpr *fallback = member_default_value(member);
-        if (fallback) write_constant(L, global, member->member_offset, fallback, member->type);
+        if (fallback && !given) write_constant(L, global, member->member_offset, fallback, member->type);
     }
     write_constant(L, global, 0, (AstExpr *) value, type);
     return global->index;
+}
+
+// The slice of attributedFunctionList: an AttributedFunction for each function with attribute values. The functions are
+// compiled, as the program calls them through the list
+static void write_attributed_functions(Lowerer *L, IrGlobal *list) {
+    DynamicArray functions = L->parser->attributed_functions;
+    int entry_size = runtime_size(L, "AttributedFunction");
+    int count = 0;
+    for (int i = 0; i < functions.count; i++) {
+        AstIdentifier *ident = da_get_deref(functions, i);
+        if (ident->type && ident->type->kind == TYPE_FUNCTION && !(ident->flags & IDENTIFIER_IS_POISONED)) count++;
+    }
+    if (count == 0) return;
+
+    IrGlobal *array = ir_global_data(L->module, "attributed_functions", NULL, count * entry_size, 8, true);
+    int entry = 0;
+    for (int i = 0; i < functions.count; i++) {
+        AstIdentifier *ident = da_get_deref(functions, i);
+        if (!ident->type || ident->type->kind != TYPE_FUNCTION || (ident->flags & IDENTIFIER_IS_POISONED)) continue;
+        AstFunctionDefn *func = ((TypeFunction *)ident->type)->node;
+
+        int at = entry * entry_size;
+        write_string_field(L, array, at + runtime_offset(L, "AttributedFunction", "name"), ident->name);
+        AstFile *file = ident->head.file;
+        write_string_field(L, array, at + runtime_offset(L, "AttributedFunction", "namespaceName"), file && file->ns ? file->ns->name : "");
+        write_pointer_field(array, at + runtime_offset(L, "AttributedFunction", "function"), function_global(L, func));
+
+        int attribute_count = ident->attributes.count;
+        IrGlobal *attributes = ir_global_data(L->module, "attributes", NULL, attribute_count * 16, 8, true);
+        for (int j = 0; j < attribute_count; j++) {
+            AstStructLiteral *value = da_get_deref(ident->attributes, j);
+            write_pointer_field(attributes, j * 16,     attribute_value_global(L, value));
+            write_pointer_field(attributes, j * 16 + 8, type_info_global(L, value->head.type));
+        }
+        write_slice_field(array, at + runtime_offset(L, "AttributedFunction", "attributes"), attributes->index, attribute_count);
+        entry++;
+    }
+    write_slice_field(list, 0, array->index, count);
 }
 
 static int struct_members_global(Lowerer *L, TypeStruct *struct_type, int *out_count) {
@@ -2085,7 +2245,7 @@ static Value lower_call(Lowerer *L, AstFunctionCall *call, int *ret_slots, int m
 
     // Return type for C functions returning in a register
     Type  *c_return_type = func_defn->return_types.count > 0 ? da_get_deref(func_defn->return_types, 0) : NULL;
-    IrType ir_return_type = IR_VOID;
+    IrType ir_return_type = is_c ? IR_VOID : IR_I32; // A Saad function says in eax if an error was thrown out of it
     if (is_c && ret_count == 0 && c_return_type && c_return_type->kind != TYPE_VOID) {
         if (type_is_aggregate(c_return_type)) {
             ir_return_type = int_ir_type_of_size(c_return_type->size);
@@ -2129,7 +2289,8 @@ static Value lower_call(Lowerer *L, AstFunctionCall *call, int *ret_slots, int m
     // An error that the callee threw goes on, and so does the error result that isn't taken, e.g of 'x := f();'
     if (!is_c) {
         L->line = call->head.head.start.line > 0 ? call->head.head.start.line : L->line;
-        emit_throw_check(L);
+        // A function value can be a function of C, whose eax isn't the flag, so thrownError says it then
+        emit_throw_check(L, result, callee_kind == IR_CALLEE_VREG);
         if ((call->head.head.flags & AST_FLAG_THROWS_ON_ERROR) && ret_count > 0) {
             AstIdentifier *err_param = da_get_deref(func_defn->lowered_return_params, ret_count - 1);
             (void) err_param;
@@ -2484,7 +2645,7 @@ static AstIdentifier *errors_declaration(Lowerer *L, const char *name) {
 }
 
 static IrAddr thrown_error_addr(Lowerer *L) {
-    return addr_global(global_variable(L, errors_declaration(L, "thrownError")), 0);
+    return global_variable_addr_of(L, errors_declaration(L, "thrownError"), true);
 }
 
 // The address of a NUL terminated copy of the text, as written (no escapes, e.g a Windows path)
@@ -2539,16 +2700,26 @@ static void emit_unwind(Lowerer *L) {
     }
     emit_defers_while_throwing(L, 0);
     if (is_main_function(L)) emit_errors_call(L, "reportUncaught", 0, NULL); // Ends the program
-    terminate_ret(L, IR_NO_VREG);
+    terminate_return(L, true);
 }
 
-// After a call: if it threw, the error goes on from here
-static void emit_throw_check(Lowerer *L) {
+// After a call: if it threw, the error goes on from here. 'threw' is the flag the callee returned in eax (see
+// terminate_return). With 'confirm', a flag that isn't 0 is checked with thrownError, e.g for a function value that
+// can be a function of C
+static void emit_throw_check(Lowerer *L, int threw, bool confirm) {
     if (block_is_terminated(L)) return;
-    int thrown = emit_load(L, IR_PTR, thrown_error_addr(L));
     IrBlock *throwing = create_block(L, "throw");
     IrBlock *go_on    = create_block(L, "no.throw");
-    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_PTR, thrown, emit_const(L, IR_PTR, 0)), throwing, go_on);
+    int flag_set = emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_I32, threw, emit_const(L, IR_I32, 0));
+    if (confirm) {
+        IrBlock *check = create_block(L, "check.throw");
+        terminate_br(L, flag_set, check, go_on);
+        set_block(L, check);
+        int thrown = emit_load(L, IR_PTR, thrown_error_addr(L));
+        terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_PTR, thrown, emit_const(L, IR_PTR, 0)), throwing, go_on);
+    } else {
+        terminate_br(L, flag_set, throwing, go_on);
+    }
     set_block(L, throwing);
     emit_trace_frame(L, L->line);
     emit_unwind(L);
@@ -2777,7 +2948,7 @@ static void lower_return(Lowerer *L, AstReturn *ret) {
 
     // The values are taken before the deferred statements run
     emit_defers(L, 0);
-    terminate_ret(L, IR_NO_VREG);
+    terminate_return(L, false);
     start_unreachable_block(L);
 }
 
@@ -2902,6 +3073,7 @@ static void lower_function(Lowerer *L, AstFunctionDefn *func_defn) {
     int global = ptr_map_get(&pending_functions.queued, func_defn);
     IrFunction *func = ir_function_new(L->module, L->module->globals.items[global]->name);
     func->is_entry_point = strcmp(func_defn->symbol_name, "main") == 0 && func_defn->parent_function == NULL;
+    func->return_type    = IR_I32; // If an error was thrown out of it, see terminate_return
 
     L->func     = func;
     L->ast_func = func_defn;
@@ -2909,8 +3081,12 @@ static void lower_function(Lowerer *L, AstFunctionDefn *func_defn) {
     L->loops.count = 0;
     L->defers.count = 0;
     L->tries.count = 0;
+    L->thread_block_slot = -1;
     ptr_map_clear(&L->locals);
 
+    // Filled in at the end, e.g with loading the block of the @threadLocal globals when the function uses one
+    IrBlock *prologue = create_block(L, "prologue");
+    set_block(L, prologue);
     IrBlock *entry = create_block(L, "entry");
     set_block(L, entry);
 
@@ -2937,7 +3113,20 @@ static void lower_function(Lowerer *L, AstFunctionDefn *func_defn) {
     }
 
     lower_block(L, func_defn->body);
-    terminate_ret(L, IR_NO_VREG);
+    terminate_return(L, false);
+
+    set_block(L, prologue);
+    if (func->is_entry_point) {
+        int args[2] = { emit_global_addr(L, L->thread_template), emit_const(L, IR_I64, L->thread_block_size) };
+        emit_errors_call(L, "startThreadBlocks", 2, args);
+    }
+    bool is_thread_helper = func_defn->head.head.file == L->parser->errors_file && func_defn->identifier &&
+                            (strcmp(func_defn->identifier->name, "startThreadBlocks") == 0 || strcmp(func_defn->identifier->name, "newThreadBlock") == 0);
+    if (L->thread_block_slot >= 0) {
+        if (is_thread_helper) lower_fail(L, (Ast *)func_defn, "Compiler Error: %s uses a @threadLocal global", func_defn->identifier->name);
+        emit_store(L, IR_PTR, addr_slot(L->thread_block_slot, 0), emit_lookup_thread_block(L));
+    }
+    terminate_jmp(L, entry);
 
     ir_function_finalize(func);
 }
@@ -2974,6 +3163,7 @@ IrModule *lower_program(Parser *parser, AstFile *main_file) {
         if (import->imported_file && strcmp(import->string, "runtime") == 0) L->runtime_scope = import->imported_file->scope;
     }
 
+    layout_thread_locals(L);
     function_global(L, ((TypeFunction *) main_ident->type)->node);
 
     for (int i = 0; i < pending_functions.list.count; i++) {

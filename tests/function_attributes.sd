@@ -1,0 +1,65 @@
+// Attribute values on functions and methods, listed by attributedFunctions(), e.g to register the routes of a server
+
+import fmt;
+
+@attribute
+Route :: struct {
+    verb: string = "GET";
+    path:   string;
+}
+
+@attribute
+Slow :: struct {}
+
+Request :: struct {
+    path:   string;
+    answer: string;
+}
+
+@Route(path: "/posts")
+listPosts :: (request: *Request) {
+    request.answer = "all posts";
+}
+
+@Route("POST", "/posts") @Slow
+createPost :: (request: *Request) {
+    request.answer = "made a post";
+}
+
+notListed :: (request: *Request) {}
+
+Api :: struct {
+    @Route(path: "/health")
+    health :: (request: *Request) {
+        request.answer = "ok";
+    }
+}
+
+// An attribute that gives a member with a default, on a struct member. The default was written over it
+Endpoint :: struct {
+    @Route("PUT", "/members")
+    target: string;
+}
+
+main :: () {
+    endpoint: any = Endpoint{};
+    member := &(endpoint.type as *TypeStruct).members[0];
+    put: Route;
+    assert(attributeOf(member, &put) && put.verb == "PUT" && put.path == "/members");
+
+    names: [..]string;
+    for f in attributedFunctions() {
+        route: Route;
+        if !f.attribute(&route) { continue; }
+        handler := f.function as (request: *Request);
+        request := Request{path: route.path};
+        handler(&request);
+        slow: Slow;
+        names.add(fmt.sprint("% % % % %", f.name, route.verb, route.path, request.answer, f.attribute(&slow)));
+    }
+    assert(names.count == 3);
+    assert(names.contains("listPosts GET /posts all posts false"));
+    assert(names.contains("createPost POST /posts made a post true"));
+    assert(names.contains("health GET /health ok false"));
+    fmt.print("function attributes ok");
+}
