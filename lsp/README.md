@@ -49,15 +49,21 @@ The extension is in `lsp/vscode`. It has the highlighting of Saad, an icon for `
 `lsp/vscode/icons`) and starts the server. VS Code shows the icon of a language when the file icon theme has no icon of
 its own for the file, as with the default theme (Seti).
 
+Install **Saad** (`jakobsaadbye.saad`) from the Extensions view: it is on the Visual Studio Marketplace and on Open VSX
+(for VSCodium and Cursor). VS Code updates it by itself.
+
+To publish a new version, raise `version` in `lsp/vscode/package.json` and add it to `lsp/vscode/CHANGELOG.md`. When it
+is merged to `main`, `.github/workflows/vscode-extension.yml` publishes it to both. A version that is published already is
+skipped. The workflow needs the secrets `VSCE_PAT` (Marketplace) and `OVSX_PAT` (Open VSX, optional) of the repository.
+
+To try a change before it is published:
+
 ```
 cd lsp/vscode
 npm install
-npx @vscode/vsce package         # saad-0.3.0.vsix
-code --install-extension saad-0.3.0.vsix
+npx @vscode/vsce package    # saad-0.3.0.vsix
+code --install-extension saad-0.3.0.vsix --force
 ```
-
-VS Code keeps an extension that is installed with the same version, so the version in `package.json` goes up when the
-highlighting changes, e.g for new keywords. `--force` installs it again anyway.
 
 Or open `lsp/vscode` in VS Code and press F5 to run it in a new window.
 

@@ -1,0 +1,54 @@
+# Publishes the VS Code extension (lsp/vscode) when its version in package.json changes on main, to the
+# Visual Studio Marketplace (VS Code) and Open VSX (VSCodium, Cursor, ...). Installed copies update by themselves.
+#
+# Secrets of the repository (Settings > Secrets and variables > Actions):
+#   VSCE_PAT  a token of Azure DevOps with the scope Marketplace > Manage, for the publisher in package.json
+#   OVSX_PAT  a token of open-vsx.org, for the namespace of the publisher. Optional
+#
+# A version that is published already is skipped, so only raising the version publishes.
+
+name: VS Code extension
+
+on:
+  push:
+    branches: [main]
+    paths: ["lsp/vscode/**"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: lsp/vscode
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install
+        run: npm ci
+
+      - name: Package
+        run: npx --yes @vscode/vsce@3 package --out saad.vsix
+
+      - name: Publish to the Visual Studio Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then echo "No VSCE_PAT secret, so it isn't published to the Marketplace"; exit 0; fi
+          npx --yes @vscode/vsce@3 publish --packagePath saad.vsix --skip-duplicate
+
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then echo "No OVSX_PAT secret, so it isn't published to Open VSX"; exit 0; fi
+          npx --yes ovsx@0.10 publish saad.vsix --skip-duplicate
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: saad-vsix
+          path: lsp/vscode/saad.vsix
