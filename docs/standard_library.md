@@ -80,13 +80,14 @@ an anonymous struct `{w: 1.000000, h: 2.000000}`, and the variant without a valu
 ## os
 
 ```odin
-text, ok := os.readFile("config.txt");      // the whole file, allocated with malloc
-os.writeFile("out.txt", "Hello");           // creates or replaces, false on failure
+text, err := os.readFile("config.txt");     // the whole file. err is an os.NotFound when it isn't there
+text := os.readFile("config.txt");          // the same, and the error is thrown (see docs/errors.md)
+os.writeFile("out.txt", "Hello");           // creates or replaces. An os.IOError when it can't, thrown here
 os.appendFile("log.txt", "line\n");
-os.fileExists("out.txt");
+os.fileExists("out.txt");                   // a bool: it asks, and can't fail
 os.renameFile("out.txt", "new.txt");
-os.removeFile("new.txt");
-os.makeDir("out");                          // true when it is there afterwards, also when it was there before
+_ := os.removeFile("new.txt");              // taken: a file that isn't there isn't thrown
+os.makeDir("out");                          // also fine when it was there before
 home, found := os.getEnv("HOME");
 code := os.run("echo hi");                  // runs a shell command, returns its exit code
 text, code := os.output("git status");      // runs a shell command, returns what it wrote and its exit code
@@ -236,7 +237,7 @@ Person :: struct {
 text := json.encode(person);              // {"first_name":"Ada","age":36,...}
 text := json.encode(person, json.Pretty); // over more lines
 
-p, err := json.decode<Person>(text);      // err is "" when it worked, otherwise e.g "address.zip: Expected a number, but got a string"
+p, err := json.decode<Person>(text);      // err is null when it worked, otherwise a json.DecodeError, e.g "address.zip: Expected a number, but got a string"
 err2 := json.decodeInto(text, &settings); // into a value that exists, which keeps what the JSON doesn't have
 
 value, parseErr := json.parse(text);      // a json.Value of any shape

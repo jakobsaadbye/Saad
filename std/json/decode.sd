@@ -19,28 +19,33 @@ import mem;
 // * A null leaves the value as it is, except for pointers, which become null, and optionals (?T), which become empty
 // * Strings, slices, lists, maps and the values of pointers are allocated with malloc
 // * Enums are read from the name of the value, e.g "open", or its number
-decode :: <T>(text: string, options := Options{}) -> T, string {
+// * The error is of the kind json.DecodeError, e.g "age: expected a number, got a string" or a syntax error of the text
+decode :: <T>(text: string, options := Options{}) -> T, error {
     value: T;
     err := decodeInto(text, &value, options);
     return value, err;
 }
 
 // Like decode, but into a value that exists. Members that are not in the JSON keep their value
-decodeInto :: <T>(text: string, value: *T, options := Options{}) -> string {
+decodeInto :: <T>(text: string, value: *T, options := Options{}) -> error {
     root, err := parse(text);
-    if err != "" {
+    if err != null {
         return err;
     }
 
     boxed: any = value;
     pointer := boxed.type as *TypePointer;
     target  := *(boxed.data as **void);
-    err = assign(root, target, pointer.pointerTo, "", &options);
+    failed := assign(root, target, pointer.pointerTo, "", &options);
 
     // The strings of the parsed values are used by the decoded value, so only the arrays and objects are freed
     root.free();
-    return err;
+    if failed != "" { return newError(failed, DecodeError); }
+    return null;
 }
+
+// The kind of the errors of decode, decodeInto and parse
+DecodeError :: ErrorKind{"json.DecodeError"};
 
 // A copy of the value with its own arrays and objects
 clone :: method (v: Value) -> Value {

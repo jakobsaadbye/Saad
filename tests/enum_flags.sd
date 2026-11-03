@@ -51,7 +51,7 @@ main :: () {
     text := json.encode(Settings{name: "a", options: .verbose | .color});
     assert(text == "{\"name\":\"a\",\"options\":[\"verbose\",\"color\"]}");
     back, err := json.decode<Settings>(text);
-    assert(err == "" && back.options == .verbose | .color);
+    assert(err == null && back.options == .verbose | .color);
 
     // The runtime's own flags of a type are an enum flags
     maybe: ?int;

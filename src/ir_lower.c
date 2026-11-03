@@ -820,6 +820,7 @@ static int declare_local(Lowerer *L, AstIdentifier *ident) {
 static Value lower_expr(Lowerer *L, AstExpr *expr);
 static Value lower_place(Lowerer *L, AstExpr *expr);
 static void emit_errors_call(Lowerer *L, const char *name, int arg_count, int *args);
+bool bounds_checks = true; // Indexes of arrays, slices, lists and strings are checked, unless built with --unchecked
 static void emit_trace_frame(Lowerer *L, int line);
 static void emit_unwind(Lowerer *L);
 static void emit_throw_check(Lowerer *L);
@@ -1351,16 +1352,34 @@ static IrAddr array_access_addr(Lowerer *L, AstArrayAccess *aa) {
     }
 
     int data;
+    int count = -1; // The number of elements, for the bounds check. A pointer has none
     if (left_type->kind == TYPE_POINTER) {
         data = value_to_scalar(L, lower_expr(L, aa->left));
     } else if (is_fixed_array(left_type)) {
         data = addr_to_ptr(L, lower_place(L, aa->left).addr);
+        count = emit_const(L, IR_I64, fixed_array_count((TypeArray *) left_type));
     } else {
-        // slices, dynamic arrays, variadics and strings all start with a data pointer
-        data = emit_load(L, IR_PTR, lower_place(L, aa->left).addr);
+        // slices, dynamic arrays, variadics and strings all start with a data pointer, and the count after it
+        IrAddr place = lower_place(L, aa->left).addr;
+        data  = emit_load(L, IR_PTR, place);
+        count = emit_load(L, IR_I64, addr_add(place, 8));
     }
 
     int index  = lower_scalar_as(L, aa->index_expr, primitive_type(PRIMITIVE_I64));
+
+    // An index outside of the elements throws a Panic. The compare is unsigned, so a negative index is outside too
+    bool into_pointer = (aa->head.head.flags & AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER) != 0; // e.g self.data[i] of a *T
+    if (count >= 0 && bounds_checks && !into_pointer) {
+        IrBlock *outside = create_block(L, "index.out.of.bounds");
+        IrBlock *inside  = create_block(L, "index");
+        terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_ULT, IR_I64, index, count), inside, outside);
+        set_block(L, outside);
+        int args[2] = { index, count };
+        emit_errors_call(L, "panicIndexOutOfBounds", 2, args);
+        emit_trace_frame(L, aa->head.head.start.line);
+        emit_unwind(L);
+        set_block(L, inside);
+    }
     int offset = emit_binop(L, IR_MUL, IR_I64, index, emit_const(L, IR_I64, elem_type->size));
     return addr_vreg(emit_ptr_add(L, data, offset), 0);
 }
@@ -2344,6 +2363,19 @@ static void lower_assignment(Lowerer *L, AstAssignment *assign) {
 }
 
 static void lower_assert(Lowerer *L, AstAssert *assertion) {
+    // A failed assert throws a Panic, with the place of the assert in its trace
+    IrBlock *failed = create_block(L, "assert.failed");
+    IrBlock *ok     = create_block(L, "assert.ok");
+    lower_condition(L, assertion->expr, ok, failed);
+    set_block(L, failed);
+    emit_errors_call(L, "panicAssertion", 0, NULL);
+    emit_trace_frame(L, assertion->head.start.line);
+    emit_unwind(L);
+    set_block(L, ok);
+}
+
+// The assert of the C runtime, which ends the program. Not used: an assert throws
+__attribute__((unused)) static void lower_assert_with_c(Lowerer *L, AstAssert *assertion) {
     // runtime_builtin_assert(condition: bool, filename: string, line: u64)
     int args[3];
     args[0] = lower_scalar_as(L, assertion->expr, primitive_type(PRIMITIVE_BOOL));

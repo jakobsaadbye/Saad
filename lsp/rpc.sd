@@ -53,8 +53,8 @@ read :: () -> Message, bool {
         }
 
         value, err := json.parse(body);
-        if err != "" {
-            log(fmt.sprint("A message that isn't JSON was skipped: %", err));
+        if err != null {
+            log(fmt.sprint("A message that isn't JSON was skipped: %", err.message));
             continue;
         }
 

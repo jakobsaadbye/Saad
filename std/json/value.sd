@@ -160,8 +160,8 @@ toJson :: method (v: Value, options := Options{}) -> string {
 // Parsing
 //////////////////////////////////////////////////////////////////////////////////////
 
-// Parses JSON text. err is empty when it is valid JSON, otherwise it tells what is wrong and where
-parse :: (text: string) -> Value, string {
+// Parses JSON text. err is null when it is valid JSON, otherwise it tells what is wrong and where (a json.DecodeError)
+parse :: (text: string) -> Value, error {
     p := Parser{text: text};
     p.skipSpace();
     value, ok := p.parseValue(0);
@@ -173,9 +173,9 @@ parse :: (text: string) -> Value, string {
         }
     }
     if !ok {
-        return Value{}, p.error;
+        return Value{}, newError(p.error, DecodeError);
     }
-    return value, "";
+    return value, null;
 }
 
 @private MaxDepth :: 512;

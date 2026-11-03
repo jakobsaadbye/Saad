@@ -21,6 +21,8 @@ save :: (ok: bool) -> error {
     return errorf("can't save %", 42);
 }
 
+third :: (sl: []int) -> int { return sl[2]; }
+
 divide :: (a: int, b: int) -> int {
     return a / b;
 }
@@ -72,6 +74,32 @@ main :: () {
         assert(false);
     } catch (e) {
         assert(e.is(Panic) && e.message == "Division by zero");
+    }
+
+    // An index outside of the elements is a Panic: of a fixed array, a slice, a list and a string
+    xs := [1, 2, 3];
+    list: [..]int;
+    list.add(1);
+    text := "ab";
+    misses := 0;
+    for i in 0..4 {
+        try {
+            if i == 0 { n := xs[5 - i * 0]; }
+            if i == 1 { n := third([7, 8]); }
+            if i == 2 { n := list[1]; }
+            if i == 3 { c := text[-1]; }
+        } catch (e) {
+            assert(e.is(Panic) && e.message.indexOf("is out of bounds") > 0);
+            misses += 1;
+        }
+    }
+    assert(misses == 4 && xs[2] == 3 && list[0] == 1 && text[1] == 'b');
+
+    // A failed assert is a Panic too, with the place of the assert first in its trace
+    try {
+        assert(misses == 0);
+    } catch (e) {
+        assert(e.message == "Assertion failed" && e.trace[0].line > 0);
     }
 
     // A catch can throw again, and the cause is kept

@@ -4174,9 +4174,18 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
     return true;
 }
 
+// An error isn't a condition: 'if err' would be true when there is one, which reads the other way. It is compared with
+// null, e.g if err != null
+static bool reject_error_condition(Typer *typer, AstExpr *expr, Type *type) {
+    if (!is_error_type(typer, type)) return true;
+    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "An error isn't a condition. Compare it with null, e.g 'err != null' when there is one, or 'err == null' when it worked");
+    return false;
+}
+
 bool check_assert(Typer *typer, AstAssert *ast_assert) {
     Type *expr_type = check_expression(typer, ast_assert->expr, NULL);
     if (!expr_type) return false;
+    if (!reject_error_condition(typer, ast_assert->expr, expr_type)) return false;
     if (expr_type->kind != TYPE_BOOL && expr_type->kind != TYPE_POINTER) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_assert), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(expr_type));
         return false;
@@ -4640,6 +4649,7 @@ bool check_switch(Typer *typer, AstSwitch *sw) {
 bool check_if(Typer *typer, AstIf *ast_if) {
     Type *condition_type = check_expression(typer, ast_if->condition, NULL);
     if (!condition_type) return NULL;
+    if (!reject_error_condition(typer, ast_if->condition, condition_type)) return false;
 
     if (condition_type->kind != TYPE_BOOL && condition_type->kind != TYPE_POINTER) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_if->condition), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(condition_type));
@@ -8243,6 +8253,10 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     TypeKind type_kind = expr_type->kind;
 
     if (unary->operator == OP_NOT) {
+        if (is_error_type(typer, expr_type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)unary, "An error isn't a condition. Compare it with null, e.g 'err == null' when it worked");
+            return NULL;
+        }
         if (type_kind != TYPE_BOOL && type_kind != TYPE_POINTER) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Operator '!' expects expression to be type bool or pointer. Got type %s\n", type_to_str(expr_type));
             return NULL;

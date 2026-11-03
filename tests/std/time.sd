@@ -95,9 +95,9 @@ main :: () {
     text := json.encode(e);
     assert(text == "{\"name\":\"launch\",\"at\":\"2025-11-02T11:15:00.25+01:00\",\"end\":null}");
     back, err := json.decode<Event>(text);
-    assert(err == "" && back.at == e.at && back.end == null && back.cache == 3);
+    assert(err == null && back.at == e.at && back.end == null && back.cache == 3);
     _, err2 := json.decode<Event>("{\"name\": \"x\", \"at\": \"soon\"}");
-    assert(err2 == "at: \"soon\" is not a time like 2026-11-02T10:15:00Z");
+    assert(err2.message == "at: \"soon\" is not a time like 2026-11-02T10:15:00Z");
 
     print("time ok");
 }

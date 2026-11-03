@@ -22,6 +22,14 @@ config := readConfig(path);                       // not taken: if there is an e
 The rule: **an error that is taken is a value, and one that isn't is thrown.** A function that gives only an error,
 e.g `save :: () -> error`, throws it when it is called as a statement, `save();`, and gives it with `err := save();`.
 
+An error isn't a condition: `if err { }`, `!err` and `assert(err)` are compile errors, as they read the other way
+round. Compare it with `null`: `if err != null { }`.
+
+The standard library gives errors: `dbms` (`dbms.DatabaseError`, `dbms.QueryError`, `dbms.NoLink`), `json.decode`,
+`json.decodeInto` and `json.parse` (`json.DecodeError`), and the file functions of `os`, `readFile`, `writeFile`,
+`appendFile`, `makeDir`, `removeFile` and `renameFile` (`os.NotFound`, `os.IOError`). What asks a question and can't fail
+stays a `bool`, e.g `os.fileExists` and the `found` of `os.getEnv`.
+
 ## try, catch and throw
 
 A thrown error leaves the functions it is thrown through, running their `defer`s on the way, up to the `catch` of a
@@ -51,8 +59,14 @@ handlePost :: (req: Request) -> Response {
       at main (main.sd:37)
   ```
 
-* A division by zero throws a `Panic`, and so does `mem.allocate` when there is no memory left, so a web server can
-  turn them into a 500 instead of crashing. `panic("message")` throws one too.
+* These throw a `Panic`, so a web server can turn them into a 500 instead of crashing:
+  * a division by zero
+  * an index outside of the elements of a fixed array, a slice, a list or a string, e.g `Index 5 is out of bounds, as
+    there are 3 elements`. An index into a pointer, e.g `p[i]` of a `*u8`, isn't checked. `saad build --unchecked`
+    leaves the checks out
+  * an `assert` whose condition is false, with the place of the assert first in the trace
+  * `mem.allocate` and `mem.resize` when there is no memory left
+  * `panic("message")`
 
 ## The error type
 

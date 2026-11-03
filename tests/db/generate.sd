@@ -32,8 +32,8 @@ main :: () {
     }
 
     for file in files {
-        expected, ok := os.readFile(sprint("%/%", Golden, file.name));
-        if !ok || file.code != expected {
+        expected, notRead := os.readFile(sprint("%/%", Golden, file.name));
+        if notRead != null || file.code != expected {
             os.makeDir("tests/db/build/entity");
             os.writeFile(sprint("tests/db/build/%", file.name), file.code);
             print("The generated % isn't the one in % any more. It is in tests/db/build/%", file.name, Golden, file.name);
@@ -44,11 +44,11 @@ main :: () {
     // Writing into a folder: made when it isn't there. A later run removes the files of tables that are gone, but not
     // files written by hand
     folder := "tests/db/build/generated";
-    for file in files { os.removeFile(sprint("%/%", folder, file.name)); }
+    for file in files { _ := os.removeFile(sprint("%/%", folder, file.name)); } // From an earlier run, if there was one
     _, e1 := postgres.writeFiles(folder, files);
     assert(e1 == null);
     assert(os.fileExists(sprint("%/entity/category.sd", folder)));
-    assert(os.writeFile(sprint("%/entity/mine.sd", folder), "namespace entities;\n"));
+    assert(os.writeFile(sprint("%/entity/mine.sd", folder), "namespace entities;\n") == null);
 
     fewer := files.filter(f => f.name != "entity/category.sd");
     removed, e2 := postgres.writeFiles(folder, fewer);
