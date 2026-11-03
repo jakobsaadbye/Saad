@@ -73,6 +73,19 @@ SockAddrIn :: struct {
         freeaddrinfo    :: (info: *AddrInfo);
     }
 
+    // struct pollfd of WSAPoll
+    PollFd :: struct {
+        socket:  Socket;
+        events:  i16;
+        revents: i16;
+    }
+    PollIn   :: 0x0100;   // POLLRDNORM: there is something to read, or the other end closed
+    PollDone :: 0x0100 | 0x0001 | 0x0002 | 0x0004;   // Readable, POLLERR, POLLHUP or POLLNVAL
+
+    extern "ws2_32.dll" {
+        WSAPoll :: (fds: *PollFd, count: u32, milliseconds: i32) -> i32;
+    }
+
     WsaeTimedOut    :: 10060;
     WsaeConnReset   :: 10054;
     WsaeConnAborted :: 10053;
@@ -126,6 +139,19 @@ SockAddrIn :: struct {
         gai_strerror :: (code: i32) -> c.string;
         __errno_location :: () -> *i32;
         strerror     :: (code: i32) -> c.string;
+    }
+
+    // struct pollfd of poll.h
+    PollFd :: struct {
+        socket:  Socket;
+        events:  i16;
+        revents: i16;
+    }
+    PollIn   :: 0x001;   // POLLIN
+    PollDone :: 0x001 | 0x008 | 0x010 | 0x020;   // Readable, POLLERR, POLLHUP or POLLNVAL
+
+    extern "C" {
+        poll :: (fds: *PollFd, count: u64, milliseconds: i32) -> i32;
     }
 
     Eagain       :: 11;    // A timeout of SO_RCVTIMEO or SO_SNDTIMEO

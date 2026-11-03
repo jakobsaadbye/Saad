@@ -229,6 +229,52 @@ close :: method (listener: *Listener) {
 }
 
 //
+// Poll: waits until one of many sockets can be read, e.g for a server that keeps many connections open
+//
+//     p: net.Poll;
+//     p.add(listener.socket);
+//     p.add(conn.socket);
+//     n := p.wait(1000);          // Milliseconds, -1 for ever. 0 when the time was up
+//     if p.ready(1) { ... }       // conn has something to read, or was closed
+//
+
+Poll :: struct {
+    fds: [..]sys.PollFd;
+}
+
+add :: method (p: *Poll, socket: sys.Socket) {
+    p.fds.add(sys.PollFd{socket: socket, events: sys.PollIn});
+}
+
+clear :: method (p: *Poll) {
+    p.fds.clear();
+}
+
+free :: method (p: *Poll) {
+    p.fds.free();
+}
+
+// Waits until a socket can be read, and gives how many can
+wait :: method (p: *Poll, milliseconds: int) -> int, error {
+    if p.fds.count == 0 {
+        if milliseconds > 0 { thread.sleep(milliseconds); }
+        return 0, null;
+    }
+    #if OS == .windows {
+        n := sys.WSAPoll(p.fds.data, p.fds.count as u32, milliseconds as i32) as int;
+    } else {
+        n := sys.poll(p.fds.data, p.fds.count as u64, milliseconds as i32) as int;
+    }
+    if n < 0 { return 0, lastError("poll"); }
+    return n, null;
+}
+
+// If the socket at the index can be read, or was closed, after wait()
+ready :: method (p: *Poll, index: int) -> bool {
+    return (p.fds[index].revents & sys.PollDone) != 0;
+}
+
+//
 // Conn
 //
 

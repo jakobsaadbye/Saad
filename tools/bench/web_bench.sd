@@ -1,0 +1,157 @@
+// A load test of net.http and web: clients on threads send requests over keep-alive connections, one after the other,
+// for a while, and it prints the requests per second and the slowest request. Run it with
+//
+//     saad run tools/bench/web_bench.sd
+//
+// 1. A handler of net.http that answers a short text
+// 2. A web endpoint with a parameter and a JSON answer
+// 3. The endpoint again, while many connections are open and idle, as browsers keep them
+
+import net;
+import net.http;
+import web;
+import thread;
+import time;
+import bytes;
+import fmt;
+import mem;
+
+Point :: struct {
+    x: int;
+    y: int;
+    label: string;
+}
+
+@web.endpoint(.get)
+double :: (session: *web.Session, x: int, y: int) -> Point {
+    return Point{x * 2, y * 2, fmt.sprint("% and %", x, y)};
+}
+
+hello :: (w: *http.ResponseWriter, r: *http.Request) {
+    w.write("hello");
+}
+
+Client :: struct {
+    address:  string;
+    request:  string;
+    until:    time.Time;
+    done:     int;
+    slowest:  i64;       // Nanoseconds
+    failed:   bool;
+}
+
+// Sends the request over one connection until the time is up
+run :: (client: *Client) {
+    conn, err := net.dial(client.address);
+    if err != null { client.failed = true; return; }
+    defer conn.close();
+    conn.setReadTimeout(3000);   // A client that isn't answered gives up
+    buffer: bytes.Buffer;
+    defer buffer.free();
+    while time.now().before(client.until) {
+        start := time.now();
+        if conn.write(client.request) != null { client.failed = true; return; }
+        if !readResponse(conn, &buffer) { client.failed = true; return; }
+        took := time.now().sub(start);
+        if took > client.slowest { client.slowest = took; }
+        client.done += 1;
+    }
+}
+
+// Reads one response: the head and Content-Length bytes
+readResponse :: (conn: *net.Conn, buffer: *bytes.Buffer) -> bool {
+    while buffer.unread().indexOf("\r\n\r\n") < 0 {
+        n, err := conn.read(buffer.space(4096));
+        if err != null { return false; }
+        buffer.wrote(n);
+    }
+    head, _ := buffer.readUntil("\r\n\r\n");
+    at := head.indexOf("Content-Length: ");
+    length := 0;
+    for ch in head.slice(at + 16) {
+        if !ch.isDigit() { break; }
+        length = length * 10 + ch.digitValue();
+    }
+    while buffer.available() < length {
+        n, err := conn.read(buffer.space(4096));
+        if err != null { return false; }
+        buffer.wrote(n);
+    }
+    buffer.skip(length);
+    return true;
+}
+
+measure :: (name: string, address: string, request: string, clients: int, seconds: int) {
+    list: [..]Client;
+    list.allocator = mem.heap();
+    until := time.now().add(time.Second * seconds as i64);
+    for i in 0..clients { list.add(Client{address: address, request: request, until: until}); }
+    threads: [..]thread.Thread;
+    for i in 0..clients { threads.add(thread.spawn(run, list.indexRef(i))); }
+    for i in 0..threads.count { threads.indexRef(i).join(); }
+
+    total := 0;
+    slowest: i64 = 0;
+    failed := 0;
+    unserved := 0;
+    for c in list {
+        total += c.done;
+        if c.slowest > slowest { slowest = c.slowest; }
+        if c.failed { failed += 1; }
+        if c.done == 0 { unserved += 1; }
+    }
+    note := "";
+    if unserved > 0 { note = fmt.sprint(", % clients got no answer", unserved); }
+    else if failed > 0 { note = fmt.sprint(", % clients failed", failed); }
+    fmt.print("% % clients: % requests/s, the slowest took % ms%\n", name, clients, total / seconds, slowest / 1000000, note);
+}
+
+serve :: (server: *http.Server) {
+    server.serve();
+}
+
+serveApp :: (app: *web.App) {
+    app.server.serve();
+}
+
+main :: () {
+    // 1
+    router: http.Router;
+    router.handle("GET /hello", hello);
+    server: http.Server;
+    server.router = &router;
+    server.log = false;
+    server.listen("127.0.0.1:0");
+    plain := thread.spawn(serve, &server);
+    address := server.listener.addr.toString();
+    get := "GET /hello HTTP/1.1\r\nHost: bench\r\n\r\n";
+    measure("http handler,      ", address, get, 4, 1);
+    measure("http handler,      ", address, get, 32, 1);
+    server.shutdown();
+    plain.join();
+
+    // 2
+    app := web.newApp<web.Session>("/v1");
+    app.server.log = false;
+    app.server.readTimeout = 5000;
+    app.server.listen("127.0.0.1:0");
+    serving := thread.spawn(serveApp, app);
+    address = app.server.listener.addr.toString();
+    call := "GET /v1/double?x=3&y=4 HTTP/1.1\r\nHost: bench\r\n\r\n";
+    measure("web endpoint,      ", address, call, 4, 1);
+    measure("web endpoint,      ", address, call, 32, 1);
+
+    // 3: idle connections that send nothing, like the tabs of browsers
+    idle: [..]*net.Conn;
+    idle.allocator = mem.heap();
+    for i in 0..64 {
+        conn, err := net.dial(address);
+        if err == null { idle.add(conn); }
+    }
+    thread.sleep(100);
+    measure("with 64 idle conns,", address, call, 4, 1);
+    for conn in idle { conn.close(); }
+
+    app.server.shutdown();
+    serving.join();
+}

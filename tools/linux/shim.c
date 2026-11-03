@@ -190,3 +190,7 @@ MS void    ms_freeaddrinfo(struct addrinfo *info) { freeaddrinfo(info); }
 MS const char *ms_gai_strerror(int code) { return gai_strerror(code); }
 MS int    *ms___errno_location(void) { return __errno_location(); }
 MS char   *ms_strerror(int code) { return strerror(code); }
+
+// ---- poll (std/net Poll) ----
+#include <poll.h>
+MS int ms_poll(struct pollfd *fds, uint64_t count, int milliseconds) { return poll(fds, (nfds_t)count, milliseconds); }

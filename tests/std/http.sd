@@ -136,6 +136,15 @@ main :: () {
     text = raw(address, "GET /hello/a HTTP/1.0\r\n\r\n");   // HTTP/1.0 closes after the response
     assert(text.startsWith("HTTP/1.1 200") && text.indexOf("Connection: close") > 0);
 
+    // Idle connections, e.g of browsers, don't keep the 2 workers from answering others
+    idle: [..]*net.Conn;
+    for i in 0..5 { idle.add(net.dial(address)); }
+    thread.sleep(50);
+    response = http.get(fmt.sprint("%/hello/busy", base));
+    assert(response.status == 200 && response.body == "hello busy");
+    response.free();
+    for conn in idle { conn.close(); }
+
     // Urls the client doesn't take
     _, err := http.get("https://example.com/");
     assert(err != null && err.is(http.ProtocolError));

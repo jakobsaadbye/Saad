@@ -1,0 +1,21 @@
+// Constants of bits: | & ^ % << >> are folded, and an untyped constant takes the number type of a struct member
+
+Flags :: 0x0100 | 0x0001 | 0x0002;
+Mask  :: Flags & 0xFF;
+Flip  :: 0b1010 ^ 0b0110;
+Shift :: 1 << 10;
+Back  :: Shift >> 3;
+Rest  :: 17 % 5;
+
+Fd :: struct { events: i16; ratio: f64; }
+
+main :: () {
+    fd := Fd{events: Flags, ratio: Shift};   // An untyped constant takes the type of the member
+    positional := Fd{Mask};
+    assert(fd.events == 259 && fd.ratio == 1024.0 && positional.events == 3);
+
+    assert(Flags == 0x0103 && Mask == 3 && Flip == 0b1100);
+    assert(Shift == 1024 && Back == 128 && Rest == 2);
+    x: u16 = Flags;
+    assert(x == 259);
+}
