@@ -84,6 +84,7 @@ void report_error_range(Parser *parser, Pos start, Pos end, const char *message,
 void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const char *message, ...);
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
 static void report_missing_semicolon(Parser *parser);
+AstBlock *parse_multi_assignment(Parser *parser, AstExpr *first);
 
 
 Parser parser_init(Lexer *lexer) {
@@ -1322,7 +1323,13 @@ Ast *parse_statement(Parser *parser) {
         }
 
         Token next = peek_next_token(parser);
-        if (is_assignment_operator(next)) {
+        if (next.type == ',') {
+            // a, b = f(); or a, b = b, a;
+            stmt = (Ast *)parse_multi_assignment(parser, lhs);
+            statement_ends_with_semicolon = true;
+            matched_a_statement = true; // An error is reported
+        }
+        else if (is_assignment_operator(next)) {
             eat_token(parser);
             stmt = (Ast *)(parse_assignment(parser, lhs, next));
             if (stmt) {
@@ -2592,6 +2599,150 @@ AstStruct *parse_struct_defn(Parser *parser) {
     ident->flags |= IDENTIFIER_IS_RESOLVED | IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_CONSTANT;
 
     return struct_defn;
+}
+
+static bool is_place_expression(AstExpr *lhs) {
+    if (lhs->head.kind == AST_LITERAL) return ((AstLiteral *)lhs)->kind == LITERAL_IDENTIFIER;
+    return lhs->head.kind == AST_MEMBER_ACCESS || lhs->head.kind == AST_ARRAY_ACCESS || lhs->head.kind == AST_UNARY;
+}
+
+static bool is_discard(AstExpr *lhs) {
+    return lhs->head.kind == AST_LITERAL && ((AstLiteral *)lhs)->kind == LITERAL_IDENTIFIER && strcmp(((AstLiteral *)lhs)->as.value.identifier.name, "_") == 0;
+}
+
+// A value that reads nothing, so it can be assigned after the others, and gets the type of its place, e.g 2 for an f64,
+// .open for a Status or {1, 2} for a Point
+static bool reads_nothing(AstExpr *value) {
+    switch (value->head.kind) {
+    case AST_LITERAL:        return ((AstLiteral *)value)->kind != LITERAL_IDENTIFIER;
+    case AST_ENUM_LITERAL:   return true;
+    case AST_FUNCTION_DEFN:  return true;
+    case AST_UNARY:          return reads_nothing(((AstUnary *)value)->expr);
+    default:                 return false;
+    }
+}
+
+// An identifier that the compiler wrote, at the position of 'at'. It isn't in the index
+static AstLiteral *generated_identifier_literal(Parser *parser, char *name, Ast *at) {
+    AstLiteral *literal = ast_allocate(parser, sizeof(AstLiteral));
+    literal->head.head.kind  = AST_LITERAL;
+    literal->head.head.file  = parser->current_file;
+    literal->head.head.start = at->start;
+    literal->head.head.end   = at->end;
+    literal->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    literal->kind = LITERAL_IDENTIFIER;
+    literal->as.value.identifier.name   = name;
+    literal->as.value.identifier.length = (int)strlen(name);
+    return literal;
+}
+
+// 'a, b = f();', 'x, err = conn.read(buf);' or 'a, b = b, a;': the values are given to places that exist. It is made
+// into a block that takes the values first, and then assigns them, so 'a, b = b, a' swaps:
+//
+//   { $1, $2 := f(); a = $1; b = $2; }
+//
+// '_' leaves a value out, e.g 'n, _ = conn.read(buf);'
+AstBlock *parse_multi_assignment(Parser *parser, AstExpr *first) {
+    DynamicArray places = da_init(4, sizeof(AstExpr *));
+    da_append(&places, first);
+    while (peek_next_token(parser).type == ',') {
+        eat_token(parser);
+        AstExpr *place = parse_expression(parser, MIN_PRECEDENCE);
+        if (!place) return NULL;
+        da_append(&places, place);
+    }
+    for (int i = 0; i < places.count; i++) {
+        AstExpr *place = ((AstExpr **)places.items)[i];
+        if (!is_place_expression(place)) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)place, "Syntax Error: Only a variable, a member, an element or a '*p' can be given a value");
+            return NULL;
+        }
+    }
+
+    Token op = peek_next_token(parser);
+    if (op.type != '=') {
+        if (op.type == TOKEN_COLON_EQUAL) {
+            report_error_token(parser, LABEL_ERROR, op, "Syntax Error: ':=' declares names, so the names before it can't be members or elements");
+        } else if (is_assignment_operator(op)) {
+            report_error_token(parser, LABEL_ERROR, op, "Syntax Error: Several places are given values with '=', not '%s'", token_type_to_str(op.type));
+        } else {
+            report_error_token(parser, LABEL_ERROR, op, "Syntax Error: Expected '=' after the places, e.g a, b = f();");
+        }
+        return NULL;
+    }
+    eat_token(parser);
+
+    AstBlock *block = new_block(parser, BLOCK_IMPERATIVE);
+    block->head.start = first->head.start;
+
+    AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
+    decl->head.kind = AST_DECLARATION;
+    decl->head.file = parser->current_file;
+    decl->head.flags = AST_FLAG_COMPILER_GENERATED;
+    decl->flags     = DECLARATION_INFER;
+    decl->idents    = da_init(places.count, sizeof(AstIdentifier *));
+    decl->values    = da_init(2, sizeof(AstExpr *));
+    decl->values_token_index = parser->current_token_index;
+    bool ok = parse_expression_list(parser, &decl->values);
+    if (!ok) { close_block(parser); return NULL; }
+    if (decl->values.count != 1 && decl->values.count != places.count) {
+        AstExpr *value = ((AstExpr **)decl->values.items)[0];
+        report_error_ast(parser, LABEL_ERROR, (Ast *)value, "%d places are given %d values", places.count, decl->values.count);
+        report_error_ast(parser, LABEL_HINT, NULL, "Give each place a value, or call a function that gives %d values", places.count);
+        close_block(parser);
+        return NULL;
+    }
+    AstExpr *last = ((AstExpr **)decl->values.items)[decl->values.count - 1];
+    decl->head.start = first->head.start;
+    decl->head.end   = last->head.end;
+
+    // The value of each place: a name that holds it, or the value itself when it reads nothing
+    bool from_call = decl->values.count == 1 && places.count > 1;
+    DynamicArray all_values = decl->values;
+    decl->values = da_init(all_values.count, sizeof(AstExpr *));
+    AstExpr **given = calloc(places.count, sizeof(AstExpr *));
+    static int counter = 0;
+    for (int i = 0; i < places.count; i++) {
+        AstExpr *value = ((AstExpr **)all_values.items)[from_call ? 0 : i];
+        if (!from_call && reads_nothing(value)) {
+            given[i] = value;
+            continue;
+        }
+        char *name = malloc(24);
+        snprintf(name, 24, "$value%d", ++counter);
+        AstIdentifier *ident = make_identifier_from_string(parser, name, NULL);
+        ident->head.start  = value->head.start;
+        ident->head.end    = value->head.end;
+        ident->head.flags |= AST_FLAG_COMPILER_GENERATED;
+        ident->decl        = decl;
+        da_append(&decl->idents, ident);
+        if (!from_call || i == 0) da_append(&decl->values, value);
+        given[i] = (AstExpr *)generated_identifier_literal(parser, ident->name, (Ast *)ident);
+    }
+    if (decl->idents.count > 0) {
+        if (add_declaration_to_scope(parser, block, decl) != NULL) { close_block(parser); return NULL; }
+        da_append(&block->statements, decl);
+    }
+
+    for (int i = 0; i < places.count; i++) {
+        AstExpr *place = ((AstExpr **)places.items)[i];
+        if (is_discard(place)) continue;
+
+        AstAssignment *assign = ast_allocate(parser, sizeof(AstAssignment));
+        assign->head.kind  = AST_ASSIGNMENT;
+        assign->head.file  = parser->current_file;
+        assign->head.start = place->head.start;
+        assign->head.end   = last->head.end;
+        assign->lhs        = place;
+        assign->op         = (AssignOp)'=';
+        assign->expr       = given[i];
+        da_append(&block->statements, assign);
+    }
+    free(given);
+
+    block->head.end = last->head.end;
+    close_block(parser);
+    return block;
 }
 
 AstAssignment *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token) {

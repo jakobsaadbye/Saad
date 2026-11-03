@@ -3212,12 +3212,12 @@ check_identifiers_vs_values:
         }
         if (decl->idents.count > num_values) {
             AstIdentifier *extra_ident = ((AstIdentifier **)decl->idents.items)[decl->idents.count - 1];
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(extra_ident), "Assignment mismatch. Have %d %s and %d %s", decl->idents.count, decl->idents.count == 1 ? "identifier" : "identifiers", num_values, num_values == 1 ? "value" : "values");
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(extra_ident), "Assignment mismatch. Have %d %s and %d %s", decl->idents.count, (decl->head.flags & AST_FLAG_COMPILER_GENERATED) ? (decl->idents.count == 1 ? "place" : "places") : decl->idents.count == 1 ? "identifier" : "identifiers", num_values, num_values == 1 ? "value" : "values");
             return NULL;
         }
         if (decl->idents.count < num_values) {
             AstExpr *extra_expr = ((AstExpr **)decl->values.items)[decl->values.count - 1];
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(extra_expr), "Assignment mismatch. Have %d %s and %d %s", decl->idents.count, decl->idents.count == 1 ? "identifier" : "identifiers", num_values, num_values == 1 ? "value" : "values");
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(extra_expr), "Assignment mismatch. Have %d %s and %d %s", decl->idents.count, (decl->head.flags & AST_FLAG_COMPILER_GENERATED) ? (decl->idents.count == 1 ? "place" : "places") : decl->idents.count == 1 ? "identifier" : "identifiers", num_values, num_values == 1 ? "value" : "values");
             return NULL;
         }
     }
