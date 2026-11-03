@@ -61,7 +61,7 @@ To try a change before it is published:
 ```
 cd lsp/vscode
 npm install
-npx @vscode/vsce package --skip-license    # saad-0.3.0.vsix
+npx @vscode/vsce package    # saad-0.3.0.vsix
 code --install-extension saad-0.3.0.vsix --force
 ```
 

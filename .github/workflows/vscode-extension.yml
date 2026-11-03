@@ -32,7 +32,7 @@ jobs:
         run: npm ci
 
       - name: Package
-        run: npx --yes @vscode/vsce@3 package --skip-license --out saad.vsix
+        run: npx --yes @vscode/vsce@3 package --out saad.vsix
 
       - name: Publish to the Visual Studio Marketplace
         env:
