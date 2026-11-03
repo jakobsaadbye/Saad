@@ -1,0 +1,26 @@
+// Writes the tables of the schema saad_blog as Saad files into examples/blog/db. Run it when schema.sql changes:
+//
+//     saad run examples/blog/generate.sd -- "host=localhost dbname=postgres user=postgres"
+
+import dbms.postgres;
+import os;
+use fmt;
+
+main :: () {
+    args := os.args();
+    if args.count < 2 {
+        print("Usage: saad run examples/blog/generate.sd -- \"host=localhost dbname=postgres user=postgres\" [folder]");
+        os.exit(2);
+    }
+
+    generator := postgres.EntityGenerator{connectionString: args[1], schema: "saad_blog", folder: "examples/blog/db"};
+    if args.count > 2 { generator.folder = args[2]; }
+
+    report, err := generator.run();
+    if err != null {
+        print("Can't generate: %", err.message);
+        os.exit(1);
+    }
+    print("Wrote % files to %", report.written.count, generator.folder);
+    for name in report.removed { print("Removed %, as its table is gone", name); }
+}

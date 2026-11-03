@@ -16,7 +16,7 @@ namespace dbms;
 //
 // The columns are the members of T, in snake case: createdAt is created_at, and a _ at the end is left out, so for_
 // is the column for. The generated columns are left to the database by create and update, and read back by
-// saveChanges. @dbms.Column on a member says the same for a struct written by hand. std/dbms/tools/generate.sd writes
+// saveChanges. @dbms.Column on a member says the same for a struct written by hand. postgres.EntityGenerator writes
 // the structs and tables of a database
 import fmt;
 use c;

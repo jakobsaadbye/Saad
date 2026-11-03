@@ -50,7 +50,7 @@ if [ "$SAAD_UPDATE_GENERATED" = 1 ]; then
     PSQL="psql"
     [ -n "$BIN" ] && [ -x "$BIN/psql" ] && PSQL="$BIN/psql"
     "$PSQL" "$SAAD_TEST_POSTGRES" -q -v ON_ERROR_STOP=1 -f examples/blog/schema.sql > /dev/null || exit 1
-    rm -rf examples/blog/db && bash "$HERE/run.sh" std/dbms/tools/generate.sd "$SAAD_TEST_POSTGRES" examples/blog/db saad_blog > /dev/null || exit 1
+    rm -rf examples/blog/db && bash "$HERE/run.sh" examples/blog/generate.sd "$SAAD_TEST_POSTGRES" examples/blog/db > /dev/null || exit 1
     echo "Wrote examples/blog/db again"
 fi
 
@@ -68,19 +68,6 @@ for f in tests/db/*.sd; do
     fi
 done
 
-# The program std/dbms/tools/generate.sd writes the same files as tests/db/generate.sd compares (with the schema it left)
-printf "%-56s " "std/dbms/tools/generate.sd"
-OUT="$(mktemp -d)"
-if output=$(bash "$HERE/run.sh" std/dbms/tools/generate.sd "$SAAD_TEST_POSTGRES" "$OUT/db" saad_shop 2>&1) && diff -r "$OUT/db" tests/db/model > /dev/null; then
-    echo "${GREEN}OK${RESET}"
-    passed=$((passed + 1))
-else
-    echo "${RED}FAILED${RESET}"
-    echo "$output" | tail -5 | sed 's/^/    /'
-    failed=$((failed + 1))
-fi
-rm -rf "$OUT"
-
 # The blog example: its schema, the files the generator writes of it, which must be the ones in examples/blog/db, the tour
 # of dbms, and the backend, which demo.sd calls over HTTP
 printf "%-56s " "examples/blog"
@@ -91,7 +78,7 @@ if ! output=$("$PSQL" "$SAAD_TEST_POSTGRES" -q -v ON_ERROR_STOP=1 -f examples/bl
     echo "${RED}FAILED (schema.sql)${RESET}"
     echo "$output" | tail -5 | sed 's/^/    /'
     failed=$((failed + 1))
-elif ! output=$(bash "$HERE/run.sh" std/dbms/tools/generate.sd "$SAAD_TEST_POSTGRES" "$OUT/db" saad_blog 2>&1) || ! diff -r "$OUT/db" examples/blog/db > /dev/null; then
+elif ! output=$(bash "$HERE/run.sh" examples/blog/generate.sd "$SAAD_TEST_POSTGRES" "$OUT/db" 2>&1) || ! diff -r "$OUT/db" examples/blog/db > /dev/null; then
     echo "${RED}FAILED (examples/blog/db is not what the generator writes)${RESET}"
     diff -r "$OUT/db" examples/blog/db | head -10 | sed 's/^/    /'
     failed=$((failed + 1))
