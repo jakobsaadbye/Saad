@@ -33,12 +33,7 @@ serve :: (app: *web.App) {
 }
 
 main :: () {
-    args := os.args();
-    if args.count < 2 {
-        print("Usage: saad run examples/blog/demo.sd -- \"host=localhost dbname=postgres user=postgres\"");
-        os.exit(2);
-    }
-    connectionString := args[1];
+    connectionString := "host=localhost dbname=postgres user=postgres password=postgres";
 
     // An empty blog, with the posts to start with
     conn := postgres.connect(connectionString);

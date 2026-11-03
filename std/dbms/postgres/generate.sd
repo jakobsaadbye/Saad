@@ -160,6 +160,8 @@ write :: method (g: *EntityGenerator, files: [..]GeneratedFile) -> ([..]string, 
         if os.writeFile(path, file.code) != null {
             return removed, fmt.errorf("Can't write %", path);
         }
+
+        fmt.print("Generated: %", path);
     }
     return removed, null;
 }

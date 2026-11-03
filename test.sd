@@ -1,10 +1,6 @@
-use fmt;
-
-defaultArguments :: (a := 69) {
-    print("%", a);
-}
+import fmt;
 
 main :: () {
-    defaultArguments();
+    
 }
 
