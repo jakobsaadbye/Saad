@@ -1,4 +1,4 @@
-// net.http: a server with a Mux on a thread, the client, and raw requests for keep-alive, chunks and bad requests
+// net.http: a server with a Router on a thread, the client, and raw requests for keep-alive, chunks and bad requests
 
 import net;
 import net.http;
@@ -35,8 +35,7 @@ moved :: (w: *http.ResponseWriter, r: *http.Request) {
     w.redirect("/hello/again");
 }
 
-run :: (argument: *void) {
-    server := argument as *http.Server;
+run :: (server: *http.Server) {
     server.serve();
 }
 
@@ -57,17 +56,17 @@ raw :: (address: string, text: string) -> string {
 }
 
 main :: () {
-    mux: http.Mux;
-    mux.handle("GET /hello/{name}", hello);
-    mux.handle("POST /echo", echo);
-    mux.handle("GET /search", search);
-    mux.handle("/static/", files);
-    mux.handle("GET /static/special", hello);   // More specific than the prefix
-    mux.handle("GET /boom", boom);
-    mux.handle("GET /old", moved);
+    router: http.Router;
+    router.handle("GET /hello/{name}", hello);
+    router.handle("POST /echo", echo);
+    router.handle("GET /search", search);
+    router.handle("/static/", files);
+    router.handle("GET /static/special", hello);   // More specific than the prefix
+    router.handle("GET /boom", boom);
+    router.handle("GET /old", moved);
 
     server: http.Server;
-    server.mux = &mux;
+    server.router = &router;
     server.workers = 2;
     server.log = false;
     server.readTimeout = 2000;

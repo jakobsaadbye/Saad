@@ -1,0 +1,47 @@
+// invoke() of attributedFunctions(): a function called with its arguments in a block, without knowing its type
+
+import fmt;
+@attribute
+Call :: struct {}
+Point :: struct { x: int; y: int; z: int; }
+
+@Call
+describe :: (name: string, count: i64, point: Point, flag: bool) -> string, int {
+    return fmt.sprint("% % % %", name, count, point.z, flag), point.x + point.y;
+}
+
+@Call
+fails :: (n: int) -> int {
+    if n < 0 { throw newError("negative"); }
+    return n * 2;
+}
+
+main :: () {
+    for f in attributedFunctions() {
+        args := c.calloc(1, f.argumentsSize as int) as *u8;
+        results := c.calloc(1, f.resultsSize as int + 8) as *u8;
+        assert(f.parameters.count > 0 && f.results.count > 0);
+        if f.name == "describe" {
+            assert(f.parameters.count == 4 && f.parameters[2].name == "point" && f.parameters[2].type.name == "Point");
+            assert(f.results.count == 2 && f.results[0].type.name == "string" && f.argumentsSize >= 40);
+            *((&args[f.parameters[0].offset]) as *string) = "ada";
+            *((&args[f.parameters[1].offset]) as *i64) = 7;
+            *((&args[f.parameters[2].offset]) as *Point) = Point{1, 2, 3};
+            *((&args[f.parameters[3].offset]) as *bool) = true;
+            f.invoke(args, results);
+            text := *((&results[f.results[0].offset]) as *string);
+            sum := *((&results[f.results[1].offset]) as *int);
+            assert(text == "ada 7 3 true" && sum == 3);
+        } else {
+            *((&args[0]) as *int) = 21;
+            f.invoke(args, results);
+            assert(*(results as *int) == 42);
+            *((&args[0]) as *int) = -1;
+            caught := false;
+            try { f.invoke(args, results); } catch (e) { caught = e.message == "negative"; }
+            assert(caught);
+        }
+    }
+    fmt.print("function invoke ok");
+}
+use c;

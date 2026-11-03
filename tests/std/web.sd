@@ -1,0 +1,199 @@
+// web: endpoints are functions, called at the url of their name, with their parameters from JSON or the query
+
+import web;
+import net.http;
+import thread;
+import json;
+import fmt;
+
+Post :: struct {
+    id:       int;
+    authorId: int;
+    title:    string;
+}
+
+// What the endpoints share: a store of posts
+Store :: struct {
+    mutex: thread.Mutex;
+    posts: [..]Post;
+}
+
+store: Store;
+finished := 0;
+finishMutex: thread.Mutex;
+
+Session :: struct {
+    @embed base: web.Session;
+    store: *Store;
+    user:  string;
+}
+
+startSession :: (session: *Session) {
+    session.store = &store;
+    user, given := session.request.header("Authorization");
+    if given { session.user = user; }
+}
+
+finishSession :: (session: *Session) {
+    finishMutex.lock();
+    finished += 1;
+    finishMutex.unlock();
+}
+
+@web.endpoint(.get)
+getPosts :: (session: *Session, authorId: int) -> [..]Post {
+    result: [..]Post;
+    result.allocator = &session.request.allocator;   // Freed with the request
+    session.store.mutex.lock();
+    for p in session.store.posts {
+        if p.authorId == authorId { result.add(p); }
+    }
+    session.store.mutex.unlock();
+    return result;
+}
+
+@web.endpoint
+createPost :: (session: *Session, post: Post) -> Post, error {
+    session.store.mutex.lock();
+    defer session.store.mutex.unlock();
+    for p in session.store.posts {
+        if p.title == post.title { return post, newError("A post has that title", web.Conflict); }
+    }
+    post.id = session.store.posts.count as int + 1;
+    post.title = post.title.copy();
+    session.store.posts.add(post);
+    return post, null;
+}
+
+@web.endpoint(.get)
+getPost :: (session: *Session, id: int) -> Post {
+    session.store.mutex.lock();
+    defer session.store.mutex.unlock();
+    for p in session.store.posts {
+        if p.id == id { return p; }
+    }
+    throw newError(fmt.sprint("No post has the id %", id), web.NotFound);
+    none: Post;
+    return none;
+}
+
+@web.endpoint(.get)
+whoami :: (session: *Session) -> string {
+    if session.user == "" { throw newError("Log in first", web.Unauthorized); }
+    return session.user;
+}
+
+@web.endpoint(.get)
+search :: (session: *Session, word: string, limit: ?int) -> string, int {
+    return word, limit ?? 10;
+}
+
+@web.endpoint
+clear :: (session: *Session) {
+    session.store.mutex.lock();
+    session.store.posts.clear();
+    session.store.mutex.unlock();
+}
+
+@web.endpoint(.get)
+crash :: (session: *Session) -> int {
+    xs := [1, 2];
+    i := 5;
+    return xs[i];   // A Panic, which isn't told to the client
+}
+
+run :: (app: *web.App) {
+    app.server.serve();
+}
+
+main :: () {
+    app := web.newApp<Session>("/v1");
+    app.onStart(startSession);
+    app.onFinish(finishSession);
+    app.server.workers = 2;
+    app.server.log = false;
+    assert(app.endpoints.count == 7);
+    assert(app.server.listen("127.0.0.1:0") == null);
+    base := fmt.sprint("http://%/v1", app.server.listener.addr.toString());
+    serving := thread.spawn(run, app);
+
+    // POST: the parameters are the members of a JSON object
+    response := http.post(fmt.sprint("%/createPost", base), "application/json", "{\"post\": {\"authorId\": 7, \"title\": \"Hello\"}}");
+    assert(response.status == 200 && response.body == "{\"id\":1,\"authorId\":7,\"title\":\"Hello\"}");
+    kind, _ := response.header("Content-Type");
+    assert(kind == "application/json");
+    response.free();
+    response = http.post(fmt.sprint("%/createPost", base), "application/json", "{\"post\": {\"authorId\": 8, \"title\": \"Other\"}}");
+    response.free();
+
+    // An error that is given has the status of its kind
+    response = http.post(fmt.sprint("%/createPost", base), "application/json", "{\"post\": {\"authorId\": 7, \"title\": \"Hello\"}}");
+    assert(response.status == 409 && response.body == "{\"error\":\"A post has that title\",\"kind\":\"web.Conflict\"}");
+    response.free();
+
+    // GET: the parameters are in the query
+    response = http.get(fmt.sprint("%/getPosts?authorId=7", base));
+    posts, err := json.decode<[..]Post>(response.body);
+    assert(response.status == 200 && err == null && posts.count == 1 && posts[0].title == "Hello");
+    response.free();
+    response = http.get(fmt.sprint("%/getPost?id=2", base));
+    assert(response.body == "{\"id\":2,\"authorId\":8,\"title\":\"Other\"}");
+    response.free();
+
+    // A thrown error, and the session that onStart gave
+    response = http.get(fmt.sprint("%/getPost?id=99", base));
+    assert(response.status == 404 && response.body.indexOf("No post has the id 99") > 0);
+    response.free();
+    response = http.get(fmt.sprint("%/whoami", base));
+    assert(response.status == 401);
+    response.free();
+    response = http.request("GET", fmt.sprint("%/whoami", base), [http.Header{"Authorization", "ada"}]);
+    assert(response.status == 200 && response.body == "\"ada\"");
+    response.free();
+
+    // An optional parameter can be left out, and more results are an array
+    response = http.get(fmt.sprint("%/search?word=saad+lang", base));
+    assert(response.body == "[\"saad lang\",10]");
+    response.free();
+    response = http.get(fmt.sprint("%/search?word=x&limit=3", base));
+    assert(response.body == "[\"x\",3]");
+    response.free();
+
+    // Parameters that are missing or of the wrong type, urls that aren't endpoints, and the wrong method
+    response = http.get(fmt.sprint("%/getPosts", base));
+    assert(response.status == 400 && response.body.indexOf("The parameter authorId is missing") > 0);
+    response.free();
+    response = http.get(fmt.sprint("%/getPosts?authorId=seven", base));
+    assert(response.status == 400);
+    response.free();
+    response = http.post(fmt.sprint("%/createPost", base), "application/json", "{\"post\": {\"authorId\": \"x\"}}");
+    assert(response.status == 400 && response.body.indexOf("authorId") > 0);
+    response.free();
+    response = http.post(fmt.sprint("%/createPost", base), "application/json", "not json");
+    assert(response.status == 400);
+    response.free();
+    response = http.get(fmt.sprint("%/nothing", base));
+    assert(response.status == 404);
+    response.free();
+    response = http.get(fmt.sprint("%/createPost", base));
+    allow, _ := response.header("Allow");
+    assert(response.status == 405 && allow == "POST");
+    response.free();
+
+    // A panic is a 500, without what went wrong, and the server goes on
+    response = http.get(fmt.sprint("%/crash", base));
+    assert(response.status == 500 && response.body == "{\"error\":\"Internal Server Error\",\"kind\":\"Panic\"}");
+    response.free();
+
+    // No result is null
+    response = http.post(fmt.sprint("%/clear", base), "application/json", "");
+    assert(response.status == 200 && response.body == "null" && store.posts.count == 0);
+    response.free();
+
+    app.server.shutdown();
+    serving.join();
+    finishMutex.lock();
+    assert(finished == 12);   // Every endpoint that was called, also the ones that threw
+    finishMutex.unlock();
+    fmt.print("web ok");
+}

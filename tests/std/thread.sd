@@ -24,8 +24,7 @@ failing :: (id: int, round: int) -> int, error {
     return round, null;
 }
 
-work :: (argument: *void) {
-    job := argument as *Job;
+work :: (job: *Job) {
     assert(mine == 0 && label == "start");   // The start values, in a new thread
     label = fmt.sprint("job %", job.id);
     ok := true;
@@ -57,8 +56,7 @@ Queue :: struct {
     sum:   int;
 }
 
-consume :: (argument: *void) {
-    queue := argument as *Queue;
+consume :: (queue: *Queue) {
     queue.mutex.lock();
     while true {
         while queue.items.count == 0 && !queue.closed {
@@ -69,6 +67,14 @@ consume :: (argument: *void) {
         queue.items.removeAt(queue.items.count - 1);
     }
     queue.mutex.unlock();
+}
+
+ticks: Shared;
+
+tick :: () {
+    ticks.mutex.lock();
+    ticks.total += 1;
+    ticks.mutex.unlock();
 }
 
 main :: () {
@@ -106,6 +112,13 @@ main :: () {
     queue.mutex.unlock();
     consumer.join();
     assert(queue.sum == expected);
+
+    // A function without an argument
+    alone := thread.start(tick);
+    alone.join();
+    ticks.mutex.lock();
+    assert(ticks.total == 1);
+    ticks.mutex.unlock();
 
     thread.sleep(1);
     assert(thread.currentId() != 0);

@@ -43,6 +43,13 @@ encode :: <T>(value: T, options := Options{}) -> string {
     return w.sb.toString();
 }
 
+// A value whose type is only known when the program runs, e.g a result of a function of attributedFunctions(), at data
+encodeAt :: (data: *void, type: *Type, options := Options{}) -> string {
+    w := newWriter(options);
+    w.writeAny(data, type);
+    return w.sb.toString();
+}
+
 //////////////////////////////////////////////////////////////////////////////////////
 // Writer
 //////////////////////////////////////////////////////////////////////////////////////

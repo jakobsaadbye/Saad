@@ -1,13 +1,13 @@
 namespace net.http;
 
-// The server: a Mux routes each request to a handler, and a Server runs the handlers on a pool of threads, e.g
+// The server: a Router routes each request to a handler, and a Server runs the handlers on a pool of threads, e.g
 //
-//     mux: http.Mux;
-//     mux.handle("GET /posts", listPosts);
-//     mux.handle("GET /posts/{id}", showPost);
-//     mux.handle("POST /posts", createPost);
-//     mux.handle("/static/", files);          // Everything below /static/
-//     http.listenAndServe(":8080", &mux);
+//     router: http.Router;
+//     router.handle("GET /posts", listPosts);
+//     router.handle("GET /posts/{id}", showPost);
+//     router.handle("POST /posts", createPost);
+//     router.handle("/static/", files);          // Everything below /static/
+//     http.listenAndServe(":8080", &router);
 //
 // A handler that throws gives a 500, and the server goes on. The texts of a request are kept until its handler
 // returns: copy() what is kept for longer
@@ -29,8 +29,9 @@ Request :: struct {
     headers: [..]Header;
     body:    string;
     remote:  net.Addr;          // Who sent it
-    pattern: string;            // The pattern of the Mux that matched, e.g GET /posts/{id}
+    pattern: string;            // The pattern of the Router that matched, e.g GET /posts/{id}
     values:  [..]Header;        // The values of the {names} of the pattern
+    server:  *Server;           // That answers it
 
     arena:     mem.Arena;       // The memory of the request, freed when the handler returned
     allocator: Allocator;
@@ -125,7 +126,7 @@ redirect :: method (w: *ResponseWriter, url: string, status := 303) {
 Handler :: (w: *ResponseWriter, r: *Request);
 
 //
-// Mux: a pattern for each handler
+// Router: a pattern for each handler
 //
 
 Route :: struct {
@@ -136,7 +137,7 @@ Route :: struct {
     handler:  Handler;
 }
 
-Mux :: struct {
+Router :: struct {
     routes:   [..]Route;
     notFound: Handler;   // When no route matches. A 404 when it is null
 }
@@ -144,7 +145,7 @@ Mux :: struct {
 // Adds a route: "[METHOD ]/path", where a segment {name} matches any segment, e.g "GET /posts/{id}", and a path that
 // ends with / matches every path below it, e.g "/static/". "/" matches every path. When more patterns match, the one
 // with the most segments that are written out wins
-handle :: method (mux: *Mux, pattern: string, handler: Handler) {
+handle :: method (router: *Router, pattern: string, handler: Handler) {
     route: Route;
     route.pattern = pattern;
     route.handler = handler;
@@ -159,11 +160,11 @@ handle :: method (mux: *Mux, pattern: string, handler: Handler) {
     for segment in path.split("/") {
         if segment.len > 0 { route.segments.add(segment); }
     }
-    mux.routes.add(route);
+    router.routes.add(route);
 }
 
 // The route for the request, with the values of its {names}. A 404 or 405 when there is none
-serve :: method (mux: *Mux, w: *ResponseWriter, r: *Request) {
+serve :: method (router: *Router, w: *ResponseWriter, r: *Request) {
     segments: [..]string;
     segments.allocator = &r.allocator;
     for segment in r.path.split("/") {
@@ -175,7 +176,7 @@ serve :: method (mux: *Mux, w: *ResponseWriter, r: *Request) {
     pathMatched := false;
     allowed: [..]string;
     allowed.allocator = &r.allocator;
-    for route, i in mux.routes {
+    for route, i in router.routes {
         score := matchScore(&route, segments);
         if score < 0 { continue; }
         methodMatches := route.method.len == 0 || route.method == r.method || (route.method == "GET" && r.method == "HEAD");
@@ -203,12 +204,12 @@ serve :: method (mux: *Mux, w: *ResponseWriter, r: *Request) {
             w.error(405, "Method Not Allowed");
             return;
         }
-        if mux.notFound != null { mux.notFound(w, r); return; }
+        if router.notFound != null { router.notFound(w, r); return; }
         w.error(404, "Not Found");
         return;
     }
 
-    route := &mux.routes[best];
+    route := &router.routes[best];
     r.pattern = route.pattern;
     r.values.allocator = &r.allocator;
     for segment, i in route.segments {
@@ -240,7 +241,7 @@ matchScore :: (route: *Route, segments: []string) -> int {
 //
 
 Server :: struct {
-    mux:          *Mux;          // Routes the requests. Or handler, for one handler of every request
+    router:          *Router;          // Routes the requests. Or handler, for one handler of every request
     handler:      Handler;
     workers:      int;           // Threads that answer requests. 0 is 2 for each processor, at least 4
     readTimeout:  int = 30000;   // Milliseconds a connection may wait for its next request, and its parts
@@ -256,11 +257,11 @@ Server :: struct {
     threads:  [..]thread.Thread;
 }
 
-// Listens at the address, e.g ":8080", and answers the requests with the routes of the mux. Returns when it can't
+// Listens at the address, e.g ":8080", and answers the requests with the routes of the router. Returns when it can't
 // listen, or after shutdown()
-listenAndServe :: (address: string, mux: *Mux) -> error {
+listenAndServe :: (address: string, router: *Router) -> error {
     server := new(Server);
-    server.mux = mux;
+    server.router = router;
     return server.listenAndServe(address);
 }
 
@@ -330,8 +331,7 @@ shutdown :: method (server: *Server) {
 }
 
 // A worker thread: answers the connections of the queue
-work :: (argument: *void) {
-    server := argument as *Server;
+work :: (server: *Server) {
     while true {
         server.mutex.lock();
         while server.queue.count == 0 && !server.stopping {
@@ -368,6 +368,7 @@ serveConn :: method (server: *Server, conn: *net.Conn) {
         r.allocator = r.arena.allocator();
         r.headers.allocator = &r.allocator;
         r.remote = conn.remote;
+        r.server = server;
 
         w.body.clear();
         noHeaders: [..]Header;
@@ -386,7 +387,7 @@ serveConn :: method (server: *Server, conn: *net.Conn) {
 
         try {
             if server.handler != null      { server.handler(&w, &r); }
-            else if server.mux != null     { server.mux.serve(&w, &r); }
+            else if server.router != null     { server.router.serve(&w, &r); }
             else                           { w.error(404, "Not Found"); }
         } catch (err) {
             if server.log {

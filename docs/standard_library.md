@@ -22,6 +22,7 @@ std/
   os/           namespace os: files, environment variables, processes
     windows.sd      namespace os.windows: the Windows API (threads, Sleep, ...)
   thread/       namespace thread: threads, Mutex, Condition and WaitGroup, on Windows and Linux
+  web/          namespace web: endpoints, functions that are called at the url of their name with JSON
   vendor/       Bindings for libraries the standard library doesn't own
     raylib.sd       namespace raylib
   bytes.sd      namespace bytes: Buffer, bytes written at the end and read from the front
@@ -210,7 +211,7 @@ addr := net.resolve("localhost", 80);     // net.Addr: ip and port, toString() i
 
 ## net.http
 
-HTTP/1.1, like Go's `net/http`: a `Mux` routes requests to handlers, a `Server` answers them on a pool of threads,
+HTTP/1.1, like Go's `net/http`: a `Router` routes requests to handlers, a `Server` answers them on a pool of threads,
 and a client sends requests.
 
 ```odin
@@ -225,11 +226,11 @@ showPost :: (w: *http.ResponseWriter, r: *http.Request) {
     w.write(json.encode(post));
 }
 
-mux: http.Mux;
-mux.handle("GET /posts/{id}", showPost);
-mux.handle("POST /posts", createPost);
-mux.handle("/static/", files);              // Every path below /static/
-http.listenAndServe(":8080", &mux);
+router: http.Router;
+router.handle("GET /posts/{id}", showPost);
+router.handle("POST /posts", createPost);
+router.handle("/static/", files);           // Every path below /static/
+http.listenAndServe(":8080", &router);
 
 response := http.get("http://localhost:8080/posts/1");
 defer response.free();
@@ -240,18 +241,64 @@ response = http.request("PUT", url, headers, body);
 
 * **Patterns:** `[METHOD ]/path`. A segment `{name}` matches any segment, and a path that ends with `/` matches
   every path below it. The pattern with the most segments that are written out wins. `GET` also answers `HEAD`.
-  A path that matches with another method gives a 405 with `Allow`, and no match a 404 (or `mux.notFound`).
+  A path that matches with another method gives a 405 with `Allow`, and no match a 404 (or `router.notFound`).
 * **Responses:** a handler writes into a buffer, and the response is sent when it returns, with `Content-Length`.
   `w.error(status, text)` and `w.redirect(url)` help. A handler that throws gives a 500, and the error is written to
   stderr (`server.log`); the server goes on.
 * **Server:** `server.listen(address)`, then `server.serve()`, which returns after `server.shutdown()`. Fields:
-  `mux` or `handler`, `workers` (0 is 2 for each processor, at least 4), `readTimeout` and `writeTimeout`
+  `router` or `handler`, `workers` (0 is 2 for each processor, at least 4), `readTimeout` and `writeTimeout`
   (milliseconds), and `limits` (`headBytes`, `bodyBytes`). Connections are kept alive, and bodies can be
   `Content-Length` or chunked. Bad requests get 400, 408, 413, 431, 501 or 505.
 * **Memory:** the texts of a request are in an arena of the connection, freed when the handler returns. `copy()`
   what is kept for longer.
 * **Client:** `get`, `post` and `request`, a connection for each request. The texts of a response are freed with
   `response.free()`. Only `http://`: put the server behind a proxy, e.g Caddy or nginx, for https.
+
+## web
+
+Endpoints: a backend whose API is its functions. A function with `@web.endpoint` is called at the url of its name,
+with its parameters from the JSON of the request, and its result is the JSON of the response.
+
+```odin
+import web;
+
+Session :: struct {
+    @embed base: web.Session;    // request, response and app
+    db: *blog.Db;                // What the program wants in each session
+}
+
+@web.endpoint(.get)
+getPosts :: (session: *Session, authorId: int) -> [..]Post { ... }
+
+@web.endpoint                     // POST
+createPost :: (session: *Session, post: Post) -> Post, error { ... }
+
+main :: () {
+    app := web.newApp<Session>("/v1");
+    app.onStart(openSession);     // Called with each new session, e.g to give it a database context
+    app.onFinish(closeSession);   // After the endpoint, also when it threw
+    app.listenAndServe(":8080");
+}
+```
+
+```
+GET  /v1/getPosts?authorId=2                         -> [{"id": 1, ...}]
+POST /v1/createPost   {"post": {"title": "Hi"}}      -> {"id": 3, "title": "Hi"}
+```
+
+* The url is the prefix and the name of the function, so the names of endpoints must be unique: `newApp` gives an
+  error when two are the same, or when an endpoint doesn't take the session as its first parameter.
+* POST takes the parameters as the members of a JSON object in the body, and GET from the query (a string as it is,
+  other types as JSON, e.g `?ids=[1,2]`). A parameter that isn't there is a 400, unless it is an optional (`?int`).
+* The result is JSON: the value, an array of the values when there are more, or `null`. A given or thrown error is
+  `{"error": message, "kind": kind}`, with the status of its kind: `web.BadRequest` 400, `web.Unauthorized` 401,
+  `web.Forbidden` 403, `web.NotFound` 404, `web.Conflict` 409, others 500. A `Panic` is a 500 that doesn't tell what
+  went wrong.
+* The session is new for each request, and freed with it, as are the texts of the request. Allocate a result that is
+  freed with the request with `session.request.allocator`, e.g `result.allocator = &session.request.allocator;`.
+* `app.server` is the `http.Server`, e.g `app.server.workers` or `app.server.shutdown()`.
+* It is built on `attributedFunctions()` and their `invoke()` (see `docs/reflection.md`). A TypeScript client can be
+  made from the same: the names, parameters and results of the endpoints.
 
 ## thread
 
@@ -261,8 +308,7 @@ Threads, and what they share safely. On Windows (`CreateThread`, `SRWLOCK`, `CON
 ```odin
 import thread;
 
-work :: (argument: *void) {
-    job := argument as *Job;
+work :: (job: *Job) {
     ...
     job.group.done();
 }
@@ -279,7 +325,8 @@ counter.value += 1;
 counter.mutex.unlock();
 ```
 
-* `spawn(function, argument)` starts a thread that runs `function(argument)`, and `t.join()` waits for it to end.
+* `spawn(function, argument)` starts a thread that runs `function(argument)`, e.g `spawn(work, &job)` for
+  `work :: (job: *Job)`, and `t.join()` waits for it to end. `start(function)` runs a function without an argument.
   An error that the function doesn't catch ends the program, with its trace, like one in `main`.
 * `Mutex` (`lock`, `unlock`), `Condition` (`wait(&mutex)`, `signal`, `broadcast`) and `WaitGroup` (`add`, `done`,
   `wait`). Their zero values are ready to use. Don't copy one that is in use.

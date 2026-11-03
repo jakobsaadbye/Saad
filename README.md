@@ -78,6 +78,30 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.13.0 - 3. Nov 2026
+
+* `web`: endpoints, a backend whose API is its functions. `@web.endpoint` (POST) or `@web.endpoint(.get)` on a
+  function makes it callable at `/prefix/name`, with its parameters from JSON or the query, and its result as JSON.
+  Its first parameter is a session of the program, which embeds `web.Session`, new for each request. Errors become
+  JSON with a status from their kind, e.g `web.NotFound` is 404
+* `attributedFunctions()` has the parameters and results of each function, and `invoke(arguments, results)` to call
+  it without knowing its type. `json.encodeAt` and `json.assignAt` write and read values of a type known at runtime
+* `http.Request` has its `server`
+
+```odin
+@web.endpoint(.get)
+getPosts :: (session: *Session, authorId: int) -> [..]Post { ... }
+
+app := web.newApp<Session>("/v1");
+app.listenAndServe(":8080");      // GET /v1/getPosts?authorId=2
+```
+
+## Update v0.12.1 - 3. Nov 2026
+
+* `thread.spawn` takes the argument with its type: `thread.spawn(work, &job)` for `work :: (job: *Job)`, not a `*void`.
+  `thread.start(function)` runs a function without an argument
+* `http.Mux` is `http.Router`, e.g `router.handle("GET /posts/{id}", showPost)`
+
 ## Update v0.12.0 - 3. Nov 2026
 
 * `net`: TCP over IPv4: `net.listen`, `accept`, `net.dial`, `read`, `write`, timeouts and `net.resolve`, on

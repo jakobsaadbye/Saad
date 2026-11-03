@@ -47,6 +47,14 @@ decodeInto :: <T>(text: string, value: *T, options := Options{}) -> error {
 // The kind of the errors of decode, decodeInto and parse
 DecodeError :: ErrorKind{"json.DecodeError"};
 
+// Reads a parsed value into a value whose type is only known when the program runs, at data, e.g a parameter of a
+// function of attributedFunctions(). 'path' names it in the error, e.g "authorId"
+assignAt :: (v: Value, data: *void, type: *Type, path := "", options := Options{}) -> error {
+    failed := assign(v, data, type, path, &options);
+    if failed != "" { return newError(failed, DecodeError); }
+    return null;
+}
+
 // A copy of the value with its own arrays and objects
 clone :: method (v: Value) -> Value {
     noItems:  [..]Value;

@@ -1,0 +1,311 @@
+namespace web;
+
+// Endpoints: a backend whose API is its functions, like a remote procedure call. A function with @web.endpoint is
+// called at the url of its name, with its parameters from the JSON of the request, and its result is the JSON of the
+// response, e.g
+//
+//     Session :: struct {
+//         @embed base: web.Session;     // The request and the response
+//         db: *blog.Db;                // What the program wants in each session
+//     }
+//
+//     @web.endpoint(.get)
+//     getPosts :: (session: *Session, authorId: int) -> [..]Post {
+//         return session.db.posts.where(p => p.authorId == authorId).all();
+//     }
+//
+//     @web.endpoint
+//     createPost :: (session: *Session, post: Post) -> Post, error { ... }
+//
+//     app := web.newApp<Session>("/v1");
+//     app.onStart(openSession);                   // e.g give the session its database context
+//     app.listenAndServe(":8080");
+//
+//     GET  /v1/getPosts?authorId=2
+//     POST /v1/createPost   {"post": {"title": "..."}}
+//
+// * The url is the prefix and the name of the function, so the names of endpoints are unique
+// * POST takes the parameters as the members of a JSON object, and GET from the query, e.g ?authorId=2
+// * The result is the JSON of the response: the value, an array of the values when there are more, or null for none
+// * An error, given or thrown, is {"error": message, "kind": kind} with a status from its kind, e.g web.NotFound is 404
+// * The first parameter is the session, a struct of the program that embeds web.Session. Each request gets a new one
+//
+// The memory of a request, e.g its texts and its session, is freed after the response. session.request.allocator
+// allocates from it
+
+import net.http;
+import json;
+import fmt;
+import mem;
+
+// The attribute of an endpoint: @web.endpoint for POST, @web.endpoint(.get) for GET
+@attribute
+endpoint :: struct {
+    method: Method = .post;
+}
+
+Method :: enum {
+    post,
+    get,
+}
+
+// The kinds of errors that give a status other than 500
+BadRequest   :: ErrorKind{"web.BadRequest"};     // 400
+Unauthorized :: ErrorKind{"web.Unauthorized"};   // 401
+Forbidden    :: ErrorKind{"web.Forbidden"};      // 403
+NotFound     :: ErrorKind{"web.NotFound"};       // 404
+Conflict     :: ErrorKind{"web.Conflict"};       // 409
+
+// What every session has. The session of a program embeds it: @embed base: web.Session;
+Session :: struct {
+    request:  *http.Request;
+    response: *http.ResponseWriter;
+    app:      *App;
+}
+
+// An endpoint of the app
+Endpoint :: struct {
+    name:     string;
+    method:   Method;
+    function: *AttributedFunction;
+}
+
+App :: struct {
+    server:    http.Server;       // First, as a request finds its app through its server. Its fields can be set, e.g workers
+    prefix:    string;            // Of the urls, e.g /v1
+    endpoints: [..]Endpoint;
+
+    sessionType:   *TypeStruct;   // Of the session of the program
+    sessionOffset: int;           // Where its web.Session is in it
+    start:         (session: *u8);
+    finish:        (session: *u8);
+}
+
+// The app of the endpoints whose first parameter is a *S, with urls under the prefix, e.g "/v1". S is web.Session, or a
+// struct that embeds one. An error says what is wrong with an endpoint, e.g a name that two endpoints have
+newApp :: <S>(prefix: string) -> *App, error {
+    app := new(App);
+    app.prefix = prefix;
+    if app.prefix.endsWith("/") { app.prefix = app.prefix.slice(0, app.prefix.len - 1); }
+
+    probe: S;
+    boxed: any = probe;
+    app.sessionType = boxed.type as *TypeStruct;
+    base: Session;
+    boxedBase: any = base;
+    if app.sessionType != boxedBase.type as *TypeStruct {
+        found := false;
+        for member in app.sessionType.members {
+            if member.type == boxedBase.type {
+                app.sessionOffset = member.offset as int;
+                found = true;
+            }
+        }
+        if !found {
+            return null, newError(fmt.sprint("The session % has no web.Session: give it a member '@embed base: web.Session;'", app.sessionType.head.name));
+        }
+    }
+
+    for f, i in attributedFunctions() {
+        marked: endpoint;
+        if !f.attribute(&marked) { continue; }
+        function := &attributedFunctions()[i];
+        first := f.parameters.count > 0 && f.parameters[0].type.kind == .pointer && (f.parameters[0].type as *TypePointer).pointerTo == boxed.type;
+        if !first {
+            return null, newError(fmt.sprint("The endpoint % must take a *% as its first parameter", f.name, app.sessionType.head.name));
+        }
+        for e in app.endpoints {
+            if e.name == f.name {
+                return null, newError(fmt.sprint("Two endpoints are named %: the name of an endpoint is its url, so it must be unique", f.name));
+            }
+        }
+        app.endpoints.add(Endpoint{f.name, marked.method, function});
+    }
+
+    app.server.handler = dispatch;
+    return app, null;
+}
+
+// A function that is called with each new session before its endpoint, e.g to give it a database context. It can
+// throw, e.g web.Unauthorized, and the endpoint isn't called then
+onStart :: method <S>(app: *App, hook: (session: *S)) {
+    address := hook as *void;
+    app.start = address as (session: *u8);
+}
+
+// A function that is called with each session after its endpoint, also when the endpoint threw, e.g to save changes
+onFinish :: method <S>(app: *App, hook: (session: *S)) {
+    address := hook as *void;
+    app.finish = address as (session: *u8);
+}
+
+listenAndServe :: method (app: *App, address: string) -> error {
+    return app.server.listenAndServe(address);
+}
+
+//
+// Answering a request
+//
+
+ErrorBody :: struct {
+    @json.Field(name: "error")
+    message: string;
+    kind:    string;
+}
+
+// The status of an error, from its kind
+statusOf :: (err: error) -> int {
+    if err.is(BadRequest) || err.is(json.DecodeError) { return 400; }
+    if err.is(Unauthorized) { return 401; }
+    if err.is(Forbidden)    { return 403; }
+    if err.is(NotFound)     { return 404; }
+    if err.is(Conflict)     { return 409; }
+    return 500;
+}
+
+respondError :: (w: *http.ResponseWriter, status: int, message: string, kind: string) {
+    w.status = status;
+    w.body.clear();
+    w.setHeader("Content-Type", "application/json");
+    w.write(json.encode(ErrorBody{message, kind}));
+}
+
+respondWith :: (w: *http.ResponseWriter, err: error) {
+    status := statusOf(err);
+    message := err.message;
+    if err.is(Panic) { message = "Internal Server Error"; }   // What went wrong inside isn't told
+    respondError(w, status, message, err.kind.name);
+}
+
+// The handler of the server of an app
+dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
+    app := r.server as *App;   // The server is the first member of the app
+
+    name := "";
+    if r.path.startsWith(app.prefix) && r.path.len > app.prefix.len && r.path[app.prefix.len] == '/' {
+        name = r.path.slice(app.prefix.len + 1);
+    }
+    target: *Endpoint;
+    for i in 0..app.endpoints.count {
+        if app.endpoints[i].name == name { target = app.endpoints.indexRef(i); }
+    }
+    if target == null {
+        respondError(w, 404, fmt.sprint("There is no endpoint at %", r.path), "web.NotFound");
+        return;
+    }
+    wanted := "POST";
+    if target.method == .get { wanted = "GET"; }
+    if r.method != wanted && !(wanted == "GET" && r.method == "HEAD") {
+        w.setHeader("Allow", wanted);
+        respondError(w, 405, fmt.sprint("% is called with %", name, wanted), "web.MethodNotAllowed");
+        return;
+    }
+
+    f := target.function;
+    arguments := r.arena.allocate(f.argumentsSize as int) as *u8;
+    results   := r.arena.allocate(f.resultsSize as int + 8) as *u8;
+
+    // A new session, with the request and the response
+    session := r.arena.allocate(app.sessionType.head.size) as *u8;
+    base := (&session[app.sessionOffset]) as *Session;
+    base.request  = r;
+    base.response = w;
+    base.app      = app;
+    *((&arguments[f.parameters[0].offset]) as **u8) = session;
+
+    err := readArguments(f, r, arguments);
+    if err != null {
+        respondWith(w, err);
+        return;
+    }
+
+    try {
+        if app.start != null { app.start(session); }
+        f.invoke(arguments, results);
+    } catch (thrown) {
+        if app.finish != null { app.finish(session); }
+        respondWith(w, thrown);
+        return;
+    }
+    if app.finish != null { app.finish(session); }
+
+    // The results: an error that is given, and the values
+    values: [..]FunctionValue;
+    values.allocator = &r.allocator;
+    for result in f.results {
+        if isErrorType(result.type) {
+            given := *((&results[result.offset]) as *error);
+            if given != null {
+                respondWith(w, given);
+                return;
+            }
+            continue;
+        }
+        values.add(result);
+    }
+    w.setHeader("Content-Type", "application/json");
+    if values.count == 0 {
+        w.write("null");
+    } else if values.count == 1 {
+        w.write(json.encodeAt(&results[values[0].offset], values[0].type));
+    } else {
+        w.write("[");
+        for v, i in values {
+            if i > 0 { w.write(","); }
+            w.write(json.encodeAt(&results[v.offset], v.type));
+        }
+        w.write("]");
+    }
+}
+
+// If the type is error, a *Error
+isErrorType :: (type: *Type) -> bool {
+    probe: error;
+    boxed: any = probe;
+    return type == boxed.type;
+}
+
+// The parameters after the session: the members of the JSON object of the body for POST, or the query for GET. One
+// that isn't there is an error, unless it is an optional
+readArguments :: (f: *AttributedFunction, r: *http.Request, arguments: *u8) -> error {
+    body: json.Value;
+    isGet := r.method == "GET" || r.method == "HEAD";
+    if !isGet && f.parameters.count > 1 {
+        text := r.body;
+        if text.len == 0 { text = "{}"; }
+        parsed, err := json.parse(text);
+        if err != null { return newError(fmt.sprint("The body isn't JSON: %", err.message), BadRequest); }
+        if parsed.kind != .object { return newError("The body is a JSON object of the parameters, e.g {\"id\": 1}", BadRequest); }
+        body = parsed;
+    }
+
+    for i in 1..f.parameters.count {
+        p := f.parameters[i];
+        place := (&arguments[p.offset]) as *void;
+        value: json.Value;
+        given := false;
+        if isGet {
+            text, found := r.queryValue(p.name);
+            given = found;
+            if found {
+                if p.type.kind == .string {
+                    *(place as *string) = text;
+                    continue;
+                }
+                parsed, err := json.parse(text);
+                if err != null { return newError(fmt.sprint("%: '%' isn't a value of type %", p.name, text, p.type.name), BadRequest); }
+                value = parsed;
+            }
+        } else {
+            given = body.has(p.name);
+            if given { value = body.get(p.name); }
+        }
+        if !given {
+            if p.type.flags.has(.isOptional) { continue; }
+            return newError(fmt.sprint("The parameter % is missing", p.name), BadRequest);
+        }
+        err := json.assignAt(value, place, p.type, p.name);
+        if err != null { return newError(err.message, BadRequest); }
+    }
+    return null;
+}
