@@ -4746,9 +4746,11 @@ static Type *error_type(Typer *typer) {
     AstFile *file = typer->parser->errors_file;
     if (file == NULL) return NULL;
     AstIdentifier *ident = find_identifier_in_scope(file->scope, "error");
-    if (ident == NULL) return NULL;
-    if (ident->decl && !(ident->flags & IDENTIFIER_IS_RESOLVED)) check_declaration_of(typer, ident);
-    return ident->type ? resolve_type(typer, ident->type) : NULL;
+    if (ident == NULL || is_poisoned(ident)) return NULL;
+    if (ident->decl && !(ident->flags & IDENTIFIER_IS_RESOLVED) && !check_declaration_of(typer, ident)) return NULL;
+    if (ident->decl && (ident->decl->head.flags & AST_FLAG_HAS_ERRORS)) return NULL; // e.g a prelude with errors
+    Type *type = ident->type;
+    return type && type->kind == TYPE_POINTER ? type : NULL;
 }
 
 bool is_error_type(Typer *typer, Type *type) {

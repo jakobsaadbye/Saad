@@ -96,7 +96,7 @@ discardChanges :: method (context: *Context) {
 // changed. When one of them fails, none of them are written, the error says which one, and the changes are kept so that
 // they can be fixed and saved again. After the commit, what the database made for the created rows (e.g serial ids and
 // defaults of now()) is in them
-saveChanges :: method (context: *Context) -> string {
+saveChanges :: method (context: *Context) -> error {
     // The tracked rows to write: changed, and not updated or deleted by a change
     dirty: [..]*Tracked;
     for *t in context.tracked {
@@ -105,12 +105,12 @@ saveChanges :: method (context: *Context) -> string {
     total := context.changes.count + dirty.count;
     if total == 0 {
         dirty.free();
-        return "";
+        return null;
     }
 
     conn := context.conn;
     err := conn.begin();
-    if err != "" {
+    if err != null {
         dirty.free();
         return err;
     }
@@ -151,13 +151,14 @@ saveChanges :: method (context: *Context) -> string {
     }
 
     if failed == "" {
-        failed = conn.commit();
+        committed := conn.commit();
+        if committed != null { failed = committed.message; }
     }
     if failed != "" {
         conn.rollback();
         stored.free();
         dirty.free();
-        return failed;
+        return databaseError(failed);
     }
 
     // Saved: the created rows get what the database made, the deleted rows are not tracked any more, and every tracked
@@ -177,7 +178,7 @@ saveChanges :: method (context: *Context) -> string {
     stored.free();
     dirty.free();
     context.changes.clear();
-    return "";
+    return null;
 }
 
 // Records a change. The tables do, e.g create of a dbms.Table
@@ -437,7 +438,7 @@ updateTracked :: method (context: *Context, t: *Tracked) -> string {
     sb.free();
     args.free();
     changed.free();
-    if err != "" { return err; }
+    if err != null { return err.message; }
     if n == 0 { return fmt.sprint("No row has the key %", key); }
     return "";
 }
@@ -483,7 +484,7 @@ apply :: method (context: *Context, change: Change) -> string {
             sb.free();
             args.free();
             columns.free();
-            if err != "" { return err; }
+            if err != null { return err.message; }
             if changed == 0 { return fmt.sprint("No row has the key %", key); }
             return "";
         }
@@ -491,7 +492,7 @@ apply :: method (context: *Context, change: Change) -> string {
             sql := fmt.sprint("DELETE FROM % WHERE % = $1", name, quoted(table.key));
             removed, err := conn.exec(sql, change.key);
             sql.free();
-            if err != "" { return err; }
+            if err != null { return err.message; }
             if removed == 0 { return fmt.sprint("No row has the key %", change.key); }
             return "";
         }

@@ -17,7 +17,7 @@ Order :: struct {
     @Hidden dbLink: dbms.Link;
 
     // The row of users that userId refers to, or null
-    user :: method () -> (*User, string) {
+    user :: method () -> (*User, error) {
         return dbms.related<User>(self.dbLink, "users", "id", self.userId);
     }
 

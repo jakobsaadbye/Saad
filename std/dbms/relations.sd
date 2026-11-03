@@ -7,7 +7,8 @@ namespace dbms;
 //     recent, err2 := author.posts().where(p => p.status == .published).orderBy(p => p.title).all();
 //
 // A row knows its database through a hidden member, a dbms.Link, which the tables set on the rows they give: create,
-// get, all, and the queries. A row made otherwise, e.g Post{...}, has no link, and its relations give an error.
+// get, all, and the queries. A row made otherwise, e.g Post{...}, has no link, and its relations give an error of the
+// kind dbms.NoLink.
 // The rows of a relation are tracked like the rows of get, and a row that is tracked already is given again instead of
 // a copy, so post.author() twice gives the same *Author
 import fmt;
@@ -33,15 +34,15 @@ NoLinkError :: "The row has no link to a database, as it wasn't made by create, 
 
 // The row of a table whose column has the value, e.g the author of a post. Null when there is none, or when the value
 // is an empty optional, e.g of a column that can be NULL
-related :: <T>(link: Link, table: string, column: string, value: any) -> (*T, string) {
-    if link.context == null { return null, NoLinkError; }
+related :: <T>(link: Link, table: string, column: string, value: any) -> (*T, error) {
+    if link.context == null { return null, databaseError(NoLinkError, NoLink); }
     context := link.context;
     info, found := context.tableNamed(table);
-    if !found { return null, fmt.sprint("The table % isn't a table of the database", table); }
+    if !found { return null, databaseError(fmt.sprint("The table % isn't a table of the database", table), QueryError); }
 
     if value.type.isOptional() {
         inner, innerType, present := (value.type as *TypeStruct).optionalValue(value.data);
-        if !present { return null, ""; }
+        if !present { return null, null; }
         value.type = innerType;
         value.data = inner;
     }
@@ -49,7 +50,7 @@ related :: <T>(link: Link, table: string, column: string, value: any) -> (*T, st
     // A tracked row with the key is the row
     if column == info.key {
         for *t in context.tracked {
-            if sameTable(t.table, info) && sameKey(t, value) { return t.row as *T, ""; }
+            if sameTable(t.table, info) && sameKey(t, value) { return t.row as *T, null; }
         }
     }
 

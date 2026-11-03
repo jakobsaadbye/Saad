@@ -74,7 +74,7 @@ main :: () {
     conn := dbms.Connection{driver: &driver, handle: &table};
 
     posts, err := conn.query<Post>("SELECT * FROM posts");
-    assert(err == "");
+    assert(err == null);
     assert(table.lastSql == "SELECT * FROM posts");
     assert(posts.count == 2);
 
@@ -99,7 +99,7 @@ main :: () {
     maybe: ?string = "opt";
     nothing: ?int;
     changed, e1 := conn.exec("UPDATE", 42, -7 as i8, 2.5, true, Status.published, "text", &tag, noTag, 'c', maybe, nothing);
-    assert(e1 == "" && changed == 3);
+    assert(e1 == null && changed == 3);
     assert(table.lastParams.count == 11);
     assert(table.lastParams[9] == "opt" && table.lastParams[10] == "NULL");
     assert(table.lastParams[0] == "42" && table.lastParams[1] == "-7" && table.lastParams[2] == "2.5");
@@ -108,44 +108,44 @@ main :: () {
 
     point := Post{};
     _, e2 := conn.exec("UPDATE", point);
-    assert(e2 == "Parameter $1 can't be a Post");
+    assert(e2.message == "Parameter $1 can't be a Post");
 
     // Errors of the driver and of reading
     _, e3 := conn.exec("fail");
-    assert(e3 == "ERROR: it failed");
+    assert(e3.message == "ERROR: it failed");
 
     table.cells[2] = "65536".data;       // Too big for a u16
     _, e4 := conn.query<Post>("SELECT");
-    assert(e4 == "Row 1: likes: 65536 doesn't fit in a u16");
+    assert(e4.message == "Row 1: likes: 65536 doesn't fit in a u16");
     table.cells[2] = "65535".data;
 
     table.cells[4] = "deleted".data;
     _, e5 := conn.query<Post>("SELECT");
-    assert(e5 == "Row 1: status: 'deleted' is not a value of Status");
+    assert(e5.message == "Row 1: status: 'deleted' is not a value of Status");
     table.cells[4] = "Published".data;   // Case doesn't matter
 
     _, e6 := conn.query<int>("SELECT");
-    assert(e6 == "Rows are read into structs, not into values of type int. Use queryOne for a single value");
+    assert(e6.message == "Rows are read into structs, not into values of type int. Use queryOne for a single value");
 
     // One row and one value
     one, found, e7 := conn.queryOne<Post>("SELECT");
-    assert(found && e7 == "" && one.title == "Hello" && one.status == .published);
+    assert(found && e7 == null && one.title == "Hello" && one.status == .published);
     id, hasId, e8 := conn.queryOne<i64>("SELECT");
-    assert(hasId && e8 == "" && id == 1);
+    assert(hasId && e8 == null && id == 1);
 
     // Memory from an arena
     arena: mem.Arena;
     alloc := arena.allocator();
     conn.allocator = &alloc;
     fromArena, e9 := conn.query<Post>("SELECT");
-    assert(e9 == "" && fromArena.count == 2 && fromArena.allocator == &alloc);
+    assert(e9 == null && fromArena.count == 2 && fromArena.allocator == &alloc);
     assert(fromArena[0].title == "Hello" && fromArena[0].authorId == 7 && *fromArena[0].authorPointer == 7);
     assert(arena.used() > 0);
     arena.free();
 
     conn.close();
     _, e10 := conn.exec("SELECT");
-    assert(e10 == "The connection is closed");
+    assert(e10.message == "The connection is closed");
 
     print("db ok");
 }

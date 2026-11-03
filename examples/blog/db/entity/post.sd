@@ -21,7 +21,7 @@ Post :: struct {
     @Hidden dbLink: dbms.Link;
 
     // The row of authors that authorId refers to, or null
-    author :: method () -> (*Author, string) {
+    author :: method () -> (*Author, error) {
         return dbms.related<Author>(self.dbLink, "authors", "id", self.authorId);
     }
 

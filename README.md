@@ -85,6 +85,9 @@ saad check main.sd        # only check for errors
   division by zero throws a `Panic`. An error that nothing catches ends the program with its message and trace. The
   language server shows `throws` after the calls whose error isn't taken. See `docs/errors.md`
 
+* `dbms` gives `error`s instead of strings, of the kinds `dbms.DatabaseError`, `dbms.QueryError` and `dbms.NoLink`, so
+  `posts := db.posts.all();` throws when the database fails. The blog example has no error checks anymore
+
 ```odin
 config, err := readConfig(path);     // a value
 config := readConfig(path);          // thrown when there is an error

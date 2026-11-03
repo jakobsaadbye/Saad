@@ -69,16 +69,27 @@ Column :: struct {
     generated: bool = false; // Made by the database, e.g a serial id or a default of now(). dbms.Table's insert and update leave it out
 }
 
+// The kinds of the errors of dbms, for a catch to tell them apart, e.g err.is(dbms.DatabaseError)
+DatabaseError :: ErrorKind{"dbms.DatabaseError"}; // What the database said, e.g a broken constraint, or the connection is gone
+QueryError    :: ErrorKind{"dbms.QueryError"};    // A query of a table that can't be made into SQL, e.g a method SQL doesn't have
+NoLink        :: ErrorKind{"dbms.NoLink"};        // The relations of a row that wasn't made by a table, see relations.sd
+
+// The error of the message, or null when it is empty. The functions of dbms give these, and keep the text of errors inside
+databaseError :: (message: string, kind := DatabaseError) -> error {
+    if message == "" { return null; }
+    return newError(message, kind);
+}
+
 // Runs a statement that returns no rows, e.g INSERT, UPDATE or DELETE. Gives the number of rows it changed.
 // The arguments are the parameters $1, $2, ... of the SQL
-exec :: method (conn: *Connection, sql: string, args: ...any) -> i64, string {
+exec :: method (conn: *Connection, sql: string, args: ...any) -> i64, error {
     result, err := conn.run(sql, ...args);
     if err != "" {
-        return 0, err;
+        return 0, databaseError(err);
     }
     changed := conn.driver.affected(result);
     conn.driver.freeResult(result);
-    return changed, "";
+    return changed, null;
 }
 
 // Runs a query and gives its rows, one T per row, e.g
@@ -93,7 +104,7 @@ exec :: method (conn: *Connection, sql: string, args: ...any) -> i64, string {
 // * Columns are read from their text: numbers, bool (t/f or true/false), string, enums (by name or number),
 //   and optionals and pointers of them
 // * The list, strings and pointers are allocated with conn.allocator
-query :: method <T>(conn: *Connection, sql: string, args: ...any) -> [..]T, string {
+query :: method <T>(conn: *Connection, sql: string, args: ...any) -> [..]T, error {
     rows: [..]T;
     rows.allocator = conn.allocator;
 
@@ -101,12 +112,12 @@ query :: method <T>(conn: *Connection, sql: string, args: ...any) -> [..]T, stri
     boxed: any = empty;
     rowType := boxed.type;
     if rowType.kind != .struct {
-        return rows, fmt.sprint("Rows are read into structs, not into values of type %. Use queryOne for a single value", rowType.name);
+        return rows, databaseError(fmt.sprint("Rows are read into structs, not into values of type %. Use queryOne for a single value", rowType.name), QueryError);
     }
 
     result, err := conn.run(sql, ...args);
     if err != "" {
-        return rows, err;
+        return rows, databaseError(err);
     }
 
     columns := conn.columnsOf(result, rowType as *TypeStruct);
@@ -123,7 +134,7 @@ query :: method <T>(conn: *Connection, sql: string, args: ...any) -> [..]T, stri
     }
     columns.free();
     conn.driver.freeResult(result);
-    return rows, err;
+    return rows, databaseError(err);
 }
 
 // Runs a query and gives its first row, or the first column of it when T isn't a struct, e.g
@@ -132,11 +143,11 @@ query :: method <T>(conn: *Connection, sql: string, args: ...any) -> [..]T, stri
 //     total, _, err2   := conn.queryOne<i64>("SELECT count(*) FROM users");
 //
 // found is false when there are no rows, and the value is then the default of T
-queryOne :: method <T>(conn: *Connection, sql: string, args: ...any) -> T, bool, string {
+queryOne :: method <T>(conn: *Connection, sql: string, args: ...any) -> T, bool, error {
     row: T;
     result, err := conn.run(sql, ...args);
     if err != "" {
-        return row, false, err;
+        return row, false, databaseError(err);
     }
 
     boxed: any = row;
@@ -157,26 +168,30 @@ queryOne :: method <T>(conn: *Connection, sql: string, args: ...any) -> T, bool,
         columns.free();
     }
     conn.driver.freeResult(result);
-    return row, found, err;
+    return row, found, databaseError(err);
 }
 
 // Starts a transaction. Nothing it changes is seen by others until commit, and rollback undoes all of it, e.g
 //
-//     err := conn.begin();
-//     _, err1 := conn.exec("UPDATE accounts SET balance = balance - $1 WHERE id = $2", 10, from);
-//     _, err2 := conn.exec("UPDATE accounts SET balance = balance + $1 WHERE id = $2", 10, to);
-//     if err1 != "" || err2 != "" { conn.rollback(); } else { conn.commit(); }
-begin :: method (conn: *Connection) -> string {
+//     conn.begin();
+//     try {
+//         conn.exec("UPDATE accounts SET balance = balance - $1 WHERE id = $2", 10, from);
+//         conn.exec("UPDATE accounts SET balance = balance + $1 WHERE id = $2", 10, to);
+//         conn.commit();
+//     } catch (err) {
+//         conn.rollback();
+//     }
+begin :: method (conn: *Connection) -> error {
     _, err := conn.exec("BEGIN");
     return err;
 }
 
-commit :: method (conn: *Connection) -> string {
+commit :: method (conn: *Connection) -> error {
     _, err := conn.exec("COMMIT");
     return err;
 }
 
-rollback :: method (conn: *Connection) -> string {
+rollback :: method (conn: *Connection) -> error {
     _, err := conn.exec("ROLLBACK");
     return err;
 }

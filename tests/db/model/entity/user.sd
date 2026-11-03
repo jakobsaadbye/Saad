@@ -21,7 +21,7 @@ User :: struct {
     @Hidden dbLink: dbms.Link;
 
     // The row of users that referredBy refers to, or null
-    referredByRow :: method () -> (*User, string) {
+    referredByRow :: method () -> (*User, error) {
         return dbms.related<User>(self.dbLink, "users", "id", self.referredBy);
     }
 

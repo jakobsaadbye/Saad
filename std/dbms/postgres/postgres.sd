@@ -17,24 +17,24 @@ import mem;
 
 // Connects with a connection string of libpq, e.g "host=localhost dbname=app user=postgres", or a URL like
 // "postgresql://postgres@localhost/app". err is empty when it worked
-connect :: (connectionString: string) -> dbms.Connection, string {
+connect :: (connectionString: string) -> dbms.Connection, error {
     conn: dbms.Connection;
     info := connectionString.toCString();
     handle := PQconnectdb(info);
     mem.free(info);
 
     if handle == null {
-        return conn, "libpq couldn't make a connection";
+        return conn, dbms.databaseError("libpq couldn't make a connection");
     }
     if PQstatus(handle) != ConnectionOk {
         err := message(PQerrorMessage(handle));
         PQfinish(handle);
-        return conn, err;
+        return conn, dbms.databaseError(err);
     }
 
     conn.driver = driver();
     conn.handle = handle;
-    return conn, "";
+    return conn, null;
 }
 
 // The driver for dbms.Connection

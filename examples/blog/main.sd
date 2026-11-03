@@ -32,8 +32,7 @@ main :: () {
     db := database.open(&conn);
 
     // Every run starts from an empty blog
-    _, err := conn.exec("TRUNCATE saad_blog.authors, saad_blog.posts, saad_blog.comments, saad_blog.post_tags RESTART IDENTITY");
-    check(err);
+    _ := conn.exec("TRUNCATE saad_blog.authors, saad_blog.posts, saad_blog.comments, saad_blog.post_tags RESTART IDENTITY");
 
     //
     // 1. Creating rows. create() gives a new row with the defaults of the table, e.g status is .draft. Nothing is
@@ -50,7 +49,7 @@ main :: () {
     grace.email = "grace@example.com";
 
     print("% changes to save", db.pendingChanges());
-    check(db.saveChanges());
+    db.saveChanges();
     print("Saved authors % (id %) and % (id %)", ada.name, ada.id, grace.name, grace.id);
     print("% joined at % (a time.Time, as the column is a timestamptz)", ada.name, ada.joinedAt.format("15:04 on Monday"));
 
@@ -66,7 +65,7 @@ main :: () {
     compilers.publishedAt = time.date(2026, 10, 15, 12, 30);
     compilers.views  = 300;
     moth.status = .archived;
-    check(db.saveChanges());     // The four posts are one INSERT
+    db.saveChanges();     // The four posts are one INSERT
 
     // Comments, and tags, whose table has no key of one column: it can only be read and created
     addComment(&db, engine,    "Charles", "Brilliant work!");
@@ -76,15 +75,14 @@ main :: () {
     addTag(&db, engine, "history");
     addTag(&db, engine, "math");
     addTag(&db, compilers, "languages");
-    check(db.saveChanges());
+    db.saveChanges();
     print("Saved 4 posts, and comments and tags for them");
 
     //
     // 2. Querying. The lambdas are checked like any code, and made into SQL. The values they use, like minViews, are
     //    sent as parameters
     //
-    published, e1 := db.posts.where(p => p.status == .published).orderByDescending(p => p.publishedAt).all();
-    check(e1);
+    published := db.posts.where(p => p.status == .published).orderByDescending(p => p.publishedAt).all();
     print("\nPublished, newest first:");
     for post in published {
         print("  % (% views, published %)", post.title, post.views, (post.publishedAt ?? post.createdAt).format("Jan 2"));
@@ -92,8 +90,7 @@ main :: () {
 
     // Some columns, into an anonymous struct: struct { title: string; slug: string; popular: bool; }
     minViews := 200;
-    summaries, e2 := db.posts.where(p => p.authorId == grace.id).orderBy(p => p.title).select(p => {title: p.title, slug: p.slug, popular: p.views >= minViews}).all();
-    check(e2);
+    summaries := db.posts.where(p => p.authorId == grace.id).orderBy(p => p.title).select(p => {title: p.title, slug: p.slug, popular: p.views >= minViews}).all();
     print("\nPosts of %:", grace.name);
     for s in summaries {
         if s.popular { print("  /% % (popular)", s.slug, s.title); }
@@ -102,99 +99,83 @@ main :: () {
 
     // A search, into one value per row
     term := "engine";
-    titles, e3 := db.posts.where(p => p.title.toLower().indexOf(term) >= 0 || p.body.toLower().indexOf(term) >= 0).select(p => p.title).all();
-    check(e3);
+    titles := db.posts.where(p => p.title.toLower().indexOf(term) >= 0 || p.body.toLower().indexOf(term) >= 0).select(p => p.title).all();
     print("\nPosts about '%': %", term, titles);
 
     // Times are values too. publishedAt can be NULL, so ?. and ?? say what it is then
     since := time.date(2026, 10, 10);
-    recent, e12 := db.posts.where(p => p.publishedAt?.after(since) ?? false).select(p => p.title).all();
-    check(e12);
+    recent := db.posts.where(p => p.publishedAt?.after(since) ?? false).select(p => p.title).all();
     print("Published after %: %", since.format("January 2"), recent);
 
     // count and exists
-    comments, e4 := db.comments.where(c => c.postId == engine.id).count();
-    check(e4);
-    taken, e5 := db.posts.where(p => p.slug == "bernoulli").exists();
-    check(e5);
+    comments := db.comments.where(c => c.postId == engine.id).count();
+    taken := db.posts.where(p => p.slug == "bernoulli").exists();
     print("\n'%' has % comments, and the slug 'bernoulli' is taken: %", engine.title, comments, taken);
 
     // A page of rows
-    page, e6 := db.posts.orderBy(p => p.id).offset(1).limit(2).select(p => p.slug).all();
-    check(e6);
+    page := db.posts.orderBy(p => p.id).offset(1).limit(2).select(p => p.slug).all();
     print("Page 2 of the posts, by two: %", page);
 
     //
     // 3. Relations, from the foreign keys: posts.author_id refers to authors.id, so a Post has author() and an Author
     //    has posts(). author() gives the row, and posts() a query, which can be narrowed and sorted like any other
     //
-    writer, e13 := moth.author();
-    check(e13);
+    writer := moth.author();
     print("\n'%' is by %", moth.title, writer.name);
     again, _ := moth.author();
     print("Asking again gives the same row, as it is tracked: %", again == writer);
 
-    adaPublished, e14 := ada.posts().where(p => p.status == .published).orderBy(p => p.title).select(p => p.title).all();
-    check(e14);
+    adaPublished := ada.posts().where(p => p.status == .published).orderBy(p => p.title).select(p => p.title).all();
     print("Published by %: %", ada.name, adaPublished);
 
-    discussion, e15 := engine.comments().orderBy(c => c.id).all();
-    check(e15);
+    discussion := engine.comments().orderBy(c => c.id).all();
     print("Comments on '%':", engine.title);
     for comment in discussion {
         post, _ := comment.post();
         print("  % on '%': %", comment.authorName, post.slug, comment.body);
     }
-    tags, e16 := engine.postTags().orderBy(t => t.tag).select(t => t.tag).all();
-    check(e16);
+    tags := engine.postTags().orderBy(t => t.tag).select(t => t.tag).all();
     print("Tags of '%': %", engine.slug, tags);
 
     // A query can use the row that a foreign key refers to, e.g p.author().name, which is a join in SQL. A member
     // without a name gets the name of the member it reads: {p.title, p.author().email} has title and email
-    withAuthors, e20 := db.posts.where(p => p.status == .published).orderBy(p => p.title).select(p => {
+    withAuthors := db.posts.where(p => p.status == .published).orderBy(p => p.title).select(p => {
         p.title,
         p.publishedAt,
         authorName: p.author().name,
         p.author().email,
     }).all();
-    check(e20);
     print("\nPublished posts with their authors:");
     for row in withAuthors {
         print("  '%' by % (%) on %", row.title, row.authorName, row.email, row.publishedAt?.format("2006-01-02") ?? "-");
     }
-    byAda, e21 := db.posts.where(p => p.author().email == "ada@example.com").count();
-    check(e21);
+    byAda := db.posts.where(p => p.author().email == "ada@example.com").count();
     print("Posts by the author with the email ada@example.com: %", byAda);
-    onAda, e22 := db.comments.where(c => c.post().author().name.startsWith("Ada")).select(c => {c.body, c.post().slug}).all();
-    check(e22);
+    onAda := db.comments.where(c => c.post().author().name.startsWith("Ada")).select(c => {c.body, c.post().slug}).all();
     print("Comments on the posts of Ada: %", onAda.count);
 
     //
     // 4. Changing rows. The rows of get, all and first are tracked: what is changed on them is saved by saveChanges,
     //    without calling update, and only the columns that changed
     //
-    post, e7 := db.posts.where(p => p.slug == "bernoulli").first();   // A *Post, or null when there is none
-    check(e7);
+    post := db.posts.where(p => p.slug == "bernoulli").first();   // A *Post, or null when there is none
     post.status      = .published;
     post.publishedAt = time.now();
 
-    reader, e8 := db.posts.get(engine.id);
-    check(e8);
+    reader := db.posts.get(engine.id);
     reader.views += 1;
 
     print("\n% changes to save: the post that is published, and the view", db.pendingChanges());
-    check(db.saveChanges());
-    stillDraft, e9 := db.posts.where(p => p.status == .draft).count();
-    check(e9);
+    db.saveChanges();
+    stillDraft := db.posts.where(p => p.status == .draft).count();
     print("Drafts left: %", stillDraft);
 
     //
     // 5. Removing rows, by their key
     //
     db.comments.delete(spam.id);
-    check(db.saveChanges());
-    left, e10 := db.comments.count();
-    check(e10);
+    db.saveChanges();
+    left := db.comments.count();
     print("\nRemoved the spam, % comments are left", left);
 
     //
@@ -203,37 +184,36 @@ main :: () {
     copycat := db.authors.create();
     copycat.name  = "Ada again";
     copycat.email = "ada@example.com";     // email is UNIQUE
-    saveErr := db.saveChanges();
-    print("\nSaving a second author with the email of Ada fails: %", firstLine(saveErr));
-    db.discardChanges();
+    try {
+        db.saveChanges();
+    } catch (err) {
+        print("\nSaving a second author with the email of Ada fails (%): %", err.kind.name, firstLine(err.message));
+        db.discardChanges();
+    }
 
     //
     // 7. The rows that refer to a row can be counted and summed in a query too: a.posts() is a subquery. The rows can
     //    be a struct of the program, like Stats, or an anonymous struct, like the ones above
     //
-    stats, e11 := db.authors.orderBy(a => a.name).select(a => Stats{
+    stats := db.authors.orderBy(a => a.name).select(a => Stats{
         name: a.name,
         posts: a.posts().where(p => p.status == .published).count(),
         views: a.posts().where(p => p.status == .published).sum(p => p.views),
         mostRead: a.posts().orderByDescending(p => p.views).first().title,
     }).all();
-    check(e11);
     print("\nPublished posts per author:");
     for s in stats {
         print("  %: % posts, % views", s.name, s.posts, s.views);
     }
     print("Most read: %", stats.map(s => s.mostRead));
-    withComments, e23 := db.posts.where(p => p.comments().exists()).select(p => p.slug).all();
-    check(e23);
-    total, e24 := db.posts.sum(p => p.views);
-    check(e24);
+    withComments := db.posts.where(p => p.comments().exists()).select(p => p.slug).all();
+    total := db.posts.sum(p => p.views);
     print("Posts with comments: %. Views of all posts: %", withComments, total);
 
     //
     // 8. Plain SQL stays for everything else, e.g a GROUP BY
     //
-    counts, e25 := conn.query<StatusCount>("SELECT status, count(*) AS posts FROM saad_blog.posts GROUP BY status ORDER BY status");
-    check(e25);
+    counts := conn.query<StatusCount>("SELECT status, count(*) AS posts FROM saad_blog.posts GROUP BY status ORDER BY status");
     for c in counts {
         print("  %: %", c.status, c.posts);
     }
@@ -275,18 +255,11 @@ connect :: () -> dbms.Connection {
         os.exit(2);
     }
     conn, err := postgres.connect(connection);
-    if err != "" {
-        print("Can't connect: %", err);
+    if err != null {
+        print("Can't connect: %", err.message);
         os.exit(1);
     }
     return conn;
-}
-
-check :: (err: string) {
-    if err != "" {
-        print("Error: %", err);
-        os.exit(1);
-    }
 }
 
 firstLine :: (text: string) -> string {
