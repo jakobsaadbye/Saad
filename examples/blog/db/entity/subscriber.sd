@@ -1,0 +1,13 @@
+// Made by std/dbms/tools/generate.sd from the schema saad_blog of a Postgres database. Make it again
+// instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
+namespace entities;
+
+import time;
+
+// A row of subscribers
+Subscriber :: struct {
+    id:        i64;
+    email:     string;
+    confirmed: bool = false;
+    createdAt: time.Time;
+}

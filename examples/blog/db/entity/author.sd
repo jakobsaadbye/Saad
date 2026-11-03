@@ -13,11 +13,21 @@ Author :: struct {
     bio:      ?string;
     joinedAt: time.Time;
 
-    // The database it came from, for posts()
+    // The database it came from, for follows(), posts(), series()
     @Hidden dbLink: dbms.Link;
+
+    // The rows of follows whose author_id is the id of this one, as a query, e.g author.follows().all()
+    follows :: method () -> dbms.Query<Follow> {
+        return dbms.relatedRows<Follow>(self.dbLink, "follows").where(row => row.authorId == self.id);
+    }
 
     // The rows of posts whose author_id is the id of this one, as a query, e.g author.posts().all()
     posts :: method () -> dbms.Query<Post> {
         return dbms.relatedRows<Post>(self.dbLink, "posts").where(row => row.authorId == self.id);
+    }
+
+    // The rows of series whose author_id is the id of this one, as a query, e.g author.series().all()
+    series :: method () -> dbms.Query<Series> {
+        return dbms.relatedRows<Series>(self.dbLink, "series").where(row => row.authorId == self.id);
     }
 }

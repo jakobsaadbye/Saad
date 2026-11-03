@@ -78,6 +78,14 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.13.2 - 3. Nov 2026
+
+* `examples/blog` is a backend: 13 tables, endpoints with `web` for posts, comments, likes, follows, bookmarks, series,
+  moderation and a newsletter, a pool of connections, and readers who log in with a token. `demo.sd` calls it over
+  HTTP, and `tour.sd` is the tour of `dbms` that `main.sd` was
+* A GET parameter of `web` that is a `?string` is taken as it is, like a `string`
+* The generator keeps `series` as it is, instead of `Sery`
+
 ## Update v0.13.1 - 3. Nov 2026
 
 * The allocator of the thread: a null allocator, e.g of `new(T)`, a string, `fmt.sprint`, a list, `json` or `dbms`,

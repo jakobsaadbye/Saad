@@ -1,0 +1,27 @@
+// Made by std/dbms/tools/generate.sd from the schema saad_blog of a Postgres database. Make it again
+// instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
+namespace entities;
+
+import dbms;
+
+// A row of series
+Series :: struct {
+    id:          i64;
+    authorId:    i64;
+    title:       string;
+    slug:        string;
+    description: string = "";
+
+    // The database it came from, for author(), seriesPosts()
+    @Hidden dbLink: dbms.Link;
+
+    // The row of authors that authorId refers to, or null
+    author :: method () -> (*Author, error) {
+        return dbms.related<Author>(self.dbLink, "authors", "id", self.authorId);
+    }
+
+    // The rows of series_posts whose series_id is the id of this one, as a query, e.g series.seriesPosts().all()
+    seriesPosts :: method () -> dbms.Query<SeriesPost> {
+        return dbms.relatedRows<SeriesPost>(self.dbLink, "series_posts").where(row => row.seriesId == self.id);
+    }
+}

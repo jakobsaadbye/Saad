@@ -9,16 +9,27 @@ import time;
 Comment :: struct {
     id:         i64;
     postId:     i64;
+    readerId:   ?i64;
     authorName: string;
     body:       string;
     likes:      i32 = 0;
     createdAt:  time.Time;
 
-    // The database it came from, for post()
+    // The database it came from, for post(), reader(), reports()
     @Hidden dbLink: dbms.Link;
 
     // The row of posts that postId refers to, or null
     post :: method () -> (*Post, error) {
         return dbms.related<Post>(self.dbLink, "posts", "id", self.postId);
+    }
+
+    // The row of readers that readerId refers to, or null
+    reader :: method () -> (*Reader, error) {
+        return dbms.related<Reader>(self.dbLink, "readers", "id", self.readerId);
+    }
+
+    // The rows of reports whose comment_id is the id of this one, as a query, e.g comment.reports().all()
+    reports :: method () -> dbms.Query<Report> {
+        return dbms.relatedRows<Report>(self.dbLink, "reports").where(row => row.commentId == self.id);
     }
 }

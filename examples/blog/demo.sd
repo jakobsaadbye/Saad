@@ -1,0 +1,99 @@
+// The blog backend, called like a client would: it starts the server of server.sd on a free port, sends requests to
+// the endpoints, and prints what they answer. Run it with
+//
+//     saad run examples/blog/demo.sd -- "host=localhost dbname=postgres user=postgres"
+//
+// It empties the blog first, so it can be run again
+
+import api;
+import web;
+import net.http;
+import dbms.postgres;
+import database;
+import thread;
+import json;
+import os;
+use fmt;
+
+base := "";
+
+// Sends a request and prints it with its answer. A token logs in
+call :: (verb: string, path: string, body := "", token := "") -> string {
+    headers: [..]http.Header;
+    if token != "" { headers.add(http.Header{"Authorization", sprint("Bearer %", token)}); }
+    if body != "" { headers.add(http.Header{"Content-Type", "application/json"}); }
+    response := http.request(verb, sprint("%%", base, path), headers, body);
+    print("% /v1%  %", verb, path, body);
+    print("    % %\n", response.status, response.body);
+    return response.body;
+}
+
+serve :: (app: *web.App) {
+    app.server.serve();
+}
+
+main :: () {
+    args := os.args();
+    if args.count < 2 {
+        print("Usage: saad run examples/blog/demo.sd -- \"host=localhost dbname=postgres user=postgres\"");
+        os.exit(2);
+    }
+    connectionString := args[1];
+
+    // An empty blog, with the posts to start with
+    conn := postgres.connect(connectionString);
+    conn.exec("SET client_min_messages TO warning");
+    conn.exec("TRUNCATE saad_blog.authors, saad_blog.categories, saad_blog.readers, saad_blog.subscribers RESTART IDENTITY CASCADE");
+    db := database.open(&conn);
+    api.seed(&db);
+    conn.close();
+
+    app := api.newApp(connectionString);
+    app.server.log = false;
+    app.server.listen("127.0.0.1:0");
+    base = sprint("http://%/v1", app.server.listener.addr.toString());
+    server := thread.spawn(serve, app);
+
+    print("Reading\n");
+    call("GET", "/listCategories");
+    call("GET", "/listPosts");
+    call("GET", "/listPosts?category=history");
+    call("GET", "/listPosts?tag=math");
+    call("GET", "/getPost?slug=compilers");
+    call("GET", "/getSeries?slug=from-the-start");
+    call("GET", "/getPost?slug=nothing");
+    call("GET", "/listPosts?page=two");
+
+    print("A reader\n");
+    call("GET", "/me");
+    answer := http.post(sprint("%/register", base), "application/json", "{\"name\": \"Charles\", \"email\": \"charles@example.com\"}");
+    charles := json.decode<api.Registration>(answer.body);
+    print("POST /v1/register  {\"name\": \"Charles\", \"email\": \"charles@example.com\"}");
+    print("    % Charles has the id % and a token of % letters\n", answer.status, charles.id, charles.token.len);
+    call("POST", "/likePost", "{\"slug\": \"compilers\"}", charles.token);
+    call("POST", "/addComment", "{\"slug\": \"compilers\", \"body\": \"Great read!\"}", charles.token);
+    call("POST", "/bookmarkPost", "{\"slug\": \"first-bug\", \"note\": \"Read later\"}", charles.token);
+    call("POST", "/followAuthor", "{\"authorId\": 2}", charles.token);
+    call("GET", "/feed", "", charles.token);
+    call("GET", "/listBookmarks", "", charles.token);
+    call("GET", "/me", "", charles.token);
+    call("POST", "/subscribe", "{\"email\": \"charles@example.com\"}");
+    call("POST", "/subscribe", "{\"email\": \"charles@example.com\"}");
+
+    print("An author\n");
+    answer = http.post(sprint("%/register", base), "application/json", "{\"name\": \"Grace\", \"email\": \"grace@example.com\"}");
+    grace := json.decode<api.Registration>(answer.body);
+    call("POST", "/createPost", "{\"title\": \"No posts for readers\", \"slug\": \"nope\", \"body\": \"\", \"tags\": []}", charles.token);
+    call("POST", "/createPost", "{\"title\": \"FLOW-MATIC\", \"slug\": \"flow-matic\", \"body\": \"English for programs\", \"category\": \"programming\", \"tags\": [\"history\", \"programming\"]}", grace.token);
+    call("POST", "/publishPost", "{\"slug\": \"flow-matic\"}", grace.token);
+    call("GET", "/listPosts?category=programming");
+
+    print("Moderation\n");
+    call("POST", "/reportComment", "{\"commentId\": 1, \"reason\": \"Too short\"}", charles.token);
+    call("GET", "/openReports", "", grace.token);
+    call("POST", "/resolveReport", "{\"reportId\": 1, \"removeComment\": false}", grace.token);
+    call("GET", "/authorStats");
+
+    app.server.shutdown();
+    server.join();
+}

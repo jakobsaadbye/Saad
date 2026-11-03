@@ -38,8 +38,9 @@ Status: steps 1 to 5 of the plan below are done: `dbms`, `dbms.postgres`, rows i
 allocators, `dbms.Table<T>`, the generator that writes the tables of a database as Saad, queries with lambdas, and
 saving changes.
 
-`examples/blog` is a whole program: a schema, the code the generator writes of it, and an app that creates,
-queries, changes and removes rows. With the generator, the program above is:
+`examples/blog` is a whole program: a backend of 13 tables with `web` endpoints, the code the generator writes of its
+schema, a client that calls it, and a tour of `dbms` on its own (`tour.sd`). See `examples/blog/README.md`. With the
+generator, the program above is:
 
 ```odin
 import dbms;

@@ -258,6 +258,16 @@ dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
     }
 }
 
+// A string, or a ?string
+isText :: (type: *Type) -> bool {
+    if type.kind == .string { return true; }
+    if type.flags.has(.isOptional) {
+        item := (type as *TypeStruct).members[0].type;
+        return item.kind == .string;
+    }
+    return false;
+}
+
 // If the type is error, a *Error
 isErrorType :: (type: *Type) -> bool {
     probe: error;
@@ -288,10 +298,8 @@ readArguments :: (f: *AttributedFunction, r: *http.Request, arguments: *u8) -> e
             text, found := r.queryValue(p.name);
             given = found;
             if found {
-                if p.type.kind == .string {
-                    *(place as *string) = text;
-                    continue;
-                }
+                // Text is as it is, also for a ?string. Other types are JSON, e.g 2, true or [1, 2]
+                if isText(p.type) { text = json.encode(text); }
                 parsed, err := json.parse(text);
                 if err != null { return newError(fmt.sprint("%: '%' isn't a value of type %", p.name, text, p.type.name), BadRequest); }
                 value = parsed;

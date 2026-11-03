@@ -81,7 +81,8 @@ else
 fi
 rm -rf "$OUT"
 
-# The blog example: its schema, the files the generator writes of it, which must be the ones in examples/blog/db, and the app
+# The blog example: its schema, the files the generator writes of it, which must be the ones in examples/blog/db, the tour
+# of dbms, and the backend, which demo.sd calls over HTTP
 printf "%-56s " "examples/blog"
 PSQL="psql"
 [ -n "$BIN" ] && [ -x "$BIN/psql" ] && PSQL="$BIN/psql"
@@ -94,8 +95,12 @@ elif ! output=$(bash "$HERE/run.sh" std/dbms/tools/generate.sd "$SAAD_TEST_POSTG
     echo "${RED}FAILED (examples/blog/db is not what the generator writes)${RESET}"
     diff -r "$OUT/db" examples/blog/db | head -10 | sed 's/^/    /'
     failed=$((failed + 1))
-elif ! output=$(bash "$HERE/run.sh" examples/blog/main.sd "$SAAD_TEST_POSTGRES" 2>&1) || ! printf '%s' "$output" | grep -q "Grace Hopper: 1 posts, 300 views"; then
-    echo "${RED}FAILED${RESET}"
+elif ! output=$(bash "$HERE/run.sh" examples/blog/tour.sd "$SAAD_TEST_POSTGRES" 2>&1) || ! printf '%s' "$output" | grep -q "Grace Hopper: 1 posts, 300 views"; then
+    echo "${RED}FAILED (tour.sd)${RESET}"
+    echo "$output" | tail -5 | sed 's/^/    /'
+    failed=$((failed + 1))
+elif ! output=$(timeout 120 bash "$HERE/run.sh" examples/blog/demo.sd "$SAAD_TEST_POSTGRES" 2>&1) || ! printf '%s' "$output" | grep -q '"name":"Grace Hopper","posts":3,"views":511,"followers":1'; then
+    echo "${RED}FAILED (demo.sd, the backend)${RESET}"
     echo "$output" | tail -5 | sed 's/^/    /'
     failed=$((failed + 1))
 else

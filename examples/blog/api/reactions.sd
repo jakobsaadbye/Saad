@@ -1,0 +1,70 @@
+namespace api;
+
+import web;
+use entities;
+
+// Likes, bookmarks and follows of the reader who is logged in
+
+// Likes a post, once. Gives how many like it
+@web.endpoint
+likePost :: (session: *Session, slug: string) -> i64 {
+    reader := loggedIn(session);
+    post := publishedPost(session, slug);
+    if !session.db.likes.where(l => l.readerId == reader.id && l.postId == post.id).exists() {
+        like := session.db.likes.create();
+        like.readerId = reader.id;
+        like.postId   = post.id;
+        session.db.saveChanges();
+    }
+    return post.likes().count();
+}
+
+@web.endpoint
+unlikePost :: (session: *Session, slug: string) -> i64 {
+    reader := loggedIn(session);
+    post := publishedPost(session, slug);
+    like := session.db.likes.where(l => l.readerId == reader.id && l.postId == post.id).first();
+    if like != null {
+        session.db.likes.delete(like.id);
+        session.db.saveChanges();
+    }
+    return post.likes().count();
+}
+
+// Follows an author. Gives how many follow them
+@web.endpoint
+followAuthor :: (session: *Session, authorId: i64) -> i64 {
+    reader := loggedIn(session);
+    author := session.db.authors.get(authorId);
+    if author == null { throw newError("No author has that id", web.NotFound); }
+    if !session.db.follows.where(f => f.readerId == reader.id && f.authorId == authorId).exists() {
+        follow := session.db.follows.create();
+        follow.readerId = reader.id;
+        follow.authorId = authorId;
+        session.db.saveChanges();
+    }
+    return author.follows().count();
+}
+
+@web.endpoint
+bookmarkPost :: (session: *Session, slug: string, note: ?string) -> i64 {
+    reader := loggedIn(session);
+    post := publishedPost(session, slug);
+    if !session.db.bookmarks.where(b => b.readerId == reader.id && b.postId == post.id).exists() {
+        bookmark := session.db.bookmarks.create();
+        bookmark.readerId = reader.id;
+        bookmark.postId   = post.id;
+        bookmark.note     = note;
+        session.db.saveChanges();
+    }
+    return reader.bookmarks().count();
+}
+
+@web.endpoint(.get)
+listBookmarks :: (session: *Session) -> [..]BookmarkView {
+    reader := loggedIn(session);
+    return reader.bookmarks()
+        .orderBy(b => b.id)
+        .select(b => BookmarkView{slug: b.post().slug, title: b.post().title, note: b.note})
+        .all();
+}

@@ -1,0 +1,62 @@
+namespace api;
+
+import web;
+import fmt;
+use entities;
+
+@web.endpoint
+addComment :: (session: *Session, slug: string, body: string) -> CommentView {
+    reader := loggedIn(session);
+    post := publishedPost(session, slug);
+    if body.len == 0 { throw newError("A comment has a body", web.BadRequest); }
+    comment := session.db.comments.create();
+    comment.postId     = post.id;
+    comment.readerId   = reader.id;
+    comment.authorName = reader.name;
+    comment.body       = body;
+    session.db.saveChanges();
+    return CommentView{comment.id, comment.authorName, comment.body};
+}
+
+// Reports a comment to the moderators
+@web.endpoint
+reportComment :: (session: *Session, commentId: i64, reason: string) -> i64 {
+    reader := loggedIn(session);
+    if session.db.comments.get(commentId) == null { throw newError("No comment has that id", web.NotFound); }
+    report := session.db.reports.create();
+    report.commentId = commentId;
+    report.readerId  = reader.id;
+    report.reason    = reason;
+    session.db.saveChanges();
+    return report.id;
+}
+
+// The reports that wait for an author
+@web.endpoint(.get)
+openReports :: (session: *Session) -> [..]ReportView {
+    loggedInAuthor(session);
+    return session.db.reports
+        .where(r => r.status == .open)
+        .orderBy(r => r.id)
+        .select(r => ReportView{id: r.id, reason: r.reason, comment: r.comment().body, reporter: r.reader().name, status: r.status})
+        .all();
+}
+
+// Removes the comment, or keeps it
+@web.endpoint
+resolveReport :: (session: *Session, reportId: i64, removeComment: bool) -> ReportView {
+    loggedInAuthor(session);
+    report := session.db.reports.get(reportId);
+    if report == null { throw newError(fmt.sprint("No report has the id %", reportId), web.NotFound); }
+    comment := report.comment();
+    view := ReportView{id: report.id, reason: report.reason, comment: comment.body, reporter: report.reader().name};
+    if removeComment {
+        session.db.comments.delete(comment.id);   // Its reports go with it (ON DELETE CASCADE)
+        view.status = .resolved;
+    } else {
+        report.status = .dismissed;
+        view.status = .dismissed;
+    }
+    session.db.saveChanges();
+    return view;
+}

@@ -1,0 +1,43 @@
+// Made by std/dbms/tools/generate.sd from the schema saad_blog of a Postgres database. Make it again
+// instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
+namespace entities;
+
+import dbms;
+import time;
+
+// A row of readers
+Reader :: struct {
+    id:       i64;
+    name:     string;
+    email:    string;
+    token:    string;
+    joinedAt: time.Time;
+
+    // The database it came from, for bookmarks(), comments(), follows(), likes(), reports()
+    @Hidden dbLink: dbms.Link;
+
+    // The rows of bookmarks whose reader_id is the id of this one, as a query, e.g reader.bookmarks().all()
+    bookmarks :: method () -> dbms.Query<Bookmark> {
+        return dbms.relatedRows<Bookmark>(self.dbLink, "bookmarks").where(row => row.readerId == self.id);
+    }
+
+    // The rows of comments whose reader_id is the id of this one, as a query, e.g reader.comments().all()
+    comments :: method () -> dbms.Query<Comment> {
+        return dbms.relatedRows<Comment>(self.dbLink, "comments").where(row => row.readerId == self.id);
+    }
+
+    // The rows of follows whose reader_id is the id of this one, as a query, e.g reader.follows().all()
+    follows :: method () -> dbms.Query<Follow> {
+        return dbms.relatedRows<Follow>(self.dbLink, "follows").where(row => row.readerId == self.id);
+    }
+
+    // The rows of likes whose reader_id is the id of this one, as a query, e.g reader.likes().all()
+    likes :: method () -> dbms.Query<Like> {
+        return dbms.relatedRows<Like>(self.dbLink, "likes").where(row => row.readerId == self.id);
+    }
+
+    // The rows of reports whose reader_id is the id of this one, as a query, e.g reader.reports().all()
+    reports :: method () -> dbms.Query<Report> {
+        return dbms.relatedRows<Report>(self.dbLink, "reports").where(row => row.readerId == self.id);
+    }
+}

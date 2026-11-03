@@ -679,6 +679,7 @@ tableTypeName :: (table: string) -> string {
 // The singular of an English word, for most words: categories is category, addresses is address, users is user
 @private
 singular :: (word: string) -> string {
+    if word.endsWith("series") || word.endsWith("species") { return word; }   // The same as one
     if word.endsWith("ies") && word.len > 3 { return fmt.sprint("%y", word.slice(0, word.len as int - 3)); }
     if word.endsWith("sses") || word.endsWith("xes") || word.endsWith("ches") || word.endsWith("shes") {
         return word.slice(0, word.len as int - 2);

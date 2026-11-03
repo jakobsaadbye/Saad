@@ -1,39 +1,149 @@
-# A blog with dbms
+# A blog backend with web and dbms
 
-A whole program on Postgres with `std/dbms`. It goes from the schema, to the Saad code that the generator writes of it,
-to creating, querying, following relations, changing and removing rows. It runs as a test in `tools/linux/dbtests.sh`.
+A small backend in Saad: a blog with posts, comments, likes, follows, bookmarks, series, moderation and a newsletter.
+Its API is its functions: a function with `@web.endpoint` is called at `/v1/<name>` with JSON, and reads and writes
+Postgres through the tables that the generator wrote of the schema. It runs as a test in `tools/linux/dbtests.sh`.
 
 ```
 examples/blog/
-├── schema.sql              the tables, in the schema saad_blog
-├── db/                     written by the generator, don't change it
-│   ├── database.sd         namespace database: Database, open, and a type per table
-│   └── entity/             namespace entities: a struct per table, an enum per Postgres enum
-│       ├── author.sd
-│       ├── post.sd
-│       ├── post_status.sd
-│       ├── comment.sd
-│       └── post_tag.sd
-└── main.sd                 the app
+├── schema.sql      13 tables in the schema saad_blog
+├── db/             written by the generator from schema.sql, don't change it
+│   ├── database.sd     namespace database: Database, open, a table type per table
+│   └── entity/         namespace entities: a struct per table, an enum per Postgres enum
+├── api/            namespace api: the endpoints
+│   ├── app.sd          the session of a request, the pool, logging in
+│   ├── views.sd        what the endpoints answer with
+│   ├── posts.sd        listPosts, getPost, createPost, publishPost, feed
+│   ├── readers.sd      register, me
+│   ├── reactions.sd    likePost, unlikePost, followAuthor, bookmarkPost, listBookmarks
+│   ├── comments.sd     addComment, reportComment, openReports, resolveReport
+│   ├── catalog.sd      listCategories, getSeries, subscribe, authorStats
+│   └── seed.sd         the posts the blog starts with
+├── server.sd       the server
+├── demo.sd         a client: starts the server, calls the endpoints and prints the answers
+└── tour.sd         a tour of dbms on its own, without the server (below)
 ```
 
 ## Running it
 
 ```bash
-# 1. Make the tables (drops the schema saad_blog first)
+# 1. The tables (drops the schema saad_blog first)
 psql "host=localhost dbname=postgres user=postgres" -f examples/blog/schema.sql
 
-# 2. Write them as Saad, into examples/blog/db. Do it again when the schema changes
+# 2. Write them as Saad into examples/blog/db. Again when the schema changes
 saad run std/dbms/tools/generate.sd -- "host=localhost dbname=postgres user=postgres" examples/blog/db saad_blog
 
-# 3. Run the app
-saad run examples/blog/main.sd -- "host=localhost dbname=postgres user=postgres"
+# 3. The server, at http://localhost:8080/v1
+saad run examples/blog/server.sd -- "host=localhost dbname=postgres user=postgres" :8080
+
+curl "http://localhost:8080/v1/listPosts?category=history"
+curl -X POST -d '{"name": "Charles", "email": "charles@example.com"}' http://localhost:8080/v1/register
+curl -X POST -H "Authorization: Bearer <token>" -d '{"slug": "compilers"}' http://localhost:8080/v1/likePost
+
+# Or the demo, which calls every endpoint
+saad run examples/blog/demo.sd -- "host=localhost dbname=postgres user=postgres"
 ```
 
 On Linux, `tools/linux/run.sh` runs the programs instead of `saad run`, with the same arguments but without `--`.
-The app empties the tables when it starts, so it can be run again.
 
-## 1. The tables as Saad
+## The endpoints
+
+GET takes its parameters from the query, POST from a JSON object. The ones marked with a lock need
+`Authorization: Bearer <token>`, the token of `register`; the ones with a pen need the reader of an author (same email).
+
+| Endpoint | | Parameters | Answer |
+| --- | --- | --- | --- |
+| `listPosts` | GET | `category?`, `tag?`, `page?` | the published posts, newest first |
+| `getPost` | GET | `slug` | the post, its tags and comments. Counts a view |
+| `listCategories` | GET | | the categories and how many posts they have |
+| `getSeries` | GET | `slug` | a series and its posts, in order |
+| `authorStats` | GET | | posts, views and followers of each author |
+| `register` | POST | `name`, `email` | the reader and its token |
+| `me` 🔒 | GET | | the reader, and how many likes, bookmarks and follows |
+| `likePost`, `unlikePost` 🔒 | POST | `slug` | how many like the post |
+| `followAuthor` 🔒 | POST | `authorId` | how many follow the author |
+| `feed` 🔒 | GET | | the posts of the authors the reader follows |
+| `bookmarkPost` 🔒 | POST | `slug`, `note?` | how many bookmarks the reader has |
+| `listBookmarks` 🔒 | GET | | the bookmarks |
+| `addComment` 🔒 | POST | `slug`, `body` | the comment |
+| `reportComment` 🔒 | POST | `commentId`, `reason` | the id of the report |
+| `subscribe` | POST | `email` | a text |
+| `createPost` 🖊 | POST | `title`, `slug`, `body`, `category?`, `tags` | the draft |
+| `publishPost` 🖊 | POST | `slug` | the post |
+| `openReports` 🖊 | GET | | the reports that wait |
+| `resolveReport` 🖊 | POST | `reportId`, `removeComment` | the report |
+
+Errors are `{"error": "...", "kind": "..."}`: 400 for a parameter that is missing or wrong, 401 without a token,
+403 for a reader that isn't an author, 404 for what isn't there and 409 for a slug or an email that is taken.
+
+## How it fits together
+
+An endpoint is a function whose first parameter is the session of the request:
+
+```odin
+@web.endpoint(.get)
+getSeries :: (session: *Session, slug: string) -> SeriesView {
+    series := session.db.series.where(s => s.slug == slug).first();
+    if series == null { throw newError(fmt.sprint("No series has the slug '%'", slug), web.NotFound); }
+    view := SeriesView{title: series.title, description: series.description, author: series.author().name};
+    view.parts = series.seriesPosts()
+        .orderBy(s => s.position)
+        .select(s => SeriesPart{position: s.position, slug: s.post().slug, title: s.post().title})
+        .all();
+    return view;
+}
+```
+
+* **The session** (`api/app.sd`) embeds `web.Session` and has what the endpoints need: a connection of a `dbms.Pool`,
+  the tables on it, and the reader of the token. `startSession` and `finishSession` take the connection and give it
+  back, for every request.
+* **Memory**: while an endpoint runs, what it allocates is in the arena of its request, also what it answers with, so
+  there is no `free` in `api/`. It is all freed after the response.
+* **Errors**: a query that fails throws, and the server answers with a 500. What the client did wrong is thrown with
+  a kind of `web`, e.g `web.NotFound`, which gives its status.
+* **Queries** are lambdas made into SQL, with relations as joins (`p.author().name`) and subqueries
+  (`p.likes().count()`, `p.postTags().where(t => t.tag == name).exists()`). `feed` is plain SQL with
+  `conn.query<PostSummary>`, for a join the tables can't say yet.
+* **Changes** to the rows that a query gave are saved by `saveChanges`, e.g the views of `getPost`.
+
+## What the demo prints
+
+```
+Reading
+
+GET /v1/listCategories  
+    200 [{"name":"History","slug":"history","posts":2},{"name":"Math","slug":"math","posts":1},{"name":"Programming","slug":"programming","posts":1}]
+
+GET /v1/listPosts  
+    200 [{"slug":"compilers","title":"Why we need compilers","author":"Grace Hopper","category":"Programming","views":300,"likes":0,"comments":0},{"slug":"first-bug","title":"The first actual bug","author":"Grace Hopper","category":"History","views":210,"likes":0,"comments":0},{"slug":"bernoulli","title":"Computing Bernoulli numbers","author":"Ada Lovelace","category":"Math","views":80,"likes":0,"comments":0},{"slug":"analytical-engine","title":"Notes on the Analytical Engine","author":"Ada Lovelace","category":"History","views":120,"likes":0,"comments":0}]
+
+GET /v1/listPosts?category=history  
+    200 [{"slug":"first-bug","title":"The first actual bug","author":"Grace Hopper","category":"History","views":210,"likes":0,"comments":0},{"slug":"analytical-engine","title":"Notes on the Analytical Engine","author":"Ada Lovelace","category":"History","views":120,"likes":0,"comments":0}]
+
+GET /v1/listPosts?tag=math  
+    200 [{"slug":"bernoulli","title":"Computing Bernoulli numbers","author":"Ada Lovelace","category":"Math","views":80,"likes":0,"comments":0}]
+
+GET /v1/getPost?slug=compilers  
+    200 {"slug":"compilers","title":"Why we need compilers","body":"Why we need compilers","author":"Grace Hopper","category":"Programming","views":301,"likes":0,"tags":["programming"],"comments":[]}
+
+GET /v1/getSeries?slug=from-the-start  
+    200 {"title":"Programming, from the start","description":"How programs went from bugs to compilers","author":"Grace Hopper","parts":[{"position":1,"slug":"first-bug","title":"The first actual bug"},{"position":2,"slug":"compilers","title":"Why we need compilers"}]}
+
+GET /v1/getPost?slug=nothing  
+    404 {"error":"No post has the slug 'nothing'","kind":"web.NotFound"}
+...
+```
+
+## The tour of dbms
+
+`tour.sd` is a walkthrough of `std/dbms` without the server, on the tables `authors`, `posts`, `comments` and
+`post_tags`:
+
+```bash
+saad run examples/blog/tour.sd -- "host=localhost dbname=postgres user=postgres"
+```
+
+### 1. The tables as Saad
 
 `schema.sql` has
 
@@ -127,7 +237,7 @@ use entities;         // Post instead of entities.Post
 db := database.open(&conn);
 ```
 
-## 2. Creating rows
+### 2. Creating rows
 
 `create()` gives a new row with the defaults. Nothing is written until `saveChanges`, which writes every change in one
 transaction, and then what the database made into the rows:
@@ -146,7 +256,7 @@ engine.publishedAt = time.date(2026, 10, 1, 9);     // October 1, 09:00 UTC
 
 The creates of one table that come after each other are one `INSERT`, so the four posts of the app are one statement.
 
-## 3. Querying
+### 3. Querying
 
 The lambdas of `where`, `orderBy` and `select` are made into SQL. They are checked like any other code, so a wrong
 member or type is a compile error, and the values they use are sent as parameters:
@@ -175,7 +285,7 @@ The first query is sent as
 SELECT * FROM "saad_blog"."posts" WHERE (("status" = $1)) ORDER BY "published_at" DESC
 ```
 
-## 4. Relations
+### 4. Relations
 
 The methods of the foreign keys give the row a row refers to, or a query of the rows that refer to it, which is
 narrowed and sorted like any other:
@@ -190,7 +300,7 @@ tags, err4 := engine.postTags().select(t => t.tag).all();     // [..]string
 The row of `author()` is tracked like a row of `get`. A row that is tracked already is given again instead of a copy,
 so `moth.author()` gives the very `*Author` that `create()` gave for Grace, and asking twice gives the same row.
 
-## 5. Changing and removing rows
+### 5. Changing and removing rows
 
 The rows of `get`, `all` and `first` are tracked: changes to them are saved by `saveChanges`, without calling `update`,
 and only the columns that changed are written. The rows of `select` are not tracked.
@@ -207,7 +317,7 @@ check(db.saveChanges());      // UPDATE posts SET status = $1, published_at = $2
 When a change fails, none of the changes of the save are written, the error says which change it was, and the changes
 are kept until they are fixed or `db.discardChanges()`.
 
-## 6. Plain SQL
+### 6. Plain SQL
 
 What the tables can't say yet, like a join, is plain SQL with `conn.query<T>`, which reads the rows into any struct:
 
@@ -217,7 +327,7 @@ AuthorStats :: struct { name: string; posts: i64; views: i64; }
 stats, err := conn.query<AuthorStats>("SELECT a.name, count(p.id) AS posts, ... GROUP BY a.name", PostStatus.published);
 ```
 
-## What it prints
+### What it prints
 
 The times of the rows the database made, like when Ada joined, are those of the run.
 

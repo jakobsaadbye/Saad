@@ -1,0 +1,68 @@
+namespace api;
+
+// The API of the blog: endpoints at /v1/<name>, on the tables of db/
+
+import web;
+import fmt;
+import dbms;
+import dbms.postgres;
+import database;
+use entities;
+
+// What each request gets
+Session :: struct {
+    @embed base: web.Session;
+    conn:   *dbms.Connection;   // From the pool
+    db:     database.Database;
+    reader: *Reader;            // Logged in with 'Authorization: Bearer <token>', or null
+}
+
+pool: *dbms.Pool;
+
+startSession :: (session: *Session) {
+    session.conn = pool.get();
+    session.db   = database.open(session.conn);
+
+    header, given := session.request.header("Authorization");
+    if given && header.startsWith("Bearer ") {
+        token := header.slice(7);
+        session.reader = session.db.readers.where(r => r.token == token).first();
+    }
+}
+
+finishSession :: (session: *Session) {
+    if session.conn != null { pool.put(session.conn); }
+}
+
+// The app, with a pool of connections to the database
+newApp :: (connectionString: string) -> *web.App {
+    pool = dbms.newPool(postgres.connect, connectionString, 8);
+    app := web.newApp<Session>("/v1");
+    app.onStart(startSession);
+    app.onFinish(finishSession);
+    return app;
+}
+
+// The reader who is logged in
+loggedIn :: (session: *Session) -> *Reader {
+    if session.reader == null {
+        throw newError("Log in with the header 'Authorization: Bearer <token>'", web.Unauthorized);
+    }
+    return session.reader;
+}
+
+// The author whose email the reader has. Only authors write
+loggedInAuthor :: (session: *Session) -> *Author {
+    reader := loggedIn(session);
+    email := reader.email;
+    author := session.db.authors.where(a => a.email == email).first();
+    if author == null { throw newError("Only authors can do that", web.Forbidden); }
+    return author;
+}
+
+// A published post
+publishedPost :: (session: *Session, slug: string) -> *Post {
+    post := session.db.posts.where(p => p.slug == slug && p.status == .published).first();
+    if post == null { throw newError(fmt.sprint("No post has the slug '%'", slug), web.NotFound); }
+    return post;
+}

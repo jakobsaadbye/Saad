@@ -9,6 +9,7 @@ import time;
 Post :: struct {
     id:          i64;
     authorId:    i64;
+    categoryId:  ?i64;
     title:       string;
     slug:        string;
     body:        string = "";
@@ -17,7 +18,7 @@ Post :: struct {
     publishedAt: ?time.Time;
     createdAt:   time.Time;
 
-    // The database it came from, for author(), comments(), postTags()
+    // The database it came from, for author(), category(), bookmarks(), comments(), likes(), postTags(), seriesPosts()
     @Hidden dbLink: dbms.Link;
 
     // The row of authors that authorId refers to, or null
@@ -25,13 +26,33 @@ Post :: struct {
         return dbms.related<Author>(self.dbLink, "authors", "id", self.authorId);
     }
 
+    // The row of categories that categoryId refers to, or null
+    category :: method () -> (*Category, error) {
+        return dbms.related<Category>(self.dbLink, "categories", "id", self.categoryId);
+    }
+
+    // The rows of bookmarks whose post_id is the id of this one, as a query, e.g post.bookmarks().all()
+    bookmarks :: method () -> dbms.Query<Bookmark> {
+        return dbms.relatedRows<Bookmark>(self.dbLink, "bookmarks").where(row => row.postId == self.id);
+    }
+
     // The rows of comments whose post_id is the id of this one, as a query, e.g post.comments().all()
     comments :: method () -> dbms.Query<Comment> {
         return dbms.relatedRows<Comment>(self.dbLink, "comments").where(row => row.postId == self.id);
     }
 
+    // The rows of likes whose post_id is the id of this one, as a query, e.g post.likes().all()
+    likes :: method () -> dbms.Query<Like> {
+        return dbms.relatedRows<Like>(self.dbLink, "likes").where(row => row.postId == self.id);
+    }
+
     // The rows of post_tags whose post_id is the id of this one, as a query, e.g post.postTags().all()
     postTags :: method () -> dbms.Query<PostTag> {
         return dbms.relatedRows<PostTag>(self.dbLink, "post_tags").where(row => row.postId == self.id);
+    }
+
+    // The rows of series_posts whose post_id is the id of this one, as a query, e.g post.seriesPosts().all()
+    seriesPosts :: method () -> dbms.Query<SeriesPost> {
+        return dbms.relatedRows<SeriesPost>(self.dbLink, "series_posts").where(row => row.postId == self.id);
     }
 }

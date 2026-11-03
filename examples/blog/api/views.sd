@@ -1,0 +1,85 @@
+namespace api;
+
+// What the endpoints answer with: the parts of the rows that a client needs
+
+PostSummary :: struct {
+    slug:     string;
+    title:    string;
+    author:   string;
+    category: string;
+    views:    i32;
+    likes:    i64;
+    comments: i64;
+}
+
+PostDetail :: struct {
+    slug:     string;
+    title:    string;
+    body:     string;
+    author:   string;
+    category: string;
+    views:    i32;
+    likes:    i64;
+    tags:     [..]string;
+    comments: [..]CommentView;
+}
+
+CommentView :: struct {
+    id:     i64;
+    author: string;
+    body:   string;
+}
+
+CategoryView :: struct {
+    name:  string;
+    slug:  string;
+    posts: i64;
+}
+
+SeriesView :: struct {
+    title:       string;
+    description: string;
+    author:      string;
+    parts:       [..]SeriesPart;
+}
+
+SeriesPart :: struct {
+    position: i32;
+    slug:     string;
+    title:    string;
+}
+
+Registration :: struct {
+    id:    i64;
+    name:  string;
+    token: string;   // For 'Authorization: Bearer <token>'
+}
+
+Profile :: struct {
+    name:      string;
+    email:     string;
+    likes:     i64;
+    bookmarks: i64;
+    following: i64;
+}
+
+BookmarkView :: struct {
+    slug:  string;
+    title: string;
+    note:  ?string;
+}
+
+ReportView :: struct {
+    id:       i64;
+    reason:   string;
+    comment:  string;
+    reporter: string;
+    status:   ReportStatus;
+}
+
+AuthorStats :: struct {
+    name:      string;
+    posts:     i64;
+    views:     i64;
+    followers: i64;
+}

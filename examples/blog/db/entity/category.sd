@@ -1,0 +1,20 @@
+// Made by std/dbms/tools/generate.sd from the schema saad_blog of a Postgres database. Make it again
+// instead of changing it, e.g saad run std/dbms/tools/generate.sd -- "host=localhost dbname=app" db
+namespace entities;
+
+import dbms;
+
+// A row of categories
+Category :: struct {
+    id:   i64;
+    name: string;
+    slug: string;
+
+    // The database it came from, for posts()
+    @Hidden dbLink: dbms.Link;
+
+    // The rows of posts whose category_id is the id of this one, as a query, e.g category.posts().all()
+    posts :: method () -> dbms.Query<Post> {
+        return dbms.relatedRows<Post>(self.dbLink, "posts").where(row => row.categoryId == self.id);
+    }
+}
