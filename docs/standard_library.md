@@ -294,8 +294,9 @@ POST /v1/createPost   {"post": {"title": "Hi"}}      -> {"id": 3, "title": "Hi"}
   `{"error": message, "kind": kind}`, with the status of its kind: `web.BadRequest` 400, `web.Unauthorized` 401,
   `web.Forbidden` 403, `web.NotFound` 404, `web.Conflict` 409, others 500. A `Panic` is a 500 that doesn't tell what
   went wrong.
-* The session is new for each request, and freed with it, as are the texts of the request. Allocate a result that is
-  freed with the request with `session.request.allocator`, e.g `result.allocator = &session.request.allocator;`.
+* The session is new for each request, and freed with it. While the endpoint runs, the allocator of the thread is the
+  arena of the request, so what it allocates, also its result, is freed after the response. Give what lives longer
+  the heap, e.g `post.title.copy(mem.heap())`. A `dbms.Pool` gives each session a connection (see `docs/dbms.md`).
 * `app.server` is the `http.Server`, e.g `app.server.workers` or `app.server.shutdown()`.
 * It is built on `attributedFunctions()` and their `invoke()` (see `docs/reflection.md`). A TypeScript client can be
   made from the same: the names, parameters and results of the endpoints.
@@ -478,8 +479,16 @@ freeMemory(p);                     // or mem.free(p), with the allocator it came
 * `mem`: memory, so the standard library and programs don't call C for it. `mem.allocate(size, allocator)` gives
   zeroed memory, `mem.resize(p, size, allocator)` is like `realloc`, `mem.free(p, allocator)`, and `mem.copy(to, from,
   n)`, `mem.set(to, byte, n)` and `mem.equal(a, b, n)` are like `memcpy`, `memset` and `memcmp`. The allocator is
-  optional, the heap when there is none. The standard library uses these and `new`; `mem` and the prelude are the
-  only places that call C for memory.
+  optional: the allocator of the thread when there is none. The standard library uses these and `new`; `mem` and the
+  prelude are the only places that call C for memory.
+* **The allocator of the thread** is what a null allocator means, e.g for `new(T)`, strings, `fmt.sprint`, lists,
+  maps, `json` and `dbms`. It is the heap unless it is set: `mem.setAllocator(&alloc)` sets it and gives the one before,
+  and `mem.allocator()` reads it. The http server sets it to the arena of the request while a handler or an endpoint
+  runs, so everything it allocates, also its result, is freed after the response, without `free`.
+* A list, a map, a `StringBuilder` and a `bytes.Buffer` keep the allocator of their first memory, so they grow and
+  are freed with it after the allocator of the thread changed.
+* What lives longer than a request is given the heap, `mem.heap()`: `store.posts.allocator = mem.heap();` or
+  `title.copy(mem.heap())` (`copy` and `free` of a string take an allocator).
 * `mem.Arena`: memory that is freed all at once, and the sizes `Kilobyte` and `Megabyte`. The zero value is
   ready to use: `arena.allocate(size)` gives zeroed memory, `arena.allocator()` an `Allocator` for lists, maps and
   `dbms.Connection`, and `arena.clear()` and `arena.free()` free all of it.

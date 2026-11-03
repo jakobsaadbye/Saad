@@ -91,7 +91,7 @@ request :: (verb: string, url: string, headers: []Header = [], body := "") -> *R
     if err != null { return null, err; }
     defer {
         conn.close();
-        mem.free(conn);
+        mem.free(conn, mem.heap());
     }
 
     out := fmt.newStringBuilder(256 + body.len as int);

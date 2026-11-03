@@ -1,8 +1,9 @@
 use c;
 
-// A copy of the string as a c.string, with a 0 after its bytes, e.g for a function of C. Free it with .free()
+// A copy of the string as a c.string, with a 0 after its bytes, e.g for a function of C. Free it with .free(). It is on
+// the heap, as C frees it
 toCString :: method (s: string) -> c.string {
-    cstr := resizeMemory(null, null, s.len + 1) as *u8;
+    cstr := resizeMemory(heapAllocator(), null, s.len + 1) as *u8;
     memcpy(cstr, s.data, s.len);
     cstr[s.len] = 0;
     return c.string{cstr};
@@ -22,15 +23,18 @@ slice :: method (s: string, from: int, to := -1) -> string {
     return result;
 }
 
-// Frees a string that was allocated, e.g by copy() or fmt.sprint()
-free :: method (s: string) {
-    c.free(s.data);
+// Frees a string that was allocated, e.g by copy() or fmt.sprint(), with the allocator of the thread, or the one it
+// was allocated with
+free :: method (s: string, allocator: *Allocator = null) {
+    if s.data != null { resizeMemory(allocator, s.data, 0); }
 }
 
-copy :: method (s: string) -> string {
+// A copy of the string, from the allocator of the thread, or the one given, e.g title.copy(mem.heap()) for a string
+// that lives longer than a request
+copy :: method (s: string, allocator: *Allocator = null) -> string {
     result: string;
 
-    result.data = resizeMemory(null, null, s.len) as *u8;
+    result.data = resizeMemory(allocator, null, s.len) as *u8;
     memcpy(result.data, s.data, s.len);
 
     result.len = s.len;

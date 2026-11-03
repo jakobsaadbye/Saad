@@ -1,0 +1,94 @@
+// dbms.Pool: connections for many threads, at most size of them, each used by one thread at a time
+
+import dbms;
+import thread;
+import mem;
+import fmt;
+use c;
+
+// A fake database, which counts its connections
+Stats :: struct {
+    mutex:     thread.Mutex;
+    made:      int;
+    closed:    int;
+    inUse:     int;
+    mostInUse: int;
+    failNext:  bool;
+}
+
+stats: Stats;
+driver: dbms.Driver;
+
+fakeClose :: (conn: *void) {
+    stats.mutex.lock();
+    stats.closed += 1;
+    stats.mutex.unlock();
+}
+
+fakeConnect :: (connectionString: string) -> dbms.Connection, error {
+    conn: dbms.Connection;
+    stats.mutex.lock();
+    defer stats.mutex.unlock();
+    if stats.failNext {
+        stats.failNext = false;
+        return conn, dbms.databaseError("the database isn't there");
+    }
+    stats.made += 1;
+    conn.driver = &driver;
+    conn.handle = &stats;
+    return conn, null;
+}
+
+pool: *dbms.Pool;
+
+work :: (rounds: *int) {
+    for i in 0..*rounds {
+        conn := pool.get();
+        stats.mutex.lock();
+        stats.inUse += 1;
+        if stats.inUse > stats.mostInUse { stats.mostInUse = stats.inUse; }
+        stats.mutex.unlock();
+        thread.yield();
+        stats.mutex.lock();
+        stats.inUse -= 1;
+        stats.mutex.unlock();
+        pool.put(conn);
+    }
+}
+
+main :: () {
+    driver.name  = "fake";
+    driver.close = fakeClose;
+    pool = dbms.newPool(fakeConnect, "fake", 2);
+
+    rounds := 50;
+    threads: [..]thread.Thread;
+    for i in 0..8 { threads.add(thread.spawn(work, &rounds)); }
+    for i in 0..threads.count { threads.indexRef(i).join(); }
+
+    // Reused, and never more than the size. When the threads happen to run one after another, one is enough
+    assert(stats.made >= 1 && stats.made <= 2 && pool.openCount() == stats.made);
+    assert(stats.mostInUse <= 2);
+
+    // A connection that can't be made gives the error, and doesn't count
+    a := pool.get();
+    b := pool.get();
+    stats.failNext = true;
+    pool.put(a);
+    pool.put(b);
+    held: [..]*dbms.Connection;
+    held.add(pool.get());
+    held.add(pool.get());
+    pool.size = 3;
+    stats.failNext = true;
+    _, err := pool.get();
+    assert(err != null && err.message == "the database isn't there" && pool.openCount() == 2);   // a and b
+    for conn in held { pool.put(conn); }
+
+    // Closed: the idle ones are closed, and get gives an error
+    pool.close();
+    assert(stats.closed == 2 && pool.openCount() == 0);
+    _, err = pool.get();
+    assert(err != null);
+    fmt.print("dbms pool ok");
+}

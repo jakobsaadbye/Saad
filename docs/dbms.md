@@ -117,7 +117,27 @@ User :: struct {
 ## Memory
 
 All the memory of a result comes from `conn.allocator`: the list, the strings and what pointers point to.
-`null`, the default, means the heap. A list that has an allocator already keeps it.
+`null`, the default, means the allocator of the thread: the heap, or the arena of the request while a server answers
+one (see `mem` in `docs/standard_library.md`). A list that has an allocator already keeps it.
+
+### A pool of connections
+
+A connection is used by one thread at a time, so a server takes one from a `dbms.Pool` for each request:
+
+```odin
+pool := dbms.newPool(postgres.connect, "host=localhost dbname=blog", 8);   // At most 8 open
+
+startSession :: (session: *Session) {
+    session.conn = pool.get();             // An idle one, a new one, or it waits while all are in use
+    session.db   = blog.newDb(session.conn);
+}
+finishSession :: (session: *Session) {
+    pool.put(session.conn);
+}
+```
+
+`pool.close()` closes the idle connections, and the ones in use when they are given back. The rows of a connection
+of the pool come from the allocator of the thread, so in a request they are freed with it.
 
 An arena is the easy way for a web request: everything of the request is freed at once.
 

@@ -54,7 +54,8 @@ Optional :: struct <T> {
 // Allocators
 //
 
-// Where a collection gets its memory from. A null allocator means the heap (realloc and free)
+// Where a collection gets its memory from. A null allocator means the allocator of the thread: the heap, unless it is
+// set, e.g to the arena of a request while a server answers it (see currentAllocator)
 Allocator :: struct {
     context: *void;
 
@@ -63,14 +64,38 @@ Allocator :: struct {
 }
 
 resizeMemory :: (allocator: *Allocator, memory: *void, size: i64) -> *void {
-    if allocator != null {
-        return allocator.resize(allocator.context, memory, size);
+    if allocator == null {
+        allocator = currentAllocator();
     }
+    return allocator.resize(allocator.context, memory, size);
+}
+
+// The allocator of the thread, which a null allocator means, e.g of new(T), a string or a list. Null is the heap. A
+// server sets it to the arena of a request while it answers it, so what the handler allocates is freed with the request.
+// See mem.setAllocator and mem.heap
+@threadLocal threadAllocator: *Allocator;
+
+currentAllocator :: () -> *Allocator {
+    allocator := threadAllocator;
+    if allocator != null { return allocator; }
+    return heapAllocator();
+}
+
+// realloc and free
+heapResize :: (context: *void, memory: *void, size: i64) -> *void {
     if size == 0 {
         free(memory);
         return null;
     }
     return realloc(memory, size);
+}
+
+heapAllocatorValue: Allocator;
+
+// The heap, for what lives longer than the allocator of the thread, e.g a list that a request adds to
+heapAllocator :: () -> *Allocator {
+    if heapAllocatorValue.resize == null { heapAllocatorValue.resize = heapResize; }   // The same value on every thread
+    return &heapAllocatorValue;
 }
 
 // What new(T) and new(T, allocator) are: a T with the defaults of its type, in memory of the allocator (null is the
@@ -129,7 +154,7 @@ List :: struct <T> {
     data:      *T;
     count:     i64;
     capacity:  i64;
-    allocator: *Allocator; // Null means the heap
+    allocator: *Allocator; // Null until it has memory: then the allocator of the thread, which it keeps
 
     // Adds a value at the end
     add :: method * (value: T) {
@@ -246,6 +271,10 @@ List :: struct <T> {
     reserve :: method * (capacity: i64) {
         if capacity <= self.capacity {
             return;
+        }
+        // The allocator of its first memory is kept, so it grows and is freed with the same one
+        if self.allocator == null {
+            self.allocator = currentAllocator();
         }
         self.data     = resizeMemory(self.allocator, self.data, capacity * sizeof(T)) as *T;
         self.capacity = capacity;
@@ -374,7 +403,7 @@ Map :: struct <K, V> {
     entries:   [..]Entry<K, V>; // In the order they were added
     slots:     [..]i64;         // Open addressing table. 0 is an empty slot, otherwise the index of an entry + 1. The count is a power of two
     count:     i64;
-    allocator: *Allocator;      // Null means the heap
+    allocator: *Allocator;      // Null until it has memory: then the allocator of the thread, which it keeps
 
     // Adds the key with the value, or changes the value if the key is already there
     set :: method * (key: K, value: V) {
@@ -452,6 +481,7 @@ Map :: struct <K, V> {
         if capacity > self.slots.count {
             self.rebuildSlots(capacity);
         }
+        if self.allocator == null { self.allocator = currentAllocator(); }
         self.entries.allocator = self.allocator;
         self.entries.reserve(count);
     }
@@ -529,6 +559,7 @@ Map :: struct <K, V> {
             self.rebuildSlots(capacity);
         }
 
+        if self.allocator == null { self.allocator = currentAllocator(); }
         self.entries.allocator = self.allocator;
         self.entries.add(Entry<K, V>{key, value, hash});
         self.count += 1;
@@ -547,6 +578,7 @@ Map :: struct <K, V> {
 
     // Puts every entry in a slot again, in a table of 'capacity' slots
     rebuildSlots :: method * (capacity: i64) {
+        if self.allocator == null { self.allocator = currentAllocator(); }
         self.slots.allocator = self.allocator;
         self.slots.clear();
         self.slots.reserve(capacity);

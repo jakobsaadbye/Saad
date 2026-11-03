@@ -9,8 +9,9 @@ namespace net.http;
 //     router.handle("/static/", files);          // Everything below /static/
 //     http.listenAndServe(":8080", &router);
 //
-// A handler that throws gives a 500, and the server goes on. The texts of a request are kept until its handler
-// returns: copy() what is kept for longer
+// A handler that throws gives a 500, and the server goes on. While a handler runs, the allocator of the thread is the
+// arena of its request: what it allocates, e.g with new(T), fmt.sprint or a list, is freed after the response. Give
+// what lives longer the heap, e.g title.copy(mem.heap()) or list.allocator = mem.heap()
 
 use c;
 import net;
@@ -356,10 +357,12 @@ serveConn :: method (server: *Server, conn: *net.Conn) {
     conn.setReadTimeout(server.readTimeout);
     conn.setWriteTimeout(server.writeTimeout);
     buffer: bytes.Buffer;
+    buffer.allocator = mem.heap();
     defer buffer.free();
     r: Request;
     defer r.arena.free();
     w: ResponseWriter;
+    w.body.allocator = mem.heap();   // Kept for the next request, so not in its arena
     defer w.body.free();
 
     while true {
@@ -385,9 +388,11 @@ serveConn :: method (server: *Server, conn: *net.Conn) {
             return;
         }
 
+        // What the handler allocates is in the arena of the request, unless it says otherwise, e.g mem.heap()
+        previous := mem.setAllocator(&r.allocator);
         try {
             if server.handler != null      { server.handler(&w, &r); }
-            else if server.router != null     { server.router.serve(&w, &r); }
+            else if server.router != null  { server.router.serve(&w, &r); }
             else                           { w.error(404, "Not Found"); }
         } catch (err) {
             if server.log {
@@ -396,6 +401,7 @@ serveConn :: method (server: *Server, conn: *net.Conn) {
             w.headers.clear();
             w.error(500, "Internal Server Error");
         }
+        mem.setAllocator(previous);
 
         close := wantsClose(&r) || server.isStopping();
         if close { w.setHeader("Connection", "close"); }
