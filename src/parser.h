@@ -39,6 +39,7 @@ typedef struct Parser {
 
     DynamicArray namespaces; // of *Namespace. All the namespaces found in the project and the standard library
     DynamicArray thread_locals; // of *AstIdentifier. The global variables with @threadLocal, laid out in the block of each thread
+    DynamicArray attributed_functions; // of *AstIdentifier. The functions with attribute values, e.g @Route("/posts"). See attributedFunctions()
     char *builtin_string_file_path;
 
     jmp_buf *syntax_error; // Where parse_file() continues after a syntax error, see stop_parsing()

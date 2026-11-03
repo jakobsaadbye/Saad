@@ -1,0 +1,8 @@
+// expect-error: A generic function can't have attribute values
+@attribute
+Route :: struct { path: string; }
+
+@Route("/x")
+first :: <T>(xs: []T) -> T { return xs[0]; }
+
+main :: () {}

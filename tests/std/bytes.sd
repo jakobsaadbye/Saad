@@ -1,0 +1,67 @@
+// bytes.Buffer: written at the end and read from the front, e.g the bytes of a socket
+
+import bytes;
+import fmt;
+import mem;
+
+main :: () {
+    buffer: bytes.Buffer;
+    buffer.write("GET / HTTP/1.1\r\nHost: saad\r\n");
+
+    // A line at a time, without the \r\n
+    line, found := buffer.readLine();
+    assert(found && line == "GET / HTTP/1.1");
+    line, found = buffer.readLine();
+    assert(found && line == "Host: saad");
+    line, found = buffer.readLine();
+    assert(!found && buffer.available() == 0);   // Not there yet
+
+    // Bytes written into space(), like the read of a socket, in pieces
+    for piece in ["Content-Le", "ngth: 5\r\n\r\nhel", "lo"] {
+        space := buffer.space(piece.len as int);
+        assert(space.count >= piece.len);
+        mem.copy(space.data, piece.data, piece.len);
+        buffer.wrote(piece.len as int);
+    }
+    headers, ended := buffer.readUntil("\r\n\r\n");
+    assert(ended && headers == "Content-Length: 5");
+    body, ok := buffer.read(5);
+    assert(ok && body == "hello");
+    _, ok = buffer.read(1);
+    assert(!ok);
+
+    // Bytes
+    buffer.writeByte('x');
+    buffer.writeByte('y');
+    peeked, _ := buffer.peekByte();
+    assert(peeked == 'x');
+    first, _ := buffer.readByte();
+    assert(first == 'x' && buffer.unread() == "y");
+    buffer.skip(10);
+    assert(buffer.available() == 0);
+
+    // Growing, and the bytes that are read are dropped when there is room
+    big := bytes.newBuffer(16);
+    for i in 0..1000 { big.write(fmt.sprint("%,", i)); }
+    total := 0;
+    while true {
+        number, more := big.readUntil(",");
+        if !more { break; }
+        total += 1;
+    }
+    assert(total == 1000);
+    big.clear();
+    assert(big.available() == 0 && big.capacity > 0);
+    big.free();
+
+    // With an arena
+    arena: mem.Arena;
+    alloc := arena.allocator();
+    held := bytes.newBuffer(8, &alloc);
+    held.write("in the arena");
+    assert(held.toString() == "in the arena");
+    arena.free();
+
+    buffer.free();
+    fmt.print("bytes ok");
+}

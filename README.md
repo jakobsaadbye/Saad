@@ -86,6 +86,9 @@ saad check main.sd        # only check for errors
   file and in blocks. What a branch declares is in the scope around it. See `docs/compile_time_if.md`
 * `@threadLocal` on a global variable: each thread has its own. The error that is being thrown is one
 * `thread`: `spawn` and `join`, `Mutex`, `Condition`, `WaitGroup`, `sleep` and `processorCount`, on Windows and Linux
+* `bytes.Buffer`: bytes written at the end and read from the front, e.g a line or the headers of a request at a time
+* Attribute values on functions and methods, e.g `@Route("POST", "/posts")`, listed by `attributedFunctions()`. Fixed:
+  an attribute value that gave a member with a default, e.g a string, got the default
 * A Saad function says in `eax` if an error left it, so the check after a call doesn't read memory. Programs that make
   many calls are a bit faster
 

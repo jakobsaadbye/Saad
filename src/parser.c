@@ -99,6 +99,7 @@ Parser parser_init(Lexer *lexer) {
     parser.inside_parameter_list   = false;
     parser.namespaces    = da_init(16, sizeof(Namespace *));
     parser.thread_locals = da_init(4, sizeof(AstIdentifier *));
+    parser.attributed_functions = da_init(4, sizeof(AstIdentifier *));
 
     return parser;
 }
@@ -1315,11 +1316,17 @@ Ast *parse_attributed_declaration(Parser *parser) {
             da_append(&parser->thread_locals, idents[i]);
         }
     }
+    // A function or a method takes the values of attribute structs, e.g @Route("/posts"). attributedFunctions() lists them
+    if (custom.count > 0 && stmt->kind == AST_DECLARATION && (stmt->flags & AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN) && count == 1) {
+        idents[0]->attributes = custom;
+        da_append(&parser->attributed_functions, idents[0]);
+        custom.count = 0;
+    }
     if (custom.count > 0) {
         AstStructLiteral *value = ((AstStructLiteral **)custom.items)[0];
         report_error_ast(parser, LABEL_ERROR, (Ast *)value, "Unknown attribute '@%s'", type_to_str(value->explicit_type));
         report_error_ast(parser, LABEL_HINT, NULL, "The attributes of the language are @private, @deprecated(\"message\"), @attribute, @embed and @threadLocal");
-        report_error_ast(parser, LABEL_NOTE, NULL, "The values of structs marked with @attribute can only be given to struct members");
+        report_error_ast(parser, LABEL_NOTE, NULL, "The values of structs marked with @attribute can only be given to struct members, functions and methods");
         return NULL;
     }
     if (is_attribute) {

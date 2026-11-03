@@ -3124,6 +3124,21 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         } else {
             decl->type = ((AstExpr **)decl->values.items)[0]->type;
         }
+
+        // The attribute values of a function, e.g @Route("/posts") getPosts :: (...). attributedFunctions() lists it
+        for (int i = 0; i < decl->idents.count && i < decl->values.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+            if (ident->attributes.count == 0) continue;
+            AstExpr *value = ((AstExpr **)decl->values.items)[i];
+            if (value->head.kind == AST_FUNCTION_DEFN && is_generic_function((AstFunctionDefn *)value)) {
+                AstStructLiteral *first = ((AstStructLiteral **)ident->attributes.items)[0];
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)first, "A generic function can't have attribute values, as it is a function for each set of types");
+                return false;
+            }
+            for (int j = 0; j < ident->attributes.count; j++) {
+                if (!check_attribute_value(typer, ((AstStructLiteral **)ident->attributes.items)[j])) return false;
+            }
+        }
     }
 
     // A read-only self cannot be stored, as the pointer could be used to change self
@@ -3845,6 +3860,14 @@ bool is_constant_value(AstExpr *expr) {
 // The value of an attribute on a struct member e.g @json.Field(name: "id") is a struct literal of a struct marked with @attribute,
 // with values that are known when compiling, as it is stored in the program for reflection
 bool check_attribute_value(Typer *typer, AstStructLiteral *value) {
+    // A name that isn't declared, e.g @privte, is a misspelled attribute
+    Type *written = value->explicit_type;
+    if (written && written->kind == TYPE_NAME && !strchr(written->name, '.') && !lookup_from_scope(typer->parser, typer->current_scope, written->name)) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "Unknown attribute '@%s'", written->name);
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "The attributes of the language are @private, @deprecated(\"message\"), @attribute, @embed and @threadLocal. Others are structs marked with @attribute");
+        return false;
+    }
+
     Type *type = check_expression(typer, (AstExpr *)value, NULL);
     if (!type) return false;
 
@@ -8507,6 +8530,10 @@ bool can_cast_explicitly(Type *from, Type *to) {
         // Allow any pointers to cast to any other pointer
         return true;
     }
+
+    // A function is its address, e.g 'f.function as (request: *Request)' of attributedFunctions(). The program says its type
+    if (from->kind == TYPE_POINTER && to->kind == TYPE_FUNCTION) return true;
+    if (from->kind == TYPE_FUNCTION && to->kind == TYPE_POINTER) return true;
 
     if (from->kind == TYPE_STRUCT && to->kind == TYPE_STRUCT) {
         // Allow C-like downcasts of one struct to another for c-like inheritence

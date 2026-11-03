@@ -68,7 +68,7 @@ Slot :: struct { index: int; }
 
 * Attributes go before a function, method (also inside a struct), struct, enum, constant, type alias or global
   variable, at the top of a file. Not inside functions. A struct member takes `@embed` and the values of attribute
-  structs.
+  structs, and so do functions and methods (see `docs/reflection.md`).
 * Unknown, repeated and misplaced attributes are errors.
 * Structs marked with `@attribute` are attributes of your own, which go on struct members and are read through
   reflection, e.g `@json.Field(name: "id")`. See `docs/reflection.md`.

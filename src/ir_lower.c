@@ -1266,9 +1266,19 @@ static void write_default_constants(Lowerer *L, IrGlobal *global, int offset, Ty
 }
 
 // The global holding a global variable e.g 'count := 0;', with its start value
+static void write_attributed_functions(Lowerer *L, IrGlobal *list);
+
 static int global_variable(Lowerer *L, AstIdentifier *ident) {
     int cached = ptr_map_get(&L->const_globals, ident);
     if (cached >= 0) return cached;
+
+    // attributedFunctionList of runtime.sd: the functions with attribute values
+    if (L->runtime_scope && strcmp(ident->name, "attributedFunctionList") == 0 && find_identifier_in_scope(L->runtime_scope, ident->name) == ident) {
+        IrGlobal *list = ir_global_data(L->module, ident->name, NULL, 16, 8, false);
+        ptr_map_put(&L->const_globals, ident, list->index);
+        write_attributed_functions(L, list);
+        return list->index;
+    }
 
     Type *type = ident->type;
     int size = type_storage_size(type);
@@ -1933,14 +1943,59 @@ static int attribute_value_global(Lowerer *L, AstStructLiteral *value) {
     Type *type = value->head.type;
     IrGlobal *global = ir_global_data(L->module, "attribute", NULL, type->size > 0 ? type->size : 1, type_alignment(type), true);
 
+    // The default of a member that isn't given. Not both, as a pointer, e.g of a string, is a relocation, and the first
+    // one written at an offset would win
     DynamicArray members = ((TypeStruct *) type)->node->members->identifiers;
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = da_get_deref(members, i);
+        bool given = false;
+        for (int k = 0; k < value->initializers.count; k++) {
+            AstStructInitializer *init = da_get_deref(value->initializers, k);
+            if (init->member == member) given = true;
+        }
         AstExpr *fallback = member_default_value(member);
-        if (fallback) write_constant(L, global, member->member_offset, fallback, member->type);
+        if (fallback && !given) write_constant(L, global, member->member_offset, fallback, member->type);
     }
     write_constant(L, global, 0, (AstExpr *) value, type);
     return global->index;
+}
+
+// The slice of attributedFunctionList: an AttributedFunction for each function with attribute values. The functions are
+// compiled, as the program calls them through the list
+static void write_attributed_functions(Lowerer *L, IrGlobal *list) {
+    DynamicArray functions = L->parser->attributed_functions;
+    int entry_size = runtime_size(L, "AttributedFunction");
+    int count = 0;
+    for (int i = 0; i < functions.count; i++) {
+        AstIdentifier *ident = da_get_deref(functions, i);
+        if (ident->type && ident->type->kind == TYPE_FUNCTION && !(ident->flags & IDENTIFIER_IS_POISONED)) count++;
+    }
+    if (count == 0) return;
+
+    IrGlobal *array = ir_global_data(L->module, "attributed_functions", NULL, count * entry_size, 8, true);
+    int entry = 0;
+    for (int i = 0; i < functions.count; i++) {
+        AstIdentifier *ident = da_get_deref(functions, i);
+        if (!ident->type || ident->type->kind != TYPE_FUNCTION || (ident->flags & IDENTIFIER_IS_POISONED)) continue;
+        AstFunctionDefn *func = ((TypeFunction *)ident->type)->node;
+
+        int at = entry * entry_size;
+        write_string_field(L, array, at + runtime_offset(L, "AttributedFunction", "name"), ident->name);
+        AstFile *file = ident->head.file;
+        write_string_field(L, array, at + runtime_offset(L, "AttributedFunction", "namespaceName"), file && file->ns ? file->ns->name : "");
+        write_pointer_field(array, at + runtime_offset(L, "AttributedFunction", "function"), function_global(L, func));
+
+        int attribute_count = ident->attributes.count;
+        IrGlobal *attributes = ir_global_data(L->module, "attributes", NULL, attribute_count * 16, 8, true);
+        for (int j = 0; j < attribute_count; j++) {
+            AstStructLiteral *value = da_get_deref(ident->attributes, j);
+            write_pointer_field(attributes, j * 16,     attribute_value_global(L, value));
+            write_pointer_field(attributes, j * 16 + 8, type_info_global(L, value->head.type));
+        }
+        write_slice_field(array, at + runtime_offset(L, "AttributedFunction", "attributes"), attributes->index, attribute_count);
+        entry++;
+    }
+    write_slice_field(list, 0, array->index, count);
 }
 
 static int struct_members_global(Lowerer *L, TypeStruct *struct_type, int *out_count) {

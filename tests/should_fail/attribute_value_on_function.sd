@@ -1,9 +1,0 @@
-// expect-error: Unknown attribute '@Note'
-
-@attribute
-Note :: struct { text: string; }
-
-@Note(text: "hi")
-foo :: () {}
-
-main :: () {}

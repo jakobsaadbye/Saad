@@ -196,6 +196,47 @@ attributeOf :: <T>(member: *StructMember, value: *T) -> bool {
     return false;
 }
 
+// A function with attribute values, e.g a handler of a web server:
+//
+//     @attribute
+//     Route :: struct { path: string; }
+//
+//     @Route("/posts")
+//     listPosts :: (request: *Request) { ... }
+//
+//     for f in attributedFunctions() {
+//         route: Route;
+//         if f.attribute(&route) {
+//             handler := f.function as (request: *Request);   // Its type, which the program knows
+//             ...
+//         }
+//     }
+AttributedFunction :: struct {
+    name:          string;  // As it is declared, e.g listPosts
+    namespaceName: string;  // Of its file, e.g blog. Empty when the file has none
+    function:      *void;   // Its address. Cast it to its function type to call it
+    attributes:    []any;
+}
+
+// Every function of the program with attribute values. The compiler writes the list, and compiles the functions on it
+attributedFunctionList: []AttributedFunction;
+
+attributedFunctions :: () -> []AttributedFunction {
+    return attributedFunctionList;
+}
+
+// Gets the value of the attribute of type T on the function, like attributeOf for a member
+attribute :: method <T>(f: *AttributedFunction, value: *T) -> bool {
+    name := typeof(*value);
+    for attribute in f.attributes {
+        if attribute.type.name == name {
+            *value = *(attribute.data as *T);
+            return true;
+        }
+    }
+    return false;
+}
+
 isUnion :: method (type: *Type) -> bool {
     return type.flags.has(.isUnion);
 }
