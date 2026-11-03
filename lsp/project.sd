@@ -85,8 +85,8 @@ run :: method (p: *Project, compiler: string, overlays: string) -> bool {
     }
 
     index, err := json.decode<Index>(text);
-    if err != "" {
-        rpc.log(fmt.sprint("The compiler didn't write an index for %: % (% bytes: %)", p.root, err, text.len, text.slice(0, 60)));
+    if err != null {
+        rpc.log(fmt.sprint("The compiler didn't write an index for %: % (% bytes: %)", p.root, err.message, text.len, text.slice(0, 60)));
         text.free();
         return false;
     }
@@ -149,8 +149,8 @@ complete :: method (p: *Project, compiler: string, overlays: string, path: strin
     }
     err := json.decodeInto(text, &result);
     text.free();
-    if err != "" {
-        rpc.log(fmt.sprint("The compiler didn't write completions: %", err));
+    if err != null {
+        rpc.log(fmt.sprint("The compiler didn't write completions: %", err.message));
         return result, false;
     }
     return result, true;

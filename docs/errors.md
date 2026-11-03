@@ -22,6 +22,14 @@ config := readConfig(path);                       // not taken: if there is an e
 The rule: **an error that is taken is a value, and one that isn't is thrown.** A function that gives only an error,
 e.g `save :: () -> error`, throws it when it is called as a statement, `save();`, and gives it with `err := save();`.
 
+An error isn't a condition: `if err { }`, `!err` and `assert(err)` are compile errors, as they read the other way
+round. Compare it with `null`: `if err != null { }`.
+
+The standard library gives errors: `dbms` (`dbms.DatabaseError`, `dbms.QueryError`, `dbms.NoLink`), `json.decode`,
+`json.decodeInto` and `json.parse` (`json.DecodeError`), and the file functions of `os`, `readFile`, `writeFile`,
+`appendFile`, `makeDir`, `removeFile` and `renameFile` (`os.NotFound`, `os.IOError`). What asks a question and can't fail
+stays a `bool`, e.g `os.fileExists` and the `found` of `os.getEnv`.
+
 ## try, catch and throw
 
 A thrown error leaves the functions it is thrown through, running their `defer`s on the way, up to the `catch` of a

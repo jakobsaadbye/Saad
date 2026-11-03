@@ -85,6 +85,9 @@ saad check main.sd        # only check for errors
   division by zero throws a `Panic`. An error that nothing catches ends the program with its message and trace. The
   language server shows `throws` after the calls whose error isn't taken. See `docs/errors.md`
 
+* `json` (`decode`, `decodeInto`, `parse`) and the file functions of `os` (`readFile`, `writeFile`, `appendFile`, `makeDir`,
+  `removeFile`, `renameFile`) give errors, of the kinds `json.DecodeError`, `os.NotFound` and `os.IOError`. Changed: they
+  gave strings and bools. An error can't be a condition (`if err`), as it reads the other way round: write `err != null`
 * Panics: an index outside of an array, a slice, a list or a string, and an `assert` that fails, throw a `Panic`
   instead of reading past the end or ending the program. `saad build --unchecked` leaves the bounds checks out. They
   found that `"abc".startsWith("abcd")` read past the end of the string

@@ -91,13 +91,14 @@ generate :: (conn: *dbms.Connection, options: GenerateOptions) -> ([..]Generated
 writeFiles :: (folder: string, files: [..]GeneratedFile) -> ([..]string, error) {
     removed: [..]string;
     for dir in [folder, fmt.sprint("%/entity", folder)] {
-        if !os.makeDir(dir) {
+        if os.makeDir(dir) != null {
             return removed, fmt.errorf("Can't make the folder %", dir);
         }
     }
 
     // The files of the last run
-    old, hadOld := os.readFile(fmt.sprint("%/database.sd", folder));
+    old, readErr := os.readFile(fmt.sprint("%/database.sd", folder));
+    hadOld := readErr == null;
     if hadOld {
         for line in old.split("\n") {
             if !line.startsWith("// Files: ") { continue; }
@@ -109,8 +110,8 @@ writeFiles :: (folder: string, files: [..]GeneratedFile) -> ([..]string, error) 
                 }
                 if written { continue; }
                 path := fmt.sprint("%/%", folder, name);
-                text, ok := os.readFile(path);
-                if ok && text.startsWith(GeneratedMark) && os.removeFile(path) {
+                text, notRead := os.readFile(path);
+                if notRead == null && text.startsWith(GeneratedMark) && os.removeFile(path) == null {
                     removed.add(name);
                 }
             }
@@ -119,7 +120,7 @@ writeFiles :: (folder: string, files: [..]GeneratedFile) -> ([..]string, error) 
 
     for file in files {
         path := fmt.sprint("%/%", folder, file.name);
-        if !os.writeFile(path, file.code) {
+        if os.writeFile(path, file.code) != null {
             return removed, fmt.errorf("Can't write %", path);
         }
     }

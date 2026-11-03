@@ -1,0 +1,8 @@
+// expect-error: An error isn't a condition
+
+f :: () -> error { return null; }
+
+main :: () {
+    err := f();
+    if err { }
+}

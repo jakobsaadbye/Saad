@@ -6,6 +6,7 @@ namespace os;
 use c;
 import os.windows;
 import mem;
+import fmt;
 
 // Ends the program right away with the exit code
 exit :: (code: int) {
@@ -73,16 +74,32 @@ getEnv :: (name: string) -> string, bool {
     return fromCString(value), true;
 }
 
-// The whole file. ok is false if it couldn't be read. The text is allocated with malloc
-readFile :: (path: string) -> string, bool {
+// The kinds of the errors of os, e.g err.is(os.NotFound)
+NotFound :: ErrorKind{"os.NotFound"}; // The file isn't there
+IOError  :: ErrorKind{"os.IOError"};  // The file is there, but couldn't be read or written, e.g without the right to
+
+// The whole file, or an error, of the kind os.NotFound when it isn't there. The text is allocated with mem.allocate
+readFile :: (path: string) -> string, error {
     file := openFile(path, "rb");
     if file == null {
-        return "", false;
+        return "", fileError("Can't read", path);
     }
 
     text := readAll(file);
     fclose(file);
-    return text, true;
+    return text, null;
+}
+
+// The error of a file that couldn't be used: os.NotFound when it isn't there, otherwise os.IOError
+@private
+fileError :: (what: string, path: string) -> error {
+    message: fmt.StringBuilder;
+    message.add("% %", what, path);
+    if !fileExists(path) && what == "Can't read" {
+        message.addString(": it isn't there");
+        return newError(message.toString(), NotFound);
+    }
+    return newError(message.toString(), IOError);
 }
 
 
@@ -110,22 +127,25 @@ readAll :: (file: *void) -> string {
     return text;
 }
 
-// Creates the file or replaces what is in it. Returns false if it couldn't be written
-writeFile :: (path: string, text: string) -> bool {
-    return writeToFile(path, text, "wb");
+// Creates the file or replaces what is in it. An os.IOError when it couldn't be written
+writeFile :: (path: string, text: string) -> error {
+    if writeToFile(path, text, "wb") { return null; }
+    return fileError("Can't write", path);
 }
 
 // Adds the text to the end of the file, and creates it if it doesn't exist
-appendFile :: (path: string, text: string) -> bool {
-    return writeToFile(path, text, "ab");
+appendFile :: (path: string, text: string) -> error {
+    if writeToFile(path, text, "ab") { return null; }
+    return fileError("Can't write", path);
 }
 
-// Makes the folder, if it isn't there. Its parent folder must be there. true when it is there afterwards
-makeDir :: (path: string) -> bool {
+// Makes the folder, if it isn't there. Its parent folder must be there. null when it is there afterwards
+makeDir :: (path: string) -> error {
     cPath := path.toCString();
     made := windows.CreateDirectoryA(cPath, null);
     mem.free(cPath);
-    return made || windows.GetLastError() == windows.ErrorAlreadyExists;
+    if made || windows.GetLastError() == windows.ErrorAlreadyExists { return null; }
+    return fileError("Can't make the folder", path);
 }
 
 fileExists :: (path: string) -> bool {
@@ -137,22 +157,26 @@ fileExists :: (path: string) -> bool {
     return true;
 }
 
-// Returns false if the file couldn't be removed
-removeFile :: (path: string) -> bool {
+// Removes the file. An error when it couldn't be, e.g os.NotFound
+removeFile :: (path: string) -> error {
+    if !fileExists(path) { return newError(fmt.sprint("Can't remove %: it isn't there", path), NotFound); }
     cPath := path.toCString();
     result := remove(cPath);
     mem.free(cPath);
-    return result == 0;
+    if result == 0 { return null; }
+    return fileError("Can't remove", path);
 }
 
-// Returns false if the file couldn't be renamed
-renameFile :: (oldPath: string, newPath: string) -> bool {
+// Renames or moves the file. An error when it couldn't be, e.g os.NotFound
+renameFile :: (oldPath: string, newPath: string) -> error {
+    if !fileExists(oldPath) { return newError(fmt.sprint("Can't rename %: it isn't there", oldPath), NotFound); }
     cOld := oldPath.toCString();
     cNew := newPath.toCString();
     result := rename(cOld, cNew);
     mem.free(cOld);
     mem.free(cNew);
-    return result == 0;
+    if result == 0 { return null; }
+    return fileError("Can't rename", oldPath);
 }
 
 @private

@@ -8,32 +8,32 @@ import time;
 main :: () {
     {
         path := "build/std_os_test.txt";
-        assert(os.writeFile(path, "Hello"));
-        assert(os.appendFile(path, ", World"));
+        assert(os.writeFile(path, "Hello") == null);
+        assert(os.appendFile(path, ", World") == null);
         assert(os.fileExists(path));
 
-        text, ok := os.readFile(path);
-        assert(ok);
+        text, err := os.readFile(path);
+        assert(err == null);
         assert(text == "Hello, World");
 
         newPath := "build/std_os_test_renamed.txt";
-        assert(os.renameFile(path, newPath));
+        assert(os.renameFile(path, newPath) == null);
         assert(!os.fileExists(path));
-        assert(os.removeFile(newPath));
+        assert(os.removeFile(newPath) == null);
         assert(!os.fileExists(newPath));
 
-        _, found := os.readFile("build/this_file_does_not_exist.txt");
-        assert(!found);
+        _, missing := os.readFile("build/this_file_does_not_exist.txt");
+        assert(missing != null && missing.is(os.NotFound));
+        assert(os.removeFile("build/this_file_does_not_exist.txt").is(os.NotFound));
     }
     {
         // A file bigger than the first buffer of readFile
         line := "0123456789abcdefghijklmnopqrstuvwxyz\n";
-        assert(os.writeFile("build/std_os_big.txt", ""));
+        assert(os.writeFile("build/std_os_big.txt", "") == null);
         for 0..500 {
             os.appendFile("build/std_os_big.txt", line);
         }
-        text, ok := os.readFile("build/std_os_big.txt");
-        assert(ok);
+        text := os.readFile("build/std_os_big.txt");   // Thrown if it can't be read
         assert(text.len == 500 * line.len);
         assert(text.slice(text.len - line.len) == line);
         os.removeFile("build/std_os_big.txt");

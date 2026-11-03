@@ -126,7 +126,7 @@ initialize :: (m: rpc.Message) {
 // The editor asks the server to end after asking it to shut down. Otherwise the server ends with an error
 stop :: () {
     for doc in documents {
-        os.removeFile(doc.overlay);
+        _ := os.removeFile(doc.overlay); // It may not be there
     }
     if shuttingDown {
         os.exit(0);
@@ -169,8 +169,8 @@ didOpen :: (params: json.Value) {
         doc = documents.indexRef(documents.count - 1);
     }
     doc.text    = source.newText(item.get("text").asString().copy());
-    onDisk, ok := os.readFile(path);
-    doc.unsaved = !ok || onDisk != doc.text.text;
+    onDisk, notRead := os.readFile(path);
+    doc.unsaved = notRead != null || onDisk != doc.text.text;
     onDisk.free();
     doc.written = false;
     generation += 1;
@@ -221,7 +221,7 @@ didClose :: (params: json.Value) {
     key := source.keyOf(source.pathOf(uri));
     for doc, i in documents {
         if doc.key == key {
-            os.removeFile(doc.overlay);
+            _ := os.removeFile(doc.overlay); // It may not be there
             documents.removeAt(i);
             generation += 1;
             return;
@@ -401,7 +401,7 @@ overlayOptions :: () -> string {
             continue;
         }
         if !doc.written {
-            documents.indexRef(d).written = os.writeFile(doc.overlay, doc.text.text);
+            documents.indexRef(d).written = os.writeFile(doc.overlay, doc.text.text) == null;
         }
         sb.add(" --overlay \"%=%\"", doc.path, doc.overlay);
     }
@@ -481,7 +481,7 @@ textOf :: (key: string, path: string) -> *source.Text {
         return &doc.text;
     }
     if !texts.has(key) {
-        text, ok := os.readFile(path);
+        text, _ := os.readFile(path);   // A file that isn't there is empty
         texts.set(key, source.newText(text));
     }
     return texts.indexRef(key);
