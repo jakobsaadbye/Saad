@@ -78,6 +78,21 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.13.1 - 3. Nov 2026
+
+* The allocator of the thread: a null allocator, e.g of `new(T)`, a string, `fmt.sprint`, a list, `json` or `dbms`,
+  means it. It is the heap, and the http server sets it to the arena of the request while a handler or an endpoint
+  runs, so what they allocate, also the results of endpoints, is freed after the response. What lives longer is given
+  `mem.heap()`. `mem.setAllocator` and `mem.allocator` set and read it
+* Lists, maps, `StringBuilder` and `bytes.Buffer` keep the allocator of their first memory
+* `dbms.Pool`: connections for many threads, e.g `pool.get()` in `onStart` and `pool.put()` in `onFinish`
+
+```odin
+pool := dbms.newPool(postgres.connect, connectionString, 8);
+session.conn = pool.get();
+pool.put(session.conn);
+```
+
 ## Update v0.13.0 - 3. Nov 2026
 
 * `web`: endpoints, a backend whose API is its functions. `@web.endpoint` (POST) or `@web.endpoint(.get)` on a

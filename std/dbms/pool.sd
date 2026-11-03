@@ -1,0 +1,116 @@
+namespace dbms;
+
+// A pool of connections, for a server that answers requests on many threads. A connection is used by one thread at a
+// time: a request takes one with get() and gives it back with put(), e.g in the onStart and onFinish of web:
+//
+//     pool := dbms.newPool(postgres.connect, "host=localhost dbname=blog", 8);
+//
+//     startSession :: (session: *Session) {
+//         session.conn = pool.get();              // Waits when all 8 are in use
+//         session.db   = blog.newDb(session.conn);
+//     }
+//     finishSession :: (session: *Session) {
+//         pool.put(session.conn);
+//     }
+//
+// The rows a connection reads come from the allocator of the thread, so in a request they are freed with it
+
+import thread;
+import mem;
+
+Pool :: struct {
+    connect:          (connectionString: string) -> (Connection, error);   // e.g postgres.connect
+    connectionString: string;
+    size:             int;               // The most connections that are open at a time
+
+    mutex:     thread.Mutex;
+    available: thread.Condition;         // A connection was given back
+    idle:      [..]*Connection;
+    open:      int;
+    closed:    bool;
+}
+
+newPool :: (connect: (connectionString: string) -> (Connection, error), connectionString: string, size := 8) -> *Pool {
+    pool := new(Pool, mem.heap());   // It lives as long as the program
+    pool.connect          = connect;
+    pool.connectionString = connectionString.copy(mem.heap());
+    pool.size             = size;
+    pool.idle.allocator   = mem.heap();
+    return pool;
+}
+
+// A connection that no other thread uses: an idle one, or a new one while fewer than size are open. Waits while all
+// are in use. Give it back with put()
+get :: method (pool: *Pool) -> *Connection, error {
+    pool.mutex.lock();
+    while true {
+        if pool.closed {
+            pool.mutex.unlock();
+            return null, databaseError("The pool is closed");
+        }
+        if pool.idle.count > 0 {
+            conn := pool.idle[pool.idle.count - 1];
+            pool.idle.removeAt(pool.idle.count - 1);
+            pool.mutex.unlock();
+            return conn, null;
+        }
+        if pool.open < pool.size {
+            pool.open += 1;
+            break;
+        }
+        pool.available.wait(&pool.mutex);
+    }
+    pool.mutex.unlock();
+
+    // A new one, made without holding the lock, as connecting takes time
+    made, err := pool.connect(pool.connectionString);
+    if err != null {
+        pool.mutex.lock();
+        pool.open -= 1;
+        pool.available.signal();
+        pool.mutex.unlock();
+        return null, err;
+    }
+    conn := new(Connection, mem.heap());
+    *conn = made;
+    conn.allocator = null;   // The allocator of the thread, e.g the arena of a request
+    return conn, null;
+}
+
+// Gives a connection of get() back, for another thread
+put :: method (pool: *Pool, conn: *Connection) {
+    if conn == null { return; }
+    pool.mutex.lock();
+    if pool.closed {
+        pool.open -= 1;
+        pool.mutex.unlock();
+        conn.close();
+        mem.free(conn, mem.heap());
+        return;
+    }
+    pool.idle.add(conn);
+    pool.available.signal();
+    pool.mutex.unlock();
+}
+
+// Closes the idle connections. The ones in use are closed when they are given back. get() gives an error after it
+close :: method (pool: *Pool) {
+    pool.mutex.lock();
+    pool.closed = true;
+    for conn in pool.idle {
+        conn.close();
+        mem.free(conn, mem.heap());
+        pool.open -= 1;
+    }
+    pool.idle.clear();
+    pool.available.broadcast();
+    pool.mutex.unlock();
+}
+
+// How many connections are open, idle or in use
+openCount :: method (pool: *Pool) -> int {
+    pool.mutex.lock();
+    count := pool.open;
+    pool.mutex.unlock();
+    return count;
+}
