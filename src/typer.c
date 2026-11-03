@@ -8357,6 +8357,12 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         if (lhs == TYPE_FLOAT   && rhs == TYPE_INTEGER) return primitive_type(PRIMITIVE_BOOL);
         if (lhs == TYPE_POINTER && rhs == TYPE_POINTER) return primitive_type(PRIMITIVE_BOOL);
 
+        // A function value with null, e.g 'if mux.notFound != null', as a member of a struct of functions can be unset
+        bool is_equality = binary->operator == TOKEN_DOUBLE_EQUAL || binary->operator == TOKEN_NOT_EQUAL;
+        if (is_equality && ((lhs == TYPE_FUNCTION && is_null_type(ti_rhs)) || (is_null_type(ti_lhs) && rhs == TYPE_FUNCTION))) {
+            return primitive_type(PRIMITIVE_BOOL);
+        }
+
         if (lhs == TYPE_ENUM    && rhs == TYPE_ENUM) {
             if (strcmp(ti_lhs->name, ti_rhs->name) == 0) {
                 return primitive_type(PRIMITIVE_BOOL);

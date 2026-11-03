@@ -1,0 +1,465 @@
+namespace net.http;
+
+// The server: a Mux routes each request to a handler, and a Server runs the handlers on a pool of threads, e.g
+//
+//     mux: http.Mux;
+//     mux.handle("GET /posts", listPosts);
+//     mux.handle("GET /posts/{id}", showPost);
+//     mux.handle("POST /posts", createPost);
+//     mux.handle("/static/", files);          // Everything below /static/
+//     http.listenAndServe(":8080", &mux);
+//
+// A handler that throws gives a 500, and the server goes on. The texts of a request are kept until its handler
+// returns: copy() what is kept for longer
+
+use c;
+import net;
+import bytes;
+import mem;
+import fmt;
+import io;
+import thread;
+
+Request :: struct {
+    method:  string;            // e.g GET
+    target:  string;            // As it was written, e.g /posts?page=2
+    path:    string;            // e.g /posts
+    query:   string;            // After the ?, e.g page=2
+    version: string;            // e.g HTTP/1.1
+    headers: [..]Header;
+    body:    string;
+    remote:  net.Addr;          // Who sent it
+    pattern: string;            // The pattern of the Mux that matched, e.g GET /posts/{id}
+    values:  [..]Header;        // The values of the {names} of the pattern
+
+    arena:     mem.Arena;       // The memory of the request, freed when the handler returned
+    allocator: Allocator;
+}
+
+// The value of a header, e.g r.header("Content-Type"). Without case
+header :: method (r: *Request, name: string) -> string, bool {
+    return findHeader(r.headers, name);
+}
+
+// The value of a {name} of the pattern, e.g "42" of /posts/42 for /posts/{id}. Empty when there is none
+pathValue :: method (r: *Request, name: string) -> string {
+    for v in r.values {
+        if v.name == name { return v.value; }
+    }
+    return "";
+}
+
+// A value of the query, e.g r.queryValue("page") of /posts?page=2, with %XX and + decoded
+queryValue :: method (r: *Request, name: string) -> string, bool {
+    rest := r.query;
+    while rest.len > 0 {
+        end := rest.indexOf("&");
+        pair := rest;
+        if end >= 0 {
+            pair = rest.slice(0, end);
+            rest = rest.slice(end + 1);
+        } else {
+            rest = "";
+        }
+        equals := pair.indexOf("=");
+        key := pair;
+        value := "";
+        if equals >= 0 {
+            key   = pair.slice(0, equals);
+            value = pair.slice(equals + 1);
+        }
+        if decodeUrl(key, &r.arena) == name { return decodeUrl(value, &r.arena), true; }
+    }
+    return "", false;
+}
+
+// What a handler answers with. It is sent when the handler returns, with its Content-Length
+ResponseWriter :: struct {
+    status:  int = 200;
+    headers: [..]Header;
+    body:    bytes.Buffer;
+}
+
+// Sets a header, in place of one with the name, e.g w.setHeader("Content-Type", "application/json")
+setHeader :: method (w: *ResponseWriter, name: string, value: string) {
+    for i in 0..w.headers.count {
+        if equalFold(w.headers[i].name, name) {
+            w.headers[i].value = value;
+            return;
+        }
+    }
+    w.headers.add(Header{name, value});
+}
+
+// Adds a header, also when there is one with the name, e.g Set-Cookie
+addHeader :: method (w: *ResponseWriter, name: string, value: string) {
+    w.headers.add(Header{name, value});
+}
+
+// The status of the response, e.g 201. It is 200 when it isn't set
+writeHeader :: method (w: *ResponseWriter, status: int) {
+    w.status = status;
+}
+
+// Adds to the body
+write :: method (w: *ResponseWriter, text: string) {
+    w.body.write(text);
+}
+
+// An error status with a text, e.g w.error(404, "no such post")
+error :: method (w: *ResponseWriter, status: int, message: string) {
+    w.status = status;
+    w.setHeader("Content-Type", "text/plain; charset=utf-8");
+    w.body.clear();
+    w.body.write(message);
+    w.body.write("\n");
+}
+
+// Sends the client to another url, e.g after a POST
+redirect :: method (w: *ResponseWriter, url: string, status := 303) {
+    w.status = status;
+    w.setHeader("Location", url);
+}
+
+// Answers a request
+Handler :: (w: *ResponseWriter, r: *Request);
+
+//
+// Mux: a pattern for each handler
+//
+
+Route :: struct {
+    pattern:  string;          // As it was given
+    method:   string;          // Empty for any. GET also matches HEAD
+    segments: [..]string;      // Of the path, e.g ["posts", "{id}"]
+    prefix:   bool;            // The pattern ends with /, so it matches every path below it
+    handler:  Handler;
+}
+
+Mux :: struct {
+    routes:   [..]Route;
+    notFound: Handler;   // When no route matches. A 404 when it is null
+}
+
+// Adds a route: "[METHOD ]/path", where a segment {name} matches any segment, e.g "GET /posts/{id}", and a path that
+// ends with / matches every path below it, e.g "/static/". "/" matches every path. When more patterns match, the one
+// with the most segments that are written out wins
+handle :: method (mux: *Mux, pattern: string, handler: Handler) {
+    route: Route;
+    route.pattern = pattern;
+    route.handler = handler;
+    path := pattern;
+    space := pattern.indexOf(" ");
+    if space >= 0 {
+        route.method = pattern.slice(0, space);
+        path = trimSpaces(pattern.slice(space + 1));
+    }
+    assert(path.startsWith("/"));   // A pattern is a path that starts with /, e.g "GET /posts"
+    route.prefix = path.endsWith("/");
+    for segment in path.split("/") {
+        if segment.len > 0 { route.segments.add(segment); }
+    }
+    mux.routes.add(route);
+}
+
+// The route for the request, with the values of its {names}. A 404 or 405 when there is none
+serve :: method (mux: *Mux, w: *ResponseWriter, r: *Request) {
+    segments: [..]string;
+    segments.allocator = &r.allocator;
+    for segment in r.path.split("/") {
+        if segment.len > 0 { segments.add(segment); }
+    }
+
+    best := -1;
+    bestScore := -1;
+    pathMatched := false;
+    allowed: [..]string;
+    allowed.allocator = &r.allocator;
+    for route, i in mux.routes {
+        score := matchScore(&route, segments);
+        if score < 0 { continue; }
+        methodMatches := route.method.len == 0 || route.method == r.method || (route.method == "GET" && r.method == "HEAD");
+        if !methodMatches {
+            pathMatched = true;
+            if !allowed.contains(route.method) { allowed.add(route.method); }
+            continue;
+        }
+        if route.method.len > 0 { score += 1; }   // A route with a method wins over one without
+        if score > bestScore {
+            best = i as int;
+            bestScore = score;
+        }
+    }
+
+    if best < 0 {
+        if pathMatched {
+            allow := fmt.newStringBuilder(32);
+            for m, i in allowed {
+                if i > 0 { allow.addString(", "); }
+                allow.addString(m);
+            }
+            w.setHeader("Allow", keep(allow.toString(), &r.arena));
+            allow.free();
+            w.error(405, "Method Not Allowed");
+            return;
+        }
+        if mux.notFound != null { mux.notFound(w, r); return; }
+        w.error(404, "Not Found");
+        return;
+    }
+
+    route := &mux.routes[best];
+    r.pattern = route.pattern;
+    r.values.allocator = &r.allocator;
+    for segment, i in route.segments {
+        if segment.startsWith("{") && segment.endsWith("}") {
+            name := segment.slice(1, segment.len - 1);
+            r.values.add(Header{name, decodeUrl(segments[i], &r.arena)});
+        }
+    }
+    route.handler(w, r);
+}
+
+// How well the route matches the segments of a path: the number of segments that are written out, times 2, and 1000
+// more for a match of the whole path. -1 when it doesn't match
+matchScore :: (route: *Route, segments: []string) -> int {
+    if route.segments.count > segments.count { return -1; }
+    if !route.prefix && route.segments.count != segments.count { return -1; }
+    score := 0;
+    for pattern, i in route.segments {
+        if pattern.startsWith("{") && pattern.endsWith("}") { continue; }
+        if pattern != segments[i] { return -1; }
+        score += 2;
+    }
+    if !route.prefix { score += 1000; }
+    return score;
+}
+
+//
+// Server
+//
+
+Server :: struct {
+    mux:          *Mux;          // Routes the requests. Or handler, for one handler of every request
+    handler:      Handler;
+    workers:      int;           // Threads that answer requests. 0 is 2 for each processor, at least 4
+    readTimeout:  int = 30000;   // Milliseconds a connection may wait for its next request, and its parts
+    writeTimeout: int = 30000;
+    limits:       Limits;
+    log:          bool = true;   // Writes the errors of handlers to stderr
+
+    listener: *net.Listener;
+    queue:    [..]*net.Conn;     // Accepted connections that wait for a worker
+    mutex:    thread.Mutex;
+    ready:    thread.Condition;
+    stopping: bool;
+    threads:  [..]thread.Thread;
+}
+
+// Listens at the address, e.g ":8080", and answers the requests with the routes of the mux. Returns when it can't
+// listen, or after shutdown()
+listenAndServe :: (address: string, mux: *Mux) -> error {
+    server := new(Server);
+    server.mux = mux;
+    return server.listenAndServe(address);
+}
+
+listenAndServe :: method (server: *Server, address: string) -> error {
+    err := server.listen(address);
+    if err != null { return err; }
+    return server.serve();
+}
+
+// Listens at the address. server.listener.addr says where, e.g the port of ":0"
+listen :: method (server: *Server, address: string) -> error {
+    listener, err := net.listen(address);
+    if err != null { return err; }
+    server.listener = listener;
+    return null;
+}
+
+// Accepts connections and answers them, until shutdown()
+serve :: method (server: *Server) -> error {
+    assert(server.listener != null);   // listen() first
+    workers := server.workers;
+    if workers <= 0 {
+        workers = thread.processorCount() * 2;
+        if workers < 4 { workers = 4; }
+    }
+    for i in 0..workers {
+        t, err := thread.spawn(work, server);
+        if err != null { return err; }
+        server.threads.add(t);
+    }
+
+    while true {
+        conn, err := server.listener.accept();
+        if err != null {
+            if server.isStopping() { break; }
+            continue;   // e.g too many open files: the next one may work
+        }
+        server.mutex.lock();
+        server.queue.add(conn);
+        server.ready.signal();
+        server.mutex.unlock();
+    }
+
+    // The workers end when the queue is empty
+    server.mutex.lock();
+    server.ready.broadcast();
+    server.mutex.unlock();
+    for i in 0..server.threads.count { server.threads.indexRef(i).join(); }
+    server.threads.clear();
+    return null;
+}
+
+isStopping :: method (server: *Server) -> bool {
+    server.mutex.lock();
+    stopping := server.stopping;
+    server.mutex.unlock();
+    return stopping;
+}
+
+// Stops listening. serve() returns when the connections that were accepted are answered. A connection that is kept
+// alive is closed after its next request, or its read timeout
+shutdown :: method (server: *Server) {
+    server.mutex.lock();
+    server.stopping = true;
+    server.mutex.unlock();
+    if server.listener != null { server.listener.close(); }
+}
+
+// A worker thread: answers the connections of the queue
+work :: (argument: *void) {
+    server := argument as *Server;
+    while true {
+        server.mutex.lock();
+        while server.queue.count == 0 && !server.stopping {
+            server.ready.wait(&server.mutex);
+        }
+        if server.queue.count == 0 {
+            server.mutex.unlock();
+            return;
+        }
+        conn := server.queue[0];
+        server.queue.removeAt(0);
+        server.mutex.unlock();
+
+        server.serveConn(conn);
+        conn.close();
+        c.free(conn);
+    }
+}
+
+// Answers the requests of a connection, one after the other, while it is kept alive
+serveConn :: method (server: *Server, conn: *net.Conn) {
+    conn.setReadTimeout(server.readTimeout);
+    conn.setWriteTimeout(server.writeTimeout);
+    buffer: bytes.Buffer;
+    defer buffer.free();
+    r: Request;
+    defer r.arena.free();
+    w: ResponseWriter;
+    defer w.body.free();
+
+    while true {
+        r.arena.clear();
+        r = Request{arena: r.arena};
+        r.allocator = r.arena.allocator();
+        r.headers.allocator = &r.allocator;
+        r.remote = conn.remote;
+
+        w.body.clear();
+        noHeaders: [..]Header;
+        w.headers = noHeaders;
+        w.headers.allocator = &r.allocator;
+        w.status = 200;
+
+        status := readRequest(conn, &buffer, &server.limits, &r);
+        if status == Gone { return; }
+        if status != 0 {
+            w.error(status, statusText(status));
+            w.setHeader("Connection", "close");
+            writeResponse(conn, &w, &r, true);
+            return;
+        }
+
+        try {
+            if server.handler != null      { server.handler(&w, &r); }
+            else if server.mux != null     { server.mux.serve(&w, &r); }
+            else                           { w.error(404, "Not Found"); }
+        } catch (err) {
+            if server.log {
+                io.writeError(fmt.sprint("http: % % failed: %\n", r.method, r.target, err.message));
+            }
+            w.headers.clear();
+            w.error(500, "Internal Server Error");
+        }
+
+        close := wantsClose(&r) || server.isStopping();
+        if close { w.setHeader("Connection", "close"); }
+        if writeResponse(conn, &w, &r, close) != null || close { return; }
+    }
+}
+
+// If the connection ends after this request: HTTP/1.0 without keep-alive, or Connection: close
+wantsClose :: (r: *Request) -> bool {
+    connection, given := r.header("Connection");
+    if given && equalFold(connection, "close") { return true; }
+    if r.version == "HTTP/1.0" { return !(given && equalFold(connection, "keep-alive")); }
+    return false;
+}
+
+// Reads a request: 0 when it worked, Gone when the connection ended, or the status of what was wrong
+readRequest :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, r: *Request) -> int {
+    first, status := readHead(conn, buffer, limits, &r.arena, &r.headers);
+    if status != 0 { return status; }
+
+    // METHOD target HTTP/1.1
+    space := first.indexOf(" ");
+    if space <= 0 { return 400; }
+    r.method = first.slice(0, space);
+    rest := first.slice(space + 1);
+    space = rest.indexOf(" ");
+    if space <= 0 { return 400; }
+    r.target  = rest.slice(0, space);
+    r.version = rest.slice(space + 1);
+    if !r.version.startsWith("HTTP/1.") { return 505; }
+    if !r.target.startsWith("/") && r.target != "*" { return 400; }
+
+    question := r.target.indexOf("?");
+    r.path = r.target;
+    if question >= 0 {
+        r.path  = r.target.slice(0, question);
+        r.query = r.target.slice(question + 1);
+    }
+
+    // A client that waits for 100 Continue before it sends the body
+    expect, expects := r.header("Expect");
+    if expects && equalFold(expect, "100-continue") {
+        conn.write("HTTP/1.1 100 Continue\r\n\r\n");
+    }
+
+    body: string;
+    body, status = readBody(conn, buffer, r.headers, limits, &r.arena, false);
+    if status != 0 { return status; }
+    r.body = body;
+    return 0;
+}
+
+// Sends the response: the status line, the headers with Content-Length, and the body (not for HEAD)
+writeResponse :: (conn: *net.Conn, w: *ResponseWriter, r: *Request, close: bool) -> error {
+    out := fmt.newStringBuilder(256 + w.body.length);
+    defer out.free();
+    out.add("HTTP/1.1 % %\r\n", w.status, statusText(w.status));
+    _, typed := findHeader(w.headers, "Content-Type");
+    if !typed && w.body.length > 0 { out.addString("Content-Type: text/plain; charset=utf-8\r\n"); }
+    for h in w.headers {
+        if equalFold(h.name, "Content-Length") { continue; }
+        out.add("%: %\r\n", h.name, h.value);
+    }
+    if w.status != 204 && w.status != 304 { out.add("Content-Length: %\r\n", w.body.length); }
+    out.addString("\r\n");
+    if r.method != "HEAD" && w.status != 204 && w.status != 304 { out.addString(w.body.toString()); }
+    return conn.write(out.toString());
+}

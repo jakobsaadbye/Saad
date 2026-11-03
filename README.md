@@ -78,6 +78,23 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.12.0 - 3. Nov 2026
+
+* `net`: TCP over IPv4: `net.listen`, `accept`, `net.dial`, `read`, `write`, timeouts and `net.resolve`, on
+  Windows and Linux. The bindings in `net.sys` are typed: the structs of the headers are written out
+* `net.http`: an HTTP/1.1 server with a router, `mux.handle("GET /posts/{id}", showPost)`, on a pool of threads, with
+  keep-alive and chunked bodies, and a client, `http.get(url)`. A handler that throws gives a 500
+* A function value can be compared with `null`, e.g `if mux.notFound != null`
+* A keyword before a `:` is a name, e.g a member `method: string;` or `Request{method: "GET"}`
+* Constants: a cast to an integer type keeps the type and wraps like at runtime, `~` is folded, and
+  `0xFFFF_FFFF_FFFF_FFFF` fits a `u64`
+
+```odin
+mux: http.Mux;
+mux.handle("GET /hello/{name}", hello);
+http.listenAndServe(":8080", &mux);
+```
+
 ## Update v0.11.0 - 3. Nov 2026
 
 * Several values are given to places that exist: `n, err = conn.read(buffer);`, `a, b = b, a;` (it swaps),

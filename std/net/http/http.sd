@@ -1,0 +1,272 @@
+namespace net.http;
+
+// HTTP/1.1 on top of net: a server with a router (Mux) and a client, like Go's net/http, e.g
+//
+//     import net.http;
+//
+//     hello :: (w: *http.ResponseWriter, r: *http.Request) {
+//         w.write(fmt.sprint("hello %", r.pathValue("name")));
+//     }
+//
+//     mux: http.Mux;
+//     mux.handle("GET /hello/{name}", hello);
+//     http.listenAndServe(":8080", &mux);
+//
+//     response := http.get("http://localhost:8080/hello/ada");
+//
+// No TLS: put the server behind a proxy, e.g Caddy or nginx, for https. See docs/standard_library.md
+
+use c;
+import net;
+import bytes;
+import mem;
+import fmt;
+
+Header :: struct {
+    name:  string;
+    value: string;
+}
+
+// The value of the first header with the name, which is compared without case, e.g "content-type"
+findHeader :: (headers: []Header, name: string) -> string, bool {
+    for h in headers {
+        if equalFold(h.name, name) { return h.value, true; }
+    }
+    return "", false;
+}
+
+// If two texts are the same, without case for ASCII letters
+equalFold :: (a: string, b: string) -> bool {
+    if a.len != b.len { return false; }
+    for ch, i in a {
+        if ch.toLower() != b[i].toLower() { return false; }
+    }
+    return true;
+}
+
+// The reason phrase of a status code, e.g "Not Found" for 404
+statusText :: (status: int) -> string {
+    return switch status {
+        case 100 => "Continue";
+        case 200 => "OK";
+        case 201 => "Created";
+        case 202 => "Accepted";
+        case 204 => "No Content";
+        case 301 => "Moved Permanently";
+        case 302 => "Found";
+        case 303 => "See Other";
+        case 304 => "Not Modified";
+        case 307 => "Temporary Redirect";
+        case 308 => "Permanent Redirect";
+        case 400 => "Bad Request";
+        case 401 => "Unauthorized";
+        case 403 => "Forbidden";
+        case 404 => "Not Found";
+        case 405 => "Method Not Allowed";
+        case 408 => "Request Timeout";
+        case 409 => "Conflict";
+        case 410 => "Gone";
+        case 413 => "Content Too Large";
+        case 415 => "Unsupported Media Type";
+        case 422 => "Unprocessable Content";
+        case 429 => "Too Many Requests";
+        case 431 => "Request Header Fields Too Large";
+        case 500 => "Internal Server Error";
+        case 501 => "Not Implemented";
+        case 502 => "Bad Gateway";
+        case 503 => "Service Unavailable";
+        case 504 => "Gateway Timeout";
+        case 505 => "HTTP Version Not Supported";
+        else => "";
+    };
+}
+
+// %XX and + of a URL decoded, e.g "a%20b+c" is "a b c". Text that has neither is given back as it is
+decodeUrl :: (text: string, arena: *mem.Arena) -> string {
+    if text.indexOf("%") < 0 && text.indexOf("+") < 0 { return text; }
+    out := arena.allocate(text.len as int) as *u8;
+    n := 0;
+    i := 0;
+    while i < text.len {
+        ch := text[i];
+        if ch == '+' {
+            out[n] = ' ';
+        } else if ch == '%' && i + 2 < text.len && text[i + 1].isHexDigit() && text[i + 2].isHexDigit() {
+            out[n] = (text[i + 1].digitValue() * 16 + text[i + 2].digitValue()) as u8;
+            i += 2;
+        } else {
+            out[n] = ch as u8;
+        }
+        n += 1;
+        i += 1;
+    }
+    result: string;
+    result.data = out;
+    result.len  = n;
+    return result;
+}
+
+// A copy of the text in the arena
+keep :: (text: string, arena: *mem.Arena) -> string {
+    if text.len == 0 { return ""; }
+    data := arena.allocate(text.len as int) as *u8;
+    mem.copy(data, text.data, text.len);
+    result: string;
+    result.data = data;
+    result.len  = text.len;
+    return result;
+}
+
+// A number of a header, e.g Content-Length, or -1 when it isn't one
+parseCount :: (text: string) -> i64 {
+    if text.len == 0 || text.len > 18 { return -1; }
+    n: i64 = 0;
+    for ch in text {
+        if !ch.isDigit() { return -1; }
+        n = n * 10 + ch.digitValue();
+    }
+    return n;
+}
+
+trimSpaces :: (text: string) -> string {
+    start := 0;
+    end := text.len as int;
+    while start < end && (text[start] == ' ' || text[start] == '\t') { start += 1; }
+    while end > start && (text[end - 1] == ' ' || text[end - 1] == '\t') { end -= 1; }
+    return text.slice(start, end);
+}
+
+//
+// Reading a message: its head (the first line and the headers) and its body. The server reads requests and the
+// client responses with these. The result is 0 when it worked, Gone when the connection ended before the message
+// started, or the status that says what was wrong, e.g 400 or 431
+//
+
+Gone :: -1;
+
+Limits :: struct {
+    headBytes: int = 65536;          // Of the first line and the headers
+    bodyBytes: int = 10 * 1048576;
+}
+
+// Reads until the buffer has the head, and gives the first line, with the headers added to the list. The texts are
+// kept in the arena
+readHead :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, arena: *mem.Arena, headers: *[..]Header) -> string, int {
+    while buffer.unread().indexOf("\r\n\r\n") < 0 {
+        if buffer.available() > limits.headBytes { return "", 431; }
+        started := buffer.available() > 0;
+        n, err := conn.read(buffer.space(4096));
+        if err != null {
+            if started && !err.is(net.Closed) { return "", 408; }
+            return "", Gone;
+        }
+        buffer.wrote(n);
+    }
+    head, _ := buffer.readUntil("\r\n\r\n");
+    if head.len > limits.headBytes { return "", 431; }
+
+    lineEnd := head.indexOf("\r\n");
+    first := head;
+    rest := "";
+    if lineEnd >= 0 {
+        first = head.slice(0, lineEnd);
+        rest  = head.slice(lineEnd + 2);
+    }
+    while rest.len > 0 {
+        end := rest.indexOf("\r\n");
+        line := rest;
+        if end >= 0 {
+            line = rest.slice(0, end);
+            rest = rest.slice(end + 2);
+        } else {
+            rest = "";
+        }
+        colon := line.indexOf(":");
+        if colon <= 0 { return "", 400; }
+        name := line.slice(0, colon);
+        if name.indexOf(" ") >= 0 { return "", 400; }
+        headers.add(Header{keep(name, arena), keep(trimSpaces(line.slice(colon + 1)), arena)});
+    }
+    return keep(first, arena), 0;
+}
+
+// Reads the body that the headers say: Content-Length bytes, chunks of Transfer-Encoding: chunked, or, with
+// untilClose, all that comes until the other end closes (a response without either)
+readBody :: (conn: *net.Conn, buffer: *bytes.Buffer, headers: []Header, limits: *Limits, arena: *mem.Arena, untilClose: bool) -> string, int {
+    encoding, chunked := findHeader(headers, "Transfer-Encoding");
+    if chunked {
+        if !equalFold(encoding, "chunked") { return "", 501; }
+        return readChunks(conn, buffer, limits, arena);
+    }
+    lengthText, hasLength := findHeader(headers, "Content-Length");
+    if hasLength {
+        length := parseCount(lengthText);
+        if length < 0 { return "", 400; }
+        if length > limits.bodyBytes { return "", 413; }
+        if !fill(conn, buffer, length as int) { return "", 400; }
+        body, _ := buffer.read(length as int);
+        return keep(body, arena), 0;
+    }
+    if !untilClose { return "", 0; }
+    while true {
+        n, err := conn.read(buffer.space(4096));
+        if err != null { break; }
+        buffer.wrote(n);
+        if buffer.available() > limits.bodyBytes { return "", 413; }
+    }
+    body, _ := buffer.read(buffer.available());
+    return keep(body, arena), 0;
+}
+
+// Reads until the buffer has at least count bytes that aren't read. False when the connection ends first
+fill :: (conn: *net.Conn, buffer: *bytes.Buffer, count: int) -> bool {
+    while buffer.available() < count {
+        n, err := conn.read(buffer.space(count - buffer.available()));
+        if err != null { return false; }
+        buffer.wrote(n);
+    }
+    return true;
+}
+
+// The chunks of Transfer-Encoding: chunked: a size in hex, the bytes, ..., a size of 0 and the trailer
+readChunks :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, arena: *mem.Arena) -> string, int {
+    body: bytes.Buffer;
+    defer body.free();
+    while true {
+        while buffer.unread().indexOf("\r\n") < 0 {
+            if buffer.available() > 1024 { return "", 400; }
+            n, err := conn.read(buffer.space(4096));
+            if err != null { return "", 400; }
+            buffer.wrote(n);
+        }
+        line, _ := buffer.readUntil("\r\n");
+        semicolon := line.indexOf(";");   // Chunk extensions are left out
+        if semicolon >= 0 { line = line.slice(0, semicolon); }
+        line = trimSpaces(line);
+        if line.len == 0 || line.len > 15 { return "", 400; }
+        size := 0;
+        for ch in line {
+            if !ch.isHexDigit() { return "", 400; }
+            size = size * 16 + ch.digitValue();
+        }
+        if body.length + size > limits.bodyBytes { return "", 413; }
+        if size == 0 {
+            // The trailer, up to an empty line
+            while true {
+                while buffer.unread().indexOf("\r\n") < 0 {
+                    n, err := conn.read(buffer.space(1024));
+                    if err != null { return "", 400; }
+                    buffer.wrote(n);
+                }
+                trailer, _ := buffer.readUntil("\r\n");
+                if trailer.len == 0 { break; }
+            }
+            return keep(body.toString(), arena), 0;
+        }
+        if !fill(conn, buffer, size + 2) { return "", 400; }
+        chunk, _ := buffer.read(size);
+        body.write(chunk);
+        buffer.skip(2);   // \r\n
+    }
+    return "", 400;
+}
