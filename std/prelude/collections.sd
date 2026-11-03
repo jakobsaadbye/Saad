@@ -279,8 +279,8 @@ List :: struct <T> {
 
     // The collection protocol
     indexRef :: method (index: i64) -> *T {
-        assert(index >= 0 && index < self.count);
-        return &self.data[index];
+        items := self.elements(); // A slice, so an index outside of it throws, e.g "Index 5 is out of bounds, as there are 2 elements"
+        return &items[index];
     }
 
     elements :: method () -> []T {

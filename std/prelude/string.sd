@@ -69,6 +69,9 @@ toLower :: method (s: string) -> string {
 }
 
 startsWith :: method (s: string, str: string) -> bool {
+    if s.len < str.len {
+        return false; // It read past the end of s before, which the bounds checks found
+    }
     for c, i in str {
         if s[i] != c {
             return false;

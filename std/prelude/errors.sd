@@ -90,6 +90,23 @@ panicDivisionByZero :: () {
     panic("Division by zero");
 }
 
+// For an assert whose condition is false. The trace has the place of the assert
+panicAssertion :: () {
+    panic("Assertion failed");
+}
+
+// For an index outside of the elements of an array, a slice, a list or a string
+panicIndexOutOfBounds :: (index: i64, count: i64) {
+    buffer: [96]u8;
+    sprintf(buffer.data, xx "Index %lld is out of bounds, as there are %lld elements", index, count);
+    text := fromCString(buffer.data);
+    message: string;
+    message.data = resizeMemory(null, null, text.len) as *u8;
+    message.len  = text.len;
+    for i in 0..text.len { message.data[i] = text.data[i]; }
+    panic(message);
+}
+
 // For an error that nothing caught: main ends with it
 reportUncaught :: () {
     err := thrownError;

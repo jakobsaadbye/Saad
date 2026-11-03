@@ -61,6 +61,7 @@ bool parse_options(CompilerConfig *config, int argc, char const *argv[], int fir
         if (strcmp(option, "--all-std") == 0) { program_index.with_std = true; program_index.all_std = true; continue; }
         if (strcmp(option, "--debug") == 0) { config->debug = true; continue; }
         if (strcmp(option, "--elf") == 0)   { config->emit_elf = true; continue; }
+        if (strcmp(option, "--unchecked") == 0) { bounds_checks = false; continue; } // No bounds checks of indexes
         if (strcmp(option, "--at") == 0 && i + 1 < argc) {
             // file:line:character. The file can have a ':' itself, e.g C:/dev/main.sd
             char *at = strdup(argv[i + 1]);

@@ -85,6 +85,9 @@ saad check main.sd        # only check for errors
   division by zero throws a `Panic`. An error that nothing catches ends the program with its message and trace. The
   language server shows `throws` after the calls whose error isn't taken. See `docs/errors.md`
 
+* Panics: an index outside of an array, a slice, a list or a string, and an `assert` that fails, throw a `Panic`
+  instead of reading past the end or ending the program. `saad build --unchecked` leaves the bounds checks out. They
+  found that `"abc".startsWith("abcd")` read past the end of the string
 * `dbms` gives `error`s instead of strings, of the kinds `dbms.DatabaseError`, `dbms.QueryError` and `dbms.NoLink`, so
   `posts := db.posts.all();` throws when the database fails. The blog example has no error checks anymore
 

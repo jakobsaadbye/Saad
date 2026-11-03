@@ -51,8 +51,14 @@ handlePost :: (req: Request) -> Response {
       at main (main.sd:37)
   ```
 
-* A division by zero throws a `Panic`, and so does `mem.allocate` when there is no memory left, so a web server can
-  turn them into a 500 instead of crashing. `panic("message")` throws one too.
+* These throw a `Panic`, so a web server can turn them into a 500 instead of crashing:
+  * a division by zero
+  * an index outside of the elements of a fixed array, a slice, a list or a string, e.g `Index 5 is out of bounds, as
+    there are 3 elements`. An index into a pointer, e.g `p[i]` of a `*u8`, isn't checked. `saad build --unchecked`
+    leaves the checks out
+  * an `assert` whose condition is false, with the place of the assert first in the trace
+  * `mem.allocate` and `mem.resize` when there is no memory left
+  * `panic("message")`
 
 ## The error type
 
