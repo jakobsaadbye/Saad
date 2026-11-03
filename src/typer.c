@@ -148,6 +148,7 @@ void report_readonly_self(Typer *typer, Ast *at, AstFunctionDefn *method, const 
 void append_place_text(StringBuilder *sb, AstExpr *expr);
 bool check_declaration(Typer *typer, AstDeclaration *decl);
 bool check_defer(Typer *typer, AstDefer *defer);
+static bool check_condition_type(Typer *typer, AstExpr *expr, Type *type);
 bool check_try(Typer *typer, AstTry *ast_try);
 bool check_throw(Typer *typer, AstThrow *ast_throw);
 bool is_error_type(Typer *typer, Type *type);
@@ -4010,10 +4011,7 @@ bool check_while(Typer *typer, AstWhile *ast_while) {
     Type *cond_type = check_expression(typer, ast_while->condition, NULL);
     if (!cond_type) return false;
 
-    if (cond_type->kind != TYPE_BOOL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_while->condition, "Type mistmatch. Expeced a bool, but got type %s", type_to_str(cond_type));
-        return false;
-    }
+    if (!check_condition_type(typer, ast_while->condition, cond_type)) return false;
 
     bool ok = check_block(typer, ast_while->body);
     if (!ok) return false;
@@ -4174,22 +4172,23 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
     return true;
 }
 
-// An error isn't a condition: 'if err' would be true when there is one, which reads the other way. It is compared with
-// null, e.g if err != null
-static bool reject_error_condition(Typer *typer, AstExpr *expr, Type *type) {
-    if (!is_error_type(typer, type)) return true;
-    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "An error isn't a condition. Compare it with null, e.g 'err != null' when there is one, or 'err == null' when it worked");
+// A condition is a bool. A pointer (also an error) is compared with null, e.g 'if p != null', so it reads what it means
+static bool check_condition_type(Typer *typer, AstExpr *expr, Type *type) {
+    if (type->kind == TYPE_BOOL) return true;
+    if (is_error_type(typer, type)) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "An error isn't a condition. Compare it with null, e.g 'err != null' when there is one, or 'err == null' when it worked");
+    } else if (type->kind == TYPE_POINTER) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "A pointer isn't a condition. Compare it with null, e.g 'p != null' when it is set, or 'p == null' when it isn't");
+    } else {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "A condition is a bool, but this is %s", text_bold(type_to_str(type)));
+    }
     return false;
 }
 
 bool check_assert(Typer *typer, AstAssert *ast_assert) {
     Type *expr_type = check_expression(typer, ast_assert->expr, NULL);
     if (!expr_type) return false;
-    if (!reject_error_condition(typer, ast_assert->expr, expr_type)) return false;
-    if (expr_type->kind != TYPE_BOOL && expr_type->kind != TYPE_POINTER) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_assert), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(expr_type));
-        return false;
-    }
+    if (!check_condition_type(typer, ast_assert->expr, expr_type)) return false;
 
     return true;
 }
@@ -4649,12 +4648,7 @@ bool check_switch(Typer *typer, AstSwitch *sw) {
 bool check_if(Typer *typer, AstIf *ast_if) {
     Type *condition_type = check_expression(typer, ast_if->condition, NULL);
     if (!condition_type) return NULL;
-    if (!reject_error_condition(typer, ast_if->condition, condition_type)) return false;
-
-    if (condition_type->kind != TYPE_BOOL && condition_type->kind != TYPE_POINTER) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_if->condition), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(condition_type));
-        return false;
-    }
+    if (!check_condition_type(typer, ast_if->condition, condition_type)) return false;
 
     bool ok = check_block(typer, ast_if->then_block);
     if (!ok) return false;
@@ -8253,16 +8247,7 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     TypeKind type_kind = expr_type->kind;
 
     if (unary->operator == OP_NOT) {
-        if (is_error_type(typer, expr_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)unary, "An error isn't a condition. Compare it with null, e.g 'err == null' when it worked");
-            return NULL;
-        }
-        if (type_kind != TYPE_BOOL && type_kind != TYPE_POINTER) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Operator '!' expects expression to be type bool or pointer. Got type %s\n", type_to_str(expr_type));
-            return NULL;
-        }
-
-        // @Note - If applied to a pointer, we will do a pointer to bool conversion
+        if (!check_condition_type(typer, unary->expr, expr_type)) return NULL; // !p of a pointer is p == null
         return primitive_type(PRIMITIVE_BOOL);
     }
 
