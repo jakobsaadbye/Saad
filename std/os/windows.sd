@@ -79,7 +79,7 @@ extern "kernel32.dll" {
         lpBytesLeftThisMessage: *u32
     ) -> bool;
 
-    CreateDirectoryA :: (lpPathName: *u8, lpSecurityAttributes: *void) -> bool;
+    CreateDirectoryA :: (lpPathName: c.string, lpSecurityAttributes: *void) -> bool;
     GetLastError     :: () -> u32;
 }
 
@@ -93,5 +93,5 @@ StdErrorHandle  :: 4294967284;
 // From the C runtime of Windows (msvcrt)
 extern "C" {
     // The arguments the program was started with
-    __getmainargs :: (argc: *i32, argv: ***u8, env: ***u8, doWildcard: i32, startInfo: *i32) -> i32;
+    __getmainargs :: (argc: *i32, argv: **c.string, env: **c.string, doWildcard: i32, startInfo: *i32) -> i32;
 }

@@ -58,6 +58,6 @@ main :: () {
     }
     print("---------------- Passing variadic arguments to C function ----------------");
     {
-        printf(xx "Passing %s arguments into %s functions is %d doable", "variadic".data, "C".data, 100);
+        printf("Passing %s arguments into %s functions is %d doable", "variadic".data, "C".data, 100);
     }
 }

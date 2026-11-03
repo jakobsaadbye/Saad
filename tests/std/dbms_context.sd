@@ -16,20 +16,20 @@ User :: struct {
 Fake :: struct {
     sent:     [..]string;  // Each statement with its parameters, e.g INSERT ... [Ada, NULL]
     columns:  []string;
-    cells:    []*u8;
+    cells:    []c.string;
     affected: i64 = 1;
 }
 
-fakeExecute :: (conn: *void, sql: *u8, params: []*u8, err: *string) -> *void {
+fakeExecute :: (conn: *void, sql: c.string, params: []c.string, err: *string) -> *void {
     fake := conn as *Fake;
     sb: StringBuilder;
-    sb.addString(fromCString(sql));
+    sb.addString(sql.toString());
     if params.count > 0 {
         sb.addString(" [");
         for p, i in params {
             if i > 0 { sb.addString(", "); }
-            if p == null { sb.addString("NULL"); }
-            else         { sb.addString(fromCString(p)); }
+            if p.isNull() { sb.addString("NULL"); }
+            else         { sb.addString(p.toString()); }
         }
         sb.addChar(']');
     }
@@ -43,18 +43,18 @@ fakeExecute :: (conn: *void, sql: *u8, params: []*u8, err: *string) -> *void {
 }
 fakeRowCount    :: (result: *void) -> i64 { f := result as *Fake; return f.cells.count / f.columns.count; }
 fakeColumnCount :: (result: *void) -> i64 { return (result as *Fake).columns.count; }
-fakeColumnName  :: (result: *void, column: i64) -> *u8 { return (result as *Fake).columns[column].data; }
-fakeValue       :: (result: *void, row: i64, column: i64) -> *u8 { f := result as *Fake; return f.cells[row * f.columns.count + column]; }
+fakeColumnName  :: (result: *void, column: i64) -> c.string { return c.string{(result as *Fake).columns[column].data}; }
+fakeValue       :: (result: *void, row: i64, column: i64) -> c.string { f := result as *Fake; return f.cells[row * f.columns.count + column]; }
 fakeAffected    :: (result: *void) -> i64 { return (result as *Fake).affected; }
 fakeFreeResult  :: (result: *void) {}
 
 // What the fake database answers: a row of id, name and a NULL email for each
 answer :: (fake: *Fake, ids: []string, names: []string) {
-    cells: [..]*u8;
+    cells: [..]c.string;
     for id, i in ids {
-        cells.add(id.data);
-        cells.add(names[i].data);
-        cells.add(null);
+        cells.add(c.string{id.data});
+        cells.add(c.string{names[i].data});
+        cells.add(c.string{});   // NULL
     }
     fake.cells = cells.elements();
 }

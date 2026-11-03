@@ -182,24 +182,24 @@ draw :: method (pe: *ParticleEmitter) {
 main :: () {
     ColorWhite :: Color{255, 255, 255, 255};
 
-    InitWindow(WindowWidth, WindowHeight, xx "Super Breakout");
+    InitWindow(WindowWidth, WindowHeight, "Super Breakout");
     InitAudioDevice();
     SetTargetFPS(90);
 
     //
     // Textxures
     //
-    heartTexture := LoadTexture(xx "data/textures/heart.png");
+    heartTexture := LoadTexture("data/textures/heart.png");
     heartTexture.width  = 24;
     heartTexture.height = 24;
 
 
     pickupTextures : [PickupType.count]Texture = [
-        LoadTexture(xx "data/textures/pickups/ball_speed_up.png"),
-        LoadTexture(xx "data/textures/pickups/ball_slow_down.png"),
-        LoadTexture(xx "data/textures/pickups/bar_widen.png"),
-        LoadTexture(xx "data/textures/pickups/bar_shorten.png"),
-        LoadTexture(xx "data/textures/pickups/fire_ball.png"),
+        LoadTexture("data/textures/pickups/ball_speed_up.png"),
+        LoadTexture("data/textures/pickups/ball_slow_down.png"),
+        LoadTexture("data/textures/pickups/bar_widen.png"),
+        LoadTexture("data/textures/pickups/bar_shorten.png"),
+        LoadTexture("data/textures/pickups/fire_ball.png"),
     ];
 
     // Scale each pickup texture
@@ -213,12 +213,12 @@ main :: () {
     //
     // Sounds
     //
-    soundBallBounce1   := LoadSound(xx "data/sounds/ball_bounce_1.mp3");
-    soundBallBounce2   := LoadSound(xx "data/sounds/ball_bounce_2.wav");
-    soundPickup        := LoadSound(xx "data/sounds/pickup.wav");
-    soundGameOver      := LoadSound(xx "data/sounds/game_over.wav");
-    soundLostLife      := LoadSound(xx "data/sounds/lost_life.wav");
-    soundLevelComplete := LoadSound(xx "data/sounds/level_complete.mp3");
+    soundBallBounce1   := LoadSound("data/sounds/ball_bounce_1.mp3");
+    soundBallBounce2   := LoadSound("data/sounds/ball_bounce_2.wav");
+    soundPickup        := LoadSound("data/sounds/pickup.wav");
+    soundGameOver      := LoadSound("data/sounds/game_over.wav");
+    soundLostLife      := LoadSound("data/sounds/lost_life.wav");
+    soundLevelComplete := LoadSound("data/sounds/level_complete.mp3");
 
     //
     // Game state + variables
@@ -561,7 +561,9 @@ main :: () {
 
         // Draw score
         scoreText := sprint("Score: %", player.score);
-        DrawText(scoreText.data, 105, 16, 24, ColorWhite);
+        cText := scoreText.toCString();     // With the 0 at its end that C wants
+        DrawText(cText, 105, 16, 24, ColorWhite);
+        cText.free();
         scoreText.free();
 
         // Draw the dead zone        

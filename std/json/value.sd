@@ -402,7 +402,7 @@ parseNumber :: method (p: *Parser) -> Value, bool {
 parseF64 :: (text: string) -> f64 {
     buffer := text.toCString();
     n := strtod(buffer, null);
-    c.free(buffer);
+    buffer.free();
     return n;
 }
 

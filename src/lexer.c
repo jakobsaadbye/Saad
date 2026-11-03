@@ -344,9 +344,16 @@ bool lex_file(Lexer *lexer) {
             Pos pos_start = get_current_position(lexer);
             KeywordMatch keyword = match_keyword(lexer);
 
-            // A word right after a '.' is a name, also when it is a keyword e.g TypeKind.int or .struct
+            // A word right after a '.' is a name, also when it is a keyword e.g TypeKind.int or .struct. So is a word that
+            // is declared, right before a '::', e.g the 'string :: struct' of c.string
             bool after_dot = lexer->tokens.count > 0 && ((Token *)lexer->tokens.items)[lexer->tokens.count - 1].type == '.';
-            if (keyword.matched && !after_dot) {
+            bool declared  = false;
+            if (keyword.matched) {
+                int ahead = keyword.length;
+                while (peek_char(lexer, ahead) == ' ' || peek_char(lexer, ahead) == '\t') ahead++;
+                declared = peek_char(lexer, ahead) == ':' && peek_char(lexer, ahead + 1) == ':';
+            }
+            if (keyword.matched && !after_dot && !declared) {
                 eat_characters(lexer, keyword.length);
 
                 if (keyword.token == TOKEN_LITERAL_TRUE || keyword.token == TOKEN_LITERAL_FALSE) {

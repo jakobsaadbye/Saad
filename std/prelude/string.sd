@@ -1,17 +1,11 @@
 use c;
 
-toCString :: method (s: string) -> *u8 {
+// A copy of the string as a c.string, with a 0 after its bytes, e.g for a function of C. Free it with .free()
+toCString :: method (s: string) -> c.string {
     cstr := resizeMemory(null, null, s.len + 1) as *u8;
     memcpy(cstr, s.data, s.len);
     cstr[s.len] = 0;
-    return cstr;
-}
-
-fromCString :: (cstr: *u8) -> string {
-    result: string;
-    result.data = cstr;
-    result.len = strlen(cstr);
-    return result;
+    return c.string{cstr};
 }
 
 slice :: method (s: string, from: int, to := -1) -> string {

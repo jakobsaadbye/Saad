@@ -53,7 +53,7 @@ main :: () {
     } catch (e) {
         caught = true;
         assert(e.is(NotFound) && e.trace.count == 2);
-        assert(fromCString(e.trace[0].function) == "age" && fromCString(e.trace[1].function) == "main");
+        assert(e.trace[0].function.toString() == "age" && e.trace[1].function.toString() == "main");
     }
     assert(caught && log.count == 2 && log[1] == "left age(bo)");
 

@@ -320,6 +320,26 @@ arena.free();
 ```
 * `c`: `printf`, `fopen`, `strlen`, ... Use it when nothing else fits; for memory, use `new` and `mem`. Sizes that are
   `size_t` in C are `i64` here.
+* `c.string`: a string of C, the pointer to its bytes, which end with a 0. It is passed to C like a `*u8`, and the
+  bindings (`c`, `os.windows`, libpq, raylib) take and give it where C has a `char *`. A string literal is one where
+  one is wanted, as its bytes end with a 0. A `string` isn't, as it doesn't have to end with a 0: `s.toCString()`
+  makes a copy that does.
+
+```odin
+greet :: (name: c.string) { printf("hello %s\n", name.data); }   // A vararg of C is the pointer itself: .data
+
+greet("Ada");                       // a literal
+cs := name.toCString();             // a copy of a string, with a 0 after it
+greet(cs);
+cs.free();
+
+home := getenv("HOME");             // a c.string from C
+if !home.isNull() {
+    text := home.toString();        // a string of the same bytes, without copying them. length() counts them
+}
+p: *u8 = ...;
+c.string{p}.toString();             // a pointer of C, made into one
+```
 
 ## Ideas for later
 

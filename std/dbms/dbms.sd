@@ -27,13 +27,13 @@ Driver :: struct {
 
     // Runs the SQL with the parameters ($1, $2, ...). A null parameter is NULL. On an error, the result is
     // null and the error is written to 'err', allocated with malloc
-    execute: (conn: *void, sql: *u8, params: []*u8, err: *string) -> *void;
+    execute: (conn: *void, sql: c.string, params: []c.string, err: *string) -> *void;
 
     rowCount:    (result: *void) -> i64;
     columnCount: (result: *void) -> i64;
-    columnName:  (result: *void, column: i64) -> *u8;
+    columnName:  (result: *void, column: i64) -> c.string;
     // The text of a value, or null for NULL. It lives until freeResult
-    value:       (result: *void, row: i64, column: i64) -> *u8;
+    value:       (result: *void, row: i64, column: i64) -> c.string;   // A null c.string for NULL
     // The number of rows changed by INSERT, UPDATE or DELETE
     affected:    (result: *void) -> i64;
     freeResult:  (result: *void);
@@ -216,7 +216,7 @@ run :: method (conn: *Connection, sql: string, args: ...any) -> *void, string {
     }
 
     err := "";
-    params: [..]*u8;
+    params: [..]c.string;
     for arg, i in args {
         text, ok := paramText(arg);
         if !ok {
@@ -230,9 +230,9 @@ run :: method (conn: *Connection, sql: string, args: ...any) -> *void, string {
     if err == "" {
         query := sql.toCString();
         result = conn.driver.execute(conn.handle, query, params.elements(), &err);
-        mem.free(query);
+        query.free();
     }
-    for p in params { mem.free(p); }
+    for p in params { p.free(); }
     params.free();
 
     if result == null {
@@ -246,7 +246,7 @@ run :: method (conn: *Connection, sql: string, args: ...any) -> *void, string {
 
 // The value as the text of a parameter, allocated with malloc. Null is NULL
 @private
-paramText :: (arg: any) -> *u8, bool {
+paramText :: (arg: any) -> c.string, bool {
     sb: fmt.StringBuilder;
     switch arg.type.kind {
         case .int {
@@ -259,8 +259,8 @@ paramText :: (arg: any) -> *u8, bool {
             value: f64 = 0.0;
             if arg.type.size == 4 { value = (*(arg.data as *f32)) as f64; }
             else                  { value = *(arg.data as *f64); }
-            sprintf(buf.data, xx "%.17g", value);
-            sb.addString(fromCString(buf.data));
+            sprintf(buf.data, "%.17g", value);
+            sb.addString(c.string{buf.data}.toString());
         }
         case .bool {
             if *(arg.data as *bool) { sb.addString("true"); }
@@ -272,7 +272,7 @@ paramText :: (arg: any) -> *u8, bool {
         case .enum {
             enumType := arg.type as *TypeEnum;
             name, ok := enumType.nameOf(enumType.readValue(arg.data));
-            if !ok { return null, false; }
+            if !ok { return c.string{}, false; }
             sb.addString(name);
         }
         case .struct {
@@ -285,11 +285,11 @@ paramText :: (arg: any) -> *u8, bool {
             }
             // An optional: empty is NULL, otherwise its value
             if !arg.type.isOptional() {
-                return null, false;
+                return c.string{}, false;
             }
             value, valueType, present := (arg.type as *TypeStruct).optionalValue(arg.data);
             if !present {
-                return null, true;
+                return c.string{}, true;
             }
             inner: any;
             inner.type = valueType;
@@ -300,11 +300,11 @@ paramText :: (arg: any) -> *u8, bool {
             // null is NULL, otherwise the value it points to
             pointer := *(arg.data as **void);
             if pointer == null {
-                return null, true;
+                return c.string{}, true;
             }
             pointee := (arg.type as *TypePointer).pointerTo;
             if pointee.kind == .void || pointee.kind == .pointer {
-                return null, false;
+                return c.string{}, false;
             }
             inner: any;
             inner.type = pointee;
@@ -312,7 +312,7 @@ paramText :: (arg: any) -> *u8, bool {
             return paramText(inner);
         }
         else {
-            return null, false;
+            return c.string{}, false;
         }
     }
     text := sb.toString();
@@ -336,7 +336,7 @@ columnsOf :: method (conn: *Connection, result: *void, type: *TypeStruct) -> [..
         found: i64 = -1;
         if !skip {
             for c in 0..count {
-                column := fromCString(conn.driver.columnName(result, c));
+                column := conn.driver.columnName(result, c).toString();
                 if (named && column == name) || (!named && sameName(column, name)) {
                     found = c;
                     break;
@@ -387,7 +387,7 @@ lower :: (c: u8) -> u8 {
 
 @private
 columnName :: method (conn: *Connection, result: *void, column: i64) -> string {
-    return fromCString(conn.driver.columnName(result, column));
+    return conn.driver.columnName(result, column).toString();
 }
 
 @private
@@ -406,8 +406,8 @@ readRow :: method (conn: *Connection, result: *void, row: i64, data: *void, type
 
 // Reads the text of a value (null for NULL) into the memory at data, which holds a value of the type
 @private
-readValue :: method (conn: *Connection, text: *u8, data: *void, type: *Type, column: string) -> string {
-    if text == null {
+readValue :: method (conn: *Connection, text: c.string, data: *void, type: *Type, column: string) -> string {
+    if text.isNull() {
         if type.kind == .pointer {
             *(data as **void) = null;
         }
@@ -420,7 +420,7 @@ readValue :: method (conn: *Connection, text: *u8, data: *void, type: *Type, col
         item, itemType := (type as *TypeStruct).setOptional(data, true);
         return conn.readValue(text, item, itemType, column);
     }
-    value := fromCString(text);
+    value := text.toString();
 
     switch type.kind {
         case .bool {
@@ -437,9 +437,9 @@ readValue :: method (conn: *Connection, text: *u8, data: *void, type: *Type, col
             return readInteger(value, data, type as *TypePrimitive, column);
         }
         case .float {
-            end: *u8 = null;
+            end: c.string;
             number := strtod(text, &end);
-            if end == text || *end != 0 {
+            if end.data == text.data || *end.data != 0 {
                 return fmt.sprint("%: '%' is not a number", column, value);
             }
             if type.size == 4 { *(data as *f32) = number as f32; }

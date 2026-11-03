@@ -28,7 +28,7 @@ An extern block says the library of its functions. `extern "C"` is the C runtime
 
 ```odin
 extern "C" {
-    printf :: (format: *u8, args: ...any) -> int;
+    printf :: (format: c.string, args: ...any) -> int;
 }
 
 extern "kernel32.dll" {
@@ -36,7 +36,7 @@ extern "kernel32.dll" {
 }
 
 extern "raylib.dll" {
-    InitWindow :: (width: int, height: int, title: *u8);
+    InitWindow :: (width: int, height: int, title: c.string);
 }
 ```
 

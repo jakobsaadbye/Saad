@@ -9,7 +9,7 @@ print :: (format: string, args: ...any, newline := true) {
     if newline {
         sb.addChar('\n');
     }
-    printf("%s".data, sb.buffer);
+    printf("%s", sb.buffer);   // A C vararg: the pointer itself
     sb.free();
 }
 

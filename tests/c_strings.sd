@@ -1,0 +1,56 @@
+// c.string, the type of a string of C: the pointer to its bytes, which end with a 0
+
+import fmt;
+use c;
+
+// A function of the program can take one, like the functions of C do
+countBytes :: (text: c.string) -> int {
+    return text.length();
+}
+
+Named :: struct {
+    name: c.string;
+}
+
+greeting: c.string = "constant";  // A global, written into the data
+
+main :: () {
+    // A string literal is a c.string where one is wanted, as its bytes end with a 0
+    hello: c.string = "hello";
+    assert(hello.length() == 5 && !hello.isNull());
+    assert(hello.toString() == "hello");
+    assert(countBytes("four") == 4);
+    assert(strlen("abc") == 3);
+    assert(greeting.toString() == "constant");
+
+    n := Named{"member"};
+    assert(n.name.toString() == "member");
+
+    // Nothing, e.g the NULL of a C function
+    none: c.string;
+    assert(none.isNull() && none.length() == 0 && none.toString() == "");
+    assert(none.data == null);
+    none.free();    // Nothing to free
+
+    // A string of Saad to C and back. toCString allocates a copy with a 0 after it
+    word := "saad, the language";
+    s := word.slice(0, 4);
+    cs := s.toCString();
+    assert(cs.length() == 4 && cs.toString() == "saad");
+    assert(strlen(cs) == 4);
+    cs.free();
+
+    // A pointer of C, e.g of a buffer, is made into one
+    buffer: [8]u8;
+    buffer[0] = 'h';
+    buffer[1] = 'i';
+    assert(c.string{&buffer[0]}.toString() == "hi");
+
+    // C functions take and give them, e.g getenv
+    assert(getenv("SAAD_SURELY_NOT_SET_ANYWHERE").isNull());
+
+    // A vararg of C, e.g of printf, is the pointer itself
+    text := fmt.sprint("%", hello.toString());
+    assert(text == "hello");
+    printf("%s\n", hello.data);
+}

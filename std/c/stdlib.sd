@@ -8,7 +8,7 @@ extern "C" {
     realloc :: (buffer: *void, new_size: int) -> *void;
     free    :: (ptr: *void);
     exit    :: (code: int);
-    getenv  :: (name: *u8) -> *u8;
-    system  :: (command: *u8) -> int;
-    strtod  :: (str: *u8, end: **u8) -> f64;
+    getenv  :: (name: c.string) -> c.string;
+    system  :: (command: c.string) -> int;
+    strtod  :: (str: c.string, end: *c.string) -> f64;
 }

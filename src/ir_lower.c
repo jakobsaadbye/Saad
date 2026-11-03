@@ -692,6 +692,14 @@ static void write_constant(Lowerer *L, IrGlobal *global, int offset, AstExpr *ex
         case LITERAL_NULL:
             return; // Already zero
         case LITERAL_STRING: {
+            if (storage->kind == TYPE_STRUCT) {
+                // A c.string: the pointer to the bytes
+                int len = 0;
+                int data = string_data_global(L, lit->as.value.string.data, lit->as.value.string.length, &len);
+                IrReloc reloc = { offset, data };
+                ir_array_push(global->relocs, reloc);
+                return;
+            }
             if (storage->kind != TYPE_STRING) break;
             int len = 0;
             int data = string_data_global(L, lit->as.value.string.data, lit->as.value.string.length, &len);
@@ -1139,9 +1147,15 @@ static Value lower_literal(Lowerer *L, AstLiteral *lit) {
             int global = string_global(L, lit->as.value.string.data, lit->as.value.string.length);
             return value_place(addr_global(global, 0), type);
         }
-        // A string literal typed as a pointer (e.g passed to a *u8 parameter) is just the character data
+        // A string literal typed as a pointer (e.g passed to a *u8 parameter) is just the character data, which ends with
+        // a 0. A c.string is a struct of that pointer
         int len = 0;
         int data = string_data_global(L, lit->as.value.string.data, lit->as.value.string.length, &len);
+        if (type->kind == TYPE_STRUCT) {
+            Value place = temp_place(L, type, "c string");
+            emit_store(L, IR_PTR, place.addr, emit_global_addr(L, data));
+            return place;
+        }
         return value_scalar(emit_global_addr(L, data), type);
     }
     case LITERAL_IDENTIFIER:
