@@ -47,6 +47,10 @@ typedef struct Parser {
     char *(*read_source)(const char *path); // Reads a file to parse. NULL means read_entire_file(), 'saad index --overlay' gives the text of an editor
 } Parser;
 
+// The target of #if, e.g 'OS == .windows'. Set by the compiler: linux with --elf, otherwise windows
+extern const char *target_os;
+extern const char *target_arch;
+
 Parser   parser_init(Lexer *lexer);
 Namespace *find_namespace(Parser *parser, const char *name);
 Namespace *add_namespace(Parser *parser, const char *name);

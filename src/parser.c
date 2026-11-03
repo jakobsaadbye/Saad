@@ -369,6 +369,199 @@ static bool is_statement_of_a_function(Ast *stmt) {
     }
 }
 
+//
+// #if: code that is only compiled for a target, e.g
+//
+//   #if OS == .windows {
+//       extern "ws2_32.dll" { ... }
+//   } else #if OS == .linux {
+//       extern "C" { ... }
+//   } else {
+//       ...
+//   }
+//
+// It works on the tokens of a file before it is parsed: the tokens of a branch that holds are kept, without the braces
+// of the #if, and the others are left out. So a branch can have declarations at the top of a file and statements in a
+// block, and what it declares is in the scope around the #if. A branch that is left out isn't checked, but its braces
+// must match. A condition is made of 'OS' and 'ARCH' compared with a name, e.g 'OS != .linux', 'true', 'false', '!',
+// '&&', '||' and parentheses
+//
+
+const char *target_os   = "windows";
+const char *target_arch = "x64";
+
+typedef struct IfPass {
+    Parser *parser;
+    Token  *in;
+    int     end;     // Of the tokens of the file
+    Token  *out;
+    int     count;
+    bool    failed;  // An error was reported
+    bool    bad;     // The condition that is being read has an error. It is false then
+} IfPass;
+
+static void if_error(IfPass *pass, Token at, const char *message) {
+    if (!pass->bad) report_error_token(pass->parser, LABEL_ERROR, at, "%s", message);
+    pass->failed = true;
+    pass->bad    = true;
+}
+
+static bool if_condition_or(IfPass *pass, int *i);
+
+static bool if_condition_primary(IfPass *pass, int *i) {
+    Token token = pass->in[*i];
+    if (token.type == '!') {
+        *i += 1;
+        return !if_condition_primary(pass, i);
+    }
+    if (token.type == '(') {
+        *i += 1;
+        bool value = if_condition_or(pass, i);
+        if (pass->in[*i].type != ')') { if_error(pass, pass->in[*i], "Syntax Error: Expected a ')' in the condition of #if"); return false; }
+        *i += 1;
+        return value;
+    }
+    if (token.type == TOKEN_LITERAL_BOOLEAN) {
+        *i += 1;
+        return token.as_value.value.boolean;
+    }
+    if (token.type == TOKEN_LITERAL_IDENTIFIER) {
+        char *name = token.as_value.value.identifier.name;
+        const char *actual = strcmp(name, "OS") == 0 ? target_os : strcmp(name, "ARCH") == 0 ? target_arch : NULL;
+        if (actual == NULL) {
+            if (!pass->bad) report_error_token(pass->parser, LABEL_ERROR, token, "'%s' isn't known to #if, which knows OS and ARCH", name);
+            pass->failed = pass->bad = true;
+            return false;
+        }
+        Token op = pass->in[*i + 1], dot = pass->in[*i + 2], value = pass->in[*i + 3];
+        if ((op.type != TOKEN_DOUBLE_EQUAL && op.type != TOKEN_NOT_EQUAL) || dot.type != '.' || value.type != TOKEN_LITERAL_IDENTIFIER) {
+            if_error(pass, op, "Syntax Error: #if compares OS or ARCH with a name, e.g OS == .windows");
+            return false;
+        }
+        char *wanted = value.as_value.value.identifier.name;
+        const char *known = strcmp(name, "OS") == 0 ? "|windows|linux|" : "|x64|";
+        char key[64];
+        snprintf(key, sizeof(key), "|%s|", wanted);
+        if (!strstr(known, key)) {
+            if (!pass->bad) report_error_token(pass->parser, LABEL_ERROR, value, "'%s' isn't a value of %s, which is one of %s", wanted, name,
+                strcmp(name, "OS") == 0 ? ".windows and .linux" : ".x64");
+            pass->failed = pass->bad = true;
+            return false;
+        }
+        *i += 4;
+        bool same = strcmp(actual, wanted) == 0;
+        return op.type == TOKEN_DOUBLE_EQUAL ? same : !same;
+    }
+    if_error(pass, token, "Syntax Error: Expected a condition after #if, e.g OS == .windows");
+    return false;
+}
+
+static bool if_condition_and(IfPass *pass, int *i) {
+    bool value = if_condition_primary(pass, i);
+    while (!pass->bad && pass->in[*i].type == TOKEN_LOGICAL_AND) {
+        *i += 1;
+        bool right = if_condition_primary(pass, i);
+        value = value && right;
+    }
+    return value;
+}
+
+static bool if_condition_or(IfPass *pass, int *i) {
+    bool value = if_condition_and(pass, i);
+    while (!pass->bad && pass->in[*i].type == TOKEN_LOGICAL_OR) {
+        *i += 1;
+        bool right = if_condition_and(pass, i);
+        value = value || right;
+    }
+    return value;
+}
+
+// The index of the '}' that closes the '{' at i, or -1
+static int if_matching_brace(IfPass *pass, int i) {
+    int depth = 0;
+    for (int k = i; k < pass->end; k++) {
+        if (pass->in[k].type == '{') depth++;
+        if (pass->in[k].type == '}' && --depth == 0) return k;
+    }
+    return -1;
+}
+
+static int if_tokens(IfPass *pass, int i, int end, bool keep);
+
+// The #if at i, with its else branches. Returns the index after it
+static int if_directive(IfPass *pass, int i, bool keep) {
+    Token hash = pass->in[i];
+    i += 2; // # if
+    pass->bad = false;
+    bool holds = if_condition_or(pass, &i);
+    if (pass->bad) {
+        // A condition with an error is false. Its branch starts at the next '{'
+        holds = false;
+        while (i < pass->end && pass->in[i].type != '{' && pass->in[i].type != ';' && pass->in[i].type != '}') i++;
+    }
+    if (pass->in[i].type != '{') {
+        if_error(pass, pass->in[i], "Syntax Error: Expected a '{' after the condition of #if");
+        return i; // The tokens after it are kept
+    }
+    int close = if_matching_brace(pass, i);
+    if (close < 0) { if_error(pass, hash, "Syntax Error: The '{' of this #if isn't closed"); return pass->end; }
+    if_tokens(pass, i + 1, close, keep && holds);
+    i = close + 1;
+
+    if (i < pass->end && pass->in[i].type == TOKEN_ELSE) {
+        Token after = pass->in[i + 1];
+        if (after.type == '#' && pass->in[i + 2].type == TOKEN_IF) {
+            return if_directive(pass, i + 1, keep && !holds);
+        }
+        if (after.type != '{') {
+            pass->bad = false;
+            if_error(pass, after, "Syntax Error: The else of an #if is followed by '{' or '#if'");
+            return i + 1; // Without the else
+        }
+        int else_close = if_matching_brace(pass, i + 1);
+        if (else_close < 0) { if_error(pass, after, "Syntax Error: The '{' of this else isn't closed"); return pass->end; }
+        if_tokens(pass, i + 2, else_close, keep && !holds);
+        i = else_close + 1;
+    }
+    return i;
+}
+
+// Copies the tokens from i to end, without the #if branches that don't hold
+static int if_tokens(IfPass *pass, int i, int end, bool keep) {
+    while (i < end) {
+        if (pass->in[i].type == '#' && i + 1 < end && pass->in[i + 1].type == TOKEN_IF) {
+            i = if_directive(pass, i, keep);
+            continue;
+        }
+        if (keep) pass->out[pass->count++] = pass->in[i];
+        i++;
+    }
+    return i;
+}
+
+static bool apply_compile_time_ifs(Parser *parser, int first) {
+    DynamicArray *tokens = &parser->lexer->tokens;
+    Token *all = (Token *)tokens->items;
+    bool has_if = false;
+    for (int i = first; i + 1 < tokens->count; i++) {
+        if (all[i].type == '#' && all[i + 1].type == TOKEN_IF) { has_if = true; break; }
+    }
+    if (!has_if) return true;
+
+    IfPass pass = { parser, all, tokens->count, NULL, 0, false, false };
+    pass.in  = malloc(sizeof(Token) * tokens->count);
+    memcpy(pass.in, all, sizeof(Token) * tokens->count);
+    pass.out = all;
+    pass.count = first;
+    if_tokens(&pass, first, tokens->count, true);
+    if (pass.count == first || ((Token *)tokens->items)[pass.count - 1].type != TOKEN_END) {
+        all[pass.count++] = pass.in[tokens->count - 1]; // The end of the file, e.g after an #if that isn't closed
+    }
+    tokens->count = pass.count;
+    free(pass.in);
+    return !pass.failed;
+}
+
 AstFile *parse_file(Parser *parser, char *file_path) {
 
     // printf("Parsing '%s' ...\n", file_path);
@@ -383,6 +576,7 @@ AstFile *parse_file(Parser *parser, char *file_path) {
     parser->lexer->file_path = file_path;
     parser->lexer->file_text = file_text;
 
+    int first_token = parser->lexer->tokens.count;
     bool ok = lex_file(parser->lexer);
     if (!ok) {
         return NULL;
@@ -403,6 +597,9 @@ AstFile *parse_file(Parser *parser, char *file_path) {
 
     parser->current_file  = file;
     parser->current_scope = file->scope;
+
+    // #if: only the tokens of the branches that hold are parsed
+    if (!apply_compile_time_ifs(parser, first_token)) file->has_syntax_errors = true;
 
     // Add import to the runtime library
     if (parser->runtime_file_path == NULL || strcmp(parser->current_file->absolute_path, parser->runtime_file_path) != 0) {
@@ -1168,7 +1365,7 @@ Ast *parse_statement(Parser *parser) {
     }
 
     else if (token.type == '#') {
-        report_error_token(parser, LABEL_ERROR, token, "'#' is reserved for compile-time features");
+        report_error_token(parser, LABEL_ERROR, token, "'#' is for compile-time features, e.g #if OS == .windows { ... }");
         report_error_ast(parser, LABEL_HINT, NULL, "#import is replaced by 'import name;', and #extern by an 'extern \"C\" { ... }' block");
         return NULL;
     }

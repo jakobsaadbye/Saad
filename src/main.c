@@ -47,6 +47,7 @@ Command *find_command(const char *name) {
 
 // Parses the options after the input file. Returns false on an unknown option
 bool parse_options(CompilerConfig *config, int argc, char const *argv[], int first_option) {
+    bool os_given = false;
     for (int i = first_option; i < argc; i++) {
         const char *option = argv[i];
 
@@ -60,7 +61,18 @@ bool parse_options(CompilerConfig *config, int argc, char const *argv[], int fir
         if (strcmp(option, "--std") == 0)  { program_index.with_std = true; continue; }
         if (strcmp(option, "--all-std") == 0) { program_index.with_std = true; program_index.all_std = true; continue; }
         if (strcmp(option, "--debug") == 0) { config->debug = true; continue; }
-        if (strcmp(option, "--elf") == 0)   { config->emit_elf = true; continue; }
+        if (strcmp(option, "--elf") == 0)   { config->emit_elf = true; if (!os_given) target_os = "linux"; continue; }
+        if (strcmp(option, "--os") == 0 && i + 1 < argc) {
+            // The OS of #if, e.g for 'saad index' of the code for Linux
+            const char *os = argv[++i];
+            if (strcmp(os, "windows") != 0 && strcmp(os, "linux") != 0) {
+                printf("Error: --os is windows or linux\n\n");
+                return false;
+            }
+            target_os = os;
+            os_given  = true;
+            continue;
+        }
         if (strcmp(option, "--unchecked") == 0) { bounds_checks = false; continue; } // No bounds checks of indexes
         if (strcmp(option, "--at") == 0 && i + 1 < argc) {
             // file:line:character. The file can have a ':' itself, e.g C:/dev/main.sd

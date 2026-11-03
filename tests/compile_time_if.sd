@@ -1,0 +1,46 @@
+// #if keeps the code of the branches that hold for the target, e.g OS == .linux with 'saad build --elf'
+
+import fmt;
+
+#if OS == .windows {
+    osName :: () -> string { return "windows"; }
+    PathSeparator :: '\\';
+} else #if OS == .linux {
+    osName :: () -> string { return "linux"; }
+    PathSeparator :: '/';
+} else {
+    osName :: () -> string { return "other"; }   // Not checked
+    PathSeparator :: does not even type check;
+}
+
+#if ARCH == .x64 && (OS == .linux || OS == .windows) {
+    Bits :: 64;
+}
+
+main :: () {
+    name := osName();
+    assert(name == "windows" || name == "linux");
+    assert((name == "linux") == (PathSeparator == '/'));
+    assert(Bits == 64);
+
+    count := 0;
+    #if true {
+        count += 1;       // In the scope around the #if
+        local := 2;
+    }
+    #if false {
+        count += 100;
+    } else {
+        count += 10;
+    }
+    #if !(OS != .windows) {
+        count += 1000;
+    }
+    assert(count == 11 || count == 1011);
+    assert(local == 2);
+
+    #if OS == .linux {
+        assert(count == 11 && name == "linux");
+    }
+    fmt.print("compile time if ok");
+}
