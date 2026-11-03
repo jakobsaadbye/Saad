@@ -82,11 +82,6 @@ handlePost :: (req: Request) -> Response {
 * `newError(message, kind, cause)` makes one, and `fmt.errorf("no user %", id)` with a format.
 * A kind is declared as a constant: `NotFound :: ErrorKind{"NotFound"};`. `Panic` is the kind of the panics.
 
-## In the editor
-
-The language server shows `throws` after every call whose error isn't taken, so it is seen where an error becomes an
-exception.
-
 ## How it works
 
 * The error that is being thrown is in the global `thrownError` of the prelude. After every call of a Saad function,

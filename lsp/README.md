@@ -52,9 +52,12 @@ its own for the file, as with the default theme (Seti).
 ```
 cd lsp/vscode
 npm install
-npx @vscode/vsce package         # saad-0.2.0.vsix
-code --install-extension saad-0.2.0.vsix
+npx @vscode/vsce package         # saad-0.3.0.vsix
+code --install-extension saad-0.3.0.vsix
 ```
+
+VS Code keeps an extension that is installed with the same version, so the version in `package.json` goes up when the
+highlighting changes, e.g for new keywords. `--force` installs it again anyway.
 
 Or open `lsp/vscode` in VS Code and press F5 to run it in a new window.
 

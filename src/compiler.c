@@ -827,6 +827,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
         }
     }
     typed = typed && error_count() == 0; // Statements with errors were skipped, so the others were still checked
+    index_unused_generics(&typer, parsed_files); // For 'saad index': the names in the generics that nothing instantiates
     index_declarations(parsed_files); // For 'saad index', also when there are errors, so an editor can still find what was checked
     if (program_completion.enabled) complete_program(&typer, parsed_files); // For 'saad complete', also when there are errors
     if (!typed) {
