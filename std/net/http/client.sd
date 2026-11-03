@@ -1,0 +1,153 @@
+namespace net.http;
+
+// The client: a request, and the response to it, e.g
+//
+//     response := http.get("http://localhost:8080/posts");
+//     defer response.free();
+//     if response.status == 200 { print(response.body); }
+//
+//     response = http.post("http://localhost:8080/posts", "application/json", text);
+//
+// Only http, not https. Each request is a connection of its own
+
+import net;
+import bytes;
+import mem;
+import fmt;
+
+Response :: struct {
+    status:     int;           // e.g 200
+    statusText: string;        // e.g OK
+    version:    string;        // e.g HTTP/1.1
+    headers:    [..]Header;
+    body:       string;
+
+    arena:      mem.Arena;     // The memory of the texts, freed by free()
+    allocator:  Allocator;
+}
+
+header :: method (response: *Response, name: string) -> string, bool {
+    return findHeader(response.headers, name);
+}
+
+free :: method (response: *Response) {
+    response.arena.free();
+    mem.free(response);
+}
+
+ProtocolError :: ErrorKind{"http.ProtocolError"};   // A url that isn't http, or a response that isn't HTTP
+
+// The parts of an http url
+Url :: struct {
+    host: string;      // e.g localhost
+    port: int;         // 80 when it isn't given
+    path: string;      // With the query, e.g /posts?page=2. / when it isn't given
+}
+
+// The host, port and path of "http://host[:port][/path]"
+parseUrl :: (url: string) -> Url, error {
+    result: Url;
+    if !url.startsWith("http://") {
+        if url.startsWith("https://") {
+            return result, newError(fmt.sprint("'%' is https, which isn't supported: only http", url), ProtocolError);
+        }
+        return result, newError(fmt.sprint("'%' isn't an http url, e.g http://localhost:8080/", url), ProtocolError);
+    }
+    rest := url.slice(7);
+    slash := rest.indexOf("/");
+    hostPort := rest;
+    result.path = "/";
+    if slash >= 0 {
+        hostPort = rest.slice(0, slash);
+        result.path = rest.slice(slash);
+    }
+    result.host = hostPort;
+    result.port = 80;
+    if hostPort.indexOf(":") >= 0 {
+        host, port, err := net.splitHostPort(hostPort);
+        if err != null { return result, err; }
+        result.host = host;
+        result.port = port;
+    }
+    if result.host.len == 0 { return result, newError(fmt.sprint("'%' has no host", url), ProtocolError); }
+    return result, null;
+}
+
+get :: (url: string) -> *Response, error {
+    return request("GET", url);
+}
+
+post :: (url: string, contentType: string, body: string) -> *Response, error {
+    headers := [Header{"Content-Type", contentType}];
+    return request("POST", url, headers, body);
+}
+
+// Sends a request, e.g request("PUT", url, headers, body), and reads the response to it. A response with an error status, e.g 404, isn't an error
+request :: (verb: string, url: string, headers: []Header = [], body := "") -> *Response, error {
+    parts, err := parseUrl(url);
+    if err != null { return null, err; }
+    conn: *net.Conn;
+    conn, err = net.dial(fmt.sprint("%:%", parts.host, parts.port));
+    if err != null { return null, err; }
+    defer {
+        conn.close();
+        mem.free(conn);
+    }
+
+    out := fmt.newStringBuilder(256 + body.len as int);
+    defer out.free();
+    out.add("% % HTTP/1.1\r\n", verb, parts.path);
+    if parts.port == 80 { out.add("Host: %\r\n", parts.host); }
+    else                { out.add("Host: %:%\r\n", parts.host, parts.port); }
+    for h in headers { out.add("%: %\r\n", h.name, h.value); }
+    if body.len > 0 || verb == "POST" || verb == "PUT" || verb == "PATCH" {
+        out.add("Content-Length: %\r\n", body.len);
+    }
+    out.addString("Connection: close\r\n\r\n");
+    out.addString(body);
+    err = conn.write(out.toString());
+    if err != null { return null, err; }
+
+    response := new(Response);
+    response.allocator = response.arena.allocator();
+    response.headers.allocator = &response.allocator;
+    buffer: bytes.Buffer;
+    defer buffer.free();
+    limits: Limits;
+
+    first, status := readHead(conn, &buffer, &limits, &response.arena, &response.headers);
+    if status != 0 {
+        response.free();
+        return null, newError(fmt.sprint("% %: no response", verb, url), ProtocolError);
+    }
+
+    // HTTP/1.1 200 OK
+    space := first.indexOf(" ");
+    if space <= 0 || !first.startsWith("HTTP/1.") {
+        response.free();
+        return null, newError(fmt.sprint("% %: the response isn't HTTP: %", verb, url, first), ProtocolError);
+    }
+    response.version = first.slice(0, space);
+    rest := first.slice(space + 1);
+    space = rest.indexOf(" ");
+    code := rest;
+    if space >= 0 {
+        code = rest.slice(0, space);
+        response.statusText = rest.slice(space + 1);
+    }
+    response.status = parseCount(code) as int;
+    if response.status < 100 || code.len != 3 {
+        response.free();
+        return null, newError(fmt.sprint("% %: the status of the response isn't a number: %", verb, url, first), ProtocolError);
+    }
+
+    // No body for HEAD, 204 and 304
+    if verb != "HEAD" && response.status != 204 && response.status != 304 {
+        response.body, status = readBody(conn, &buffer, response.headers, &limits, &response.arena, true);
+        if status != 0 {
+            response.free();
+            return null, newError(fmt.sprint("% %: the body of the response couldn't be read", verb, url), ProtocolError);
+        }
+    }
+    return response, null;
+}

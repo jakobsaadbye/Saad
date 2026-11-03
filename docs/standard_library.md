@@ -16,6 +16,9 @@ std/
   fmt/          namespace fmt: print, sprint and StringBuilder
   io/           namespace io: bytes on stdin, stdout and stderr
   json/         namespace json: encode, decode, parse and json.Value
+  net/          namespace net: TCP connections and listeners
+    sys.sd          namespace net.sys: the typed bindings of Winsock and BSD sockets
+    http/           namespace net.http: an HTTP/1.1 server with a router, and a client
   os/           namespace os: files, environment variables, processes
     windows.sd      namespace os.windows: the Windows API (threads, Sleep, ...)
   thread/       namespace thread: threads, Mutex, Condition and WaitGroup, on Windows and Linux
@@ -182,6 +185,73 @@ body, ok := buffer.read(length);
   when the bytes aren't all there yet.
 * `unread()`, `available()`, `toString()`, `clear()`, `compact()` and `free()`. When it grows, the bytes that are
   read are dropped first.
+
+## net
+
+TCP over IPv4, on Windows (Winsock) and Linux (BSD sockets).
+
+```odin
+listener := net.listen(":8080");         // ":0" lets the system choose the port: listener.addr.port
+conn := listener.accept();
+n, err := conn.read(buffer);              // []u8. n is 0 with net.Closed when the other end closed
+conn.write("hello\n");
+conn.setReadTimeout(5000);                // Milliseconds. A read that waits longer gives net.Timeout
+conn.close();
+
+conn := net.dial("example.com:80");
+addr := net.resolve("localhost", 80);     // net.Addr: ip and port, toString() is 127.0.0.1:80
+```
+
+* Errors are of the kinds `net.Timeout`, `net.Closed`, `net.Refused`, `net.InUse` and `net.NetError`.
+* `listener.close()` wakes an `accept()` that waits, which gives `net.Closed`.
+* The bindings are in `net.sys`, with the structs of the headers written out for both systems (`SockAddrIn`,
+  `AddrInfo`, `WsaData`, `TimeVal`) and the types of the calls named (`Socket`, `Length`, `AddrLength`).
+* IPv6 and UDP aren't there yet.
+
+## net.http
+
+HTTP/1.1, like Go's `net/http`: a `Mux` routes requests to handlers, a `Server` answers them on a pool of threads,
+and a client sends requests.
+
+```odin
+import net.http;
+
+showPost :: (w: *http.ResponseWriter, r: *http.Request) {
+    id := r.pathValue("id");
+    page, given := r.queryValue("page");    // Of ?page=2, decoded
+    kind, _ := r.header("Content-Type");     // Without case
+    w.setHeader("Content-Type", "application/json");
+    w.writeHeader(201);                      // 200 when it isn't set
+    w.write(json.encode(post));
+}
+
+mux: http.Mux;
+mux.handle("GET /posts/{id}", showPost);
+mux.handle("POST /posts", createPost);
+mux.handle("/static/", files);              // Every path below /static/
+http.listenAndServe(":8080", &mux);
+
+response := http.get("http://localhost:8080/posts/1");
+defer response.free();
+// response.status, response.body, response.header("Content-Type")
+response = http.post(url, "application/json", body);
+response = http.request("PUT", url, headers, body);
+```
+
+* **Patterns:** `[METHOD ]/path`. A segment `{name}` matches any segment, and a path that ends with `/` matches
+  every path below it. The pattern with the most segments that are written out wins. `GET` also answers `HEAD`.
+  A path that matches with another method gives a 405 with `Allow`, and no match a 404 (or `mux.notFound`).
+* **Responses:** a handler writes into a buffer, and the response is sent when it returns, with `Content-Length`.
+  `w.error(status, text)` and `w.redirect(url)` help. A handler that throws gives a 500, and the error is written to
+  stderr (`server.log`); the server goes on.
+* **Server:** `server.listen(address)`, then `server.serve()`, which returns after `server.shutdown()`. Fields:
+  `mux` or `handler`, `workers` (0 is 2 for each processor, at least 4), `readTimeout` and `writeTimeout`
+  (milliseconds), and `limits` (`headBytes`, `bodyBytes`). Connections are kept alive, and bodies can be
+  `Content-Length` or chunked. Bad requests get 400, 408, 413, 431, 501 or 505.
+* **Memory:** the texts of a request are in an arena of the connection, freed when the handler returns. `copy()`
+  what is kept for longer.
+* **Client:** `get`, `post` and `request`, a connection for each request. The texts of a response are freed with
+  `response.free()`. Only `http://`: put the server behind a proxy, e.g Caddy or nginx, for https.
 
 ## thread
 

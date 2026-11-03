@@ -89,6 +89,28 @@ AstExpr *simplify_binary(ConstEvaluator *ce, AstBlock *scope, AstBinary *bin) {
     XXX;
 }
 
+bool is_untyped_type(Type *type);
+
+// An integer of the type, wrapped to its size like at runtime, e.g 300 as u8 is 44 and ~(0 as u64) is the biggest u64
+static AstExpr *integer_of_type(ConstEvaluator *ce, long long value, Type *type) {
+    AstLiteral *result = (AstLiteral *)make_literal_integer(ce, value);
+    if (type == NULL || type->kind != TYPE_INTEGER || is_untyped_type(type)) return (AstExpr *)result;
+    PrimitiveKind kind = ((TypePrimitive *)type)->kind;
+    bool is_signed = kind == PRIMITIVE_I8 || kind == PRIMITIVE_I16 || kind == PRIMITIVE_I32 || kind == PRIMITIVE_I64 || kind == PRIMITIVE_INT;
+    int bits = type->size * 8;
+    if (bits < 64) {
+        unsigned long long mask = (1ULL << bits) - 1;
+        unsigned long long bits_of = (unsigned long long)value & mask;
+        if (is_signed && (bits_of >> (bits - 1)) & 1) value = (long long)(bits_of | ~mask);   // Negative
+        else value = (long long)bits_of;
+    } else if (!is_signed && value < 0) {
+        result->as.flags |= VALUE_IS_BIGGER_THAN_SIGNED_64_BIT_INTEGER;
+    }
+    result->as.value.integer = value;
+    result->head.type = type;
+    return (AstExpr *)result;
+}
+
 AstExpr *simplify_unary(ConstEvaluator *ce, AstBlock *scope, AstUnary *unary) {
     AstExpr *sub_expr = simplify_expression(ce, scope, unary->expr);
 
@@ -116,6 +138,10 @@ AstExpr *simplify_unary(ConstEvaluator *ce, AstBlock *scope, AstUnary *unary) {
         }
 
         XXX; // Shouldn't happen
+    }
+    if (unary->operator == OP_BITWISE_NOT && lit->kind == LITERAL_INTEGER) {
+        // The bits flipped, in the type of the value, e.g ~(0 as u64) is the biggest u64
+        return integer_of_type(ce, ~lit->as.value.integer, lit->head.type);
     }
 
     fprintf(stderr, "Unhandled cases in simplify_unary()\n");
@@ -182,7 +208,12 @@ AstExpr *simplify_expression(ConstEvaluator *ce, AstBlock *scope, AstExpr *expr)
         }
         case AST_CAST: {
             AstCast *cast = (AstCast *)expr;
-            return simplify_expression(ce, scope, cast->expr);
+            AstExpr *inner = simplify_expression(ce, scope, cast->expr);
+            // An integer keeps the type it is cast to, e.g 0 as u64
+            if (inner && inner->head.kind == AST_LITERAL && ((AstLiteral *)inner)->kind == LITERAL_INTEGER && cast->cast_to && cast->cast_to->kind == TYPE_INTEGER) {
+                return integer_of_type(ce, ((AstLiteral *)inner)->as.value.integer, cast->cast_to);
+            }
+            return inner;
         }
         case AST_STRUCT_LITERAL: {
             AstStructLiteral *lit = (AstStructLiteral *) expr;

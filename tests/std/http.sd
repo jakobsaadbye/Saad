@@ -1,0 +1,151 @@
+// net.http: a server with a Mux on a thread, the client, and raw requests for keep-alive, chunks and bad requests
+
+import net;
+import net.http;
+import thread;
+import bytes;
+import fmt;
+
+hello :: (w: *http.ResponseWriter, r: *http.Request) {
+    w.write(fmt.sprint("hello %", r.pathValue("name")));
+}
+
+echo :: (w: *http.ResponseWriter, r: *http.Request) {
+    kind, _ := r.header("content-type");     // Without case
+    w.setHeader("Content-Type", kind);
+    w.writeHeader(201);
+    w.write(r.body);
+}
+
+search :: (w: *http.ResponseWriter, r: *http.Request) {
+    term, found := r.queryValue("q");
+    page, _ := r.queryValue("page");
+    w.write(fmt.sprint("% % %", term, found, page));
+}
+
+files :: (w: *http.ResponseWriter, r: *http.Request) {
+    w.write(fmt.sprint("file % for %", r.path, r.pattern));
+}
+
+boom :: (w: *http.ResponseWriter, r: *http.Request) {
+    throw newError("the handler failed");
+}
+
+moved :: (w: *http.ResponseWriter, r: *http.Request) {
+    w.redirect("/hello/again");
+}
+
+run :: (argument: *void) {
+    server := argument as *http.Server;
+    server.serve();
+}
+
+// Sends raw text, and reads until the connection is closed
+raw :: (address: string, text: string) -> string {
+    conn := net.dial(address);
+    conn.write(text);
+    buffer: bytes.Buffer;
+    while true {
+        n, err := conn.read(buffer.space(4096));
+        if err != null { break; }
+        buffer.wrote(n);
+    }
+    conn.close();
+    result := buffer.toString().copy();
+    buffer.free();
+    return result;
+}
+
+main :: () {
+    mux: http.Mux;
+    mux.handle("GET /hello/{name}", hello);
+    mux.handle("POST /echo", echo);
+    mux.handle("GET /search", search);
+    mux.handle("/static/", files);
+    mux.handle("GET /static/special", hello);   // More specific than the prefix
+    mux.handle("GET /boom", boom);
+    mux.handle("GET /old", moved);
+
+    server: http.Server;
+    server.mux = &mux;
+    server.workers = 2;
+    server.log = false;
+    server.readTimeout = 2000;
+    assert(server.listen("127.0.0.1:0") == null);
+    address := server.listener.addr.toString();
+    base := fmt.sprint("http://%", address);
+    serving := thread.spawn(run, &server);
+
+    // The client
+    response := http.get(fmt.sprint("%/hello/ada\%20lovelace", base));
+    assert(response.status == 200 && response.statusText == "OK" && response.body == "hello ada lovelace");
+    kind, _ := response.header("Content-Type");
+    assert(kind == "text/plain; charset=utf-8");
+    response.free();
+
+    response = http.post(fmt.sprint("%/echo", base), "application/json", "{\"a\": 1}");
+    assert(response.status == 201 && response.body == "{\"a\": 1}");
+    kind, _ = response.header("content-type");
+    assert(kind == "application/json");
+    response.free();
+
+    response = http.get(fmt.sprint("%/search?q=saad+lang&page=2", base));
+    assert(response.body == "saad lang true 2");
+    response.free();
+
+    response = http.get(fmt.sprint("%/static/css/site.css", base));
+    assert(response.body == "file /static/css/site.css for /static/");
+    response.free();
+    response = http.get(fmt.sprint("%/static/special", base));
+    assert(response.body == "hello ");
+    response.free();
+
+    // No route, the wrong method, and a handler that throws: the server goes on
+    response = http.get(fmt.sprint("%/nothing", base));
+    assert(response.status == 404);
+    response.free();
+    response = http.request("DELETE", fmt.sprint("%/echo", base));
+    allow, _ := response.header("Allow");
+    assert(response.status == 405 && allow == "POST");
+    response.free();
+    response = http.get(fmt.sprint("%/boom", base));
+    assert(response.status == 500 && response.body == "Internal Server Error\n");
+    response.free();
+    response = http.get(fmt.sprint("%/old", base));
+    location, _ := response.header("Location");
+    assert(response.status == 303 && location == "/hello/again");
+    response.free();
+
+    // HEAD has the headers of GET, without the body
+    response = http.request("HEAD", fmt.sprint("%/hello/x", base));
+    length, _ := response.header("Content-Length");
+    assert(response.status == 200 && length == "7" && response.body == "");
+    response.free();
+
+    // Two requests on one connection, the second with a chunked body
+    text := raw(address, "GET /hello/one HTTP/1.1\r\nHost: x\r\n\r\nPOST /echo HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n4\r\nwiki\r\n5;ext=1\r\npedia\r\n0\r\n\r\n");
+    assert(text.indexOf("HTTP/1.1 200 OK") == 0 && text.indexOf("hello one") > 0);
+    assert(text.indexOf("HTTP/1.1 201 Created") > 0 && text.endsWith("wikipedia"));
+
+    // Requests that are wrong
+    text = raw(address, "NOT A REQUEST\r\n\r\n");
+    assert(text.startsWith("HTTP/1.1 505"));
+    text = raw(address, "GET /x HTTP/1.1\r\nbad header line\r\n\r\n");
+    assert(text.startsWith("HTTP/1.1 400"));
+    text = raw(address, "POST /echo HTTP/1.1\r\nContent-Length: 99999999999\r\n\r\n");
+    assert(text.startsWith("HTTP/1.1 413"));
+    text = raw(address, "GET /hello/a HTTP/1.0\r\n\r\n");   // HTTP/1.0 closes after the response
+    assert(text.startsWith("HTTP/1.1 200") && text.indexOf("Connection: close") > 0);
+
+    // Urls the client doesn't take
+    _, err := http.get("https://example.com/");
+    assert(err != null && err.is(http.ProtocolError));
+    _, err = http.get("ftp://example.com/");
+    assert(err != null);
+
+    server.shutdown();
+    serving.join();
+    _, err = http.get(fmt.sprint("%/hello/late", base));
+    assert(err != null && err.is(net.Refused));
+    fmt.print("http ok");
+}

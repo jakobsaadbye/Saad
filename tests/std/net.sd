@@ -1,0 +1,103 @@
+// net: a server that echoes lines, on a thread, and a client. Timeouts, closed connections and the errors
+
+import net;
+import thread;
+import bytes;
+import fmt;
+
+// Echoes each line back in upper case, until "bye"
+serve :: (argument: *void) {
+    listener := argument as *net.Listener;
+    conn := listener.accept();
+    defer conn.close();
+    buffer: bytes.Buffer;
+    defer buffer.free();
+    while true {
+        n, err := conn.read(buffer.space(1024));
+        if err != null { return; }
+        buffer.wrote(n);
+        while true {
+            line, found := buffer.readLine();
+            if !found { break; }
+            if line == "bye" { return; }
+            conn.write(fmt.sprint("%\n", line.toUpper()));
+        }
+    }
+}
+
+// Reads until a whole line has come
+readLine :: (conn: *net.Conn, buffer: *bytes.Buffer) -> string {
+    while true {
+        line, found := buffer.readLine();
+        if found { return line.copy(); }
+        n := conn.read(buffer.space(1024));
+        buffer.wrote(n);
+    }
+    return "";
+}
+
+main :: () {
+    // Addresses
+    host, port, err := net.splitHostPort("localhost:8080");
+    assert(err == null && host == "localhost" && port == 8080);
+    _, _, err = net.splitHostPort("localhost");
+    assert(err != null && err.is(net.NetError));
+    _, _, err = net.splitHostPort(":99999");
+    assert(err != null);
+    local := net.resolve("localhost", 80);
+    assert(local.toString() == "127.0.0.1:80");
+    _, err = net.resolve("no-such-host.invalid", 80);
+    assert(err != null && err.is(net.NetError));
+
+    // Port 0: the system chooses one
+    listener := net.listen("127.0.0.1:0");
+    assert(listener.addr.port > 0);
+    address := listener.addr.toString();
+    server := thread.spawn(serve, listener);
+
+    conn := net.dial(address);
+    buffer: bytes.Buffer;
+    conn.write("hello\n");
+    assert(readLine(conn, &buffer) == "HELLO");
+    conn.write("in two");
+    conn.write(" parts\nand more\n");
+    assert(readLine(conn, &buffer) == "IN TWO PARTS");
+    assert(readLine(conn, &buffer) == "AND MORE");
+
+    // A read that waits too long
+    conn.setReadTimeout(50);
+    scratch: [16]u8;
+    n: int;
+    n, err = conn.read(scratch);
+    assert(n == 0 && err != null && err.is(net.Timeout));
+
+    // The server closes after "bye"
+    conn.setReadTimeout(0);
+    conn.write("bye\n");
+    n, err = conn.read(scratch);
+    assert(n == 0 && err.is(net.Closed));
+    conn.close();
+    server.join();
+
+    // The port is in use while the listener is open, and nothing listens after it is closed
+    _, err = net.listen(address);
+    assert(err != null && err.is(net.InUse));
+    listener.close();
+    _, err = net.dial(address);
+    assert(err != null && err.is(net.Refused));
+
+    // A listener that is closed while accept() waits
+    waiting := net.listen("127.0.0.1:0");
+    closer := thread.spawn(closeSoon, waiting);
+    _, err = waiting.accept();
+    assert(err != null && err.is(net.Closed));
+    closer.join();
+
+    buffer.free();
+    fmt.print("net ok");
+}
+
+closeSoon :: (argument: *void) {
+    thread.sleep(50);
+    (argument as *net.Listener).close();
+}
