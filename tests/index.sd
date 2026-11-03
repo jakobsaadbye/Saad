@@ -75,3 +75,13 @@ main :: () {
 matching :: (f: Expr<(Circle) -> bool>) -> int {
     return f.parameters.count as int;
 }
+
+// An error that isn't taken is thrown
+parsedCount :: () -> int {
+    n := parsed("12");
+    return n;
+}
+
+parsed :: (text: string) -> (int, error) {
+    return text.len as int, null;
+}

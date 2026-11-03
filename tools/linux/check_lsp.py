@@ -266,6 +266,12 @@ def main():
     runs = sum("Indexed" in line for line in client.log) - indexed
     check(runs <= 2, f"checked {runs} times for 5 changes")  # Once, or twice when a change arrives while the first check runs
 
+    print("inlay hints: the calls that throw")
+    m = client.request("textDocument/inlayHint", {"textDocument": doc, "range": {"start": {"line": 0, "character": 0}, "end": {"line": 200, "character": 0}}})
+    hints = m.get("result") or []
+    throw_line = next(i for i, l in enumerate(text.split("\n")) if 'n := parsed("12");' in l)
+    check(any(h["label"] == "throws" and h["position"]["line"] == throw_line for h in hints), f"a throws hint after parsed(...): {hints}")
+
     print("hover of self")
     m = client.request("textDocument/hover", {"textDocument": doc, "position": position_of(text, 19, "self")})
     value = m["result"]["contents"]["value"] if m["result"] else ""

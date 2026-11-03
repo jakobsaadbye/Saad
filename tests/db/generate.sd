@@ -12,21 +12,21 @@ Golden :: "tests/db/model";
 
 main :: () {
     conn, err := postgres.connect(fromCString(getenv(xx "SAAD_TEST_POSTGRES")));
-    assert(err == "");
+    assert(err == null);
     shopsetup.create(&conn);
 
     options := postgres.GenerateOptions{schema: "saad_shop"};
     assert(options.entities == "entities" && options.database == "database"); // The default namespaces
 
     files, err2 := postgres.generate(&conn, options);
-    assert(err2 == "");
+    assert(err2 == null);
     names := files.map((f: postgres.GeneratedFile) -> string { return f.name; });
     assert(sprint("%", names) == "[\"entity/order_status.sd\", \"entity/role.sd\", \"entity/category.sd\", \"entity/order_item.sd\", \"entity/order.sd\", \"entity/user.sd\", \"database.sd\"]");
 
     _, update := os.getEnv("SAAD_UPDATE_GOLDEN");
     if update {
         _, e := postgres.writeFiles(Golden, files);
-        assert(e == "");
+        assert(e == null);
         print("Wrote %", Golden);
         return;
     }
@@ -46,19 +46,19 @@ main :: () {
     folder := "tests/db/build/generated";
     for file in files { os.removeFile(sprint("%/%", folder, file.name)); }
     _, e1 := postgres.writeFiles(folder, files);
-    assert(e1 == "");
+    assert(e1 == null);
     assert(os.fileExists(sprint("%/entity/category.sd", folder)));
     assert(os.writeFile(sprint("%/entity/mine.sd", folder), "namespace entities;\n"));
 
     fewer := files.filter(f => f.name != "entity/category.sd");
     removed, e2 := postgres.writeFiles(folder, fewer);
-    assert(e2 == "" && removed.count == 1 && removed[0] == "entity/category.sd");
+    assert(e2 == null && removed.count == 1 && removed[0] == "entity/category.sd");
     assert(!os.fileExists(sprint("%/entity/category.sd", folder)) && os.fileExists(sprint("%/entity/mine.sd", folder)));
     os.removeFile(sprint("%/entity/mine.sd", folder));
 
     // A schema that doesn't exist has only a database.sd, with no tables but the context
     empty, err3 := postgres.generate(&conn, postgres.GenerateOptions{schema: "no_such_schema"});
-    assert(err3 == "" && empty.count == 1 && empty[0].code.indexOf("Database :: struct {\n    @embed context: *dbms.Context;\n}") >= 0);
+    assert(err3 == null && empty.count == 1 && empty[0].code.indexOf("Database :: struct {\n    @embed context: *dbms.Context;\n}") >= 0);
 
     conn.close();
     print("generate ok");

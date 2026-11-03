@@ -53,6 +53,8 @@ typedef enum AstKind {
     AST_ASSERT,
     AST_RETURN,
     AST_DEFER,
+    AST_TRY,
+    AST_THROW,
     AST_BREAK_OR_CONTINUE,
     AST_IF,
     AST_SWITCH,
@@ -129,6 +131,7 @@ typedef enum AstFlags {
     AST_FLAG_IS_BEING_CHECKED                      = 1 << 9, // Set on a type alias while its type is resolved, to find aliases that refer to themselves
     AST_FLAG_HAS_ERRORS                            = 1 << 10, // Type checking it failed. It isn't checked again, see check_declaration_of()
     AST_FLAG_TREE_VALUE_OF_RESULTS                 = 1 << 11, // A call in an expression tree that gives a value and an error, which is its value, e.g a.posts().count()
+    AST_FLAG_THROWS_ON_ERROR                       = 1 << 12, // A call that gives an error which isn't taken, e.g 'text := os.readFile(p);'. The error is thrown
 } AstFlags;
 
 typedef struct Ast {
@@ -473,6 +476,7 @@ typedef struct AstFunctionCall {
     DynamicArray     type_args;              // of *Type. The type arguments given at the call e.g the f64 in max<f64>(a, b)
 
     DynamicArray     lowered_arguments;      // of *AstExpr. A lowered representation of the argument list including hidden return arguments
+    Type            *results;                // With AST_FLAG_THROWS_ON_ERROR: all the results, with the error last
 } AstFunctionCall;
 
 typedef struct AstExprStmt {
@@ -501,6 +505,20 @@ typedef struct AstDefer {
     Ast  head;
     Ast *statement;
 } AstDefer;
+
+// try { ... } catch (err) { ... }: an error thrown in the body goes to the handler, as err
+typedef struct AstTry {
+    Ast            head;
+    AstBlock      *body;
+    AstIdentifier *error;    // The name of the error in the handler
+    AstBlock      *handler;
+} AstTry;
+
+// throw err;
+typedef struct AstThrow {
+    Ast      head;
+    AstExpr *value;
+} AstThrow;
 
 typedef struct AstReturn {
     Ast              head;

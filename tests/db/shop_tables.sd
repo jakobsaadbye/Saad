@@ -25,7 +25,7 @@ UserSummary :: struct {
 
 main :: () {
     conn, err := postgres.connect(fromCString(getenv(xx "SAAD_TEST_POSTGRES")));
-    assert(err == "");
+    assert(err == null);
     shopsetup.create(&conn);
 
     db := database.open(&conn);
@@ -44,7 +44,7 @@ main :: () {
     count0, _ := db.users.count();
     assert(count0 == 0); // Nothing is written yet
 
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
     assert(db.pendingChanges() == 0);
     assert(ada.id == 1 && bo.id == 2 && ada.createdAt.year() >= 2025);   // A timestamptz is a time.Time
     assert(time.since(ada.createdAt) < time.Hour && !bo.createdAt.before(ada.createdAt));
@@ -52,21 +52,21 @@ main :: () {
     assert(bo.email == null && bo.age == null && bo.role == .guest);
 
     count, e3 := db.users.count();
-    assert(e3 == "" && count == 2);
+    assert(e3 == null && count == 2);
     assert(rowsOf(&db.users) == 2);
 
     // get gives a pointer, null when there is no row
     found, e4 := db.users.get(ada.id);
-    assert(e4 == "" && found != null && found.name == "Ada" && found.email == "ada@example.com");
+    assert(e4 == null && found != null && found.name == "Ada" && found.email == "ada@example.com");
     missing, e5 := db.users.get(99);
-    assert(e5 == "" && missing == null);
+    assert(e5 == null && missing == null);
 
     // update writes the row with its key
     found.email = "ada@lovelace.org";
     bo.active = false;
     db.users.update(found);
     db.users.update(bo);
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
     again, _ := db.users.get(bo.id);
     assert(again.active == false);
     ada2, _ := db.users.get(ada.id);
@@ -78,7 +78,7 @@ main :: () {
     order.status = .in_transit;
     order.total  = "12.50";
     order.type   = "gift";
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
     assert(order.id == 1 && order.status == .in_transit && order.total == "12.50" && order.note == "none" && order.type == "gift");
 
     // A table with a key of two columns has create and all
@@ -89,9 +89,9 @@ main :: () {
     cake := db.orderItems.create();
     cake.orderId = order.id;
     cake.product = "cake";
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
     items, e10 := db.orderItems.all();
-    assert(e10 == "" && items.count == 2);
+    assert(e10 == null && items.count == 2);
     quantities := items.reduce(0, (sum, item) => sum + item.quantity);
     assert(quantities == 4);
 
@@ -99,13 +99,13 @@ main :: () {
     books := db.categories.create();
     books.code = "books";
     books.for_ = "readers";
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
     stored, _ := db.categories.get("books");
     assert(stored?.for_ ?? "" == "readers" && stored.uid == null);
 
     // delete, by the key
     db.categories.delete("books");
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
     gone, _ := db.categories.get("books");
     assert(gone == null);
 
@@ -115,7 +115,7 @@ main :: () {
     bad := db.orders.create();
     bad.userId = 999;    // No such user
     e13 := db.saveChanges();
-    assert(e13.startsWith("create in orders (change 2 of 2): ERROR:") && e13.indexOf("foreign key") >= 0);
+    assert(e13.message.startsWith("create in orders (change 2 of 2): ERROR:") && e13.message.indexOf("foreign key") >= 0);
     assert(cy.id == 0 && db.pendingChanges() == 2);
     count2, _ := db.users.count();
     assert(count2 == 2); // Cy wasn't written either
@@ -124,14 +124,14 @@ main :: () {
 
     // Changing or removing a row that isn't there is an error
     db.users.delete(12345);
-    assert(db.saveChanges() == "delete in users (change 1 of 1): No row has the key 12345");
+    assert(db.saveChanges().message == "delete in users (change 1 of 1): No row has the key 12345");
     db.discardChanges();
 
     // Tracking: the rows of get and all are saved without update, only the columns that changed
     dbUser, _ := db.users.get(ada.id);
     dbUser.score = 4.5;
     assert(db.pendingChanges() == 1);
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
     check, _ := db.users.get(ada.id);
     assert(check.score == 4.5);
 
@@ -139,7 +139,7 @@ main :: () {
     for i in 0..everyone.count {
         everyone.indexRef(i).active = true;
     }
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
     activeCount, _, _ := conn.queryOne<i64>("SELECT count(*) FROM saad_shop.users WHERE active");
     assert(activeCount == 2);
 
@@ -151,75 +151,75 @@ main :: () {
         row.name = name;
         created.add(row);
     }
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
     for row, i in created {
         stored, _ := db.users.get(row.id);
         assert(stored.name == names[i]);
     }
     assert(created[0].id + 3 == created[3].id);
     created[1].email = "finn@example.com";   // and tracked after they are saved
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
     finn, _ := db.users.get(created[1].id);
     assert(finn.email == "finn@example.com");
     for row in created { db.users.delete(row.id); }
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
 
     // Queries with lambdas, made into SQL. The values they use are parameters
     minAge := 30;
     older, e15 := db.users.where(u => u.age ?? 0 >= minAge).all();
-    assert(e15 == "" && older.count == 1 && older[0].name == "Ada");
+    assert(e15 == null && older.count == 1 && older[0].name == "Ada");
     withoutEmail, e16 := db.users.where(u => u.email == null).count();
-    assert(e16 == "" && withoutEmail == 1);
+    assert(e16 == null && withoutEmail == 1);
 
     // Times are parameters too, and after, before and equal are comparisons
     lastWeek := time.now().addDate(0, 0, -7);
     newUsers, e22 := db.users.where(u => u.createdAt.after(lastWeek) && !u.createdAt.before(ada.createdAt)).count();
-    assert(e22 == "" && newUsers == 2);
+    assert(e22 == null && newUsers == 2);
     sameTime, _ := db.users.where(u => u.createdAt.equal(ada.createdAt)).select(u => u.name).all();
     assert(sameTime.contains("Ada"));
 
     // first gives a pointer, and its row is tracked
     admin, e17 := db.users.where(u => u.role == .admin && u.name.startsWith("A")).first();
-    assert(e17 == "" && admin != null && admin.name == "Ada");
+    assert(e17 == null && admin != null && admin.name == "Ada");
     admin.score = 5.0;
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
     isFive, _ := db.users.where(u => u.score == 5.0).exists();
     assert(isFive);
     nobody, e18 := db.users.where(u => u.name == "Nobody").first();
-    assert(e18 == "" && nobody == null);
+    assert(e18 == null && nobody == null);
 
     // Sorted, a part of the rows, and select into values or anonymous structs, which aren't tracked
     sorted, e19 := db.users.orderByDescending(u => u.name).select(u => u.name).all();
-    assert(e19 == "" && sorted.count == 2 && sorted[0] == "Bo" && sorted[1] == "Ada");
+    assert(e19 == null && sorted.count == 2 && sorted[0] == "Bo" && sorted[1] == "Ada");
     second, _ := db.users.orderBy(u => u.id).offset(1).limit(1).select(u => u.name.toUpper()).all();
     assert(second.count == 1 && second[0] == "BO");
     scores, e20 := db.users.where(u => u.name.toLower().endsWith("da")).select(u => {name: u.name, doubled: u.score * 2.0}).all();
-    assert(e20 == "" && scores.count == 1 && scores[0].name == "Ada" && scores[0].doubled == 10.0);
+    assert(e20 == null && scores.count == 1 && scores[0].name == "Ada" && scores[0].doubled == 10.0);
     scores[0].name = "changed";
     assert(db.pendingChanges() == 0);
 
     // A mistake in a query is an error of all, first, count and exists
     _, e21 := db.users.where(u => u.name.reverse() == "adA").all();
-    assert(e21.startsWith("The method reverse can't be made into SQL"));
+    assert(e21.message.startsWith("The method reverse can't be made into SQL"));
 
     // Relations, from the foreign keys. orders.user_id refers to users.id, so an Order has user() and a User orders()
     buyer, e23 := order.user();
-    assert(e23 == "" && buyer == ada);              // ada is tracked since she was saved, so she is the row
+    assert(e23 == null && buyer == ada);              // ada is tracked since she was saved, so she is the row
     adaOrders, e24 := ada.orders().count();
-    assert(e24 == "" && adaOrders == 1);
+    assert(e24 == null && adaOrders == 1);
     lines, e25 := order.orderItems().orderBy(i => i.product).all();
-    assert(e25 == "" && lines.count == 2 && lines[0].product == "cake");
+    assert(e25 == null && lines.count == 2 && lines[0].product == "cake");
     owner, _ := lines[1].order();
     assert(owner == order);
     assert(sprint("%", *order).indexOf("dbLink") < 0);   // The link isn't data
 
     // A foreign key that can be NULL, to the same table: users.referred_by
     bo.referredBy = ada.id;
-    assert(db.saveChanges() == "");
+    assert(db.saveChanges() == null);
     referrer, e26 := bo.referredByRow();
-    assert(e26 == "" && referrer == ada);
+    assert(e26 == null && referrer == ada);
     noReferrer, e27 := ada.referredByRow();
-    assert(e27 == "" && noReferrer == null);
+    assert(e27 == null && noReferrer == null);
     referred, _ := ada.usersByReferredBy().select(u => u.name).all();
     assert(referred.count == 1 && referred[0] == "Bo");
 
@@ -231,19 +231,19 @@ main :: () {
         referred: u.usersByReferredBy().count(),
         firstItem: u.orders().orderBy(o => o.id).first().note,
     }).all();
-    assert(e30 == "");
+    assert(e30 == null);
     assert(sprint("%", perUser) == "[{name: \"Ada\", orders: 1, items: 1, referred: 1, firstItem: \"none\"}, {name: \"Bo\", orders: 0, items: 0, referred: 0, firstItem: null}]");
     summaries, e37 := db.users.orderBy(u => u.name).select(u => UserSummary{u.name, orders: u.orders().count()}).all();
-    assert(e37 == "" && summaries.count == 2);
+    assert(e37 == null && summaries.count == 2);
     assert(summaries[0].name == "Ada" && summaries[0].orders == 1 && summaries[1].orders == 0 && summaries[0].label == "user");
     buyers, e31 := db.users.where(u => u.orders().where(o => o.orderItems().sum(i => i.quantity) > 1).exists()).select(u => u.name).all();
-    assert(e31 == "" && buyers.count == 1 && buyers[0] == "Ada");
+    assert(e31 == null && buyers.count == 1 && buyers[0] == "Ada");
     quantity, e32 := db.orderItems.sum(i => i.quantity);
     most, e33 := db.orderItems.max(i => i.quantity);
     least, e34 := db.orderItems.where(i => i.order().user().name == "Ada").min(i => i.quantity);
     mean, e35 := db.orderItems.average(i => i.quantity);
     none, e36 := db.orderItems.where(i => i.quantity > 100).sum(i => i.quantity);
-    assert(e32 == "" && e33 == "" && e34 == "" && e35 == "" && e36 == "");
+    assert(e32 == null && e33 == null && e34 == null && e35 == null && e36 == null);
     assert(quantity == most + least && mean * 2.0 == quantity as f64 && none == 0);
 
     // The rows of a relation are tracked
@@ -251,20 +251,20 @@ main :: () {
     assert(db.pendingChanges() == 0);    // order_items has no key of one column, so its rows aren't tracked
     item, _ := cake.order();
     item.note = "gift wrapped";
-    assert(db.pendingChanges() == 1 && db.saveChanges() == "");
+    assert(db.pendingChanges() == 1 && db.saveChanges() == null);
     noted, _ := db.orders.get(order.id);
     assert(noted.note ?? "" == "gift wrapped");
 
     // A row that wasn't made by a table has no link
     stray := Order{userId: ada.id};
     _, e28 := stray.user();
-    assert(e28 == dbms.NoLinkError);
+    assert(e28.is(dbms.NoLink));
     _, e29 := stray.orderItems().all();
-    assert(e29 == dbms.NoLinkError);
+    assert(e29.is(dbms.NoLink));
 
     // all, with the methods of lists
     users, e14 := db.users.all();
-    assert(e14 == "" && users.count == 2);
+    assert(e14 == null && users.count == 2);
     admins := users.filter(u => u.role == .admin).map(u => u.name);
     assert(admins.count == 1 && admins[0] == "Ada");
 

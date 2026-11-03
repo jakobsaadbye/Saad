@@ -8,7 +8,9 @@ namespace dbms;
 //     rows, err4  := db.users.where(u => u.age >= 18).select(u => {name: u.name, nextYear: u.age + 1}).all();
 //
 // The lambdas are expression trees (Expr, see docs/expression_trees.md), which are made into SQL. The values they use,
-// like minAge, are sent as parameters ($1, $2, ...). Nothing is sent before all, first, count or exists.
+// like minAge, are sent as parameters ($1, $2, ...). Nothing is sent before all, first, count or exists. Their errors
+// are of the kinds dbms.DatabaseError and dbms.QueryError (a lambda that can't be SQL): taken, they are values, and not
+// taken, e.g 'adults := db.users.where(...).all();', they are thrown
 //
 // In a lambda, the members of the row are its columns, and these work:
 //
@@ -100,9 +102,9 @@ Query :: struct <T> {
 
     // The rows. When the table has a key and nothing is selected, they are tracked like the rows of all of the table.
     // Don't add to the list then, as its rows can move
-    all :: method () -> ([..]T, string) {
+    all :: method () -> ([..]T, error) {
         rows, err := self.fetch();
-        if err == "" && self.isTracked() {
+        if err == null && self.isTracked() {
             for i in 0..rows.count {
                 self.context.trackRow(self.table, rows.indexRef(i) as *void);
             }
@@ -112,10 +114,10 @@ Query :: struct <T> {
 
     // The first row, or null when there are none. It is made with the allocator of the connection, and tracked like the
     // rows of all
-    first :: method () -> (*T, string) {
+    first :: method () -> (*T, error) {
         q := self.limit(1);
         rows, err := q.fetch();
-        if err != "" || rows.count == 0 {
+        if err != null || rows.count == 0 {
             rows.free();
             return null, err;
         }
@@ -125,14 +127,14 @@ Query :: struct <T> {
         if self.isTracked() {
             self.context.trackRow(self.table, row as *void);
         }
-        return row, "";
+        return row, null;
     }
 
     // The rows, without tracking them
-    fetch :: method () -> ([..]T, string) {
+    fetch :: method () -> ([..]T, error) {
         none: [..]T;
         sql, args, err := self.toSql();
-        if err != "" { return none, err; }
+        if err != null { return none, err; }
 
         if self.single {
             values, e := self.context.conn.query<Single<T>>(sql, ...args.elements());
@@ -157,9 +159,9 @@ Query :: struct <T> {
     }
 
     // The number of rows
-    count :: method () -> (i64, string) {
+    count :: method () -> (i64, error) {
         sql, args, err := self.toSql();
-        if err != "" { return 0, err; }
+        if err != null { return 0, err; }
         counting := fmt.sprint("SELECT count(*) FROM (%) AS rows", sql);
         sql.free();
         n, _, e := self.context.conn.queryOne<i64>(counting, ...args.elements());
@@ -168,32 +170,32 @@ Query :: struct <T> {
     }
 
     // The sum of a value of the rows, e.g db.posts.sum(p => p.views). 0 when there are no rows
-    sum :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
+    sum :: method <K> (f: Expr<(T) -> K>) -> (K, error) {
         return self.aggregate<K>("coalesce(sum(\"value\"), 0)", f);
     }
 
     // The smallest of a value of the rows, e.g db.posts.min(p => p.createdAt). The zero value when there are no rows
-    min :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
+    min :: method <K> (f: Expr<(T) -> K>) -> (K, error) {
         return self.aggregate<K>("min(\"value\")", f);
     }
 
     // The largest of a value of the rows. The zero value when there are no rows
-    max :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
+    max :: method <K> (f: Expr<(T) -> K>) -> (K, error) {
         return self.aggregate<K>("max(\"value\")", f);
     }
 
     // The average of a value of the rows, e.g db.posts.average(p => p.views). 0 when there are no rows
-    average :: method <K> (f: Expr<(T) -> K>) -> (f64, string) {
+    average :: method <K> (f: Expr<(T) -> K>) -> (f64, error) {
         return self.aggregate<f64>("coalesce(avg(\"value\"), 0)::double precision", f);
     }
 
     // An aggregate of SQL over the values that f gives of the rows, which are the column "value"
     @private
-    aggregate :: method <V, K> (of: string, f: Expr<(T) -> K>) -> (V, string) {
+    aggregate :: method <V, K> (of: string, f: Expr<(T) -> K>) -> (V, error) {
         values := self.select(f);
         values.single = true;
         sql, args, err := values.toSql();
-        if err != "" {
+        if err != null {
             zero: V;
             return zero, err;
         }
@@ -205,9 +207,9 @@ Query :: struct <T> {
     }
 
     // True when there is a row
-    exists :: method () -> (bool, string) {
+    exists :: method () -> (bool, error) {
         sql, args, err := self.toSql();
-        if err != "" { return false, err; }
+        if err != null { return false, err; }
         asking := fmt.sprint("SELECT EXISTS (%)", sql);
         sql.free();
         found, _, e := self.context.conn.queryOne<bool>(asking, ...args.elements());
@@ -216,16 +218,18 @@ Query :: struct <T> {
     }
 
     // The SQL of the query, and its parameters
-    toSql :: method () -> (string, [..]any, string) {
+    toSql :: method () -> (string, [..]any, error) {
         sql, args, err, joins := self.sqlWith(false);
         if err == "" && joins > 0 {
             // A relation is joined or a subquery made, so the columns are written with their table, e.g t0."title"
             sql.free();
             args.free();
             sql2, args2, err2, _ := self.sqlWith(true);
-            return sql2, args2, err2;
+            return sql2, args2, databaseError(err2, QueryError);
         }
-        return sql, args, err;
+        kind := QueryError;
+        if err == NoLinkError { kind = NoLink; }
+        return sql, args, databaseError(err, kind);
     }
 
     // The SQL, the parameters, the error and the number of joins. 'qualified' writes the columns as t0."title"

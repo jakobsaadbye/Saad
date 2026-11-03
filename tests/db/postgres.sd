@@ -24,7 +24,7 @@ User :: struct {
 // Runs a statement that must work
 run :: (conn: *dbms.Connection, sql: string) {
     _, err := conn.exec(sql);
-    if err != "" {
+    if err != null {
         print("%", err);
         exit(1);
     }
@@ -38,11 +38,11 @@ main :: () {
     }
 
     conn, err := postgres.connect(info);
-    assert(err == "");
+    assert(err == null);
 
     // A bad connection gives an error
     _, bad := postgres.connect("host=localhost port=1 connect_timeout=1");
-    assert(bad != "");
+    assert(bad != null);
 
     run(&conn, "SET client_min_messages TO warning"); // No NOTICEs
     run(&conn, "DROP TABLE IF EXISTS saad_users");
@@ -65,16 +65,16 @@ main :: () {
     noEmail: ?string;
     count, e1 := conn.exec("INSERT INTO saad_users (name, email, age, score, active, role, nick_name) VALUES ($1, $2, $3, $4, $5, $6, $7)",
                            "Ada", email, 36, 9.5, true, Role.admin, "ada");
-    assert(e1 == "");
+    assert(e1 == null);
     assert(count == 1);
     count2, e2 := conn.exec("INSERT INTO saad_users (name, email, age, score, active, role) VALUES ($1, $2, NULL, $3, $4, $5)",
                            "Bob", noEmail, -1.25, false, Role.member);
-    assert(e2 == "" && count2 == 1);
+    assert(e2 == null && count2 == 1);
     count3, e3 := conn.exec("INSERT INTO saad_users (name) VALUES ('Cy'), ('Di')");
-    assert(e3 == "" && count3 == 2);
+    assert(e3 == null && count3 == 2);
 
     users, err1 := conn.query<User>("SELECT * FROM saad_users ORDER BY id");
-    assert(err1 == "");
+    assert(err1 == null);
     assert(users.count == 4);
 
     ada := users[0];
@@ -93,43 +93,43 @@ main :: () {
 
     // Parameters in a query
     young, err2 := conn.query<User>("SELECT id, name FROM saad_users WHERE name = $1 OR id = $2", "Cy", 4);
-    assert(err2 == "");
+    assert(err2 == null);
     assert(young.count == 2 && young[0].name == "Cy" && young[1].name == "Di");
     assert(young[0].email == null && young[0].age == -1); // Columns that are not there keep their value
 
     // One row, and one value
     one, found, e4 := conn.queryOne<User>("SELECT * FROM saad_users WHERE id = $1", 2);
-    assert(found && e4 == "" && one.name == "Bob");
+    assert(found && e4 == null && one.name == "Bob");
     _, missing, e5 := conn.queryOne<User>("SELECT * FROM saad_users WHERE id = $1", 99);
-    assert(!missing && e5 == "");
+    assert(!missing && e5 == null);
 
     total, hasTotal, e6 := conn.queryOne<i64>("SELECT count(*) FROM saad_users");
-    assert(hasTotal && e6 == "" && total == 4);
+    assert(hasTotal && e6 == null && total == 4);
     average, hasAverage, e7 := conn.queryOne<f64>("SELECT avg(score) FROM saad_users");
-    assert(hasAverage && e7 == "" && average == 2.0625);
+    assert(hasAverage && e7 == null && average == 2.0625);
 
     // Errors of Postgres
     _, e8 := conn.exec("SELECT * FROM no_such_table");
-    assert(e8.startsWith("ERROR:"));
-    assert(e8.indexOf("no_such_table") >= 0);
+    assert(e8.message.startsWith("ERROR:"));
+    assert(e8.message.indexOf("no_such_table") >= 0);
     _, err3 := conn.query<User>("SELECT 'x' AS age");
-    assert(err3 == "Row 1: age: 'x' is not a whole number");
+    assert(err3.message == "Row 1: age: 'x' is not a whole number");
     nothing: *void = null;
     _, e9 := conn.exec("SELECT $1", &nothing);
-    assert(e9 == "Parameter $1 can't be a **void");
+    assert(e9.message == "Parameter $1 can't be a **void");
 
     // Transactions
-    assert(conn.begin() == "");
+    assert(conn.begin() == null);
     run(&conn, "DELETE FROM saad_users WHERE name = 'Di'");
-    assert(conn.rollback() == "");
+    assert(conn.rollback() == null);
     afterRollback, _, e10 := conn.queryOne<i64>("SELECT count(*) FROM saad_users");
-    assert(e10 == "" && afterRollback == 4);
+    assert(e10 == null && afterRollback == 4);
 
-    assert(conn.begin() == "");
+    assert(conn.begin() == null);
     run(&conn, "UPDATE saad_users SET score = score + 1 WHERE name = 'Cy'");
-    assert(conn.commit() == "");
+    assert(conn.commit() == null);
     cy, _, e11 := conn.queryOne<User>("SELECT * FROM saad_users WHERE name = $1", "Cy");
-    assert(e11 == "" && cy.score == 1.0);
+    assert(e11 == null && cy.score == 1.0);
     run(&conn, "UPDATE saad_users SET score = 0 WHERE name = 'Cy'");
 
     // The rows, strings and pointers from an arena, freed all at once
@@ -137,7 +137,7 @@ main :: () {
     alloc := arena.allocator();
     conn.allocator = &alloc;
     fromArena, err4 := conn.query<User>("SELECT * FROM saad_users ORDER BY id");
-    assert(err4 == "" && fromArena.count == 4);
+    assert(err4 == null && fromArena.count == 4);
     assert(fromArena.allocator == &alloc);
     assert(fromArena[0].email ?? "" == "ada@example.com");
     assert(arena.used() > 0);
@@ -149,7 +149,7 @@ main :: () {
     conn.close();
 
     _, closed := conn.exec("SELECT 1");
-    assert(closed == "The connection is closed");
+    assert(closed.message == "The connection is closed");
 
     print("db ok");
 }

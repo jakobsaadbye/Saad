@@ -46,7 +46,7 @@ create :: (conn: *dbms.Connection) {
     ];
     for sql in statements {
         _, err := conn.exec(sql);
-        if err != "" {
+        if err != null {
             print("Setting up the schema failed: %", err);
             exit(1);
         }

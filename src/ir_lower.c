@@ -47,6 +47,12 @@ typedef struct LoopTargets {
     int      defer_count;    // The defers that are active outside of the loop. break and continue run the ones above
 } LoopTargets;
 
+// A try of the function that is being lowered: a thrown error goes to its catch, after the defers inside of the try
+typedef struct TryTarget {
+    IrBlock *catch_block;
+    int      defer_count;
+} TryTarget;
+
 typedef struct PtrMapEntry {
     void *key;
     int   value;
@@ -74,6 +80,7 @@ typedef struct Lowerer {
     PtrMap           locals;          // AstIdentifier* -> slot index
     IrArray(LoopTargets) loops;
     IrArray(Ast *)   defers;          // The deferred statements of the blocks that are being lowered, innermost last
+    IrArray(TryTarget) tries;         // The try blocks that are being lowered, innermost last
     int              line;
 
     // Module state
@@ -812,6 +819,11 @@ static int declare_local(Lowerer *L, AstIdentifier *ident) {
 
 static Value lower_expr(Lowerer *L, AstExpr *expr);
 static Value lower_place(Lowerer *L, AstExpr *expr);
+static void emit_errors_call(Lowerer *L, const char *name, int arg_count, int *args);
+static void emit_trace_frame(Lowerer *L, int line);
+static void emit_unwind(Lowerer *L);
+static void emit_throw_check(Lowerer *L);
+static void emit_throw(Lowerer *L, int err);
 static void  lower_declaration(Lowerer *L, AstDeclaration *decl);
 static int   lower_scalar_as(Lowerer *L, AstExpr *expr, Type *target);
 static void  lower_condition(Lowerer *L, AstExpr *expr, IrBlock *on_true, IrBlock *on_false);
@@ -1373,6 +1385,19 @@ static int emit_arithmetic(Lowerer *L, int op, Type *type, int a, int b, Ast *si
     }
 
     bool is_signed = type_is_signed(type);
+
+    // A division by zero throws a Panic
+    if (op == '/' || op == '%') {
+        IrBlock *zero  = create_block(L, "division.by.zero");
+        IrBlock *go_on = create_block(L, "division");
+        terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_EQ, ir_type, b, emit_const(L, ir_type, 0)), zero, go_on);
+        set_block(L, zero);
+        emit_errors_call(L, "panicDivisionByZero", 0, NULL);
+        emit_trace_frame(L, site ? site->start.line : L->line);
+        emit_unwind(L);
+        set_block(L, go_on);
+    }
+
     switch (op) {
     case '+': return emit_binop(L, IR_ADD, ir_type, a, b);
     case '-': return emit_binop(L, IR_SUB, ir_type, a, b);
@@ -2068,6 +2093,17 @@ static Value lower_call(Lowerer *L, AstFunctionCall *call, int *ret_slots, int m
 
     int result = emit_call(L, ir_call);
 
+    // An error that the callee threw goes on, and so does the error result that isn't taken, e.g of 'x := f();'
+    if (!is_c) {
+        L->line = call->head.head.start.line > 0 ? call->head.head.start.line : L->line;
+        emit_throw_check(L);
+        if ((call->head.head.flags & AST_FLAG_THROWS_ON_ERROR) && ret_count > 0) {
+            AstIdentifier *err_param = da_get_deref(func_defn->lowered_return_params, ret_count - 1);
+            (void) err_param;
+            emit_throw(L, emit_load(L, IR_PTR, addr_slot(local_ret_slots[ret_count - 1], 0)));
+        }
+    }
+
     // Result
     if (ret_count > 0) {
         AstIdentifier *ret_param = da_get_deref(func_defn->lowered_return_params, 0);
@@ -2372,10 +2408,117 @@ static void lower_statement(Lowerer *L, Ast *stmt);
 // Runs the deferred statements above 'down_to', the last one first, e.g on the way out of a block or for a return.
 // They stay active, as another way out of the block runs them too
 static void emit_defers(Lowerer *L, int down_to) {
-    for (int i = L->defers.count - 1; i >= down_to; i--) {
-        if (block_is_terminated(L)) return;
-        lower_statement(L, L->defers.items[i]);
+    int count = L->defers.count;
+    if (count <= down_to) return;
+    // A deferred statement runs with only the defers below it active, e.g an error it throws doesn't run it again.
+    // What it pushes itself goes on top of those, so the defers above are kept aside and put back
+    Ast **kept = malloc(sizeof(Ast *) * count);
+    memcpy(kept, L->defers.items, sizeof(Ast *) * count);
+    for (int i = count - 1; i >= down_to; i--) {
+        if (block_is_terminated(L)) break;
+        L->defers.count = i;
+        lower_statement(L, kept[i]);
     }
+    L->defers.count = 0;
+    for (int i = 0; i < count; i++) ir_array_push(L->defers, kept[i]);
+    free(kept);
+}
+
+//
+// Throwing (std/prelude/errors.sd). The error that is being thrown is in the global thrownError. After a call of a Saad
+// function, a thrown error goes to the catch of the try that the call is in, or the function returns, after running
+// the defers on the way. Each place it leaves adds a frame to its trace. main reports an error that nothing caught
+//
+
+static AstIdentifier *errors_declaration(Lowerer *L, const char *name) {
+    AstFile *file = L->parser->errors_file;
+    AstIdentifier *ident = file ? find_identifier_in_scope(file->scope, (char *)name) : NULL;
+    if (ident == NULL) lower_fail(L, NULL, "Compiler Error: '%s' of std/prelude/errors.sd isn't loaded", name);
+    return ident;
+}
+
+static IrAddr thrown_error_addr(Lowerer *L) {
+    return addr_global(global_variable(L, errors_declaration(L, "thrownError")), 0);
+}
+
+// The address of a NUL terminated copy of the text, as written (no escapes, e.g a Windows path)
+static int emit_c_text(Lowerer *L, const char *text) {
+    int len = (int) strlen(text);
+    IrGlobal *data = ir_global_data(L->module, "text", text, len + 1, 1, true);
+    return emit_global_addr(L, data->index);
+}
+
+// Calls a function of errors.sd that takes no results, without the check for a thrown error after it
+static void emit_errors_call(Lowerer *L, const char *name, int arg_count, int *args) {
+    AstIdentifier *ident = errors_declaration(L, name);
+    AstFunctionDefn *func = ((TypeFunction *) ident->type)->node;
+    IrCall *call = new_call(L, IR_CALLEE_DIRECT, function_global(L, func), IR_VOID, arg_count);
+    for (int i = 0; i < arg_count; i++) call_add_arg(call, args[i], false);
+    emit_call(L, call);
+}
+
+// Adds the function that is being lowered, at the line, to the trace of the error that is being thrown. The functions of
+// errors.sd, e.g panic, are left out
+static void emit_trace_frame(Lowerer *L, int line) {
+    AstFile *file = L->ast_func ? L->ast_func->head.head.file : NULL;
+    if (file == NULL || file == L->parser->errors_file) return;
+    const char *function = L->ast_func->identifier && L->ast_func->identifier->name ? L->ast_func->identifier->name : "lambda";
+    int args[3] = { emit_c_text(L, function), emit_c_text(L, file->absolute_path), emit_const(L, IR_I64, line) };
+    emit_errors_call(L, "traceThrow", 3, args);
+}
+
+static bool is_main_function(Lowerer *L) {
+    AstFunctionDefn *f = L->ast_func;
+    return f && f->identifier && strcmp(f->identifier->name, "main") == 0 && f->head.head.file && f->head.head.file->ns == NULL && !f->is_method;
+}
+
+// Runs the defers above down_to while an error is thrown. The error is put aside meanwhile, so the calls of the defers
+// run as usual instead of seeing it and leaving
+static void emit_defers_while_throwing(Lowerer *L, int down_to) {
+    if (L->defers.count <= down_to) return;
+    int parked = ir_new_slot(L->func, 8, 8, "thrown error");
+    emit_store(L, IR_PTR, addr_slot(parked, 0), emit_load(L, IR_PTR, thrown_error_addr(L)));
+    emit_store(L, IR_PTR, thrown_error_addr(L), emit_const(L, IR_PTR, 0));
+    emit_defers(L, down_to);
+    if (!block_is_terminated(L)) emit_store(L, IR_PTR, thrown_error_addr(L), emit_load(L, IR_PTR, addr_slot(parked, 0)));
+}
+
+// Leaves for the catch of the innermost try, or returns from the function, running the defers on the way
+static void emit_unwind(Lowerer *L) {
+    if (L->tries.count > 0) {
+        TryTarget target = L->tries.items[L->tries.count - 1];
+        emit_defers_while_throwing(L, target.defer_count);
+        terminate_jmp(L, target.catch_block);
+        return;
+    }
+    emit_defers_while_throwing(L, 0);
+    if (is_main_function(L)) emit_errors_call(L, "reportUncaught", 0, NULL); // Ends the program
+    terminate_ret(L, IR_NO_VREG);
+}
+
+// After a call: if it threw, the error goes on from here
+static void emit_throw_check(Lowerer *L) {
+    if (block_is_terminated(L)) return;
+    int thrown = emit_load(L, IR_PTR, thrown_error_addr(L));
+    IrBlock *throwing = create_block(L, "throw");
+    IrBlock *go_on    = create_block(L, "no.throw");
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_PTR, thrown, emit_const(L, IR_PTR, 0)), throwing, go_on);
+    set_block(L, throwing);
+    emit_trace_frame(L, L->line);
+    emit_unwind(L);
+    set_block(L, go_on);
+}
+
+// Throws the error, a *Error in the vreg, when it isn't null
+static void emit_throw(Lowerer *L, int err) {
+    IrBlock *throwing = create_block(L, "throw");
+    IrBlock *go_on    = create_block(L, "no.error");
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_PTR, err, emit_const(L, IR_PTR, 0)), throwing, go_on);
+    set_block(L, throwing);
+    emit_store(L, IR_PTR, thrown_error_addr(L), err);
+    emit_trace_frame(L, L->line);
+    emit_unwind(L);
+    set_block(L, go_on);
 }
 
 static void lower_while(Lowerer *L, AstWhile *ast_while) {
@@ -2614,6 +2757,32 @@ static void lower_statement(Lowerer *L, Ast *stmt) {
     case AST_BREAK_OR_CONTINUE: lower_break_or_continue(L, (AstBreakOrContinue *) stmt); return;
     case AST_RETURN:            lower_return(L, (AstReturn *) stmt); return;
     case AST_DEFER:             ir_array_push(L->defers, ((AstDefer *) stmt)->statement); return; // Runs when the block is left
+    case AST_TRY: {
+        AstTry *ast_try = (AstTry *) stmt;
+        IrBlock *catch_block = create_block(L, "catch");
+        IrBlock *done        = create_block(L, "try.end");
+        TryTarget target = { catch_block, L->defers.count };
+        ir_array_push(L->tries, target);
+        lower_block(L, ast_try->body);
+        L->tries.count--;
+        terminate_jmp(L, done);
+
+        // The handler has the error, and nothing is being thrown anymore
+        set_block(L, catch_block);
+        int err = emit_load(L, IR_PTR, thrown_error_addr(L));
+        emit_store(L, IR_PTR, thrown_error_addr(L), emit_const(L, IR_PTR, 0));
+        int slot = declare_local(L, ast_try->error);
+        emit_store(L, IR_PTR, addr_slot(slot, 0), err);
+        lower_block(L, ast_try->handler);
+        terminate_jmp(L, done);
+        set_block(L, done);
+        return;
+    }
+    case AST_THROW: {
+        int err = lower_scalar_as(L, ((AstThrow *) stmt)->value, ((AstThrow *) stmt)->value->type);
+        emit_throw(L, err);
+        return;
+    }
 
     // Declarations that produce no code at the point where they appear
     case AST_STRUCT:
@@ -2693,6 +2862,7 @@ static void lower_function(Lowerer *L, AstFunctionDefn *func_defn) {
     L->line     = func_defn->head.head.start.line;
     L->loops.count = 0;
     L->defers.count = 0;
+    L->tries.count = 0;
     ptr_map_clear(&L->locals);
 
     IrBlock *entry = create_block(L, "entry");

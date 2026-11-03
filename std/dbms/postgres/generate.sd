@@ -33,16 +33,16 @@ GeneratedFile :: struct {
 GeneratedMark :: "// Made by std/dbms/tools/generate.sd";
 
 // The Saad files of the tables and enums of the schema, or an error
-generate :: (conn: *dbms.Connection, options: GenerateOptions) -> ([..]GeneratedFile, string) {
+generate :: (conn: *dbms.Connection, options: GenerateOptions) -> ([..]GeneratedFile, error) {
     files: [..]GeneratedFile;
     columns, err := conn.query<SchemaColumn>(ColumnsSql, options.schema);
-    if err != "" { return files, err; }
+    if err != null { return files, err; }
     keys, err2 := conn.query<SchemaKey>(KeysSql, options.schema);
-    if err2 != "" { return files, err2; }
+    if err2 != null { return files, err2; }
     enumLabels, err3 := conn.query<SchemaEnumLabel>(EnumsSql, options.schema);
-    if err3 != "" { return files, err3; }
+    if err3 != null { return files, err3; }
     foreignKeys, err4 := conn.query<SchemaForeignKey>(ForeignKeysSql, options.schema);
-    if err4 != "" { return files, err4; }
+    if err4 != null { return files, err4; }
 
     // The enums with their labels, and the tables with their columns, in the order of their names
     enums: [..]SchemaEnum;
@@ -82,17 +82,17 @@ generate :: (conn: *dbms.Connection, options: GenerateOptions) -> ([..]Generated
         files.add(GeneratedFile{name: w.fileNameOf(singular(table.name), false), code: w.rowFile(table)});
     }
     files.add(GeneratedFile{name: "database.sd", code: w.databaseFile(tables, files)});
-    return files, "";
+    return files, null;
 }
 
 // Writes the files into the folder, which is made if it isn't there, and its folder entity. The files of an earlier run
 // (listed in its database.sd) that are not written again, e.g of a table that is gone, are removed, if they were made by
 // the generator. Gives the names of those
-writeFiles :: (folder: string, files: [..]GeneratedFile) -> ([..]string, string) {
+writeFiles :: (folder: string, files: [..]GeneratedFile) -> ([..]string, error) {
     removed: [..]string;
     for dir in [folder, fmt.sprint("%/entity", folder)] {
         if !os.makeDir(dir) {
-            return removed, fmt.sprint("Can't make the folder %", dir);
+            return removed, fmt.errorf("Can't make the folder %", dir);
         }
     }
 
@@ -120,10 +120,10 @@ writeFiles :: (folder: string, files: [..]GeneratedFile) -> ([..]string, string)
     for file in files {
         path := fmt.sprint("%/%", folder, file.name);
         if !os.writeFile(path, file.code) {
-            return removed, fmt.sprint("Can't write %", path);
+            return removed, fmt.errorf("Can't write %", path);
         }
     }
-    return removed, "";
+    return removed, null;
 }
 
 //
@@ -403,7 +403,7 @@ writeRelations :: method (w: *Writer, sb: *fmt.StringBuilder, table: SchemaTable
         } else {
             row := rowTypeName(r.otherTable);
             sb.addLine("    // The row of % that % refers to, or null", r.otherTable, memberName(r.column));
-            sb.addLine("    % :: method () -> (*%, string) {", r.name, row);
+            sb.addLine("    % :: method () -> (*%, error) {", r.name, row);
             sb.addLine("        return dbms.related<%>(self.%, %, %, self.%);", row, link, saadString(r.otherTable), saadString(r.otherColumn), memberName(r.column));
         }
         sb.addLine("    }");
@@ -741,7 +741,7 @@ enumValueName :: (label: string) -> string {
 
 @private
 isKeyword :: (name: string) -> bool {
-    keywords := ["if", "else", "for", "while", "return", "defer", "break", "continue", "in", "as", "xx", "new", "assert", "typeof", "sizeof",
+    keywords := ["if", "else", "for", "while", "return", "defer", "try", "catch", "throw", "break", "continue", "in", "as", "xx", "new", "assert", "typeof", "sizeof",
                  "struct", "enum", "union", "method", "switch", "case", "import", "use", "namespace", "extern", "any", "string",
                  "true", "false", "null", "int", "uint", "float", "char", "bool", "void", "u8", "u16", "u32", "u64",
                  "i8", "i16", "i32", "i64", "f32", "f64"];

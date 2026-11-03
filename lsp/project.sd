@@ -59,6 +59,7 @@ Index :: struct {
     success:     bool;
     symbols:     [..]Symbol;
     references:  [..]Reference;
+    throws:      [..]Reference;   // The calls whose error isn't taken, so it is thrown. Without a symbol
     files:       [..]string;
     diagnostics: [..]Diagnostic;
 }
@@ -236,6 +237,7 @@ free :: method (index: *Index) {
     }
     index.symbols.free();
     index.references.free();
+    index.throws.free();
     index.files.free();
     index.diagnostics.free();
 }

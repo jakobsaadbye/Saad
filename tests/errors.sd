@@ -1,0 +1,98 @@
+// Errors: a value when it is taken, thrown when it isn't, and caught with try and catch
+use fmt;
+
+NotFound :: ErrorKind{"NotFound"};
+
+find :: (name: string) -> (int, error) {
+    if name == "ada" { return 36, null; }
+    return 0, newError(sprint("no one is called %", name), NotFound);
+}
+
+log: [..]string;
+
+age :: (name: string) -> int {
+    defer log.add(sprint("left age(%)", name));
+    a := find(name);                       // The error isn't taken, so it is thrown
+    return a + 1;
+}
+
+save :: (ok: bool) -> error {
+    if ok { return null; }
+    return errorf("can't save %", 42);
+}
+
+divide :: (a: int, b: int) -> int {
+    return a / b;
+}
+
+// An error thrown deeper is caught here, and a new one thrown with it as the cause
+load :: (name: string) -> int {
+    try {
+        return age(name);
+    } catch (err) {
+        throw newError("loading failed", cause: err);
+    }
+    return 0;
+}
+
+main :: () {
+    // Taken: a value
+    a, err := find("bo");
+    assert(a == 0 && err != null && err.message == "no one is called bo" && err.is(NotFound));
+    b, none := find("ada");
+    assert(b == 36 && none == null);
+
+    // Not taken: thrown, through the defers, to the catch, with a frame for each function it left
+    assert(age("ada") == 37);
+    caught := false;
+    try {
+        age("bo");
+        assert(false);                     // Not reached
+    } catch (e) {
+        caught = true;
+        assert(e.is(NotFound) && e.trace.count == 2);
+        assert(fromCString(e.trace[0].function) == "age" && fromCString(e.trace[1].function) == "main");
+    }
+    assert(caught && log.count == 2 && log[1] == "left age(bo)");
+
+    // A function that gives only an error, as a statement, throws it
+    save(true);
+    try {
+        save(false);
+        assert(false);
+    } catch (e) {
+        assert(e.message == "can't save 42");
+    }
+    taken := save(false);                  // Taken: a value
+    assert(taken.message == "can't save 42");
+
+    // A division by zero is a Panic
+    try {
+        divide(1, 0);
+        assert(false);
+    } catch (e) {
+        assert(e.is(Panic) && e.message == "Division by zero");
+    }
+
+    // A catch can throw again, and the cause is kept
+    try {
+        load("cy");
+    } catch (e) {
+        assert(e.message == "loading failed" && e.is(NotFound) && e.cause.message == "no one is called cy");
+    }
+
+    // try and catch in a loop, and nothing is thrown after a catch
+    count := 0;
+    for i in 0..5 {
+        try {
+            if i % 2 == 1 { throw newError("odd"); }
+            count += 1;
+        } catch (e) {
+            count += 10;
+        }
+    }
+    assert(count == 23);
+    assert(thrownError == null);
+
+    print("errors ok");
+}

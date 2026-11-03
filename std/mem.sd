@@ -22,13 +22,16 @@ import c;
 allocate :: (size: int, allocator: *Allocator = null) -> *void {
     if size <= 0 { size = 1; }
     memory := resizeMemory(allocator, null, size);
-    if memory != null { c.memset(memory, 0, size); }
+    if memory == null { panic("Out of memory"); }
+    c.memset(memory, 0, size);
     return memory;
 }
 
 // The memory with a new size, keeping what fits of it, like realloc. A null memory is new memory, and a size of 0 frees it
 resize :: (memory: *void, size: int, allocator: *Allocator = null) -> *void {
-    return resizeMemory(allocator, memory, size);
+    result := resizeMemory(allocator, memory, size);
+    if result == null && size > 0 { panic("Out of memory"); }
+    return result;
 }
 
 // Gives back memory of allocate, resize or new to the allocator it came from (null is the heap)

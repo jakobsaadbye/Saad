@@ -55,7 +55,7 @@ main :: () {
     // The values are parameters, the members are columns, in snake case
     minAge := 18;
     sql, args, err := users.where(u => u.age ?? 0 >= minAge && u.name != "").toSql();
-    assert(err == "" && args.count == 3);
+    assert(err == null && args.count == 3);
     assert(sql == "SELECT * FROM \"shop\".\"users\" WHERE (((coalesce(\"age\", $1) >= $2) AND (\"name\" <> $3)))");
     assert(*(args[1].data as *int) == 18);
 
@@ -88,9 +88,9 @@ main :: () {
 
     // Mistakes are errors of the query
     _, _, err7 := users.where(u => u.name.reverse() == "x").toSql();
-    assert(err7.startsWith("The method reverse can't be made into SQL"));
+    assert(err7.message.startsWith("The method reverse can't be made into SQL"));
     _, _, err8 := users.select(u => u.name).where(n => n == "x").toSql();
-    assert(err8 == "where after select isn't supported. Put the where before the select");
+    assert(err8.message == "where after select isn't supported. Put the where before the select");
 
     // A query is the start of others
     adults := users.where(u => u.age ?? 0 >= 18);
@@ -109,7 +109,7 @@ main :: () {
     context.register(groups.tableInfo());
 
     sql9, _, err9 := users.where(u => u.age ?? 0 >= 18).select(u => {u.name, teamName: u.team().name, u.team().group().title}).toSql();
-    assert(err9 == "");
+    assert(err9 == null);
     assert(sql9 == "SELECT t0.\"name\" AS \"name\", t1.\"name\" AS \"teamName\", t2.\"title\" AS \"title\" FROM \"shop\".\"users\" AS t0 LEFT JOIN \"shop\".\"teams\" AS t1 ON t1.\"id\" = t0.\"team_id\" LEFT JOIN \"shop\".\"groups\" AS t2 ON t2.\"id\" = t1.\"group_id\" WHERE ((coalesce(t0.\"age\", $1) >= $2))");
     sql10, _, _ := users.where(u => u.team().name == "Core" && u.team().id > 1).toSql();
     assert(sql10 == "SELECT t0.* FROM \"shop\".\"users\" AS t0 LEFT JOIN \"shop\".\"teams\" AS t1 ON t1.\"id\" = t0.\"team_id\" WHERE (((t1.\"name\" = $1) AND (t1.\"id\" > $2)))");
@@ -126,7 +126,7 @@ main :: () {
     teams.relations.add(dbms.Relation{name: "members", column: "team_id", table: "users", references: "id", many: true});
     context.register(teams.tableInfo());
     sql14, _, err14 := teams.select(t => {t.name, members: t.members().count()}).toSql();
-    assert(err14 == "");
+    assert(err14 == null);
     assert(sql14 == "SELECT t0.\"name\" AS \"name\", (SELECT count(*) FROM \"shop\".\"users\" AS t1 WHERE t1.\"team_id\" = t0.\"id\") AS \"members\" FROM \"shop\".\"teams\" AS t0");
     sql15, args15, _ := teams.where(t => t.members().where(u => u.role == .admin && u.name != t.name).exists()).select(t => {
         t.name,
@@ -139,11 +139,11 @@ main :: () {
     sql16, _, _ := users.where(u => u.team().members().count() > 3).toSql();
     assert(sql16 == "SELECT t0.* FROM \"shop\".\"users\" AS t0 LEFT JOIN \"shop\".\"teams\" AS t1 ON t1.\"id\" = t0.\"team_id\" WHERE (((SELECT count(*) FROM \"shop\".\"users\" AS t2 WHERE t2.\"team_id\" = t1.\"id\") > $1))");
     _, _, err17 := teams.select(t => t.members().first().name.len).toSql();
-    assert(err17 == "");
+    assert(err17 == null);
 
     // A struct of the program for the rows: the names of its fields are the columns
     sql19, _, err19 := teams.select(t => TeamSize{t.name, size: t.members().count()}).toSql();
-    assert(err19 == "" && sql19.startsWith("SELECT t0.\"name\" AS \"name\", (SELECT count(*) FROM") && sql19.indexOf(" AS \"size\" FROM") > 0);
+    assert(err19 == null && sql19.startsWith("SELECT t0.\"name\" AS \"name\", (SELECT count(*) FROM") && sql19.indexOf(" AS \"size\" FROM") > 0);
 
     // A method that isn't a relation of the table is an error of the query
     groups.relations.clear();
@@ -151,7 +151,7 @@ main :: () {
     teams.relations.clear();
     context.register(teams.tableInfo());
     _, _, err12 := users.select(u => u.team().group().title).toSql();
-    assert(err12.startsWith("group isn't a relation of teams"));
+    assert(err12.message.startsWith("group isn't a relation of teams"));
 
     print("dbms query ok");
 }

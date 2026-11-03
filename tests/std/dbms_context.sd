@@ -91,7 +91,7 @@ main :: () {
     bo.email = "bo@example.com";
     users.delete(3);
     assert(fake.sent.count == 0 && context.pendingChanges() == 3);
-    assert(context.saveChanges() == "");
+    assert(context.saveChanges() == null);
 
     assert(fake.sent.count == 4);
     assert(fake.sent[0] == "BEGIN");
@@ -108,7 +108,7 @@ main :: () {
     fake.sent.clear();
     ada.email = "ada@example.com";
     assert(context.pendingChanges() == 1);
-    assert(context.saveChanges() == "");
+    assert(context.saveChanges() == null);
     assert(fake.sent.count == 3);
     assert(fake.sent[1] == "UPDATE \"shop\".\"users\" SET \"email\" = $1 WHERE \"id\" = $2 [ada@example.com, 7]");
     assert(context.pendingChanges() == 0);
@@ -116,15 +116,15 @@ main :: () {
     // Setting the same value again is no change
     fake.sent.clear();
     ada.email = "ada@example.com";
-    assert(context.pendingChanges() == 0 && context.saveChanges() == "" && fake.sent.count == 0);
+    assert(context.pendingChanges() == 0 && context.saveChanges() == null && fake.sent.count == 0);
 
     // A row of get is tracked
     answer(&fake, ["2"], ["Cy"]);
     cy, e1 := users.get(2);
-    assert(e1 == "" && cy.name == "Cy");
+    assert(e1 == null && cy.name == "Cy");
     fake.sent.clear();
     cy.name = "Cyril";
-    assert(context.saveChanges() == "");
+    assert(context.saveChanges() == null);
     assert(fake.sent[1] == "UPDATE \"shop\".\"users\" SET \"name\" = $1 WHERE \"id\" = $2 [Cyril, 2]");
 
     // A tracked row that is also given to update is written once, with every column
@@ -132,7 +132,7 @@ main :: () {
     cy.name = "C";
     users.update(cy);
     assert(context.pendingChanges() == 2); // The update, and the tracked row, which is the same row
-    assert(context.saveChanges() == "");
+    assert(context.saveChanges() == null);
     assert(fake.sent.count == 3);
     assert(fake.sent[1] == "UPDATE \"shop\".\"users\" SET \"name\" = $1, \"email\" = $2, \"cache\" = $3 WHERE \"id\" = $4 [C, NULL, 5, 2]");
 
@@ -140,7 +140,7 @@ main :: () {
     fake.sent.clear();
     cy.name = "X";
     users.delete(2);
-    assert(context.saveChanges() == "");
+    assert(context.saveChanges() == null);
     assert(fake.sent.count == 3 && fake.sent[1] == "DELETE FROM \"shop\".\"users\" WHERE \"id\" = $1 [2]");
     cy.name = "Y";
     assert(context.pendingChanges() == 0);
@@ -170,7 +170,7 @@ main :: () {
     f.name = "F";
     g := users.create();
     g.name = "G";
-    assert(context.saveChanges() == "");
+    assert(context.saveChanges() == null);
     assert(fake.sent.count == 5);
     assert(fake.sent[1].startsWith("INSERT INTO \"shop\".\"users\"") && fake.sent[2].startsWith("INSERT INTO \"shop\".\"admins\"") && fake.sent[3].startsWith("INSERT INTO \"shop\".\"users\""));
     context.untrackAll();
@@ -183,7 +183,7 @@ main :: () {
     mallory := users.create();
     mallory.name = "Mallory";
     err := context.saveChanges();
-    assert(err == "create in users (changes 1 to 2 of 2): ERROR: no Mallory");
+    assert(err.message == "create in users (changes 1 to 2 of 2): ERROR: no Mallory");
     assert(fake.sent.count == 3 && fake.sent[2] == "ROLLBACK");
     assert(cy2.id == 0 && context.pendingChanges() == 2);
     context.discardChanges();
@@ -191,13 +191,13 @@ main :: () {
     // A row that isn't there
     fake.affected = 0;
     users.delete(4);
-    assert(context.saveChanges() == "delete in users (change 1 of 1): No row has the key 4");
+    assert(context.saveChanges().message == "delete in users (change 1 of 1): No row has the key 4");
     context.discardChanges();
     fake.affected = 1;
 
     // Nothing to save sends nothing
     fake.sent.clear();
-    assert(context.saveChanges() == "" && fake.sent.count == 0);
+    assert(context.saveChanges() == null && fake.sent.count == 0);
 
     print("dbms context ok");
 }

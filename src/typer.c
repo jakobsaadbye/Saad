@@ -42,6 +42,7 @@ typedef struct Typer {
     int  next_hidden_local_id;
 
     bool checking_member_default; // Set while checking the members of a struct and their default values e.g 'age: int = 30;'
+    bool wants_all_results;       // Set before checking a value whose results are all taken, e.g of 'a, err := f()'. Else an error result that isn't taken is thrown
 
     DynamicArray slice_methods; // of *AstFunctionDefn. The generic methods on []T, see register_slice_method()
 
@@ -147,6 +148,9 @@ void report_readonly_self(Typer *typer, Ast *at, AstFunctionDefn *method, const 
 void append_place_text(StringBuilder *sb, AstExpr *expr);
 bool check_declaration(Typer *typer, AstDeclaration *decl);
 bool check_defer(Typer *typer, AstDefer *defer);
+bool check_try(Typer *typer, AstTry *ast_try);
+bool check_throw(Typer *typer, AstThrow *ast_throw);
+bool is_error_type(Typer *typer, Type *type);
 bool identifier_is_type(AstIdentifier *ident);
 Type *resolve_anonymous_type(Typer *typer, Type *type);
 AstExpr *member_default_value(AstIdentifier *member);
@@ -476,6 +480,7 @@ bool is_prelude_identifier(Typer *typer, AstIdentifier *ident) {
     if (file == NULL) return false;
     if (file == parser->collections_file) return true;
     if (file == parser->expression_trees_file) return true;
+    if (file == parser->errors_file) return true;
     if (parser->runtime_file_path && strcmp(file->absolute_path, parser->runtime_file_path) == 0) return true;
     if (parser->builtin_string_file_path && strcmp(file->absolute_path, parser->builtin_string_file_path) == 0) return true;
     if (parser->slices_file_path && strcmp(file->absolute_path, parser->slices_file_path) == 0) return true;
@@ -2940,6 +2945,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         int ident_index = 0;
         for (int i = 0; i < decl->values.count; i++) {
             AstExpr *value = ((AstExpr **)decl->values.items)[i];
+            typer->wants_all_results = decl->idents.count > decl->values.count; // e.g text, err := os.readFile(path)
             Type *expr_type = check_expression(typer, value, NULL);
             if (!expr_type) return false;
 
@@ -4033,6 +4039,13 @@ bool check_expr_stmt(Typer *typer, AstExprStmt *expr_stmt) {
     if (expr_type == NULL) {
         return false;
     }
+    // f(); of a function that gives only an error: the error isn't taken, so it is thrown
+    AstExpr *expr = expr_stmt->expr;
+    if (expr->head.kind == AST_FUNCTION_CALL && !(expr->head.flags & AST_FLAG_THROWS_ON_ERROR) && is_error_type(typer, expr_type)) {
+        ((AstFunctionCall *)expr)->results = expr_type;
+        expr->head.flags |= AST_FLAG_THROWS_ON_ERROR;
+        index_throw_site((Ast *)expr);
+    }
     return true;
 }
 
@@ -4084,6 +4097,7 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
         AstExpr *return_value = ((AstExpr **)ast_return->values.items)[i];
         Type    *wanted_type  = i < ef->return_types.count ? ((Type **)ef->return_types.items)[i] : NULL; // Too many values are reported below
 
+        typer->wants_all_results = ast_return->values.count < ef->return_types.count; // return f() of the results of f
         Type *ok = check_expression(typer, return_value, wanted_type);
         if (!ok) return false;
 
@@ -4673,6 +4687,8 @@ bool check_statement(Typer *typer, Ast *stmt) {
     case AST_EXPR_STMT:         return check_expr_stmt(typer, (AstExprStmt *)(stmt));
     case AST_RETURN:            return check_return(typer, (AstReturn *)(stmt));
     case AST_DEFER:             return check_defer(typer, (AstDefer *)(stmt));
+    case AST_TRY:               return check_try(typer, (AstTry *)(stmt));
+    case AST_THROW:             return check_throw(typer, (AstThrow *)(stmt));
     case AST_ASSERT:            return check_assert(typer, (AstAssert *)(stmt));
     case AST_IF:                return check_if(typer, (AstIf *)(stmt));
     case AST_SWITCH:            return check_switch(typer, (AstSwitch *)(stmt));
@@ -4719,6 +4735,54 @@ static Ast *leaves_defer(Ast *stmt, int loops) {
     case AST_WHILE: return leaves_defer((Ast *)((AstWhile *)stmt)->body, loops + 1);
     default: return NULL;
     }
+}
+
+//
+// Errors (std/prelude/errors.sd): try, catch and throw, and the calls whose error isn't taken, which throw it
+//
+
+// The type 'error' of the prelude, a *Error
+static Type *error_type(Typer *typer) {
+    AstFile *file = typer->parser->errors_file;
+    if (file == NULL) return NULL;
+    AstIdentifier *ident = find_identifier_in_scope(file->scope, "error");
+    if (ident == NULL || is_poisoned(ident)) return NULL;
+    if (ident->decl && !(ident->flags & IDENTIFIER_IS_RESOLVED) && !check_declaration_of(typer, ident)) return NULL;
+    if (ident->decl && (ident->decl->head.flags & AST_FLAG_HAS_ERRORS)) return NULL; // e.g a prelude with errors
+    Type *type = ident->type;
+    return type && type->kind == TYPE_POINTER ? type : NULL;
+}
+
+bool is_error_type(Typer *typer, Type *type) {
+    if (type == NULL || type->kind != TYPE_POINTER) return false;
+    Type *to = ((TypePointer *)type)->pointer_to;
+    if (to->kind != TYPE_STRUCT) return false;
+    AstStruct *node = ((TypeStruct *)to)->node;
+    return node && node->head.file == typer->parser->errors_file && node->identifier && strcmp(node->identifier->name, "Error") == 0;
+}
+
+bool check_try(Typer *typer, AstTry *ast_try) {
+    if (!check_block(typer, ast_try->body)) return false;
+    Type *type = error_type(typer);
+    if (type == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_try, "Compiler Error: The type error of the prelude isn't loaded");
+        return false;
+    }
+    ast_try->error->type   = type;
+    ast_try->error->flags |= IDENTIFIER_IS_RESOLVED;
+    if (typer->enclosing_function) reserve_local_storage(typer->enclosing_function, type->size);
+    return check_block(typer, ast_try->handler);
+}
+
+bool check_throw(Typer *typer, AstThrow *ast_throw) {
+    Type *type = check_expression(typer, ast_throw->value, error_type(typer));
+    if (!type) return false;
+    if (!is_error_type(typer, type)) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_throw->value, "throw takes an error, not %s", text_bold(type_to_str(type)));
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Make one with newError(\"what went wrong\"), or fmt.errorf(\"...\", values)");
+        return false;
+    }
+    return true;
 }
 
 bool check_defer(Typer *typer, AstDefer *defer) {
@@ -7016,6 +7080,8 @@ Type *check_sizeof(Typer *typer, AstSizeof *ast_sizeof) {
 
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     Type *result = NULL;
+    bool wants_all_results = typer->wants_all_results; // Only for this expression, not the ones in it
+    typer->wants_all_results = false;
 
     // Where a ?T is wanted, a T is wanted too, e.g the struct literal in 'p: ?Point = {1, 2}'
     if (ctx_type && is_optional_type(ctx_type)) ctx_type = optional_inner_type(ctx_type);
@@ -7053,10 +7119,31 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
 
     // In an expression tree, a call that gives a value and an error is its value, e.g the i64 of a.posts().count() or
     // the *Author of p.author(): the tree is made into SQL, where it is a subquery or a join, and isn't run
-    if (expr->head.kind == AST_FUNCTION_CALL && result->kind == TYPE_TUPLE && typer->enclosing_function && typer->enclosing_function->is_expression_tree) {
+    bool in_tree = typer->enclosing_function && typer->enclosing_function->is_expression_tree;
+    if (expr->head.kind == AST_FUNCTION_CALL && result->kind == TYPE_TUPLE && !in_tree && !wants_all_results) {
+        // A call whose error isn't taken throws it, e.g 'text := os.readFile(path);' of (string, error)
+        TypeTuple *tuple = (TypeTuple *)result;
+        Type *last = tuple->types.count >= 2 ? ((Type **)tuple->types.items)[tuple->types.count - 1] : NULL;
+        if (last && is_error_type(typer, last)) {
+            AstFunctionCall *call = (AstFunctionCall *)expr;
+            call->results = result;
+            expr->head.flags |= AST_FLAG_THROWS_ON_ERROR;
+            index_throw_site((Ast *)expr);
+            if (tuple->types.count == 2) {
+                result = ((Type **)tuple->types.items)[0];
+            } else {
+                TypeTuple *rest = type_alloc(&typer->parser->type_table, sizeof(TypeTuple));
+                *rest = *tuple;
+                rest->types = da_init(tuple->types.count, sizeof(Type *));
+                for (int i = 0; i < tuple->types.count - 1; i++) da_append(&rest->types, ((Type **)tuple->types.items)[i]);
+                result = (Type *)rest;
+            }
+        }
+    }
+    if (expr->head.kind == AST_FUNCTION_CALL && result->kind == TYPE_TUPLE && in_tree) {
         TypeTuple *tuple = (TypeTuple *)result;
         Type *second = tuple->types.count == 2 ? ((Type **)tuple->types.items)[1] : NULL;
-        if (second && second->kind == TYPE_STRING) {
+        if (second && (second->kind == TYPE_STRING || is_error_type(typer, second))) {
             result = ((Type **)tuple->types.items)[0];
             expr->head.flags |= AST_FLAG_TREE_VALUE_OF_RESULTS;
         }

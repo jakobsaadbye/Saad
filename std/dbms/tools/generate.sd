@@ -45,20 +45,20 @@ main :: () {
     if args.count > 5 { options.database = args[5]; }
 
     conn, err := postgres.connect(args[1]);
-    if err != "" {
+    if err != null {
         print("Can't connect: %", err);
         os.exit(1);
     }
 
     files, err2 := postgres.generate(&conn, options);
     conn.close();
-    if err2 != "" {
+    if err2 != null {
         print("Can't read the tables: %", err2);
         os.exit(1);
     }
 
     removed, err3 := postgres.writeFiles(folder, files);
-    if err3 != "" {
+    if err3 != null {
         print("%", err3);
         os.exit(1);
     }

@@ -14,7 +14,7 @@ OrderItem :: struct {
     @Hidden dbLink: dbms.Link;
 
     // The row of orders that orderId refers to, or null
-    order :: method () -> (*Order, string) {
+    order :: method () -> (*Order, error) {
         return dbms.related<Order>(self.dbLink, "orders", "id", self.orderId);
     }
 }

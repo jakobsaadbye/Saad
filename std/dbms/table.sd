@@ -53,24 +53,24 @@ Table :: struct <T> {
     }
 
     // Of a value of every row, e.g users.sum(u => u.age). See query.sd
-    sum :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
+    sum :: method <K> (f: Expr<(T) -> K>) -> (K, error) {
         return self.query().sum(f);
     }
 
-    min :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
+    min :: method <K> (f: Expr<(T) -> K>) -> (K, error) {
         return self.query().min(f);
     }
 
-    max :: method <K> (f: Expr<(T) -> K>) -> (K, string) {
+    max :: method <K> (f: Expr<(T) -> K>) -> (K, error) {
         return self.query().max(f);
     }
 
-    average :: method <K> (f: Expr<(T) -> K>) -> (f64, string) {
+    average :: method <K> (f: Expr<(T) -> K>) -> (f64, error) {
         return self.query().average(f);
     }
 
     // Every row
-    all :: method () -> ([..]T, string) {
+    all :: method () -> ([..]T, error) {
         sql := fmt.sprint("SELECT * FROM %", qualifiedName(self.schema, self.name));
         rows, err := self.context.conn.query<T>(sql);
         sql.free();
@@ -82,7 +82,7 @@ Table :: struct <T> {
     }
 
     // The number of rows
-    count :: method () -> (i64, string) {
+    count :: method () -> (i64, error) {
         sql := fmt.sprint("SELECT count(*) FROM %", qualifiedName(self.schema, self.name));
         n, _, err := self.context.conn.queryOne<i64>(sql);
         sql.free();
@@ -129,7 +129,7 @@ KeyedTable :: struct <T, K> {
 
     // Every row. They are tracked, so what is changed on them is saved by saveChanges, unless context.track is false.
     // Don't add to the list then, as its rows can move
-    all :: method () -> ([..]T, string) {
+    all :: method () -> ([..]T, error) {
         rows, err := self.table.all();
         for i in 0..rows.count {
             self.context.trackRow(self.info(self.key), rows.indexRef(i));
@@ -139,19 +139,19 @@ KeyedTable :: struct <T, K> {
 
     // The row with the key, or null when there is none. It is made with the allocator of the connection, and tracked, so
     // what is changed on it is saved by saveChanges, unless context.track is false
-    get :: method (key: K) -> (*T, string) {
+    get :: method (key: K) -> (*T, error) {
         sql := fmt.sprint("SELECT * FROM % WHERE % = $1", qualifiedName(self.schema, self.name), quoted(self.key));
         conn := self.context.conn;
         row, found, err := conn.queryOne<T>(sql, key);
         sql.free();
-        if !found || err != "" {
+        if !found || err != null {
             return null, err;
         }
         stored := resizeMemory(conn.allocator, null, sizeof(T)) as *T;
         *stored = row;
         linkRow(self.context, rowType<T>(), stored as *void);
         self.context.trackRow(self.info(self.key), stored);
-        return stored, "";
+        return stored, null;
     }
 
     // Writes the row to the row with its key when the context saves its changes: every column that isn't the key or

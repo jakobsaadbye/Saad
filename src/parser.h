@@ -33,6 +33,8 @@ typedef struct Parser {
     char *slices_file_path;    // std/prelude/slices.sd, the methods on slices. Every file but itself imports it
     char *expression_trees_file_path; // std/prelude/expression_trees.sd, Expr<F> and the functions that build one
     AstFile *expression_trees_file;   // Every file that imports the collections imports it, but itself
+    char *errors_file_path;  // std/prelude/errors.sd, error and the functions that throw. Imported like expression_trees.sd
+    AstFile *errors_file;
     char *c_bindings_path;     // Absolute path of std/c. The prelude is built on these files, so they don't import it
 
     DynamicArray namespaces; // of *Namespace. All the namespaces found in the project and the standard library

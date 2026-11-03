@@ -88,6 +88,9 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_ELSE:                  return "else";
         case TOKEN_NEW:                   return "new";
         case TOKEN_DEFER:                 return "defer";
+        case TOKEN_TRY:                   return "try";
+        case TOKEN_CATCH:                 return "catch";
+        case TOKEN_THROW:                 return "throw";
         case TOKEN_IMPORT:                return "import";
         case TOKEN_USE:                   return "use";
         case TOKEN_NAMESPACE:             return "namespace";
@@ -465,6 +468,7 @@ KeywordMatch match_keyword(Lexer *lexer) {
         if (strcmp(text, "xx") == 0) token = TOKEN_XX;
     }
     if (keyword_len == 3) {
+        if (strcmp(text, "try") == 0) token = TOKEN_TRY;
         if (strcmp(text, "new") == 0) token = TOKEN_NEW;
         if (strcmp(text, "use") == 0) token = TOKEN_USE;
         if (strcmp(text, "int") == 0) token = TOKEN_TYPE_INT;
@@ -491,6 +495,8 @@ KeywordMatch match_keyword(Lexer *lexer) {
         if (strcmp(text, "enum") == 0) token = TOKEN_ENUM;
     }
     if (keyword_len == 5) {
+        if (strcmp(text, "catch") == 0) token = TOKEN_CATCH;
+        if (strcmp(text, "throw") == 0) token = TOKEN_THROW;
         if (strcmp(text, "defer") == 0) token = TOKEN_DEFER;
         if (strcmp(text, "float") == 0) token = TOKEN_TYPE_FLOAT;
         if (strcmp(text, "false") == 0) token = TOKEN_LITERAL_FALSE;

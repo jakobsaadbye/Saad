@@ -20,7 +20,7 @@ User :: struct {
 
 main :: () {
     conn, err := postgres.connect("host=localhost dbname=shop user=postgres password=secret");
-    if err != "" { print("Can't connect: %", err); return; }
+    if err != null { print("Can't connect: %", err.message); return; }
 
     users, err1 := conn.query<User>("SELECT * FROM users WHERE role = $1 ORDER BY name", Role.admin);
     for u in users { print("% %", u.id, u.name); }
@@ -70,15 +70,18 @@ main :: () {
 
 | | |
 | --- | --- |
-| `conn.exec(sql, args...) -> i64, string` | A statement without rows (INSERT, UPDATE, DELETE, CREATE, ...). Gives the number of rows it changed |
-| `conn.query<T>(sql, args...) -> [..]T, string` | A T for every row |
-| `conn.queryOne<T>(sql, args...) -> T, bool, string` | The first row as a struct, or the first column of it as a single value, e.g `count(*)`. `false` when there are no rows |
-| `conn.begin()`, `conn.commit()`, `conn.rollback()` | Transactions. Each gives an error or `""` |
+| `conn.exec(sql, args...) -> i64, error` | A statement without rows (INSERT, UPDATE, DELETE, CREATE, ...). Gives the number of rows it changed |
+| `conn.query<T>(sql, args...) -> [..]T, error` | A T for every row |
+| `conn.queryOne<T>(sql, args...) -> T, bool, error` | The first row as a struct, or the first column of it as a single value, e.g `count(*)`. `false` when there are no rows |
+| `conn.begin()`, `conn.commit()`, `conn.rollback()` | Transactions. Each gives an error, or null |
 | `conn.close()` | Closes the connection. Using it afterwards gives the error "The connection is closed" |
 
-* Every function gives an error as a string, `""` when it worked, like `json.decode`. Errors of Postgres are its
-  own message, e.g `ERROR:  relation "userz" does not exist`. Errors of reading say the row and the column, e.g
-  `Row 3: age: 'x' is not a whole number`.
+* Every function gives an `error` (see `docs/errors.md`), null when it worked. Taken, it is a value; not taken, it is
+  thrown, so code that treats a failing database as exceptional writes `users := conn.query<User>(...);` and catches
+  the errors in one place, e.g a `try` around a request. Errors of Postgres are its own message, e.g
+  `ERROR:  relation "userz" does not exist`, of the kind `dbms.DatabaseError`. Errors of reading say the row and the
+  column, e.g `Row 3: age: 'x' is not a whole number`. A lambda that can't be SQL gives `dbms.QueryError`, and the
+  relations of a row without a database `dbms.NoLink`.
 * The arguments are the parameters `$1`, `$2`, ... of the SQL, sent apart from the SQL text, so a value can never
   change the SQL (no SQL injection). Numbers, `bool`, `string`, chars and enums (by name) can be parameters, and
   optionals and pointers of them, where empty and `null` are `NULL`.
@@ -567,7 +570,7 @@ busy, err3 := db.users.where(u => u.orders().where(o => o.orderItems().sum(i => 
 
 * The lambda of a `where` in the lambda can use the row around it too, e.g
   `a.posts().where(p => p.title != a.name).count()`.
-* In the lambda, `count()` is the `i64`, not `(i64, string)`: a call that gives a value and an error is its value in
+* In the lambda, `count()` is the `i64`, not `(i64, error)`: a call that gives a value and an error is its value in
   an expression tree, as it is made into SQL and not run.
 * `first().title` of no rows is `NULL`, which gives the default of the type, or an empty optional.
 
