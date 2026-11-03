@@ -19,6 +19,9 @@
       "include": "#declarations"
     },
     {
+      "include": "#directives"
+    },
+    {
       "include": "#keywords"
     },
     {
@@ -103,6 +106,20 @@
               "name": "entity.name.namespace.saad"
             }
           }
+        }
+      ]
+    },
+    "directives": {
+      "patterns": [
+        {
+          "comment": "#if, code for some targets only",
+          "name": "keyword.control.directive.saad",
+          "match": "#\\s*if\\b"
+        },
+        {
+          "comment": "The names of the condition of an #if",
+          "name": "constant.language.target.saad",
+          "match": "\\b(OS|ARCH)\\b"
         }
       ]
     },

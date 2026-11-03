@@ -227,6 +227,14 @@ def main():
     check(items and all(i.get("additionalTextEdits", [{}])[0].get("newText") == "import random;\n" for i in items),
           f"the names of random, which isn't imported, import it: {[(i['label'], i.get('additionalTextEdits')) for i in items][:3]}")
 
+    print("completion in the condition of an #if")
+    labels = [item["label"] for item in complete_at("    #if |")]
+    check(labels == ["OS", "ARCH", "true", "false"], f"the names of an #if: {labels}")
+    labels = [item["label"] for item in complete_at("    #if OS == .|")]
+    check(labels == ["windows", "linux"], f"the values of OS: {labels}")
+    labels = [item["label"] for item in complete_at("    #if OS == .linux && ARCH != .|")]
+    check(labels == ["x64"], f"the values of ARCH: {labels}")
+
     print("completion of half-written lines, expression trees and inferred struct literals")
     labels = [item["label"] for item in complete_at("    big := [c].filter(x => x.|")]
     check(labels[:2] == ["radius", "area"], f"the members of a lambda's parameter, while the call isn't closed: {labels}")
