@@ -3,10 +3,20 @@ namespace mem;
 // Memory: the standard library takes its memory from here (and from new), not from C, so a program can give it an
 // Allocator, and C is only called in one place
 //
-//     p := mem.allocate(64);              // 64 zeroed bytes from the heap, or mem.allocate(64, &allocator)
+//     p := mem.allocate(64);              // 64 zeroed bytes from the allocator of the thread, or mem.allocate(64, &allocator)
 //     p = mem.resize(p, 128);             // like realloc
 //     mem.copy(to, from, 16);             // like memcpy
 //     mem.free(p);
+//
+// The allocator of the thread is what a null allocator means, e.g for new(T), strings, lists and fmt.sprint. It is the
+// heap, unless it is set: a server sets it to the arena of a request while it answers the request, so everything the
+// handler allocates is freed with the request. What lives longer is given the heap:
+//
+//     store.posts.allocator = mem.heap();
+//     title := post.title.copy(mem.heap());
+//
+//     previous := mem.setAllocator(&alloc);    // The allocator of the thread, until it is set back
+//     defer mem.setAllocator(previous);
 //
 // Arenas: memory that is taken bit by bit and freed all at once, e.g for everything of one request
 //
@@ -18,7 +28,25 @@ namespace mem;
 
 import c;
 
-// Zeroed memory of the size, from the allocator (null is the heap). Free it with mem.free and the same allocator
+// The heap: realloc and free. For what lives longer than the allocator of the thread, e.g a request
+heap :: () -> *Allocator {
+    return heapAllocator();
+}
+
+// The allocator of the thread: what a null allocator means
+allocator :: () -> *Allocator {
+    return currentAllocator();
+}
+
+// Sets the allocator of the thread, and gives the one before, to set it back. Null is the heap
+setAllocator :: (allocator: *Allocator) -> *Allocator {
+    previous := threadAllocator;
+    threadAllocator = allocator;
+    return previous;
+}
+
+// Zeroed memory of the size, from the allocator (null is the allocator of the thread). Free it with mem.free and the
+// same allocator
 allocate :: (size: int, allocator: *Allocator = null) -> *void {
     if size <= 0 { size = 1; }
     memory := resizeMemory(allocator, null, size);
@@ -34,7 +62,7 @@ resize :: (memory: *void, size: int, allocator: *Allocator = null) -> *void {
     return result;
 }
 
-// Gives back memory of allocate, resize or new to the allocator it came from (null is the heap)
+// Gives back memory of allocate, resize or new to the allocator it came from (null is the allocator of the thread)
 free :: (memory: *void, allocator: *Allocator = null) {
     freeMemory(memory, allocator);
 }

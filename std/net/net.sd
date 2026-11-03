@@ -21,6 +21,7 @@ use c;
 import fmt;
 import thread;
 import net.sys;
+import mem;
 
 Timeout  :: ErrorKind{"net.Timeout"};   // A read or a write took longer than its timeout
 Closed   :: ErrorKind{"net.Closed"};    // The other end closed the connection, or it was reset
@@ -195,7 +196,7 @@ listen :: (address: string, backlog := 128) -> *Listener, error {
     length := sys.addrLength();
     sys.getsockname(s, &bound, &length);
 
-    listener := new(Listener);
+    listener := new(Listener, mem.heap());   // It lives longer than a request
     listener.socket = s;
     listener.addr   = fromSockAddr(&bound);
     return listener, null;
@@ -212,7 +213,7 @@ accept :: method (listener: *Listener) -> *Conn, error {
         }
         return null, lastError("accept");
     }
-    conn := new(Conn);
+    conn := new(Conn, mem.heap());
     conn.socket = s;
     conn.remote = fromSockAddr(&remote);
     return conn, null;
@@ -254,7 +255,7 @@ dial :: (address: string) -> *Conn, error {
         sys.closeSocket(s);
         return null, failed;
     }
-    conn := new(Conn);
+    conn := new(Conn, mem.heap());
     conn.socket = s;
     conn.remote = addr;
     return conn, null;

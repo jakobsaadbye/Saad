@@ -1,0 +1,66 @@
+// The allocator of the thread: what a null allocator means. A list, a map, a StringBuilder and a bytes.Buffer keep the
+// allocator of their first memory, so they grow and are freed with it, also after the allocator of the thread changed
+
+import mem;
+import fmt;
+import bytes;
+import thread;
+
+other :: (seen: **Allocator) {
+    *seen = mem.allocator();   // Each thread has its own
+}
+
+main :: () {
+    assert(mem.allocator() == mem.heap());
+
+    // A list that got its memory from the heap stays on the heap
+    heapList: [..]int;
+    heapList.add(1);
+    assert(heapList.allocator == mem.heap());
+
+    arena: mem.Arena;
+    alloc := arena.allocator();
+    previous := mem.setAllocator(&alloc);
+    assert(previous == null && mem.allocator() == &alloc);
+
+    for i in 0..1000 { heapList.add(i); }       // Grows on the heap, not in the arena
+    assert(heapList.allocator == mem.heap());
+
+    // What has no memory yet takes the arena
+    arenaList: [..]int;
+    arenaList.add(5);
+    assert(arenaList.allocator == &alloc);
+    counts: Map<string, int>;
+    counts["a"] = 1;
+    sb: fmt.StringBuilder;
+    sb.addString("in the arena");
+    assert(sb.allocator == &alloc);
+    buffer: bytes.Buffer;
+    buffer.write("also");
+    assert(buffer.allocator == &alloc);
+    text := fmt.sprint("% %", 1, 2);
+    p := new(int);
+    *p = 3;
+    used := arena.used();
+    assert(used > 0);
+
+    // A string for later goes to the heap
+    kept := text.copy(mem.heap());
+
+    // Another thread has the heap
+    seen: *Allocator;
+    t := thread.spawn(other, &seen);
+    t.join();
+    assert(seen == mem.heap());
+
+    mem.setAllocator(previous);
+    assert(mem.allocator() == mem.heap());
+    arena.free();                                // Frees the arena list, the map, the builder, text and p
+
+    // The heap list grows and is freed as before
+    for i in 0..1000 { heapList.add(i); }
+    assert(heapList.count == 2001 && kept == "1 2");
+    heapList.free();
+    kept.free();
+    fmt.print("allocators ok");
+}

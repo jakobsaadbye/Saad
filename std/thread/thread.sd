@@ -109,7 +109,7 @@ Start :: struct {
 // Starts a thread that runs function(argument), e.g spawn(work, &job) for 'work :: (job: *Job)'. join() waits for it
 // to end. The argument must live until the function is done with it
 spawn :: <T>(function: (argument: *T), argument: *T) -> Thread, error {
-    start := new(Start);
+    start := new(Start, heapAllocator());   // Freed by the thread, with C
     address := function as *void;
     start.function = address as (argument: *void);
     start.argument = argument;
@@ -118,7 +118,7 @@ spawn :: <T>(function: (argument: *T), argument: *T) -> Thread, error {
 
 // Starts a thread that runs a function without an argument
 start :: (function: ()) -> Thread, error {
-    start := new(Start);
+    start := new(Start, heapAllocator());   // Freed by the thread, with C
     start.alone = function;
     return startThread(start);
 }
