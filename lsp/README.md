@@ -61,8 +61,8 @@ To try a change before it is published:
 ```
 cd lsp/vscode
 npm install
-npx @vscode/vsce package    # saad-0.3.0.vsix
-code --install-extension saad-0.3.0.vsix --force
+npx @vscode/vsce package    # saad-0.3.1.vsix
+code --install-extension saad-0.3.1.vsix --force
 ```
 
 Or open `lsp/vscode` in VS Code and press F5 to run it in a new window.

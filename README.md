@@ -83,7 +83,8 @@ saad check main.sd        # only check for errors
 * Several values are given to places that exist: `n, err = conn.read(buffer);`, `a, b = b, a;` (it swaps),
   `p.x, xs[i] = 1, 2;`. `_` leaves a value out
 * `#if`: code for some targets only, e.g `#if OS == .windows { ... } else #if OS == .linux { ... }`, at the top of a
-  file and in blocks. What a branch declares is in the scope around it. See `docs/compile_time_if.md`
+  file and in blocks. What a branch declares is in the scope around it. Completion offers `OS`, `ARCH` and their
+  values, and the VS Code extension (0.3.1) highlights them. See `docs/compile_time_if.md`
 * `@threadLocal` on a global variable: each thread has its own. The error that is being thrown is one
 * `thread`: `spawn` and `join`, `Mutex`, `Condition`, `WaitGroup`, `sleep` and `processorCount`, on Windows and Linux
 * `bytes.Buffer`: bytes written at the end and read from the front, e.g a line or the headers of a request at a time

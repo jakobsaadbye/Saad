@@ -211,6 +211,8 @@ before the position stays the same. Then the text before the position says what 
 * After a namespace of the standard library that isn't imported, e.g `fmt.pr`, its declarations, with
   `missingImport` set to it. Its files are loaded anyway.
 * A function or a method has `parameters`, the number of its parameters without the receiver of a method.
+* In the condition of an `#if`, `OS`, `ARCH`, `true` and `false`, and after `OS == .` or `ARCH != .` their values
+  (`complete_compile_time_if()`).
 
 The language server turns these into the completion of the editor: `needsImport` and `missingImport` add
 `import name;` after the imports at the top of the file (`additionalTextEdits`). A function or a method is written

@@ -1077,6 +1077,45 @@ char *repair_for_completion(const char *path, char *text) {
 }
 
 // Called by compile_program() after the program is checked
+// The names of the condition of an #if (see apply_compile_time_ifs in parser.c), when the position is in one: from the
+// #if on its line to the position, there is no '{'. True when it answered
+static bool complete_compile_time_if(const char *text, int start) {
+    int line = start;
+    while (line > 0 && text[line - 1] != '\n') line--;
+    int hash = -1;
+    for (int i = line; i + 2 < start; i++) {
+        if (text[i] == '#' && text[i + 1] == 'i' && text[i + 2] == 'f' && !is_name_char(text[i + 3])) hash = i;
+        if (text[i] == '{' || text[i] == '}') hash = -1;
+    }
+    if (hash < 0) return false;
+
+    // After 'OS == .' or 'ARCH != .': the values
+    if (start > 0 && text[start - 1] == '.') {
+        int p = start - 2;
+        while (p > hash && (text[p] == ' ' || text[p] == '\t')) p--;
+        if (p - 1 > hash && (text[p] == '=') && (text[p - 1] == '=' || text[p - 1] == '!')) p -= 2;
+        else return true; // A '.' that isn't after a comparison has nothing
+        while (p > hash && (text[p] == ' ' || text[p] == '\t')) p--;
+        int end = p + 1;
+        while (p > hash && is_name_char(text[p])) p--;
+        int name_start = p + 1;
+        int length = end - name_start;
+        if (length == 2 && strncmp(&text[name_start], "OS", 2) == 0) {
+            add_item("windows", "enumMember", "OS: Windows, the target unless --elf or --os linux is given", NULL);
+            add_item("linux", "enumMember", "OS: Linux, with saad build --elf or --os linux", NULL);
+        } else if (length == 4 && strncmp(&text[name_start], "ARCH", 4) == 0) {
+            add_item("x64", "enumMember", "ARCH: x86-64", NULL);
+        }
+        return true;
+    }
+
+    add_item("OS", "constant", "The operating system of the target: .windows or .linux", "e.g `#if OS == .windows { ... }`");
+    add_item("ARCH", "constant", "The processor of the target: .x64", "e.g `#if ARCH == .x64 { ... }`");
+    add_item("true", "keyword", "", NULL);
+    add_item("false", "keyword", "", NULL);
+    return true;
+}
+
 void complete_program(Typer *typer, DynamicArray files) {
     program_completion.items = sb_init(4096);
     program_completion.item_count = 0;
@@ -1099,6 +1138,9 @@ void complete_program(Typer *typer, DynamicArray files) {
     // The name being written, and what is before it
     int start = offset;
     while (start > 0 && is_name_char(file->text[start - 1])) start--;
+
+    // In the condition of an #if: OS and ARCH, and their values after e.g 'OS == .'
+    if (complete_compile_time_if(file->text, start)) return;
 
     bool after_dot = start > 0 && file->text[start - 1] == '.' && !(start > 1 && file->text[start - 2] == '.');
     if (!after_dot) {

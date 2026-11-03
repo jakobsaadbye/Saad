@@ -28,6 +28,12 @@
 * The target is `windows`, or `linux` with `saad build --elf`. `--os linux` or `--os windows` picks it for any
   command, e.g `saad index main.sd --os linux` for the language server.
 
+## In the editor
+
+Completion in a condition offers `OS` and `ARCH`, and their values after `OS == .` or `ARCH != .`. The VS Code
+extension highlights `#if`, `OS` and `ARCH`. A branch that doesn't hold has no names for the language server, as it
+isn't parsed: `--os` picks the target of `saad index`.
+
 ## How it works
 
 The compiler works on the tokens of a file before it parses it (`apply_compile_time_ifs()` in parser.c): the tokens of
