@@ -279,7 +279,7 @@ static void skip_failed_statement(Parser *parser, ParserState *state, bool top_l
         }
         Token head = all[first];
         Token after = first + 1 < parser->lexer->tokens.count ? all[first + 1] : (Token){0};
-        bool starts_statement = head.type == TOKEN_IF || head.type == TOKEN_FOR || head.type == TOKEN_WHILE || head.type == TOKEN_RETURN || head.type == TOKEN_DEFER ||
+        bool starts_statement = head.type == TOKEN_IF || head.type == TOKEN_FOR || head.type == TOKEN_WHILE || head.type == TOKEN_RETURN || head.type == TOKEN_DEFER || head.type == TOKEN_TRY || head.type == TOKEN_THROW ||
                                 head.type == TOKEN_SWITCH || head.type == TOKEN_BREAK || head.type == TOKEN_CONTINUE ||
                                 (head.type == TOKEN_LITERAL_IDENTIFIER && (after.type == TOKEN_COLON_EQUAL || after.type == ':' ||
                                  after.type == TOKEN_DOUBLE_COLON || after.type == '(' || is_assignment_operator(after)));
@@ -355,7 +355,7 @@ static bool has_values(Parser *parser, AstDeclaration *decl) {
 // e.g 'for', 'return' or 'x = 1;', which can only be inside a function
 static bool is_statement_of_a_function(Ast *stmt) {
     switch (stmt->kind) {
-    case AST_RETURN: case AST_DEFER: case AST_IF: case AST_SWITCH: case AST_FOR: case AST_WHILE: case AST_BREAK_OR_CONTINUE:
+    case AST_RETURN: case AST_DEFER: case AST_TRY: case AST_THROW: case AST_IF: case AST_SWITCH: case AST_FOR: case AST_WHILE: case AST_BREAK_OR_CONTINUE:
     case AST_BLOCK: case AST_ASSIGNMENT: case AST_ASSERT:
         return true;
     case AST_EXPR_STMT: {
@@ -429,6 +429,16 @@ AstFile *parse_file(Parser *parser, char *file_path) {
         }
         else if (parser->expression_trees_file_path) {
             ok = generate_and_add_import(parser, "expression_trees", parser->expression_trees_file_path);
+            if (!ok) return NULL;
+            prelude = ((AstImport **)file->imports.items)[file->imports.count - 1];
+            prelude->is_prelude = true;
+        }
+
+        if (parser->errors_file_path && strcmp(file_path, parser->errors_file_path) == 0) {
+            parser->errors_file = file;
+        }
+        else if (parser->errors_file_path) {
+            ok = generate_and_add_import(parser, "errors", parser->errors_file_path);
             if (!ok) return NULL;
             prelude = ((AstImport **)file->imports.items)[file->imports.count - 1];
             prelude->is_prelude = true;
@@ -1169,6 +1179,65 @@ Ast *parse_statement(Parser *parser) {
 
     else if (token.type == TOKEN_RETURN) {
         stmt = (Ast *)(parse_return(parser));
+        statement_ends_with_semicolon = true;
+        matched_a_statement = true;
+    }
+
+    // try { ... } catch (err) { ... }
+    else if (token.type == TOKEN_TRY) {
+        eat_token(parser);
+        if (parser->enclosing_function == NULL) {
+            report_error_token(parser, LABEL_ERROR, token, "Syntax Error: 'try' is only in a function");
+            return NULL;
+        }
+        AstBlock *body = parse_block(parser, NULL);
+        if (!body) return NULL;
+
+        Token catch_token = peek_next_token(parser);
+        if (catch_token.type != TOKEN_CATCH) {
+            report_error_token(parser, LABEL_ERROR, catch_token, "Syntax Error: A try block is followed by 'catch (err) { ... }'");
+            return NULL;
+        }
+        eat_token(parser);
+        Token open = peek_next_token(parser);
+        Token name = peek_token(parser, 1);
+        Token close = peek_token(parser, 2);
+        if (open.type != '(' || name.type != TOKEN_LITERAL_IDENTIFIER || close.type != ')') {
+            report_error_token(parser, LABEL_ERROR, open, "Syntax Error: catch names the error, e.g catch (err) { ... }");
+            return NULL;
+        }
+        eat_token(parser); eat_token(parser); eat_token(parser);
+
+        AstIdentifier *error = make_identifier_from_token(parser, name, NULL); // The type is given by the typer
+        AstBlock *handler = new_block(parser, BLOCK_IMPERATIVE);
+        add_identifier_to_scope(parser, handler, error);
+        handler = parse_block(parser, handler);
+        if (!handler) return NULL;
+        close_block(parser);
+
+        AstTry *ast_try = ast_allocate(parser, sizeof(AstTry));
+        ast_try->head.kind  = AST_TRY;
+        ast_try->head.file  = parser->current_file;
+        ast_try->head.start = token.start;
+        ast_try->head.end   = handler->head.end;
+        ast_try->body       = body;
+        ast_try->error      = error;
+        ast_try->handler    = handler;
+        return (Ast *)ast_try;
+    }
+
+    // throw err;
+    else if (token.type == TOKEN_THROW) {
+        eat_token(parser);
+        AstExpr *value = parse_expression(parser, MIN_PRECEDENCE);
+        if (!value) return NULL;
+        AstThrow *ast_throw = ast_allocate(parser, sizeof(AstThrow));
+        ast_throw->head.kind  = AST_THROW;
+        ast_throw->head.file  = parser->current_file;
+        ast_throw->head.start = token.start;
+        ast_throw->head.end   = value->head.end;
+        ast_throw->value      = value;
+        stmt = (Ast *)ast_throw;
         statement_ends_with_semicolon = true;
         matched_a_statement = true;
     }

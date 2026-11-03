@@ -110,7 +110,7 @@
       "patterns": [
         {
           "name": "keyword.control.saad",
-          "match": "\\b(if|else|for|while|in|switch|case|return|defer|break|continue)\\b"
+          "match": "\\b(if|else|for|while|in|switch|case|return|defer|try|catch|throw|break|continue)\\b"
         },
         {
           "name": "keyword.declaration.saad",

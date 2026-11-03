@@ -1,0 +1,7 @@
+// expect-error: A try block is followed by
+
+main :: () {
+    try {
+        x := 1;
+    }
+}

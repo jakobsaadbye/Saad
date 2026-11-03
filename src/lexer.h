@@ -105,6 +105,9 @@ typedef enum TokenType {
     TOKEN_USE          = 175,
     TOKEN_NAMESPACE    = 176,
     TOKEN_DEFER        = 160,
+    TOKEN_TRY          = 240,
+    TOKEN_CATCH        = 241,
+    TOKEN_THROW        = 242,
 
     TOKEN_STRUCT  = 180,
     TOKEN_ENUM    = 181,

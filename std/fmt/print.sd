@@ -19,3 +19,8 @@ sprint :: (format: string, args: ...any) -> string {
     sb.add(format, ...args);
     return sb.toString();
 }
+
+// A new error with the message in the format, like sprint, e.g fmt.errorf("no user with the id %", id)
+errorf :: (format: string, args: ...any) -> error {
+    return newError(sprint(format, ...args));
+}

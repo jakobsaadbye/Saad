@@ -1,0 +1,5 @@
+// expect-error: throw takes an error, not
+
+main :: () {
+    throw "oops";
+}

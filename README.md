@@ -78,6 +78,24 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.10.0 - 3. Nov 2026
+
+* Errors: `error`, a value that says what went wrong and where, with a stack trace. The caller decides: an error that
+  is taken is a value, and one that isn't is thrown, up to a `try` and `catch`. `throw err;` throws one, and a
+  division by zero throws a `Panic`. An error that nothing catches ends the program with its message and trace. The
+  language server shows `throws` after the calls whose error isn't taken. See `docs/errors.md`
+
+```odin
+config, err := readConfig(path);     // a value
+config := readConfig(path);          // thrown when there is an error
+
+try {
+    post := db.posts.get(id);
+} catch (err) {
+    if err.is(NotFound) { ... }
+}
+```
+
 ## Update v0.9.11 - 2. Nov 2026
 
 * `defer`: a statement that runs when its block is left, also by `return`, `break` and `continue`, the last one first

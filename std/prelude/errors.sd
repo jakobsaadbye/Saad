@@ -1,0 +1,106 @@
+// Errors: an error is a value that says what went wrong, and where. A function that can fail gives one as its last
+// result, e.g 'readFile :: (path: string) -> (string, error)'. The caller decides what a failure is:
+//
+//     text, err := os.readFile(path);      // a value: the program looks at err (null when it worked)
+//     text := os.readFile(path);           // an exception: if there is an error, it is thrown
+//
+// A thrown error leaves the functions it is thrown through, running their defers, up to a try:
+//
+//     try {
+//         text := os.readFile(path);
+//     } catch (err) {
+//         print("% (%)", err.message, err.trace);
+//     }
+//
+// 'throw err;' throws an error that the program made itself. A division by zero, and memory that can't be had, throw
+// an error of the kind Panic. An error that nothing catches ends the program, with its message and trace.
+//
+// Every file imports this file like the rest of the prelude. The compiler calls the functions at the bottom.
+use c;
+
+Error :: struct {
+    message: string;
+    kind:    ErrorKind;
+    cause:   error;            // The error this one was made because of, or null
+    trace:   [..]TraceFrame;   // Where it was made or thrown, and each call it was thrown through after
+}
+
+// An error, or null for none
+error :: *Error;
+
+// What kind of error it is, for a catch to tell errors apart, e.g err.is(dbms.NotFound). Two kinds are the same kind
+// when their names are
+ErrorKind :: struct {
+    name: string;
+}
+
+// A place in the program: a function, its file and the line
+TraceFrame :: struct {
+    function: *u8;
+    file:     *u8;
+    line:     i64;
+}
+
+// A failure that isn't a part of what the program does, e.g a division by zero or no memory left
+Panic :: ErrorKind{"Panic"};
+
+// A new error with the message, e.g newError("no port") or newError("not found", NotFound)
+newError :: (message: string, kind := ErrorKind{}, cause: error = null) -> error {
+    err := new(Error);
+    err.message = message;
+    err.kind    = kind;
+    err.cause   = cause;
+    return err;
+}
+
+// If the error is of the kind, or was made because of one that is
+is :: method (err: *Error, kind: ErrorKind) -> bool {
+    e := err;
+    while e != null {
+        if e.kind.name == kind.name { return true; }
+        e = e.cause;
+    }
+    return false;
+}
+
+// Throws an error of the kind Panic, e.g panic("unreachable")
+panic :: (message: string) {
+    throw newError(message, Panic);
+}
+
+//
+// For the compiler: the error that is being thrown, and the frames of its trace
+//
+
+// The error that is being thrown, or null. After a call, the compiler goes to the catch, or returns, while it isn't null
+thrownError: error;
+
+// Adds a frame to the trace of the error that is being thrown. It is taken out of thrownError meanwhile, as the calls
+// here would see it and leave
+traceThrow :: (function: *u8, file: *u8, line: i64) {
+    err := thrownError;
+    if err == null { return; }
+    thrownError = null;
+    err.trace.add(TraceFrame{function, file, line});
+    thrownError = err;
+}
+
+// For a division by zero
+panicDivisionByZero :: () {
+    panic("Division by zero");
+}
+
+// For an error that nothing caught: main ends with it
+reportUncaught :: () {
+    err := thrownError;
+    if err == null { return; }
+    thrownError = null;
+    kind := err.kind.name;
+    if kind.len == 0 { kind = "error"; }
+    printf(xx "%.*s: %.*s\n", kind.len as i32, kind.data, err.message.len as i32, err.message.data);
+    for frame in err.trace {
+        printf(xx "    at %s (%s:%lld)\n", frame.function, frame.file, frame.line);
+    }
+    fflush(null);
+    exit(1);
+}

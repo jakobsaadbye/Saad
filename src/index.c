@@ -390,6 +390,18 @@ void index_type_name_use(Ast *site, AstIdentifier *ident) {
     }
 }
 
+// A call whose error isn't taken, so it is thrown, e.g 'text := os.readFile(path);'. An editor shows it
+void index_throw_site(Ast *call) {
+    if (!program_index.enabled || !has_position(call)) return;
+    if (program_index.throws.items == NULL) program_index.throws = da_init(64, sizeof(IndexReference));
+    for (int i = 0; i < program_index.throws.count; i++) {
+        IndexReference *t = &((IndexReference *)program_index.throws.items)[i];
+        if (t->file == call->file && t->end.input_idx == call->end.input_idx) return; // Checked more than once
+    }
+    IndexReference site = { call->file, call->start, call->end, -1 };
+    da_append(&program_index.throws, site);
+}
+
 // A namespace is declared by the 'namespace a.b;' of its first file
 static int index_namespace(Namespace *ns) {
     if (!program_index.enabled || ns == NULL) return -1;
@@ -626,6 +638,17 @@ void write_index_json(FILE *out, bool success) {
         sb_append(&sb, ", \"symbol\": %d}", new_id[r->symbol]);
     }
     (void)in_std;
+
+    sb_append(&sb, "\n],\n\"throws\": [");
+    int written_throws = 0;
+    for (int i = 0; i < program_index.throws.count; i++) {
+        IndexReference *t = &((IndexReference *)program_index.throws.items)[i];
+        if (!program_index.with_std && is_std_file(t->file)) continue;
+        if (written_throws++ > 0) sb_append(&sb, ",");
+        sb_append(&sb, "\n  {\"file\": %d, \"range\": ", file_id(&files, t->file));
+        json_write_range(&sb, t->start, t->end);
+        sb_append(&sb, "}");
+    }
 
     sb_append(&sb, "\n],\n\"files\": [");
     for (int i = 0; i < files.count; i++) {

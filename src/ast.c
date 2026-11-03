@@ -37,6 +37,8 @@ const char *ast_to_str(Ast *ast) {
     case AST_SWITCH_ARM:         return "AST_SWITCH_ARM";
     case AST_RETURN:             return "AST_RETURN";
     case AST_DEFER:              return "AST_DEFER";
+    case AST_TRY:                return "AST_TRY";
+    case AST_THROW:              return "AST_THROW";
     case AST_FOR:                return "AST_FOR";
     case AST_WHILE:              return "AST_WHILE";
     case AST_BREAK_OR_CONTINUE:  return "AST_BREAK_OR_CONTINUE";
