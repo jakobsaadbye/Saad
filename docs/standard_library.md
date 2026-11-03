@@ -294,6 +294,9 @@ POST /v1/createPost   {"post": {"title": "Hi"}}      -> {"id": 3, "title": "Hi"}
 
 * The url is the prefix and the name of the function, so the names of endpoints must be unique: `newApp` gives an
   error when two are the same, or when an endpoint doesn't take the session as its first parameter.
+* `newApp` also checks that the parameters can come from JSON and the results can be written as JSON, so a type that
+  can't, e.g a function, `any` as a parameter or a `*void`, is an error when the app starts, not at a request:
+  `The parameter job of the endpoint run can't come from JSON: Job.callback is a function`.
 * POST takes the parameters as the members of a JSON object in the body, and GET from the query (a string as it is,
   other types as JSON, e.g `?ids=[1,2]`). A parameter that isn't there is a 400, unless it is an optional (`?int`).
 * The result is JSON: the value, an array of the values when there are more, or `null`. A given or thrown error is

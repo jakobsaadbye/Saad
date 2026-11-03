@@ -78,6 +78,18 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.14.0 - 3. Nov 2026
+
+* The http server keeps connections alive without keeping a worker: the thread of `serve()` waits for the idle
+  connections with `net.Poll` (`poll`, `WSAPoll`) and gives a connection to a worker when a request comes. Before, 8
+  idle connections held all 8 workers of a 4-core computer. `server.idleTimeout` closes connections that wait too long
+* `tools/bench/web_bench.sd`, a load test: on 4 cores, 330k requests/s for 4 clients of a handler, 78k for 32 clients
+  of an endpoint, also with 64 idle connections open
+* `web.newApp` checks that the parameters of the endpoints can come from JSON and their results can be written as JSON
+* `net.Poll` waits until one of many sockets can be read
+* Constants: `|`, `&`, `^`, `%`, `<<` and `>>` are folded, and an untyped constant takes the number type of a struct
+  member when it fits
+
 ## Update v0.13.3 - 3. Nov 2026
 
 * The generator of `dbms` is a library: `postgres.EntityGenerator`, which a project calls from a `generate.sd` of its

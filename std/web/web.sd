@@ -114,6 +114,20 @@ newApp :: <S>(prefix: string) -> *App, error {
         if !first {
             return null, newError(fmt.sprint("The endpoint % must take a *% as its first parameter", f.name, app.sessionType.head.name));
         }
+        for i in 1..f.parameters.count {
+            param := f.parameters[i];
+            problem := jsonProblem(param.type, true, 0);
+            if problem != "" {
+                return null, newError(fmt.sprint("The parameter % of the endpoint % can't come from JSON: %", param.name, f.name, problem));
+            }
+        }
+        for result in f.results {
+            if isErrorType(result.type) { continue; }
+            problem := jsonProblem(result.type, false, 0);
+            if problem != "" {
+                return null, newError(fmt.sprint("The result of the endpoint % can't be written as JSON: %", f.name, problem));
+            }
+        }
         for e in app.endpoints {
             if e.name == f.name {
                 return null, newError(fmt.sprint("Two endpoints are named %: the name of an endpoint is its url, so it must be unique", f.name));
@@ -256,6 +270,72 @@ dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
         }
         w.write("]");
     }
+}
+
+// What of the type can't be JSON, e.g "Job.run is a function", or empty when all of it can. A parameter is read from JSON,
+// which can't make an any, and a result is written
+jsonProblem :: (type: *Type, reading: bool, depth: int) -> string {
+    if depth > 8 { return ""; }   // e.g a struct with a pointer to itself
+    switch type.kind {
+        case .bool
+        case .int
+        case .float
+        case .string
+        case .enum {
+            return "";
+        }
+        case .pointer {
+            to := (type as *TypePointer).pointerTo;
+            if to.kind == .void { return fmt.sprint("% is a pointer to nothing", type.name); }
+            return jsonProblem(to, reading, depth + 1);
+        }
+        case .array {
+            return jsonProblem((type as *TypeArray).elemType, reading, depth + 1);
+        }
+        case .struct {
+            // What json reads and writes as a whole
+            name := type.name;
+            if name == "time.Time" || name == "json.Value" { return ""; }
+            structType := type as *TypeStruct;
+            if type.flags.has(.isOptional) { return jsonProblem(structType.members[0].type, reading, depth + 1); }
+            if name.startsWith("List<") {
+                return jsonProblem((memberType(structType, "data") as *TypePointer).pointerTo, reading, depth + 1);
+            }
+            if name.startsWith("Map<") {
+                entries := memberType(structType, "entries") as *TypeStruct;
+                entry := (memberType(entries, "data") as *TypePointer).pointerTo as *TypeStruct;
+                if reading && memberType(entry, "key").kind != .string { return fmt.sprint("the keys of % aren't strings", name); }
+                return jsonProblem(memberType(entry, "value"), reading, depth + 1);
+            }
+            for member in structType.members {
+                if member.isHidden() || member.name.startsWith("$") { continue; }
+                problem := jsonProblem(member.type, reading, depth + 1);
+                if problem != "" {
+                    if member.type.kind == .function { return fmt.sprint("%.% is a function", type.name, member.name); }
+                    return problem;
+                }
+            }
+            return "";
+        }
+        case .any {
+            if reading { return "any has no type to read into"; }
+            return "";
+        }
+        case .function {
+            return fmt.sprint("% is a function", type.name);
+        }
+        else {
+            return fmt.sprint("% is a %", type.name, type.kind);
+        }
+    }
+}
+
+// The type of a member of a struct, by its name
+memberType :: (type: *TypeStruct, name: string) -> *Type {
+    for member in type.members {
+        if member.name == name { return member.type; }
+    }
+    return null;
 }
 
 // A string, or a ?string

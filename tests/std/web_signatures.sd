@@ -1,0 +1,43 @@
+// web.newApp checks that the parameters of the endpoints can come from JSON, and their results can be written as JSON
+
+import web;
+
+Session :: struct {
+    @embed base: web.Session;
+}
+
+Job :: struct {
+    name: string;
+    run:  (x: int) -> int;
+}
+
+// Lists, optionals, slices and structs that point to themselves are fine
+Node :: struct { title: string; tags: [..]string; next: *Node; }
+
+@web.endpoint
+fine :: (session: *Session, ids: []i64, names: ?[..]string, at: Node) -> [..]Node, error { return [at], null; }
+
+@web.endpoint
+takesFunction :: (session: *Session, job: Job) {}
+
+problemOf :: (value: any, reading: bool) -> string {
+    return web.jsonProblem(value.type, reading, 0);
+}
+
+main :: () {
+    app, err := web.newApp<Session>("/v1");
+    assert(app == null && err.message == "The parameter job of the endpoint takesFunction can't come from JSON: Job.run is a function");
+
+    // What can and can't be JSON
+    node: Node;
+    nothing: *void;
+    something: any = 5;
+    assert(problemOf(node, true) == "" && problemOf(5, true) == "" && problemOf("text", true) == "");
+    assert(problemOf(nothing, false) == "*void is a pointer to nothing");
+    boxed: any = something;
+    holder := Holder{boxed};
+    assert(problemOf(holder, true) == "any has no type to read into");
+    assert(problemOf(holder, false) == "");   // An any is written as its value
+}
+
+Holder :: struct { value: any; }
