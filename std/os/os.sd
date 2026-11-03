@@ -17,7 +17,7 @@ exit :: (code: int) {
 run :: (command: string) -> int {
     cCommand := command.toCString();
     code := system(cCommand);
-    mem.free(cCommand);
+    cCommand.free();
     return code;
 }
 
@@ -35,8 +35,7 @@ output :: (command: string) -> string, int {
     quoted[command.len + 1] = '"';
     quoted[command.len + 2] = 0;
 
-    mode := "rb";
-    pipe := _popen(quoted, mode.data);
+    pipe := _popen(c.string{quoted}, "rb");
     mem.free(quoted);
     if pipe == null {
         return "", -1;
@@ -50,7 +49,7 @@ output :: (command: string) -> string, int {
 // The arguments the program was started with. The first is the program itself
 args :: () -> []string {
     argc: i32;
-    argv, env: **u8;
+    argv, env: *c.string;
     startInfo: i32;
     windows.__getmainargs(&argc, &argv, &env, 0, &startInfo);
 
@@ -58,7 +57,7 @@ args :: () -> []string {
     result.data  = mem.allocate(argc as int * sizeof(string)) as *string;
     result.count = argc;
     for i in 0..argc {
-        result[i] = fromCString(argv[i]);
+        result[i] = argv[i].toString();
     }
     return result;
 }
@@ -67,11 +66,11 @@ args :: () -> []string {
 getEnv :: (name: string) -> string, bool {
     cName := name.toCString();
     value := getenv(cName);
-    mem.free(cName);
-    if value == null {
+    cName.free();
+    if value.isNull() {
         return "", false;
     }
-    return fromCString(value), true;
+    return value.toString(), true;
 }
 
 // The kinds of the errors of os, e.g err.is(os.NotFound)
@@ -143,7 +142,7 @@ appendFile :: (path: string, text: string) -> error {
 makeDir :: (path: string) -> error {
     cPath := path.toCString();
     made := windows.CreateDirectoryA(cPath, null);
-    mem.free(cPath);
+    cPath.free();
     if made || windows.GetLastError() == windows.ErrorAlreadyExists { return null; }
     return fileError("Can't make the folder", path);
 }
@@ -162,7 +161,7 @@ removeFile :: (path: string) -> error {
     if !fileExists(path) { return newError(fmt.sprint("Can't remove %: it isn't there", path), NotFound); }
     cPath := path.toCString();
     result := remove(cPath);
-    mem.free(cPath);
+    cPath.free();
     if result == 0 { return null; }
     return fileError("Can't remove", path);
 }
@@ -173,22 +172,22 @@ renameFile :: (oldPath: string, newPath: string) -> error {
     cOld := oldPath.toCString();
     cNew := newPath.toCString();
     result := rename(cOld, cNew);
-    mem.free(cOld);
-    mem.free(cNew);
+    cOld.free();
+    cNew.free();
     if result == 0 { return null; }
     return fileError("Can't rename", oldPath);
 }
 
 @private
-openFile :: (path: string, mode: string) -> *void {
+openFile :: (path: string, mode: c.string) -> *void {
     cPath := path.toCString();
-    file := fopen(cPath, mode.data);
-    mem.free(cPath);
+    file := fopen(cPath, mode);
+    cPath.free();
     return file;
 }
 
 @private
-writeToFile :: (path: string, text: string, mode: string) -> bool {
+writeToFile :: (path: string, text: string, mode: c.string) -> bool {
     file := openFile(path, mode);
     if file == null {
         return false;

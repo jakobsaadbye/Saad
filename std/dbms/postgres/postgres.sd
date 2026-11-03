@@ -21,7 +21,7 @@ connect :: (connectionString: string) -> dbms.Connection, error {
     conn: dbms.Connection;
     info := connectionString.toCString();
     handle := PQconnectdb(info);
-    mem.free(info);
+    info.free();
 
     if handle == null {
         return conn, dbms.databaseError("libpq couldn't make a connection");
@@ -62,8 +62,8 @@ driver :: () -> *dbms.Driver {
 @private ResultTuplesOk  :: 2;
 
 @private
-execute :: (conn: *void, sql: *u8, params: []*u8, err: *string) -> *void {
-    values: **u8 = null;
+execute :: (conn: *void, sql: c.string, params: []c.string, err: *string) -> *void {
+    values: *c.string = null;
     if params.count > 0 {
         values = params.data;
     }
@@ -83,21 +83,21 @@ execute :: (conn: *void, sql: *u8, params: []*u8, err: *string) -> *void {
 
 @private rowCount    :: (result: *void) -> i64 { return PQntuples(result) as i64; }
 @private columnCount :: (result: *void) -> i64 { return PQnfields(result) as i64; }
-@private columnName  :: (result: *void, column: i64) -> *u8 { return PQfname(result, column as int); }
+@private columnName  :: (result: *void, column: i64) -> c.string { return PQfname(result, column as int); }
 @private freeResult  :: (result: *void) { PQclear(result); }
 @private close       :: (conn: *void) { PQfinish(conn); }
 
 @private
-value :: (result: *void, row: i64, column: i64) -> *u8 {
+value :: (result: *void, row: i64, column: i64) -> c.string {
     if PQgetisnull(result, row as int, column as int) != 0 {
-        return null;
+        return c.string{};   // NULL
     }
     return PQgetvalue(result, row as int, column as int);
 }
 
 @private
 affected :: (result: *void) -> i64 {
-    text := fromCString(PQcmdTuples(result));
+    text := PQcmdTuples(result).toString();
     n: i64 = 0;
     for i in 0..text.len {
         if text[i] < '0' || text[i] > '9' { break; }
@@ -108,11 +108,11 @@ affected :: (result: *void) -> i64 {
 
 // A copy of an error message of libpq, without the line break at its end
 @private
-message :: (text: *u8) -> string {
-    if text == null {
+message :: (text: c.string) -> string {
+    if text.isNull() {
         return "Unknown error";
     }
-    s := fromCString(text);
+    s := text.toString();
     while s.len > 0 && (s[s.len - 1] == '\n' || s[s.len - 1] == ' ') {
         s.len -= 1;
     }
@@ -123,18 +123,18 @@ message :: (text: *u8) -> string {
 }
 
 extern "libpq.dll" {
-    PQconnectdb          :: (conninfo: *u8) -> *void;
+    PQconnectdb          :: (conninfo: c.string) -> *void;
     PQstatus             :: (conn: *void) -> int;
-    PQerrorMessage       :: (conn: *void) -> *u8;
+    PQerrorMessage       :: (conn: *void) -> c.string;
     PQfinish             :: (conn: *void);
-    PQexecParams         :: (conn: *void, command: *u8, nParams: int, paramTypes: *u32, paramValues: **u8, paramLengths: *int, paramFormats: *int, resultFormat: int) -> *void;
+    PQexecParams         :: (conn: *void, command: c.string, nParams: int, paramTypes: *u32, paramValues: *c.string, paramLengths: *int, paramFormats: *int, resultFormat: int) -> *void;
     PQresultStatus       :: (result: *void) -> int;
-    PQresultErrorMessage :: (result: *void) -> *u8;
+    PQresultErrorMessage :: (result: *void) -> c.string;
     PQntuples            :: (result: *void) -> int;
     PQnfields            :: (result: *void) -> int;
-    PQfname              :: (result: *void, column: int) -> *u8;
-    PQgetvalue           :: (result: *void, row: int, column: int) -> *u8;
+    PQfname              :: (result: *void, column: int) -> c.string;
+    PQgetvalue           :: (result: *void, row: int, column: int) -> c.string;
     PQgetisnull          :: (result: *void, row: int, column: int) -> int;
-    PQcmdTuples          :: (result: *void) -> *u8;
+    PQcmdTuples          :: (result: *void) -> c.string;
     PQclear              :: (result: *void);
 }

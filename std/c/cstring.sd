@@ -1,0 +1,40 @@
+namespace c;
+
+// A string of C: a pointer to its bytes, which end with a 0, e.g the 'const char *' of a C function. Saad's own string
+// has its length instead. Write it as c.string, also in the files of namespace c, where 'string' is Saad's string:
+//
+//     puts :: (text: c.string) -> int;          // in an extern "C" block
+//     puts("Hello");                            // a string literal is a c.string too, as it ends with a 0
+//     name := "Ada".toCString();                // a copy of a string, with a 0 at its end. Free it with name.free()
+//     home := getenv("HOME").toString();        // the bytes of a c.string as a string, without a copy
+//
+// It is a struct of the pointer, which C sees as the pointer
+string :: struct {
+    data: *u8;
+
+    // If it points nowhere, e.g a getenv of a variable that isn't set
+    isNull :: method () -> bool {
+        return self.data == null;
+    }
+
+    // The number of bytes before the 0. 0 for a null
+    length :: method () -> int {
+        if self.data == null { return 0; }
+        n := 0;
+        while self.data[n] != 0 { n += 1; }
+        return n;
+    }
+
+    // A string of the same bytes, without a copy, so it is there as long as the c.string is. Empty for a null
+    toString :: method () -> string {
+        result: string;
+        result.data = self.data;
+        result.len  = self.length();
+        return result;
+    }
+
+    // Gives back its memory, e.g of toCString, which comes from the heap
+    free :: method () {
+        if self.data != null { c.free(self.data); }
+    }
+}

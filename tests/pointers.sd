@@ -134,14 +134,14 @@ main:: () {
         assert(cursor.data == 1);
     }
 
-    print("Iffing on a pointer");
+    print("A pointer is compared with null");
     {
         n : Node;
         n1 : Node;
 
         n.next = &n1;
         
-        assert(n.next);
+        assert(n.next != null && n1.next == null);
     }
 }
 

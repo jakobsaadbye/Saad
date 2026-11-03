@@ -285,9 +285,9 @@ sameKey :: (t: *Tracked, key: any) -> bool {
     if !hasKey { return false; }
     a, okA := paramText(valueOf(keyColumn, t.snapshot));
     b, okB := paramText(key);
-    same := okA && okB && a != null && b != null && fromCString(a) == fromCString(b);
-    mem.free(a);
-    mem.free(b);
+    same := okA && okB && !a.isNull() && !b.isNull() && a.toString() == b.toString();
+    a.free();
+    b.free();
     return same;
 }
 

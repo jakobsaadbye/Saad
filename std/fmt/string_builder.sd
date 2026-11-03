@@ -47,7 +47,7 @@ reserve :: method (sb: *StringBuilder, extra: int) {
 
     buffer := mem.resize(sb.buffer, capacity) as *u8;
     if buffer == null {
-        printf("Out of memory: a StringBuilder couldn't grow to %d bytes\n".data, capacity);
+        printf("Out of memory: a StringBuilder couldn't grow to %d bytes\n", capacity);
         exit(1);
     }
     sb.buffer   = buffer;
@@ -195,14 +195,14 @@ join :: (parts: []string, separator: string) -> string {
 
 addFloat32 :: method (sb: *StringBuilder, v: f32) {
     buf: [32]u8;
-    sprintf(buf.data, xx "%f", v);
-    sb.addBytes(buf.data, strlen(buf.data) as int);
+    sprintf(buf.data, "%f", v);
+    sb.addBytes(buf.data, strlen(c.string{buf.data}) as int);
 }
 
 addFloat64 :: method (sb: *StringBuilder, v: f64) {
     buf: [32]u8;
-    sprintf(buf.data, xx "%lf", v);
-    sb.addBytes(buf.data, strlen(buf.data) as int);
+    sprintf(buf.data, "%lf", v);
+    sb.addBytes(buf.data, strlen(c.string{buf.data}) as int);
 }
 
 addInt64 :: method (sb: *StringBuilder, v: i64) {
@@ -293,7 +293,7 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
         }
         case .pointer {
             buf: [64]u8;
-            written := sprintf(buf.data, xx "0x%p", *(arg.data as **void));
+            written := sprintf(buf.data, "0x%p", *(arg.data as **void));
             sb.addBytes(buf.data, written);
         }
         case .array {

@@ -148,9 +148,11 @@ void report_readonly_self(Typer *typer, Ast *at, AstFunctionDefn *method, const 
 void append_place_text(StringBuilder *sb, AstExpr *expr);
 bool check_declaration(Typer *typer, AstDeclaration *decl);
 bool check_defer(Typer *typer, AstDefer *defer);
+static bool check_condition_type(Typer *typer, AstExpr *expr, Type *type);
 bool check_try(Typer *typer, AstTry *ast_try);
 bool check_throw(Typer *typer, AstThrow *ast_throw);
 bool is_error_type(Typer *typer, Type *type);
+bool is_c_string_type(Type *type);
 bool identifier_is_type(AstIdentifier *ident);
 Type *resolve_anonymous_type(Typer *typer, Type *type);
 AstExpr *member_default_value(AstIdentifier *member);
@@ -4010,10 +4012,7 @@ bool check_while(Typer *typer, AstWhile *ast_while) {
     Type *cond_type = check_expression(typer, ast_while->condition, NULL);
     if (!cond_type) return false;
 
-    if (cond_type->kind != TYPE_BOOL) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_while->condition, "Type mistmatch. Expeced a bool, but got type %s", type_to_str(cond_type));
-        return false;
-    }
+    if (!check_condition_type(typer, ast_while->condition, cond_type)) return false;
 
     bool ok = check_block(typer, ast_while->body);
     if (!ok) return false;
@@ -4174,22 +4173,23 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
     return true;
 }
 
-// An error isn't a condition: 'if err' would be true when there is one, which reads the other way. It is compared with
-// null, e.g if err != null
-static bool reject_error_condition(Typer *typer, AstExpr *expr, Type *type) {
-    if (!is_error_type(typer, type)) return true;
-    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "An error isn't a condition. Compare it with null, e.g 'err != null' when there is one, or 'err == null' when it worked");
+// A condition is a bool. A pointer (also an error) is compared with null, e.g 'if p != null', so it reads what it means
+static bool check_condition_type(Typer *typer, AstExpr *expr, Type *type) {
+    if (type->kind == TYPE_BOOL) return true;
+    if (is_error_type(typer, type)) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "An error isn't a condition. Compare it with null, e.g 'err != null' when there is one, or 'err == null' when it worked");
+    } else if (type->kind == TYPE_POINTER) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "A pointer isn't a condition. Compare it with null, e.g 'p != null' when it is set, or 'p == null' when it isn't");
+    } else {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "A condition is a bool, but this is %s", text_bold(type_to_str(type)));
+    }
     return false;
 }
 
 bool check_assert(Typer *typer, AstAssert *ast_assert) {
     Type *expr_type = check_expression(typer, ast_assert->expr, NULL);
     if (!expr_type) return false;
-    if (!reject_error_condition(typer, ast_assert->expr, expr_type)) return false;
-    if (expr_type->kind != TYPE_BOOL && expr_type->kind != TYPE_POINTER) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_assert), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(expr_type));
-        return false;
-    }
+    if (!check_condition_type(typer, ast_assert->expr, expr_type)) return false;
 
     return true;
 }
@@ -4649,12 +4649,7 @@ bool check_switch(Typer *typer, AstSwitch *sw) {
 bool check_if(Typer *typer, AstIf *ast_if) {
     Type *condition_type = check_expression(typer, ast_if->condition, NULL);
     if (!condition_type) return NULL;
-    if (!reject_error_condition(typer, ast_if->condition, condition_type)) return false;
-
-    if (condition_type->kind != TYPE_BOOL && condition_type->kind != TYPE_POINTER) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_if->condition), "Expression needs to be of type 'bool' or pointer, but expression evaluated to type '%s'", type_to_str(condition_type));
-        return false;
-    }
+    if (!check_condition_type(typer, ast_if->condition, condition_type)) return false;
 
     bool ok = check_block(typer, ast_if->then_block);
     if (!ok) return false;
@@ -4761,6 +4756,21 @@ static Type *error_type(Typer *typer) {
     if (ident->decl && (ident->decl->head.flags & AST_FLAG_HAS_ERRORS)) return NULL; // e.g a prelude with errors
     Type *type = ident->type;
     return type && type->kind == TYPE_POINTER ? type : NULL;
+}
+
+// c.string of std/c/cstring.sd: a struct of the pointer to the bytes of a string of C
+bool is_c_string_type(Type *type) {
+    if (type == NULL || type->kind != TYPE_STRUCT) return false;
+    AstStruct *node = ((TypeStruct *)type)->node;
+    if (node == NULL || node->identifier == NULL || strcmp(node->identifier->name, "string") != 0) return false;
+    AstFile *file = node->head.file;
+    return file && file->ns && strcmp(file->ns->name, "c") == 0;
+}
+
+// A string where a c.string is wanted, e.g puts(name). Only a literal ends with a 0 for sure
+static void hint_c_string(Typer *typer, Type *wanted, Type *given) {
+    if (!is_c_string_type(wanted) || given->kind != TYPE_STRING) return;
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "A string doesn't have to end with a 0, so it isn't a c.string. Make one with .toCString(), and .free() it after the call");
 }
 
 bool is_error_type(Typer *typer, Type *type) {
@@ -5460,6 +5470,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             if (!types_fit_either_way(wanted_type, given_type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(wanted_type)), text_bold(type_to_str(given_type)));
                 hint_optional_unwrap(typer, wanted_type, given_type);
+                hint_c_string(typer, wanted_type, given_type);
                 if (given_type->kind == TYPE_VARIADIC && ((TypeVariadic *)given_type)->type->kind == wanted_type->kind) {
                     report_error_ast(typer->parser, LABEL_HINT, (Ast *)(arg), "Use ... to spread the variadic argument into the parameter");
                 }
@@ -5590,6 +5601,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             if (!types_fit_either_way(param->type, arg->value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg->value->type)));
                 hint_optional_unwrap(typer, param->type, arg->value->type);
+                hint_c_string(typer, param->type, arg->value->type);
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param->decl), "Here is the definition of '%s'", param->name);
                 return NULL;
             }
@@ -8253,16 +8265,7 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     TypeKind type_kind = expr_type->kind;
 
     if (unary->operator == OP_NOT) {
-        if (is_error_type(typer, expr_type)) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)unary, "An error isn't a condition. Compare it with null, e.g 'err == null' when it worked");
-            return NULL;
-        }
-        if (type_kind != TYPE_BOOL && type_kind != TYPE_POINTER) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Operator '!' expects expression to be type bool or pointer. Got type %s\n", type_to_str(expr_type));
-            return NULL;
-        }
-
-        // @Note - If applied to a pointer, we will do a pointer to bool conversion
+        if (!check_condition_type(typer, unary->expr, expr_type)) return NULL; // !p of a pointer is p == null
         return primitive_type(PRIMITIVE_BOOL);
     }
 
@@ -8534,6 +8537,8 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
         if (typer->enclosing_function) {
             reserve_temporary_storage(typer->enclosing_function, 16);
         }
+        // Where a c.string is wanted, e.g puts("Hello"), a string literal is one: its bytes end with a 0
+        if (ctx_type && is_c_string_type(ctx_type)) return ctx_type;
         return (ctx_type && ctx_type->kind == TYPE_STRING) ? ctx_type : (Type *) type_defn_string;
     }
     case LITERAL_IDENTIFIER: {
@@ -8658,7 +8663,37 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             report_error_ast(typer->parser, LABEL_HINT, NULL, "Wrap it in a non-generic function that calls it with the types you need, e.g (a, b: int) -> int { return %s(a, b); }", ident->name);
             return NULL;
         }
+        bool as_callee = typer->checking_callee;
         typer->checking_callee = false;
+
+        // A function used as a value before it is checked, e.g 'd.execute = execute;' above 'execute :: (sql: c.string) ...'.
+        // The names in its signature are resolved where it is declared, so the function types can be compared
+        if (ident->type->kind == TYPE_FUNCTION && (declared->flags & IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN)) {
+            AstFunctionDefn *func = ((TypeFunction *)ident->type)->node;
+            if (func && !as_callee && !(func->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) && !is_generic_function(func)) {
+                Typer saved_state = *typer;
+                typer->current_file  = func->head.head.file ? func->head.head.file : typer->current_file;
+                typer->current_scope = func->body ? func->body : typer->current_scope;
+                bool ok = true;
+                for (int i = 0; ok && i < func->parameters.count; i++) {
+                    AstIdentifier *param = ((AstIdentifier **)func->parameters.items)[i];
+                    if (param->type == NULL) continue; // Inferred from its default value when the function is checked
+                    Type *resolved = resolve_type(typer, param->type);
+                    if (resolved) param->type = resolved;
+                    else ok = false;
+                }
+                for (int i = 0; ok && i < func->return_types.count; i++) {
+                    Type **return_type_ptr = &((Type **)func->return_types.items)[i];
+                    Type *resolved = resolve_type(typer, *return_type_ptr);
+                    if (resolved) *return_type_ptr = resolved;
+                    else ok = false;
+                }
+                DynamicArray stack = typer->enclosing_function_stack;
+                typer_restore_state(typer, saved_state);
+                typer->enclosing_function_stack = stack;
+                if (!ok) return NULL;
+            }
+        }
 
         report_if_deprecated(typer, ident, (Ast *)literal);
 

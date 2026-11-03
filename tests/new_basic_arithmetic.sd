@@ -1,5 +1,5 @@
 extern "C" {
-    printf :: (format: *u8, args: ...any);
+    printf :: (format: c.string, args: ...any);
 }
 
 main :: () {
@@ -9,7 +9,7 @@ main :: () {
         b := 4.5;
         c := a + b;
 
-        printf(xx "%f %f %f\n", c, b, a);
+        printf("%f %f %f\n", c, b, a);
     }
     {
         // Integer arithmetic
@@ -18,6 +18,6 @@ main :: () {
         c := a * b;
         d := c / 8;
 
-        printf(xx "%u-%u-%u-%u", a, b, c, d);
+        printf("%u-%u-%u-%u", a, b, c, d);
     }
 }

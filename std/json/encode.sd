@@ -115,10 +115,10 @@ writeF64 :: method (w: *Writer, n: f64) {
 
     buffer: [32]u8;
     for precision in 15..18 {
-        sprintf(buffer.data, xx "%.*g", precision, n);
-        if strtod(buffer.data, null) == n { break; }
+        sprintf(buffer.data, "%.*g", precision, n);
+        if strtod(c.string{buffer.data}, null) == n { break; }
     }
-    w.sb.addString(fromCString(buffer.data));
+    w.sb.addString(c.string{buffer.data}.toString());
 }
 
 @private
@@ -130,10 +130,10 @@ writeF32 :: method (w: *Writer, n: f32) {
 
     buffer: [32]u8;
     for precision in 6..10 {
-        sprintf(buffer.data, xx "%.*g", precision, n as f64);
-        if strtod(buffer.data, null) as f32 == n { break; }
+        sprintf(buffer.data, "%.*g", precision, n as f64);
+        if strtod(c.string{buffer.data}, null) as f32 == n { break; }
     }
-    w.sb.addString(fromCString(buffer.data));
+    w.sb.addString(c.string{buffer.data}.toString());
 }
 
 @private

@@ -1,0 +1,8 @@
+// expect-error: Make one with .toCString()
+// A string isn't a c.string, as its bytes don't have to end with a 0. Only a literal is made into one
+use c;
+
+main :: () {
+    name := "Ada";
+    puts(name);
+}

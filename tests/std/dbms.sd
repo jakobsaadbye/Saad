@@ -24,18 +24,18 @@ Post :: struct {
 // The table of the fake database. Null is NULL
 Table :: struct {
     columns: []string;
-    cells:   []*u8;      // Row after row
+    cells:   []c.string;      // Row after row
     lastSql: string;
     lastParams: [..]string;
 }
 
-fakeExecute :: (conn: *void, sql: *u8, params: []*u8, err: *string) -> *void {
+fakeExecute :: (conn: *void, sql: c.string, params: []c.string, err: *string) -> *void {
     table := conn as *Table;
-    table.lastSql = fromCString(sql).copy();
+    table.lastSql = sql.toString().copy();
     table.lastParams.clear();
     for p in params {
-        if p == null { table.lastParams.add("NULL"); }
-        else         { table.lastParams.add(fromCString(p).copy()); }
+        if p.isNull() { table.lastParams.add("NULL"); }
+        else         { table.lastParams.add(p.toString().copy()); }
     }
     if table.lastSql == "fail" {
         *err = "ERROR: it failed";
@@ -45,18 +45,18 @@ fakeExecute :: (conn: *void, sql: *u8, params: []*u8, err: *string) -> *void {
 }
 fakeRowCount    :: (result: *void) -> i64 { t := result as *Table; return t.cells.count / t.columns.count; }
 fakeColumnCount :: (result: *void) -> i64 { return (result as *Table).columns.count; }
-fakeColumnName  :: (result: *void, column: i64) -> *u8 { return (result as *Table).columns[column].data; }
-fakeValue       :: (result: *void, row: i64, column: i64) -> *u8 { t := result as *Table; return t.cells[row * t.columns.count + column]; }
+fakeColumnName  :: (result: *void, column: i64) -> c.string { return c.string{(result as *Table).columns[column].data}; }
+fakeValue       :: (result: *void, row: i64, column: i64) -> c.string { t := result as *Table; return t.cells[row * t.columns.count + column]; }
 fakeAffected    :: (result: *void) -> i64 { return 3; }
 fakeFreeResult  :: (result: *void) {}
 fakeClose       :: (conn: *void) {}
 
 main :: () {
     columns := ["id", "title", "likes", "rating", "status", "author_id", "body_text", "title_upper", "extra"];
-    cells: [..]*u8;
-    for v in ["1", "Hello", "65535", "4.5", "published", "7", "First post", "IGNORED", "x"] { cells.add(v.data); }
-    for v in ["2", "Draft", "0", "-1", "0", "", "", "IGNORED", "y"] { cells.add(v.data); }
-    cells[14] = null; // author_id of row 2 is NULL
+    cells: [..]c.string;
+    for v in ["1", "Hello", "65535", "4.5", "published", "7", "First post", "IGNORED", "x"] { cells.add(c.string{v.data}); }
+    for v in ["2", "Draft", "0", "-1", "0", "", "", "IGNORED", "y"] { cells.add(c.string{v.data}); }
+    cells[14] = c.string{}; // author_id of row 2 is NULL
 
     table := Table{columns: columns, cells: cells.elements()};
 
@@ -114,15 +114,15 @@ main :: () {
     _, e3 := conn.exec("fail");
     assert(e3.message == "ERROR: it failed");
 
-    table.cells[2] = "65536".data;       // Too big for a u16
+    table.cells[2] = "65536";       // Too big for a u16
     _, e4 := conn.query<Post>("SELECT");
     assert(e4.message == "Row 1: likes: 65536 doesn't fit in a u16");
-    table.cells[2] = "65535".data;
+    table.cells[2] = "65535";
 
-    table.cells[4] = "deleted".data;
+    table.cells[4] = "deleted";
     _, e5 := conn.query<Post>("SELECT");
     assert(e5.message == "Row 1: status: 'deleted' is not a value of Status");
-    table.cells[4] = "Published".data;   // Case doesn't matter
+    table.cells[4] = "Published";   // Case doesn't matter
 
     _, e6 := conn.query<int>("SELECT");
     assert(e6.message == "Rows are read into structs, not into values of type int. Use queryOne for a single value");

@@ -176,11 +176,11 @@ writes them, which is what libpq gives and what SQLite can give too.
 ```odin
 Driver :: struct {
     name: string;
-    execute:     (conn: *void, sql: *u8, params: []*u8, err: *string) -> *void;  // a result, or null and err
+    execute:     (conn: *void, sql: c.string, params: []c.string, err: *string) -> *void;  // a result, or null and err
     rowCount:    (result: *void) -> i64;
     columnCount: (result: *void) -> i64;
-    columnName:  (result: *void, column: i64) -> *u8;
-    value:       (result: *void, row: i64, column: i64) -> *u8;  // null is NULL
+    columnName:  (result: *void, column: i64) -> c.string;
+    value:       (result: *void, row: i64, column: i64) -> c.string;  // c.string{} (isNull) is NULL
     affected:    (result: *void) -> i64;
     freeResult:  (result: *void);
     close:       (conn: *void);

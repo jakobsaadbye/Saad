@@ -11,7 +11,7 @@ use c;
 Golden :: "tests/db/model";
 
 main :: () {
-    conn, err := postgres.connect(fromCString(getenv(xx "SAAD_TEST_POSTGRES")));
+    conn, err := postgres.connect(getenv("SAAD_TEST_POSTGRES").toString());
     assert(err == null);
     shopsetup.create(&conn);
 

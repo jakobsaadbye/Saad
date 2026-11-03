@@ -78,6 +78,24 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.10.1 - 3. Nov 2026
+
+* A condition is a `bool`. A pointer isn't one anymore: `if p { }`, `while node { }`, `!p` and `assert(p)` are compile
+  errors, the same as for errors. Write `p != null` or `p == null`
+* `c.string`: the type of a string of C, a struct of the pointer to its bytes, passed to C like a `*u8`. The bindings
+  of `c`, `os.windows`, libpq and raylib take and give it where C has a `char *`, so `myFunction :: (str: c.string)` says
+  that it wants the 0 at the end. A string literal is one where one is wanted. It has `isNull()`, `length()`,
+  `toString()` and `free()`, and `s.toCString()` makes one of a string. Changed: `toCString` gave a `*u8`, and
+  `fromCString(p)` is now `c.string{p}.toString()`. `xx "text"` for C isn't needed anymore
+* `dbms.Driver` takes and gives `c.string`s
+
+```odin
+cs := name.toCString();
+DrawText(cs, 10, 10, 20, WHITE);
+cs.free();
+title := getenv("TITLE").toString();
+```
+
 ## Update v0.10.0 - 3. Nov 2026
 
 * Errors: `error`, a value that says what went wrong and where, with a stack trace. The caller decides: an error that

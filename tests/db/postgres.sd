@@ -31,7 +31,7 @@ run :: (conn: *dbms.Connection, sql: string) {
 }
 
 main :: () {
-    info := fromCString(getenv(xx "SAAD_TEST_POSTGRES"));
+    info := getenv("SAAD_TEST_POSTGRES").toString();
     if info.len == 0 {
         print("Set SAAD_TEST_POSTGRES to a connection string");
         exit(1);

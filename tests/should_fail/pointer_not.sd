@@ -1,0 +1,6 @@
+// expect-error: A pointer isn't a condition
+
+main :: () {
+    p: *int = null;
+    b := !p;
+}

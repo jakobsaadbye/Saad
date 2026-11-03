@@ -6,5 +6,5 @@ extern "C" {
     memset  :: (dest: *void, value: int, size: int) -> *void;
     memcpy  :: (dest: *void, src: *void, size: int) -> *void;
     memcmp  :: (a: *void, b: *void, size: i64) -> int;
-    strlen  :: (str: *u8) -> int;
+    strlen  :: (str: c.string) -> int;
 }

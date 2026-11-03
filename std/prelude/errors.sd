@@ -36,8 +36,8 @@ ErrorKind :: struct {
 
 // A place in the program: a function, its file and the line
 TraceFrame :: struct {
-    function: *u8;
-    file:     *u8;
+    function: c.string;
+    file:     c.string;
     line:     i64;
 }
 
@@ -81,7 +81,7 @@ traceThrow :: (function: *u8, file: *u8, line: i64) {
     err := thrownError;
     if err == null { return; }
     thrownError = null;
-    err.trace.add(TraceFrame{function, file, line});
+    err.trace.add(TraceFrame{c.string{function}, c.string{file}, line});
     thrownError = err;
 }
 
@@ -98,8 +98,8 @@ panicAssertion :: () {
 // For an index outside of the elements of an array, a slice, a list or a string
 panicIndexOutOfBounds :: (index: i64, count: i64) {
     buffer: [96]u8;
-    sprintf(buffer.data, xx "Index %lld is out of bounds, as there are %lld elements", index, count);
-    text := fromCString(buffer.data);
+    sprintf(buffer.data, "Index %lld is out of bounds, as there are %lld elements", index, count);
+    text := c.string{buffer.data}.toString();
     message: string;
     message.data = resizeMemory(null, null, text.len) as *u8;
     message.len  = text.len;
@@ -114,9 +114,9 @@ reportUncaught :: () {
     thrownError = null;
     kind := err.kind.name;
     if kind.len == 0 { kind = "error"; }
-    printf(xx "%.*s: %.*s\n", kind.len as i32, kind.data, err.message.len as i32, err.message.data);
+    printf("%.*s: %.*s\n", kind.len as i32, kind.data, err.message.len as i32, err.message.data);
     for frame in err.trace {
-        printf(xx "    at %s (%s:%lld)\n", frame.function, frame.file, frame.line);
+        printf("    at %s (%s:%lld)\n", frame.function.data, frame.file.data, frame.line);   // C varargs: the pointers
     }
     fflush(null);
     exit(1);

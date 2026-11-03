@@ -23,7 +23,7 @@ The rule: **an error that is taken is a value, and one that isn't is thrown.** A
 e.g `save :: () -> error`, throws it when it is called as a statement, `save();`, and gives it with `err := save();`.
 
 An error isn't a condition: `if err { }`, `!err` and `assert(err)` are compile errors, as they read the other way
-round. Compare it with `null`: `if err != null { }`.
+round. Compare it with `null`: `if err != null { }`. The same goes for any pointer, as a condition is a `bool`.
 
 The standard library gives errors: `dbms` (`dbms.DatabaseError`, `dbms.QueryError`, `dbms.NoLink`), `json.decode`,
 `json.decodeInto` and `json.parse` (`json.DecodeError`), and the file functions of `os`, `readFile`, `writeFile`,

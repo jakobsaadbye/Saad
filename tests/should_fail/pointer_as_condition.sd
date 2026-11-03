@@ -1,0 +1,7 @@
+// expect-error: A pointer isn't a condition
+
+main :: () {
+    x := 1;
+    p := &x;
+    if p { }
+}
