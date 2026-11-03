@@ -1960,6 +1960,56 @@ static int attribute_value_global(Lowerer *L, AstStructLiteral *value) {
     return global->index;
 }
 
+static int function_global(Lowerer *L, AstFunctionDefn *func_defn);
+static int thunk_global(Lowerer *L, AstFunctionDefn *target, int *argument_offsets, int *result_offsets);
+
+// Lays out values of the types like the members of a struct: their offsets, and the size of the block
+static int layout_values(Type **types, int count, int *offsets) {
+    int size = 0;
+    for (int i = 0; i < count; i++) {
+        int align = type_alignment(types[i]);
+        if (align < 1) align = 1;
+        size = (size + align - 1) / align * align;
+        offsets[i] = size;
+        size += type_storage_size(types[i]);
+    }
+    return (size + 7) / 8 * 8;
+}
+
+// The parameters, results, sizes and invoke() of an AttributedFunction
+static void write_function_values(Lowerer *L, IrGlobal *array, int at, AstFunctionDefn *func) {
+    int param_count  = func->parameters.count;
+    int result_count = func->lowered_return_params.count;   // Not a void result
+    Type **param_types  = calloc(param_count + 1, sizeof(Type *));
+    Type **result_types = calloc(result_count + 1, sizeof(Type *));
+    int *argument_offsets = calloc(param_count + 1, sizeof(int));
+    int *result_offsets   = calloc(result_count + 1, sizeof(int));
+    for (int i = 0; i < param_count; i++)  param_types[i]  = ((AstIdentifier *)da_get_deref(func->parameters, i))->type;
+    for (int i = 0; i < result_count; i++) result_types[i] = da_get_deref(func->return_types, i);
+    int arguments_size = layout_values(param_types, param_count, argument_offsets);
+    int results_size   = layout_values(result_types, result_count, result_offsets);
+
+    int value_size = runtime_size(L, "FunctionValue");
+    for (int kind = 0; kind < 2; kind++) {
+        int count = kind == 0 ? param_count : result_count;
+        if (count == 0) continue;
+        IrGlobal *values = ir_global_data(L->module, kind == 0 ? "parameters" : "results", NULL, count * value_size, 8, true);
+        for (int i = 0; i < count; i++) {
+            int v = i * value_size;
+            const char *name = kind == 0 ? ((AstIdentifier *)da_get_deref(func->parameters, i))->name : "";
+            write_string_field(L, values, v + runtime_offset(L, "FunctionValue", "name"), name);
+            write_pointer_field(values, v + runtime_offset(L, "FunctionValue", "type"), type_info_global(L, kind == 0 ? param_types[i] : result_types[i]));
+            write_int_bytes(&values->data[v + runtime_offset(L, "FunctionValue", "offset")], kind == 0 ? argument_offsets[i] : result_offsets[i], 8);
+        }
+        write_slice_field(array, at + runtime_offset(L, "AttributedFunction", kind == 0 ? "parameters" : "results"), values->index, count);
+    }
+    write_int_bytes(&array->data[at + runtime_offset(L, "AttributedFunction", "argumentsSize")], arguments_size, 8);
+    write_int_bytes(&array->data[at + runtime_offset(L, "AttributedFunction", "resultsSize")], results_size, 8);
+    write_pointer_field(array, at + runtime_offset(L, "AttributedFunction", "invoke"), thunk_global(L, func, argument_offsets, result_offsets));
+    free(param_types);
+    free(result_types);
+}
+
 // The slice of attributedFunctionList: an AttributedFunction for each function with attribute values. The functions are
 // compiled, as the program calls them through the list
 static void write_attributed_functions(Lowerer *L, IrGlobal *list) {
@@ -1984,6 +2034,8 @@ static void write_attributed_functions(Lowerer *L, IrGlobal *list) {
         AstFile *file = ident->head.file;
         write_string_field(L, array, at + runtime_offset(L, "AttributedFunction", "namespaceName"), file && file->ns ? file->ns->name : "");
         write_pointer_field(array, at + runtime_offset(L, "AttributedFunction", "function"), function_global(L, func));
+
+        write_function_values(L, array, at, func);
 
         int attribute_count = ident->attributes.count;
         IrGlobal *attributes = ir_global_data(L->module, "attributes", NULL, attribute_count * 16, 8, true);
@@ -3036,6 +3088,17 @@ typedef struct PendingFunctions {
 
 static PendingFunctions pending_functions; // Reset for every module
 
+// The invoke() of a function with attribute values (see AttributedFunction of runtime.sd): it reads the arguments from
+// a block, calls the function, and writes the results to a block
+typedef struct PendingThunk {
+    AstFunctionDefn *target;
+    int              global;
+    int             *argument_offsets;
+    int             *result_offsets;
+} PendingThunk;
+
+static IrArray(PendingThunk) pending_thunks;
+
 // The global of a function symbol. Saad functions get queued for lowering the first time they are referenced
 static int function_global(Lowerer *L, AstFunctionDefn *func_defn) {
     int global = ptr_map_get(&pending_functions.queued, func_defn);
@@ -3067,6 +3130,72 @@ static int function_global(Lowerer *L, AstFunctionDefn *func_defn) {
 
     ptr_map_put(&pending_functions.queued, func_defn, global);
     return global;
+}
+
+// The global of the invoke() of a function, which is lowered after the functions (lower_thunk)
+static int thunk_global(Lowerer *L, AstFunctionDefn *target, int *argument_offsets, int *result_offsets) {
+    function_global(L, target);
+    char name[300];
+    snprintf(name, sizeof(name), "invoke_%s", target->identifier ? target->identifier->name : "function");
+    char unique[320];
+    snprintf(unique, sizeof(unique), "%s", name);
+    for (int n = 2; ; n++) {
+        bool taken = false;
+        for (int i = 0; i < L->module->globals.count; i++) {
+            if (strcmp(L->module->globals.items[i]->name, unique) == 0) { taken = true; break; }
+        }
+        if (!taken) break;
+        snprintf(unique, sizeof(unique), "%s__%d", name, n);
+    }
+    IrGlobal *g = ir_global_new(L->module, IR_GLOBAL_EXTERN, unique); // Becomes a FUNCTION when lowered
+    g->is_saad = true;
+    PendingThunk thunk = { target, g->index, argument_offsets, result_offsets };
+    ir_array_push(pending_thunks, thunk);
+    return g->index;
+}
+
+// invoke(arguments: *u8, results: *u8): calls the target with the arguments of the block, and its out-pointers into the
+// block of the results. It returns the flag of the target, so what the target throws goes on
+static void lower_thunk(Lowerer *L, PendingThunk *thunk) {
+    AstFunctionDefn *target = thunk->target;
+    IrFunction *func = ir_function_new(L->module, L->module->globals.items[thunk->global]->name);
+    func->return_type = IR_I32;
+    L->func     = func;
+    L->ast_func = target;
+    L->loops.count = 0;
+    L->defers.count = 0;
+    L->tries.count = 0;
+    L->thread_block_slot = -1;
+    ptr_map_clear(&L->locals);
+
+    IrBlock *entry = create_block(L, "entry");
+    set_block(L, entry);
+    int arguments = ir_new_vreg(func, IR_PTR);
+    int results   = ir_new_vreg(func, IR_PTR);
+    ir_array_push(func->params, arguments);
+    ir_array_push(func->params, results);
+
+    int ret_count   = target->lowered_return_params.count;
+    int param_count = target->parameters.count;
+    IrCall *call = new_call(L, IR_CALLEE_DIRECT, function_global(L, target), IR_I32, ret_count + param_count);
+    for (int i = 0; i < ret_count; i++) {
+        call_add_arg(call, emit_ptr_add(L, results, emit_const(L, IR_I64, thunk->result_offsets[i])), false);
+    }
+    for (int i = 0; i < param_count; i++) {
+        AstIdentifier *param = resolve_override(da_get_deref(target->lowered_params, ret_count + i));
+        Type *type = param->type;
+        IrAddr addr = addr_vreg(arguments, thunk->argument_offsets[i]);
+        int value;
+        switch (classify_argument(type)) {
+        case ARG_SCALAR:                 value = emit_load(L, ir_type_of(type), addr); break;
+        case ARG_AGGREGATE_BY_VALUE:     value = emit_load(L, int_ir_type_of_size(type->size), addr); break;
+        default:                         value = emit_ptr_add(L, arguments, emit_const(L, IR_I64, thunk->argument_offsets[i])); break;
+        }
+        call_add_arg(call, value, false);
+    }
+    int threw = emit_call(L, call);
+    terminate_ret(L, threw);
+    ir_function_finalize(func);
 }
 
 static void lower_function(Lowerer *L, AstFunctionDefn *func_defn) {
@@ -3140,6 +3269,7 @@ IrModule *lower_program(Parser *parser, AstFile *main_file) {
     L->assert_filename_global = -1;
 
     pending_functions = (PendingFunctions){0};
+    pending_thunks    = (typeof(pending_thunks)){0};
 
     if (setjmp(L->on_error)) {
         return NULL;
@@ -3166,8 +3296,14 @@ IrModule *lower_program(Parser *parser, AstFile *main_file) {
     layout_thread_locals(L);
     function_global(L, ((TypeFunction *) main_ident->type)->node);
 
-    for (int i = 0; i < pending_functions.list.count; i++) {
-        lower_function(L, pending_functions.list.items[i]);
+    // A thunk can queue functions, and a function can queue thunks (by using attributedFunctions())
+    int next_function = 0, next_thunk = 0;
+    while (next_function < pending_functions.list.count || next_thunk < pending_thunks.count) {
+        if (next_function < pending_functions.list.count) {
+            lower_function(L, pending_functions.list.items[next_function++]);
+        } else {
+            lower_thunk(L, &pending_thunks.items[next_thunk++]);
+        }
     }
 
     return L->module;

@@ -22,6 +22,7 @@ std/
   os/           namespace os: files, environment variables, processes
     windows.sd      namespace os.windows: the Windows API (threads, Sleep, ...)
   thread/       namespace thread: threads, Mutex, Condition and WaitGroup, on Windows and Linux
+  web/          namespace web: endpoints, functions that are called at the url of their name with JSON
   vendor/       Bindings for libraries the standard library doesn't own
     raylib.sd       namespace raylib
   bytes.sd      namespace bytes: Buffer, bytes written at the end and read from the front
@@ -252,6 +253,52 @@ response = http.request("PUT", url, headers, body);
   what is kept for longer.
 * **Client:** `get`, `post` and `request`, a connection for each request. The texts of a response are freed with
   `response.free()`. Only `http://`: put the server behind a proxy, e.g Caddy or nginx, for https.
+
+## web
+
+Endpoints: a backend whose API is its functions. A function with `@web.endpoint` is called at the url of its name,
+with its parameters from the JSON of the request, and its result is the JSON of the response.
+
+```odin
+import web;
+
+Session :: struct {
+    @embed base: web.Session;    // request, response and app
+    db: *blog.Db;                // What the program wants in each session
+}
+
+@web.endpoint(.get)
+getPosts :: (session: *Session, authorId: int) -> [..]Post { ... }
+
+@web.endpoint                     // POST
+createPost :: (session: *Session, post: Post) -> Post, error { ... }
+
+main :: () {
+    app := web.newApp<Session>("/v1");
+    app.onStart(openSession);     // Called with each new session, e.g to give it a database context
+    app.onFinish(closeSession);   // After the endpoint, also when it threw
+    app.listenAndServe(":8080");
+}
+```
+
+```
+GET  /v1/getPosts?authorId=2                         -> [{"id": 1, ...}]
+POST /v1/createPost   {"post": {"title": "Hi"}}      -> {"id": 3, "title": "Hi"}
+```
+
+* The url is the prefix and the name of the function, so the names of endpoints must be unique: `newApp` gives an
+  error when two are the same, or when an endpoint doesn't take the session as its first parameter.
+* POST takes the parameters as the members of a JSON object in the body, and GET from the query (a string as it is,
+  other types as JSON, e.g `?ids=[1,2]`). A parameter that isn't there is a 400, unless it is an optional (`?int`).
+* The result is JSON: the value, an array of the values when there are more, or `null`. A given or thrown error is
+  `{"error": message, "kind": kind}`, with the status of its kind: `web.BadRequest` 400, `web.Unauthorized` 401,
+  `web.Forbidden` 403, `web.NotFound` 404, `web.Conflict` 409, others 500. A `Panic` is a 500 that doesn't tell what
+  went wrong.
+* The session is new for each request, and freed with it, as are the texts of the request. Allocate a result that is
+  freed with the request with `session.request.allocator`, e.g `result.allocator = &session.request.allocator;`.
+* `app.server` is the `http.Server`, e.g `app.server.workers` or `app.server.shutdown()`.
+* It is built on `attributedFunctions()` and their `invoke()` (see `docs/reflection.md`). A TypeScript client can be
+  made from the same: the names, parameters and results of the endpoints.
 
 ## thread
 

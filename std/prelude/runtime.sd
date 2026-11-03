@@ -216,6 +216,21 @@ AttributedFunction :: struct {
     namespaceName: string;  // Of its file, e.g blog. Empty when the file has none
     function:      *void;   // Its address. Cast it to its function type to call it
     attributes:    []any;
+
+    // Calling it without knowing its type, e.g for a router: the arguments are in a block laid out like a struct of
+    // its parameters, and invoke() stores the results in a block laid out like a struct of its results
+    parameters:    []FunctionValue;
+    results:       []FunctionValue;
+    argumentsSize: int;
+    resultsSize:   int;
+    invoke:        (arguments: *u8, results: *u8);   // Throws what the function throws
+}
+
+// A parameter or a result of a function, and where it is in the block of the arguments or the results
+FunctionValue :: struct {
+    name:   string;   // Empty for a result
+    type:   *Type;
+    offset: int;
 }
 
 // Every function of the program with attribute values. The compiler writes the list, and compiles the functions on it

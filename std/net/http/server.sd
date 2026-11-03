@@ -31,6 +31,7 @@ Request :: struct {
     remote:  net.Addr;          // Who sent it
     pattern: string;            // The pattern of the Router that matched, e.g GET /posts/{id}
     values:  [..]Header;        // The values of the {names} of the pattern
+    server:  *Server;           // That answers it
 
     arena:     mem.Arena;       // The memory of the request, freed when the handler returned
     allocator: Allocator;
@@ -367,6 +368,7 @@ serveConn :: method (server: *Server, conn: *net.Conn) {
         r.allocator = r.arena.allocator();
         r.headers.allocator = &r.allocator;
         r.remote = conn.remote;
+        r.server = server;
 
         w.body.clear();
         noHeaders: [..]Header;

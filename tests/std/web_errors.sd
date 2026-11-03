@@ -1,0 +1,21 @@
+// web.newApp tells what is wrong with an endpoint, e.g a first parameter that isn't the session
+
+import web;
+
+Session :: struct {
+    @embed base: web.Session;
+}
+
+@web.endpoint
+wrong :: (id: int) -> int { return id; }
+
+NoBase :: struct { id: int; }
+
+main :: () {
+    app, err := web.newApp<Session>("/v1");
+    assert(app == null && err != null);
+    assert(err.message == "The endpoint wrong must take a *Session as its first parameter");
+
+    _, err = web.newApp<NoBase>("/v1");
+    assert(err != null && err.message.startsWith("The session NoBase has no web.Session"));
+}
