@@ -3,7 +3,7 @@
 // foreign keys are methods like post.author() and author.posts(), which queries can use too, e.g p.author().name.
 // See README.md for how to run it, and docs/dbms.md for all of dbms
 //
-//     saad run examples/blog/main.sd -- "host=localhost dbname=postgres user=postgres"
+//     saad run examples/blog/tour.sd -- "host=localhost dbname=postgres user=postgres"
 
 import dbms;
 import dbms.postgres;
@@ -32,7 +32,7 @@ main :: () {
     db := database.open(&conn);
 
     // Every run starts from an empty blog
-    _ := conn.exec("TRUNCATE saad_blog.authors, saad_blog.posts, saad_blog.comments, saad_blog.post_tags RESTART IDENTITY");
+    _ := conn.exec("TRUNCATE saad_blog.authors, saad_blog.posts, saad_blog.comments, saad_blog.post_tags RESTART IDENTITY CASCADE");
 
     //
     // 1. Creating rows. create() gives a new row with the defaults of the table, e.g status is .draft. Nothing is
@@ -251,7 +251,7 @@ connect :: () -> dbms.Connection {
     connection, found := os.getEnv("SAAD_BLOG_POSTGRES");
     if args.count > 1 { connection = args[1]; found = true; }
     if !found {
-        print("Usage: saad run examples/blog/main.sd -- \"host=localhost dbname=postgres user=postgres\"");
+        print("Usage: saad run examples/blog/tour.sd -- \"host=localhost dbname=postgres user=postgres\"");
         os.exit(2);
     }
     conn, err := postgres.connect(connection);

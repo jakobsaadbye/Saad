@@ -1,0 +1,40 @@
+namespace api;
+
+import web;
+import fmt;
+import random;
+use entities;
+
+// A new reader, with the token to log in with
+@web.endpoint
+register :: (session: *Session, name: string, email: string) -> Registration {
+    if email.indexOf("@") < 0 { throw newError(fmt.sprint("'%' isn't an email", email), web.BadRequest); }
+    if session.db.readers.where(r => r.email == email).exists() {
+        throw newError("A reader has that email", web.Conflict);
+    }
+    reader := session.db.readers.create();
+    reader.name  = name;
+    reader.email = email;
+    reader.token = newToken();
+    session.db.saveChanges();
+    return Registration{reader.id, reader.name, reader.token};
+}
+
+// The reader who is logged in, and what they did
+@web.endpoint(.get)
+me :: (session: *Session) -> Profile {
+    id := loggedIn(session).id;
+    profile := session.db.readers.where(r => r.id == id).select(r => Profile{
+        name: r.name, email: r.email,
+        likes: r.likes().count(), bookmarks: r.bookmarks().count(), following: r.follows().count(),
+    }).first();
+    return *profile;
+}
+
+// 32 hex digits
+newToken :: () -> string {
+    digits := "0123456789abcdef";
+    sb := fmt.newStringBuilder(32);
+    for i in 0..32 { sb.addChar(digits[random.between(0, 15)]); }
+    return sb.toString();
+}

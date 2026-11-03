@@ -1,0 +1,111 @@
+namespace api;
+
+import web;
+import fmt;
+import time;
+use entities;
+
+// The published posts, newest first, 10 a page. Narrowed to a category or a tag when they are given
+@web.endpoint(.get)
+listPosts :: (session: *Session, category: ?string, tag: ?string, page: ?int) -> [..]PostSummary {
+    query := session.db.posts.where(p => p.status == .published);
+    if category.hasValue() {
+        slug := category ?? "";
+        query = query.where(p => p.category().slug == slug);
+    }
+    if tag.hasValue() {
+        name := tag ?? "";
+        query = query.where(p => p.postTags().where(t => t.tag == name).exists());
+    }
+    skip := ((page ?? 1) - 1) * 10;
+    return query
+        .orderByDescending(p => p.publishedAt)
+        .offset(skip)
+        .limit(10)
+        .select(p => PostSummary{
+            slug: p.slug, title: p.title, author: p.author().name, category: p.category().name, views: p.views,
+            likes: p.likes().count(), comments: p.comments().count(),
+        })
+        .all();
+}
+
+// A post with its tags and comments. Reading it counts a view
+@web.endpoint(.get)
+getPost :: (session: *Session, slug: string) -> PostDetail {
+    post := publishedPost(session, slug);
+    post.views += 1;
+    session.db.saveChanges();   // Only the views changed, so only they are written
+
+    author := post.author();
+    category := post.category();
+    detail := PostDetail{slug: post.slug, title: post.title, body: post.body, author: author.name, views: post.views};
+    detail.category = category?.name ?? "";
+    detail.likes    = post.likes().count();
+    detail.tags     = post.postTags().orderBy(t => t.tag).select(t => t.tag).all();
+    detail.comments = post.comments()
+        .orderBy(c => c.id)
+        .select(c => CommentView{id: c.id, author: c.authorName, body: c.body})
+        .all();
+    return detail;
+}
+
+// A draft by the author who is logged in
+@web.endpoint
+createPost :: (session: *Session, title: string, slug: string, body: string, category: ?string, tags: []string) -> PostSummary {
+    author := loggedInAuthor(session);
+    if session.db.posts.where(p => p.slug == slug).exists() {
+        throw newError(fmt.sprint("The slug '%' is taken", slug), web.Conflict);
+    }
+
+    post := session.db.posts.create();
+    post.authorId = author.id;
+    post.title    = title;
+    post.slug     = slug;
+    post.body     = body;
+    categoryName := "";
+    if category.hasValue() {
+        categorySlug := category ?? "";
+        found := session.db.categories.where(c => c.slug == categorySlug).first();
+        if found == null { throw newError(fmt.sprint("No category is '%'", categorySlug), web.BadRequest); }
+        post.categoryId = found.id;
+        categoryName = found.name;
+    }
+    session.db.saveChanges();   // Gives the post its id
+
+    for name in tags {
+        tagged := session.db.postTags.create();
+        tagged.postId = post.id;
+        tagged.tag    = name;
+    }
+    session.db.saveChanges();
+    return PostSummary{slug: post.slug, title: post.title, author: author.name, category: categoryName};
+}
+
+// Publishes a draft of the author who is logged in
+@web.endpoint
+publishPost :: (session: *Session, slug: string) -> PostSummary {
+    author := loggedInAuthor(session);
+    post := session.db.posts.where(p => p.slug == slug && p.authorId == author.id).first();
+    if post == null { throw newError(fmt.sprint("You have no post '%'", slug), web.NotFound); }
+    post.status      = .published;
+    post.publishedAt = time.now();
+    session.db.saveChanges();
+    category := post.category();
+    return PostSummary{slug: post.slug, title: post.title, author: author.name, category: category?.name ?? ""};
+}
+
+// The posts of the authors the reader follows. Plain SQL, for a join that the tables can't say
+@web.endpoint(.get)
+feed :: (session: *Session) -> [..]PostSummary {
+    reader := loggedIn(session);
+    return session.conn.query<PostSummary>("
+        SELECT p.slug, p.title, a.name AS author, coalesce(c.name, '') AS category, p.views,
+               (SELECT count(*) FROM saad_blog.likes l WHERE l.post_id = p.id) AS likes,
+               (SELECT count(*) FROM saad_blog.comments m WHERE m.post_id = p.id) AS comments
+        FROM saad_blog.posts p
+        JOIN saad_blog.follows f ON f.author_id = p.author_id AND f.reader_id = $1
+        JOIN saad_blog.authors a ON a.id = p.author_id
+        LEFT JOIN saad_blog.categories c ON c.id = p.category_id
+        WHERE p.status = 'published'
+        ORDER BY p.published_at DESC", reader.id);
+}

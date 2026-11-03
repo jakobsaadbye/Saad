@@ -1,0 +1,34 @@
+// The blog as a backend: the endpoints of api/ at http://localhost:8080/v1/<name>, on Postgres
+//
+//     saad run examples/blog/server.sd -- "host=localhost dbname=postgres user=postgres" :8080
+//
+// It adds the authors, categories and posts of api/seed.sd when the blog is empty. See README.md
+
+import api;
+import dbms.postgres;
+import database;
+import os;
+use fmt;
+
+main :: () {
+    args := os.args();
+    if args.count < 2 {
+        print("Usage: saad run examples/blog/server.sd -- \"host=localhost dbname=postgres user=postgres\" [:8080]");
+        os.exit(2);
+    }
+    connectionString := args[1];
+    address := ":8080";
+    if args.count > 2 { address = args[2]; }
+
+    // An empty blog gets the posts to start with
+    conn := postgres.connect(connectionString);
+    db := database.open(&conn);
+    if db.authors.count() == 0 { api.seed(&db); }
+    conn.close();
+
+    app := api.newApp(connectionString);
+    host := address;
+    if host.startsWith(":") { host = sprint("localhost%", address); }
+    print("The blog listens at http://%/v1, e.g GET http://%/v1/listPosts", host, host);
+    app.listenAndServe(address);
+}

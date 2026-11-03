@@ -1,4 +1,4 @@
-// std/dbms/postgres/generate.sd writes tests/db/model from the schema of tests/db/shop/setup.sd.
+// postgres.EntityGenerator writes tests/db/model from the schema of tests/db/shop/setup.sd.
 // After a change of the generator, SAAD_UPDATE_GOLDEN=1 tools/linux/dbtests.sh writes the files again
 
 import dbms;
@@ -15,17 +15,17 @@ main :: () {
     assert(err == null);
     shopsetup.create(&conn);
 
-    options := postgres.GenerateOptions{schema: "saad_shop"};
-    assert(options.entities == "entities" && options.database == "database"); // The default namespaces
+    generator := postgres.EntityGenerator{schema: "saad_shop", folder: Golden};
+    assert(generator.entities == "entities" && generator.database == "database"); // The default namespaces
 
-    files, err2 := postgres.generate(&conn, options);
+    files, err2 := generator.generate(&conn);
     assert(err2 == null);
     names := files.map((f: postgres.GeneratedFile) -> string { return f.name; });
     assert(sprint("%", names) == "[\"entity/order_status.sd\", \"entity/role.sd\", \"entity/category.sd\", \"entity/order_item.sd\", \"entity/order.sd\", \"entity/user.sd\", \"database.sd\"]");
 
     _, update := os.getEnv("SAAD_UPDATE_GOLDEN");
     if update {
-        _, e := postgres.writeFiles(Golden, files);
+        _, e := generator.write(files);
         assert(e == null);
         print("Wrote %", Golden);
         return;
@@ -44,21 +44,38 @@ main :: () {
     // Writing into a folder: made when it isn't there. A later run removes the files of tables that are gone, but not
     // files written by hand
     folder := "tests/db/build/generated";
+    generator.folder = folder;
     for file in files { _ := os.removeFile(sprint("%/%", folder, file.name)); } // From an earlier run, if there was one
-    _, e1 := postgres.writeFiles(folder, files);
+    _, e1 := generator.write(files);
     assert(e1 == null);
     assert(os.fileExists(sprint("%/entity/category.sd", folder)));
     assert(os.writeFile(sprint("%/entity/mine.sd", folder), "namespace entities;\n") == null);
 
     fewer := files.filter(f => f.name != "entity/category.sd");
-    removed, e2 := postgres.writeFiles(folder, fewer);
+    removed, e2 := generator.write(fewer);
     assert(e2 == null && removed.count == 1 && removed[0] == "entity/category.sd");
     assert(!os.fileExists(sprint("%/entity/category.sd", folder)) && os.fileExists(sprint("%/entity/mine.sd", folder)));
     os.removeFile(sprint("%/entity/mine.sd", folder));
 
     // A schema that doesn't exist has only a database.sd, with no tables but the context
-    empty, err3 := postgres.generate(&conn, postgres.GenerateOptions{schema: "no_such_schema"});
+    nothing := postgres.EntityGenerator{schema: "no_such_schema"};
+    empty, err3 := nothing.generate(&conn);
     assert(err3 == null && empty.count == 1 && empty[0].code.indexOf("Database :: struct {\n    @embed context: *dbms.Context;\n}") >= 0);
+
+    // Names of your own, and tables that are left out
+    renamed := postgres.EntityGenerator{schema: "saad_shop"};
+    renamed.typeNames["users"] = "Customer";
+    renamed.typeNames["order_status"] = "OrderState";
+    renamed.relationNames["orders.user"] = "buyer";
+    renamed.skip.add("categories");
+    other, err4 := renamed.generate(&conn);
+    assert(err4 == null && other.count == 6);
+    code := "";
+    for file in other { code = sprint("%%", code, file.code); }
+    assert(code.indexOf("Customer :: struct {") >= 0 && code.indexOf("User :: struct") < 0);
+    assert(code.indexOf("OrderState :: enum") >= 0 && code.indexOf("status: OrderState") >= 0);
+    assert(code.indexOf("buyer :: method () -> (*Customer, error)") >= 0);
+    assert(code.indexOf("Category") < 0 && code.indexOf("categories") < 0);
 
     conn.close();
     print("generate ok");

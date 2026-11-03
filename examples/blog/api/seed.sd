@@ -1,0 +1,79 @@
+namespace api;
+
+import database;
+import time;
+use entities;
+
+// The authors, categories, posts and series that the blog starts with
+seed :: (db: *database.Database) {
+    ada := db.authors.create();
+    ada.name  = "Ada Lovelace";
+    ada.email = "ada@example.com";
+    grace := db.authors.create();
+    grace.name  = "Grace Hopper";
+    grace.email = "grace@example.com";
+
+    history := category(db, "History", "history");
+    math := category(db, "Math", "math");
+    programming := category(db, "Programming", "programming");
+    db.saveChanges();
+
+    engine := post(db, ada.id, history.id, "Notes on the Analytical Engine", "analytical-engine", time.date(2026, 10, 1), 120);
+    numbers := post(db, ada.id, math.id, "Computing Bernoulli numbers", "bernoulli", time.date(2026, 10, 5), 80);
+    bug := post(db, grace.id, history.id, "The first actual bug", "first-bug", time.date(2026, 10, 10), 210);
+    compilers := post(db, grace.id, programming.id, "Why we need compilers", "compilers", time.date(2026, 10, 15), 300);
+    draft := db.posts.create();
+    draft.authorId = grace.id;
+    draft.title    = "A language for business";
+    draft.slug     = "cobol";
+    db.saveChanges();
+
+    tag(db, engine.id, "history");
+    tag(db, engine.id, "machines");
+    tag(db, numbers.id, "math");
+    tag(db, bug.id, "history");
+    tag(db, compilers.id, "programming");
+
+    series := db.series.create();
+    series.authorId    = grace.id;
+    series.title       = "Programming, from the start";
+    series.slug        = "from-the-start";
+    series.description = "How programs went from bugs to compilers";
+    db.saveChanges();
+    part(db, series.id, bug.id, 1);
+    part(db, series.id, compilers.id, 2);
+    db.saveChanges();
+}
+
+category :: (db: *database.Database, name: string, slug: string) -> *Category {
+    c := db.categories.create();
+    c.name = name;
+    c.slug = slug;
+    return c;
+}
+
+post :: (db: *database.Database, authorId: i64, categoryId: i64, title: string, slug: string, published: time.Time, views: i32) -> *Post {
+    p := db.posts.create();
+    p.authorId    = authorId;
+    p.categoryId  = categoryId;
+    p.title       = title;
+    p.slug        = slug;
+    p.body        = title;   // Short, for the example
+    p.status      = .published;
+    p.publishedAt = published;
+    p.views       = views;
+    return p;
+}
+
+tag :: (db: *database.Database, postId: i64, name: string) {
+    t := db.postTags.create();
+    t.postId = postId;
+    t.tag    = name;
+}
+
+part :: (db: *database.Database, seriesId: i64, postId: i64, position: i32) {
+    p := db.seriesPosts.create();
+    p.seriesId = seriesId;
+    p.postId   = postId;
+    p.position = position;
+}

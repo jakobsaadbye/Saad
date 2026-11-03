@@ -78,6 +78,29 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.13.3 - 3. Nov 2026
+
+* The generator of `dbms` is a library: `postgres.EntityGenerator`, which a project calls from a `generate.sd` of its
+  own, instead of the program `std/dbms/tools/generate.sd`, which is gone. It takes the connection string, folder,
+  schema and namespaces, and names of your own: `typeNames` for the struct of a table or an enum, `relationNames` for a
+  relation method (by `table.method`), and `skip` for tables that are left out
+* The generated files say in their first line that they are generated, and from which schema. A relation method has
+  the name of its foreign key as its comment, and `dbLink` has none
+
+```odin
+generator := postgres.EntityGenerator{connectionString: "host=localhost dbname=shop", folder: "db"};
+generator.typeNames["people"] = "Person";
+generator.run();
+```
+
+## Update v0.13.2 - 3. Nov 2026
+
+* `examples/blog` is a backend: 13 tables, endpoints with `web` for posts, comments, likes, follows, bookmarks, series,
+  moderation and a newsletter, a pool of connections, and readers who log in with a token. `demo.sd` calls it over
+  HTTP, and `tour.sd` is the tour of `dbms` that `main.sd` was
+* A GET parameter of `web` that is a `?string` is taken as it is, like a `string`
+* The generator keeps `series` as it is, instead of `Sery`
+
 ## Update v0.13.1 - 3. Nov 2026
 
 * The allocator of the thread: a null allocator, e.g of `new(T)`, a string, `fmt.sprint`, a list, `json` or `dbms`,

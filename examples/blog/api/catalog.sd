@@ -1,0 +1,53 @@
+namespace api;
+
+import web;
+import fmt;
+use entities;
+
+// Categories, series, the newsletter and the numbers of the authors
+
+@web.endpoint(.get)
+listCategories :: (session: *Session) -> [..]CategoryView {
+    return session.db.categories
+        .orderBy(c => c.name)
+        .select(c => CategoryView{name: c.name, slug: c.slug, posts: c.posts().where(p => p.status == .published).count()})
+        .all();
+}
+
+// A series and its parts, in order
+@web.endpoint(.get)
+getSeries :: (session: *Session, slug: string) -> SeriesView {
+    series := session.db.series.where(s => s.slug == slug).first();
+    if series == null { throw newError(fmt.sprint("No series has the slug '%'", slug), web.NotFound); }
+    view := SeriesView{title: series.title, description: series.description, author: series.author().name};
+    view.parts = series.seriesPosts()
+        .orderBy(s => s.position)
+        .select(s => SeriesPart{position: s.position, slug: s.post().slug, title: s.post().title})
+        .all();
+    return view;
+}
+
+@web.endpoint
+subscribe :: (session: *Session, email: string) -> string {
+    if email.indexOf("@") < 0 { throw newError(fmt.sprint("'%' isn't an email", email), web.BadRequest); }
+    if session.db.subscribers.where(s => s.email == email).exists() {
+        throw newError("That email is subscribed already", web.Conflict);
+    }
+    subscriber := session.db.subscribers.create();
+    subscriber.email = email;
+    session.db.saveChanges();
+    return "Check your inbox to confirm";
+}
+
+@web.endpoint(.get)
+authorStats :: (session: *Session) -> [..]AuthorStats {
+    return session.db.authors
+        .orderBy(a => a.name)
+        .select(a => AuthorStats{
+            name:      a.name,
+            posts:     a.posts().where(p => p.status == .published).count(),
+            views:     a.posts().sum(p => p.views),
+            followers: a.follows().count(),
+        })
+        .all();
+}

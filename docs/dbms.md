@@ -38,13 +38,14 @@ Status: steps 1 to 5 of the plan below are done: `dbms`, `dbms.postgres`, rows i
 allocators, `dbms.Table<T>`, the generator that writes the tables of a database as Saad, queries with lambdas, and
 saving changes.
 
-`examples/blog` is a whole program: a schema, the code the generator writes of it, and an app that creates,
-queries, changes and removes rows. With the generator, the program above is:
+`examples/blog` is a whole program: a backend of 13 tables with `web` endpoints, the code the generator writes of its
+schema, a client that calls it, and a tour of `dbms` on its own (`tour.sd`). See `examples/blog/README.md`. With the
+generator, the program above is:
 
 ```odin
 import dbms;
 import dbms.postgres;
-import database;          // written by std/dbms/tools/generate.sd
+import database;          // written by postgres.EntityGenerator
 use entities;             // the rows, e.g User
 
 main :: () {
@@ -180,7 +181,7 @@ starts.
 * `tests/db/generate.sd` checks that the generator writes the files of `tests/db/model` from the schema of
   `tests/db/shop/setup.sd`, and that a later run removes the files of tables that are gone. `tests/db/shop_tables.sd`
   uses those files on the database. After a change of the generator, `SAAD_UPDATE_GOLDEN=1 tools/linux/dbtests.sh`
-  writes them again. `dbtests.sh` also runs `std/dbms/tools/generate.sd` itself and compares what it writes.
+  writes them again. It also checks the names of `typeNames`, `relationNames` and `skip`.
 * `tests/std/dbms.sd` tests `dbms` with a driver written in the test itself. It needs no database and runs with
   the other tests (`tools/linux/runtests.sh`).
 * `tests/db/*.sd` need Postgres. `tools/linux/dbtests.sh` makes a throwaway server in a temporary folder (with
@@ -276,12 +277,24 @@ items := dbms.table<OrderItem>(context, "order_items");    // no key of one colu
 
 #### The generator
 
-A Saad program reads the tables from `information_schema` and the enums from `pg_enum`, and writes plain Saad files
-into a folder of the project, e.g `db`:
+`postgres.EntityGenerator` reads the tables from `information_schema` and the enums from `pg_enum`, and writes plain
+Saad files into a folder of the project, e.g `db`. A project calls it from a program of its own, e.g `generate.sd`:
+
+```odin
+import dbms.postgres;
+
+main :: () {
+    generator := postgres.EntityGenerator{connectionString: "host=localhost dbname=shop user=postgres", folder: "db"};
+    generator.schema = "sales";                           // public when it isn't set
+    generator.typeNames["people"] = "Person";             // The struct of a table, or an enum, by its name
+    generator.relationNames["orders.user"] = "buyer";     // A method of a relation, by table.method
+    generator.skip.add("schema_migrations");              // A table that is left out
+    report := generator.run();                            // report.written and report.removed
+}
+```
 
 ```
-saad run std/dbms/tools/generate.sd -- "host=localhost dbname=shop user=postgres" db
-saad run std/dbms/tools/generate.sd -- "host=localhost dbname=shop user=postgres" sales/db sales
+saad run generate.sd
 ```
 
 ```
@@ -290,10 +303,10 @@ db/entity/role.sd      an enum                                           namespa
 db/database.sd         the types of the tables, Database and open       namespace database
 ```
 
-The arguments are the connection string, the folder, the schema (`public` when it is left out), and the namespaces of
-the rows (`entities`) and of `database.sd` (`database`). `saad run` runs the program in the folder it is called from,
-so the folder is where you are. The same is a function too: `postgres.generate(&conn, postgres.GenerateOptions{})`
-gives the files, and `postgres.writeFiles(folder, files)` writes them. `tests/db/model` has all the files of a schema.
+The namespaces are `entities` for the rows and `database` for `database.sd`, unless `generator.entities` and
+`generator.database` say otherwise. The folder is relative to where the program runs. `generator.generate(&conn)` gives
+the files without writing them, and `generator.write(files)` writes them. `tests/db/model` has all the files of a
+schema, and `examples/blog/generate.sd` is the program of the blog.
 
 The rows and enums are all that is in the namespace `entities`, so `use entities;` brings in only them:
 
@@ -301,7 +314,6 @@ The rows and enums are all that is in the namespace `entities`, so `use entities
 // db/entity/user.sd
 namespace entities;
 
-// A row of users
 User :: struct {
     id:        i64;
     name:      string;
@@ -381,7 +393,8 @@ err2 := db.saveChanges();
 * A table with a key of one column is a `dbms.KeyedTable`, typed by its key. Others are a `dbms.Table`.
 * Names: the table `order_items` is the row `OrderItem` in `entity/order_item.sd` (most English plurals become
   singular), the table type `OrderItemsTable` and the member `orderItems` of `Database`.
-* Every file starts with `// Made by std/dbms/tools/generate.sd`, and `database.sd` lists the files. Run it again when
+* Every file starts with `// Generated by dbms.postgres.EntityGenerator`, and `database.sd` lists the files. A
+  relation method has the name of its foreign key as its comment, e.g `// posts_author_id_fkey`. Run it again when
   the database changes: the files of tables and enums that are gone are removed, but files you wrote yourself in the
   folder are left alone. Make the files again instead of changing them.
 * Building a program needs no database: a change of the database is a diff of these files.
@@ -499,15 +512,15 @@ Post :: struct {
     ...
     authorId: i64;
 
-    @Hidden dbLink: dbms.Link;   // The database it came from. Not a column, and fmt and json leave it out
+    @Hidden dbLink: dbms.Link;
 
-    // The row of authors that authorId refers to, or null
-    author :: method () -> (*Author, string) { ... }
+    // posts_author_id_fkey
+    author :: method () -> (*Author, error) { ... }
 }
 
 Author :: struct {
     ...
-    // The rows of posts whose author_id is the id of this one, as a query
+    // posts_author_id_fkey
     posts :: method () -> dbms.Query<Post> { ... }
 }
 ```
