@@ -1,4 +1,4 @@
-// expect-error: Struct members take @embed and the values of attribute structs, not @private, @deprecated or @attribute
+// expect-error: Struct members take @embed and the values of attribute structs, not @private, @deprecated, @attribute or @threadLocal
 
 Row :: struct {
     @private

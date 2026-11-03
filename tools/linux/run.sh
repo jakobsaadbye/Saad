@@ -56,7 +56,7 @@ if nm "$OBJECT" 2>/dev/null | grep -q ' U ms_PQ'; then
     fi
     EXTRA="$PQ_O -lpq"
 fi
-gcc -no-pie -z noexecstack "$OBJECT" "$SHIM_O" $EXTRA -o "$TMP/program" -lm
+gcc -no-pie -z noexecstack "$OBJECT" "$SHIM_O" $EXTRA -o "$TMP/program" -lm -lpthread
 
 set +e
 timeout 10 "$TMP/program" "${@:2}"

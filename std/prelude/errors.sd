@@ -72,8 +72,9 @@ panic :: (message: string) {
 // For the compiler: the error that is being thrown, and the frames of its trace
 //
 
-// The error that is being thrown, or null. After a call, the compiler goes to the catch, or returns, while it isn't null
-thrownError: error;
+// The error that is being thrown, or null. After a call, the compiler goes to the catch, or returns, while it isn't null.
+// Each thread has its own
+@threadLocal thrownError: error;
 
 // Adds a frame to the trace of the error that is being thrown. It is taken out of thrownError meanwhile, as the calls
 // here would see it and leave
@@ -120,4 +121,58 @@ reportUncaught :: () {
     }
     fflush(null);
     exit(1);
+}
+
+//
+// The block of the @threadLocal globals of a thread, e.g thrownError. The compiler lays them out in one block, and each
+// thread gets a copy of their start values the first time it runs a function that uses one. A function finds the block
+// of its thread when it starts (see thread_block in ir_lower.c). The block is freed when the thread ends.
+//
+// These functions only call C, as the compiler calls them before the block is there. The compiler sets the globals
+//
+
+#if OS == .windows {
+    extern "kernel32.dll" {
+        FlsAlloc    :: (callback: (data: *void)) -> u32;   // Calls callback with the value of a thread when it ends
+        FlsGetValue :: (index: u32) -> *void;
+        FlsSetValue :: (index: u32, data: *void) -> bool;
+    }
+} else {
+    extern "C" {
+        pthread_key_create  :: (key: *u32, destructor: (data: *void)) -> i32;
+        pthread_getspecific :: (key: u32) -> *void;
+        pthread_setspecific :: (key: u32, data: *void) -> i32;
+    }
+}
+
+threadBlockKey:      u32;
+threadBlockTemplate: *u8;   // The start values of the @threadLocal globals
+threadBlockSize:     i64;
+
+// Called by main before anything else
+startThreadBlocks :: (template: *u8, size: i64) {
+    threadBlockTemplate = template;
+    threadBlockSize     = size;
+    #if OS == .windows {
+        threadBlockKey = FlsAlloc(c.free);
+    } else {
+        pthread_key_create(&threadBlockKey, c.free);
+    }
+}
+
+// The block of the thread that runs it, made the first time
+newThreadBlock :: () {
+    size := threadBlockSize;
+    if size < 8 { size = 8; }
+    block := c.malloc(size as int);
+    if block == null {
+        c.printf("No memory for the @threadLocal globals of a thread\n");
+        c.exit(1);
+    }
+    c.memcpy(block, threadBlockTemplate, threadBlockSize as int);
+    #if OS == .windows {
+        FlsSetValue(threadBlockKey, block);
+    } else {
+        pthread_setspecific(threadBlockKey, block);
+    }
 }

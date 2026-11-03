@@ -98,6 +98,7 @@ Parser parser_init(Lexer *lexer) {
     parser.inside_statement_header = false;
     parser.inside_parameter_list   = false;
     parser.namespaces    = da_init(16, sizeof(Namespace *));
+    parser.thread_locals = da_init(4, sizeof(AstIdentifier *));
 
     return parser;
 }
@@ -1150,7 +1151,7 @@ bool starts_function_defn_at(Parser *parser, int cursor) {
 
 // The attributes of the language e.g @private and @deprecated("use add instead"). Any other attribute is the value of a struct
 // marked with @attribute e.g @json.Field(name: "id")
-static const char *known_attributes[] = { "private", "deprecated", "attribute", "embed" };
+static const char *known_attributes[] = { "private", "deprecated", "attribute", "embed", "threadLocal" };
 
 // Parses the attributes in front of a declaration and the declaration, and gives the attributes to the declared identifier
 Ast *parse_attributed_declaration(Parser *parser) {
@@ -1160,6 +1161,7 @@ Ast *parse_attributed_declaration(Parser *parser) {
     bool  is_deprecated = false;
     bool  is_attribute = false;
     bool  is_embed = false;
+    bool  is_thread_local = false;
     char *deprecated_message = NULL;
     Token first_builtin = {0};
     DynamicArray custom = da_init(1, sizeof(AstStructLiteral *));
@@ -1215,6 +1217,13 @@ Ast *parse_attributed_declaration(Parser *parser) {
         }
         if (strcmp(name, "embed") == 0) {
             is_embed = true;
+        }
+        if (strcmp(name, "threadLocal") == 0) {
+            if (is_thread_local) {
+                report_error_range(parser, at.start, name_token.end, "The attribute '@threadLocal' is given more than once");
+                return NULL;
+            }
+            is_thread_local = true;
         }
         if (strcmp(name, "private") == 0) {
             is_private = true;
@@ -1273,8 +1282,8 @@ Ast *parse_attributed_declaration(Parser *parser) {
     }
     else if (stmt->kind == AST_DECLARATION && (((AstDeclaration *)stmt)->flags & DECLARATION_IS_STRUCT_MEMBER)) {
         // A struct member takes @embed and the values of attribute structs
-        if (is_private || is_deprecated || is_attribute) {
-            report_error_token(parser, LABEL_ERROR, first_builtin, "Struct members take @embed and the values of attribute structs, not @private, @deprecated or @attribute");
+        if (is_private || is_deprecated || is_attribute || is_thread_local) {
+            report_error_token(parser, LABEL_ERROR, first_builtin, "Struct members take @embed and the values of attribute structs, not @private, @deprecated, @attribute or @threadLocal");
             report_error_ast(parser, LABEL_HINT, NULL, "e.g @embed table: dbms.Table<User>; or @json.Field(name: \"id\")");
             return NULL;
         }
@@ -1295,10 +1304,21 @@ Ast *parse_attributed_declaration(Parser *parser) {
         report_error_token(parser, LABEL_ERROR, first, "@embed is for struct members, e.g @embed table: dbms.Table<User>;");
         return NULL;
     }
+    if (is_thread_local) {
+        bool is_global = stmt->kind == AST_DECLARATION && !(((AstDeclaration *)stmt)->flags & DECLARATION_CONSTANT);
+        if (!is_global) {
+            report_error_token(parser, LABEL_ERROR, first, "@threadLocal is for global variables, e.g @threadLocal count := 0;");
+            return NULL;
+        }
+        for (int i = 0; i < count; i++) {
+            idents[i]->flags |= IDENTIFIER_IS_THREAD_LOCAL;
+            da_append(&parser->thread_locals, idents[i]);
+        }
+    }
     if (custom.count > 0) {
         AstStructLiteral *value = ((AstStructLiteral **)custom.items)[0];
         report_error_ast(parser, LABEL_ERROR, (Ast *)value, "Unknown attribute '@%s'", type_to_str(value->explicit_type));
-        report_error_ast(parser, LABEL_HINT, NULL, "The attributes of the language are @private, @deprecated(\"message\"), @attribute and @embed");
+        report_error_ast(parser, LABEL_HINT, NULL, "The attributes of the language are @private, @deprecated(\"message\"), @attribute, @embed and @threadLocal");
         report_error_ast(parser, LABEL_NOTE, NULL, "The values of structs marked with @attribute can only be given to struct members");
         return NULL;
     }

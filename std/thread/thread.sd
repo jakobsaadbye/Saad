@@ -1,0 +1,279 @@
+namespace thread;
+
+// Threads, and what they share safely: Mutex, Condition and WaitGroup. On Windows and Linux, e.g
+//
+//     import thread;
+//
+//     work :: (argument: *void) {
+//         job := argument as *Job;
+//         ...
+//     }
+//
+//     t := thread.spawn(work, &job);
+//     t.join();
+//
+// Each thread has its own @threadLocal globals, e.g the error that is being thrown, so threads can throw and catch at
+// the same time. An error that a thread doesn't catch ends the program, like one in main.
+//
+// The zero value of a Mutex, a Condition and a WaitGroup is ready to use. Don't copy one that is in use
+
+use c;
+
+#if OS == .windows {
+    extern "kernel32.dll" {
+        CreateThread        :: (attributes: *void, stackSize: u64, start: (argument: *void), argument: *void, flags: u32, id: *u32) -> *void;
+        WaitForSingleObject :: (handle: *void, milliseconds: u32) -> u32;
+        CloseHandle         :: (handle: *void) -> bool;
+        GetCurrentThreadId  :: () -> u32;
+
+        AcquireSRWLockExclusive  :: (lock: *Mutex);
+        ReleaseSRWLockExclusive  :: (lock: *Mutex);
+        TryAcquireSRWLockExclusive :: (lock: *Mutex) -> u8;
+        SleepConditionVariableSRW :: (condition: *Condition, lock: *Mutex, milliseconds: u32, flags: u32) -> bool;
+        WakeConditionVariable    :: (condition: *Condition);
+        WakeAllConditionVariable :: (condition: *Condition);
+
+        Sleep          :: (milliseconds: u32);
+        SwitchToThread :: () -> bool;
+        GetSystemInfo  :: (info: *SystemInfo);
+    }
+
+    // A lock that one thread holds at a time. An SRWLOCK of Windows, which is ready when it is zero
+    Mutex :: struct {
+        srwLock: *void;
+    }
+
+    // Threads wait on it until another wakes them. A CONDITION_VARIABLE of Windows, which is ready when it is zero
+    Condition :: struct {
+        variable: *void;
+    }
+
+    SystemInfo :: struct {
+        processorArchitecture: u16;
+        reserved:              u16;
+        pageSize:              u32;
+        minimumAddress:        *void;
+        maximumAddress:        *void;
+        activeProcessorMask:   u64;
+        numberOfProcessors:    u32;
+        processorType:         u32;
+        allocationGranularity: u32;
+        processorLevel:        u16;
+        processorRevision:     u16;
+    }
+
+    Infinite :: 0xFFFF_FFFF as u32;
+} else {
+    extern "C" {
+        pthread_create :: (thread: *u64, attributes: *void, start: (argument: *void), argument: *void) -> i32;
+        pthread_join   :: (thread: u64, result: **void) -> i32;
+        pthread_self   :: () -> u64;
+
+        pthread_mutex_lock    :: (mutex: *Mutex) -> i32;
+        pthread_mutex_unlock  :: (mutex: *Mutex) -> i32;
+        pthread_cond_wait      :: (condition: *Condition, mutex: *Mutex) -> i32;
+        pthread_cond_signal    :: (condition: *Condition) -> i32;
+        pthread_cond_broadcast :: (condition: *Condition) -> i32;
+
+        usleep      :: (microseconds: u32) -> i32;
+        sched_yield :: () -> i32;
+        sysconf     :: (name: i32) -> i64;
+    }
+
+    // A pthread_mutex_t, which is ready when it is zero (PTHREAD_MUTEX_INITIALIZER)
+    Mutex :: struct {
+        data: [40]u8;
+    }
+
+    // A pthread_cond_t, which is ready when it is zero (PTHREAD_COND_INITIALIZER)
+    Condition :: struct {
+        data: [48]u8;
+    }
+
+    ProcessorsOnline :: 84;   // _SC_NPROCESSORS_ONLN
+}
+
+// A thread that runs a function
+Thread :: struct {
+    handle: *void;   // The HANDLE of Windows, or the pthread_t of Linux
+}
+
+// What a new thread runs: the function and its argument
+Start :: struct {
+    function: (argument: *void);
+    argument: *void;
+}
+
+// Starts a thread that runs function(argument). join() waits for it to end
+spawn :: (function: (argument: *void), argument: *void = null) -> Thread, error {
+    start := new(Start);
+    start.function = function;
+    start.argument = argument;
+
+    t: Thread;
+    #if OS == .windows {
+        handle := CreateThread(null, 0, run, start, 0, null);
+        if handle == null {
+            c.free(start);
+            return t, newError("A thread couldn't be started");
+        }
+        t.handle = handle;
+    } else {
+        if pthread_create((&t.handle) as *u64, null, run, start) != 0 {
+            c.free(start);
+            return t, newError("A thread couldn't be started");
+        }
+    }
+    return t, null;
+}
+
+// The function a new thread starts in. An error that the function doesn't catch ends the program
+@private run :: (data: *void) {
+    start := *(data as *Start);
+    c.free(data);
+    try {
+        start.function(start.argument);
+    } catch (err) {
+        thrownError = err;
+        reportUncaught();
+    }
+}
+
+// Waits for the thread to end
+join :: method (t: *Thread) {
+    #if OS == .windows {
+        WaitForSingleObject(t.handle, Infinite);
+        CloseHandle(t.handle);
+    } else {
+        pthread_join(t.handle as u64, null);
+    }
+}
+
+// The number of the thread that runs it
+currentId :: () -> u64 {
+    #if OS == .windows {
+        return GetCurrentThreadId() as u64;
+    } else {
+        return pthread_self();
+    }
+}
+
+// The number of processors, e.g for how many threads to start
+processorCount :: () -> int {
+    #if OS == .windows {
+        info: SystemInfo;
+        GetSystemInfo(&info);
+        return info.numberOfProcessors as int;
+    } else {
+        return sysconf(ProcessorsOnline) as int;
+    }
+}
+
+// Lets the thread sleep for a number of milliseconds
+sleep :: (milliseconds: int) {
+    #if OS == .windows {
+        Sleep(milliseconds as u32);
+    } else {
+        usleep((milliseconds * 1000) as u32);
+    }
+}
+
+// Lets another thread run
+yield :: () {
+    #if OS == .windows {
+        SwitchToThread();
+    } else {
+        sched_yield();
+    }
+}
+
+//
+// Mutex
+//
+
+// Waits until no other thread holds the lock, and holds it
+lock :: method (m: *Mutex) {
+    #if OS == .windows {
+        AcquireSRWLockExclusive(m);
+    } else {
+        pthread_mutex_lock(m);
+    }
+}
+
+unlock :: method (m: *Mutex) {
+    #if OS == .windows {
+        ReleaseSRWLockExclusive(m);
+    } else {
+        pthread_mutex_unlock(m);
+    }
+}
+
+//
+// Condition
+//
+
+// Lets go of the mutex, which the thread must hold, and waits until another thread wakes it. It holds the mutex again
+// when it returns. It can wake without a reason, so check what it waits for in a loop:
+//
+//     queue.mutex.lock();
+//     while queue.count == 0 { queue.ready.wait(&queue.mutex); }
+wait :: method (condition: *Condition, m: *Mutex) {
+    #if OS == .windows {
+        SleepConditionVariableSRW(condition, m, Infinite, 0);
+    } else {
+        pthread_cond_wait(condition, m);
+    }
+}
+
+// Wakes a thread that waits
+signal :: method (condition: *Condition) {
+    #if OS == .windows {
+        WakeConditionVariable(condition);
+    } else {
+        pthread_cond_signal(condition);
+    }
+}
+
+// Wakes every thread that waits
+broadcast :: method (condition: *Condition) {
+    #if OS == .windows {
+        WakeAllConditionVariable(condition);
+    } else {
+        pthread_cond_broadcast(condition);
+    }
+}
+
+//
+// WaitGroup: waits for a number of jobs to be done, like Go's sync.WaitGroup
+//
+//     group: thread.WaitGroup;
+//     group.add(workers.count);
+//     for w in workers { thread.spawn(work, &w); }     // each calls group.done() when it is done
+//     group.wait();
+//
+
+WaitGroup :: struct {
+    mutex: Mutex;
+    zero:  Condition;   // Woken when the count is 0
+    count: int;
+}
+
+add :: method (group: *WaitGroup, count := 1) {
+    group.mutex.lock();
+    group.count += count;
+    if group.count <= 0 { group.zero.broadcast(); }
+    group.mutex.unlock();
+}
+
+done :: method (group: *WaitGroup) {
+    group.add(-1);
+}
+
+// Waits until every job that was added is done
+wait :: method (group: *WaitGroup) {
+    group.mutex.lock();
+    while group.count > 0 {
+        group.zero.wait(&group.mutex);
+    }
+    group.mutex.unlock();
+}

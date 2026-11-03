@@ -38,6 +38,7 @@ typedef struct Parser {
     char *c_bindings_path;     // Absolute path of std/c. The prelude is built on these files, so they don't import it
 
     DynamicArray namespaces; // of *Namespace. All the namespaces found in the project and the standard library
+    DynamicArray thread_locals; // of *AstIdentifier. The global variables with @threadLocal, laid out in the block of each thread
     char *builtin_string_file_path;
 
     jmp_buf *syntax_error; // Where parse_file() continues after a syntax error, see stop_parsing()

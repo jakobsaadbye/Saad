@@ -1,4 +1,4 @@
-// expect-error: '#' is reserved for compile-time features
+// expect-error: '#' is for compile-time features
 
 #import "fmt"
 

@@ -128,3 +128,43 @@ MS int ms___getmainargs(int *argc, char ***argv, char ***env, int wild, void *in
 // ---- entry ----
 MS int ms_main(void);
 int main(int argc, char **argv) { saved_argc = argc; saved_argv = argv; int r = ms_main(); fflush(stdout); return r; }
+
+// ---- Threads (std/thread and the @threadLocal globals of std/prelude/errors.sd) ----
+// A function of the program has the Win64 ABI, so the functions that pthread calls back go through a wrapper
+#include <pthread.h>
+#include <sched.h>
+
+typedef void (MS *ms_callback)(void *);
+
+static ms_callback key_destructor; // Of the key that the program makes. It makes one, for the @threadLocal globals
+static void call_key_destructor(void *value) { if (key_destructor) key_destructor(value); }
+MS int   ms_pthread_key_create(uint32_t *key, ms_callback destructor) { pthread_key_t k; key_destructor = destructor; int r = pthread_key_create(&k, destructor ? call_key_destructor : NULL); *key = (uint32_t)k; return r; }
+MS void *ms_pthread_getspecific(uint32_t key) { return pthread_getspecific((pthread_key_t)key); }
+MS int   ms_pthread_setspecific(uint32_t key, void *value) { return pthread_setspecific((pthread_key_t)key, value); }
+
+typedef struct ThreadStart { ms_callback function; void *argument; } ThreadStart;
+static void *start_thread(void *data) { ThreadStart start = *(ThreadStart *)data; free(data); start.function(start.argument); return NULL; }
+MS int ms_pthread_create(uint64_t *thread, void *attributes, ms_callback function, void *argument) {
+    ThreadStart *start = malloc(sizeof(ThreadStart));
+    start->function = function;
+    start->argument = argument;
+    pthread_t t;
+    int r = pthread_create(&t, (pthread_attr_t *)attributes, start_thread, start);
+    *thread = (uint64_t)t;
+    return r;
+}
+MS int ms_pthread_join(uint64_t thread, void **result) { return pthread_join((pthread_t)thread, result); }
+MS int ms_pthread_detach(uint64_t thread) { return pthread_detach((pthread_t)thread); }
+MS uint64_t ms_pthread_self(void) { return (uint64_t)pthread_self(); }
+MS int ms_pthread_mutex_init(pthread_mutex_t *m, void *attributes) { return pthread_mutex_init(m, (pthread_mutexattr_t *)attributes); }
+MS int ms_pthread_mutex_lock(pthread_mutex_t *m) { return pthread_mutex_lock(m); }
+MS int ms_pthread_mutex_unlock(pthread_mutex_t *m) { return pthread_mutex_unlock(m); }
+MS int ms_pthread_mutex_destroy(pthread_mutex_t *m) { return pthread_mutex_destroy(m); }
+MS int ms_pthread_cond_init(pthread_cond_t *c, void *attributes) { return pthread_cond_init(c, (pthread_condattr_t *)attributes); }
+MS int ms_pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m) { return pthread_cond_wait(c, m); }
+MS int ms_pthread_cond_signal(pthread_cond_t *c) { return pthread_cond_signal(c); }
+MS int ms_pthread_cond_broadcast(pthread_cond_t *c) { return pthread_cond_broadcast(c); }
+MS int ms_pthread_cond_destroy(pthread_cond_t *c) { return pthread_cond_destroy(c); }
+MS int ms_sched_yield(void) { return sched_yield(); }
+MS int ms_usleep(uint32_t microseconds) { return usleep(microseconds); }
+MS long ms_sysconf(int name) { return sysconf(name); }

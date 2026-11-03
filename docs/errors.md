@@ -84,10 +84,13 @@ handlePost :: (req: Request) -> Response {
 
 ## How it works
 
-* The error that is being thrown is in the global `thrownError` of the prelude. After every call of a Saad function,
-  the compiler checks it. When it is set, the call adds a frame to the trace (`traceThrow`) and goes to the `catch` of
-  the innermost `try` of the function, or runs the `defer`s and returns. There is no stack unwinding of the system:
-  the code of the function does it, so it works the same on Windows and Linux.
+* The error that is being thrown is in `thrownError` of the prelude, a `@threadLocal` global, so each thread has its
+  own. A Saad function returns its values through out-pointers, so it says in `eax` if an error left it: 0 when it
+  returns, 1 when it was thrown out of it. After every call of a Saad function, the compiler checks `eax`. When it is
+  set, the call adds a frame to the trace (`traceThrow`) and goes to the `catch` of the innermost `try` of the
+  function, or runs the `defer`s and returns with 1. A call through a function value, which can be a function of C,
+  checks `thrownError` too when `eax` isn't 0. There is no stack unwinding of the system: the code of the function
+  does it, so it works the same on Windows and Linux.
 * A call whose error isn't taken (`AST_FLAG_THROWS_ON_ERROR`) throws the error when it isn't null.
 * While the `defer`s run during a throw, the error is put aside, so their calls run as usual.
 * `main` reports an error that nothing caught (`reportUncaught`), and the program ends with the exit code 1.
