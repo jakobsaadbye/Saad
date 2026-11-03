@@ -36,13 +36,12 @@ typedef struct Index {
     AstFile     *main_file;  // A file of the standard library is part of the program when it is the main file or in its namespace
     DynamicArray symbols;    // of IndexSymbol
     DynamicArray references; // of IndexReference
-    DynamicArray throws;     // of IndexReference, without a symbol: the calls whose error isn't taken, which throw it
 } Index;
 
 extern Index program_index;
 
 void index_identifier_use(Ast *site, AstIdentifier *ident);
-void index_throw_site(Ast *call);
+bool is_std_file(AstFile *file);
 void index_type_name_use(Ast *site, AstIdentifier *ident);
 void index_name_use(Ast *site, Pos start, Pos end, AstIdentifier *ident);
 void index_enumerator_use(Ast *site, AstEnumerator *etor);

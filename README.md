@@ -78,6 +78,14 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.10.2 - 3. Nov 2026
+
+* Language server: the names in a generic that nothing instantiates go to their declarations and have hovers, e.g the
+  methods of `dbms.KeyedTable` when `std/dbms/table.sd` is open. A generic is only checked for its instances, so the
+  index checks the others with stand-in types, named like the type parameters (`T`)
+* The `throws` hints after the calls whose error isn't taken are removed, as there were many of them
+* The VS Code extension is version 0.3.0, so it is installed again with the highlighting of `try`, `catch` and `throw`
+
 ## Update v0.10.1 - 3. Nov 2026
 
 * A condition is a `bool`. A pointer isn't one anymore: `if p { }`, `while node { }`, `!p` and `assert(p)` are compile

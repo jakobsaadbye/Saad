@@ -266,12 +266,6 @@ def main():
     runs = sum("Indexed" in line for line in client.log) - indexed
     check(runs <= 2, f"checked {runs} times for 5 changes")  # Once, or twice when a change arrives while the first check runs
 
-    print("inlay hints: the calls that throw")
-    m = client.request("textDocument/inlayHint", {"textDocument": doc, "range": {"start": {"line": 0, "character": 0}, "end": {"line": 200, "character": 0}}})
-    hints = m.get("result") or []
-    throw_line = next(i for i, l in enumerate(text.split("\n")) if 'n := parsed("12");' in l)
-    check(any(h["label"] == "throws" and h["position"]["line"] == throw_line for h in hints), f"a throws hint after parsed(...): {hints}")
-
     print("hover of self")
     m = client.request("textDocument/hover", {"textDocument": doc, "position": position_of(text, 19, "self")})
     value = m["result"]["contents"]["value"] if m["result"] else ""
@@ -331,6 +325,24 @@ def main():
     names = [s["name"] for s in m["result"] or []]
     check("Writer" in names and "writeAny" in names, f"the outline of encode.sd: {names[:12]}")
     client.notify("textDocument/didClose", {"textDocument": {"uri": encode_uri}})
+
+    print("a generic that nothing instantiates")
+    # The methods of dbms.KeyedTable are only checked for its instances, and the standard library has none. The index
+    # checks them with stand-in types, so their names go to their declarations
+    table = os.path.join(REPO, "std", "dbms", "table.sd")
+    table_text = open(table).read()
+    table_uri = uri_of(table)
+    client.notify("textDocument/didOpen", {"textDocument": {"uri": table_uri, "languageId": "saad", "version": 1, "text": table_text}})
+    check(client.diagnostics_until(table_uri, lambda d: d == []) == [], "no errors in std/dbms/table.sd")
+    lines = table_text.split("\n")
+    keyed = next(i for i, line in enumerate(lines) if line.startswith("KeyedTable ::"))
+    get_line = next(i + 1 for i, line in enumerate(lines) if i > keyed and "conn.queryOne<T>" in line)
+    m = client.request("textDocument/definition", {"textDocument": {"uri": table_uri}, "position": position_of(table_text, get_line, "queryOne")})
+    check(m["result"] and m["result"]["uri"].endswith("/dbms/dbms.sd"), f"queryOne in KeyedTable.get goes to dbms.sd: {m['result']}")
+    m = client.request("textDocument/hover", {"textDocument": {"uri": table_uri}, "position": position_of(table_text, get_line + 5, "stored")})
+    value = m["result"]["contents"]["value"] if m["result"] else ""
+    check("*T" in value, f"hover of a variable of type *T in KeyedTable.get: {value!r}")
+    client.notify("textDocument/didClose", {"textDocument": {"uri": table_uri}})
 
     print("unknown request")
     m = client.request("textDocument/formatting", {"textDocument": doc, "options": {}})

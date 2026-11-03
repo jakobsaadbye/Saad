@@ -34,6 +34,7 @@ typedef struct Typer {
     bool generic_depth_limit_reached; // Set when generic_depth hits GENERIC_DEPTH_LIMIT, so that the error is not followed by a note for every level
     bool checking_callee;             // Set while checking the function expression of a call. Generic functions may only be used as a callee
     int  struct_check_depth;          // How many struct definitions are currently being checked inside each other
+    bool indexing_unused_generics;    // Checking the generics that nothing instantiates, for the index. See index_unused_generics()
 
     TypeStruct *primitive_method_holders[PRIMITIVE_COUNT]; // Holds the methods declared on each primitive type e.g 'hash :: method (x: int) -> u64'. See method_holder_of()
 
@@ -306,6 +307,7 @@ static void poison_statement(Parser *parser, Ast *stmt) {
 
 // An error was reported, so an internal error is likely to come from it
 static bool errors_reported(void) {
+    if (diagnostics.muted > 0) return true; // e.g while index_unused_generics() checks with stand-in types
     for (int i = 0; i < diagnostics.count; i++) {
         if (diagnostics.items[i].label == LABEL_ERROR) return true;
     }
@@ -678,7 +680,7 @@ bool check_block(Typer *typer, AstBlock *block) {
     bool all_ok = true;
     for (int i = 0; i < block->statements.count; i++) {
         Ast *stmt = ((Ast **)block->statements.items)[i];
-        if (typer->generic_depth > 0) {
+        if (typer->generic_depth > 0 && !typer->indexing_unused_generics) {
             if (!check_statement(typer, stmt)) return false;
             continue;
         }
@@ -1683,6 +1685,99 @@ AstFunctionDefn *instantiate_generic_function(Typer *typer, AstFunctionDefn *gen
 
     ident->type = instance->head.type;
     return instance;
+}
+
+//
+// The index of the generics that nothing instantiates. A generic is checked only for its instances, so the names in the
+// body of one that isn't used, e.g a method of KeyedTable when the standard library is the program, would have no
+// definition or hover. For 'saad index' each of them is checked once more with stand-in types: an empty struct for each
+// type parameter, named like it. What the stand-ins can't do, e.g a member of T, is an error that isn't reported, and
+// the statement is skipped
+//
+
+static Type *stand_in_type(Typer *typer, AstIdentifier *param) {
+    TypeStruct *stand_in = generate_empty_struct_type(typer->parser, param->name);
+    stand_in->node->head.flags   |= AST_FLAG_IS_TYPE_CHECKED;
+    stand_in->head.size           = 8;
+    stand_in->alignment           = 8;
+    stand_in->qualified_name      = param->name; // Shown as T, e.g in the hover of a variable of type T
+    return (Type *)stand_in;
+}
+
+static DynamicArray stand_in_types(Typer *typer, DynamicArray type_params) {
+    DynamicArray types = da_init(type_params.count, sizeof(Type *));
+    for (int i = 0; i < type_params.count; i++) {
+        Type *type = stand_in_type(typer, ((AstIdentifier **)type_params.items)[i]);
+        da_append(&types, type);
+    }
+    return types;
+}
+
+static void index_unused_generic_function(Typer *typer, AstFunctionDefn *generic) {
+    if (!is_generic_function(generic) || generic->instances.count > 0) return;
+    if (!(generic->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) || (generic->head.head.flags & AST_FLAG_HAS_ERRORS)) return;
+
+    Typer saved_state = *typer;
+    instantiate_generic_function(typer, generic, stand_in_types(typer, generic->type_params), (Ast *)generic);
+    DynamicArray stack = typer->enclosing_function_stack;
+    typer_restore_state(typer, saved_state);
+    typer->enclosing_function_stack = stack;
+}
+
+static void index_unused_generic_struct(Typer *typer, AstStruct *generic) {
+    if (generic->type_params.count == 0 || generic->instances.count > 0 || (generic->head.flags & AST_FLAG_HAS_ERRORS)) return;
+
+    TypeGenericInstance *instance = ast_allocate(typer->parser, sizeof(TypeGenericInstance));
+    instance->head.head.kind = AST_TYPE;
+    instance->head.head.file = generic->head.file;
+    instance->head.kind      = TYPE_GENERIC_INSTANCE;
+    instance->head.name      = generic->identifier->name;
+    instance->type_args      = stand_in_types(typer, generic->type_params);
+
+    Typer saved_state = *typer;
+    typer->current_file  = generic->head.file;
+    typer->current_scope = generic->members->parent;
+    instantiate_generic_struct(typer, instance);
+    DynamicArray stack = typer->enclosing_function_stack;
+    typer_restore_state(typer, saved_state);
+    typer->enclosing_function_stack = stack;
+}
+
+static void index_unused_generics_of_declaration(Typer *typer, AstDeclaration *decl) {
+    for (int i = 0; i < decl->values.count; i++) {
+        AstExpr *value = ((AstExpr **)decl->values.items)[i];
+        if (value->head.kind == AST_FUNCTION_DEFN) index_unused_generic_function(typer, (AstFunctionDefn *)value);
+    }
+}
+
+static void index_unused_generics_of_file(Typer *typer, AstFile *file) {
+    if (file->check_state != 2 && file->check_state != 1) return; // Not part of the program
+    if (!program_index.with_std && is_std_file(file)) return;     // Not in the index
+
+    for (int i = 0; i < file->statements.count; i++) {
+        Ast *stmt = ((Ast **)file->statements.items)[i];
+        if (stmt->flags & AST_FLAG_HAS_ERRORS) continue;
+        if (stmt->kind == AST_DECLARATION) {
+            index_unused_generics_of_declaration(typer, (AstDeclaration *)stmt);
+        } else if (stmt->kind == AST_STRUCT) {
+            AstStruct *ast_struct = (AstStruct *)stmt;
+            for (int j = 0; j < ast_struct->inside_methods.count; j++) {
+                index_unused_generics_of_declaration(typer, ((AstDeclaration **)ast_struct->inside_methods.items)[j]);
+            }
+            index_unused_generic_struct(typer, ast_struct);
+        }
+    }
+}
+
+void index_unused_generics(Typer *typer, DynamicArray files) {
+    if (!program_index.enabled) return;
+    diagnostics.muted += 1;
+    typer->indexing_unused_generics = true;
+    for (int i = 0; i < files.count; i++) {
+        index_unused_generics_of_file(typer, ((AstFile **)files.items)[i]);
+    }
+    typer->indexing_unused_generics = false;
+    diagnostics.muted -= 1;
 }
 
 // Infers the type arguments of a call to a generic function from the arguments and returns the instance to call
@@ -4043,7 +4138,6 @@ bool check_expr_stmt(Typer *typer, AstExprStmt *expr_stmt) {
     if (expr->head.kind == AST_FUNCTION_CALL && !(expr->head.flags & AST_FLAG_THROWS_ON_ERROR) && is_error_type(typer, expr_type)) {
         ((AstFunctionCall *)expr)->results = expr_type;
         expr->head.flags |= AST_FLAG_THROWS_ON_ERROR;
-        index_throw_site((Ast *)expr);
     }
     return true;
 }
@@ -7150,7 +7244,6 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
             AstFunctionCall *call = (AstFunctionCall *)expr;
             call->results = result;
             expr->head.flags |= AST_FLAG_THROWS_ON_ERROR;
-            index_throw_site((Ast *)expr);
             if (tuple->types.count == 2) {
                 result = ((Type **)tuple->types.items)[0];
             } else {

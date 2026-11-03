@@ -90,7 +90,6 @@ handle :: (m: rpc.Message) {
         case "textDocument/prepareRename" { prepareRename(m); }
         case "textDocument/rename"       { rename(m); }
         case "textDocument/codeAction"   { codeActions(m); }
-        case "textDocument/inlayHint"    { inlayHints(m); }
         else {
             if rpc.isRequest(m) {
                 rpc.fail(m.id, rpc.MethodNotFound, fmt.sprint("% is not supported", m.name));
@@ -118,7 +117,7 @@ initialize :: (m: rpc.Message) {
     }
     rpc.log(fmt.sprint("The workspace is '%'. The compiler is %", workspaceRoot, compiler));
 
-    capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]},\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":%,\"tokenModifiers\":%},\"full\":true},\"renameProvider\":{\"prepareProvider\":true},\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\"]},\"inlayHintProvider\":true}";
+    capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]},\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":%,\"tokenModifiers\":%},\"full\":true},\"renameProvider\":{\"prepareProvider\":true},\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\"]}}";
     capabilities = fmt.sprint(capabilities, json.encode(TokenTypes), json.encode(TokenModifiers));
     rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.3.0\"}}", capabilities));
 }
@@ -1063,40 +1062,6 @@ Keywords :: ["if", "else", "for", "while", "in", "switch", "case", "return", "de
              "method", "import", "use", "namespace", "extern", "as", "new", "assert", "typeof", "sizeof", "true", "false",
              "null", "self", "int", "uint", "float", "bool", "string", "any", "void", "u8", "u16", "u32", "u64", "i8", "i16",
              "i32", "i64", "f32", "f64", "xx"];
-
-//
-// Inlay hints: 'throws' after each call whose error isn't taken, e.g 'text := os.readFile(path);', so it is seen where an
-// error leaves as an exception
-//
-
-inlayHints :: (m: rpc.Message) {
-    uri  := m.params.get("textDocument").get("uri").asString();
-    path := source.pathOf(uri);
-    key  := source.keyOf(path);
-    i    := projectFor(key, path);
-    if i < 0 {
-        rpc.respond(m.id, "[]");
-        return;
-    }
-    p    := projects.indexRef(i);
-    file := p.fileNumber(key);
-    text := textOf(key, path);
-
-    sb := fmt.newStringBuilder(256);
-    sb.addChar('[');
-    count := 0;
-    for t in p.index.throws {
-        if t.file != file { continue; }
-        line := t.range.end.line;
-        character := source.toUtf16(text.line(line), t.range.end.character);
-        if count > 0 { sb.addChar(','); }
-        count += 1;
-        sb.add("{\"position\":{\"line\":%,\"character\":%},\"label\":\"throws\",\"paddingLeft\":true,\"tooltip\":%}",
-            line, character, json.encode("The error of this call isn't taken, so it is thrown: to the catch of a try around it, or out of the function"));
-    }
-    sb.addChar(']');
-    rpc.respond(m.id, sb.toString());
-}
 
 //
 // Code actions: the missing cases of a switch
