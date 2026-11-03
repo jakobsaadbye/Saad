@@ -83,6 +83,7 @@ int align_value(int value, int alignment);
 void report_error_range(Parser *parser, Pos start, Pos end, const char *message, ...);
 void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const char *message, ...);
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
+static void report_missing_semicolon(Parser *parser);
 
 
 Parser parser_init(Lexer *lexer) {
@@ -1355,6 +1356,11 @@ Ast *parse_statement(Parser *parser) {
             matched_a_statement = true;
             statement_ends_with_semicolon = true;
         }
+        else {
+            // e.g 'print(y)' on the line above the next statement
+            report_missing_semicolon(parser);
+            return NULL;
+        }
     }
 
     if (!matched_a_statement) {
@@ -1369,8 +1375,7 @@ Ast *parse_statement(Parser *parser) {
     if (statement_ends_with_semicolon) {
         Token next = peek_next_token(parser);
         if (next.type != ';') {
-            Token token_missing_semicolon = peek_token(parser, -2);
-            report_error_range(parser, token_missing_semicolon.end, token_missing_semicolon.end, "Syntax Error: Expected a semi-colon");
+            report_missing_semicolon(parser);
             return NULL;
         }
         eat_token(parser);
@@ -2824,6 +2829,12 @@ AstReturn *parse_return(Parser *parser) {
 
     Token return_token = peek_next_token(parser);
     eat_token(parser);
+
+    // 'return' at the end of a block, without its ';'
+    if (peek_next_token(parser).type == '}') {
+        report_missing_semicolon(parser);
+        return NULL;
+    }
 
     while (true) {
         AstExpr *expr = parse_expression(parser, MIN_PRECEDENCE);
@@ -4727,6 +4738,13 @@ Token peek_token(Parser *parser, int lookahead) {
         return (Token){.type = TOKEN_END};
     }
     return ((Token *)parser->lexer->tokens.items)[parser->current_token_index + lookahead];
+}
+
+// The statement ends with the token before the next one, e.g the '5' of 'x := 5' on the line above 'y := 6;'. That
+// token is marked, as the next one can be far away
+static void report_missing_semicolon(Parser *parser) {
+    Token last = peek_token(parser, -1);
+    report_error_range(parser, last.start, last.end, "Syntax Error: Expected a ';' after this");
 }
 
 Token peek_next_token(Parser *parser) {

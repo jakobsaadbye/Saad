@@ -10,7 +10,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 SAAD = os.path.join(REPO, "bin", "saad")
 FIXTURE = os.path.join(REPO, "tests", "index.sd")
 
-# (what, the text to replace, its replacement, the most errors, (line, name) uses that must still be in the index)
+# (what, the text to replace, its replacement, the most errors, (line, name) uses that must still be in the index), and
+# optionally (line, text) that the first error marks, e.g the token before a missing ';'
 CASES = [
     ("a syntax error in a statement",
      "    c.grow(by: 1.0);", "    c.grow(by: 1.0;", 1,
@@ -36,13 +37,22 @@ CASES = [
     ("a junk character",
      "    q := swapped(p);", "    q := swapped(p); §", 1,
      [(60, "swapped"), (70, "drawnName")]),
+    ("a call without its ';'",
+     "    c.grow(by: 1.0);", "    c.grow(by: 1.0)", 1,
+     [(53, "Shape"), (60, "swapped"), (70, "drawnName")], (52, ")")),
+    ("an assignment without its ';'",
+     "    total += n;", "    total += n", 1,
+     [(59, "Pair"), (60, "swapped"), (65, "total")], (57, "n")),
+    ("a declaration without its ';'",
+     "    q := swapped(p);", "    q := swapped(p)", 1,
+     [(61, "geometry"), (70, "drawnName")], (60, ")")),
 ]
 
 def main():
     text = open(FIXTURE).read()
     work = tempfile.mkdtemp()
     failed = 0
-    for what, old, new, most_errors, uses in CASES:
+    for what, old, new, most_errors, uses, *marked in CASES:
         assert old in text, old
         overlay = os.path.join(work, "case.sd")
         open(overlay, "w").write(text.replace(old, new, 1))
@@ -61,6 +71,14 @@ def main():
         if len(errors) > most_errors:
             problems.append(f"{len(errors)} errors, wanted at most {most_errors}: " + "; ".join(
                 f"{d['range']['start']['line'] + 1}: {d['message'].splitlines()[0]}" for d in errors))
+
+        if errors and marked:
+            line, wanted = marked[0]
+            r = errors[0]["range"]
+            content = text.replace(old, new, 1).split("\n")[r["start"]["line"]]
+            got = content[r["start"]["character"]:r["end"]["character"]]
+            if r["start"]["line"] != line - 1 or got != wanted:
+                problems.append(f"the error marks {got!r} on line {r['start']['line'] + 1}, wanted {wanted!r} on line {line}")
 
         file = index["files"].index(FIXTURE) if FIXTURE in index["files"] else -1
         symbols = index["symbols"]
