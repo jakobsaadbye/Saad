@@ -3,7 +3,6 @@ namespace entities;
 
 import dbms;
 
-// A row of series_posts
 SeriesPost :: struct {
     seriesId: i64;
     postId:   i64;

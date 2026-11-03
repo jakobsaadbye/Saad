@@ -3,7 +3,6 @@ namespace entities;
 
 import dbms;
 
-// A row of post_tags
 PostTag :: struct {
     postId: i64;
     tag:    string;

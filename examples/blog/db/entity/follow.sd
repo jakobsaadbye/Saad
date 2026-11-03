@@ -4,7 +4,6 @@ namespace entities;
 import dbms;
 import time;
 
-// A row of follows
 Follow :: struct {
     id:        i64;
     readerId:  i64;

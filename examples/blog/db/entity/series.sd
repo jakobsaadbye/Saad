@@ -3,7 +3,6 @@ namespace entities;
 
 import dbms;
 
-// A row of series
 Series :: struct {
     id:          i64;
     authorId:    i64;

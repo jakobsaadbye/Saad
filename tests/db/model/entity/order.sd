@@ -3,7 +3,6 @@ namespace entities;
 
 import dbms;
 
-// A row of orders
 Order :: struct {
     id:     i32;
     userId: i64;

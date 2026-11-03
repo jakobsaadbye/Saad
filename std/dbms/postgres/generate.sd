@@ -335,7 +335,6 @@ rowFile :: method (w: *Writer, table: SchemaTable) -> string {
     if usesDbms { sb.addLine("import dbms;"); }
     if usesTime { sb.addLine("import time;"); }
     if usesDbms || usesTime { sb.addLine(""); }
-    sb.addLine("// A row of %", table.name);
     sb.addLine("% :: struct {", w.rowType(table.name));
     for m in members {
         if m.attribute.len > 0 {

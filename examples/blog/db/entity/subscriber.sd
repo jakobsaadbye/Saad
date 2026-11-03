@@ -3,7 +3,6 @@ namespace entities;
 
 import time;
 
-// A row of subscribers
 Subscriber :: struct {
     id:        i64;
     email:     string;

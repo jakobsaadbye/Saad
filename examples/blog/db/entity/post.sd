@@ -4,7 +4,6 @@ namespace entities;
 import dbms;
 import time;
 
-// A row of posts
 Post :: struct {
     id:          i64;
     authorId:    i64;

@@ -4,7 +4,6 @@ namespace entities;
 import dbms;
 import time;
 
-// A row of users
 User :: struct {
     id:         i64;
     name:       string;

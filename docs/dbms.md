@@ -314,7 +314,6 @@ The rows and enums are all that is in the namespace `entities`, so `use entities
 // db/entity/user.sd
 namespace entities;
 
-// A row of users
 User :: struct {
     id:        i64;
     name:      string;

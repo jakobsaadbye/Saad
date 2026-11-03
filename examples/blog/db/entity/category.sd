@@ -3,7 +3,6 @@ namespace entities;
 
 import dbms;
 
-// A row of categories
 Category :: struct {
     id:   i64;
     name: string;

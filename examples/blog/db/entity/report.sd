@@ -4,7 +4,6 @@ namespace entities;
 import dbms;
 import time;
 
-// A row of reports
 Report :: struct {
     id:        i64;
     commentId: i64;

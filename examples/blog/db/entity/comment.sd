@@ -4,7 +4,6 @@ namespace entities;
 import dbms;
 import time;
 
-// A row of comments
 Comment :: struct {
     id:         i64;
     postId:     i64;
