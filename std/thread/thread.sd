@@ -4,13 +4,13 @@ namespace thread;
 //
 //     import thread;
 //
-//     work :: (argument: *void) {
-//         job := argument as *Job;
+//     work :: (job: *Job) {
 //         ...
 //     }
 //
-//     t := thread.spawn(work, &job);
+//     t := thread.spawn(work, &job);      // work(&job) on a new thread
 //     t.join();
+//     thread.start(tick);                 // A function without an argument
 //
 // Each thread has its own @threadLocal globals, e.g the error that is being thrown, so threads can throw and catch at
 // the same time. An error that a thread doesn't catch ends the program, like one in main.
@@ -98,17 +98,32 @@ Thread :: struct {
     handle: *void;   // The HANDLE of Windows, or the pthread_t of Linux
 }
 
-// What a new thread runs: the function and its argument
+// What a new thread runs: the function and its argument. The type of the argument is left out here, as spawn() checked
+// that the function takes it
 Start :: struct {
     function: (argument: *void);
     argument: *void;
+    alone:    ();          // Or a function without an argument
 }
 
-// Starts a thread that runs function(argument). join() waits for it to end
-spawn :: (function: (argument: *void), argument: *void = null) -> Thread, error {
+// Starts a thread that runs function(argument), e.g spawn(work, &job) for 'work :: (job: *Job)'. join() waits for it
+// to end. The argument must live until the function is done with it
+spawn :: <T>(function: (argument: *T), argument: *T) -> Thread, error {
     start := new(Start);
-    start.function = function;
+    address := function as *void;
+    start.function = address as (argument: *void);
     start.argument = argument;
+    return startThread(start);
+}
+
+// Starts a thread that runs a function without an argument
+start :: (function: ()) -> Thread, error {
+    start := new(Start);
+    start.alone = function;
+    return startThread(start);
+}
+
+@private startThread :: (start: *Start) -> Thread, error {
 
     t: Thread;
     #if OS == .windows {
@@ -132,7 +147,8 @@ spawn :: (function: (argument: *void), argument: *void = null) -> Thread, error 
     start := *(data as *Start);
     c.free(data);
     try {
-        start.function(start.argument);
+        if start.alone != null { start.alone(); }
+        else                   { start.function(start.argument); }
     } catch (err) {
         thrownError = err;
         reportUncaught();

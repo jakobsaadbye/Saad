@@ -78,6 +78,12 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.12.1 - 3. Nov 2026
+
+* `thread.spawn` takes the argument with its type: `thread.spawn(work, &job)` for `work :: (job: *Job)`, not a `*void`.
+  `thread.start(function)` runs a function without an argument
+* `http.Mux` is `http.Router`, e.g `router.handle("GET /posts/{id}", showPost)`
+
 ## Update v0.12.0 - 3. Nov 2026
 
 * `net`: TCP over IPv4: `net.listen`, `accept`, `net.dial`, `read`, `write`, timeouts and `net.resolve`, on

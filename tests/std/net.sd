@@ -6,8 +6,7 @@ import bytes;
 import fmt;
 
 // Echoes each line back in upper case, until "bye"
-serve :: (argument: *void) {
-    listener := argument as *net.Listener;
+serve :: (listener: *net.Listener) {
     conn := listener.accept();
     defer conn.close();
     buffer: bytes.Buffer;
@@ -97,7 +96,7 @@ main :: () {
     fmt.print("net ok");
 }
 
-closeSoon :: (argument: *void) {
+closeSoon :: (listener: *net.Listener) {
     thread.sleep(50);
-    (argument as *net.Listener).close();
+    listener.close();
 }

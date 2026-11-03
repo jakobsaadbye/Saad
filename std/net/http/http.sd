@@ -1,6 +1,6 @@
 namespace net.http;
 
-// HTTP/1.1 on top of net: a server with a router (Mux) and a client, like Go's net/http, e.g
+// HTTP/1.1 on top of net: a server with a router (Router) and a client, like Go's net/http, e.g
 //
 //     import net.http;
 //
@@ -8,9 +8,9 @@ namespace net.http;
 //         w.write(fmt.sprint("hello %", r.pathValue("name")));
 //     }
 //
-//     mux: http.Mux;
-//     mux.handle("GET /hello/{name}", hello);
-//     http.listenAndServe(":8080", &mux);
+//     router: http.Router;
+//     router.handle("GET /hello/{name}", hello);
+//     http.listenAndServe(":8080", &router);
 //
 //     response := http.get("http://localhost:8080/hello/ada");
 //
