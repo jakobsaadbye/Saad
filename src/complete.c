@@ -26,6 +26,7 @@ typedef struct Completion {
     StringBuilder items;      // JSON objects, separated by commas
     int           item_count;
     char         *signature;  // A JSON object, or NULL
+    char         *missing_import; // The namespace before the '.' isn't imported, e.g the fmt of 'fmt.pr'. Or NULL
 } Completion;
 
 Completion program_completion;
@@ -324,6 +325,11 @@ static bool resolve_chain(Typer *typer, AstBlock *scope, Segment *segments, int 
 
 static void add_item_inserting(const char *name, const char *kind, const char *detail, const char *doc, const char *insert);
 
+// More about the next item: the namespace it needs to be imported, and the number of parameters of a function or method,
+// so an editor can write the parentheses of the call. A method is called on its receiver, which isn't counted
+static const char *item_import     = NULL;
+static int         item_parameters = -1;
+
 static void add_item(const char *name, const char *kind, const char *detail, const char *doc) {
     add_item_inserting(name, kind, detail, doc, NULL);
 }
@@ -346,6 +352,13 @@ static void add_item_inserting(const char *name, const char *kind, const char *d
         sb_append(sb, ", \"insert\": ");
         json_write_string(sb, insert);
     }
+    if (item_import) {
+        sb_append(sb, ", \"needsImport\": ");
+        json_write_string(sb, item_import);
+    }
+    if (item_parameters >= 0) sb_append(sb, ", \"parameters\": %d", item_parameters);
+    item_import     = NULL;
+    item_parameters = -1;
     sb_append(sb, "}");
     program_completion.item_count++;
 }
@@ -371,6 +384,10 @@ static void add_identifier(AstIdentifier *ident) {
     const char *kind = (declared->flags & IDENTIFIER_IS_NAMESPACE) ? "namespace" : kind_of(declared);
     char *detail = (declared->flags & IDENTIFIER_IS_NAMESPACE) ? "namespace" : detail_of(declared, kind);
     char *doc = declared->head.file ? doc_comment(declared->head.file, declared->head.start.line) : NULL;
+    if (strcmp(kind, "function") == 0 || strcmp(kind, "method") == 0) {
+        AstFunctionDefn *func = function_of(declared);
+        if (func) item_parameters = func->parameters.count - (func->is_method && func->parameters.count > 0 ? 1 : 0);
+    }
     add_item(ident->name, kind, detail, doc);
 }
 
@@ -502,6 +519,18 @@ static void add_names_in_scope(AstFile *file, AstBlock *scope, int offset) {
     }
     for (size_t i = 0; i < sizeof(keywords) / sizeof(keywords[0]); i++) {
         if (!already_added(&seen, keywords[i])) add_item(keywords[i], "keyword", "", NULL);
+    }
+
+    // The namespaces of the standard library that the file doesn't import, e.g fmt. Choosing one imports it
+    Parser *parser = completing_typer ? completing_typer->parser : NULL;
+    for (int i = 0; parser && i < parser->namespaces.count; i++) {
+        Namespace *ns = ((Namespace **)parser->namespaces.items)[i];
+        if (!ns->is_standard || strchr(ns->name, '.') || ns == file->ns || ns->paths.count == 0) continue;
+        if (already_added(&seen, ns->name)) continue;
+        char detail[160];
+        snprintf(detail, sizeof(detail), "import %s", ns->name);
+        item_import = ns->name;
+        add_item(ns->name, "namespace", detail, NULL);
     }
 }
 
@@ -1052,6 +1081,7 @@ void complete_program(Typer *typer, DynamicArray files) {
     program_completion.items = sb_init(4096);
     program_completion.item_count = 0;
     program_completion.signature = NULL;
+    program_completion.missing_import = NULL;
 
     AstFile *file = completion_file(files, program_completion.path);
     if (!file || !file->text) return;
@@ -1100,13 +1130,20 @@ void complete_program(Typer *typer, DynamicArray files) {
     Target target;
     if (!resolve_chain(typer, scope, segments, count, &target)) return;
     if (question && target.type && is_optional_type(target.type)) target.type = optional_inner_type(target.type);
+    // A namespace of the standard library that isn't imported, e.g the fmt of 'fmt.pr'. Its files are loaded anyway, so
+    // its names are listed, and the editor imports it with the one that is chosen
+    if (target.ns && target.ns->is_standard && target.ns != file->ns && !lookup_visible(scope, segments[0].name)) {
+        program_completion.missing_import = target.ns->name;
+    }
     if (target.ns)             add_namespace_declarations(target.ns, file);
     else if (target.type_name) add_static_members(target.type_name);
     else                       add_members(typer, target.type);
 }
 
 void write_completion_json(FILE *out) {
-    fprintf(out, "{\"version\": 1, \"items\": [%s\n], \"signature\": %s}\n",
+    StringBuilder missing = sb_init(32);
+    json_write_string(&missing, program_completion.missing_import ? program_completion.missing_import : "");
+    fprintf(out, "{\"version\": 1, \"items\": [%s\n], \"signature\": %s, \"missingImport\": %s}\n",
         program_completion.items.buffer ? program_completion.items.buffer : "",
-        program_completion.signature ? program_completion.signature : "null");
+        program_completion.signature ? program_completion.signature : "null", missing.buffer);
 }

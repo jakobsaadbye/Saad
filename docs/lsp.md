@@ -178,8 +178,10 @@ like `saad index`.
 {"version": 1,
  "items": [
   {"label": "radius", "kind": "field", "detail": "f32"},
-  {"label": "area", "kind": "method", "detail": "method (self: *Circle) -> f32", "doc": "The area of the circle"}],
- "signature": {"label": "grow(by: f32)", "parameters": ["by: f32"], "active": 0}}
+  {"label": "area", "kind": "method", "detail": "method (self: *Circle) -> f32", "doc": "The area of the circle", "parameters": 0},
+  {"label": "time", "kind": "namespace", "detail": "import time", "needsImport": "time"}],
+ "signature": {"label": "grow(by: f32)", "parameters": ["by: f32"], "active": 0},
+ "missingImport": ""}
 ```
 
 The program is checked first, and, as the compiler goes on after errors (phase 4), the code around the position is
@@ -204,7 +206,16 @@ before the position stays the same. Then the text before the position says what 
   written (`inferred_literals`).
 * The functions that build expression trees (`exprMember`, ...) aren't offered: the compiler calls them.
 * Otherwise, the names in scope: the locals declared above the position and the parameters, the declarations and
-  imports of the file, and the keywords.
+  imports of the file, and the keywords. Then the namespaces of the standard library that the file doesn't import,
+  with `needsImport`, e.g `time`.
+* After a namespace of the standard library that isn't imported, e.g `fmt.pr`, its declarations, with
+  `missingImport` set to it. Its files are loaded anyway.
+* A function or a method has `parameters`, the number of its parameters without the receiver of a method.
+
+The language server turns these into the completion of the editor: `needsImport` and `missingImport` add
+`import name;` after the imports at the top of the file (`additionalTextEdits`). A function or a method is written
+with its parentheses, `area()`, or `grow(|)` with the cursor between them and the signature shown, unless a `(`
+follows already.
 * In a call, `signature` is the function of the last `(` that isn't closed, and `active` the argument at the
   position. A method called on a value doesn't show its receiver.
 

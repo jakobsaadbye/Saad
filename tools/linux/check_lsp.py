@@ -211,6 +211,22 @@ def main():
     items = complete_at("    p2 := Pair<int>{first: 1, |};")
     check([(i["label"], i.get("insertText")) for i in items] == [("second", "second: ")], f"the field of a struct literal that isn't written: {items}")
 
+    print("completion of calls and of namespaces that aren't imported")
+    items = {i["label"]: i for i in complete_at("    c.gr|")}
+    grow, area = items.get("grow", {}), items.get("area", {})
+    check(grow.get("insertText") == "grow($0)" and grow.get("insertTextFormat") == 2 and "command" in grow, f"a method with parameters gets its parentheses: {grow}")
+    check(area.get("insertText") == "area()", f"a method without parameters gets '()': {area}")
+    items = {i["label"]: i for i in complete_at("    c.gr|(1.0);")}
+    check("insertText" not in items.get("grow", {}), f"no parentheses before a '(': {items.get('grow')}")
+    imports_end = next(i for i, l in enumerate(text.split("\n")) if l.startswith("use game.physics;")) + 1
+    items = {i["label"]: i for i in complete_at("    t := ti|")}
+    edits = items.get("time", {}).get("additionalTextEdits")
+    check(edits == [{"range": {"start": {"line": imports_end, "character": 0}, "end": {"line": imports_end, "character": 0}}, "newText": "import time;\n"}],
+          f"the namespace time isn't imported, so choosing it imports it: {items.get('time')}")
+    items = complete_at("    r := random.|")
+    check(items and all(i.get("additionalTextEdits", [{}])[0].get("newText") == "import random;\n" for i in items),
+          f"the names of random, which isn't imported, import it: {[(i['label'], i.get('additionalTextEdits')) for i in items][:3]}")
+
     print("completion of half-written lines, expression trees and inferred struct literals")
     labels = [item["label"] for item in complete_at("    big := [c].filter(x => x.|")]
     check(labels[:2] == ["radius", "area"], f"the members of a lambda's parameter, while the call isn't closed: {labels}")

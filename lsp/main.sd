@@ -818,6 +818,27 @@ completionsAt :: (params: json.Value) -> project.Completions, bool {
     return p.complete(compiler, overlayOptions(), path, at);
 }
 
+// The line an import is added at: after the imports, uses and namespace line at the top of the file, or the first line
+importLine :: (text: *source.Text) -> int {
+    after := 0;
+    for i in 0..text.lines.count {
+        line := text.line(i as int);
+        if line.startsWith("import ") || line.startsWith("use ") || line.startsWith("namespace ") {
+            after = i as int + 1;
+        } else if line != "" && !line.startsWith("//") && !line.startsWith("\r") {
+            break;
+        }
+    }
+    return after;
+}
+
+// The edit that adds 'import name;' to the file, for additionalTextEdits
+importEdit :: (text: *source.Text, name: string) -> string {
+    line := importLine(text);
+    return fmt.sprint("[{\"range\":{\"start\":{\"line\":%,\"character\":0},\"end\":{\"line\":%,\"character\":0}},\"newText\":%}]",
+        line, line, json.encode(fmt.sprint("import %;\n", name)));
+}
+
 // The CompletionItemKind of LSP
 completionKind :: (kind: string) -> int {
     return switch kind {
@@ -847,6 +868,12 @@ completion :: (m: rpc.Message) {
         rpc.respond(m.id, "[]");
         return;
     }
+    path := source.pathOf(m.params.get("textDocument").get("uri").asString());
+    text := textOf(source.keyOf(path), path);
+    position := m.params.get("position");
+    line := text.line(position.get("line").asNumber() as int);
+    called := isCalled(line, source.toByte(line, position.get("character").asNumber() as int));
+
     sb := fmt.newStringBuilder(4096);
     sb.addChar('[');
     for item, i in result.items {
@@ -857,6 +884,22 @@ completion :: (m: rpc.Message) {
         }
         if item.insert != "" {
             sb.addString(fmt.sprint(",\"insertText\":%", json.encode(item.insert)));
+        } else if (item.kind == "function" || item.kind == "method") && !called {
+            // The parentheses of the call, with the cursor between them when it takes arguments
+            if item.parameters == 0 {
+                sb.addString(fmt.sprint(",\"insertText\":%", json.encode(fmt.sprint("%()", item.label))));
+            } else {
+                sb.addString(fmt.sprint(",\"insertText\":%,\"insertTextFormat\":2", json.encode(fmt.sprint("%($0)", item.label))));
+                sb.addString(",\"command\":{\"title\":\"Signature help\",\"command\":\"editor.action.triggerParameterHints\"}");
+            }
+        }
+        // A namespace that isn't imported, or a name of one, adds the import
+        needs := item.needsImport;
+        if needs == "" {
+            needs = result.missingImport;
+        }
+        if needs != "" {
+            sb.addString(fmt.sprint(",\"additionalTextEdits\":%", importEdit(text, needs)));
         }
         // Keywords after the names of the program
         if item.kind == "keyword" {
@@ -866,6 +909,14 @@ completion :: (m: rpc.Message) {
     }
     sb.addChar(']');
     rpc.respond(m.id, sb.toString());
+}
+
+// If the name at the byte is followed by a '(', e.g when 'pri' of 'pri(x)' is completed, so no parentheses are added
+isCalled :: (line: string, at: int) -> bool {
+    i := at;
+    while i < line.len && (line[i].isLetterOrDigit() || line[i] == '_') { i += 1; }
+    while i < line.len && line[i] == ' ' { i += 1; }
+    return i < line.len && line[i] == '(';
 }
 
 signatureHelp :: (m: rpc.Message) {

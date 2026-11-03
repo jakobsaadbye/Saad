@@ -78,6 +78,15 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.10.3 - 3. Nov 2026
+
+* Language server, completion: the namespaces of the standard library that a file doesn't import are offered too, and
+  choosing one, or a name of one (`fmt.pr`), adds `import fmt;` to the file. A function or method is completed with its
+  parentheses, with the cursor between them and its signature shown when it has parameters
+* A missing `;` marks the token it should come after. It marked the token before that, e.g `+` of `x + 1`. A call
+  without its `;`, e.g `print(y)`, said "Invalid start of statement", and `return` before a `}` "Invalid start of
+  expression"
+
 ## Update v0.10.2 - 3. Nov 2026
 
 * Language server: the names in a generic that nothing instantiates go to their declarations and have hovers, e.g the
