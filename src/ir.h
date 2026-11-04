@@ -197,6 +197,7 @@ typedef struct IrInst {
     double   fimm;     // CONST_FLOAT value
     IrCall  *call;     // CALL
     int      line;     // Source line, 0 if unknown. In the file of the function (IrFunction.source_file)
+    int      scope;    // The lexical scope it is in, for the debug information. 0 is the function itself
 } IrInst;
 
 typedef enum IrTermKind {
@@ -232,6 +233,22 @@ typedef struct IrSlot {
     char *name;        // Debug name (variable name or temporary kind)
 } IrSlot;
 
+// A block of the program, e.g the body of a for, for the debug information. Its variables are only seen in it
+typedef struct IrScope {
+    int parent;        // 0 is the function itself
+    int line;
+} IrScope;
+
+// A variable of the program, for the debug information
+typedef struct IrLocal {
+    char *name;
+    void *type;        // The Type of the front end (ast.h)
+    int   slot;        // Where it is
+    int   scope;
+    int   line;
+    int   arg;         // The number of a parameter, from 1. 0 for a local variable
+} IrLocal;
+
 typedef struct IrFunction {
     char   *name;
     int     global;            // Index of the function's symbol in the module globals
@@ -244,6 +261,8 @@ typedef struct IrFunction {
     IrArray(IrType)    vreg_types;
     IrArray(int)       params;     // Vreg per incoming parameter, in ABI order
     IrArray(IrSlot)    slots;
+    IrArray(IrScope)   scopes;     // scopes.items[0] is the function itself
+    IrArray(IrLocal)   locals;     // The variables of the program, for the debug information
     IrArray(IrBlock *) blocks;     // Layout order. blocks.items[0] is the entry block
     int                next_block_id;
 } IrFunction;

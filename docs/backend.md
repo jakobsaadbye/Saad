@@ -94,7 +94,22 @@ lines, and show the calls with the names of the program, e.g `List<int>.add` or 
   `coff_read()` keeps them and the debug sections, and `pe_write()` writes them as sections of their own, with the
   exception directory pointing at `.pdata`, and a string table for the long names like `.debug_abbrev`.
 
-The variables of a function, and the x64 backend, don't have debug information yet.
+The variables and parameters have debug information too:
+
+* `declare_local()` (ir_lower.c) records each variable of the program (`IrFunction.locals`): its name, Saad type, slot,
+  line and lexical scope. Each block, `for` and `catch` is a scope (`IrFunction.scopes`, and `IrInst.scope` for each
+  instruction), so two loops can each have an `i`.
+* llvm_emit.c makes a lexical block per scope and declares each variable on the alloca of its slot, with the DWARF type
+  of its Saad type (`llvm_di_type`): structs with their members, pointers, fixed arrays, enums by name, and `string`,
+  lists, slices, optionals, unions and `any` as the structs they are.
+* `tools/lldb/saad_formatters.py` shows those like the program writes them: a string as `"hi"`, a list or slice as its
+  elements, an optional as its value or `none`, a union as the variant it holds (`.label "hi"`), and an `any` with the
+  type of its value (`int 7`). Load it with `command script import tools/lldb/saad_formatters.py`.
+* The code after a block, e.g the step of a loop, is at the line of its `}`, so stepping goes through a loop like in C.
+* `tools/linux/check_debug.sh` (part of `runtests.sh` when LLDB is installed) stops in `tests/debug/variables.sd` with
+  LLDB and checks what it shows.
+
+The global variables, and the x64 backend, don't have debug information yet.
 
 ## Debugging
 

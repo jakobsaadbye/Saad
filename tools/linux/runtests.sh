@@ -116,6 +116,19 @@ if command -v python3 > /dev/null; then
     fi
 fi
 
+# The debug information of the LLVM backend, in LLDB (needs lldb and a saad built with LLVM)
+if command -v lldb > /dev/null && ./bin/saad build tests/debug/variables.sd --elf --llvm > /dev/null 2>&1; then
+    printf "%-56s " "debug information (check_debug.sh)"
+    if output=$(bash "$HERE/check_debug.sh" 2>&1); then
+        echo "${GREEN}OK${RESET}"
+        passed=$((passed + 1))
+    else
+        echo "${RED}FAILED${RESET}"
+        echo "$output" | grep "missing" | head -5 | sed 's/^/    /'
+        failed=$((failed + 1))
+    fi
+fi
+
 echo
 echo "$passed passed, $failed failed"
 [ $failed -eq 0 ]

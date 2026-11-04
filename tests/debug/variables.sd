@@ -1,0 +1,73 @@
+// The debug information of the LLVM backend: tools/linux/check_debug.sh runs this in LLDB with
+// tools/lldb/saad_formatters.py. It stops at 'stop in describe' when i is 1, then at 'break here', and what
+// LLDB shows must have each 'expect-debug' line
+
+import fmt;
+
+Color :: enum { red, green, blue }
+
+Point :: struct {
+    x: int;
+    y: f64;
+    next: *Point;
+}
+
+Shape :: union {
+    circle: f64;
+    label: string;
+    empty;
+}
+
+describe :: (p: Point, scale: int, name: string) -> int {
+    total := p.x * scale;
+    for i in 0..2 {
+        squared := i * i;
+        total += squared;     // stop in describe
+    }
+    return total + xx name.len;
+}
+
+main :: () {
+    count := 42;
+    ok := true;
+    name := "saad";
+    color := Color.green;
+    p := Point{3, 4.5, null};
+    q := Point{7, 1.0, &p};
+    numbers: [3]int;
+    numbers[1] = 2;
+    list: [..]int;
+    list.add(10);
+    list.add(20);
+    slice: []int = list;
+    maybe: ?int = 5;
+    nothing: ?int;
+    value: any = 7;
+    e: Shape = .empty;
+    l := Shape{label: "hi"};
+    r := describe(q, 2, name);
+    fmt.print("% % % % % %\n", count, ok, color, numbers[1], slice.count, r);   // break here
+}
+
+// expect-debug: (int) count = 42
+// expect-debug: (bool) ok = true
+// expect-debug: (string) name = "saad"
+// expect-debug: (Color) color = green
+// expect-debug: x = 3
+// expect-debug: y = 4.5
+// expect-debug: (int[3]) numbers = ([0] = 0, [1] = 2, [2] = 0)
+// expect-debug: (List<int>) list = count = 2
+// expect-debug: [1] = 20
+// expect-debug: ([]int) slice = count = 2
+// expect-debug: (?int) maybe = 5
+// expect-debug: (?int) nothing = none
+// expect-debug: (any) value = int 7
+// expect-debug: (Shape) e = .empty
+// expect-debug: (Shape) l = .label "hi"
+// expect-debug: (int) r = 19
+// expect-debug: (int) q.next->x = 3
+// expect-debug: `describe(p=Point @
+// expect-debug: scale=2, name="saad")
+// expect-debug: (int) total = 14
+// expect-debug: (int) squared = 1
+// expect-debug: (int) i = 1

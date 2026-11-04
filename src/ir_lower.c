@@ -77,6 +77,7 @@ typedef struct Lowerer {
     IrFunction      *func;
     IrBlock         *block;
     AstFunctionDefn *ast_func;
+    int              scope;     // The lexical scope of the instructions, an index of func->scopes
     PtrMap           locals;          // AstIdentifier* -> slot index
     IrArray(LoopTargets) loops;
     IrArray(Ast *)   defers;          // The deferred statements of the blocks that are being lowered, innermost last
@@ -288,6 +289,7 @@ static IrInst make_inst(Lowerer *L, IrOp op, IrType type) {
     inst.a    = IR_NO_VREG;
     inst.b    = IR_NO_VREG;
     inst.line = L->line;
+    inst.scope = L->scope;
     return inst;
 }
 
@@ -833,7 +835,24 @@ static int declare_local(Lowerer *L, AstIdentifier *ident) {
     ident = resolve_override(ident);
     int slot = ir_new_slot(L->func, type_storage_size(ident->type), type_alignment(ident->type), ident->name);
     ptr_map_put(&L->locals, ident, slot);
+
+    // For the debug information. The names of the compiler, e.g $ret, are left out
+    if (ident->name && ident->name[0] && ident->name[0] != '$' && strcmp(ident->name, "_") != 0) {
+        bool same_file = !L->ast_func || ident->head.file == L->ast_func->head.head.file;
+        IrLocal local = { ir_strdup(L->module, ident->name), ident->type, slot, L->scope, same_file ? ident->head.start.line : L->line, 0 };
+        ir_array_push(L->func->locals, local);
+    }
     return slot;
+}
+
+// A lexical scope inside the current one, for the variables declared in it. Returns the one to go back to
+static int enter_scope(Lowerer *L, Ast *node) {
+    int outer = L->scope;
+    bool same_file = !L->ast_func || node->file == L->ast_func->head.head.file;
+    IrScope scope = { outer, same_file && node->start.line > 0 ? node->start.line : L->line };
+    ir_array_push(L->func->scopes, scope);
+    L->scope = L->func->scopes.count - 1;
+    return outer;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -3035,7 +3054,13 @@ static void lower_statement(Lowerer *L, Ast *stmt) {
         return;
     }
     case AST_WHILE:             lower_while(L, (AstWhile *) stmt); return;
-    case AST_FOR:               lower_for(L, (AstFor *) stmt); return;
+    case AST_FOR: {
+        // The loop variables are in a scope of the for, so two loops can have an 'i' each
+        int outer = enter_scope(L, stmt);
+        lower_for(L, (AstFor *) stmt);
+        L->scope = outer;
+        return;
+    }
     case AST_BREAK_OR_CONTINUE: lower_break_or_continue(L, (AstBreakOrContinue *) stmt); return;
     case AST_RETURN:            lower_return(L, (AstReturn *) stmt); return;
     case AST_DEFER:             ir_array_push(L->defers, ((AstDefer *) stmt)->statement); return; // Runs when the block is left
@@ -3051,11 +3076,13 @@ static void lower_statement(Lowerer *L, Ast *stmt) {
 
         // The handler has the error, and nothing is being thrown anymore
         set_block(L, catch_block);
+        int outer = enter_scope(L, (Ast *) ast_try->handler);    // The error is only seen in the handler
         int err = emit_load(L, IR_PTR, thrown_error_addr(L));
         emit_store(L, IR_PTR, thrown_error_addr(L), emit_const(L, IR_PTR, 0));
         int slot = declare_local(L, ast_try->error);
         emit_store(L, IR_PTR, addr_slot(slot, 0), err);
         lower_block(L, ast_try->handler);
+        L->scope = outer;
         terminate_jmp(L, done);
         set_block(L, done);
         return;
@@ -3082,12 +3109,18 @@ static void lower_statement(Lowerer *L, Ast *stmt) {
 }
 
 static void lower_block(Lowerer *L, AstBlock *block) {
+    // A block has a scope, except the body of the function, whose scope is the function
+    int outer = L->scope;
+    if (!L->ast_func || block != L->ast_func->body) enter_scope(L, (Ast *) block);
     int defers = L->defers.count;
     for (int i = 0; i < block->statements.count; i++) {
         lower_statement(L, da_get_deref(block->statements, i));
     }
+    // What comes after the statements, e.g the deferred ones or the step of a loop, is at the line of the '}'
+    if ((!L->ast_func || block->head.file == L->ast_func->head.head.file) && block->head.end.line > 0) L->line = block->head.end.line;
     emit_defers(L, defers); // At the end of the block. A return, break or continue in it ran them already
     L->defers.count = defers;
+    L->scope = outer;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -3175,6 +3208,7 @@ static void lower_thunk(Lowerer *L, PendingThunk *thunk) {
     func->return_type = IR_I32;
     L->func     = func;
     L->ast_func = target;
+    L->scope    = 0;
     L->loops.count = 0;
     L->defers.count = 0;
     L->tries.count = 0;
@@ -3226,6 +3260,9 @@ static void lower_function(Lowerer *L, AstFunctionDefn *func_defn) {
     L->func     = func;
     L->ast_func = func_defn;
     L->line     = func_defn->head.head.start.line;
+    L->scope    = 0;
+    IrScope function_scope = { 0, L->line };
+    ir_array_push(func->scopes, function_scope);
     L->loops.count = 0;
     L->defers.count = 0;
     L->tries.count = 0;
@@ -3246,7 +3283,14 @@ static void lower_function(Lowerer *L, AstFunctionDefn *func_defn) {
         int vreg = ir_new_vreg(func, ir_param_type(type));
         ir_array_push(func->params, vreg);
 
+        int locals = func->locals.count;
         int slot = declare_local(L, param);
+        // A parameter of the program is numbered for the debug information. The hidden ones, e.g for the results, aren't
+        if (func->locals.count > locals) {
+            int ret_count = func_defn->lowered_return_params.count;
+            if (i < ret_count) func->locals.count--;
+            else               func->locals.items[func->locals.count - 1].arg = i - ret_count + 1;
+        }
         switch (classify_argument(type)) {
         case ARG_SCALAR:
             emit_store(L, ir_type_of(type), addr_slot(slot, 0), vreg);
@@ -3264,6 +3308,8 @@ static void lower_function(Lowerer *L, AstFunctionDefn *func_defn) {
     terminate_return(L, false);
 
     set_block(L, prologue);
+    L->line  = func_defn->head.head.start.line;   // The prologue is at the line of the function, not of its last statement
+    L->scope = 0;
     if (func->is_entry_point) {
         int args[2] = { emit_global_addr(L, L->thread_template), emit_const(L, IR_I64, L->thread_block_size) };
         emit_errors_call(L, "startThreadBlocks", 2, args);

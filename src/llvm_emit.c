@@ -13,7 +13,8 @@
 //     convention
 //   * The runtime functions that the x64 backend writes in assembly are built here
 //   * With debug information (saad build --debug), each function gets a DWARF subprogram and each instruction the line
-//     of its statement, so a debugger can stop at a line, step and show the calls
+//     of its statement, so a debugger can stop at a line, step and show the calls. Each variable of the program is
+//     declared on its alloca, in the lexical block of its scope, with the DWARF type of its Saad type
 //
 //////////////////////////////////////////////////////////////////////////////////////////
 
@@ -43,7 +44,12 @@ typedef struct LlvmEmitter {
     struct { char *path; LLVMMetadataRef file; } *files;
     int               file_count;
     LLVMMetadataRef   subprogram;   // Of the function being built, or NULL
+    LLVMMetadataRef  *scopes;       // Of the function being built: its subprogram, then a lexical block per IrScope
     int               line;         // The line of the last instruction
+    int               scope;        // The scope of the last instruction
+    PtrMap            type_index;   // Type* -> index in types_made
+    LLVMMetadataRef  *types_made;
+    int               type_count;
 
     // Of the function being built
     LLVMValueRef    *values;       // Of each vreg
@@ -182,12 +188,154 @@ static LLVMMetadataRef llvm_di_file(LlvmEmitter *e, const char *path) {
     return file;
 }
 
-// Where the next instructions come from: the line of the function being built
-static void llvm_set_line(LlvmEmitter *e, int line) {
+// Where the next instructions come from: a line and a scope of the function being built. A line of 0 keeps the last one
+static void llvm_set_line(LlvmEmitter *e, int line, int scope) {
     if (!e->subprogram) return;
-    if (line > 0) e->line = line;
-    LLVMMetadataRef location = LLVMDIBuilderCreateDebugLocation(e->context, (unsigned) e->line, 0, e->subprogram, NULL);
+    if (line > 0) {
+        e->line = line;
+        e->scope = scope >= 0 && scope < e->func->scopes.count ? scope : 0;
+    }
+    LLVMMetadataRef location = LLVMDIBuilderCreateDebugLocation(e->context, (unsigned) e->line, 0, e->scopes[e->scope], NULL);
     LLVMSetCurrentDebugLocation2(e->builder, location);
+}
+
+static LLVMMetadataRef llvm_di_type(LlvmEmitter *e, Type *type);
+
+static LLVMMetadataRef llvm_di_remember(LlvmEmitter *e, Type *type, LLVMMetadataRef made) {
+    int index = ptr_map_get(&e->type_index, type);
+    if (index < 0) {
+        index = e->type_count++;
+        e->types_made = realloc(e->types_made, e->type_count * sizeof(LLVMMetadataRef));
+        ptr_map_put(&e->type_index, type, index);
+    }
+    e->types_made[index] = made;
+    return made;
+}
+
+// A struct of the program, with its members. It is remembered as a placeholder first, as a member can point back to it
+static LLVMMetadataRef llvm_di_struct(LlvmEmitter *e, Type *type, TypeStruct *defn, const char *name) {
+    LLVMMetadataRef file = e->files[0].file;
+    uint64_t size = (uint64_t) type->size * 8;
+    uint32_t align = defn && defn->alignment ? defn->alignment * 8 : 64;
+    LLVMMetadataRef placeholder = LLVMDIBuilderCreateReplaceableCompositeType(e->di, 0x13 /* DW_TAG_structure_type */, name, strlen(name),
+        e->compile_unit, file, 0, 0, size, align, LLVMDIFlagZero, "", 0);
+    llvm_di_remember(e, type, placeholder);
+
+    int capacity = 8, count = 0;
+    LLVMMetadataRef *members = malloc(capacity * sizeof(LLVMMetadataRef));
+    if (defn && defn->node && defn->node->members) {
+        DynamicArray list = defn->node->members->identifiers;
+        for (int i = 0; i < list.count; i++) {
+            AstIdentifier *member = da_get_deref(list, i);
+            // A variant of a union without a value, e.g empty, has no member. Its name is a value of the $tag
+            if (!member->type || (member->flags & IDENTIFIER_IS_CONSTANT) || member->type->size <= 0) continue;
+            if (count == capacity) { capacity *= 2; members = realloc(members, capacity * sizeof(LLVMMetadataRef)); }
+            members[count++] = LLVMDIBuilderCreateMemberType(e->di, e->compile_unit, member->name, strlen(member->name), file, 0,
+                (uint64_t) member->type->size * 8, 0, (uint64_t) member->member_offset * 8, LLVMDIFlagZero, llvm_di_type(e, member->type));
+        }
+    }
+    LLVMMetadataRef made = LLVMDIBuilderCreateStructType(e->di, e->compile_unit, name, strlen(name), file, 0, size, align, LLVMDIFlagZero,
+        NULL, members, (unsigned) count, 0, NULL, "", 0);
+    free(members);
+    LLVMMetadataReplaceAllUsesWith(placeholder, made);
+    return llvm_di_remember(e, type, made);
+}
+
+// The DWARF type of a Saad type, made once. A debugger shows a value of it by its members, e.g a string as its data
+// and length
+static LLVMMetadataRef llvm_di_type(LlvmEmitter *e, Type *type) {
+    if (!type) return NULL;
+    int index = ptr_map_get(&e->type_index, type);
+    if (index >= 0) return e->types_made[index];
+
+    char *name = type_to_str(type);
+    if (!name) name = "?";
+    uint64_t bits = (uint64_t)(type->size > 0 ? type->size : 0) * 8;
+    switch (type->kind) {
+    case TYPE_BOOL:
+        return llvm_di_remember(e, type, LLVMDIBuilderCreateBasicType(e->di, "bool", 4, 8, 0x02 /* DW_ATE_boolean */, LLVMDIFlagZero));
+    case TYPE_INTEGER: {
+        unsigned encoding = is_signed_integer(type) ? 0x05 /* DW_ATE_signed */ : 0x07 /* DW_ATE_unsigned */;
+        return llvm_di_remember(e, type, LLVMDIBuilderCreateBasicType(e->di, name, strlen(name), bits ? bits : 64, encoding, LLVMDIFlagZero));
+    }
+    case TYPE_FLOAT:
+        return llvm_di_remember(e, type, LLVMDIBuilderCreateBasicType(e->di, name, strlen(name), bits ? bits : 64, 0x04 /* DW_ATE_float */, LLVMDIFlagZero));
+    case TYPE_POINTER: {
+        Type *to = ((TypePointer *) type)->pointer_to;
+        LLVMMetadataRef pointee = to && to->kind != TYPE_VOID ? llvm_di_type(e, to) : NULL;
+        // The pointee may have made the pointer already, e.g through a member pointing back
+        index = ptr_map_get(&e->type_index, type);
+        if (index >= 0) return e->types_made[index];
+        return llvm_di_remember(e, type, LLVMDIBuilderCreatePointerType(e->di, pointee, 64, 0, 0, name, strlen(name)));
+    }
+    case TYPE_FUNCTION: {
+        LLVMMetadataRef signature = LLVMDIBuilderCreateSubroutineType(e->di, e->files[0].file, NULL, 0, LLVMDIFlagZero);
+        return llvm_di_remember(e, type, LLVMDIBuilderCreatePointerType(e->di, signature, 64, 0, 0, name, strlen(name)));
+    }
+    case TYPE_ENUM: {
+        TypeEnum *enum_type = (TypeEnum *) type;
+        int count = enum_type->node ? enum_type->node->enumerators.count : 0;
+        LLVMMetadataRef *values = malloc((count + 1) * sizeof(LLVMMetadataRef));
+        for (int i = 0; i < count; i++) {
+            AstEnumerator *enumerator = da_get_deref(enum_type->node->enumerators, i);
+            values[i] = LLVMDIBuilderCreateEnumerator(e->di, enumerator->name, strlen(enumerator->name), enumerator->value, false);
+        }
+        LLVMMetadataRef backing = llvm_di_type(e, enum_type->backing_type);
+        LLVMMetadataRef made = LLVMDIBuilderCreateEnumerationType(e->di, e->compile_unit, name, strlen(name), e->files[0].file, 0,
+            bits ? bits : 32, 0, values, (unsigned) count, backing);
+        free(values);
+        return llvm_di_remember(e, type, made);
+    }
+    case TYPE_ARRAY: {
+        TypeArray *array = (TypeArray *) type;
+        if (array->array_kind == ARRAY_FIXED) {
+            LLVMMetadataRef element = llvm_di_type(e, array->elem_type);
+            LLVMMetadataRef range = LLVMDIBuilderGetOrCreateSubrange(e->di, 0, array->capacity);
+            return llvm_di_remember(e, type, LLVMDIBuilderCreateArrayType(e->di, bits, 0, element, &range, 1));
+        }
+        return llvm_di_struct(e, type, array->struct_defn, name);      // []T and [..]T: data, count, ...
+    }
+    case TYPE_STRING: return llvm_di_struct(e, type, ((TypeString *) type)->struct_defn, "string");
+    case TYPE_ANY:    return llvm_di_struct(e, type, ((TypeAny *) type)->struct_defn, "any");
+    case TYPE_STRUCT: return llvm_di_struct(e, type, (TypeStruct *) type, name);
+    case TYPE_VARIADIC: {
+        TypeVariadic *variadic = (TypeVariadic *) type;
+        if (variadic->slice) return llvm_di_remember(e, type, llvm_di_type(e, (Type *) variadic->slice));
+        break;
+    }
+    default:
+        break;
+    }
+    // Something else is shown as its bytes
+    LLVMMetadataRef byte = LLVMDIBuilderCreateBasicType(e->di, "u8", 2, 8, 0x07, LLVMDIFlagZero);
+    LLVMMetadataRef range = LLVMDIBuilderGetOrCreateSubrange(e->di, 0, type->size > 0 ? type->size : 0);
+    return llvm_di_remember(e, type, LLVMDIBuilderCreateArrayType(e->di, bits, 8, byte, &range, 1));
+}
+
+// The lexical blocks of the function, and its variables declared on their allocas. In the allocas block, before its br
+static void llvm_di_locals(LlvmEmitter *e, IrFunction *func, LLVMBasicBlockRef allocas) {
+    if (!e->subprogram) return;
+    LLVMMetadataRef file = llvm_di_file(e, func->source_file);
+    for (int i = 1; i < func->scopes.count; i++) {
+        IrScope scope = func->scopes.items[i];
+        LLVMMetadataRef parent = scope.parent >= 0 && scope.parent < i ? e->scopes[scope.parent] : e->subprogram;
+        e->scopes[i] = LLVMDIBuilderCreateLexicalBlock(e->di, parent, file, (unsigned) scope.line, 0);
+    }
+    LLVMMetadataRef expression = LLVMDIBuilderCreateExpression(e->di, NULL, 0);
+    for (int i = 0; i < func->locals.count; i++) {
+        IrLocal *local = &func->locals.items[i];
+        LLVMMetadataRef scope = local->scope >= 0 && local->scope < func->scopes.count ? e->scopes[local->scope] : e->subprogram;
+        LLVMMetadataRef type = llvm_di_type(e, (Type *) local->type);
+        unsigned line = (unsigned)(local->line > 0 ? local->line : func->source_line);
+        LLVMMetadataRef variable;
+        if (local->arg > 0) {
+            variable = LLVMDIBuilderCreateParameterVariable(e->di, scope, local->name, strlen(local->name), (unsigned) local->arg, file, line, type, true, LLVMDIFlagZero);
+        } else {
+            variable = LLVMDIBuilderCreateAutoVariable(e->di, scope, local->name, strlen(local->name), file, line, type, true, LLVMDIFlagZero, 0);
+        }
+        LLVMMetadataRef location = LLVMDIBuilderCreateDebugLocation(e->context, line, 0, scope, NULL);
+        LLVMDIBuilderInsertDeclareAtEnd(e->di, e->slots[local->slot], variable, expression, location, allocas);
+    }
 }
 
 // The subprogram of a function of the program, which a debugger shows by its name in the program, e.g Point.length
@@ -201,6 +349,9 @@ static void llvm_di_function(LlvmEmitter *e, IrFunction *func, LLVMValueRef func
         (unsigned) func->source_line, type, !func->is_entry_point, true, (unsigned) func->source_line, LLVMDIFlagPrototyped, false);
     LLVMSetSubprogram(function, e->subprogram);
     e->line = func->source_line > 0 ? func->source_line : 1;
+    e->scope = 0;
+    e->scopes = realloc(e->scopes, (func->scopes.count + 1) * sizeof(LLVMMetadataRef));
+    e->scopes[0] = e->subprogram;
 }
 
 static void llvm_emit_inst(LlvmEmitter *e, IrInst *inst) {
@@ -425,7 +576,7 @@ static void llvm_emit_function(LlvmEmitter *e, IrFunction *func) {
     // The allocas, in a block before the first block, which other blocks can jump to
     LLVMBasicBlockRef allocas = LLVMAppendBasicBlockInContext(e->context, function, "allocas");
     LLVMPositionBuilderAtEnd(b, allocas);
-    llvm_set_line(e, 0);
+    llvm_set_line(e, 0, 0);
     for (int i = 0; i < func->slots.count; i++) {
         IrSlot slot = func->slots.items[i];
         LLVMValueRef alloca = LLVMBuildAlloca(b, LLVMArrayType2(e->types[IR_I8], slot.size > 0 ? slot.size : 1), "");
@@ -438,6 +589,8 @@ static void llvm_emit_function(LlvmEmitter *e, IrFunction *func) {
     }
     free(homed);
 
+    llvm_di_locals(e, func, allocas);
+
     for (int i = 0; i < func->blocks.count; i++) {
         IrBlock *block = func->blocks.items[i];
         e->blocks[block->id] = LLVMAppendBasicBlockInContext(e->context, function, "");
@@ -449,10 +602,10 @@ static void llvm_emit_function(LlvmEmitter *e, IrFunction *func) {
         IrBlock *block = func->blocks.items[i];
         LLVMPositionBuilderAtEnd(b, e->blocks[block->id]);
         for (int j = 0; j < block->insts.count; j++) {
-            llvm_set_line(e, block->insts.items[j].line);
+            llvm_set_line(e, block->insts.items[j].line, block->insts.items[j].scope);
             llvm_emit_inst(e, &block->insts.items[j]);
         }
-        llvm_set_line(e, 0);
+        llvm_set_line(e, 0, 0);
         llvm_emit_term(e, &block->term);
     }
     LLVMSetCurrentDebugLocation2(b, NULL);
@@ -822,6 +975,9 @@ done:
     if (machine) LLVMDisposeTargetMachine(machine);
     if (e.di) LLVMDisposeDIBuilder(e.di);
     for (int i = 0; i < e.file_count; i++) free(e.files[i].path);
+    free(e.scopes);
+    free(e.types_made);
+    free(e.type_index.entries);
     free(e.files);
     LLVMDisposeBuilder(e.builder);
     LLVMDisposeModule(e.llvm);
