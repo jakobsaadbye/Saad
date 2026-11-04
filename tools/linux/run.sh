@@ -21,7 +21,7 @@ fi
 case "$INPUT" in
     *.sd)
         # The compiler's own assembler writes an ELF object, with the 'ms_' names of shim.c
-        "$REPO/bin/saad" build "$INPUT" --elf > /dev/null || { "$REPO/bin/saad" build "$INPUT" --elf; exit 3; }
+        "$REPO/bin/saad" build "$INPUT" --elf $SAAD_BUILD_FLAGS > /dev/null || { "$REPO/bin/saad" build "$INPUT" --elf $SAAD_BUILD_FLAGS; exit 3; }
         OBJECT="$(cd "$(dirname "$INPUT")" && pwd)/build/out.o"
         ;;
     *.o)

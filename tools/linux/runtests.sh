@@ -2,13 +2,17 @@
 # Runs every test on Linux: tests/*.sd must compile and run with exit code 0,
 # tests/should_fail/*.sd must be rejected by the compiler.
 #
-#   tools/linux/runtests.sh
+#   tools/linux/runtests.sh            with the x64 backend
+#   tools/linux/runtests.sh --llvm     with the LLVM backend, also for the language server
 #
-# Requirements: gcc. Builds the compiler with ./build.sh first.
+# Requirements: gcc, and LLVM (e.g llvm-18-dev) for --llvm. Builds the compiler with ./build.sh first.
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 cd "$REPO"
+
+export SAAD_BUILD_FLAGS=""
+[ "$1" = "--llvm" ] && export SAAD_BUILD_FLAGS="--llvm"
 
 bash ./build.sh > /dev/null || exit 1
 
@@ -17,7 +21,7 @@ passed=0; failed=0
 
 for f in tests/*.sd tests/std/*.sd tests/backend/*.sd; do
     printf "%-56s " "$f"
-    if ! output=$(./bin/saad build "$f" --elf 2>&1); then
+    if ! output=$(./bin/saad build "$f" --elf $SAAD_BUILD_FLAGS 2>&1); then
         echo "${RED}COMPILE ERROR${RESET}"
         echo "$output" | grep -iE 'error' | head -3 | sed 's/^/    /'
         failed=$((failed + 1))

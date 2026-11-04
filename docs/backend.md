@@ -49,6 +49,37 @@ The functions that the generated code calls, `runtime_compare_strings` (comparin
 `runtime_builtin_assert` (a failed `assert`), are written in assembly by x64_emit.c into the programs that use them, so
 there is no runtime library to link.
 
+## LLVM (optimized builds)
+
+```
+IR (ir_lower.c) -> LLVM module (llvm_emit.c) -> optimized -> COFF in memory -> coff_read() -> pe_write() -> out.exe
+```
+
+`saad build main.sd --llvm` makes the program with LLVM, optimized like `-O2`. `-O0` to `-O3` give the level. The
+compiler builds the module in memory with LLVM's C library, optimizes it with LLVM's passes (`default<O2>`) and makes
+the object file in memory. Like the x64 backend, it needs nothing installed: LLVM is linked into saad, and the program
+is made by the compiler's own PE writer, so no clang, linker or gcc is run.
+
+* A vreg is an LLVM value. One used in another block than the one defining it lives in an alloca, which mem2reg makes a
+  value again. A slot is an alloca, a data global is a packed struct of its bytes and a `ptr` for each relocation.
+* Every function has the Win64 calling convention, like the x64 backend. The runtime functions are built by llvm_emit.c,
+  and for Windows also `__chkstk` (touches each page of a big stack frame, so Windows grows the stack) and `_fltused`,
+  which would come from the static library of the C runtime.
+* `coff_read()` (object_writer.c) puts the code and data of LLVM's COFF object into the sections of an `AsmObject`, with
+  its relocations, for `pe_write()`. The unwind tables (`.pdata`, `.xdata`) are left out, as the x64 backend has none.
+* With `--elf`, LLVM writes `build/out.o` for the Linux harness instead.
+
+The compiler has the LLVM backend when it is built with LLVM, which is then linked into it from LLVM's static libraries
+(only the parts for x64, about 40 MB):
+
+* `build.sh` finds LLVM with `llvm-config`, e.g after `apt install llvm-18-dev libzstd-dev`. When the static libraries
+  can't be linked, it uses LLVM's shared library instead.
+* `make.bat` uses `llvm-config` of a MinGW build of LLVM on the PATH, e.g of MSYS2 (`pacman -S mingw-w64-x86_64-llvm`).
+* `SAAD_LLVM=0` builds without it. Then `--llvm` says that the compiler has no LLVM.
+
+LLVM takes longer: about 8 seconds for `examples/blog/server.sd` at `-O2`, against 0.5 seconds for the x64 backend and
+0.9 seconds at `-O0`.
+
 ## Debugging
 
 `saad build main.sd --debug` makes the program the old way, with `nasm -fwin64 -g` and `gcc`, so it has debug information
@@ -57,6 +88,7 @@ for gdb (see gdb_guide.md). That needs nasm and MinGW's gcc.
 ## Testing
 
 * `tools/linux/runtests.sh` runs the tests on Linux with `saad build --elf`, so every test runs the code of the assembler.
+  `runtests.sh --llvm` and `dbtests.sh --llvm` run them with the LLVM backend.
 * `tools/linux/asm_driver.c` assembles an out.asm with the compiler's assembler into a COFF, ELF or PE file. Its COFF
   output was compared with nasm's (`objdump -d -r`) for every test and example: the same instructions, except that the
   assembler makes some jumps short where nasm makes them long.

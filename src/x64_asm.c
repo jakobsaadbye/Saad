@@ -38,6 +38,7 @@ typedef struct AsmBytes {
 typedef enum AsmRelocKind {
     ASM_RELOC_REL32,  // A 32-bit offset from the end of the instruction: S + addend - (P + 4 + trailing)
     ASM_RELOC_ABS64,  // A 64-bit address: S + addend
+    ASM_RELOC_RVA32,  // A 32-bit offset from the start of the program: S + addend - image base (only from coff_read)
 } AsmRelocKind;
 
 typedef struct AsmReloc {
