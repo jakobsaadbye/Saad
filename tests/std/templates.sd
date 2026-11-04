@@ -1,6 +1,6 @@
-// web templates: values of the program, if, for, set, filters, functions, macros, include, extends and block
+// html.html, the templates of HTML pages: values of the program, if, for, set, filters, functions, macros, include, extends and block
 
-import web;
+import web.html;
 import fmt;
 import os;
 
@@ -30,35 +30,35 @@ Page :: struct {
     lang:    string;
 }
 
-shout :: (call: *web.Call, value: web.Value) -> web.Value {
+shout :: (call: *html.Call, value: html.Value) -> html.Value {
     times := 1;
-    if call.args.count > 0 { times = web.integerOf(call.args[0]) as int; }
+    if call.args.count > 0 { times = html.integerOf(call.args[0]) as int; }
     sb := fmt.newStringBuilder(16);
-    sb.addString(web.textOf(value).toUpper());
+    sb.addString(html.textOf(value).toUpper());
     for 0..times { sb.addChar('!'); }
-    return web.Value{text: sb.toString()};
+    return html.Value{text: sb.toString()};
 }
 
 // Uses the context of the render, e.g the language of a request
-greet :: (call: *web.Call) -> web.Value {
+greet :: (call: *html.Call) -> html.Value {
     lang := *(call.context as *string);
-    if lang == "de" { return web.Value{text: "Hallo"}; }
-    return web.Value{text: "Hej"};
+    if lang == "de" { return html.Value{text: "Hallo"}; }
+    return html.Value{text: "Hej"};
 }
 
-ageOf :: (call: *web.Call, value: web.Value) -> web.Value {
-    author := web.dataOf<Author>(value);
+ageOf :: (call: *html.Call, value: html.Value) -> html.Value {
+    author := html.dataOf<Author>(value);
     if author == null { return .none; }
-    return web.Value{integer: author.age};
+    return html.Value{integer: author.age};
 }
 
-check :: (templates: *web.Templates, name: string, page: Page, expected: string) {
+check :: (templates: *html.Templates, name: string, page: Page, expected: string) {
     lang := page.lang;
-    html, err := templates.render(name, page, &lang);
+    rendered, err := templates.render(name, page, &lang);
     if err != null { fmt.print("% failed: %\n", name, err.message); }
     assert(err == null);
-    if html != expected { fmt.print("% gave:\n[%]\nnot:\n[%]\n", name, html, expected); }
-    assert(html == expected);
+    if rendered != expected { fmt.print("% gave:\n[%]\nnot:\n[%]\n", name, rendered, expected); }
+    assert(rendered == expected);
 }
 
 write :: (name: string, text: string) {
@@ -79,11 +79,11 @@ main :: () {
     write("broken.html", "{% if title %}no end");
     write("unknown.html", "{{ title | nosuchfilter }}");
 
-    templates := web.newTemplates("build/views");
+    templates := html.newTemplates("build/views");
     templates.addFilter("shout", shout);
     templates.addFilter("age", ageOf);
     templates.addFunction("greet", greet);
-    templates.setGlobal("site", web.Value{text: "Saad"});
+    templates.setGlobal("site", html.Value{text: "Saad"});
 
     ada := Author{"Ada", 36};
     page: Page;
@@ -109,11 +109,11 @@ main :: () {
     check(templates, "comments.html", page, "abc d");
 
     _, err := templates.render("broken.html", page);
-    assert(err != null && err.is(web.TemplateError) && err.message.indexOf("broken.html:1") >= 0 && err.message.indexOf("endif") >= 0);
+    assert(err != null && err.is(html.TemplateError) && err.message.indexOf("broken.html:1") >= 0 && err.message.indexOf("endif") >= 0);
     _, err = templates.render("unknown.html", page);
     assert(err != null && err.message.indexOf("nosuchfilter") >= 0);
     _, err = templates.render("nothing.html", page);
-    assert(err != null && err.is(web.TemplateError));
-    assert(web.escapeHtml("<a href='x'>&") == "&lt;a href=&#39;x&#39;&gt;&amp;");
+    assert(err != null && err.is(html.TemplateError));
+    assert(html.escape("<a href='x'>&") == "&lt;a href=&#39;x&#39;&gt;&amp;");
     fmt.print("templates ok");
 }

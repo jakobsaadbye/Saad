@@ -1,11 +1,13 @@
-namespace web;
+namespace web.html;
 
-// Templates: HTML pages with values of the program, in the syntax of Jinja and Nunjucks, e.g
+// Templates of HTML pages with the values of the program, in the syntax of Jinja and Nunjucks, e.g
 //
-//     templates := web.newTemplates("views");
+//     import web.html;
+//
+//     templates := html.newTemplates("views");
 //     templates.addFilter("upper", toUpper);                // {{ name | upper }}
 //     templates.addFunction("t", translate);                // {{ t("Hello") }}
-//     templates.setGlobal("siteName", web.Value{text: "My site"});
+//     templates.setGlobal("siteName", html.Value{text: "My site"});
 //
 //     Page :: struct { title: string; posts: [..]Post; }
 //     templates.respond(w, "posts.html", Page{"Posts", posts});   // Or html, err := templates.render(...)
@@ -33,7 +35,7 @@ namespace web;
 //   loop.index0, loop.first, loop.last and loop.length, {% set x = value %}, {% include "name" %},
 //   {% extends "name" %} with {% block name %}{% endblock %}, {% macro name(a, b='x') %}{% endmacro %} called like a
 //   function, {{ name(1, b='y') }}, and {# comments #}. {%- and -%} remove the white space before or after a tag
-// * Filters and functions of the program get a *web.Call: its arguments, and the context given to render, e.g the
+// * Filters and functions of the program get a *html.Call: its arguments, and the context given to render, e.g the
 //   language of the request. Built in: range(start, stop), and the filters safe, escape, length, default, upper,
 //   lower, trim, join
 //
@@ -74,7 +76,7 @@ Call :: struct {
 Filter           :: (call: *Call, value: Value) -> Value;   // {{ value | name(args) }}. It can throw
 TemplateFunction :: (call: *Call) -> Value;                 // {{ name(args) }}. It can throw
 
-TemplateError :: ErrorKind{"web.TemplateError"};   // A template that can't be read or rendered
+TemplateError :: ErrorKind{"html.TemplateError"};   // A template that can't be read or rendered
 
 Templates :: struct {
     folder:    string;
@@ -117,7 +119,7 @@ addFunction :: method (t: *Templates, name: string, function: TemplateFunction) 
     mem.setAllocator(previous);
 }
 
-// A value that every template has, e.g setGlobal("year", web.Value{integer: 2024}). A text is copied
+// A value that every template has, e.g setGlobal("year", html.Value{integer: 2024}). A text is copied
 setGlobal :: method (t: *Templates, name: string, value: Value) {
     previous := mem.setAllocator(mem.heap());
     switch v in value {
@@ -161,7 +163,7 @@ respond :: method (t: *Templates, w: *http.ResponseWriter, name: string, data: a
     w.write(html);
 }
 
-// The value of the program in a value of a template, e.g to read it in a filter: p := web.dataOf<Point>(value)
+// The value of the program in a value of a template, e.g to read it in a filter: p := html.dataOf<Point>(value)
 dataOf :: <T>(value: Value) -> *T {
     switch v in value {
         case .data {
@@ -402,7 +404,7 @@ numberText :: (n: f64) -> string {
 }
 
 // The text escaped for HTML, like Nunjucks: & < > " and '
-escapeHtml :: (text: string) -> string {
+escape :: (text: string) -> string {
     plain := true;
     for ch in text {
         if ch == '&' || ch == '<' || ch == '>' || ch == '"' || ch == '\'' { plain = false; break; }
@@ -432,7 +434,7 @@ escapeHtml :: (text: string) -> string {
 filterEscape :: (call: *Call, value: Value) -> Value {
     switch v in value {
         case .html { return value; }
-        else { return Value{html: escapeHtml(textOf(value))}; }
+        else { return Value{html: escape(textOf(value))}; }
     }
 }
 
@@ -1319,7 +1321,7 @@ write :: method (r: *TemplateRenderer, value: Value) {
     switch v in value {
         case .html { r.out.addString(v); }
         case .none { }
-        else { r.out.addString(escapeHtml(textOf(value))); }
+        else { r.out.addString(escape(textOf(value))); }
     }
 }
 

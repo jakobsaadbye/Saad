@@ -23,8 +23,8 @@ std/
   os/           namespace os: files, environment variables, processes
     windows.sd      namespace os.windows: the Windows API (threads, Sleep, ...)
   thread/       namespace thread: threads, Mutex, Condition and WaitGroup, on Windows and Linux
-  web/          namespace web: endpoints, functions that are called at the url of their name with JSON, and templates of
-                HTML pages (template.sd)
+  web/          namespace web: endpoints, functions that are called at the url of their name with JSON
+    html.sd         namespace web.html: templates of HTML pages
   vendor/       Bindings for libraries the standard library doesn't own
     raylib.sd       namespace raylib
   base64.sd     namespace base64: encode and decode, also for urls
@@ -344,15 +344,17 @@ POST /v1/createPost   {"post": {"title": "Hi"}}      -> {"id": 3, "title": "Hi"}
 * It is built on `attributedFunctions()` and their `invoke()` (see `docs/reflection.md`). A TypeScript client can be
   made from the same: the names, parameters and results of the endpoints.
 
-### Templates
+## web.html
 
-HTML pages with the values of the program, in the syntax of Jinja and Nunjucks (`std/web/template.sd`):
+HTML pages with the values of the program, in the syntax of Jinja and Nunjucks (`std/web/html.sd`):
 
 ```odin
-templates := web.newTemplates("views");
+import web.html;
+
+templates := html.newTemplates("views");
 templates.addFilter("pretty_date", prettyDate);             // {{ booking.from | pretty_date }}
 templates.addFunction("__", translate);                     // {{ __("Forside") }}
-templates.setGlobal("BASE_PATH", web.Value{text: ""});
+templates.setGlobal("BASE_PATH", html.Value{text: ""});
 
 Page :: struct { title: string; posts: [..]Post; }
 templates.respond(w, "posts.html", Page{"Posts", posts}, &context);   // Or html, err := templates.render(...)
@@ -373,12 +375,12 @@ templates.respond(w, "posts.html", Page{"Posts", posts}, &context);   // Or html
 * Tags: `if`/`elif`/`else`, `for` (with `loop.index`, `loop.first`, `loop.last`, ...) and `else`, `set`, `include`,
   `extends` and `block`, `macro` with defaults and named arguments, `{# comments #}`, and `{%-`/`-%}` to remove white
   space. Operators: `== != < > <= >=`, `and or not`, `+ - * / %` and `~`.
-* Filters (`web.Filter`) and functions (`web.TemplateFunction`) of the program get a `*web.Call`, with the arguments
-  and the context given to `render`, e.g the language of the request. `web.dataOf<T>(value)` reads a value of the
+* Filters (`html.Filter`) and functions (`html.TemplateFunction`) of the program get a `*html.Call`, with the arguments
+  and the context given to `render`, e.g the language of the request. `html.dataOf<T>(value)` reads a value of the
   program, e.g a `time.Time`. Built in: `range()`, and `safe`, `escape`, `length`, `default`, `upper`, `lower`,
   `trim` and `join`.
 * The templates are read once. `templates.cache = false` reads them for each render, e.g while writing them. A
-  template that fails is a `web.TemplateError` with the file and the line; `respond` makes it a 500.
+  template that fails is a `html.TemplateError` with the file and the line; `respond` makes it a 500.
 
 ## thread
 
