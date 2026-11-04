@@ -5,6 +5,8 @@
 #   tools/linux/runtests.sh            with the x64 backend
 #   tools/linux/runtests.sh --llvm     with the LLVM backend, also for the language server
 #
+# With SAAD_CODELLDB set to an unpacked CodeLLDB, it also debugs a program like the VS Code extension does.
+#
 # Requirements: gcc, and LLVM (e.g llvm-18-dev) for --llvm. Builds the compiler with ./build.sh first.
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -114,6 +116,23 @@ if command -v python3 > /dev/null; then
         echo "$output" | grep -v '^[a-zA-Z/]*$' | head -10 | sed 's/^/    /'
         failed=$((failed + 1))
     fi
+fi
+
+# Debugging like the VS Code extension does, with CodeLLDB, when SAAD_CODELLDB is the folder of an unpacked CodeLLDB
+# (the 'extension' folder of codelldb-linux-x64.vsix) and node is installed
+if [ -n "$SAAD_CODELLDB" ] && command -v node > /dev/null; then
+    for backend in "" "--llvm"; do
+        if [ -n "$backend" ] && ! ./bin/saad build tests/debug/variables.sd --elf --llvm > /dev/null 2>&1; then continue; fi
+        printf "%-56s " "VS Code debugging (check_vscode_debug.js $backend)"
+        if output=$(timeout 180 node "$HERE/check_vscode_debug.js" "$SAAD_CODELLDB" $backend 2>&1); then
+            echo "${GREEN}OK${RESET}"
+            passed=$((passed + 1))
+        else
+            echo "${RED}FAILED${RESET}"
+            echo "$output" | grep "FAILED" | head -5 | sed 's/^/    /'
+            failed=$((failed + 1))
+        fi
+    done
 fi
 
 # The debug information of both backends, in LLDB (needs lldb, and a saad built with LLVM for the LLVM backend)

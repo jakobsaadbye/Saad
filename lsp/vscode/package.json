@@ -1,8 +1,8 @@
 {
   "name": "saad",
   "displayName": "Saad",
-  "description": "The Saad language: highlighting, errors as you type, go to definition, find references, hover and outline",
-  "version": "0.3.1",
+  "description": "The Saad language: highlighting, errors as you type, go to definition, find references, hover, outline and debugging",
+  "version": "0.4.0",
   "publisher": "jakobsaadbye",
   "license": "MIT",
   "repository": {
@@ -17,17 +17,22 @@
   "keywords": [
     "saad",
     "language server",
-    "lsp"
+    "lsp",
+    "debugger"
   ],
   "engines": {
     "vscode": "^1.82.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Debuggers"
   ],
   "main": "./extension.js",
   "activationEvents": [
-    "onLanguage:saad"
+    "onLanguage:saad",
+    "onDebugResolve:saad",
+    "onDebugDynamicConfigurations:saad",
+    "onCommand:saad.debugFile"
   ],
   "contributes": {
     "languages": [
@@ -87,11 +92,143 @@
       {
         "command": "saad.buildServer",
         "title": "Saad: Build the language server"
+      },
+      {
+        "command": "saad.debugFile",
+        "title": "Saad: Debug the file",
+        "icon": "$(debug-alt)"
       }
-    ]
+    ],
+    "breakpoints": [
+      {
+        "language": "saad"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "saad",
+        "label": "Saad",
+        "languages": [
+          "saad"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "default": "${file}",
+                "description": "The .sd file of the program, e.g main.sd. It is built with 'saad build --debug'."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "description": "The arguments of the program (os.args())."
+              },
+              "cwd": {
+                "type": "string",
+                "default": "${workspaceFolder}",
+                "description": "The folder the program runs in."
+              },
+              "backend": {
+                "type": "string",
+                "enum": [
+                  "x64",
+                  "llvm"
+                ],
+                "default": "x64",
+                "description": "x64: the compiler's own backend. llvm: the LLVM backend (saad build --llvm), when the compiler has it."
+              },
+              "optimization": {
+                "type": "integer",
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  3
+                ],
+                "description": "The -O of the LLVM backend. -O0 when not given, so each line is where the debugger expects it."
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "default": false,
+                "description": "Stop at the start of the program."
+              },
+              "env": {
+                "type": "object",
+                "description": "Environment variables of the program."
+              },
+              "terminal": {
+                "type": "string",
+                "enum": [
+                  "console",
+                  "integrated",
+                  "external"
+                ],
+                "description": "Where the output of the program goes (CodeLLDB's setting)."
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "saad",
+            "request": "launch",
+            "name": "Debug the Saad program",
+            "program": "${file}"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Saad: Debug the program",
+            "description": "Builds the program with debug information and debugs it with CodeLLDB",
+            "body": {
+              "type": "saad",
+              "request": "launch",
+              "name": "Debug the Saad program",
+              "program": "^\"\\${file}\""
+            }
+          },
+          {
+            "label": "Saad: Debug the program with LLVM",
+            "description": "The same with the LLVM backend",
+            "body": {
+              "type": "saad",
+              "request": "launch",
+              "name": "Debug the Saad program (LLVM)",
+              "program": "^\"\\${file}\"",
+              "backend": "llvm"
+            }
+          }
+        ]
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "saad.debugFile",
+          "when": "resourceLangId == saad",
+          "group": "navigation@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "saad.debugFile",
+          "when": "resourceLangId == saad"
+        }
+      ]
+    }
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
   },
-  "icon": "icons/icon.png"
+  "icon": "icons/icon.png",
+  "extensionDependencies": [
+    "vadimcn.vscode-lldb"
+  ]
 }

@@ -1,6 +1,8 @@
 # LLDB formatters for Saad programs: they show the values like the program writes them.
 #
-#   (lldb) command script import tools/lldb/saad_formatters.py
+#   (lldb) command script import lsp/vscode/debug/saad_formatters.py
+#
+# The VS Code extension loads it into CodeLLDB when it debugs a program (debug.js)
 #
 #   string        "hello"                     instead of its data pointer and length
 #   [..]T, []T    count = 3, with the elements [0], [1], [2] as children
@@ -34,6 +36,27 @@ def string_summary(value, internal_dict):
     data = value.GetChildMemberWithName('data').GetValueAsUnsigned()
     length = value.GetChildMemberWithName('len').GetValueAsSigned()
     return _read_string(value.GetProcess(), data, length)
+
+
+class StringProvider:
+    """A string has no children: its summary is its text."""
+    def __init__(self, value, internal_dict):
+        pass
+
+    def update(self):
+        return False
+
+    def num_children(self):
+        return 0
+
+    def get_child_index(self, name):
+        return -1
+
+    def get_child_at_index(self, index):
+        return None
+
+    def has_children(self):
+        return False
 
 
 def _short(value):
@@ -191,7 +214,8 @@ def __lldb_init_module(debugger, internal_dict):
     module = __name__
     run = debugger.HandleCommand
     category = '-w saad'
-    run('type summary add %s -F %s.string_summary "string"' % (category, module))
+    run('type summary add %s -e -F %s.string_summary "string"' % (category, module))
+    run('type synthetic add %s -l %s.StringProvider "string"' % (category, module))
     run('type summary add %s -e -F %s.list_summary -x "^(List<.+>|\\[\\].+|\\[\\.\\.\\].+)$"' % (category, module))
     run('type synthetic add %s -l %s.ListProvider -x "^(List<.+>|\\[\\].+|\\[\\.\\.\\].+)$"' % (category, module))
     run('type summary add %s -F %s.optional_summary -x "^\\?.+$"' % (category, module))

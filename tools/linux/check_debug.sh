@@ -21,7 +21,7 @@ gcc -O0 -w -c -I"$REPO/src" "$HERE/shim.c" -o "$TMP/shim.o" && gcc -no-pie -z no
 BREAK_LINE=$(grep -n "// break here" "$PROGRAM" | head -1 | cut -d: -f1)
 DESCRIBE_LINE=$(grep -n "// stop in describe" "$PROGRAM" | head -1 | cut -d: -f1)
 output=$(timeout 60 lldb -b \
-    -o "command script import $REPO/tools/lldb/saad_formatters.py" \
+    -o "command script import $REPO/lsp/vscode/debug/saad_formatters.py" \
     -o "breakpoint set -f variables.sd -l $DESCRIBE_LINE -c 'i == 1'" \
     -o "breakpoint set -f variables.sd -l $BREAK_LINE" \
     -o run -o "frame variable" -o bt \
