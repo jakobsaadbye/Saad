@@ -60,6 +60,7 @@ main :: () {
     call("GET", "/getSeries?slug=from-the-start");
     call("GET", "/getPost?slug=nothing");
     call("GET", "/listPosts?page=two");
+    call("GET", "/listPosts?page=2");
 
     print("A reader\n");
     call("GET", "/me");

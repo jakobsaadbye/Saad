@@ -228,9 +228,11 @@ AttributedFunction :: struct {
 
 // A parameter or a result of a function, and where it is in the block of the arguments or the results
 FunctionValue :: struct {
-    name:   string;   // Empty for a result
-    type:   *Type;
-    offset: int;
+    name:         string;   // Empty for a result
+    type:         *Type;
+    offset:       int;
+    hasDefault:   bool;     // A parameter with a default value, e.g page := 1
+    defaultValue: *void;    // The default, when it is known when compiling, e.g a number, a string or a constant
 }
 
 // Every function of the program with attribute values. The compiler writes the list, and compiles the functions on it

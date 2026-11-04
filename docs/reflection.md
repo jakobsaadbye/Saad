@@ -97,7 +97,8 @@ for f in attributedFunctions() {     // []AttributedFunction: name, namespaceNam
 * `*void` and a function type can be cast to each other, as a function value is its address. The program must give
   the right type.
 * A function can also be called without knowing its type: `f.parameters` and `f.results` have the name, `*Type` and
-  offset of each parameter and result, and `f.invoke(arguments, results)` calls it with the arguments in a block of
+  offset of each parameter and result, and for a parameter with a default, `hasDefault` and the `defaultValue` when it
+  is a constant, and `f.invoke(arguments, results)` calls it with the arguments in a block of
   `f.argumentsSize` bytes, laid out like a struct of its parameters, and stores its results in a block of
   `f.resultsSize` bytes. It throws what the function throws. The compiler makes an `invoke` for each function on the
   list. `web` calls its endpoints like this.
