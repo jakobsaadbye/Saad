@@ -1,0 +1,18 @@
+// A GET of an https url, for tools/linux/check_tls.sh: prints the status and the body, or the error
+//
+//     https_get https://localhost:4433/
+
+import net.http;
+import fmt;
+import os;
+
+main :: () {
+    args := os.args();
+    response, err := http.get(args[1]);
+    if err != null {
+        fmt.print("error % %\n", err.kind.name, err.message);
+        return;
+    }
+    fmt.print("status %\n%\n", response.status, response.body);
+    response.free();
+}

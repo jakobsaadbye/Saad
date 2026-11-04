@@ -13,6 +13,7 @@ namespace net;
 //     }
 //
 //     conn := net.dial("example.com:80");
+//     conn.startTls("example.com");             // TLS, e.g for https (tls.sd)
 //
 // Winsock (ws2_32.dll) on Windows and BSD sockets on Linux, through their typed bindings in net.sys. Errors are of the
 // kinds net.Timeout, net.Closed, net.Refused, net.InUse and net.NetError
@@ -282,6 +283,7 @@ ready :: method (p: *Poll, index: int) -> bool {
 Conn :: struct {
     socket: sys.Socket;
     remote: Addr;    // The other end
+    tls:    *void;   // The TLS of OpenSSL, after startTls (tls.sd)
 }
 
 // Connects to "host:port", e.g "example.com:80". An empty host is this computer
@@ -311,6 +313,7 @@ dial :: (address: string) -> *Conn, error {
 // closed the connection, and net.Timeout after the read timeout
 read :: method (conn: *Conn, buffer: []u8) -> int, error {
     if buffer.count == 0 { return 0, null; }
+    if conn.tls != null { return readTls(conn, buffer); }
     n := sys.recv(conn.socket, buffer.data, buffer.count as sys.Length, 0) as int;
     if n == 0 { return 0, newError("The connection was closed", Closed); }
     if n < 0  { return 0, lastError("read"); }
@@ -319,6 +322,7 @@ read :: method (conn: *Conn, buffer: []u8) -> int, error {
 
 // Writes all of the bytes
 write :: method (conn: *Conn, data: string) -> error {
+    if conn.tls != null { return writeTls(conn, data); }
     sent := 0;
     while sent < data.len {
         n := sys.send(conn.socket, &data.data[sent], (data.len - sent) as sys.Length, sys.SendFlags) as int;
@@ -351,6 +355,7 @@ setTimeout :: (s: sys.Socket, option: i32, milliseconds: int) {
 
 // Closes the connection
 close :: method (conn: *Conn) {
+    if conn.tls != null { closeTls(conn); }
     if conn.socket != sys.InvalidSocket {
         sys.closeSocket(conn.socket);
         conn.socket = sys.InvalidSocket;

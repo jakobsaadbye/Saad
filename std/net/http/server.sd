@@ -7,6 +7,7 @@ namespace net.http;
 //     router.handle("GET /posts/{id}", showPost);
 //     router.handle("POST /posts", createPost);
 //     router.handle("/static/", files);          // Everything below /static/
+//     router.handleFiles("/assets/", "public");  // The files of a folder (files.sd)
 //     http.listenAndServe(":8080", &router);
 //
 // A handler that throws gives a 500, and the server goes on. While a handler runs, the allocator of the thread is the
@@ -54,26 +55,7 @@ pathValue :: method (r: *Request, name: string) -> string {
 
 // A value of the query, e.g r.queryValue("page") of /posts?page=2, with %XX and + decoded
 queryValue :: method (r: *Request, name: string) -> string, bool {
-    rest := r.query;
-    while rest.len > 0 {
-        end := rest.indexOf("&");
-        pair := rest;
-        if end >= 0 {
-            pair = rest.slice(0, end);
-            rest = rest.slice(end + 1);
-        } else {
-            rest = "";
-        }
-        equals := pair.indexOf("=");
-        key := pair;
-        value := "";
-        if equals >= 0 {
-            key   = pair.slice(0, equals);
-            value = pair.slice(equals + 1);
-        }
-        if decodeUrl(key, &r.arena) == name { return decodeUrl(value, &r.arena), true; }
-    }
-    return "", false;
+    return findValue(r.query, name, &r.arena);
 }
 
 // What a handler answers with. It is sent when the handler returns, with its Content-Length
@@ -137,6 +119,7 @@ Route :: struct {
     segments: [..]string;      // Of the path, e.g ["posts", "{id}"]
     prefix:   bool;            // The pattern ends with /, so it matches every path below it
     handler:  Handler;
+    folder:   string;          // Of handleFiles: the folder of the files below the prefix
 }
 
 Router :: struct {

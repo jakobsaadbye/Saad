@@ -1,0 +1,133 @@
+namespace net;
+
+// TLS of a connection, with OpenSSL, e.g for https:
+//
+//     conn := net.dial("example.com:443");
+//     conn.startTls("example.com");     // Checks the certificate of example.com against the certificates of the system
+//     conn.write("GET / HTTP/1.1\r\n...");
+//
+// After startTls, read and write are encrypted. The certificate must be valid for the host and signed by a certificate
+// authority of the system; SSL_CERT_FILE or SSL_CERT_DIR give others, e.g of a test.
+//
+// On Windows it needs the DLLs of OpenSSL 3 (libssl-3-x64.dll and libcrypto-3-x64.dll) next to the program or on the
+// PATH, and on Linux libssl (tools/linux links it).
+
+use c;
+import fmt;
+import mem;
+
+TlsError :: ErrorKind{"net.TlsError"};   // The TLS handshake failed, e.g the certificate isn't valid for the host
+
+extern "libssl-3-x64.dll" {
+    TLS_client_method                :: () -> *void;
+    SSL_CTX_new                      :: (method: *void) -> *void;
+    SSL_CTX_free                     :: (ctx: *void);
+    SSL_CTX_set_default_verify_paths :: (ctx: *void) -> i32;
+    SSL_CTX_set_verify               :: (ctx: *void, mode: i32, callback: *void);
+    SSL_new                          :: (ctx: *void) -> *void;
+    SSL_free                         :: (ssl: *void);
+    SSL_set_fd                       :: (ssl: *void, fd: i32) -> i32;
+    SSL_ctrl                         :: (ssl: *void, command: i32, larg: i64, parg: *void) -> i64;
+    SSL_set1_host                    :: (ssl: *void, hostname: c.string) -> i32;
+    SSL_connect                      :: (ssl: *void) -> i32;
+    SSL_read                         :: (ssl: *void, buffer: *u8, count: i32) -> i32;
+    SSL_write                        :: (ssl: *void, buffer: *u8, count: i32) -> i32;
+    SSL_get_error                    :: (ssl: *void, result: i32) -> i32;
+    SSL_shutdown                     :: (ssl: *void) -> i32;
+    SSL_get_verify_result            :: (ssl: *void) -> i64;
+}
+
+extern "libcrypto-3-x64.dll" {
+    ERR_get_error                    :: () -> u64;
+    ERR_error_string_n               :: (code: u64, buffer: *u8, length: u64);
+    X509_verify_cert_error_string    :: (code: i64) -> c.string;
+}
+
+@private SslVerifyPeer        :: 1;
+@private SslCtrlSetHostname   :: 55;   // SSL_set_tlsext_host_name is SSL_ctrl with this
+@private SslErrorWantRead     :: 2;
+@private SslErrorWantWrite    :: 3;
+@private SslErrorSyscall      :: 5;
+@private SslErrorZeroReturn   :: 6;
+
+// Starts TLS on the connection, as a client of the host: the handshake, which checks the certificate of the server
+startTls :: method (conn: *Conn, host: string) -> error {
+    ctx := SSL_CTX_new(TLS_client_method());
+    if ctx == null { return tlsError("TLS isn't available (OpenSSL couldn't start)"); }
+    SSL_CTX_set_default_verify_paths(ctx);
+    SSL_CTX_set_verify(ctx, SslVerifyPeer, null);
+    ssl := SSL_new(ctx);
+    SSL_CTX_free(ctx);   // The SSL keeps it
+    if ssl == null { return tlsError("TLS isn't available (OpenSSL couldn't start)"); }
+
+    cHost := host.toCString();
+    SSL_set_fd(ssl, conn.socket as i32);
+    SSL_ctrl(ssl, SslCtrlSetHostname, 0, cHost.data);   // The name of the server, for servers of more sites
+    SSL_set1_host(ssl, cHost);                           // The certificate must be of the host
+    result := SSL_connect(ssl);
+    cHost.free();
+    if result != 1 {
+        verify := SSL_get_verify_result(ssl);
+        failed: error;
+        if verify != 0 {
+            failed = newError(fmt.sprint("TLS with %: the certificate isn't valid: %", host, X509_verify_cert_error_string(verify).toString()), TlsError);
+        } else {
+            failed = tlsError(fmt.sprint("TLS with % failed", host));
+        }
+        SSL_free(ssl);
+        return failed;
+    }
+    conn.tls = ssl;
+    return null;
+}
+
+// An error with the reason of OpenSSL, when it has one
+@private
+tlsError :: (what: string) -> error {
+    code := ERR_get_error();
+    if code == 0 { return newError(what, TlsError); }
+    buffer: [256]u8;
+    ERR_error_string_n(code, &buffer[0], 256);
+    return newError(fmt.sprint("%: %", what, c.string{&buffer[0]}.toString()), TlsError);
+}
+
+// read of a connection with TLS
+@private
+readTls :: (conn: *Conn, buffer: []u8) -> int, error {
+    count := buffer.count;
+    if count > 1 << 30 { count = 1 << 30; }
+    n := SSL_read(conn.tls, buffer.data, count as i32);
+    if n > 0 { return n as int, null; }
+    code := SSL_get_error(conn.tls, n);
+    if code == SslErrorZeroReturn { return 0, newError("The connection was closed", Closed); }
+    if code == SslErrorSyscall && n == 0 { return 0, newError("The connection was closed", Closed); }
+    if code == SslErrorWantRead || code == SslErrorWantWrite { return 0, newError("read: TLS timed out", Timeout); }
+    if code == SslErrorSyscall { return 0, lastError("read"); }
+    return 0, tlsError("read");
+}
+
+// write of a connection with TLS
+@private
+writeTls :: (conn: *Conn, data: string) -> error {
+    sent := 0;
+    while sent < data.len {
+        part := data.len - sent;
+        if part > 1 << 30 { part = 1 << 30; }
+        n := SSL_write(conn.tls, &data.data[sent], part as i32);
+        if n <= 0 {
+            code := SSL_get_error(conn.tls, n);
+            if code == SslErrorSyscall { return lastError("write"); }
+            return tlsError("write");
+        }
+        sent += n;
+    }
+    return null;
+}
+
+// Ends TLS of the connection, before its socket is closed
+@private
+closeTls :: (conn: *Conn) {
+    SSL_shutdown(conn.tls);
+    SSL_free(conn.tls);
+    conn.tls = null;
+}

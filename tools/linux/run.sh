@@ -6,7 +6,8 @@
 #   tools/linux/run.sh path/to/out.asm       run generated assembly, assembled with nasm
 #
 # The exit code is the exit code of the program (asserts exit with 1).
-# Requirements: gcc (and nasm for .asm, and libpq-dev for std/dbms/postgres). Build the compiler first with ./build.sh
+# Requirements: gcc (and nasm for .asm, libpq-dev for std/dbms/postgres, libssl-dev for https). Build the compiler first
+# with ./build.sh. To keep the program, link it with tools/linux/link.sh
 set -e
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -32,14 +33,6 @@ case "$INPUT" in
         ;;
 esac
 
-# The shim (the C wrappers) is compiled once and cached
-CACHE="$REPO/build/linux"
-mkdir -p "$CACHE"
-SHIM_O="$CACHE/shim.o"
-if [ ! -f "$SHIM_O" ] || [ "$SHIM_O" -ot "$HERE/shim.c" ]; then
-    gcc -O0 -w -c -I"$REPO/src" "$HERE/shim.c" -o "$SHIM_O"
-fi
-
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -47,16 +40,8 @@ if [ -z "$OBJECT" ]; then
     nasm -felf64 --prefix ms_ "$ASM" -o "$TMP/program.o"
     OBJECT="$TMP/program.o"
 fi
-# libpq (std/dbms/postgres) only for the programs that call it, as it needs libpq-dev
-EXTRA=""
-if nm "$OBJECT" 2>/dev/null | grep -q ' U ms_PQ'; then
-    PQ_O="$CACHE/shim_pq.o"
-    if [ ! -f "$PQ_O" ] || [ "$PQ_O" -ot "$HERE/shim_pq.c" ]; then
-        gcc -O0 -w -c -I/usr/include/postgresql "$HERE/shim_pq.c" -o "$PQ_O"
-    fi
-    EXTRA="$PQ_O -lpq"
-fi
-gcc -no-pie -z noexecstack "$OBJECT" "$SHIM_O" $EXTRA -o "$TMP/program" -lm -lpthread
+# With the shims, libpq and OpenSSL that it uses
+bash "$HERE/link.sh" "$OBJECT" "$TMP/program"
 
 set +e
 timeout 10 "$TMP/program" "${@:2}"

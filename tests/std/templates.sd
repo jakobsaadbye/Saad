@@ -1,0 +1,119 @@
+// web templates: values of the program, if, for, set, filters, functions, macros, include, extends and block
+
+import web;
+import fmt;
+import os;
+
+Color :: enum { red, green }
+
+Author :: struct {
+    name: string;
+    age:  int;
+}
+
+Post :: struct {
+    id:     int;
+    title:  string;
+    score:  f64;
+    color:  Color;
+    author: *Author;
+    tags:   [..]string;
+    note:   ?string;
+}
+
+Page :: struct {
+    title:   string;
+    posts:   [..]Post;
+    empty:   [..]Post;
+    numbers: [3]int;
+    flag:    bool;
+    lang:    string;
+}
+
+shout :: (call: *web.Call, value: web.Value) -> web.Value {
+    times := 1;
+    if call.args.count > 0 { times = web.integerOf(call.args[0]) as int; }
+    sb := fmt.newStringBuilder(16);
+    sb.addString(web.textOf(value).toUpper());
+    for 0..times { sb.addChar('!'); }
+    return web.Value{text: sb.toString()};
+}
+
+// Uses the context of the render, e.g the language of a request
+greet :: (call: *web.Call) -> web.Value {
+    lang := *(call.context as *string);
+    if lang == "de" { return web.Value{text: "Hallo"}; }
+    return web.Value{text: "Hej"};
+}
+
+ageOf :: (call: *web.Call, value: web.Value) -> web.Value {
+    author := web.dataOf<Author>(value);
+    if author == null { return .none; }
+    return web.Value{integer: author.age};
+}
+
+check :: (templates: *web.Templates, name: string, page: Page, expected: string) {
+    lang := page.lang;
+    html, err := templates.render(name, page, &lang);
+    if err != null { fmt.print("% failed: %\n", name, err.message); }
+    assert(err == null);
+    if html != expected { fmt.print("% gave:\n[%]\nnot:\n[%]\n", name, html, expected); }
+    assert(html == expected);
+}
+
+write :: (name: string, text: string) {
+    os.writeFile(fmt.sprint("build/views/%", name), text);
+}
+
+main :: () {
+    os.makeDir("build");
+    os.makeDir("build/views");
+    write("values.html", "<h1>{{ title }}</h1>{{ missing }}{{ missing.deeper }} {{ posts.length }} {{ posts[0].title }} {{ posts[1].author.name }} {{ numbers[2] }} {{ posts[0].color }} {{ posts[0].score }} {{ posts[1].score }} {{ flag }} {{ 'a\"b' }} {{ 3 + 4 * 2 }} {{ 7 / 2 }} {{ 'x' ~ 1 }} {{ posts[0].note }}|{{ posts[1].note }}");
+    write("control.html", "{% for p in posts %}{{ loop.index }}:{{ p.id }}{% if loop.first %}F{% elif loop.last %}L{% else %}M{% endif %}{% for t in p.tags %}[{{ t }}]{% endfor %} {% endfor %}{% for p in empty %}x{% else %}none{% endfor %}{% if not flag and posts %} yes{% endif %}{% if title == 'Blog' and posts.length >= 2 %} both{% endif %}{% set n = posts.length * 10 %} {{ n }}{% for i in range(0, 3) %}{{ i }}{% endfor %}");
+    write("filters.html", "{{ title | shout }} {{ title | shout(3) }} {{ '<b>' | safe }} {{ '<b>' }} {{ posts | length }} {{ missing | default('d') }} {{ '  x ' | trim }}|{{ posts[0].tags | join(', ') }} {{ greet() }} {{ posts[0].author | age }}");
+    write("macro.html", "{% macro card(title, text='none', link='') %}<div>{{ title }}:{{ text }}{% if link %}<a href=\"{{ link }}\">{{ link }}</a>{% endif %}</div>{% endmacro %}{{ card('A') }}{{ card(title='B', text='<i>') }}{{ card('C', link='/c') }}");
+    write("base.html", "<html>{% include 'nav.html' %}<main>{% block content %}default{% endblock %}</main>{% block footer %}foot{% endblock %}</html>");
+    write("nav.html", "<nav>{{ title }}</nav>");
+    write("child.html", "<!-- ignored -->\n{% extends 'base.html' %} {% block content %}{{ title }} page{% endblock %}");
+    write("comments.html", "a{# a comment #}b {%- if true -%}   c   {%- endif %} d");
+    write("broken.html", "{% if title %}no end");
+    write("unknown.html", "{{ title | nosuchfilter }}");
+
+    templates := web.newTemplates("build/views");
+    templates.addFilter("shout", shout);
+    templates.addFilter("age", ageOf);
+    templates.addFunction("greet", greet);
+    templates.setGlobal("site", web.Value{text: "Saad"});
+
+    ada := Author{"Ada", 36};
+    page: Page;
+    page.title = "Blog";
+    page.flag = false;
+    page.lang = "da";
+    page.numbers[2] = 7;
+    first := Post{id: 1, title: "First & best", score: 2.5, color: .green, author: &ada};
+    first.tags.add("a");
+    first.tags.add("b");
+    first.note = "noted";
+    page.posts.add(first);
+    page.posts.add(Post{id: 2, title: "Second", score: 3.0, color: .red, author: &ada});
+    page.posts.add(Post{id: 3, title: "Third", score: 0.0, color: .red});
+
+    check(templates, "values.html", page, "<h1>Blog</h1> 3 First &amp; best Ada 7 green 2.5 3 false a&quot;b 11 3.5 x1 noted|");
+    check(templates, "control.html", page, "1:1F[a][b] 2:2M 3:3L none yes both 30012");
+    check(templates, "filters.html", page, "BLOG! BLOG!!! <b> &lt;b&gt; 3 d x|a, b Hej 36");
+    page.lang = "de";
+    check(templates, "filters.html", page, "BLOG! BLOG!!! <b> &lt;b&gt; 3 d x|a, b Hallo 36");
+    check(templates, "macro.html", page, "<div>A:none</div><div>B:&lt;i&gt;</div><div>C:none<a href=\"/c\">/c</a></div>");
+    check(templates, "child.html", page, "<html><nav>Blog</nav><main>Blog page</main>foot</html>");
+    check(templates, "comments.html", page, "abc d");
+
+    _, err := templates.render("broken.html", page);
+    assert(err != null && err.is(web.TemplateError) && err.message.indexOf("broken.html:1") >= 0 && err.message.indexOf("endif") >= 0);
+    _, err = templates.render("unknown.html", page);
+    assert(err != null && err.message.indexOf("nosuchfilter") >= 0);
+    _, err = templates.render("nothing.html", page);
+    assert(err != null && err.is(web.TemplateError));
+    assert(web.escapeHtml("<a href='x'>&") == "&lt;a href=&#39;x&#39;&gt;&amp;");
+    fmt.print("templates ok");
+}

@@ -93,6 +93,56 @@ MS void ms_Sleep(uint32_t ms) { usleep((useconds_t) ms * 1000); }
 static uint32_t last_error;
 MS int ms_CreateDirectoryA(const char *path, void *security) { (void) security; int ok = mkdir(path, 0777) == 0; last_error = ok ? 0 : (errno == EEXIST ? 183 : (uint32_t) errno); return ok; }
 MS uint32_t ms_GetLastError(void) { return last_error; }
+
+// FindFirstFileA and FindNextFileA with opendir and readdir. The pattern is "folder/*" or "folder\\*"
+#include <dirent.h>
+typedef struct { uint32_t attributes; uint32_t times[6]; uint32_t size_high, size_low, reserved0, reserved1; char name[260]; char alternate[14]; } MsFindData;
+typedef struct { DIR *dir; char folder[4096]; } MsFind;
+static int ms_find_fill(MsFind *find, MsFindData *data) {
+    struct dirent *entry = readdir(find->dir);
+    if (!entry) return 0;
+    memset(data, 0, sizeof *data);
+    snprintf(data->name, sizeof data->name, "%s", entry->d_name);
+    char path[8192];
+    snprintf(path, sizeof path, "%s/%s", find->folder, entry->d_name);
+    struct stat info;
+    data->attributes = stat(path, &info) == 0 && S_ISDIR(info.st_mode) ? 0x10 : 0x80;
+    return 1;
+}
+MS void *ms_FindFirstFileA(const char *pattern, MsFindData *data) {
+    MsFind *find = calloc(1, sizeof *find);
+    snprintf(find->folder, sizeof find->folder, "%s", pattern);
+    size_t n = strlen(find->folder);
+    if (n >= 2 && find->folder[n - 1] == '*' && (find->folder[n - 2] == '/' || find->folder[n - 2] == '\\')) find->folder[n - 2] = 0;
+    find->dir = opendir(find->folder[0] ? find->folder : "/");
+    if (!find->dir || !ms_find_fill(find, data)) {
+        if (find->dir) closedir(find->dir);
+        free(find);
+        last_error = 2;
+        return (void *) -1;
+    }
+    return find;
+}
+MS int ms_FindNextFileA(void *handle, MsFindData *data) { return ms_find_fill(handle, data); }
+MS int ms_FindClose(void *handle) { MsFind *find = handle; closedir(find->dir); free(find); return 1; }
+MS uint32_t ms_GetFileAttributesA(const char *path) {
+    struct stat info;
+    if (stat(path, &info) != 0) return 0xFFFFFFFF;
+    return S_ISDIR(info.st_mode) ? 0x10 : 0x80;
+}
+
+// BCryptGenRandom with getrandom
+#include <sys/random.h>
+MS int32_t ms_BCryptGenRandom(void *algorithm, uint8_t *buffer, uint32_t count, uint32_t flags) {
+    (void) algorithm; (void) flags;
+    uint32_t done = 0;
+    while (done < count) {
+        ssize_t n = getrandom(buffer + done, count - done, 0);
+        if (n <= 0) { if (errno == EINTR) continue; return -1; }
+        done += (uint32_t) n;
+    }
+    return 0;
+}
 MS int  ms_QueryPerformanceCounter(int64_t *c) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); *c = (int64_t) t.tv_sec * 1000000000 + t.tv_nsec; return 1; }
 MS int  ms_QueryPerformanceFrequency(int64_t *f) { *f = 1000000000; return 1; }
 MS void ms_GetSystemTimeAsFileTime(uint64_t *ft) { struct timespec t; clock_gettime(CLOCK_REALTIME, &t); *ft = ((uint64_t) t.tv_sec + 11644473600ULL) * 10000000ULL + (uint64_t) t.tv_nsec / 100; }

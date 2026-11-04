@@ -1,0 +1,105 @@
+namespace net.http;
+
+// Files of a folder, e.g the images, scripts and stylesheets of a site:
+//
+//     router.handleFiles("/static/", "public");   // /static/css/site.css is public/css/site.css
+//     router.handleFiles("/", "public");          // Every path that no other route has
+//
+// A path that isn't a file of the folder goes to the router's notFound (a 404 when there is none). A path with .. is
+// never a file, so nothing outside the folder is sent.
+
+import os;
+import mem;
+import fmt;
+
+// The Content-Type of a file by its extension, e.g text/css for site.css. application/octet-stream when it isn't known
+contentTypeOf :: (path: string) -> string {
+    dot := -1;
+    for i in 0..path.len {
+        if path[i] == '.' { dot = i as int; }
+        if path[i] == '/' || path[i] == '\\' { dot = -1; }
+    }
+    if dot < 0 { return "application/octet-stream"; }
+    extension := path.slice(dot + 1).toLower();
+    for known in ContentTypes {
+        if known.extension == extension { return known.contentType; }
+    }
+    return "application/octet-stream";
+}
+
+@private
+KnownType :: struct {
+    extension:   string;
+    contentType: string;
+}
+
+@private
+ContentTypes :: [
+    KnownType{"html", "text/html; charset=utf-8"},  KnownType{"htm", "text/html; charset=utf-8"},
+    KnownType{"css", "text/css; charset=utf-8"},    KnownType{"js", "text/javascript; charset=utf-8"},
+    KnownType{"mjs", "text/javascript; charset=utf-8"}, KnownType{"json", "application/json"},
+    KnownType{"txt", "text/plain; charset=utf-8"},  KnownType{"xml", "application/xml"},
+    KnownType{"svg", "image/svg+xml"},              KnownType{"png", "image/png"},
+    KnownType{"jpg", "image/jpeg"},                 KnownType{"jpeg", "image/jpeg"},
+    KnownType{"gif", "image/gif"},                  KnownType{"webp", "image/webp"},
+    KnownType{"avif", "image/avif"},                KnownType{"ico", "image/x-icon"},
+    KnownType{"woff", "font/woff"},                 KnownType{"woff2", "font/woff2"},
+    KnownType{"ttf", "font/ttf"},                   KnownType{"otf", "font/otf"},
+    KnownType{"pdf", "application/pdf"},            KnownType{"wasm", "application/wasm"},
+    KnownType{"mp4", "video/mp4"},                  KnownType{"webm", "video/webm"},
+    KnownType{"mp3", "audio/mpeg"},                 KnownType{"zip", "application/zip"},
+];
+
+// Answers with the file at the path, with its Content-Type. false when there is no such file, e.g a folder
+serveFile :: (w: *ResponseWriter, r: *Request, path: string) -> bool {
+    if !os.fileExists(path) || os.isDirectory(path) { return false; }
+    text, err := os.readFile(path);
+    if err != null { return false; }
+    w.setHeader("Content-Type", contentTypeOf(path));
+    w.setHeader("Cache-Control", "public, max-age=3600");
+    w.write(text);
+    return true;
+}
+
+// Answers GET and HEAD of the paths below the prefix with the files of the folder, see the top of the file
+handleFiles :: method (router: *Router, prefix: string, folder: string) {
+    pattern := prefix;
+    if !pattern.endsWith("/") { pattern = fmt.sprint("%/", pattern); }
+    router.handle(fmt.sprint("GET %", pattern), serveFolder);
+    route := router.routes.indexRef(router.routes.count - 1);
+    route.folder = folder;
+}
+
+// The path of the file of the request in the folder of its route, or false when it can't be one, e.g with ..
+@private
+filePath :: (route: *Route, r: *Request) -> string, bool {
+    segments: [..]string;
+    segments.allocator = &r.allocator;
+    for segment in r.path.split("/") {
+        if segment.len > 0 { segments.add(segment); }
+    }
+    if segments.count <= route.segments.count { return "", false; }   // The prefix itself, which is a folder
+    path := fmt.newStringBuilder(128);
+    path.addString(route.folder);
+    for i in route.segments.count..segments.count {
+        segment := decodeUrl(segments[i], &r.arena);
+        if segment == ".." || segment == "." || segment.indexOf("\\") >= 0 { path.free(); return "", false; }
+        path.add("/%", segment);
+    }
+    return keep(path.toString(), &r.arena), true;
+}
+
+@private
+serveFolder :: (w: *ResponseWriter, r: *Request) {
+    router := r.server.router;
+    route: *Route;
+    for i in 0..router.routes.count {
+        if router.routes[i].pattern == r.pattern { route = router.routes.indexRef(i); }
+    }
+    if route != null && route.folder.len > 0 {
+        path, ok := filePath(route, r);
+        if ok && serveFile(w, r, path) { return; }
+    }
+    if router.notFound != null { router.notFound(w, r); return; }
+    w.error(404, "Not Found");
+}

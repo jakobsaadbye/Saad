@@ -147,6 +147,37 @@ makeDir :: (path: string) -> error {
     return fileError("Can't make the folder", path);
 }
 
+// Whether the path is a folder
+isDirectory :: (path: string) -> bool {
+    cPath := path.toCString();
+    attributes := windows.GetFileAttributesA(cPath);
+    cPath.free();
+    return attributes != windows.InvalidAttributes && (attributes & windows.FileAttributeDirectory) != 0;
+}
+
+// The names of the files and folders in a folder, sorted, without . and .. An error when it isn't a folder, e.g
+// os.NotFound. The names are allocated with mem.allocate
+listDir :: (path: string) -> [..]string, error {
+    names: [..]string;
+    if !isDirectory(path) {
+        return names, newError(fmt.sprint("Can't list %: it isn't a folder", path), NotFound);
+    }
+    pattern := fmt.sprint("%/*", path);
+    cPattern := pattern.toCString();
+    data: windows.FindData;
+    handle := windows.FindFirstFileA(cPattern, &data);
+    cPattern.free();
+    if handle as u64 == windows.InvalidHandle { return names, null; }   // Empty
+    while true {
+        name := c.string{&data.fileName[0]}.toString();
+        if name != "." && name != ".." { names.add(name.copy()); }
+        if !windows.FindNextFileA(handle, &data) { break; }
+    }
+    windows.FindClose(handle);
+    names.sort();
+    return names, null;
+}
+
 fileExists :: (path: string) -> bool {
     file := openFile(path, "rb");
     if file == null {

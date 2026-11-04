@@ -1,0 +1,86 @@
+namespace base64;
+
+// Base64 of RFC 4648, e.g for the Authorization header of HTTP, or to write random bytes as text
+//
+//     text := base64.encode("hello");          // aGVsbG8=
+//     bytes, ok := base64.decode(text);
+//     token := base64.encode(bytes, url: true); // With - and _ in place of + and /, and without = at the end
+
+import fmt;
+
+Alphabet    :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+UrlAlphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+// The base64 of the bytes. With url, the alphabet that can be in a url, and no padding
+encode :: (data: string, url := false) -> string {
+    alphabet := Alphabet;
+    if url { alphabet = UrlAlphabet; }
+    sb := fmt.newStringBuilder((data.len as int + 2) / 3 * 4 + 1);
+    i := 0;
+    while i + 2 < data.len {
+        n := (data[i] as u32 << 16) | (data[i + 1] as u32 << 8) | data[i + 2] as u32;
+        sb.addChar(alphabet[(n >> 18) & 63]);
+        sb.addChar(alphabet[(n >> 12) & 63]);
+        sb.addChar(alphabet[(n >> 6) & 63]);
+        sb.addChar(alphabet[n & 63]);
+        i += 3;
+    }
+    rest := data.len - i;
+    if rest == 1 {
+        n := data[i] as u32 << 16;
+        sb.addChar(alphabet[(n >> 18) & 63]);
+        sb.addChar(alphabet[(n >> 12) & 63]);
+        if !url { sb.addString("=="); }
+    } else if rest == 2 {
+        n := (data[i] as u32 << 16) | (data[i + 1] as u32 << 8);
+        sb.addChar(alphabet[(n >> 18) & 63]);
+        sb.addChar(alphabet[(n >> 12) & 63]);
+        sb.addChar(alphabet[(n >> 6) & 63]);
+        if !url { sb.addChar('='); }
+    }
+    return sb.toString();
+}
+
+// The bytes of base64 text, of either alphabet, with or without padding. false when it isn't base64
+decode :: (text: string) -> string, bool {
+    sb := fmt.newStringBuilder(text.len as int / 4 * 3 + 3);
+    bits: u32 = 0;
+    count := 0;
+    padding := 0;
+    for ch in text {
+        if ch == '=' {
+            padding += 1;
+            continue;
+        }
+        if padding > 0 { sb.free(); return "", false; }   // Something after the padding
+        value := sextet(ch);
+        if value < 0 { sb.free(); return "", false; }
+        bits = (bits << 6) | value as u32;
+        count += 1;
+        if count == 4 {
+            sb.addChar(((bits >> 16) & 255) as u8);
+            sb.addChar(((bits >> 8) & 255) as u8);
+            sb.addChar((bits & 255) as u8);
+            bits = 0;
+            count = 0;
+        }
+    }
+    if count == 1 || padding > 2 { sb.free(); return "", false; }
+    if count == 2 {
+        sb.addChar(((bits >> 4) & 255) as u8);
+    } else if count == 3 {
+        sb.addChar(((bits >> 10) & 255) as u8);
+        sb.addChar(((bits >> 2) & 255) as u8);
+    }
+    return sb.toString(), true;
+}
+
+@private
+sextet :: (ch: u8) -> int {
+    if ch >= 'A' && ch <= 'Z' { return (ch - 'A') as int; }
+    if ch >= 'a' && ch <= 'z' { return (ch - 'a') as int + 26; }
+    if ch >= '0' && ch <= '9' { return (ch - '0') as int + 52; }
+    if ch == '+' || ch == '-' { return 62; }
+    if ch == '/' || ch == '_' { return 63; }
+    return -1;
+}

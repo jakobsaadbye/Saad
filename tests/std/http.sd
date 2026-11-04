@@ -146,7 +146,7 @@ main :: () {
     for conn in idle { conn.close(); }
 
     // Urls the client doesn't take
-    _, err := http.get("https://example.com/");
+    _, err := http.get("example.com/");   // https is checked by tools/linux/check_tls.sh
     assert(err != null && err.is(http.ProtocolError));
     _, err = http.get("ftp://example.com/");
     assert(err != null);

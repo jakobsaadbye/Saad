@@ -13,6 +13,20 @@ ConditionVariable :: struct {
     ptr: *void;
 }
 
+// WIN32_FIND_DATAA, of FindFirstFileA and FindNextFileA. A FILETIME is two DWORDs, so it is 4 byte aligned
+FindData :: struct {
+    attributes:     u32;
+    creationTime:   [2]u32;
+    lastAccessTime: [2]u32;
+    lastWriteTime:  [2]u32;
+    sizeHigh:       u32;
+    sizeLow:        u32;
+    reserved0:      u32;
+    reserved1:      u32;
+    fileName:       [260]u8;
+    alternateName:  [14]u8;
+}
+
 extern "kernel32.dll" {
     CreateThread :: (
         lpThreadAttributes: *void,  // NULL for default
@@ -81,7 +95,23 @@ extern "kernel32.dll" {
 
     CreateDirectoryA :: (lpPathName: c.string, lpSecurityAttributes: *void) -> bool;
     GetLastError     :: () -> u32;
+
+    // The entries of a folder: FindFirstFileA("folder\\*", &data), then FindNextFileA until it is false
+    FindFirstFileA     :: (lpFileName: c.string, lpFindFileData: *FindData) -> *void;   // InvalidHandle when there are none
+    FindNextFileA      :: (hFindFile: *void, lpFindFileData: *FindData) -> bool;
+    FindClose          :: (hFindFile: *void) -> bool;
+    GetFileAttributesA :: (lpFileName: c.string) -> u32;                                 // InvalidAttributes when it isn't there
 }
+
+// Random bytes of the system, which are good for secrets
+extern "bcrypt.dll" {
+    BCryptGenRandom :: (hAlgorithm: *void, pbBuffer: *u8, cbBuffer: u32, dwFlags: u32) -> i32;   // 0 when it succeeded
+}
+
+BcryptUseSystemPreferredRng :: 2;            // The flag of BCryptGenRandom without an algorithm handle
+InvalidHandle               :: ~(0 as u64);  // INVALID_HANDLE_VALUE, of a handle as u64
+InvalidAttributes           :: 4294967295;   // INVALID_FILE_ATTRIBUTES
+FileAttributeDirectory      :: 16;           // FILE_ATTRIBUTE_DIRECTORY
 
 ErrorAlreadyExists :: 183; // GetLastError() when CreateDirectoryA is given a folder that is there
 

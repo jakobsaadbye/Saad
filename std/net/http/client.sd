@@ -8,7 +8,7 @@ namespace net.http;
 //
 //     response = http.post("http://localhost:8080/posts", "application/json", text);
 //
-// Only http, not https. Each request is a connection of its own
+// http and https (TLS of net, with OpenSSL). Each request is a connection of its own
 
 import net;
 import bytes;
@@ -37,23 +37,28 @@ free :: method (response: *Response) {
 
 ProtocolError :: ErrorKind{"http.ProtocolError"};   // A url that isn't http, or a response that isn't HTTP
 
-// The parts of an http url
+// The parts of an http or https url
 Url :: struct {
     host: string;      // e.g localhost
-    port: int;         // 80 when it isn't given
+    port: int;         // 80 when it isn't given, or 443 for https
     path: string;      // With the query, e.g /posts?page=2. / when it isn't given
+    tls:  bool;        // https
 }
 
-// The host, port and path of "http://host[:port][/path]"
+// The host, port and path of "http://host[:port][/path]" or "https://host[:port][/path]"
 parseUrl :: (url: string) -> Url, error {
     result: Url;
-    if !url.startsWith("http://") {
-        if url.startsWith("https://") {
-            return result, newError(fmt.sprint("'%' is https, which isn't supported: only http", url), ProtocolError);
-        }
+    rest := "";
+    if url.startsWith("http://") {
+        rest = url.slice(7);
+        result.port = 80;
+    } else if url.startsWith("https://") {
+        rest = url.slice(8);
+        result.port = 443;
+        result.tls = true;
+    } else {
         return result, newError(fmt.sprint("'%' isn't an http url, e.g http://localhost:8080/", url), ProtocolError);
     }
-    rest := url.slice(7);
     slash := rest.indexOf("/");
     hostPort := rest;
     result.path = "/";
@@ -62,7 +67,6 @@ parseUrl :: (url: string) -> Url, error {
         result.path = rest.slice(slash);
     }
     result.host = hostPort;
-    result.port = 80;
     if hostPort.indexOf(":") >= 0 {
         host, port, err := net.splitHostPort(hostPort);
         if err != null { return result, err; }
@@ -93,11 +97,15 @@ request :: (verb: string, url: string, headers: []Header = [], body := "") -> *R
         conn.close();
         mem.free(conn, mem.heap());
     }
+    if parts.tls {
+        err = conn.startTls(parts.host);
+        if err != null { return null, err; }
+    }
 
     out := fmt.newStringBuilder(256 + body.len as int);
     defer out.free();
     out.add("% % HTTP/1.1\r\n", verb, parts.path);
-    if parts.port == 80 { out.add("Host: %\r\n", parts.host); }
+    if parts.port == 80 && !parts.tls || parts.port == 443 && parts.tls { out.add("Host: %\r\n", parts.host); }
     else                { out.add("Host: %:%\r\n", parts.host, parts.port); }
     for h in headers { out.add("%: %\r\n", h.name, h.value); }
     if body.len > 0 || verb == "POST" || verb == "PUT" || verb == "PATCH" {
