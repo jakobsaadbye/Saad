@@ -443,8 +443,16 @@ bool pe_write(AsmObject *obj, const char *path, char *error, int error_size) {
     uint32_t data_size = data->size ? (uint32_t)data->size : 8;
     uint32_t image_size = data_rva + pe_align(data_size, PE_SECTION_ALIGNMENT);
 
+    // The extra sections of coff_read(), e.g the unwind tables and the debug information, after .data
+    int extra_count = obj->extra_section_count;
+    uint32_t section_rva[ASM_SECTION_COUNT + ASM_MAX_EXTRA_SECTIONS] = { text_rva, data_rva, rdata_rva };
+    for (int k = 0; k < extra_count; k++) {
+        uint32_t size = (uint32_t) obj->sections[ASM_SECTION_COUNT + k].size;
+        section_rva[ASM_SECTION_COUNT + k] = image_size;
+        image_size += pe_align(size ? size : 1, PE_SECTION_ALIGNMENT);
+    }
+
     // Where each symbol is
-    uint32_t section_rva[ASM_SECTION_COUNT] = { text_rva, data_rva, rdata_rva };
     uint32_t *symbol_rva = calloc(obj->symbol_count, sizeof(uint32_t));
     for (int i = 0; i < obj->symbol_count; i++) {
         AsmSymbol *s = &obj->symbols[i];
@@ -453,7 +461,8 @@ bool pe_write(AsmObject *obj, const char *path, char *error, int error_size) {
     for (int i = 0; i < import_count; i++) symbol_rva[imports[i].symbol] = text_rva + imports[i].thunk;
 
     // The relocations
-    uint8_t *section_data[ASM_SECTION_COUNT] = { text.data, data->data, rdata.data };
+    uint8_t *section_data[ASM_SECTION_COUNT + ASM_MAX_EXTRA_SECTIONS] = { text.data, data->data, rdata.data };
+    for (int k = 0; k < extra_count; k++) section_data[ASM_SECTION_COUNT + k] = obj->sections[ASM_SECTION_COUNT + k].data;
     for (int i = 0; i < obj->reloc_count; i++) {
         AsmReloc *r = &obj->relocs[i];
         uint8_t *field = &section_data[r->section][r->offset];
@@ -462,6 +471,8 @@ bool pe_write(AsmObject *obj, const char *path, char *error, int error_size) {
             put_u64_at(field, PE_IMAGE_BASE + target);
         } else if (r->kind == ASM_RELOC_RVA32) {
             put_u32_at(field, (uint32_t) target);
+        } else if (r->kind == ASM_RELOC_SECREL32) {
+            put_u32_at(field, (uint32_t)(obj->symbols[r->symbol].offset + r->addend));
         } else {
             int64_t place = section_rva[r->section] + r->offset + 4 + r->trailing;
             put_u32_at(field, (uint32_t)(int32_t)((int64_t)target - place));
@@ -474,7 +485,14 @@ bool pe_write(AsmObject *obj, const char *path, char *error, int error_size) {
     }
 
     // The file: headers, then the sections
-    int section_count = 3;
+    int section_count = 3 + extra_count;
+    uint32_t exception_rva = 0, exception_size = 0;
+    for (int k = 0; k < extra_count; k++) {
+        if (strcmp(obj->extra_names[k], ".pdata") == 0) {
+            exception_rva = section_rva[ASM_SECTION_COUNT + k];
+            exception_size = (uint32_t) obj->sections[ASM_SECTION_COUNT + k].size;
+        }
+    }
     uint32_t headers_size = pe_align(64 + 4 + 20 + 240 + 40 * section_count, PE_FILE_ALIGNMENT);
     uint32_t text_raw  = pe_align((uint32_t)text.size, PE_FILE_ALIGNMENT);
     uint32_t rdata_raw = pe_align((uint32_t)rdata.size, PE_FILE_ALIGNMENT);
@@ -522,19 +540,39 @@ bool pe_write(AsmObject *obj, const char *path, char *error, int error_size) {
     out_u32(&o, 16);                     // Data directories
     for (int d = 0; d < 16; d++) {
         if (d == 1)       { out_u32(&o, rdata_rva + directory); out_u32(&o, 20 * (library_count + 1)); }    // Imports
+        else if (d == 3)  { out_u32(&o, exception_rva); out_u32(&o, exception_size); }                       // Unwind tables
         else if (d == 12) { out_u32(&o, rdata_rva + iat_start); out_u32(&o, iat_end - iat_start); }          // Import address table
         else              { out_u32(&o, 0); out_u32(&o, 0); }
     }
     // Section headers
-    struct { const char *name; uint32_t size, rva, raw, characteristics; } sections[3] = {
-        { ".text",  (uint32_t)text.size,  text_rva,  text_raw,  0x60000020 },
-        { ".rdata", (uint32_t)rdata.size, rdata_rva, rdata_raw, 0x40000040 },
-        { ".data",  data_size,            data_rva,  data_raw,  0xC0000040 },
+    struct { const char *name; uint32_t size, rva, raw, characteristics; uint8_t *data; } sections[3 + ASM_MAX_EXTRA_SECTIONS] = {
+        { ".text",  (uint32_t)text.size,  text_rva,  text_raw,  0x60000020, text.data },
+        { ".rdata", (uint32_t)rdata.size, rdata_rva, rdata_raw, 0x40000040, rdata.data },
+        { ".data",  data_size,            data_rva,  data_raw,  0xC0000040, data->data },
     };
+    for (int k = 0; k < extra_count; k++) {
+        AsmBytes *b = &obj->sections[ASM_SECTION_COUNT + k];
+        sections[3 + k].name = obj->extra_names[k];
+        sections[3 + k].size = (uint32_t) b->size;
+        sections[3 + k].rva  = section_rva[ASM_SECTION_COUNT + k];
+        sections[3 + k].raw  = pe_align((uint32_t) b->size, PE_FILE_ALIGNMENT);
+        sections[3 + k].characteristics = obj->extra_flags[k];
+        sections[3 + k].data = b->data;
+    }
+    // A name longer than 8 characters, e.g .debug_abbrev, is '/' and where it is in the string table, which is after
+    // the sections (as MinGW does it), and which debuggers read
+    OutBytes strings = {0};
+    out_u32(&strings, 0);
     uint32_t file_at = headers_size;
     for (int s = 0; s < section_count; s++) {
-        char name[8] = {0};
-        memcpy(name, sections[s].name, strlen(sections[s].name));
+        char name[9] = {0};
+        size_t length = strlen(sections[s].name);
+        if (length <= 8) {
+            memcpy(name, sections[s].name, length);
+        } else {
+            snprintf(name, sizeof(name), "/%u", (unsigned) strings.size);
+            out_put(&strings, sections[s].name, length + 1);
+        }
         out_put(&o, name, 8);
         out_u32(&o, sections[s].size);
         out_u32(&o, sections[s].rva);
@@ -550,6 +588,16 @@ bool pe_write(AsmObject *obj, const char *path, char *error, int error_size) {
     out_put(&o, rdata.data, rdata.size);  out_pad(&o, PE_FILE_ALIGNMENT);
     if (data->size) out_put(&o, data->data, data->size); else out_zeros(&o, 8);
     out_pad(&o, PE_FILE_ALIGNMENT);
+    for (int s = 3; s < section_count; s++) {
+        out_put(&o, sections[s].data, sections[s].size);
+        out_pad(&o, PE_FILE_ALIGNMENT);
+    }
+    if (strings.size > 4) {
+        put_u32_at(&o.data[76], (uint32_t) o.size);           // PointerToSymbolTable, with no symbols
+        put_u32_at(strings.data, (uint32_t) strings.size);
+        out_put(&o, strings.data, strings.size);
+    }
+    free(strings.data);
 
     bool ok = write_file_bytes(path, &o);
     if (!ok) snprintf(error, error_size, "Couldn't write %s", path);
@@ -560,13 +608,31 @@ bool pe_write(AsmObject *obj, const char *path, char *error, int error_size) {
 
 //
 // Reading a COFF object file: its code and data go into the sections of an AsmObject, by what they are (code, data
-// that is written, or read only data). The unwind tables (.pdata, .xdata) and the debug information are left out, like
-// the x64 backend has none
+// that is written, or read only data). The unwind tables (.pdata, .xdata) and the debug information (.debug_*) become
+// extra sections, which pe_write() writes as sections of their own
 //
 
 static uint16_t get_u16(const uint8_t *at) { uint16_t v; memcpy(&v, at, 2); return v; }
 static uint32_t get_u32(const uint8_t *at) { uint32_t v; memcpy(&v, at, 4); return v; }
 static uint64_t get_u64(const uint8_t *at) { uint64_t v; memcpy(&v, at, 8); return v; }
+
+// The extra section with the name, made when there is none yet. Its characteristics in the program are the ones of
+// the object file without what is only for linking, e.g the alignment
+static int coff_extra_section(AsmObject *obj, const char *name, uint32_t flags) {
+    char short_name[32];
+    snprintf(short_name, sizeof(short_name), "%s", name);
+    char *dollar = strchr(short_name, '$');     // .xdata$foo goes into .xdata
+    if (dollar) *dollar = 0;
+    for (int i = 0; i < obj->extra_section_count; i++) {
+        if (strcmp(obj->extra_names[i], short_name) == 0) return ASM_SECTION_COUNT + i;
+    }
+    if (obj->extra_section_count == ASM_MAX_EXTRA_SECTIONS) return -1;
+    int i = obj->extra_section_count++;
+    snprintf(obj->extra_names[i], sizeof(obj->extra_names[i]), "%s", short_name);
+    obj->extra_flags[i] = flags & ~(0x00F00000u | 0x00001000u | 0x00000A00u);
+    obj->alignment[ASM_SECTION_COUNT + i] = 8;
+    return ASM_SECTION_COUNT + i;
+}
 
 // Reads the object file of 'size' bytes into 'obj'. Returns false, with obj->error set, on something it can't read
 bool coff_read(const uint8_t *bytes, size_t size, AsmObject *obj) {
@@ -592,10 +658,16 @@ bool coff_read(const uint8_t *bytes, size_t size, AsmObject *obj) {
         const char *name = short_name[0] == '/' ? strings + atoi(short_name + 1) : short_name;   // A long name, e.g /4
         uint32_t flags = get_u32(h + 36);
         placed_in[i] = -1;
-        bool removed = (flags & 0x800) || (flags & 0x02000000) || strncmp(name, ".pdata", 6) == 0 || strncmp(name, ".xdata", 6) == 0 ||
-                       strncmp(name, ".debug", 6) == 0 || strncmp(name, ".llvm", 5) == 0;
-        if (removed) continue;
+        if ((flags & 0x800) || (flags & 0x200) || strncmp(name, ".llvm", 5) == 0) continue;   // E.g .drectve and .llvm_addrsig
         int section = (flags & 0x20) ? ASM_TEXT : (flags & 0x80000000) ? ASM_DATA : ASM_RDATA;
+        // The unwind tables and the debug information are sections of their own in the program
+        if (strncmp(name, ".pdata", 6) == 0 || strncmp(name, ".xdata", 6) == 0 || strncmp(name, ".debug", 6) == 0) {
+            section = coff_extra_section(obj, name, flags);
+            if (section < 0) {
+                snprintf(obj->error, sizeof(obj->error), "The object file has more than %d sections", ASM_MAX_EXTRA_SECTIONS);
+                return false;
+            }
+        }
         int align = (flags >> 20) & 0xF ? 1 << (((flags >> 20) & 0xF) - 1) : 1;
         AsmBytes *b = &obj->sections[section];
         while (b->size % align) asm_put_byte(b, section == ASM_TEXT ? 0xCC : 0);
@@ -658,6 +730,9 @@ bool coff_read(const uint8_t *bytes, size_t size, AsmObject *obj) {
                 reloc.addend = (int64_t) get_u64(field);
             } else if (type == 3) {                             // ADDR32NB
                 reloc.kind = ASM_RELOC_RVA32;
+                reloc.addend = (int32_t) get_u32(field);
+            } else if (type == 11) {                            // SECREL, e.g of the debug information
+                reloc.kind = ASM_RELOC_SECREL32;
                 reloc.addend = (int32_t) get_u32(field);
             } else if (type >= 4 && type <= 9) {                // REL32, REL32_1 .. REL32_5
                 reloc.kind = ASM_RELOC_REL32;

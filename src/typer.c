@@ -6475,6 +6475,28 @@ static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *fu
         func_defn->symbol_name = sb_to_string(&sb);
     }
 
+    // The name for a debugger, written like in the program, e.g json.Parser.parse, List<int>.add or max<int>
+    {
+        StringBuilder sb = sb_init(32);
+        AstFile *file = func_defn->head.head.file;
+        if (file && file->ns && !func_defn->is_extern && !func_defn->is_lambda) sb_append(&sb, "%s.", file->ns->name);
+        if (func_defn->is_lambda) {
+            sb_append(&sb, "%s", func_defn->symbol_name);
+        } else {
+            if (func_defn->is_method) sb_append(&sb, "%s.", func_defn->receiver_struct->identifier->name);
+            else if (func_defn->generic_function && func_defn->generic_function->method_struct) sb_append(&sb, "%s.", func_defn->generic_function->method_struct->identifier->name);
+            sb_append(&sb, "%s", func_defn->identifier->name);
+        }
+        if (func_defn->generic_function && !func_defn->is_method && func_defn->type_args.count > 0) {
+            sb_append(&sb, "<");
+            for (int i = 0; i < func_defn->type_args.count; i++) {
+                sb_append(&sb, "%s%s", i > 0 ? ", " : "", type_to_str(((Type **)func_defn->type_args.items)[i]));
+            }
+            sb_append(&sb, ">");
+        }
+        func_defn->display_name = sb_to_string(&sb);
+    }
+
     // Build up the lowered representation of the parameter list for the function (to simplify codegen)
     func_defn->lowered_return_params = da_init(func_defn->return_types.count, sizeof(AstIdentifier *));
     func_defn->lowered_params = da_init(func_defn->return_types.count + func_defn->parameters.count, sizeof(AstIdentifier *));

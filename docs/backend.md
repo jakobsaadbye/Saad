@@ -80,10 +80,41 @@ The compiler has the LLVM backend when it is built with LLVM, which is then link
 LLVM takes longer: about 8 seconds for `examples/blog/server.sd` at `-O2`, against 0.5 seconds for the x64 backend and
 0.9 seconds at `-O0`.
 
+## Debug information
+
+`saad build main.sd --llvm --debug` makes the program with DWARF debug information, at `-O0` unless an `-O` is given.
+A debugger (LLDB, e.g through CodeLLDB in VS Code, or GDB) can then stop at a line of a `.sd` file, step through the
+lines, and show the calls with the names of the program, e.g `List<int>.add` or `json.Parser.parse`.
+
+* Each IR function has its file and line (`IrFunction.source_file`, `source_line`) and its name in the program
+  (`AstFunctionDefn.display_name`). Each IR instruction has the line of its statement.
+* llvm_emit.c makes a DWARF subprogram for each function and gives each LLVM instruction its line. DWARF is used on
+  Windows too (in the sections `.debug_*` of out.exe, like MinGW does), as LLDB and GDB read it there.
+* Every program of the LLVM backend has unwind tables (`.pdata`, `.xdata`), so a debugger can walk the calls.
+  `coff_read()` keeps them and the debug sections, and `pe_write()` writes them as sections of their own, with the
+  exception directory pointing at `.pdata`, and a string table for the long names like `.debug_abbrev`.
+
+The variables and parameters have debug information too:
+
+* `declare_local()` (ir_lower.c) records each variable of the program (`IrFunction.locals`): its name, Saad type, slot,
+  line and lexical scope. Each block, `for` and `catch` is a scope (`IrFunction.scopes`, and `IrInst.scope` for each
+  instruction), so two loops can each have an `i`.
+* llvm_emit.c makes a lexical block per scope and declares each variable on the alloca of its slot, with the DWARF type
+  of its Saad type (`llvm_di_type`): structs with their members, pointers, fixed arrays, enums by name, and `string`,
+  lists, slices, optionals, unions and `any` as the structs they are.
+* `tools/lldb/saad_formatters.py` shows those like the program writes them: a string as `"hi"`, a list or slice as its
+  elements, an optional as its value or `none`, a union as the variant it holds (`.label "hi"`), and an `any` with the
+  type of its value (`int 7`). Load it with `command script import tools/lldb/saad_formatters.py`.
+* The code after a block, e.g the step of a loop, is at the line of its `}`, so stepping goes through a loop like in C.
+* `tools/linux/check_debug.sh` (part of `runtests.sh` when LLDB is installed) stops in `tests/debug/variables.sd` with
+  LLDB and checks what it shows.
+
+The global variables, and the x64 backend, don't have debug information yet.
+
 ## Debugging
 
-`saad build main.sd --debug` makes the program the old way, with `nasm -fwin64 -g` and `gcc`, so it has debug information
-for gdb (see gdb_guide.md). That needs nasm and MinGW's gcc.
+With the x64 backend, `saad build main.sd --debug` makes the program the old way, with `nasm -fwin64 -g` and `gcc`, so
+gdb can step through its assembly (see gdb_guide.md). That needs nasm and MinGW's gcc.
 
 ## Testing
 
