@@ -2352,7 +2352,7 @@ static Value lower_call(Lowerer *L, AstFunctionCall *call, int *ret_slots, int m
 
     // An error that the callee threw goes on, and so does the error result that isn't taken, e.g of 'x := f();'
     if (!is_c) {
-        L->line = call->head.head.start.line > 0 ? call->head.head.start.line : L->line;
+        if (call->head.head.start.line > 0 && (!L->ast_func || call->head.head.file == L->ast_func->head.head.file)) L->line = call->head.head.start.line;
         // A function value can be a function of C, whose eax isn't the flag, so thrownError says it then
         emit_throw_check(L, result, callee_kind == IR_CALLEE_VREG);
         if ((call->head.head.flags & AST_FLAG_THROWS_ON_ERROR) && ret_count > 0) {
@@ -3017,7 +3017,8 @@ static void lower_return(Lowerer *L, AstReturn *ret) {
 }
 
 static void lower_statement(Lowerer *L, Ast *stmt) {
-    L->line = stmt->start.line;
+    // The lines are of the file of the function. A statement from another file keeps the line of where it is used
+    if (!L->ast_func || stmt->file == L->ast_func->head.head.file) L->line = stmt->start.line;
 
     switch (stmt->kind) {
     case AST_DECLARATION:       lower_declaration(L, (AstDeclaration *) stmt); return;
@@ -3215,6 +3216,12 @@ static void lower_function(Lowerer *L, AstFunctionDefn *func_defn) {
     IrFunction *func = ir_function_new(L->module, L->module->globals.items[global]->name);
     func->is_entry_point = strcmp(func_defn->symbol_name, "main") == 0 && func_defn->parent_function == NULL;
     func->return_type    = IR_I32; // If an error was thrown out of it, see terminate_return
+    AstFile *file = func_defn->head.head.file;
+    if (file && file->absolute_path) {
+        func->source_file = ir_strdup(L->module, file->absolute_path);
+        func->source_name = ir_strdup(L->module, func_defn->display_name ? func_defn->display_name : func->name);
+        func->source_line = func_defn->head.head.start.line;
+    }
 
     L->func     = func;
     L->ast_func = func_defn;

@@ -75,7 +75,7 @@ bool parse_options(CompilerConfig *config, int argc, char const *argv[], int fir
             continue;
         }
         if (strcmp(option, "--unchecked") == 0) { bounds_checks = false; continue; } // No bounds checks of indexes
-        if (strcmp(option, "--llvm") == 0)  { config->use_llvm = true; if (config->opt_level < 0) config->opt_level = 2; continue; }
+        if (strcmp(option, "--llvm") == 0)  { config->use_llvm = true; continue; }
         if (option[0] == '-' && option[1] == 'O' && option[2] >= '0' && option[2] <= '3' && option[3] == 0) {
             config->opt_level = option[2] - '0';   // -O0 to -O3, with --llvm
             continue;

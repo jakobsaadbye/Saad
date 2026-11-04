@@ -196,7 +196,7 @@ typedef struct IrInst {
     int64_t  imm2;     // MEMSET byte value
     double   fimm;     // CONST_FLOAT value
     IrCall  *call;     // CALL
-    int      line;     // Source line, 0 if unknown (only used for comments in dumps)
+    int      line;     // Source line, 0 if unknown. In the file of the function (IrFunction.source_file)
 } IrInst;
 
 typedef enum IrTermKind {
@@ -237,6 +237,9 @@ typedef struct IrFunction {
     int     global;            // Index of the function's symbol in the module globals
     bool    is_entry_point;    // 'main'. Exported and returns 0 to the C runtime
     IrType  return_type;       // Scalar return value (IR_VOID if none)
+    char   *source_file;       // For the debug information: the absolute path of its .sd file. NULL when it is made by the compiler
+    char   *source_name;       // Its name in the program, e.g "Point.length"
+    int     source_line;
 
     IrArray(IrType)    vreg_types;
     IrArray(int)       params;     // Vreg per incoming parameter, in ABI order

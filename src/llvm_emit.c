@@ -12,6 +12,8 @@
 //     Linux harness (--elf) it is set on every function and call, as tools/linux/shim.c gives the C functions that
 //     convention
 //   * The runtime functions that the x64 backend writes in assembly are built here
+//   * With debug information (saad build --debug), each function gets a DWARF subprogram and each instruction the line
+//     of its statement, so a debugger can stop at a line, step and show the calls
 //
 //////////////////////////////////////////////////////////////////////////////////////////
 
@@ -22,6 +24,7 @@
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>
 #include <llvm-c/Transforms/PassBuilder.h>
+#include <llvm-c/DebugInfo.h>
 
 typedef struct LlvmEmitter {
     IrModule        *module;
@@ -33,6 +36,14 @@ typedef struct LlvmEmitter {
     LLVMTypeRef      types[IR_TYPE_COUNT];
     LLVMTypeRef      i1;
     LLVMValueRef    *globals;      // Of each global of the module
+
+    // The debug information, when it is made
+    LLVMDIBuilderRef  di;
+    LLVMMetadataRef   compile_unit;
+    struct { char *path; LLVMMetadataRef file; } *files;
+    int               file_count;
+    LLVMMetadataRef   subprogram;   // Of the function being built, or NULL
+    int               line;         // The line of the last instruction
 
     // Of the function being built
     LLVMValueRef    *values;       // Of each vreg
@@ -149,6 +160,47 @@ static LLVMTypeRef llvm_call_type(LlvmEmitter *e, IrCall *call) {
         if (fixed < 64) params[fixed++] = e->types[ir_vreg_type(e->func, call->args[i])];
     }
     return LLVMFunctionType(e->types[call->return_type], params, fixed, vararg);
+}
+
+//
+// Debug information
+//
+
+// The DIFile of a source file, made once
+static LLVMMetadataRef llvm_di_file(LlvmEmitter *e, const char *path) {
+    for (int i = 0; i < e->file_count; i++) if (strcmp(e->files[i].path, path) == 0) return e->files[i].file;
+    const char *slash = strrchr(path, '/');
+    const char *backslash = strrchr(path, '\\');
+    if (!slash || (backslash && backslash > slash)) slash = backslash;
+    const char *name = slash ? slash + 1 : path;
+    size_t directory_length = slash ? (size_t)(slash - path) : 0;
+    LLVMMetadataRef file = LLVMDIBuilderCreateFile(e->di, name, strlen(name), path, directory_length);
+    e->files = realloc(e->files, (e->file_count + 1) * sizeof(*e->files));
+    e->files[e->file_count].path = strdup(path);
+    e->files[e->file_count].file = file;
+    e->file_count++;
+    return file;
+}
+
+// Where the next instructions come from: the line of the function being built
+static void llvm_set_line(LlvmEmitter *e, int line) {
+    if (!e->subprogram) return;
+    if (line > 0) e->line = line;
+    LLVMMetadataRef location = LLVMDIBuilderCreateDebugLocation(e->context, (unsigned) e->line, 0, e->subprogram, NULL);
+    LLVMSetCurrentDebugLocation2(e->builder, location);
+}
+
+// The subprogram of a function of the program, which a debugger shows by its name in the program, e.g Point.length
+static void llvm_di_function(LlvmEmitter *e, IrFunction *func, LLVMValueRef function) {
+    e->subprogram = NULL;
+    if (!e->di || !func->source_file) return;
+    LLVMMetadataRef file = llvm_di_file(e, func->source_file);
+    LLVMMetadataRef type = LLVMDIBuilderCreateSubroutineType(e->di, file, NULL, 0, LLVMDIFlagZero);
+    const char *name = func->source_name ? func->source_name : func->name;
+    e->subprogram = LLVMDIBuilderCreateFunction(e->di, file, name, strlen(name), "", 0, file,
+        (unsigned) func->source_line, type, !func->is_entry_point, true, (unsigned) func->source_line, LLVMDIFlagPrototyped, false);
+    LLVMSetSubprogram(function, e->subprogram);
+    e->line = func->source_line > 0 ? func->source_line : 1;
 }
 
 static void llvm_emit_inst(LlvmEmitter *e, IrInst *inst) {
@@ -360,6 +412,7 @@ static void llvm_emit_function(LlvmEmitter *e, IrFunction *func) {
     LLVMBuilderRef b = e->builder;
     LLVMValueRef function = e->globals[func->global];
     e->func = func;
+    llvm_di_function(e, func, function);
 
     int vreg_count = func->vreg_types.count;
     e->values = calloc(vreg_count + 1, sizeof(LLVMValueRef));
@@ -372,6 +425,7 @@ static void llvm_emit_function(LlvmEmitter *e, IrFunction *func) {
     // The allocas, in a block before the first block, which other blocks can jump to
     LLVMBasicBlockRef allocas = LLVMAppendBasicBlockInContext(e->context, function, "allocas");
     LLVMPositionBuilderAtEnd(b, allocas);
+    llvm_set_line(e, 0);
     for (int i = 0; i < func->slots.count; i++) {
         IrSlot slot = func->slots.items[i];
         LLVMValueRef alloca = LLVMBuildAlloca(b, LLVMArrayType2(e->types[IR_I8], slot.size > 0 ? slot.size : 1), "");
@@ -394,9 +448,15 @@ static void llvm_emit_function(LlvmEmitter *e, IrFunction *func) {
     for (int i = 0; i < func->blocks.count; i++) {
         IrBlock *block = func->blocks.items[i];
         LLVMPositionBuilderAtEnd(b, e->blocks[block->id]);
-        for (int j = 0; j < block->insts.count; j++) llvm_emit_inst(e, &block->insts.items[j]);
+        for (int j = 0; j < block->insts.count; j++) {
+            llvm_set_line(e, block->insts.items[j].line);
+            llvm_emit_inst(e, &block->insts.items[j]);
+        }
+        llvm_set_line(e, 0);
         llvm_emit_term(e, &block->term);
     }
+    LLVMSetCurrentDebugLocation2(b, NULL);
+    e->subprogram = NULL;
 
     free(e->values);
     free(e->homes);
@@ -582,9 +642,9 @@ static void llvm_windows_runtime(LlvmEmitter *e) {
 }
 
 // Builds the LLVM module of the IR module, optimizes it at opt_level (0 to 3) and makes the object file: ELF for the
-// Linux harness (elf), else COFF for Windows. It is written to path, or with no path, given in *bytes (malloc'ed) and
-// *size. Returns false, with the problem printed, on a failure
-bool llvm_compile_module(IrModule *module, bool elf, int opt_level, const char *path, uint8_t **bytes, size_t *size) {
+// Linux harness (elf), else COFF for Windows. With debug, it has DWARF debug information. It is written to path, or with
+// no path, given in *bytes (malloc'ed) and *size. Returns false, with the problem printed, on a failure
+bool llvm_compile_module(IrModule *module, bool elf, int opt_level, bool debug, const char *path, uint8_t **bytes, size_t *size) {
     LlvmEmitter e = {0};
     e.module = module;
     e.elf = elf;
@@ -601,6 +661,21 @@ bool llvm_compile_module(IrModule *module, bool elf, int opt_level, const char *
     e.types[IR_PTR]  = LLVMPointerTypeInContext(e.context, 0);
     e.i1 = LLVMInt1TypeInContext(e.context);
     e.globals = calloc(module->globals.count + 1, sizeof(LLVMValueRef));
+
+    // DWARF, also in the COFF of Windows, as LLDB and GDB read it there too
+    if (debug) {
+        e.di = LLVMCreateDIBuilder(e.llvm);
+        const char *main_file = NULL;
+        for (int f = 0; f < module->functions.count && !main_file; f++) {
+            if (module->functions.items[f]->is_entry_point) main_file = module->functions.items[f]->source_file;
+        }
+        e.compile_unit = LLVMDIBuilderCreateCompileUnit(e.di, LLVMDWARFSourceLanguageC99, llvm_di_file(&e, main_file ? main_file : "main.sd"),
+            "saad", 4, opt_level > 0, "", 0, 0, "", 0, LLVMDWARFEmissionFull, 0, false, false, "", 0, "", 0);
+        LLVMAddModuleFlag(e.llvm, LLVMModuleFlagBehaviorWarning, "Debug Info Version", 18,
+            LLVMValueAsMetadata(LLVMConstInt(e.types[IR_I32], LLVMDebugMetadataVersion(), false)));
+        LLVMAddModuleFlag(e.llvm, LLVMModuleFlagBehaviorWarning, "Dwarf Version", 13,
+            LLVMValueAsMetadata(LLVMConstInt(e.types[IR_I32], 4, false)));
+    }
 
     // The externs first, so a function of the program with the name of a C function can't take its name
     int compare_strings = -1, builtin_assert = -1;
@@ -662,15 +737,21 @@ bool llvm_compile_module(IrModule *module, bool elf, int opt_level, const char *
         if (i == 0) llvm_runtime_compare_strings(&e, e.globals[index]);
         else        llvm_runtime_builtin_assert(&e, e.globals[index]);
     }
+    // Every function has unwind tables (.pdata and .xdata on Windows), so a debugger can show the calls. With debug
+    // information they keep the frame pointer too
     unsigned nounwind = LLVMGetEnumAttributeKindForName("nounwind", 8);
+    unsigned uwtable = LLVMGetEnumAttributeKindForName("uwtable", 7);
     for (int f = 0; f < module->functions.count; f++) {
         IrFunction *func = module->functions.items[f];
         LLVMValueRef function = e.globals[func->global];
         if (!func->is_entry_point) LLVMSetLinkage(function, LLVMInternalLinkage);
         llvm_set_cc(&e, function, false);
         LLVMAddAttributeAtIndex(function, LLVMAttributeFunctionIndex, LLVMCreateEnumAttribute(e.context, nounwind, 0));
+        LLVMAddAttributeAtIndex(function, LLVMAttributeFunctionIndex, LLVMCreateEnumAttribute(e.context, uwtable, 2));
+        if (debug) LLVMAddAttributeAtIndex(function, LLVMAttributeFunctionIndex, LLVMCreateStringAttribute(e.context, "frame-pointer", 13, "all", 3));
         llvm_emit_function(&e, func);
     }
+    if (e.di) LLVMDIBuilderFinalize(e.di);
 
     if (!elf) llvm_windows_runtime(&e);
 
@@ -739,6 +820,9 @@ bool llvm_compile_module(IrModule *module, bool elf, int opt_level, const char *
 done:
     if (error) LLVMDisposeMessage(error);
     if (machine) LLVMDisposeTargetMachine(machine);
+    if (e.di) LLVMDisposeDIBuilder(e.di);
+    for (int i = 0; i < e.file_count; i++) free(e.files[i].path);
+    free(e.files);
     LLVMDisposeBuilder(e.builder);
     LLVMDisposeModule(e.llvm);
     LLVMContextDispose(e.context);
@@ -748,8 +832,8 @@ done:
 
 #else
 
-bool llvm_compile_module(IrModule *module, bool elf, int opt_level, const char *path, uint8_t **bytes, size_t *size) {
-    (void) module; (void) elf; (void) opt_level; (void) path; (void) bytes; (void) size;
+bool llvm_compile_module(IrModule *module, bool elf, int opt_level, bool debug, const char *path, uint8_t **bytes, size_t *size) {
+    (void) module; (void) elf; (void) opt_level; (void) debug; (void) path; (void) bytes; (void) size;
     printf("error: This saad was built without LLVM, so it has no --llvm. Build it with LLVM installed (see build.sh)\n");
     return false;
 }

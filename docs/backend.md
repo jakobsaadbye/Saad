@@ -80,10 +80,26 @@ The compiler has the LLVM backend when it is built with LLVM, which is then link
 LLVM takes longer: about 8 seconds for `examples/blog/server.sd` at `-O2`, against 0.5 seconds for the x64 backend and
 0.9 seconds at `-O0`.
 
+## Debug information
+
+`saad build main.sd --llvm --debug` makes the program with DWARF debug information, at `-O0` unless an `-O` is given.
+A debugger (LLDB, e.g through CodeLLDB in VS Code, or GDB) can then stop at a line of a `.sd` file, step through the
+lines, and show the calls with the names of the program, e.g `List<int>.add` or `json.Parser.parse`.
+
+* Each IR function has its file and line (`IrFunction.source_file`, `source_line`) and its name in the program
+  (`AstFunctionDefn.display_name`). Each IR instruction has the line of its statement.
+* llvm_emit.c makes a DWARF subprogram for each function and gives each LLVM instruction its line. DWARF is used on
+  Windows too (in the sections `.debug_*` of out.exe, like MinGW does), as LLDB and GDB read it there.
+* Every program of the LLVM backend has unwind tables (`.pdata`, `.xdata`), so a debugger can walk the calls.
+  `coff_read()` keeps them and the debug sections, and `pe_write()` writes them as sections of their own, with the
+  exception directory pointing at `.pdata`, and a string table for the long names like `.debug_abbrev`.
+
+The variables of a function, and the x64 backend, don't have debug information yet.
+
 ## Debugging
 
-`saad build main.sd --debug` makes the program the old way, with `nasm -fwin64 -g` and `gcc`, so it has debug information
-for gdb (see gdb_guide.md). That needs nasm and MinGW's gcc.
+With the x64 backend, `saad build main.sd --debug` makes the program the old way, with `nasm -fwin64 -g` and `gcc`, so
+gdb can step through its assembly (see gdb_guide.md). That needs nasm and MinGW's gcc.
 
 ## Testing
 

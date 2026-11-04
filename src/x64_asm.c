@@ -39,6 +39,7 @@ typedef enum AsmRelocKind {
     ASM_RELOC_REL32,  // A 32-bit offset from the end of the instruction: S + addend - (P + 4 + trailing)
     ASM_RELOC_ABS64,  // A 64-bit address: S + addend
     ASM_RELOC_RVA32,  // A 32-bit offset from the start of the program: S + addend - image base (only from coff_read)
+    ASM_RELOC_SECREL32, // A 32-bit offset from the start of the section of S: offset of S + addend (only from coff_read)
 } AsmRelocKind;
 
 typedef struct AsmReloc {
@@ -59,9 +60,15 @@ typedef struct AsmSymbol {
     char *library;   // The library an extern is in, e.g "kernel32.dll". NULL for the C runtime
 } AsmSymbol;
 
+// The sections after the three of the assembler, which only coff_read() makes, e.g .pdata and .debug_info
+#define ASM_MAX_EXTRA_SECTIONS 24
+
 typedef struct AsmObject {
-    AsmBytes   sections[ASM_SECTION_COUNT];
-    int        alignment[ASM_SECTION_COUNT];
+    AsmBytes   sections[ASM_SECTION_COUNT + ASM_MAX_EXTRA_SECTIONS];
+    int        alignment[ASM_SECTION_COUNT + ASM_MAX_EXTRA_SECTIONS];
+    int        extra_section_count;                         // Section ASM_SECTION_COUNT + i is extra section i
+    char       extra_names[ASM_MAX_EXTRA_SECTIONS][32];
+    uint32_t   extra_flags[ASM_MAX_EXTRA_SECTIONS];         // Its characteristics in the program, e.g readable
     AsmSymbol *symbols;
     int        symbol_count;
     int        symbol_capacity;

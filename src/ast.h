@@ -428,6 +428,7 @@ typedef struct AstFunctionDefn {
     int   base_ptr;              // Where rbp is currently at in codegen
     int   temp_ptr;              // Offset to allocate temporary stack locations (used for function calls and function arguments). The lifetime of the temporary storage is as long as a statement, to allow expressions to be fully evaluated
     int   return_label;
+    char *display_name;          // The name in the program, for a debugger, e.g json.Parser.parse or max<int>. Unlike symbol_name, nothing is mangled
     char *symbol_name;           // The assembly symbol name for the function call. Methods gets a prefix symbolname in the outputted asm to be namespaced to their receiver. E.g `foo :: method (bar: Bar)` would get an asm function name: `Bar.foo:`
     
     DynamicArray    lowered_return_params;  // of *AstIdentifier

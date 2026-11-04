@@ -218,6 +218,13 @@ static bool resolve_namespace_import(Parser *parser, AstImport *import) {
     return false;
 }
 
+// The -O of LLVM: the one given, else -O2, or -O0 with --debug, as the code of each line is then where a debugger
+// expects it
+static int llvm_opt_level(CompilerConfig *config) {
+    if (config->opt_level >= 0) return config->opt_level;
+    return config->debug ? 0 : 2;
+}
+
 typedef struct CompilerReport {
     CompilerConfig *config;
     clock_t lex_time_start;
@@ -312,7 +319,7 @@ void print_compiler_report(CompilerReport cr) {
     printf("Backend-end time:\n");
     printf("   IR:\t\t %.3f s.\n", dt_ir);
     if (cr.config && cr.config->use_llvm) {
-        printf("   LLVM -O%d:\t %.3f s.\n", cr.config->opt_level >= 0 ? cr.config->opt_level : 2, dt_codegen + dt_asm_link);
+        printf("   LLVM -O%d:\t %.3f s.\n", llvm_opt_level(cr.config), dt_codegen + dt_asm_link);
     } else {
         printf("   x64 codegen:\t %.3f s.\n", dt_codegen);
         printf("   Asm + Link:\t %.3f s.\n", dt_asm_link);
@@ -626,12 +633,12 @@ static bool assemble_and_link(CompilerConfig *config, IrModule *module, StringBu
 // object in memory, which coff_read() reads and pe_write() makes ./build/out.exe of, so no linker is needed. With --elf,
 // LLVM writes ./build/out.o for the Linux harness
 static bool compile_with_llvm(CompilerConfig *config, IrModule *module) {
-    int level = config->opt_level >= 0 ? config->opt_level : 2;
-    if (config->emit_elf) return llvm_compile_module(module, true, level, "./build/out.o", NULL, NULL);
+    int level = llvm_opt_level(config);
+    if (config->emit_elf) return llvm_compile_module(module, true, level, config->debug, "./build/out.o", NULL, NULL);
 
     uint8_t *bytes = NULL;
     size_t size = 0;
-    if (!llvm_compile_module(module, false, level, NULL, &bytes, &size)) return false;
+    if (!llvm_compile_module(module, false, level, config->debug, NULL, &bytes, &size)) return false;
     AsmObject obj;
     bool ok = coff_read(bytes, size, &obj);
     free(bytes);
