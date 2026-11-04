@@ -47,6 +47,7 @@ Command *find_command(const char *name) {
 
 // Parses the options after the input file. Returns false on an unknown option
 bool parse_options(CompilerConfig *config, int argc, char const *argv[], int first_option) {
+    config->opt_level = -1;
     bool os_given = false;
     for (int i = first_option; i < argc; i++) {
         const char *option = argv[i];
@@ -74,6 +75,11 @@ bool parse_options(CompilerConfig *config, int argc, char const *argv[], int fir
             continue;
         }
         if (strcmp(option, "--unchecked") == 0) { bounds_checks = false; continue; } // No bounds checks of indexes
+        if (strcmp(option, "--llvm") == 0)  { config->use_llvm = true; if (config->opt_level < 0) config->opt_level = 2; continue; }
+        if (option[0] == '-' && option[1] == 'O' && option[2] >= '0' && option[2] <= '3' && option[3] == 0) {
+            config->opt_level = option[2] - '0';   // -O0 to -O3, with --llvm
+            continue;
+        }
         if (strcmp(option, "--at") == 0 && i + 1 < argc) {
             // file:line:character. The file can have a ':' itself, e.g C:/dev/main.sd
             char *at = strdup(argv[i + 1]);

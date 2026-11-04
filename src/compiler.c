@@ -8,6 +8,7 @@
 #include "ir_lower.c"
 #include "regalloc.c"
 #include "x64_emit.c"
+#include "llvm_emit.c"
 #include "x64_asm.c"
 #include "object_writer.c"
 
@@ -310,8 +311,12 @@ void print_compiler_report(CompilerReport cr) {
 
     printf("Backend-end time:\n");
     printf("   IR:\t\t %.3f s.\n", dt_ir);
-    printf("   x64 codegen:\t %.3f s.\n", dt_codegen);
-    printf("   Asm + Link:\t %.3f s.\n", dt_asm_link);
+    if (cr.config && cr.config->use_llvm) {
+        printf("   LLVM -O%d:\t %.3f s.\n", cr.config->opt_level >= 0 ? cr.config->opt_level : 2, dt_codegen + dt_asm_link);
+    } else {
+        printf("   x64 codegen:\t %.3f s.\n", dt_codegen);
+        printf("   Asm + Link:\t %.3f s.\n", dt_asm_link);
+    }
     printf("   Total:\t %.3lf s.\n", dt_backend);
     printf("Total time: %.3lf s.\n\n", dt_total);
 }
@@ -612,6 +617,40 @@ static bool assemble_and_link(CompilerConfig *config, IrModule *module, StringBu
     return true;
 }
 
+// Makes the program with LLVM (llvm_emit.c), optimized with -O2 or the -O that is given: ./build/out.o for the Linux
+// harness (--elf), or ./build/out.obj on Windows, which gcc links into ./build/out.exe with the libraries of the externs
+static bool compile_with_llvm(CompilerConfig *config, IrModule *module) {
+    int level = config->opt_level >= 0 ? config->opt_level : 2;
+    if (config->emit_elf) return llvm_compile_module(module, true, level, "./build/out.o");
+    if (!llvm_compile_module(module, false, level, "./build/out.obj")) return false;
+#ifdef _WIN32
+    StringBuilder libraries = sb_init(256);
+    for (int i = 0; i < module->globals.count; i++) {
+        IrGlobal *global = module->globals.items[i];
+        if (global->kind != IR_GLOBAL_EXTERN || !global->library) continue;
+        char name[256];
+        snprintf(name, sizeof(name), "%s", global->library);
+        char *dot = strrchr(name, '.');
+        if (dot) *dot = 0;
+        char flag[300];
+        snprintf(flag, sizeof(flag), " -l%s", name);
+        if (!libraries.buffer || !strstr(libraries.buffer, flag)) sb_append(&libraries, "%s", flag);
+        copy_library(config, global->library);
+    }
+    char command[4096];
+    snprintf(command, sizeof(command), "gcc -o ./build/out.exe ./build/out.obj -L\"%s/packages/raylib/lib\"%s",
+        config->compiler_path, libraries.buffer ? libraries.buffer : "");
+    sb_free(&libraries);
+    if (system(command) != 0) {
+        printf("error: gcc couldn't link ./build/out.obj into ./build/out.exe\n");
+        return false;
+    }
+#else
+    printf("note: Made ./build/out.obj. A program for Windows is linked on Windows; on Linux use --elf\n");
+#endif
+    return true;
+}
+
 #ifdef _WIN32
 // An argument for cmd.exe, in quotes, e.g "host=localhost dbname=shop". A " in it is written \"
 static void append_quoted_argument(StringBuilder *sb, const char *arg) {
@@ -861,6 +900,24 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
         return false;
     }
     report.ir_time_end = clock();
+
+    // ----------- LLVM -----------
+    if (config->use_llvm) {
+        report.codegen_time_start = clock();
+        if (!compile_with_llvm(config, module)) {
+            cleanup();
+            return false;
+        }
+        report.codegen_time_end = clock();
+        report.asm_and_link_time_start = report.asm_and_link_time_end = clock();
+        if (output_to_console) print_compiler_report(report);
+        if (config->run_program && !run_executable(config, output_to_console)) {
+            cleanup();
+            return false;
+        }
+        reset_stdout();
+        return true;
+    }
 
     // ----------- x64 -----------
     report.codegen_time_start = clock();

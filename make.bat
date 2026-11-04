@@ -13,9 +13,15 @@ for %%f in (%FILES%) do (
 )
 
 :: Link all object files into one executable
+::   With the LLVM backend (--llvm) when LLVM is installed with its C headers and LLVM-C.lib, e.g in
+::   C:\Program Files\LLVM. Set LLVM_PATH for another folder
+if "%LLVM_PATH%"=="" set "LLVM_PATH=C:\Program Files\LLVM"
+set LLVM_FLAGS=
+if exist "%LLVM_PATH%\include\llvm-c\Core.h" if exist "%LLVM_PATH%\lib\LLVM-C.lib" set LLVM_FLAGS=-DSAAD_LLVM -isystem "%LLVM_PATH%\include" "%LLVM_PATH%\lib\LLVM-C.lib"
+
 gcc %CFLAGS% -o ./bin/saad.exe ^
     build/ast.o ^
     build/lexer.o ^
     build/parser.o ^
     build/scope.o ^
-    src/main.c
+    src/main.c %LLVM_FLAGS%

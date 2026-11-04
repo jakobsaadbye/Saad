@@ -951,6 +951,8 @@ typedef struct CompilerConfig {
     bool               json;               // Write the diagnostics as JSON: 'saad check --json'
     bool               debug;              // Make the program with nasm and gcc, with debug information: 'saad build --debug'
     bool               emit_elf;           // Write ./build/out.o for Linux instead of out.exe: 'saad build --elf' (tools/linux)
+    bool               use_llvm;           // Make the program with LLVM instead of the x64 backend: 'saad build --llvm'
+    int                opt_level;          // The -O of LLVM with --llvm, 2 when it isn't given
     char              *caller_directory;   // Where saad was started. 'saad run' runs the program there
     int                program_argc;       // The arguments after '--' of 'saad run main.sd -- a b', for the program
     const char       **program_argv;

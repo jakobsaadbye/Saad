@@ -4,7 +4,7 @@ set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 
-"$REPO/bin/saad" build "$REPO/lsp/main.sd" --elf > /dev/null || { "$REPO/bin/saad" build "$REPO/lsp/main.sd" --elf; exit 3; }
+"$REPO/bin/saad" build "$REPO/lsp/main.sd" --elf $SAAD_BUILD_FLAGS > /dev/null || { "$REPO/bin/saad" build "$REPO/lsp/main.sd" --elf $SAAD_BUILD_FLAGS; exit 3; }
 
 CACHE="$REPO/build/linux"
 mkdir -p "$CACHE"
