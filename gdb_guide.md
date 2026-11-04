@@ -7,7 +7,7 @@ has DWARF debug information, which LLDB and GDB read: the lines of the program, 
 
 ```lldb
 lldb build/out.exe
-command script import tools/lldb/saad_formatters.py     # Shows strings, lists, optionals, unions and any like Saad
+command script import lsp/vscode/debug/saad_formatters.py     # Shows strings, lists, optionals, unions and any like Saad
 breakpoint set -f main.sd -l 12
 run
 frame variable          # The variables

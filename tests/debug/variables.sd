@@ -1,5 +1,5 @@
 // The debug information of the LLVM backend: tools/linux/check_debug.sh runs this in LLDB with
-// tools/lldb/saad_formatters.py. It stops at 'stop in describe' when i is 1, then at 'break here', and what
+// lsp/vscode/debug/saad_formatters.py. It stops at 'stop in describe' when i is 1, then at 'break here', and what
 // LLDB shows must have each 'expect-debug' line
 
 import fmt;

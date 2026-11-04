@@ -102,9 +102,9 @@ The variables and parameters have debug information too:
 * llvm_emit.c makes a lexical block per scope and declares each variable on the alloca of its slot, with the DWARF type
   of its Saad type (`llvm_di_type`): structs with their members, pointers, fixed arrays, enums by name, and `string`,
   lists, slices, optionals, unions and `any` as the structs they are.
-* `tools/lldb/saad_formatters.py` shows those like the program writes them: a string as `"hi"`, a list or slice as its
+* `lsp/vscode/debug/saad_formatters.py` shows those like the program writes them: a string as `"hi"`, a list or slice as its
   elements, an optional as its value or `none`, a union as the variant it holds (`.label "hi"`), and an `any` with the
-  type of its value (`int 7`). Load it with `command script import tools/lldb/saad_formatters.py`.
+  type of its value (`int 7`). Load it with `command script import lsp/vscode/debug/saad_formatters.py`.
 * The code after a block, e.g the step of a loop, is at the line of its `}`, so stepping goes through a loop like in C.
 * `tools/linux/check_debug.sh` (part of `runtests.sh` when LLDB is installed) stops in `tests/debug/variables.sd` with
   LLDB and checks what it shows.
@@ -121,6 +121,15 @@ The x64 backend makes the same debug information itself, with dwarf.c:
   the same unwind information: rbp is the frame register.
 
 The global variables don't have debug information yet.
+
+### In VS Code
+
+The VS Code extension (`lsp/vscode`) has the debug type `saad`. On F5 in a `.sd` file, `debug.js` builds the program
+with `saad build --debug` (on Linux with `--elf`, linked with tools/linux/shim.c) and gives VS Code a configuration of
+CodeLLDB (`vadimcn.vscode-lldb`, a dependency of the extension) to launch it, which loads
+`lsp/vscode/debug/saad_formatters.py`. `tools/linux/check_vscode_debug.js` does the same without VS Code: it talks to
+CodeLLDB's debug adapter over the Debug Adapter Protocol and checks the stops and the variables. `runtests.sh` runs it
+when `SAAD_CODELLDB` is the folder of an unpacked CodeLLDB (the `extension` folder of `codelldb-linux-x64.vsix`).
 
 ## Testing
 

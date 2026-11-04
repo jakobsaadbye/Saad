@@ -1,9 +1,11 @@
 // Starts the Saad language server (lsp/main.sd) for .sd files. The server does the work, see docs/lsp.md
+// And debugs Saad programs with CodeLLDB, see debug.js
 const path = require("path");
 const fs = require("fs");
 const childProcess = require("child_process");
 const vscode = require("vscode");
 const { LanguageClient, State } = require("vscode-languageclient/node");
+const debug = require("./debug");
 
 const isWindows = process.platform === "win32";
 let client = null;
@@ -196,8 +198,74 @@ async function restart() {
     await start();
 }
 
+// The variables of VS Code that a configuration of type saad can use before it is launched
+function debugVariables(folder) {
+    const editor = vscode.window.activeTextEditor;
+    const file = editor && editor.document.uri.scheme === "file" ? editor.document.uri.fsPath : "";
+    const workspace = folder ? folder.uri.fsPath : (workspaceFolders()[0] || "");
+    return { file, fileDirname: file ? path.dirname(file) : "", workspaceFolder: workspace, workspaceRoot: workspace };
+}
+
+// A configuration of type saad (launch.json, or none for the current file) is built with 'saad build --debug', and
+// becomes a configuration of CodeLLDB, which VS Code then launches
+const debugProvider = {
+    provideDebugConfigurations() {
+        return [{ type: "saad", request: "launch", name: "Debug the Saad program", program: "${file}" }];
+    },
+
+    async resolveDebugConfiguration(folder, config) {
+        // F5 without a launch.json: the current file
+        if (!config.type && !config.request && !config.name) {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || editor.document.languageId !== "saad") return config;   // Not ours: VS Code asks for one
+            config = { type: "saad", request: "launch", name: "Debug the Saad program", program: "${file}" };
+        }
+        if (config.type !== "saad") return config;
+
+        const variables = debugVariables(folder);
+        const program = debug.programOf(config, variables);
+        if (!program) {
+            vscode.window.showErrorMessage("The Saad program to debug wasn't found. Open a .sd file, or set 'program' in launch.json.");
+            return undefined;
+        }
+        if (!vscode.extensions.getExtension("vadimcn.vscode-lldb")) {
+            const choice = await vscode.window.showErrorMessage("Debugging Saad programs needs the extension CodeLLDB.", "Install CodeLLDB");
+            if (choice) vscode.commands.executeCommand("workbench.extensions.installExtension", "vadimcn.vscode-lldb");
+            return undefined;
+        }
+        const compiler = findCompiler(vscode.workspace.getConfiguration("saad"));
+        if (!compiler.path) {
+            vscode.window.showErrorMessage("The Saad compiler wasn't found. Set saad.compilerPath to saad.exe.");
+            return undefined;
+        }
+
+        // Unsaved changes are built too
+        await vscode.workspace.saveAll(false);
+        try {
+            const executable = await vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Window, title: `Building ${path.basename(program)} for debugging` },
+                () => debug.build(compiler.path, program, config, log));
+            return debug.lldbConfiguration(config, executable, variables);
+        } catch (error) {
+            output.show(true);
+            vscode.window.showErrorMessage(error.message);
+            return undefined;
+        }
+    },
+};
+
 function activate(context) {
     output = vscode.window.createOutputChannel("Saad");
+    context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider("saad", debugProvider));
+    context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider("saad", {
+        provideDebugConfigurations: debugProvider.provideDebugConfigurations,
+    }, vscode.DebugConfigurationProviderTriggerKind.Dynamic));
+    context.subscriptions.push(vscode.commands.registerCommand("saad.debugFile", (uri) => {
+        const file = uri && uri.fsPath ? uri.fsPath : (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri.fsPath);
+        if (!file) return;
+        const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(file));
+        vscode.debug.startDebugging(folder, { type: "saad", request: "launch", name: `Debug ${path.basename(file)}`, program: file });
+    }));
     context.subscriptions.push(output);
     context.subscriptions.push(vscode.commands.registerCommand("saad.restartServer", restart));
     context.subscriptions.push(vscode.commands.registerCommand("saad.buildServer", async () => {
@@ -220,4 +288,4 @@ function deactivate() {
     return stop();
 }
 
-module.exports = { activate, deactivate, findOnPath, findCompiler, findServer, findServerSource };
+module.exports = { activate, deactivate, findOnPath, findCompiler, findServer, findServerSource, debugProvider };
