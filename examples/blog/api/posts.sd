@@ -7,7 +7,7 @@ use entities;
 
 // The published posts, newest first, 10 a page. Narrowed to a category or a tag when they are given
 @web.endpoint(.get)
-listPosts :: (session: *Session, category: ?string, tag: ?string, page: ?int) -> [..]PostSummary {
+listPosts :: (session: *Session, category: ?string, tag: ?string, page := 1) -> [..]PostSummary {
     query := session.db.posts.where(p => p.status == .published);
     if category.hasValue() {
         slug := category ?? "";
@@ -17,7 +17,7 @@ listPosts :: (session: *Session, category: ?string, tag: ?string, page: ?int) ->
         name := tag ?? "";
         query = query.where(p => p.postTags().where(t => t.tag == name).exists());
     }
-    skip := ((page ?? 1) - 1) * 10;
+    skip := (page - 1) * 10;
     return query
         .orderByDescending(p => p.publishedAt)
         .offset(skip)

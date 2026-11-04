@@ -2000,6 +2000,18 @@ static void write_function_values(Lowerer *L, IrGlobal *array, int at, AstFuncti
             write_string_field(L, values, v + runtime_offset(L, "FunctionValue", "name"), name);
             write_pointer_field(values, v + runtime_offset(L, "FunctionValue", "type"), type_info_global(L, kind == 0 ? param_types[i] : result_types[i]));
             write_int_bytes(&values->data[v + runtime_offset(L, "FunctionValue", "offset")], kind == 0 ? argument_offsets[i] : result_offsets[i], 8);
+
+            // The default of a parameter, written in the data when it is a constant
+            AstExpr *fallback = kind == 0 ? ((AstIdentifier *)da_get_deref(func->parameters, i))->value : NULL;
+            if (fallback) {
+                values->data[v + runtime_offset(L, "FunctionValue", "hasDefault")] = 1;
+                if (is_constant_value(fallback)) {
+                    Type *type = param_types[i];
+                    IrGlobal *value = ir_global_data(L->module, "default_value", NULL, type->size > 0 ? type->size : 1, type_alignment(type), true);
+                    write_constant(L, value, 0, fallback, type);
+                    write_pointer_field(values, v + runtime_offset(L, "FunctionValue", "defaultValue"), value->index);
+                }
+            }
         }
         write_slice_field(array, at + runtime_offset(L, "AttributedFunction", kind == 0 ? "parameters" : "results"), values->index, count);
     }

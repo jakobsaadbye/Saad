@@ -25,7 +25,8 @@ namespace web;
 //     POST /v1/createPost   {"post": {"title": "..."}}
 //
 // * The url is the prefix and the name of the function, so the names of endpoints are unique
-// * POST takes the parameters as the members of a JSON object, and GET from the query, e.g ?authorId=2
+// * POST takes the parameters as the members of a JSON object, and GET from the query, e.g ?authorId=2. A parameter that
+//   isn't there is a 400, unless it has a default, e.g 'page := 1', or is an optional
 // * The result is the JSON of the response: the value, an array of the values when there are more, or null for none
 // * An error, given or thrown, is {"error": message, "kind": kind} with a status from its kind, e.g web.NotFound is 404
 // * The first parameter is the session, a struct of the program that embeds web.Session. Each request gets a new one
@@ -119,6 +120,9 @@ newApp :: <S>(prefix: string) -> *App, error {
             problem := jsonProblem(param.type, true, 0);
             if problem != "" {
                 return null, newError(fmt.sprint("The parameter % of the endpoint % can't come from JSON: %", param.name, f.name, problem));
+            }
+            if param.hasDefault && param.defaultValue == null {
+                return null, newError(fmt.sprint("The default of the parameter % of the endpoint % must be known when compiling, e.g a number, a string or a constant", param.name, f.name));
             }
         }
         for result in f.results {
@@ -389,6 +393,10 @@ readArguments :: (f: *AttributedFunction, r: *http.Request, arguments: *u8) -> e
             if given { value = body.get(p.name); }
         }
         if !given {
+            if p.defaultValue != null {
+                mem.copy(place, p.defaultValue, p.type.size);
+                continue;
+            }
             if p.type.flags.has(.isOptional) { continue; }
             return newError(fmt.sprint("The parameter % is missing", p.name), BadRequest);
         }

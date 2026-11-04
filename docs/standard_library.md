@@ -298,7 +298,9 @@ POST /v1/createPost   {"post": {"title": "Hi"}}      -> {"id": 3, "title": "Hi"}
   can't, e.g a function, `any` as a parameter or a `*void`, is an error when the app starts, not at a request:
   `The parameter job of the endpoint run can't come from JSON: Job.callback is a function`.
 * POST takes the parameters as the members of a JSON object in the body, and GET from the query (a string as it is,
-  other types as JSON, e.g `?ids=[1,2]`). A parameter that isn't there is a 400, unless it is an optional (`?int`).
+  other types as JSON, e.g `?ids=[1,2]`). A parameter that isn't there is a 400, unless it has a default, e.g
+  `page := 1`, or is an optional (`?int`). A default must be known when compiling, e.g a number, a string or a
+  constant: `newApp` gives an error for one that is computed, e.g `size := pageSize()`.
 * The result is JSON: the value, an array of the values when there are more, or `null`. A given or thrown error is
   `{"error": message, "kind": kind}`, with the status of its kind: `web.BadRequest` 400, `web.Unauthorized` 401,
   `web.Forbidden` 403, `web.NotFound` 404, `web.Conflict` 409, others 500. A `Panic` is a 500 that doesn't tell what

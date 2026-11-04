@@ -89,6 +89,12 @@ search :: (session: *Session, word: string, limit: ?int) -> string, int {
     return word, limit ?? 10;
 }
 
+// Parameters with defaults can be left out
+@web.endpoint(.get)
+listPage :: (session: *Session, page := 1, size: i64 = 20, order := "newest", drafts := false) -> string {
+    return fmt.sprint("% % % %", page, size, order, drafts);
+}
+
 @web.endpoint
 clear :: (session: *Session) {
     session.store.mutex.lock();
@@ -114,7 +120,7 @@ main :: () {
     app.onFinish(finishSession);
     app.server.workers = 2;
     app.server.log = false;
-    assert(app.endpoints.count == 7);
+    assert(app.endpoints.count == 8);
     assert(app.server.listen("127.0.0.1:0") == null);
     base := fmt.sprint("http://%/v1", app.server.listener.addr.toString());
     serving := thread.spawn(run, app);
@@ -161,6 +167,14 @@ main :: () {
     assert(response.body == "[\"x\",3]");
     response.free();
 
+    // Defaults
+    response = http.get(fmt.sprint("%/listPage", base));
+    assert(response.status == 200 && response.body == "\"1 20 newest false\"");
+    response.free();
+    response = http.get(fmt.sprint("%/listPage?page=3&drafts=true", base));
+    assert(response.body == "\"3 20 newest true\"");
+    response.free();
+
     // Parameters that are missing or of the wrong type, urls that aren't endpoints, and the wrong method
     response = http.get(fmt.sprint("%/getPosts", base));
     assert(response.status == 400 && response.body.indexOf("The parameter authorId is missing") > 0);
@@ -195,7 +209,7 @@ main :: () {
     app.server.shutdown();
     serving.join();
     finishMutex.lock();
-    assert(finished == 12);   // Every endpoint that was called, also the ones that threw
+    assert(finished == 14);   // Every endpoint that was called, also the ones that threw
     finishMutex.unlock();
     fmt.print("web ok");
 }

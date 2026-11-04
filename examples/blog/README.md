@@ -54,7 +54,7 @@ GET takes its parameters from the query, POST from a JSON object. The ones marke
 
 | Endpoint | | Parameters | Answer |
 | --- | --- | --- | --- |
-| `listPosts` | GET | `category?`, `tag?`, `page?` | the published posts, newest first |
+| `listPosts` | GET | `category?`, `tag?`, `page := 1` | the published posts, newest first, 10 a page |
 | `getPost` | GET | `slug` | the post, its tags and comments. Counts a view |
 | `listCategories` | GET | | the categories and how many posts they have |
 | `getSeries` | GET | `slug` | a series and its posts, in order |

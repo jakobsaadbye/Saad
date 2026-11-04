@@ -1,0 +1,17 @@
+// A default of an endpoint must be known when compiling, as the router gives it when the parameter isn't sent
+
+import web;
+
+Session :: struct {
+    @embed base: web.Session;
+}
+
+pageSize :: () -> int { return 20; }
+
+@web.endpoint(.get)
+listPage :: (session: *Session, page := 1, size := pageSize()) -> int { return page * size; }
+
+main :: () {
+    app, err := web.newApp<Session>("/v1");
+    assert(app == null && err.message == "The default of the parameter size of the endpoint listPage must be known when compiling, e.g a number, a string or a constant");
+}

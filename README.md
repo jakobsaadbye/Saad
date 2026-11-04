@@ -78,6 +78,13 @@ saad check main.sd        # only check for errors
 
 # Changelog
 
+## Update v0.14.1 - 4. Nov 2026
+
+* An endpoint of `web` can have defaults, e.g `listPosts :: (session: *Session, page := 1)`: a parameter that isn't
+  sent gets its default. Without a default, or an optional type, it is a 400 as before. A default that is computed,
+  e.g `size := pageSize()`, is an error of `newApp`
+* `attributedFunctions()` has the defaults of the parameters: `hasDefault` and `defaultValue`
+
 ## Update v0.14.0 - 3. Nov 2026
 
 * The http server keeps connections alive without keeping a worker: the thread of `serve()` waits for the idle
