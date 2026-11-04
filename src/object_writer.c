@@ -6,6 +6,8 @@
 //   * elf_write()   an ELF object file (.o), for running the programs on Linux (tools/linux)
 //   * pe_write()    a Windows program (.exe) that imports the C runtime and the other DLLs it uses. No linker is needed
 //
+// And coff_read() reads a COFF object file, e.g of the LLVM backend, so pe_write() can make the program of it
+//
 //////////////////////////////////////////////////////////////////////////////////////////
 
 typedef struct OutBytes {
@@ -458,6 +460,8 @@ bool pe_write(AsmObject *obj, const char *path, char *error, int error_size) {
         uint64_t target = symbol_rva[r->symbol] + r->addend;
         if (r->kind == ASM_RELOC_ABS64) {
             put_u64_at(field, PE_IMAGE_BASE + target);
+        } else if (r->kind == ASM_RELOC_RVA32) {
+            put_u32_at(field, (uint32_t) target);
         } else {
             int64_t place = section_rva[r->section] + r->offset + 4 + r->trailing;
             put_u32_at(field, (uint32_t)(int32_t)((int64_t)target - place));
@@ -551,5 +555,129 @@ bool pe_write(AsmObject *obj, const char *path, char *error, int error_size) {
     if (!ok) snprintf(error, error_size, "Couldn't write %s", path);
     free(o.data); free(text.data); free(rdata.data); free(imports); free(symbol_rva);
     free(lookup_at); free(address_at); free(library_name);
+    return ok;
+}
+
+//
+// Reading a COFF object file: its code and data go into the sections of an AsmObject, by what they are (code, data
+// that is written, or read only data). The unwind tables (.pdata, .xdata) and the debug information are left out, like
+// the x64 backend has none
+//
+
+static uint16_t get_u16(const uint8_t *at) { uint16_t v; memcpy(&v, at, 2); return v; }
+static uint32_t get_u32(const uint8_t *at) { uint32_t v; memcpy(&v, at, 4); return v; }
+static uint64_t get_u64(const uint8_t *at) { uint64_t v; memcpy(&v, at, 8); return v; }
+
+// Reads the object file of 'size' bytes into 'obj'. Returns false, with obj->error set, on something it can't read
+bool coff_read(const uint8_t *bytes, size_t size, AsmObject *obj) {
+    memset(obj, 0, sizeof(*obj));
+    for (int s = 0; s < ASM_SECTION_COUNT; s++) obj->alignment[s] = 16;
+    if (size < 20 || get_u16(bytes) != 0x8664) {
+        snprintf(obj->error, sizeof(obj->error), "Not a COFF object file for x64");
+        return false;
+    }
+    int section_count = get_u16(bytes + 2);
+    uint32_t symbol_table = get_u32(bytes + 8);
+    int symbol_count = (int) get_u32(bytes + 12);
+    const uint8_t *headers = bytes + 20 + get_u16(bytes + 16);
+    const char *strings = (const char *) bytes + symbol_table + 18 * symbol_count;
+
+    // Where each section goes: its AsmObject section and offset there, or -1 when it is left out
+    int *placed_in = malloc((section_count + 1) * sizeof(int));
+    int *placed_at = malloc((section_count + 1) * sizeof(int));
+    for (int i = 0; i < section_count; i++) {
+        const uint8_t *h = headers + 40 * i;
+        char short_name[9] = {0};
+        memcpy(short_name, h, 8);
+        const char *name = short_name[0] == '/' ? strings + atoi(short_name + 1) : short_name;   // A long name, e.g /4
+        uint32_t flags = get_u32(h + 36);
+        placed_in[i] = -1;
+        bool removed = (flags & 0x800) || (flags & 0x02000000) || strncmp(name, ".pdata", 6) == 0 || strncmp(name, ".xdata", 6) == 0 ||
+                       strncmp(name, ".debug", 6) == 0 || strncmp(name, ".llvm", 5) == 0;
+        if (removed) continue;
+        int section = (flags & 0x20) ? ASM_TEXT : (flags & 0x80000000) ? ASM_DATA : ASM_RDATA;
+        int align = (flags >> 20) & 0xF ? 1 << (((flags >> 20) & 0xF) - 1) : 1;
+        AsmBytes *b = &obj->sections[section];
+        while (b->size % align) asm_put_byte(b, section == ASM_TEXT ? 0xCC : 0);
+        placed_in[i] = section;
+        placed_at[i] = b->size;
+        uint32_t raw_size = get_u32(h + 16), raw_at = get_u32(h + 20);
+        if ((flags & 0x80) || raw_at == 0) {
+            for (uint32_t k = 0; k < raw_size; k++) asm_put_byte(b, 0);     // .bss
+        } else {
+            asm_put(b, bytes + raw_at, (int) raw_size);
+        }
+    }
+
+    // The symbols. A local one gets the number of its entry in its name, as two can have the same name
+    int *symbol_of = malloc((symbol_count + 1) * sizeof(int));
+    for (int i = 0; i < symbol_count; i++) {
+        const uint8_t *e = bytes + symbol_table + 18 * i;
+        int aux = e[17];
+        symbol_of[i] = -1;
+        char name[256];
+        if (get_u32(e) == 0) snprintf(name, sizeof(name), "%s", strings + get_u32(e + 4));
+        else                 { memset(name, 0, sizeof(name)); memcpy(name, e, 8); }
+        int16_t section = (int16_t) get_u16(e + 12);
+        uint8_t storage = e[16];
+        bool external = storage == 2;
+        if (section > 0 && placed_in[section - 1] < 0) { i += aux; continue; }
+        if (section < 0) { i += aux; continue; }    // Absolute and debug symbols
+        if (!external) {
+            char local[300];
+            snprintf(local, sizeof(local), "%s@%d", name, i);
+            symbol_of[i] = asm_symbol(obj, local);
+        } else {
+            symbol_of[i] = asm_symbol(obj, name);
+        }
+        AsmSymbol *s = &obj->symbols[symbol_of[i]];
+        if (section > 0) {
+            s->section = placed_in[section - 1];
+            s->offset = placed_at[section - 1] + (int) get_u32(e + 8);
+            s->is_global = external;
+        } else {
+            s->is_extern = true;
+        }
+        i += aux;
+    }
+
+    // The relocations. The addend is in the field
+    bool ok = true;
+    for (int i = 0; i < section_count && ok; i++) {
+        if (placed_in[i] < 0) continue;
+        const uint8_t *h = headers + 40 * i;
+        int count = get_u16(h + 32);
+        const uint8_t *r = bytes + get_u32(h + 24);
+        for (int k = 0; k < count; k++, r += 10) {
+            int symbol = symbol_of[get_u32(r + 4)];
+            int type = get_u16(r + 8);
+            AsmReloc reloc = { .section = placed_in[i], .offset = placed_at[i] + (int) get_u32(r), .symbol = symbol };
+            uint8_t *field = &obj->sections[reloc.section].data[reloc.offset];
+            if (type == 1) {                                    // IMAGE_REL_AMD64_ADDR64
+                reloc.kind = ASM_RELOC_ABS64;
+                reloc.addend = (int64_t) get_u64(field);
+            } else if (type == 3) {                             // ADDR32NB
+                reloc.kind = ASM_RELOC_RVA32;
+                reloc.addend = (int32_t) get_u32(field);
+            } else if (type >= 4 && type <= 9) {                // REL32, REL32_1 .. REL32_5
+                reloc.kind = ASM_RELOC_REL32;
+                reloc.addend = (int32_t) get_u32(field);
+                reloc.trailing = type - 4;
+            } else {
+                snprintf(obj->error, sizeof(obj->error), "The object file has a relocation of type %d, which isn't supported", type);
+                ok = false;
+                break;
+            }
+            if (symbol < 0) {
+                snprintf(obj->error, sizeof(obj->error), "A relocation is to a symbol that was left out");
+                ok = false;
+                break;
+            }
+            asm_add_reloc(obj, reloc);
+        }
+    }
+    free(placed_in);
+    free(placed_at);
+    free(symbol_of);
     return ok;
 }

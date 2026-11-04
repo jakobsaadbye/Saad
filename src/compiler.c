@@ -556,6 +556,40 @@ static void copy_library(CompilerConfig *config, const char *library) {
     closedir(d);
 }
 
+// Writes the program of the object: ./build/out.exe, which imports the libraries of the externs (copied next to it),
+// or ./build/out.o with --elf
+static bool write_program(CompilerConfig *config, IrModule *module, AsmObject *obj) {
+    // The libraries of the externs, e.g kernel32.dll. The others are in the C runtime
+    for (int i = 0; i < module->globals.count; i++) {
+        IrGlobal *global = module->globals.items[i];
+        if (global->kind != IR_GLOBAL_EXTERN || !global->library) continue;
+        obj->symbols[asm_symbol(obj, global->name)].library = global->library;
+    }
+
+    if (config->emit_elf) {
+        if (!elf_write(obj, "./build/out.o", "ms_")) {
+            printf("error: Couldn't write ./build/out.o\n");
+            return false;
+        }
+        return true;
+    }
+
+    char error[256];
+    if (!pe_write(obj, "./build/out.exe", error, sizeof(error))) {
+        printf("error: %s\n", error);
+        return false;
+    }
+    for (int i = 0; i < obj->symbol_count; i++) {
+        AsmSymbol *symbol = &obj->symbols[i];
+        if (symbol->is_extern && symbol->library) {
+            bool copied = false;
+            for (int j = 0; j < i; j++) if (obj->symbols[j].library && strcmp(obj->symbols[j].library, symbol->library) == 0) copied = true;
+            if (!copied) copy_library(config, symbol->library);
+        }
+    }
+    return true;
+}
+
 // Makes ./build/out.exe from the assembly. The compiler assembles it itself (x64_asm.c) and writes the program
 // (object_writer.c), so nothing has to be installed. With --debug, nasm and gcc make it instead, with debug information
 // for gdb. With --elf, it writes ./build/out.o for running it on Linux (tools/linux)
@@ -585,70 +619,27 @@ static bool assemble_and_link(CompilerConfig *config, IrModule *module, StringBu
         printf("Compiler Error: The assembler failed on ./build/out.asm, %s\n", obj.error);
         return false;
     }
-
-    // The libraries of the externs, e.g kernel32.dll. The others are in the C runtime
-    for (int i = 0; i < module->globals.count; i++) {
-        IrGlobal *global = module->globals.items[i];
-        if (global->kind != IR_GLOBAL_EXTERN || !global->library) continue;
-        obj.symbols[asm_symbol(&obj, global->name)].library = global->library;
-    }
-
-    if (config->emit_elf) {
-        if (!elf_write(&obj, "./build/out.o", "ms_")) {
-            printf("error: Couldn't write ./build/out.o\n");
-            return false;
-        }
-        return true;
-    }
-
-    char error[256];
-    if (!pe_write(&obj, "./build/out.exe", error, sizeof(error))) {
-        printf("error: %s\n", error);
-        return false;
-    }
-    for (int i = 0; i < obj.symbol_count; i++) {
-        AsmSymbol *symbol = &obj.symbols[i];
-        if (symbol->is_extern && symbol->library) {
-            bool copied = false;
-            for (int j = 0; j < i; j++) if (obj.symbols[j].library && strcmp(obj.symbols[j].library, symbol->library) == 0) copied = true;
-            if (!copied) copy_library(config, symbol->library);
-        }
-    }
-    return true;
+    return write_program(config, module, &obj);
 }
 
-// Makes the program with LLVM (llvm_emit.c), optimized with -O2 or the -O that is given: ./build/out.o for the Linux
-// harness (--elf), or ./build/out.obj on Windows, which gcc links into ./build/out.exe with the libraries of the externs
+// Makes the program with LLVM (llvm_emit.c), optimized with -O2 or the -O that is given. For Windows, LLVM makes a COFF
+// object in memory, which coff_read() reads and pe_write() makes ./build/out.exe of, so no linker is needed. With --elf,
+// LLVM writes ./build/out.o for the Linux harness
 static bool compile_with_llvm(CompilerConfig *config, IrModule *module) {
     int level = config->opt_level >= 0 ? config->opt_level : 2;
-    if (config->emit_elf) return llvm_compile_module(module, true, level, "./build/out.o");
-    if (!llvm_compile_module(module, false, level, "./build/out.obj")) return false;
-#ifdef _WIN32
-    StringBuilder libraries = sb_init(256);
-    for (int i = 0; i < module->globals.count; i++) {
-        IrGlobal *global = module->globals.items[i];
-        if (global->kind != IR_GLOBAL_EXTERN || !global->library) continue;
-        char name[256];
-        snprintf(name, sizeof(name), "%s", global->library);
-        char *dot = strrchr(name, '.');
-        if (dot) *dot = 0;
-        char flag[300];
-        snprintf(flag, sizeof(flag), " -l%s", name);
-        if (!libraries.buffer || !strstr(libraries.buffer, flag)) sb_append(&libraries, "%s", flag);
-        copy_library(config, global->library);
-    }
-    char command[4096];
-    snprintf(command, sizeof(command), "gcc -o ./build/out.exe ./build/out.obj -L\"%s/packages/raylib/lib\"%s",
-        config->compiler_path, libraries.buffer ? libraries.buffer : "");
-    sb_free(&libraries);
-    if (system(command) != 0) {
-        printf("error: gcc couldn't link ./build/out.obj into ./build/out.exe\n");
+    if (config->emit_elf) return llvm_compile_module(module, true, level, "./build/out.o", NULL, NULL);
+
+    uint8_t *bytes = NULL;
+    size_t size = 0;
+    if (!llvm_compile_module(module, false, level, NULL, &bytes, &size)) return false;
+    AsmObject obj;
+    bool ok = coff_read(bytes, size, &obj);
+    free(bytes);
+    if (!ok) {
+        printf("Compiler Error: Couldn't read the object file of LLVM: %s\n", obj.error);
         return false;
     }
-#else
-    printf("note: Made ./build/out.obj. A program for Windows is linked on Windows; on Linux use --elf\n");
-#endif
-    return true;
+    return write_program(config, module, &obj);
 }
 
 #ifdef _WIN32

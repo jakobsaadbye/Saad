@@ -550,9 +550,41 @@ static LLVMTypeRef llvm_extern_type(LlvmEmitter *e, int index) {
     return LLVMFunctionType(e->types[IR_VOID], NULL, 0, false);
 }
 
-// Builds the LLVM module of the IR module, optimizes it at opt_level (0 to 3) and writes the object file to path:
-// ELF for the Linux harness (elf), else COFF for Windows. Returns false, with the problem printed, on a failure
-bool llvm_compile_module(IrModule *module, bool elf, int opt_level, const char *path) {
+// What a Windows program needs of the C runtime's static library, which isn't linked: __chkstk, which touches each page
+// of a big stack frame in order so Windows grows the stack, and _fltused, which a program using floats refers to
+static void llvm_windows_runtime(LlvmEmitter *e) {
+    const char *chkstk =
+        ".text\n"
+        ".globl __chkstk\n"
+        "__chkstk:\n"
+        "  pushq %rcx\n"
+        "  pushq %rax\n"
+        "  leaq 24(%rsp), %rcx\n"           // The stack pointer of the caller
+        "  cmpq $0x1000, %rax\n"
+        "  jb 2f\n"
+        "1:\n"
+        "  subq $0x1000, %rcx\n"
+        "  orq $0, (%rcx)\n"
+        "  subq $0x1000, %rax\n"
+        "  cmpq $0x1000, %rax\n"
+        "  ja 1b\n"
+        "2:\n"
+        "  subq %rax, %rcx\n"
+        "  orq $0, (%rcx)\n"
+        "  popq %rax\n"
+        "  popq %rcx\n"
+        "  retq\n";
+    LLVMAppendModuleInlineAsm(e->llvm, chkstk, strlen(chkstk));
+    if (!LLVMGetNamedGlobal(e->llvm, "_fltused")) {
+        LLVMValueRef fltused = LLVMAddGlobal(e->llvm, e->types[IR_I32], "_fltused");
+        LLVMSetInitializer(fltused, LLVMConstNull(e->types[IR_I32]));
+    }
+}
+
+// Builds the LLVM module of the IR module, optimizes it at opt_level (0 to 3) and makes the object file: ELF for the
+// Linux harness (elf), else COFF for Windows. It is written to path, or with no path, given in *bytes (malloc'ed) and
+// *size. Returns false, with the problem printed, on a failure
+bool llvm_compile_module(IrModule *module, bool elf, int opt_level, const char *path, uint8_t **bytes, size_t *size) {
     LlvmEmitter e = {0};
     e.module = module;
     e.elf = elf;
@@ -640,11 +672,14 @@ bool llvm_compile_module(IrModule *module, bool elf, int opt_level, const char *
         llvm_emit_function(&e, func);
     }
 
+    if (!elf) llvm_windows_runtime(&e);
+
     // The target
     LLVMInitializeX86TargetInfo();
     LLVMInitializeX86Target();
     LLVMInitializeX86TargetMC();
     LLVMInitializeX86AsmPrinter();
+    LLVMInitializeX86AsmParser();     // For __chkstk
     const char *triple = elf ? "x86_64-pc-linux-gnu" : "x86_64-pc-windows-msvc";
     char *error = NULL;
     LLVMTargetRef target;
@@ -683,9 +718,21 @@ bool llvm_compile_module(IrModule *module, bool elf, int opt_level, const char *
         goto done;
     }
 
-    if (LLVMTargetMachineEmitToFile(machine, e.llvm, (char *) path, LLVMObjectFile, &error)) {
-        printf("Compiler Error: LLVM couldn't write %s: %s\n", path, error);
-        goto done;
+    if (path) {
+        if (LLVMTargetMachineEmitToFile(machine, e.llvm, (char *) path, LLVMObjectFile, &error)) {
+            printf("Compiler Error: LLVM couldn't write %s: %s\n", path, error);
+            goto done;
+        }
+    } else {
+        LLVMMemoryBufferRef buffer;
+        if (LLVMTargetMachineEmitToMemoryBuffer(machine, e.llvm, LLVMObjectFile, &error, &buffer)) {
+            printf("Compiler Error: LLVM couldn't make the object file: %s\n", error);
+            goto done;
+        }
+        *size = LLVMGetBufferSize(buffer);
+        *bytes = malloc(*size);
+        memcpy(*bytes, LLVMGetBufferStart(buffer), *size);
+        LLVMDisposeMemoryBuffer(buffer);
     }
     ok = true;
 
@@ -701,8 +748,8 @@ done:
 
 #else
 
-bool llvm_compile_module(IrModule *module, bool elf, int opt_level, const char *path) {
-    (void) module; (void) elf; (void) opt_level; (void) path;
+bool llvm_compile_module(IrModule *module, bool elf, int opt_level, const char *path, uint8_t **bytes, size_t *size) {
+    (void) module; (void) elf; (void) opt_level; (void) path; (void) bytes; (void) size;
     printf("error: This saad was built without LLVM, so it has no --llvm. Build it with LLVM installed (see build.sh)\n");
     return false;
 }
