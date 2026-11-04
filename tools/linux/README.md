@@ -15,7 +15,16 @@ python3 tools/linux/fuzz_recovery.py 1000 7 # 1000 broken programs (seed 7): no 
 node tools/linux/lsp_demo_gifs.js           # the GIFs of lsp/README.md, after build_lsp.sh (needs ffmpeg)
 ```
 
-Requirements: `gcc` (and `nasm` to run an out.asm).
+Requirements: `gcc` (and `nasm` to run an out.asm, `libpq-dev` for Postgres and `libssl-dev` for https).
+
+A program to keep, e.g for a server or a Docker image:
+
+```sh
+bin/saad build main.sd --elf                      # build/out.o
+tools/linux/link.sh build/out.o build/program     # with shim.c, and shim_pq.c (-lpq) and shim_ssl.c (-lssl) when it uses them
+```
+
+`check_tls.sh` checks https against a local `openssl s_server`, and `runtests.sh` runs it when `openssl` is there.
 
 ## How it works
 

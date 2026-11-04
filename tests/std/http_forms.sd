@@ -1,0 +1,162 @@
+// net.http for sites: form values, cookies, basic auth, the files of a folder. And base64, os.listDir and random.secureBytes
+
+import net.http;
+import thread;
+import fmt;
+import os;
+import base64;
+import random;
+
+greet :: (w: *http.ResponseWriter, r: *http.Request) {
+    name, found := r.formValue("name");
+    lang, _ := r.cookie("lang");
+    w.setCookie(http.Cookie{name: "seen", value: "yes & more", maxAge: 60, httpOnly: true});
+    w.write(fmt.sprint("% % %", name, found, lang));
+}
+
+admin :: (w: *http.ResponseWriter, r: *http.Request) {
+    user, password, ok := r.basicAuth();
+    if !ok || user != "admin" || !http.equalSecret(password, "s3cret") {
+        w.requestBasicAuth("Admin");
+        return;
+    }
+    w.write(fmt.sprint("welcome %", user));
+}
+
+moved :: (w: *http.ResponseWriter, r: *http.Request) {
+    w.redirect("/site.css", 302);
+}
+
+missing :: (w: *http.ResponseWriter, r: *http.Request) {
+    w.status = 404;
+    w.write("no such page");
+}
+
+// A string of the bytes, e.g of binary data
+bytesOf :: (values: []u8) -> string {
+    sb := fmt.newStringBuilder(values.count as int);
+    for v in values { sb.addChar(v); }
+    return sb.toString();
+}
+
+router: http.Router;
+
+handler :: (w: *http.ResponseWriter, r: *http.Request) {
+    router.serve(w, r);
+}
+
+run :: (server: *http.Server) {
+    server.serve();
+}
+
+main :: () {
+    // base64
+    assert(base64.encode("") == "" && base64.encode("f") == "Zg==" && base64.encode("fo") == "Zm8=" && base64.encode("foo") == "Zm9v");
+    assert(base64.encode("hello world") == "aGVsbG8gd29ybGQ=");
+    decoded, ok := base64.decode("aGVsbG8gd29ybGQ=");
+    assert(ok && decoded == "hello world");
+    decoded, ok = base64.decode("aGVsbG8gd29ybGQ");     // Without padding
+    assert(ok && decoded == "hello world");
+    _, ok = base64.decode("a$b");
+    assert(!ok);
+    assert(base64.encode(bytesOf([0xfb as u8, 0xff])) == "+/8=" && base64.encode(bytesOf([0xfb as u8, 0xff]), url: true) == "-_8");
+    decoded, ok = base64.decode("-_8");
+    assert(ok && decoded.len == 2 && decoded[0] == 0xfb && decoded[1] == 0xff);
+
+    // Secure random bytes
+    a := random.secureBytes(32);
+    b := random.secureBytes(32);
+    assert(a.len == 32 && b.len == 32 && a != b);
+    token := random.secureToken();
+    assert(token.len == 43 && token.indexOf("+") < 0 && token.indexOf("/") < 0 && token.indexOf("=") < 0);
+
+    // A folder with files
+    folder := "build/http_forms_files";
+    os.makeDir("build");
+    os.makeDir(folder);
+    os.makeDir(fmt.sprint("%/images", folder));
+    os.writeFile(fmt.sprint("%/site.css", folder), "body { color: red; }");
+    png := bytesOf(['P', 'N', 'G', 0, 1, 255, 'x']);
+    os.writeFile(fmt.sprint("%/images/b.png", folder), png);
+    os.writeFile(fmt.sprint("%/images/a b.jpg", folder), "JPEG");
+    os.writeFile("build/secret.txt", "outside");
+    assert(os.isDirectory(folder) && !os.isDirectory(fmt.sprint("%/site.css", folder)) && !os.isDirectory("build/nothing"));
+    names, err := os.listDir(fmt.sprint("%/images", folder));
+    assert(err == null && names.count == 2 && names[0] == "a b.jpg" && names[1] == "b.png");
+    _, err = os.listDir("build/nothing");
+    assert(err != null && err.is(os.NotFound));
+    assert(http.contentTypeOf("a/b.CSS") == "text/css; charset=utf-8" && http.contentTypeOf("x.jpg") == "image/jpeg" && http.contentTypeOf("README") == "application/octet-stream");
+    assert(http.escapeUrl("a b/ø?") == "a%20b%2F%C3%B8%3F" && http.escapeUrl("plain-text_1.2") == "plain-text_1.2");
+
+    router.handle("POST /greet", greet);
+    router.handle("GET /greet", greet);
+    router.handle("GET /admin", admin);
+    router.handle("GET /{$}", moved);           // Only /, not the files below it
+    router.handleFiles("/", folder);
+    router.notFound = missing;
+
+    server: http.Server;
+    server.handler = handler;   // A handler of every request, which uses the router, like a site with a log does
+    server.workers = 2;
+    server.log = false;
+    assert(server.listen("127.0.0.1:0") == null);
+    base := fmt.sprint("http://%", server.listener.addr.toString());
+    serving := thread.spawn(run, &server);
+
+    // A form, posted like a browser does, with a cookie
+    headers := [http.Header{"Content-Type", "application/x-www-form-urlencoded"}, http.Header{"Cookie", "theme=dark; lang=de"}];
+    response := http.request("POST", fmt.sprint("%/greet", base), headers, "name=Ada+L%C3%B8vlace&age=36");
+    assert(response.status == 200 && response.body == "Ada Løvlace true de");
+    cookie, _ := response.header("Set-Cookie");
+    assert(cookie == "seen=yes%20%26%20more; Path=/; Max-Age=60; HttpOnly; SameSite=Lax");
+    response.free();
+
+    // Of the query when there is no form
+    response = http.get(fmt.sprint("%/greet?name=Grace", base));
+    assert(response.body == "Grace true ");
+    response.free();
+
+    // Basic auth
+    response = http.get(fmt.sprint("%/admin", base));
+    challenge, _ := response.header("WWW-Authenticate");
+    assert(response.status == 401 && challenge.startsWith("Basic realm=\"Admin\""));
+    response.free();
+    wrong := [http.Header{"Authorization", fmt.sprint("Basic %", base64.encode("admin:nope"))}];
+    response = http.request("GET", fmt.sprint("%/admin", base), wrong);
+    assert(response.status == 401);
+    response.free();
+    right := [http.Header{"Authorization", fmt.sprint("Basic %", base64.encode("admin:s3cret"))}];
+    response = http.request("GET", fmt.sprint("%/admin", base), right);
+    assert(response.status == 200 && response.body == "welcome admin");
+    response.free();
+
+    // Files
+    response = http.get(fmt.sprint("%/site.css", base));
+    kind, _ := response.header("Content-Type");
+    assert(response.status == 200 && response.body == "body { color: red; }" && kind == "text/css; charset=utf-8");
+    response.free();
+    response = http.get(fmt.sprint("%/images/b.png", base));
+    kind, _ = response.header("Content-Type");
+    assert(response.status == 200 && response.body == png && kind == "image/png");
+    response.free();
+    response = http.get(fmt.sprint("%/images/a\%20b.jpg", base));
+    assert(response.status == 200 && response.body == "JPEG");
+    response.free();
+
+    // A route wins over the files, and what is no file is notFound
+    response = http.get(fmt.sprint("%/greet?name=x", base));
+    assert(response.body == "x true ");
+    response.free();
+    response = http.get(fmt.sprint("%/", base));
+    location, _ := response.header("Location");
+    assert(response.status == 302 && location == "/site.css");
+    response.free();
+    for path in ["/nothing.css", "/images", "/../secret.txt", "/images/%2e%2e/%2e%2e/secret.txt"] {
+        response = http.get(fmt.sprint("%%", base, path));
+        assert(response.status == 404 && response.body == "no such page");
+        response.free();
+    }
+
+    server.shutdown();
+    serving.join();
+}

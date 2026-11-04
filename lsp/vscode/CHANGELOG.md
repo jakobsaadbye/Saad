@@ -3,6 +3,10 @@
 The changes of the language and the language server are in the
 [changelog of Saad](https://github.com/jakobsaadbye/Saad#changelog).
 
+## 0.4.1
+
+* Debugging on Linux links the program with tools/linux/link.sh, so programs that use libpq or OpenSSL can be debugged
+
 ## 0.4.0
 
 * Debugging of Saad programs with CodeLLDB: F5 in a `.sd` file, breakpoints, stepping, the calls and the variables,

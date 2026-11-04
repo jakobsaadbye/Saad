@@ -1,0 +1,423 @@
+namespace net;
+
+// TLS of a connection, with OpenSSL, e.g for https:
+//
+//     conn := net.dial("example.com:443");
+//     conn.startTls("example.com");     // Checks the certificate of example.com against the certificates of the system
+//     conn.write("GET / HTTP/1.1\r\n...");
+//
+// After startTls, read and write are encrypted. The certificate must be valid for the host and signed by a certificate
+// authority of the system; SSL_CERT_FILE or SSL_CERT_DIR give others, e.g of a test.
+//
+// On Windows it needs the DLLs of OpenSSL 3 (libssl-3-x64.dll and libcrypto-3-x64.dll) next to the program or on the
+// PATH, and on Linux libssl (tools/linux links it).
+
+use c;
+import fmt;
+import mem;
+import thread;
+
+TlsError :: ErrorKind{"net.TlsError"};   // The TLS handshake failed, e.g the certificate isn't valid for the host
+
+// OpenSSL is loaded when TLS is started the first time, so a program without TLS doesn't need it. On Windows from its
+// DLLs with LoadLibraryA, and on Linux through tools/linux/shim_ssl.c
+#if OS == .windows {
+    extern "kernel32.dll" {
+        LoadLibraryA   :: (lpLibFileName: c.string) -> *void;
+        GetProcAddress :: (hModule: *void, lpProcName: c.string) -> *void;
+    }
+
+    @private
+    OpenSsl :: struct {
+        loaded: bool;
+        failed: bool;
+        TLS_client_method: () -> *void;
+        SSL_CTX_new: (sslMethod: *void) -> *void;
+        SSL_CTX_free: (ctx: *void);
+        SSL_CTX_set_default_verify_paths: (ctx: *void) -> i32;
+        SSL_CTX_set_verify: (ctx: *void, mode: i32, callback: *void);
+        SSL_new: (ctx: *void) -> *void;
+        SSL_free: (ssl: *void);
+        SSL_set_fd: (ssl: *void, fd: i32) -> i32;
+        SSL_ctrl: (ssl: *void, command: i32, larg: i64, parg: *void) -> i64;
+        SSL_set1_host: (ssl: *void, hostname: c.string) -> i32;
+        SSL_connect: (ssl: *void) -> i32;
+        SSL_read: (ssl: *void, buffer: *u8, count: i32) -> i32;
+        SSL_write: (ssl: *void, buffer: *u8, count: i32) -> i32;
+        SSL_get_error: (ssl: *void, result: i32) -> i32;
+        SSL_shutdown: (ssl: *void) -> i32;
+        SSL_get_verify_result: (ssl: *void) -> i64;
+        ERR_get_error: () -> u64;
+        ERR_error_string_n: (code: u64, buffer: *u8, length: u64);
+        X509_verify_cert_error_string: (code: i64) -> c.string;
+    }
+
+    @private openSsl: OpenSsl;
+    @private openSslMutex: thread.Mutex;
+
+    // The functions of the DLLs of OpenSSL 3. false when they aren't there
+    @private
+    loadOpenSsl :: () -> bool {
+        openSslMutex.lock();
+        defer openSslMutex.unlock();
+        if openSsl.loaded || openSsl.failed { return openSsl.loaded; }
+        ssl := LoadLibraryA("libssl-3-x64.dll");
+        crypto := LoadLibraryA("libcrypto-3-x64.dll");
+        if ssl == null || crypto == null {
+            openSsl.failed = true;
+            return false;
+        }
+        missing := false;
+        address: *void;
+        address = GetProcAddress(ssl, "TLS_client_method");
+        if address == null { missing = true; }
+        openSsl.TLS_client_method = address as () -> *void;
+        address = GetProcAddress(ssl, "SSL_CTX_new");
+        if address == null { missing = true; }
+        openSsl.SSL_CTX_new = address as (sslMethod: *void) -> *void;
+        address = GetProcAddress(ssl, "SSL_CTX_free");
+        if address == null { missing = true; }
+        openSsl.SSL_CTX_free = address as (ctx: *void);
+        address = GetProcAddress(ssl, "SSL_CTX_set_default_verify_paths");
+        if address == null { missing = true; }
+        openSsl.SSL_CTX_set_default_verify_paths = address as (ctx: *void) -> i32;
+        address = GetProcAddress(ssl, "SSL_CTX_set_verify");
+        if address == null { missing = true; }
+        openSsl.SSL_CTX_set_verify = address as (ctx: *void, mode: i32, callback: *void);
+        address = GetProcAddress(ssl, "SSL_new");
+        if address == null { missing = true; }
+        openSsl.SSL_new = address as (ctx: *void) -> *void;
+        address = GetProcAddress(ssl, "SSL_free");
+        if address == null { missing = true; }
+        openSsl.SSL_free = address as (ssl: *void);
+        address = GetProcAddress(ssl, "SSL_set_fd");
+        if address == null { missing = true; }
+        openSsl.SSL_set_fd = address as (ssl: *void, fd: i32) -> i32;
+        address = GetProcAddress(ssl, "SSL_ctrl");
+        if address == null { missing = true; }
+        openSsl.SSL_ctrl = address as (ssl: *void, command: i32, larg: i64, parg: *void) -> i64;
+        address = GetProcAddress(ssl, "SSL_set1_host");
+        if address == null { missing = true; }
+        openSsl.SSL_set1_host = address as (ssl: *void, hostname: c.string) -> i32;
+        address = GetProcAddress(ssl, "SSL_connect");
+        if address == null { missing = true; }
+        openSsl.SSL_connect = address as (ssl: *void) -> i32;
+        address = GetProcAddress(ssl, "SSL_read");
+        if address == null { missing = true; }
+        openSsl.SSL_read = address as (ssl: *void, buffer: *u8, count: i32) -> i32;
+        address = GetProcAddress(ssl, "SSL_write");
+        if address == null { missing = true; }
+        openSsl.SSL_write = address as (ssl: *void, buffer: *u8, count: i32) -> i32;
+        address = GetProcAddress(ssl, "SSL_get_error");
+        if address == null { missing = true; }
+        openSsl.SSL_get_error = address as (ssl: *void, result: i32) -> i32;
+        address = GetProcAddress(ssl, "SSL_shutdown");
+        if address == null { missing = true; }
+        openSsl.SSL_shutdown = address as (ssl: *void) -> i32;
+        address = GetProcAddress(ssl, "SSL_get_verify_result");
+        if address == null { missing = true; }
+        openSsl.SSL_get_verify_result = address as (ssl: *void) -> i64;
+        address = GetProcAddress(crypto, "ERR_get_error");
+        if address == null { missing = true; }
+        openSsl.ERR_get_error = address as () -> u64;
+        address = GetProcAddress(crypto, "ERR_error_string_n");
+        if address == null { missing = true; }
+        openSsl.ERR_error_string_n = address as (code: u64, buffer: *u8, length: u64);
+        address = GetProcAddress(crypto, "X509_verify_cert_error_string");
+        if address == null { missing = true; }
+        openSsl.X509_verify_cert_error_string = address as (code: i64) -> c.string;
+        openSsl.failed = missing;
+        openSsl.loaded = !missing;
+        return openSsl.loaded;
+    }
+} else {
+    extern "C" {
+        TLS_client_method :: () -> *void;
+        SSL_CTX_new :: (sslMethod: *void) -> *void;
+        SSL_CTX_free :: (ctx: *void);
+        SSL_CTX_set_default_verify_paths :: (ctx: *void) -> i32;
+        SSL_CTX_set_verify :: (ctx: *void, mode: i32, callback: *void);
+        SSL_new :: (ctx: *void) -> *void;
+        SSL_free :: (ssl: *void);
+        SSL_set_fd :: (ssl: *void, fd: i32) -> i32;
+        SSL_ctrl :: (ssl: *void, command: i32, larg: i64, parg: *void) -> i64;
+        SSL_set1_host :: (ssl: *void, hostname: c.string) -> i32;
+        SSL_connect :: (ssl: *void) -> i32;
+        SSL_read :: (ssl: *void, buffer: *u8, count: i32) -> i32;
+        SSL_write :: (ssl: *void, buffer: *u8, count: i32) -> i32;
+        SSL_get_error :: (ssl: *void, result: i32) -> i32;
+        SSL_shutdown :: (ssl: *void) -> i32;
+        SSL_get_verify_result :: (ssl: *void) -> i64;
+        ERR_get_error :: () -> u64;
+        ERR_error_string_n :: (code: u64, buffer: *u8, length: u64);
+        X509_verify_cert_error_string :: (code: i64) -> c.string;
+    }
+
+    @private
+    loadOpenSsl :: () -> bool {
+        return true;
+    }
+}
+
+@private
+tlsClientMethod :: () -> *void {
+    #if OS == .windows {
+        return openSsl.TLS_client_method();
+    } else {
+        return TLS_client_method();
+    }
+}
+
+@private
+sslCtxNew :: (sslMethod: *void) -> *void {
+    #if OS == .windows {
+        return openSsl.SSL_CTX_new(sslMethod);
+    } else {
+        return SSL_CTX_new(sslMethod);
+    }
+}
+
+@private
+sslCtxFree :: (ctx: *void) {
+    #if OS == .windows {
+        openSsl.SSL_CTX_free(ctx);
+    } else {
+        SSL_CTX_free(ctx);
+    }
+}
+
+@private
+sslCtxSetDefaultVerifyPaths :: (ctx: *void) -> i32 {
+    #if OS == .windows {
+        return openSsl.SSL_CTX_set_default_verify_paths(ctx);
+    } else {
+        return SSL_CTX_set_default_verify_paths(ctx);
+    }
+}
+
+@private
+sslCtxSetVerify :: (ctx: *void, mode: i32, callback: *void) {
+    #if OS == .windows {
+        openSsl.SSL_CTX_set_verify(ctx, mode, callback);
+    } else {
+        SSL_CTX_set_verify(ctx, mode, callback);
+    }
+}
+
+@private
+sslNew :: (ctx: *void) -> *void {
+    #if OS == .windows {
+        return openSsl.SSL_new(ctx);
+    } else {
+        return SSL_new(ctx);
+    }
+}
+
+@private
+sslFree :: (ssl: *void) {
+    #if OS == .windows {
+        openSsl.SSL_free(ssl);
+    } else {
+        SSL_free(ssl);
+    }
+}
+
+@private
+sslSetFd :: (ssl: *void, fd: i32) -> i32 {
+    #if OS == .windows {
+        return openSsl.SSL_set_fd(ssl, fd);
+    } else {
+        return SSL_set_fd(ssl, fd);
+    }
+}
+
+@private
+sslCtrl :: (ssl: *void, command: i32, larg: i64, parg: *void) -> i64 {
+    #if OS == .windows {
+        return openSsl.SSL_ctrl(ssl, command, larg, parg);
+    } else {
+        return SSL_ctrl(ssl, command, larg, parg);
+    }
+}
+
+@private
+sslSet1Host :: (ssl: *void, hostname: c.string) -> i32 {
+    #if OS == .windows {
+        return openSsl.SSL_set1_host(ssl, hostname);
+    } else {
+        return SSL_set1_host(ssl, hostname);
+    }
+}
+
+@private
+sslConnect :: (ssl: *void) -> i32 {
+    #if OS == .windows {
+        return openSsl.SSL_connect(ssl);
+    } else {
+        return SSL_connect(ssl);
+    }
+}
+
+@private
+sslRead :: (ssl: *void, buffer: *u8, count: i32) -> i32 {
+    #if OS == .windows {
+        return openSsl.SSL_read(ssl, buffer, count);
+    } else {
+        return SSL_read(ssl, buffer, count);
+    }
+}
+
+@private
+sslWrite :: (ssl: *void, buffer: *u8, count: i32) -> i32 {
+    #if OS == .windows {
+        return openSsl.SSL_write(ssl, buffer, count);
+    } else {
+        return SSL_write(ssl, buffer, count);
+    }
+}
+
+@private
+sslGetError :: (ssl: *void, result: i32) -> i32 {
+    #if OS == .windows {
+        return openSsl.SSL_get_error(ssl, result);
+    } else {
+        return SSL_get_error(ssl, result);
+    }
+}
+
+@private
+sslShutdown :: (ssl: *void) -> i32 {
+    #if OS == .windows {
+        return openSsl.SSL_shutdown(ssl);
+    } else {
+        return SSL_shutdown(ssl);
+    }
+}
+
+@private
+sslGetVerifyResult :: (ssl: *void) -> i64 {
+    #if OS == .windows {
+        return openSsl.SSL_get_verify_result(ssl);
+    } else {
+        return SSL_get_verify_result(ssl);
+    }
+}
+
+@private
+errGetError :: () -> u64 {
+    #if OS == .windows {
+        return openSsl.ERR_get_error();
+    } else {
+        return ERR_get_error();
+    }
+}
+
+@private
+errErrorStringN :: (code: u64, buffer: *u8, length: u64) {
+    #if OS == .windows {
+        openSsl.ERR_error_string_n(code, buffer, length);
+    } else {
+        ERR_error_string_n(code, buffer, length);
+    }
+}
+
+@private
+x509VerifyCertErrorString :: (code: i64) -> c.string {
+    #if OS == .windows {
+        return openSsl.X509_verify_cert_error_string(code);
+    } else {
+        return X509_verify_cert_error_string(code);
+    }
+}
+
+@private SslVerifyPeer        :: 1;
+@private SslCtrlSetHostname   :: 55;   // SSL_set_tlsext_host_name is SSL_ctrl with this
+@private SslErrorWantRead     :: 2;
+@private SslErrorWantWrite    :: 3;
+@private SslErrorSyscall      :: 5;
+@private SslErrorZeroReturn   :: 6;
+
+// Starts TLS on the connection, as a client of the host: the handshake, which checks the certificate of the server
+startTls :: method (conn: *Conn, host: string) -> error {
+    if !loadOpenSsl() {
+        return newError("TLS needs OpenSSL 3: libssl-3-x64.dll and libcrypto-3-x64.dll next to the program or on the PATH", TlsError);
+    }
+    ctx := sslCtxNew(tlsClientMethod());
+    if ctx == null { return tlsError("TLS isn't available (OpenSSL couldn't start)"); }
+    sslCtxSetDefaultVerifyPaths(ctx);
+    sslCtxSetVerify(ctx, SslVerifyPeer, null);
+    ssl := sslNew(ctx);
+    sslCtxFree(ctx);   // The SSL keeps it
+    if ssl == null { return tlsError("TLS isn't available (OpenSSL couldn't start)"); }
+
+    cHost := host.toCString();
+    sslSetFd(ssl, conn.socket as i32);
+    sslCtrl(ssl, SslCtrlSetHostname, 0, cHost.data);   // The name of the server, for servers of more sites
+    sslSet1Host(ssl, cHost);                           // The certificate must be of the host
+    result := sslConnect(ssl);
+    cHost.free();
+    if result != 1 {
+        verify := sslGetVerifyResult(ssl);
+        failed: error;
+        if verify != 0 {
+            failed = newError(fmt.sprint("TLS with %: the certificate isn't valid: %", host, x509VerifyCertErrorString(verify).toString()), TlsError);
+        } else {
+            failed = tlsError(fmt.sprint("TLS with % failed", host));
+        }
+        sslFree(ssl);
+        return failed;
+    }
+    conn.tls = ssl;
+    return null;
+}
+
+// An error with the reason of OpenSSL, when it has one
+@private
+tlsError :: (what: string) -> error {
+    code := errGetError();
+    if code == 0 { return newError(what, TlsError); }
+    buffer: [256]u8;
+    errErrorStringN(code, &buffer[0], 256);
+    return newError(fmt.sprint("%: %", what, c.string{&buffer[0]}.toString()), TlsError);
+}
+
+// read of a connection with TLS
+@private
+readTls :: (conn: *Conn, buffer: []u8) -> int, error {
+    count := buffer.count;
+    if count > 1 << 30 { count = 1 << 30; }
+    n := sslRead(conn.tls, buffer.data, count as i32);
+    if n > 0 { return n as int, null; }
+    code := sslGetError(conn.tls, n);
+    if code == SslErrorZeroReturn { return 0, newError("The connection was closed", Closed); }
+    if code == SslErrorSyscall && n == 0 { return 0, newError("The connection was closed", Closed); }
+    if code == SslErrorWantRead || code == SslErrorWantWrite { return 0, newError("read: TLS timed out", Timeout); }
+    if code == SslErrorSyscall { return 0, lastError("read"); }
+    return 0, tlsError("read");
+}
+
+// write of a connection with TLS
+@private
+writeTls :: (conn: *Conn, data: string) -> error {
+    sent := 0;
+    while sent < data.len {
+        part := data.len - sent;
+        if part > 1 << 30 { part = 1 << 30; }
+        n := sslWrite(conn.tls, &data.data[sent], part as i32);
+        if n <= 0 {
+            code := sslGetError(conn.tls, n);
+            if code == SslErrorSyscall { return lastError("write"); }
+            return tlsError("write");
+        }
+        sent += n;
+    }
+    return null;
+}
+
+// Ends TLS of the connection, before its socket is closed
+@private
+closeTls :: (conn: *Conn) {
+    sslShutdown(conn.tls);
+    sslFree(conn.tls);
+    conn.tls = null;
+}

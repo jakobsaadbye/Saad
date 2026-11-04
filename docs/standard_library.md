@@ -16,15 +16,18 @@ std/
   fmt/          namespace fmt: print, sprint and StringBuilder
   io/           namespace io: bytes on stdin, stdout and stderr
   json/         namespace json: encode, decode, parse and json.Value
-  net/          namespace net: TCP connections and listeners
+  net/          namespace net: TCP connections and listeners, and TLS with OpenSSL (tls.sd)
     sys.sd          namespace net.sys: the typed bindings of Winsock and BSD sockets
-    http/           namespace net.http: an HTTP/1.1 server with a router, and a client
+    http/           namespace net.http: an HTTP/1.1 server with a router, forms, cookies, basic auth and the files of a
+                    folder, and a client for http and https
   os/           namespace os: files, environment variables, processes
     windows.sd      namespace os.windows: the Windows API (threads, Sleep, ...)
   thread/       namespace thread: threads, Mutex, Condition and WaitGroup, on Windows and Linux
   web/          namespace web: endpoints, functions that are called at the url of their name with JSON
+    html.sd         namespace web.html: templates of HTML pages
   vendor/       Bindings for libraries the standard library doesn't own
     raylib.sd       namespace raylib
+  base64.sd     namespace base64: encode and decode, also for urls
   bytes.sd      namespace bytes: Buffer, bytes written at the end and read from the front
   math.sd       namespace math
   mem.sd        namespace mem: allocate, resize, free, copy, set, equal, and arenas
@@ -94,6 +97,8 @@ os.fileExists("out.txt");                   // a bool: it asks, and can't fail
 os.renameFile("out.txt", "new.txt");
 _ := os.removeFile("new.txt");              // taken: a file that isn't there isn't thrown
 os.makeDir("out");                          // also fine when it was there before
+names, err := os.listDir("images");         // the names in a folder, sorted, without . and ..
+os.isDirectory("images");                   // a bool
 home, found := os.getEnv("HOME");
 code := os.run("echo hi");                  // runs a shell command, returns its exit code
 text, code := os.output("git status");      // runs a shell command, returns what it wrote and its exit code
@@ -209,6 +214,12 @@ addr := net.resolve("localhost", 80);     // net.Addr: ip and port, toString() i
   `p.ready(i)`.
 * The bindings are in `net.sys`, with the structs of the headers written out for both systems (`SockAddrIn`,
   `AddrInfo`, `WsaData`, `TimeVal`) and the types of the calls named (`Socket`, `Length`, `AddrLength`).
+* `conn.startTls(host)` starts TLS as a client of the host (`tls.sd`): the handshake checks that the certificate is of
+  the host and signed by a certificate authority of the system, and read and write are encrypted afterwards. A
+  failure is a `net.TlsError`, e.g "the certificate isn't valid: self-signed certificate". It uses OpenSSL 3, which
+  is loaded when TLS is first started, so a program without TLS doesn't need it: on Windows the DLLs
+  `libssl-3-x64.dll` and `libcrypto-3-x64.dll` next to the program or on the PATH, on Linux libssl.
+  `SSL_CERT_FILE` and `SSL_CERT_DIR` give other certificate authorities, e.g of a test.
 * IPv6 and UDP aren't there yet.
 
 ## net.http
@@ -257,8 +268,29 @@ response = http.request("PUT", url, headers, body);
   other connection waits, else gives it back. `tools/bench/web_bench.sd` measures it.
 * **Memory:** the texts of a request are in an arena of the connection, freed when the handler returns. `copy()`
   what is kept for longer.
-* **Client:** `get`, `post` and `request`, a connection for each request. The texts of a response are freed with
-  `response.free()`. Only `http://`: put the server behind a proxy, e.g Caddy or nginx, for https.
+* **Client:** `get`, `post` and `request`, a connection for each request, to `http://` and `https://` urls (TLS of
+  `net`). The texts of a response are freed with `response.free()`. The server has no TLS: put it behind a proxy, e.g
+  Caddy or nginx, for https.
+
+What a site needs of a request (`forms.sd` and `files.sd`):
+
+```odin
+name, found := r.formValue("name");         // Of a <form method="post"> (urlencoded), else of the query
+lang, _ := r.cookie("lang");
+w.setCookie(http.Cookie{name: "lang", value: "de", maxAge: 3600, httpOnly: true});
+user, password, ok := r.basicAuth();
+if !ok || !http.equalSecret(password, secret) { w.requestBasicAuth("Admin"); return; }   // 401, the browser asks
+link := fmt.sprint("/confirm?token=%", http.escapeUrl(token));   // Like encodeURIComponent
+
+router.handle("GET /{$}", home);              // Only /, not every path below it
+router.handleFiles("/", "public");            // The files of a folder, for the paths that no other route has
+```
+
+* `handleFiles(prefix, folder)` answers `GET` and `HEAD` with the file and its `Content-Type`
+  (`http.contentTypeOf(path)`), and `Cache-Control: public, max-age=3600`. A path that isn't a file of the folder,
+  e.g a folder or one with `..`, goes to `router.notFound`. `http.serveFile(w, r, path)` sends one file.
+* A request has the `router` and the `route` that routed it, e.g for a `server.handler` that logs each request and
+  then calls `router.serve(w, r)`.
 
 ## web
 
@@ -311,6 +343,44 @@ POST /v1/createPost   {"post": {"title": "Hi"}}      -> {"id": 3, "title": "Hi"}
 * `app.server` is the `http.Server`, e.g `app.server.workers` or `app.server.shutdown()`.
 * It is built on `attributedFunctions()` and their `invoke()` (see `docs/reflection.md`). A TypeScript client can be
   made from the same: the names, parameters and results of the endpoints.
+
+## web.html
+
+HTML pages with the values of the program, in the syntax of Jinja and Nunjucks (`std/web/html.sd`):
+
+```odin
+import web.html;
+
+templates := html.newTemplates("views");
+templates.addFilter("pretty_date", prettyDate);             // {{ booking.from | pretty_date }}
+templates.addFunction("__", translate);                     // {{ __("Forside") }}
+templates.setGlobal("BASE_PATH", html.Value{text: ""});
+
+Page :: struct { title: string; posts: [..]Post; }
+templates.respond(w, "posts.html", Page{"Posts", posts}, &context);   // Or html, err := templates.render(...)
+```
+
+```html
+{% extends "base.html" %}
+{% block content %}
+  {% for post in posts %}<a href="/posts/{{ post.id }}">{{ post.title }}</a>{% else %}No posts{% endfor %}
+  {% include "footer.html" %}
+{% endblock %}
+```
+
+* `{{ value }}` is escaped for HTML (`& < > " '`), unless it is html, e.g of the filter `safe` or a macro.
+* The names are the members of the data (a struct, read with reflection), the variables of `for`, `set` and macros,
+  and the globals. Members of structs, lists, slices, arrays, pointers, optionals and enums (their name) can be read;
+  a name that isn't there is none and writes nothing.
+* Tags: `if`/`elif`/`else`, `for` (with `loop.index`, `loop.first`, `loop.last`, ...) and `else`, `set`, `include`,
+  `extends` and `block`, `macro` with defaults and named arguments, `{# comments #}`, and `{%-`/`-%}` to remove white
+  space. Operators: `== != < > <= >=`, `and or not`, `+ - * / %` and `~`.
+* Filters (`html.Filter`) and functions (`html.TemplateFunction`) of the program get a `*html.Call`, with the arguments
+  and the context given to `render`, e.g the language of the request. `html.dataOf<T>(value)` reads a value of the
+  program, e.g a `time.Time`. Built in: `range()`, and `safe`, `escape`, `length`, `default`, `upper`, `lower`,
+  `trim` and `join`.
+* The templates are read once. `templates.cache = false` reads them for each render, e.g while writing them. A
+  template that fails is a `html.TemplateError` with the file and the line; `respond` makes it a 500.
 
 ## thread
 
@@ -367,6 +437,16 @@ bits  := random.bits();             // 64 random bits
   them repeatable.
 * `rng := random.newRandom(42);` is a generator of your own, with the same methods: `rng.between(1, 6)`,
   `rng.choice(names)`, `rng.shuffle(cards)`, ...
+* For secrets: `random.secureBytes(32)` gives random bytes of the system (`BCryptGenRandom`, `getrandom` on Linux),
+  and `random.secureToken()` a text of 32 of them in base64 for urls, e.g for a link that confirms something.
+
+## base64
+
+```odin
+text := base64.encode("hello");                 // aGVsbG8=
+bytes, ok := base64.decode(text);               // Either alphabet, with or without =
+token := base64.encode(bytes, url: true);       // - and _ in place of + and /, without =
+```
 
 ## Methods on slices (prelude)
 

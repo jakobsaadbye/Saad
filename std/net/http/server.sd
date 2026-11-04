@@ -7,6 +7,7 @@ namespace net.http;
 //     router.handle("GET /posts/{id}", showPost);
 //     router.handle("POST /posts", createPost);
 //     router.handle("/static/", files);          // Everything below /static/
+//     router.handleFiles("/assets/", "public");  // The files of a folder (files.sd)
 //     http.listenAndServe(":8080", &router);
 //
 // A handler that throws gives a 500, and the server goes on. While a handler runs, the allocator of the thread is the
@@ -33,6 +34,8 @@ Request :: struct {
     remote:  net.Addr;          // Who sent it
     pattern: string;            // The pattern of the Router that matched, e.g GET /posts/{id}
     values:  [..]Header;        // The values of the {names} of the pattern
+    router:  *Router;           // The router that routed it, and its route
+    route:   *Route;
     server:  *Server;           // That answers it
 
     arena:     mem.Arena;       // The memory of the request, freed when the handler returned
@@ -54,26 +57,7 @@ pathValue :: method (r: *Request, name: string) -> string {
 
 // A value of the query, e.g r.queryValue("page") of /posts?page=2, with %XX and + decoded
 queryValue :: method (r: *Request, name: string) -> string, bool {
-    rest := r.query;
-    while rest.len > 0 {
-        end := rest.indexOf("&");
-        pair := rest;
-        if end >= 0 {
-            pair = rest.slice(0, end);
-            rest = rest.slice(end + 1);
-        } else {
-            rest = "";
-        }
-        equals := pair.indexOf("=");
-        key := pair;
-        value := "";
-        if equals >= 0 {
-            key   = pair.slice(0, equals);
-            value = pair.slice(equals + 1);
-        }
-        if decodeUrl(key, &r.arena) == name { return decodeUrl(value, &r.arena), true; }
-    }
-    return "", false;
+    return findValue(r.query, name, &r.arena);
 }
 
 // What a handler answers with. It is sent when the handler returns, with its Content-Length
@@ -137,6 +121,7 @@ Route :: struct {
     segments: [..]string;      // Of the path, e.g ["posts", "{id}"]
     prefix:   bool;            // The pattern ends with /, so it matches every path below it
     handler:  Handler;
+    folder:   string;          // Of handleFiles: the folder of the files below the prefix
 }
 
 Router :: struct {
@@ -145,7 +130,7 @@ Router :: struct {
 }
 
 // Adds a route: "[METHOD ]/path", where a segment {name} matches any segment, e.g "GET /posts/{id}", and a path that
-// ends with / matches every path below it, e.g "/static/". "/" matches every path. When more patterns match, the one
+// ends with / matches every path below it, e.g "/static/". "/" matches every path, and "/{$}" only / itself. When more patterns match, the one
 // with the most segments that are written out wins
 handle :: method (router: *Router, pattern: string, handler: Handler) {
     route: Route;
@@ -159,6 +144,10 @@ handle :: method (router: *Router, pattern: string, handler: Handler) {
     }
     assert(path.startsWith("/"));   // A pattern is a path that starts with /, e.g "GET /posts"
     route.prefix = path.endsWith("/");
+    if path.endsWith("/{$}") {      // Only the path itself, e.g "GET /{$}" is / and nothing below it
+        path = path.slice(0, path.len - 3);
+        route.prefix = false;
+    }
     for segment in path.split("/") {
         if segment.len > 0 { route.segments.add(segment); }
     }
@@ -213,6 +202,8 @@ serve :: method (router: *Router, w: *ResponseWriter, r: *Request) {
 
     route := &router.routes[best];
     r.pattern = route.pattern;
+    r.router = router;
+    r.route = route;
     r.values.allocator = &r.allocator;
     for segment, i in route.segments {
         if segment.startsWith("{") && segment.endsWith("}") {

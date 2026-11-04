@@ -14,9 +14,29 @@ namespace random;
 //     dice := rng.between(1, 6);
 //
 // The generator is xorshift64*. It is fast and good for games and simulations, but not for anything to do with security.
+// For secrets, e.g a token or a password, random.secureBytes gives random bytes of the system.
 
 import math;
 import time;
+import os.windows;
+import base64;
+import mem;
+
+// count random bytes of the system (BCryptGenRandom), which are good for secrets. They are allocated with mem.allocate
+secureBytes :: (count: int) -> string {
+    result: string;
+    if count <= 0 { return result; }
+    result.data = mem.allocate(count) as *u8;
+    result.len  = count;
+    status := windows.BCryptGenRandom(null, result.data, count as u32, windows.BcryptUseSystemPreferredRng);
+    assert(status == 0);   // The system has no random bytes to give, which doesn't happen
+    return result;
+}
+
+// A random text for a secret, e.g a token in a link: count random bytes of the system in base64 that can be in a url
+secureToken :: (count := 32) -> string {
+    return base64.encode(secureBytes(count), url: true);
+}
 
 Random :: struct {
     state: u64;

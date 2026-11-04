@@ -118,6 +118,19 @@ if command -v python3 > /dev/null; then
     fi
 fi
 
+# https (TLS with OpenSSL) against a local openssl s_server (needs openssl and libssl-dev)
+if command -v openssl > /dev/null && [ -f /usr/include/openssl/ssl.h ]; then
+    printf "%-56s " "https (check_tls.sh)"
+    if output=$(bash "$HERE/check_tls.sh" 2>&1); then
+        echo "${GREEN}OK${RESET}"
+        passed=$((passed + 1))
+    else
+        echo "${RED}FAILED${RESET}"
+        echo "$output" | head -6 | sed 's/^/    /'
+        failed=$((failed + 1))
+    fi
+fi
+
 # Debugging like the VS Code extension does, with CodeLLDB, when SAAD_CODELLDB is the folder of an unpacked CodeLLDB
 # (the 'extension' folder of codelldb-linux-x64.vsix) and node is installed
 if [ -n "$SAAD_CODELLDB" ] && command -v node > /dev/null; then

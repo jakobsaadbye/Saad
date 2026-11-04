@@ -1,0 +1,145 @@
+namespace net.http;
+
+// What a request of a browser has besides its path: the values of a form, cookies and the user of basic auth, e.g
+//
+//     name, _ := r.formValue("name");            // Of <form method="post">, or of the query
+//     lang, found := r.cookie("lang");
+//     user, password, ok := r.basicAuth();
+//     if !ok || user != "admin" { w.requestBasicAuth("Admin"); return; }
+//     w.setCookie(http.Cookie{name: "lang", value: "de", maxAge: 365 * 24 * 3600});
+
+import mem;
+import fmt;
+import base64;
+
+// The value of a name in text like a=1&b=2, with %XX and + decoded
+@private
+findValue :: (text: string, name: string, arena: *mem.Arena) -> string, bool {
+    rest := text;
+    while rest.len > 0 {
+        end := rest.indexOf("&");
+        pair := rest;
+        if end >= 0 {
+            pair = rest.slice(0, end);
+            rest = rest.slice(end + 1);
+        } else {
+            rest = "";
+        }
+        equals := pair.indexOf("=");
+        key := pair;
+        value := "";
+        if equals >= 0 {
+            key   = pair.slice(0, equals);
+            value = pair.slice(equals + 1);
+        }
+        if decodeUrl(key, arena) == name { return decodeUrl(value, arena), true; }
+    }
+    return "", false;
+}
+
+// A value of the form of the request: of the body when it is application/x-www-form-urlencoded (what a <form
+// method="post"> sends), else of the query
+formValue :: method (r: *Request, name: string) -> string, bool {
+    kind, _ := r.header("Content-Type");
+    if kind.toLower().startsWith("application/x-www-form-urlencoded") {
+        value, found := findValue(r.body, name, &r.arena);
+        if found { return value, true; }
+    }
+    return r.queryValue(name);
+}
+
+// The value of a cookie that the browser sent, e.g r.cookie("lang")
+cookie :: method (r: *Request, name: string) -> string, bool {
+    for h in r.headers {
+        if !equalFold(h.name, "Cookie") { continue; }
+        for part in h.value.split(";") {
+            pair := trimSpaces(part);
+            equals := pair.indexOf("=");
+            if equals < 0 { continue; }
+            if trimSpaces(pair.slice(0, equals)) != name { continue; }
+            value := trimSpaces(pair.slice(equals + 1));
+            if value.len >= 2 && value[0] == '"' && value[value.len - 1] == '"' { value = value.slice(1, value.len - 1); }
+            return decodeUrl(value, &r.arena), true;
+        }
+    }
+    return "", false;
+}
+
+SameSite :: enum { lax, strict, none }
+
+// A cookie for the browser to keep, see setCookie
+Cookie :: struct {
+    name:     string;
+    value:    string;
+    path:     string = "/";
+    maxAge:   int = 0;           // Seconds. 0 keeps it until the browser is closed, and a negative number removes it
+    httpOnly: bool = false;      // Not seen by the JavaScript of the page
+    secure:   bool = false;      // Only sent over https
+    sameSite: SameSite = .lax;
+}
+
+// Gives the browser a cookie: a Set-Cookie header. The value is escaped like a url
+setCookie :: method (w: *ResponseWriter, c: Cookie) {
+    sb := fmt.newStringBuilder(64);
+    sb.add("%=%", c.name, escapeUrl(c.value));
+    if c.path.len > 0 { sb.add("; Path=%", c.path); }
+    if c.maxAge > 0 { sb.add("; Max-Age=%", c.maxAge); }
+    if c.maxAge < 0 { sb.addString("; Max-Age=0"); }
+    if c.httpOnly { sb.addString("; HttpOnly"); }
+    if c.secure { sb.addString("; Secure"); }
+    if c.sameSite == .strict { sb.addString("; SameSite=Strict"); }
+    else if c.sameSite == .none { sb.addString("; SameSite=None"); }
+    else { sb.addString("; SameSite=Lax"); }
+    w.addHeader("Set-Cookie", sb.toString());
+}
+
+// The user and password of basic auth (the Authorization header). false when the request has none
+basicAuth :: method (r: *Request) -> string, string, bool {
+    value, found := r.header("Authorization");
+    if !found || value.len < 6 || !equalFold(value.slice(0, 6), "Basic ") { return "", "", false; }
+    decoded, ok := base64.decode(trimSpaces(value.slice(6)));
+    if !ok { return "", "", false; }
+    colon := decoded.indexOf(":");
+    if colon < 0 { return "", "", false; }
+    return decoded.slice(0, colon), decoded.slice(colon + 1), true;
+}
+
+// Asks the browser for a user and password: 401 with a WWW-Authenticate header, so it shows its login box
+requestBasicAuth :: method (w: *ResponseWriter, realm := "Restricted") {
+    w.status = 401;
+    w.headers.count = 0;
+    w.body.clear();
+    w.setHeader("WWW-Authenticate", fmt.sprint("Basic realm=\"%\", charset=\"UTF-8\"", realm));
+    w.setHeader("Content-Type", "text/plain; charset=utf-8");
+    w.write("Unauthorized\n");
+}
+
+// Whether two texts are the same, in a time that doesn't tell how much of them is, e.g for a password
+equalSecret :: (a: string, b: string) -> bool {
+    if a.len != b.len { return false; }
+    difference: u8 = 0;
+    for i in 0..a.len { difference |= a[i] ^ b[i]; }
+    return difference == 0;
+}
+
+// The text escaped for a part of a url, like encodeURIComponent of JavaScript: all but A-Z a-z 0-9 - _ . ! ~ * ' ( )
+escapeUrl :: (text: string) -> string {
+    keep := true;
+    for ch in text { if !unreserved(ch) { keep = false; } }
+    if keep { return text; }
+    sb := fmt.newStringBuilder(text.len as int * 3);
+    hex := "0123456789ABCDEF";
+    for ch in text {
+        if unreserved(ch) { sb.addChar(ch); continue; }
+        sb.addChar('%');
+        sb.addChar(hex[(ch >> 4) & 15]);
+        sb.addChar(hex[ch & 15]);
+    }
+    return sb.toString();
+}
+
+@private
+unreserved :: (ch: u8) -> bool {
+    if ch.isLetter() || ch.isDigit() { return true; }
+    return ch == '-' || ch == '_' || ch == '.' || ch == '!' || ch == '~' || ch == '*' || ch == '\'' || ch == '(' || ch == ')';
+}

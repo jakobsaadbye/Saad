@@ -17,14 +17,6 @@ function isFile(file) {
     }
 }
 
-function newer(file, than) {
-    try {
-        return fs.statSync(file).mtimeMs >= fs.statSync(than).mtimeMs;
-    } catch {
-        return false;
-    }
-}
-
 // Runs a program, and gives its output to log. Resolves to whether it succeeded
 function run(command, args, cwd, log) {
     return new Promise((resolve) => {
@@ -52,30 +44,14 @@ function programOf(config, variables) {
     return program;
 }
 
-// On Linux, a program of Saad is the object file of 'saad build --elf' with the C functions of tools/linux/shim.c,
-// linked with gcc (see tools/linux). The shim is next to the compiler, in the Saad repository
+// On Linux, a program of Saad is the object file of 'saad build --elf', linked by tools/linux/link.sh of the Saad
+// repository (next to the compiler) with the C functions it uses, e.g of libpq or OpenSSL
 async function linkForLinux(compiler, object, log) {
     const repository = path.resolve(path.dirname(compiler), "..");
-    const shim = path.join(repository, "tools", "linux", "shim.c");
-    if (!isFile(shim)) throw new Error(`Debugging on Linux needs tools/linux/shim.c of the Saad repository, which isn't at ${shim}`);
-    const build = path.dirname(object);
-    const shimObject = path.join(build, "shim.o");
-    if (!newer(shimObject, shim) && !await run("gcc", ["-O0", "-w", "-c", `-I${path.join(repository, "src")}`, shim, "-o", shimObject], build, log)) {
-        throw new Error("gcc couldn't compile tools/linux/shim.c");
-    }
-    const args = ["-no-pie", "-z", "noexecstack", object, shimObject];
-    // libpq (std/dbms/postgres) only for the programs that call it
-    if (fs.readFileSync(object).includes("ms_PQ")) {
-        const pq = path.join(repository, "tools", "linux", "shim_pq.c");
-        const pqObject = path.join(build, "shim_pq.o");
-        if (!newer(pqObject, pq) && !await run("gcc", ["-O0", "-w", "-c", "-I/usr/include/postgresql", pq, "-o", pqObject], build, log)) {
-            throw new Error("gcc couldn't compile tools/linux/shim_pq.c (it needs libpq-dev)");
-        }
-        args.push(pqObject, "-lpq");
-    }
-    const executable = path.join(build, "out");
-    args.push("-o", executable, "-lm", "-lpthread");
-    if (!await run("gcc", args, build, log)) throw new Error("gcc couldn't link the program");
+    const link = path.join(repository, "tools", "linux", "link.sh");
+    if (!isFile(link)) throw new Error(`Debugging on Linux needs tools/linux/link.sh of the Saad repository, which isn't at ${link}`);
+    const executable = path.join(path.dirname(object), "out");
+    if (!await run("bash", [link, object, executable], path.dirname(object), log)) throw new Error("The program couldn't be linked. See the output of Saad");
     return executable;
 }
 

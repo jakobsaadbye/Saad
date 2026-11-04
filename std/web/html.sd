@@ -1,0 +1,1528 @@
+namespace web.html;
+
+// Templates of HTML pages with the values of the program, in the syntax of Jinja and Nunjucks, e.g
+//
+//     import web.html;
+//
+//     templates := html.newTemplates("views");
+//     templates.addFilter("upper", toUpper);                // {{ name | upper }}
+//     templates.addFunction("t", translate);                // {{ t("Hello") }}
+//     templates.setGlobal("siteName", html.Value{text: "My site"});
+//
+//     Page :: struct { title: string; posts: [..]Post; }
+//     templates.respond(w, "posts.html", Page{"Posts", posts});   // Or html, err := templates.render(...)
+//
+// posts.html:
+//
+//     {% extends "base.html" %}
+//     {% block content %}
+//       <h1>{{ title }}</h1>
+//       {% for post in posts %}
+//         <a href="/posts/{{ post.id }}">{{ post.title }}</a> {% if loop.last %}.{% endif %}
+//       {% else %}
+//         No posts
+//       {% endfor %}
+//       {% include "footer.html" %}
+//     {% endblock %}
+//
+// * {{ value }} writes a value, escaped for HTML (& < > " '), unless it is html, e.g of the filter safe or a macro
+// * The names are the members of the data (a struct), the variables of for, set and macros, and the globals. A name
+//   or member that isn't there is none, which writes nothing
+// * Values: none, true, false, numbers, 'texts' and "texts", lists [1, 2], and the values of the program: structs
+//   (value.member), lists, slices and arrays (list[0], list.length), pointers, optionals and enums (their name)
+// * Operators: == != < > <= >= (=== and !== too), and or not, + - * / %, ~ (joins texts), value | filter(args)
+// * {% if %} {% elif %} {% else %} {% endif %}, {% for x in list %} {% else %} {% endfor %} with loop.index (from 1),
+//   loop.index0, loop.first, loop.last and loop.length, {% set x = value %}, {% include "name" %},
+//   {% extends "name" %} with {% block name %}{% endblock %}, {% macro name(a, b='x') %}{% endmacro %} called like a
+//   function, {{ name(1, b='y') }}, and {# comments #}. {%- and -%} remove the white space before or after a tag
+// * Filters and functions of the program get a *html.Call: its arguments, and the context given to render, e.g the
+//   language of the request. Built in: range(start, stop), and the filters safe, escape, length, default, upper,
+//   lower, trim, join
+//
+// The templates are read from the folder once, and kept. With templates.cache = false they are read for each render,
+// e.g while the pages are being written.
+
+import fmt;
+import mem;
+import os;
+import thread;
+import net.http;
+import io;
+
+// A value in a template
+Value :: union {
+    none;
+    boolean: bool;
+    integer: i64;
+    number:  f64;
+    text:    string;
+    html:    string;        // Written as it is, e.g of the filter safe or of a macro
+    data:    any;           // A value of the program, e.g a struct or a list
+    list:    *ValueList;    // e.g of range() or [1, 2]
+    macro:   *Macro;
+}
+
+ValueList :: struct {
+    items: [..]Value;
+}
+
+// What a filter or a function of the program is called with
+Call :: struct {
+    args:      []Value;     // The arguments, e.g of {{ value | f(1, 2) }} or {{ f(1, 2) }}
+    context:   *void;       // What was given to render, e.g the request
+    templates: *Templates;
+}
+
+Filter           :: (call: *Call, value: Value) -> Value;   // {{ value | name(args) }}. It can throw
+TemplateFunction :: (call: *Call) -> Value;                 // {{ name(args) }}. It can throw
+
+TemplateError :: ErrorKind{"html.TemplateError"};   // A template that can't be read or rendered
+
+Templates :: struct {
+    folder:    string;
+    cache:     bool = true;   // Keeps the templates that are read. false reads them for each render
+    templates: Map<string, *Template>;
+    filters:   Map<string, Filter>;
+    functions: Map<string, TemplateFunction>;
+    globals:   Map<string, Value>;
+    mutex:     thread.Mutex;
+}
+
+// The templates of a folder, e.g "views"
+newTemplates :: (folder: string) -> *Templates {
+    t := new(Templates, mem.heap());
+    t.folder = folder.copy(mem.heap());
+    previous := mem.setAllocator(mem.heap());
+    t.addFilter("safe", filterSafe);
+    t.addFilter("escape", filterEscape);
+    t.addFilter("e", filterEscape);
+    t.addFilter("length", filterLength);
+    t.addFilter("default", filterDefault);
+    t.addFilter("upper", filterUpper);
+    t.addFilter("lower", filterLower);
+    t.addFilter("trim", filterTrim);
+    t.addFilter("join", filterJoin);
+    t.addFunction("range", functionRange);
+    mem.setAllocator(previous);
+    return t;
+}
+
+addFilter :: method (t: *Templates, name: string, filter: Filter) {
+    previous := mem.setAllocator(mem.heap());
+    t.filters.set(name.copy(), filter);
+    mem.setAllocator(previous);
+}
+
+addFunction :: method (t: *Templates, name: string, function: TemplateFunction) {
+    previous := mem.setAllocator(mem.heap());
+    t.functions.set(name.copy(), function);
+    mem.setAllocator(previous);
+}
+
+// A value that every template has, e.g setGlobal("year", html.Value{integer: 2024}). A text is copied
+setGlobal :: method (t: *Templates, name: string, value: Value) {
+    previous := mem.setAllocator(mem.heap());
+    switch v in value {
+        case .text { value = Value{text: v.copy()}; }
+        case .html { value = Value{html: v.copy()}; }
+        else { }
+    }
+    t.globals.set(name.copy(), value);
+    mem.setAllocator(previous);
+}
+
+// The template, with the data (a struct, whose members are the names of the template) and a context for the filters
+// and functions of the program
+render :: method (t: *Templates, name: string, data: any, context: *void = null) -> string, error {
+    r: TemplateRenderer;
+    r.templates = t;
+    r.data = data;
+    r.context = context;
+    r.out = fmt.newStringBuilder(4096);
+    try {
+        template := r.load(name);
+        r.renderTemplate(template);
+    } catch (thrown) {
+        r.out.free();
+        if thrown.is(TemplateError) { return "", thrown; }
+        return "", newError(fmt.sprint("%: %", name, thrown.message), TemplateError);
+    }
+    return r.out.toString(), null;
+}
+
+// Answers with the page of the template. A template that fails is a 500, with the error written to stderr
+respond :: method (t: *Templates, w: *http.ResponseWriter, name: string, data: any, context: *void = null, status := 200) {
+    html, err := t.render(name, data, context);
+    if err != null {
+        io.writeError(fmt.sprint("web: %\n", err.message));
+        w.error(500, "Internal Server Error");
+        return;
+    }
+    w.status = status;
+    w.setHeader("Content-Type", "text/html; charset=utf-8");
+    w.write(html);
+}
+
+// The value of the program in a value of a template, e.g to read it in a filter: p := html.dataOf<Point>(value)
+dataOf :: <T>(value: Value) -> *T {
+    switch v in value {
+        case .data {
+            if v.type.name == typeof(T) { return v.data as *T; }
+            if v.type.kind == .pointer && (v.type as *TypePointer).pointerTo.name == typeof(T) { return *(v.data as **T); }
+        }
+        else { }
+    }
+    return null;
+}
+
+// The text of a value as it is written, without escaping, e.g "3" of 3 or "" of none
+textOf :: (value: Value) -> string {
+    return switch v in value {
+        case .none    => "";
+        case .boolean => boolText(v);
+        case .integer => fmt.sprint("%", v);
+        case .number  => numberText(v);
+        case .text    => v;
+        case .html    => v;
+        case .data    => dataText(v);
+        case .list    => listText(v);
+        case .macro   => v.name;
+    };
+}
+
+@private
+boolText :: (b: bool) -> string {
+    if b { return "true"; }
+    return "false";
+}
+
+// Whether a value counts as true in an if: not none, false, 0, an empty text or an empty list
+isTrue :: (value: Value) -> bool {
+    return switch v in value {
+        case .none    => false;
+        case .boolean => v;
+        case .integer => v != 0;
+        case .number  => v != 0.0;
+        case .text    => v.len > 0;
+        case .html    => v.len > 0;
+        case .data    => dataIsTrue(v);
+        case .list    => v.items.count > 0;
+        case .macro   => true;
+    };
+}
+
+// The value of a value of the program, e.g Value{integer} of an int, or Value{data} of a struct
+valueOf :: (a: any) -> Value {
+    if a.data == null || a.type == null { return .none; }
+    type := a.type;
+    switch type.kind {
+        case .bool   { return Value{boolean: *(a.data as *bool)}; }
+        case .int    { return Value{integer: readInteger(a.data, type as *TypePrimitive)}; }
+        case .float  {
+            if type.size == 4 { return Value{number: (*(a.data as *f32)) as f64}; }
+            return Value{number: *(a.data as *f64)};
+        }
+        case .string { return Value{text: *(a.data as *string)}; }
+        case .enum   {
+            e := type as *TypeEnum;
+            n := e.readValue(a.data);
+            for v in e.values { if v.value == n { return Value{text: v.name}; } }
+            return Value{integer: n};
+        }
+        case .pointer {
+            to := *(a.data as **void);
+            if to == null { return .none; }
+            pointed: any;
+            pointed.data = to;
+            pointed.type = (type as *TypePointer).pointerTo;
+            return valueOf(pointed);
+        }
+        case .any { return valueOf(*(a.data as *any)); }
+        case .struct {
+            if type.isOptional() {
+                s := type as *TypeStruct;
+                present := memberOf(s, "present");
+                item := memberOf(s, "item");
+                if present == null || item == null || !*(present.valueIn(a.data) as *bool) { return .none; }
+                inner: any;
+                inner.data = item.valueIn(a.data);
+                inner.type = item.type;
+                return valueOf(inner);
+            }
+            if type.name == typeof(Value) { return *(a.data as *Value); }
+            return Value{data: a};
+        }
+        else { return Value{data: a}; }
+    }
+}
+
+//
+// Values
+//
+
+@private
+readInteger :: (data: *void, type: *TypePrimitive) -> i64 {
+    return switch type.kind {
+        case .u8
+        case .char  => (*(data as *u8)) as i64;
+        case .u16   => (*(data as *u16)) as i64;
+        case .u32
+        case .uint  => (*(data as *u32)) as i64;
+        case .u64   => (*(data as *u64)) as i64;
+        case .i8    => (*(data as *i8)) as i64;
+        case .i16   => (*(data as *i16)) as i64;
+        case .i64   => *(data as *i64);
+        else        => (*(data as *i32)) as i64;
+    };
+}
+
+@private
+memberOf :: (type: *TypeStruct, name: string) -> *StructMember {
+    for i in 0..type.members.count {
+        if type.members[i].name == name { return &type.members[i]; }
+    }
+    return null;
+}
+
+// The elements of a list, slice or array of the program, and their type. false when it isn't one
+@private
+elementsOf :: (a: any) -> *u8, i64, *Type, bool {
+    if a.type.kind == .array {
+        array := a.type as *TypeArray;
+        if array.kind == .fixed { return a.data as *u8, array.count, array.elemType, true; }
+        // A slice or a dynamic array: {data, count}
+        bytes := a.data as *u8;
+        return *(a.data as **u8), *((&bytes[8]) as *i64), array.elemType, true;
+    }
+    if a.type.kind == .struct && a.type.name.startsWith("List<") {
+        s := a.type as *TypeStruct;
+        dataMember := memberOf(s, "data");
+        countMember := memberOf(s, "count");
+        if dataMember == null || countMember == null { return null, 0, null, false; }
+        return *(dataMember.valueIn(a.data) as **u8), *(countMember.valueIn(a.data) as *i64), (dataMember.type as *TypePointer).pointerTo, true;
+    }
+    return null, 0, null, false;
+}
+
+@private
+elementAt :: (elements: *u8, elemType: *Type, index: i64) -> Value {
+    element: any;
+    element.data = &elements[index * elemType.size];
+    element.type = elemType;
+    return valueOf(element);
+}
+
+// The member of a value, e.g of value.name. length (or count) of a list or text
+@private
+memberValue :: (value: Value, name: string) -> Value {
+    switch v in value {
+        case .data {
+            elements, count, _, isList := elementsOf(v);
+            if isList {
+                if name == "length" || name == "count" { return Value{integer: count}; }
+                return .none;
+            }
+            if v.type.kind != .struct { return .none; }
+            s := v.type as *TypeStruct;
+            member := memberOf(s, name);
+            if member == null { return .none; }
+            inner: any;
+            inner.data = member.valueIn(v.data);
+            inner.type = member.type;
+            return valueOf(inner);
+        }
+        case .text { if name == "length" { return Value{integer: v.len}; } }
+        case .html { if name == "length" { return Value{integer: v.len}; } }
+        case .list { if name == "length" || name == "count" { return Value{integer: v.items.count}; } }
+        else { }
+    }
+    return .none;
+}
+
+// The element of a list at an index, or the member of a struct by a text
+@private
+indexValue :: (value: Value, index: Value) -> Value {
+    switch i in index {
+        case .text { return memberValue(value, i); }
+        case .integer {
+            switch v in value {
+                case .data {
+                    elements, count, elemType, isList := elementsOf(v);
+                    if !isList || i < 0 || i >= count { return .none; }
+                    return elementAt(elements, elemType, i);
+                }
+                case .list {
+                    if i < 0 || i >= v.items.count { return .none; }
+                    return v.items[i];
+                }
+                case .text {
+                    if i < 0 || i >= v.len { return .none; }
+                    return Value{text: v.slice(i as int, i as int + 1)};
+                }
+                else { }
+            }
+        }
+        else { }
+    }
+    return .none;
+}
+
+@private
+dataIsTrue :: (a: any) -> bool {
+    _, count, _, isList := elementsOf(a);
+    if isList { return count > 0; }
+    return true;
+}
+
+@private
+dataText :: (a: any) -> string {
+    return fmt.sprint("%", a);
+}
+
+@private
+listText :: (list: *ValueList) -> string {
+    sb := fmt.newStringBuilder(64);
+    for item, i in list.items {
+        if i > 0 { sb.addChar(','); }
+        sb.addString(textOf(item));
+    }
+    return sb.toString();
+}
+
+// A number like JavaScript writes it: 3 for 3.0, 2.5 for 2.5
+@private
+numberText :: (n: f64) -> string {
+    if n == (n as i64) as f64 && n < 1000000000000000.0 && n > -1000000000000000.0 { return fmt.sprint("%", n as i64); }
+    text := fmt.sprint("%", n);
+    if text.indexOf(".") >= 0 {
+        end := text.len;
+        while end > 0 && text[end - 1] == '0' { end -= 1; }
+        if end > 0 && text[end - 1] == '.' { end -= 1; }
+        text = text.slice(0, end as int);
+    }
+    return text;
+}
+
+// The text escaped for HTML, like Nunjucks: & < > " and '
+escape :: (text: string) -> string {
+    plain := true;
+    for ch in text {
+        if ch == '&' || ch == '<' || ch == '>' || ch == '"' || ch == '\'' { plain = false; break; }
+    }
+    if plain { return text; }
+    sb := fmt.newStringBuilder(text.len as int + 16);
+    for ch in text {
+        if ch == '&' { sb.addString("&amp;"); }
+        else if ch == '<' { sb.addString("&lt;"); }
+        else if ch == '>' { sb.addString("&gt;"); }
+        else if ch == '"' { sb.addString("&quot;"); }
+        else if ch == '\'' { sb.addString("&#39;"); }
+        else { sb.addChar(ch); }
+    }
+    return sb.toString();
+}
+
+//
+// The filters and functions that are built in
+//
+
+@private filterSafe   :: (call: *Call, value: Value) -> Value { return Value{html: textOf(value)}; }
+@private filterUpper  :: (call: *Call, value: Value) -> Value { return Value{text: textOf(value).toUpper()}; }
+@private filterLower  :: (call: *Call, value: Value) -> Value { return Value{text: textOf(value).toLower()}; }
+
+@private
+filterEscape :: (call: *Call, value: Value) -> Value {
+    switch v in value {
+        case .html { return value; }
+        else { return Value{html: escape(textOf(value))}; }
+    }
+}
+
+@private
+filterLength :: (call: *Call, value: Value) -> Value {
+    return memberValue(value, "length");
+}
+
+@private
+filterDefault :: (call: *Call, value: Value) -> Value {
+    if value.kind == .none && call.args.count > 0 { return call.args[0]; }
+    return value;
+}
+
+@private
+filterTrim :: (call: *Call, value: Value) -> Value {
+    text := textOf(value);
+    start := 0;
+    end := text.len as int;
+    while start < end && (text[start] == ' ' || text[start] == '\t' || text[start] == '\n' || text[start] == '\r') { start += 1; }
+    while end > start && (text[end - 1] == ' ' || text[end - 1] == '\t' || text[end - 1] == '\n' || text[end - 1] == '\r') { end -= 1; }
+    return Value{text: text.slice(start, end)};
+}
+
+@private
+filterJoin :: (call: *Call, value: Value) -> Value {
+    separator := "";
+    if call.args.count > 0 { separator = textOf(call.args[0]); }
+    sb := fmt.newStringBuilder(64);
+    for item, i in itemsOf(value) {
+        if i > 0 { sb.addString(separator); }
+        sb.addString(textOf(item));
+    }
+    return Value{text: sb.toString()};
+}
+
+// range(stop), range(start, stop) or range(start, stop, step): the numbers from start up to stop, without stop
+@private
+functionRange :: (call: *Call) -> Value {
+    start: i64 = 0;
+    stop: i64 = 0;
+    step: i64 = 1;
+    if call.args.count == 1 { stop = integerOf(call.args[0]); }
+    if call.args.count >= 2 { start = integerOf(call.args[0]); stop = integerOf(call.args[1]); }
+    if call.args.count >= 3 { step = integerOf(call.args[2]); }
+    if step == 0 { throw newError("range: the step is 0", TemplateError); }
+    list := new(ValueList);
+    i := start;
+    while (step > 0 && i < stop) || (step < 0 && i > stop) {
+        list.items.add(Value{integer: i});
+        i += step;
+    }
+    return Value{list: list};
+}
+
+// The value as an integer, e.g 3 of 3.0 or of "3". 0 when it isn't a number
+integerOf :: (value: Value) -> i64 {
+    return switch v in value {
+        case .integer => v;
+        case .number  => v as i64;
+        case .boolean => boolInteger(v);
+        case .text    => parseInteger(v);
+        else          => 0;
+    };
+}
+
+@private
+boolInteger :: (b: bool) -> i64 {
+    if b { return 1; }
+    return 0;
+}
+
+@private
+parseInteger :: (text: string) -> i64 {
+    n: i64 = 0;
+    negative := text.len > 0 && text[0] == '-';
+    start := 0;
+    if negative { start = 1; }
+    for i in start..text.len {
+        if !text[i].isDigit() { break; }
+        n = n * 10 + text[i].digitValue();
+    }
+    if negative { return -n; }
+    return n;
+}
+
+// The elements of a list of the program or of a template, as values. Empty when it isn't a list
+itemsOf :: (value: Value) -> [..]Value {
+    items: [..]Value;
+    switch v in value {
+        case .data {
+            elements, count, elemType, isList := elementsOf(v);
+            if isList {
+                for i in 0..count { items.add(elementAt(elements, elemType, i)); }
+            }
+        }
+        case .list {
+            for item in v.items { items.add(item); }
+        }
+        else { }
+    }
+    return items;
+}
+
+//
+// Parsing
+//
+
+Macro :: struct {
+    name:   string;
+    params: [..]TemplateParam;
+    body:   [..]*TemplateNode;
+}
+
+TemplateParam :: struct {
+    name:  string;
+    value: *TemplateExpr;   // The default, or null
+}
+
+TemplateNodeKind :: enum { text, output, if, for, set, include, block, macro }
+
+TemplateNode :: struct {
+    kind:     TemplateNodeKind;
+    line:     int;
+    text:     string;          // text
+    expr:     *TemplateExpr;           // output, the list of for, the value of set, the name of include
+    branches: [..]TemplateBranch;      // if
+    names:    [..]string;      // The variables of for, or the name of set or block
+    body:     [..]*TemplateNode;       // for, block
+    orElse:   [..]*TemplateNode;       // if, for
+    macro:    *Macro;
+}
+
+TemplateBranch :: struct {
+    condition: *TemplateExpr;
+    body:      [..]*TemplateNode;
+}
+
+Template :: struct {
+    name:    string;
+    nodes:   [..]*TemplateNode;
+    extends: *TemplateExpr;
+    blocks:  Map<string, *TemplateNode>;
+    macros:  [..]*Macro;
+}
+
+TemplateExprKind :: enum { literal, name, member, index, call, filter, unary, binary, list }
+
+TemplateExpr :: struct {
+    kind:     TemplateExprKind;
+    line:     int;
+    value:    Value;           // literal
+    name:     string;          // name, member, filter, the operator of unary and binary
+    left:     *TemplateExpr;
+    right:    *TemplateExpr;
+    args:     [..]*TemplateExpr;       // call, filter, list
+    argNames: [..]string;      // call: the name of each argument, empty when it isn't named
+}
+
+TemplateTokenKind :: enum { end, name, number, text, symbol }
+
+TemplateToken :: struct {
+    kind: TemplateTokenKind;
+    text: string;
+}
+
+TemplateParser :: struct {
+    name:     string;          // Of the template, for errors
+    source:   string;
+    at:       int;
+    line:     int;
+    template: *Template;
+    trimNext: bool;            // The tag before ended with -%}
+
+    // The expression of a tag
+    tokens:   [..]TemplateToken;
+    next:     int;
+}
+
+@private
+fail :: method (p: *TemplateParser, message: string) {
+    throw newError(fmt.sprint("%:%: %", p.name, p.line, message), TemplateError);
+}
+
+// The tags and texts of the template, until one of the end tags, e.g endif. The end tag that was found, or "" at the end
+@private
+parseNodes :: method (p: *TemplateParser, nodes: *[..]*TemplateNode, ends: []string) -> string {
+    while p.at < p.source.len {
+        start := p.source.indexOf("{", p.at);
+        while start >= 0 && start + 1 < p.source.len && p.source[start + 1] != '{' && p.source[start + 1] != '%' && p.source[start + 1] != '#' {
+            start = p.source.indexOf("{", start + 1);
+        }
+        if start < 0 || start + 1 >= p.source.len { start = p.source.len as int; }
+        // The text before the tag
+        textEnd := start;
+        trimBefore := start + 2 < p.source.len && p.source[start + 2] == '-';
+        text := p.source.slice(p.at, textEnd);
+        if p.trimNext { text = trimLeft(text); }
+        if trimBefore { text = trimRight(text); }
+        p.trimNext = false;
+        if text.len > 0 {
+            node := p.newNode(.text);
+            node.text = text;
+            nodes.add(node);
+        }
+        p.countLines(p.at, start);
+        if start >= p.source.len { p.at = p.source.len as int; return ""; }
+
+        kind := p.source[start + 1];
+        close := "#}";
+        if kind == '{' { close = "}}"; }
+        if kind == '%' { close = "%}"; }
+        contentStart := start + 2;
+        if trimBefore { contentStart += 1; }
+        end := p.findClose(contentStart, close);
+        if end < 0 { p.fail(fmt.sprint("{% has no %", p.source.slice(start, start + 2), close)); }
+        contentEnd := end;
+        if contentEnd > contentStart && p.source[contentEnd - 1] == '-' {
+            contentEnd -= 1;
+            p.trimNext = true;
+        }
+        content := p.source.slice(contentStart, contentEnd);
+        p.at = end + 2;
+        if kind == '#' { p.countLines(start, p.at); continue; }
+
+        p.tokenize(content);
+        if kind == '{' {
+            node := p.newNode(.output);
+            node.expr = p.parseExpr();
+            p.expectEnd();
+            nodes.add(node);
+        } else {
+            tag := p.word();
+            for e in ends { if e == tag { p.countLines(start, p.at); return tag; } }
+            p.parseTag(tag, nodes);
+        }
+        p.countLines(start, p.at);
+    }
+    return "";
+}
+
+@private
+countLines :: method (p: *TemplateParser, from: int, to: int) {
+    for i in from..to { if p.source[i] == '\n' { p.line += 1; } }
+}
+
+// Where the close of a tag is, after quotes
+@private
+findClose :: method (p: *TemplateParser, from: int, close: string) -> int {
+    i := from;
+    quote: u8 = 0;
+    while i + 1 < p.source.len {
+        ch := p.source[i];
+        if quote != 0 {
+            if ch == '\\' { i += 2; continue; }
+            if ch == quote { quote = 0; }
+        } else if ch == '"' || ch == '\'' {
+            quote = ch;
+        } else if ch == close[0] && p.source[i + 1] == close[1] {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+@private
+newNode :: method (p: *TemplateParser, kind: TemplateNodeKind) -> *TemplateNode {
+    node := new(TemplateNode);
+    node.kind = kind;
+    node.line = p.line;
+    return node;
+}
+
+@private
+parseTag :: method (p: *TemplateParser, tag: string, nodes: *[..]*TemplateNode) {
+    if tag == "if" {
+        node := p.newNode(.if);
+        condition := p.parseExpr();
+        p.expectEnd();
+        while true {
+            branch: TemplateBranch;
+            branch.condition = condition;
+            end := p.parseNodes(&branch.body, ["elif", "elseif", "else", "endif"]);
+            node.branches.add(branch);
+            if end == "endif" { p.expectEnd(); break; }
+            if end == "else" {
+                p.expectEnd();
+                if p.parseNodes(&node.orElse, ["endif"]) != "endif" { p.fail("{% if %} has no {% endif %}"); }
+                p.expectEnd();
+                break;
+            }
+            if end == "" { p.fail("{% if %} has no {% endif %}"); }
+            condition = p.parseExpr();
+            p.expectEnd();
+        }
+        nodes.add(node);
+        return;
+    }
+    if tag == "for" {
+        node := p.newNode(.for);
+        node.names.add(p.word());
+        while p.peekSymbol(",") { p.next += 1; node.names.add(p.word()); }
+        if p.word() != "in" { p.fail("{% for %} is written {% for x in list %}"); }
+        node.expr = p.parseExpr();
+        p.expectEnd();
+        end := p.parseNodes(&node.body, ["else", "endfor"]);
+        if end == "else" {
+            p.expectEnd();
+            end = p.parseNodes(&node.orElse, ["endfor"]);
+        }
+        if end != "endfor" { p.fail("{% for %} has no {% endfor %}"); }
+        p.expectEnd();
+        nodes.add(node);
+        return;
+    }
+    if tag == "set" {
+        node := p.newNode(.set);
+        node.names.add(p.word());
+        if !p.peekSymbol("=") { p.fail("{% set %} is written {% set x = value %}"); }
+        p.next += 1;
+        node.expr = p.parseExpr();
+        p.expectEnd();
+        nodes.add(node);
+        return;
+    }
+    if tag == "include" {
+        node := p.newNode(.include);
+        node.expr = p.parseExpr();
+        p.expectEnd();
+        nodes.add(node);
+        return;
+    }
+    if tag == "extends" {
+        p.template.extends = p.parseExpr();
+        p.expectEnd();
+        return;
+    }
+    if tag == "block" {
+        node := p.newNode(.block);
+        name := p.word();
+        node.names.add(name);
+        p.expectEndAfterName();
+        if p.parseNodes(&node.body, ["endblock"]) != "endblock" { p.fail(fmt.sprint("{% block % %} has no {% endblock %}", name)); }
+        p.expectEndAfterName();
+        p.template.blocks.set(name, node);
+        nodes.add(node);
+        return;
+    }
+    if tag == "macro" {
+        macro := new(Macro);
+        macro.name = p.word();
+        if !p.peekSymbol("(") { p.fail("{% macro %} is written {% macro name(a, b) %}"); }
+        p.next += 1;
+        while !p.peekSymbol(")") {
+            param: TemplateParam;
+            param.name = p.word();
+            if p.peekSymbol("=") {
+                p.next += 1;
+                param.value = p.parseExpr();
+            }
+            macro.params.add(param);
+            if p.peekSymbol(",") { p.next += 1; } else if !p.peekSymbol(")") { p.fail("The parameters of a macro are separated by ,"); }
+        }
+        p.next += 1;
+        p.expectEnd();
+        if p.parseNodes(&macro.body, ["endmacro"]) != "endmacro" { p.fail(fmt.sprint("{% macro % %} has no {% endmacro %}", macro.name)); }
+        p.expectEndAfterName();
+        node := p.newNode(.macro);
+        node.macro = macro;
+        p.template.macros.add(macro);
+        nodes.add(node);
+        return;
+    }
+    p.fail(fmt.sprint("Unknown tag {% % %}", tag));
+}
+
+@private
+trimLeft :: (text: string) -> string {
+    i := 0;
+    while i < text.len && (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' || text[i] == '\r') { i += 1; }
+    return text.slice(i);
+}
+
+@private
+trimRight :: (text: string) -> string {
+    end := text.len as int;
+    while end > 0 && (text[end - 1] == ' ' || text[end - 1] == '\t' || text[end - 1] == '\n' || text[end - 1] == '\r') { end -= 1; }
+    return text.slice(0, end);
+}
+
+//
+// Expressions
+//
+
+@private
+tokenize :: method (p: *TemplateParser, content: string) {
+    p.tokens.count = 0;
+    p.next = 0;
+    i := 0;
+    while i < content.len {
+        ch := content[i];
+        if ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' { i += 1; continue; }
+        start := i;
+        if ch.isLetter() || ch == '_' {
+            while i < content.len && (content[i].isLetterOrDigit() || content[i] == '_') { i += 1; }
+            p.tokens.add(TemplateToken{.name, content.slice(start, i)});
+            continue;
+        }
+        if ch.isDigit() {
+            while i < content.len && (content[i].isDigit() || content[i] == '.') { i += 1; }
+            p.tokens.add(TemplateToken{.number, content.slice(start, i)});
+            continue;
+        }
+        if ch == '"' || ch == '\'' {
+            sb := fmt.newStringBuilder(32);
+            i += 1;
+            while i < content.len && content[i] != ch {
+                if content[i] == '\\' && i + 1 < content.len {
+                    i += 1;
+                    escaped := content[i];
+                    if escaped == 'n' { sb.addChar('\n'); }
+                    else if escaped == 't' { sb.addChar('\t'); }
+                    else { sb.addChar(escaped); }
+                } else {
+                    sb.addChar(content[i]);
+                }
+                i += 1;
+            }
+            if i >= content.len { p.fail("A text has no end quote"); }
+            i += 1;
+            p.tokens.add(TemplateToken{.text, sb.toString()});
+            continue;
+        }
+        // The symbols, the longest first
+        length := 1;
+        for symbol in ["===", "!==", "==", "!=", "<=", ">="] {
+            if content.slice(i).startsWith(symbol) { length = symbol.len as int; break; }
+        }
+        p.tokens.add(TemplateToken{.symbol, content.slice(i, i + length)});
+        i += length;
+    }
+}
+
+@private
+peek :: method (p: *TemplateParser) -> TemplateToken {
+    if p.next < p.tokens.count { return p.tokens[p.next]; }
+    return TemplateToken{.end, ""};
+}
+
+@private
+peekSymbol :: method (p: *TemplateParser, symbol: string) -> bool {
+    t := p.peek();
+    return t.kind == .symbol && t.text == symbol;
+}
+
+@private
+peekName :: method (p: *TemplateParser, name: string) -> bool {
+    t := p.peek();
+    return t.kind == .name && t.text == name;
+}
+
+// A name, e.g the tag or a variable
+@private
+word :: method (p: *TemplateParser) -> string {
+    t := p.peek();
+    if t.kind != .name { p.fail(fmt.sprint("A name is wanted here, not '%'", t.text)); }
+    p.next += 1;
+    return t.text;
+}
+
+@private
+expectEnd :: method (p: *TemplateParser) {
+    t := p.peek();
+    if t.kind != .end { p.fail(fmt.sprint("Unexpected '%'", t.text)); }
+}
+
+// The end of endblock or endmacro, which can have the name after it
+@private
+expectEndAfterName :: method (p: *TemplateParser) {
+    if p.peek().kind == .name { p.next += 1; }
+    p.expectEnd();
+}
+
+@private
+newExpr :: method (p: *TemplateParser, kind: TemplateExprKind) -> *TemplateExpr {
+    e := new(TemplateExpr);
+    e.kind = kind;
+    e.line = p.line;
+    return e;
+}
+
+@private
+binary :: method (p: *TemplateParser, op: string, left: *TemplateExpr, right: *TemplateExpr) -> *TemplateExpr {
+    e := p.newExpr(.binary);
+    e.name = op;
+    e.left = left;
+    e.right = right;
+    return e;
+}
+
+@private
+parseExpr :: method (p: *TemplateParser) -> *TemplateExpr {
+    left := p.parseAnd();
+    while p.peekName("or") {
+        p.next += 1;
+        left = p.binary("or", left, p.parseAnd());
+    }
+    return left;
+}
+
+@private
+parseAnd :: method (p: *TemplateParser) -> *TemplateExpr {
+    left := p.parseNot();
+    while p.peekName("and") {
+        p.next += 1;
+        left = p.binary("and", left, p.parseNot());
+    }
+    return left;
+}
+
+@private
+parseNot :: method (p: *TemplateParser) -> *TemplateExpr {
+    if p.peekName("not") {
+        p.next += 1;
+        e := p.newExpr(.unary);
+        e.name = "not";
+        e.left = p.parseNot();
+        return e;
+    }
+    return p.parseCompare();
+}
+
+@private
+parseCompare :: method (p: *TemplateParser) -> *TemplateExpr {
+    left := p.parseAdd();
+    while true {
+        t := p.peek();
+        if t.kind != .symbol { break; }
+        op := t.text;
+        if op == "===" { op = "=="; }
+        if op == "!==" { op = "!="; }
+        if op != "==" && op != "!=" && op != "<" && op != ">" && op != "<=" && op != ">=" { break; }
+        p.next += 1;
+        left = p.binary(op, left, p.parseAdd());
+    }
+    return left;
+}
+
+@private
+parseAdd :: method (p: *TemplateParser) -> *TemplateExpr {
+    left := p.parseMul();
+    while p.peekSymbol("+") || p.peekSymbol("-") || p.peekSymbol("~") {
+        op := p.peek().text;
+        p.next += 1;
+        left = p.binary(op, left, p.parseMul());
+    }
+    return left;
+}
+
+@private
+parseMul :: method (p: *TemplateParser) -> *TemplateExpr {
+    left := p.parseUnary();
+    while p.peekSymbol("*") || p.peekSymbol("/") || p.peekSymbol("%") {
+        op := p.peek().text;
+        p.next += 1;
+        left = p.binary(op, left, p.parseUnary());
+    }
+    return left;
+}
+
+@private
+parseUnary :: method (p: *TemplateParser) -> *TemplateExpr {
+    if p.peekSymbol("-") {
+        p.next += 1;
+        e := p.newExpr(.unary);
+        e.name = "-";
+        e.left = p.parseUnary();
+        return e;
+    }
+    return p.parseFilters();
+}
+
+@private
+parseFilters :: method (p: *TemplateParser) -> *TemplateExpr {
+    left := p.parsePostfix();
+    while p.peekSymbol("|") {
+        p.next += 1;
+        e := p.newExpr(.filter);
+        e.name = p.word();
+        e.left = left;
+        if p.peekSymbol("(") { p.parseArgs(e); }
+        left = e;
+    }
+    return left;
+}
+
+// The arguments of a call or a filter, after its (
+@private
+parseArgs :: method (p: *TemplateParser, e: *TemplateExpr) {
+    p.next += 1;   // (
+    while !p.peekSymbol(")") {
+        name := "";
+        if p.peek().kind == .name && p.next + 1 < p.tokens.count && p.tokens[p.next + 1].kind == .symbol && p.tokens[p.next + 1].text == "=" {
+            name = p.word();
+            p.next += 1;
+        }
+        e.args.add(p.parseExpr());
+        e.argNames.add(name);
+        if p.peekSymbol(",") { p.next += 1; } else if !p.peekSymbol(")") { p.fail("The arguments are separated by ,"); }
+    }
+    p.next += 1;   // )
+}
+
+@private
+parsePostfix :: method (p: *TemplateParser) -> *TemplateExpr {
+    left := p.parsePrimary();
+    while true {
+        if p.peekSymbol(".") {
+            p.next += 1;
+            e := p.newExpr(.member);
+            e.left = left;
+            e.name = p.word();
+            left = e;
+        } else if p.peekSymbol("[") {
+            p.next += 1;
+            e := p.newExpr(.index);
+            e.left = left;
+            e.right = p.parseExpr();
+            if !p.peekSymbol("]") { p.fail("[ has no ]"); }
+            p.next += 1;
+            left = e;
+        } else if p.peekSymbol("(") {
+            e := p.newExpr(.call);
+            e.left = left;
+            p.parseArgs(e);
+            left = e;
+        } else {
+            break;
+        }
+    }
+    return left;
+}
+
+@private
+parsePrimary :: method (p: *TemplateParser) -> *TemplateExpr {
+    t := p.peek();
+    if t.kind == .end { p.fail("A value is wanted here"); }
+    p.next += 1;
+    if t.kind == .number {
+        e := p.newExpr(.literal);
+        if t.text.indexOf(".") >= 0 {
+            number, ok := parseNumber(t.text);
+            if !ok { p.fail(fmt.sprint("'%' isn't a number", t.text)); }
+            e.value = Value{number: number};
+        } else {
+            e.value = Value{integer: parseInteger(t.text)};
+        }
+        return e;
+    }
+    if t.kind == .text {
+        e := p.newExpr(.literal);
+        e.value = Value{text: t.text};
+        return e;
+    }
+    if t.kind == .name {
+        e := p.newExpr(.literal);
+        if t.text == "true" || t.text == "True" { e.value = Value{boolean: true}; return e; }
+        if t.text == "false" || t.text == "False" { e.value = Value{boolean: false}; return e; }
+        if t.text == "none" || t.text == "None" || t.text == "null" || t.text == "undefined" { e.value = .none; return e; }
+        e.kind = .name;
+        e.name = t.text;
+        return e;
+    }
+    if t.text == "(" {
+        e := p.parseExpr();
+        if !p.peekSymbol(")") { p.fail("( has no )"); }
+        p.next += 1;
+        return e;
+    }
+    if t.text == "[" {
+        e := p.newExpr(.list);
+        while !p.peekSymbol("]") {
+            e.args.add(p.parseExpr());
+            if p.peekSymbol(",") { p.next += 1; } else if !p.peekSymbol("]") { p.fail("The values of a list are separated by ,"); }
+        }
+        p.next += 1;
+        return e;
+    }
+    p.fail(fmt.sprint("Unexpected '%'", t.text));
+    return null;
+}
+
+@private
+parseNumber :: (text: string) -> f64, bool {
+    whole: f64 = 0.0;
+    fraction: f64 = 0.0;
+    scale: f64 = 1.0;
+    dot := false;
+    for ch in text {
+        if ch == '.' {
+            if dot { return 0.0, false; }
+            dot = true;
+            continue;
+        }
+        if dot { scale /= 10.0; fraction += (ch.digitValue() as f64) * scale; }
+        else   { whole = whole * 10.0 + ch.digitValue() as f64; }
+    }
+    return whole + fraction, true;
+}
+
+// Reads and parses a template, with the heap as its memory
+@private
+parse :: (name: string, source: string) -> *Template {
+    p: TemplateParser;
+    p.name = name;
+    p.source = source;
+    p.line = 1;
+    template := new(Template);
+    template.name = name;
+    p.template = template;
+    end := p.parseNodes(&template.nodes, ["endif", "endfor", "endblock", "endmacro", "else", "elif", "elseif"]);
+    if end != "" { p.fail(fmt.sprint("{% % %} without its start", end)); }
+    p.tokens.free();
+    return template;
+}
+
+//
+// Rendering
+//
+
+TemplateVariable :: struct {
+    name:  string;
+    value: Value;
+}
+
+// What a loop variable is: loop.index and the others of a for
+Loop :: struct {
+    index:  int;     // From 1
+    index0: int;     // From 0
+    first:  bool;
+    last:   bool;
+    length: int;
+}
+
+TemplateRenderer :: struct {
+    templates: *Templates;
+    data:      any;
+    context:   *void;
+    out:       fmt.StringBuilder;
+    variables: [..]TemplateVariable;     // Of for, set and macros, the last are the innermost
+    barrier:   i64;              // The variables before it aren't seen, e.g in a macro
+    chain:     [..]*Template;    // From the template that was rendered to the one it extends, for the blocks
+    depth:     int;              // Of includes and macros in each other
+}
+
+@private
+load :: method (r: *TemplateRenderer, name: string) -> *Template {
+    t := r.templates;
+    t.mutex.lock();
+    cached := t.templates.tryGet(name);
+    if t.cache && cached != null {
+        template := cached ?? null;
+        t.mutex.unlock();
+        return template;
+    }
+    previous := mem.setAllocator(mem.heap());
+    path := fmt.sprint("%/%", t.folder, name);
+    source, err := os.readFile(path);
+    if err != null {
+        mem.setAllocator(previous);
+        t.mutex.unlock();
+        throw newError(fmt.sprint("The template % can't be read: %", name, err.message), TemplateError);
+    }
+    template: *Template;
+    try {
+        template = parse(name.copy(), source);
+    } catch (thrown) {
+        mem.setAllocator(previous);
+        t.mutex.unlock();
+        throw thrown;
+    }
+    if t.cache { t.templates.set(template.name, template); }
+    mem.setAllocator(previous);
+    t.mutex.unlock();
+    return template;
+}
+
+@private
+renderTemplate :: method (r: *TemplateRenderer, template: *Template) {
+    // The macros are there before they are written, so they can be used anywhere in the template
+    for macro in template.macros { r.variables.add(TemplateVariable{macro.name, Value{macro: macro}}); }
+    if template.extends != null {
+        r.chain.add(template);
+        name := textOf(r.eval(template.extends));
+        parent := r.load(name);
+        r.renderTemplate(parent);
+        return;
+    }
+    r.renderNodes(template.nodes);
+}
+
+@private
+renderNodes :: method (r: *TemplateRenderer, nodes: []*TemplateNode) {
+    for node in nodes { r.renderNode(node); }
+}
+
+@private
+renderNode :: method (r: *TemplateRenderer, node: *TemplateNode) {
+    switch node.kind {
+        case .text { r.out.addString(node.text); }
+        case .output { r.write(r.eval(node.expr)); }
+        case .if {
+            for branch in node.branches {
+                if isTrue(r.eval(branch.condition)) {
+                    r.renderNodes(branch.body);
+                    return;
+                }
+            }
+            r.renderNodes(node.orElse);
+        }
+        case .for {
+            items := itemsOf(r.eval(node.expr));
+            if items.count == 0 {
+                r.renderNodes(node.orElse);
+                return;
+            }
+            loop: Loop;
+            loop.length = items.count as int;
+            count := r.variables.count;
+            for item, i in items {
+                loop.index0 = i as int;
+                loop.index = i as int + 1;
+                loop.first = i == 0;
+                loop.last = i == items.count - 1;
+                r.variables.count = count;
+                r.variables.add(TemplateVariable{node.names[0], item});
+                loopValue: any = &loop;
+                r.variables.add(TemplateVariable{"loop", valueOf(loopValue)});
+                r.renderNodes(node.body);
+            }
+            r.variables.count = count;
+        }
+        case .set {
+            r.variables.add(TemplateVariable{node.names[0], r.eval(node.expr)});
+        }
+        case .include {
+            name := textOf(r.eval(node.expr));
+            r.enter(node.line);
+            template := r.load(name);
+            chain := r.chain;
+            empty: [..]*Template;
+            r.chain = empty;
+            r.renderTemplate(template);
+            r.chain = chain;
+            r.depth -= 1;
+        }
+        case .block {
+            // The block of the template that extends the others the most
+            body := node.body;
+            name := node.names[0];
+            for template in r.chain {
+                found := template.blocks.tryGet(name);
+                if found != null {
+                    body = (found ?? node).body;
+                    break;
+                }
+            }
+            r.renderNodes(body);
+        }
+        case .macro { }   // Made a variable when the template started
+    }
+}
+
+// Includes and macros in each other, at most 100 deep
+@private
+enter :: method (r: *TemplateRenderer, line: int) {
+    r.depth += 1;
+    if r.depth > 100 { throw newError(fmt.sprint("line %: includes or macros 100 deep in each other", line), TemplateError); }
+}
+
+@private
+write :: method (r: *TemplateRenderer, value: Value) {
+    switch v in value {
+        case .html { r.out.addString(v); }
+        case .none { }
+        else { r.out.addString(escape(textOf(value))); }
+    }
+}
+
+// The value of a name: a variable, a member of the data, or a global
+@private
+lookup :: method (r: *TemplateRenderer, name: string) -> Value {
+    i := r.variables.count - 1;
+    while i >= r.barrier {
+        if r.variables[i].name == name { return r.variables[i].value; }
+        i -= 1;
+    }
+    // The macros of the templates are seen in macros too
+    for j in 0..r.barrier {
+        if r.variables[j].name == name && r.variables[j].value.kind == .macro { return r.variables[j].value; }
+    }
+    if r.data.type != null {
+        member := memberValue(valueOf(r.data), name);
+        if member.kind != .none { return member; }
+    }
+    global := r.templates.globals.tryGet(name);
+    if global != null { return global ?? Value.none; }
+    return .none;
+}
+
+@private
+eval :: method (r: *TemplateRenderer, e: *TemplateExpr) -> Value {
+    switch e.kind {
+        case .literal { return e.value; }
+        case .name { return r.lookup(e.name); }
+        case .member { return memberValue(r.eval(e.left), e.name); }
+        case .index { return indexValue(r.eval(e.left), r.eval(e.right)); }
+        case .list {
+            list := new(ValueList);
+            for item in e.args { list.items.add(r.eval(item)); }
+            return Value{list: list};
+        }
+        case .unary {
+            value := r.eval(e.left);
+            if e.name == "not" { return Value{boolean: !isTrue(value)}; }
+            switch v in value {
+                case .integer { return Value{integer: -v}; }
+                case .number { return Value{number: -v}; }
+                else { return .none; }
+            }
+        }
+        case .binary { return r.evalBinary(e); }
+        case .filter {
+            filter := r.templates.filters.tryGet(e.name);
+            if filter == null { throw newError(fmt.sprint("line %: there is no filter %", e.line, e.name), TemplateError); }
+            call := r.newCall(e);
+            f := filter.value();
+            return f(&call, r.eval(e.left));
+        }
+        case .call {
+            if e.left.kind == .name {
+                // A function of the program, unless a variable has the name, e.g a macro
+                value := r.lookup(e.left.name);
+                if value.kind != .macro {
+                    function := r.templates.functions.tryGet(e.left.name);
+                    if function == null { throw newError(fmt.sprint("line %: there is no function or macro %", e.line, e.left.name), TemplateError); }
+                    call := r.newCall(e);
+                    f := function.value();
+                    return f(&call);
+                }
+                return r.callMacro(value, e);
+            }
+            return r.callMacro(r.eval(e.left), e);
+        }
+    }
+}
+
+@private
+newCall :: method (r: *TemplateRenderer, e: *TemplateExpr) -> Call {
+    call: Call;
+    call.context = r.context;
+    call.templates = r.templates;
+    args: [..]Value;
+    for arg in e.args { args.add(r.eval(arg)); }
+    call.args = args;
+    return call;
+}
+
+// The text that the macro writes with the arguments, as html
+@private
+callMacro :: method (r: *TemplateRenderer, value: Value, e: *TemplateExpr) -> Value {
+    macro: *Macro;
+    switch v in value {
+        case .macro { macro = v; }
+        else { throw newError(fmt.sprint("line %: only a macro or a function can be called", e.line), TemplateError); }
+    }
+    // The arguments, by position and by name, and the defaults
+    values: [..]Value;
+    for param in macro.params { values.add(.none); }
+    given: [..]bool;
+    for param in macro.params { given.add(false); }
+    position := 0;
+    for arg, i in e.args {
+        name := e.argNames[i];
+        index := -1;
+        if name.len > 0 {
+            for param, j in macro.params { if param.name == name { index = j as int; } }
+            if index < 0 { throw newError(fmt.sprint("line %: the macro % has no parameter %", e.line, macro.name, name), TemplateError); }
+        } else {
+            index = position;
+            position += 1;
+            if index >= macro.params.count { throw newError(fmt.sprint("line %: the macro % takes % arguments", e.line, macro.name, macro.params.count), TemplateError); }
+        }
+        values[index] = r.eval(arg);
+        given[index] = true;
+    }
+    r.enter(e.line);
+
+    // The body, with only the parameters as variables (and the macros, the data and the globals)
+    saved := r.out;
+    r.out = fmt.newStringBuilder(256);
+    barrier := r.barrier;
+    count := r.variables.count;
+    r.barrier = count;
+    for param, j in macro.params {
+        if !given[j] && param.value != null { values[j] = r.eval(param.value); }
+        r.variables.add(TemplateVariable{param.name, values[j]});
+    }
+    r.renderNodes(macro.body);
+    html := r.out.toString();
+    r.out = saved;
+    r.variables.count = count;
+    r.barrier = barrier;
+    r.depth -= 1;
+    return Value{html: html};
+}
+
+@private
+evalBinary :: method (r: *TemplateRenderer, e: *TemplateExpr) -> Value {
+    if e.name == "and" {
+        left := r.eval(e.left);
+        if !isTrue(left) { return left; }
+        return r.eval(e.right);
+    }
+    if e.name == "or" {
+        left := r.eval(e.left);
+        if isTrue(left) { return left; }
+        return r.eval(e.right);
+    }
+    a := r.eval(e.left);
+    b := r.eval(e.right);
+    op := e.name;
+    if op == "~" { return Value{text: fmt.sprint("%%", textOf(a), textOf(b))}; }
+    if op == "==" { return Value{boolean: equalValues(a, b)}; }
+    if op == "!=" { return Value{boolean: !equalValues(a, b)}; }
+
+    // Numbers, or texts for + and the comparisons
+    aNumber, aIsNumber := numberOf(a);
+    bNumber, bIsNumber := numberOf(b);
+    if !aIsNumber || !bIsNumber {
+        if op == "+" { return Value{text: fmt.sprint("%%", textOf(a), textOf(b))}; }
+        x := textOf(a);
+        y := textOf(b);
+        if op == "<"  { return Value{boolean: x < y}; }
+        if op == ">"  { return Value{boolean: y < x}; }
+        if op == "<=" { return Value{boolean: !(y < x)}; }
+        if op == ">=" { return Value{boolean: !(x < y)}; }
+        return .none;
+    }
+    if op == "<"  { return Value{boolean: aNumber < bNumber}; }
+    if op == ">"  { return Value{boolean: aNumber > bNumber}; }
+    if op == "<=" { return Value{boolean: aNumber <= bNumber}; }
+    if op == ">=" { return Value{boolean: aNumber >= bNumber}; }
+    integers := a.kind == .integer && b.kind == .integer;
+    if integers {
+        x := integerOf(a);
+        y := integerOf(b);
+        if op == "+" { return Value{integer: x + y}; }
+        if op == "-" { return Value{integer: x - y}; }
+        if op == "*" { return Value{integer: x * y}; }
+        if op == "%" { if y == 0 { return .none; } return Value{integer: x % y}; }
+    }
+    if op == "+" { return Value{number: aNumber + bNumber}; }
+    if op == "-" { return Value{number: aNumber - bNumber}; }
+    if op == "*" { return Value{number: aNumber * bNumber}; }
+    if op == "/" { if bNumber == 0.0 { return .none; } return Value{number: aNumber / bNumber}; }
+    if op == "%" { return .none; }
+    return .none;
+}
+
+@private
+numberOf :: (value: Value) -> f64, bool {
+    switch v in value {
+        case .integer { return v as f64, true; }
+        case .number  { return v, true; }
+        else          { }
+    }
+    return 0.0, false;
+}
+
+@private
+equalValues :: (a: Value, b: Value) -> bool {
+    if a.kind == .none || b.kind == .none { return a.kind == b.kind; }
+    x, xIsNumber := numberOf(a);
+    y, yIsNumber := numberOf(b);
+    if xIsNumber && yIsNumber { return x == y; }
+    if a.kind == .boolean && b.kind == .boolean { return isTrue(a) == isTrue(b); }
+    if xIsNumber || yIsNumber { return false; }
+    return textOf(a) == textOf(b);
+}
