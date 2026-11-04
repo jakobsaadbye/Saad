@@ -91,11 +91,8 @@ filePath :: (route: *Route, r: *Request) -> string, bool {
 
 @private
 serveFolder :: (w: *ResponseWriter, r: *Request) {
-    router := r.server.router;
-    route: *Route;
-    for i in 0..router.routes.count {
-        if router.routes[i].pattern == r.pattern { route = router.routes.indexRef(i); }
-    }
+    router := r.router;
+    route := r.route;
     if route != null && route.folder.len > 0 {
         path, ok := filePath(route, r);
         if ok && serveFile(w, r, path) { return; }

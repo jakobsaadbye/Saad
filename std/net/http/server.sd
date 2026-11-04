@@ -34,6 +34,8 @@ Request :: struct {
     remote:  net.Addr;          // Who sent it
     pattern: string;            // The pattern of the Router that matched, e.g GET /posts/{id}
     values:  [..]Header;        // The values of the {names} of the pattern
+    router:  *Router;           // The router that routed it, and its route
+    route:   *Route;
     server:  *Server;           // That answers it
 
     arena:     mem.Arena;       // The memory of the request, freed when the handler returned
@@ -128,7 +130,7 @@ Router :: struct {
 }
 
 // Adds a route: "[METHOD ]/path", where a segment {name} matches any segment, e.g "GET /posts/{id}", and a path that
-// ends with / matches every path below it, e.g "/static/". "/" matches every path. When more patterns match, the one
+// ends with / matches every path below it, e.g "/static/". "/" matches every path, and "/{$}" only / itself. When more patterns match, the one
 // with the most segments that are written out wins
 handle :: method (router: *Router, pattern: string, handler: Handler) {
     route: Route;
@@ -142,6 +144,10 @@ handle :: method (router: *Router, pattern: string, handler: Handler) {
     }
     assert(path.startsWith("/"));   // A pattern is a path that starts with /, e.g "GET /posts"
     route.prefix = path.endsWith("/");
+    if path.endsWith("/{$}") {      // Only the path itself, e.g "GET /{$}" is / and nothing below it
+        path = path.slice(0, path.len - 3);
+        route.prefix = false;
+    }
     for segment in path.split("/") {
         if segment.len > 0 { route.segments.add(segment); }
     }
@@ -196,6 +202,8 @@ serve :: method (router: *Router, w: *ResponseWriter, r: *Request) {
 
     route := &router.routes[best];
     r.pattern = route.pattern;
+    r.router = router;
+    r.route = route;
     r.values.allocator = &r.allocator;
     for segment, i in route.segments {
         if segment.startsWith("{") && segment.endsWith("}") {

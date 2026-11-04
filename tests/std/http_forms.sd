@@ -23,6 +23,10 @@ admin :: (w: *http.ResponseWriter, r: *http.Request) {
     w.write(fmt.sprint("welcome %", user));
 }
 
+moved :: (w: *http.ResponseWriter, r: *http.Request) {
+    w.redirect("/site.css", 302);
+}
+
 missing :: (w: *http.ResponseWriter, r: *http.Request) {
     w.status = 404;
     w.write("no such page");
@@ -33,6 +37,12 @@ bytesOf :: (values: []u8) -> string {
     sb := fmt.newStringBuilder(values.count as int);
     for v in values { sb.addChar(v); }
     return sb.toString();
+}
+
+router: http.Router;
+
+handler :: (w: *http.ResponseWriter, r: *http.Request) {
+    router.serve(w, r);
 }
 
 run :: (server: *http.Server) {
@@ -78,15 +88,15 @@ main :: () {
     assert(http.contentTypeOf("a/b.CSS") == "text/css; charset=utf-8" && http.contentTypeOf("x.jpg") == "image/jpeg" && http.contentTypeOf("README") == "application/octet-stream");
     assert(http.escapeUrl("a b/ø?") == "a%20b%2F%C3%B8%3F" && http.escapeUrl("plain-text_1.2") == "plain-text_1.2");
 
-    router: http.Router;
     router.handle("POST /greet", greet);
     router.handle("GET /greet", greet);
     router.handle("GET /admin", admin);
+    router.handle("GET /{$}", moved);           // Only /, not the files below it
     router.handleFiles("/", folder);
     router.notFound = missing;
 
     server: http.Server;
-    server.router = &router;
+    server.handler = handler;   // A handler of every request, which uses the router, like a site with a log does
     server.workers = 2;
     server.log = false;
     assert(server.listen("127.0.0.1:0") == null);
@@ -137,7 +147,11 @@ main :: () {
     response = http.get(fmt.sprint("%/greet?name=x", base));
     assert(response.body == "x true ");
     response.free();
-    for path in ["/nothing.css", "/images", "/", "/../secret.txt", "/images/%2e%2e/%2e%2e/secret.txt"] {
+    response = http.get(fmt.sprint("%/", base));
+    location, _ := response.header("Location");
+    assert(response.status == 302 && location == "/site.css");
+    response.free();
+    for path in ["/nothing.css", "/images", "/../secret.txt", "/images/%2e%2e/%2e%2e/secret.txt"] {
         response = http.get(fmt.sprint("%%", base, path));
         assert(response.status == 404 && response.body == "no such page");
         response.free();
