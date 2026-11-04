@@ -8,8 +8,11 @@ use fmt;
 
 main :: () {
     connectionString := "host=localhost dbname=postgres user=postgres password=postgres";
+    args := os.args();
+    if args.count > 1 { connectionString = args[1]; }   // e.g the database of tools/linux/dbtests.sh
 
     generator := postgres.EntityGenerator{connectionString: connectionString, schema: "saad_blog", folder: "examples/blog/db"};
+    if args.count > 2 { generator.folder = args[2]; }
 
     report, err := generator.run();
     if err != null {

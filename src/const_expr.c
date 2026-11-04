@@ -85,8 +85,20 @@ AstExpr *simplify_binary(ConstEvaluator *ce, AstBlock *scope, AstBinary *bin) {
 
     if (op == TOKEN_LOGICAL_OR)  return make_literal_boolean(ce, left->as.value.boolean || right->as.value.boolean);
     if (op == TOKEN_LOGICAL_AND) return make_literal_boolean(ce, left->as.value.boolean && right->as.value.boolean);
-    
-    XXX;
+
+    // The bits of integers, e.g Flags :: 0x0100 | 0x0001
+    if (left->kind == LITERAL_INTEGER && right->kind == LITERAL_INTEGER) {
+        long long a = left->as.value.integer, b = right->as.value.integer;
+        if (op == '|') return make_literal_integer(ce, a | b);
+        if (op == '&') return make_literal_integer(ce, a & b);
+        if (op == '^') return make_literal_integer(ce, a ^ b);
+        if (op == '%' && b != 0) return make_literal_integer(ce, a % b);
+        if (op == TOKEN_BITWISE_SHIFT_LEFT  && b >= 0 && b < 64) return make_literal_integer(ce, (long long)((unsigned long long)a << b));
+        if (op == TOKEN_BITWISE_SHIFT_RIGHT && b >= 0 && b < 64) return make_literal_integer(ce, a >> b);
+    }
+
+    // Not folded: it is checked as an expression that isn't constant
+    return (AstExpr *)(bin);
 }
 
 bool is_untyped_type(Type *type);

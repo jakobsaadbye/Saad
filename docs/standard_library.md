@@ -205,6 +205,8 @@ addr := net.resolve("localhost", 80);     // net.Addr: ip and port, toString() i
 
 * Errors are of the kinds `net.Timeout`, `net.Closed`, `net.Refused`, `net.InUse` and `net.NetError`.
 * `listener.close()` wakes an `accept()` that waits, which gives `net.Closed`.
+* `net.Poll` waits until one of many sockets can be read: `p.add(conn.socket)`, `n := p.wait(milliseconds)` and
+  `p.ready(i)`.
 * The bindings are in `net.sys`, with the structs of the headers written out for both systems (`SockAddrIn`,
   `AddrInfo`, `WsaData`, `TimeVal`) and the types of the calls named (`Socket`, `Length`, `AddrLength`).
 * IPv6 and UDP aren't there yet.
@@ -246,9 +248,13 @@ response = http.request("PUT", url, headers, body);
   `w.error(status, text)` and `w.redirect(url)` help. A handler that throws gives a 500, and the error is written to
   stderr (`server.log`); the server goes on.
 * **Server:** `server.listen(address)`, then `server.serve()`, which returns after `server.shutdown()`. Fields:
-  `router` or `handler`, `workers` (0 is 2 for each processor, at least 4), `readTimeout` and `writeTimeout`
-  (milliseconds), and `limits` (`headBytes`, `bodyBytes`). Connections are kept alive, and bodies can be
-  `Content-Length` or chunked. Bad requests get 400, 408, 413, 431, 501 or 505.
+  `router` or `handler`, `workers` (0 is 2 for each processor, at least 4), `readTimeout`, `writeTimeout` and
+  `idleTimeout` (milliseconds), and `limits` (`headBytes`, `bodyBytes`). Bodies can be `Content-Length` or chunked.
+  Bad requests get 400, 408, 413, 431, 501 or 505.
+* **Connections** are kept alive without keeping a worker: the thread of `serve()` waits for the listener and the idle
+  connections with `net.Poll` (`poll`, or `WSAPoll` on Windows), and gives a connection to a worker when a request
+  comes on it. A worker that answered keeps the connection for its next request when it comes within 2 ms and no
+  other connection waits, else gives it back. `tools/bench/web_bench.sd` measures it.
 * **Memory:** the texts of a request are in an arena of the connection, freed when the handler returns. `copy()`
   what is kept for longer.
 * **Client:** `get`, `post` and `request`, a connection for each request. The texts of a response are freed with
@@ -288,6 +294,9 @@ POST /v1/createPost   {"post": {"title": "Hi"}}      -> {"id": 3, "title": "Hi"}
 
 * The url is the prefix and the name of the function, so the names of endpoints must be unique: `newApp` gives an
   error when two are the same, or when an endpoint doesn't take the session as its first parameter.
+* `newApp` also checks that the parameters can come from JSON and the results can be written as JSON, so a type that
+  can't, e.g a function, `any` as a parameter or a `*void`, is an error when the app starts, not at a request:
+  `The parameter job of the endpoint run can't come from JSON: Job.callback is a function`.
 * POST takes the parameters as the members of a JSON object in the body, and GET from the query (a string as it is,
   other types as JSON, e.g `?ids=[1,2]`). A parameter that isn't there is a 400, unless it is an optional (`?int`).
 * The result is JSON: the value, an array of the values when there are more, or `null`. A given or thrown error is

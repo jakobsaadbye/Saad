@@ -34,6 +34,8 @@ serve :: (app: *web.App) {
 
 main :: () {
     connectionString := "host=localhost dbname=postgres user=postgres password=postgres";
+    args := os.args();
+    if args.count > 1 { connectionString = args[1]; }   // e.g the database of tools/linux/dbtests.sh
 
     // An empty blog, with the posts to start with
     conn := postgres.connect(connectionString);

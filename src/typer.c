@@ -7856,6 +7856,16 @@ static AstLiteral *implied_member_name(AstExpr *value) {
     return NULL;
 }
 
+// An untyped number, e.g a constant 'Flags :: 0x0100 | 1', given to a member of a number type, e.g an i16, becomes that
+// type when it fits, like in a declaration. False after an error
+static bool untyped_number_fits(Typer *typer, Type *member_type, AstExpr *value) {
+    if (!value->type || !is_untyped_type(value->type) || value->type->kind != TYPE_INTEGER) return true;
+    if (member_type->kind != TYPE_INTEGER && member_type->kind != TYPE_FLOAT) return true;
+    if (!leads_to_integer_overflow(typer, member_type, value)) return false;
+    value->type = member_type;
+    return true;
+}
+
 // A struct literal without a type, where no type is wanted e.g {name: u.name, age: u.age}. Its type is the anonymous struct
 // of the names and the types of the values: struct { name: string; age: int; }. A member without a name gets the name of
 // the member it reads, e.g {p.title, p.body} is {title: p.title, body: p.body}
@@ -8086,6 +8096,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
                 init->value = (AstExpr *) any_cast;
             }
 
+            if (!untyped_number_fits(typer, member_type, init->value)) return NULL;
             if (!types_are_equal(member_type, init->value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", member->name, type_to_str(member_type), type_to_str(init->value->type));
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
@@ -8115,6 +8126,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
                 init->value = (AstExpr *) any_cast;
             }
 
+            if (!untyped_number_fits(typer, member_type, init->value)) return NULL;
             if (!types_are_equal(member_type, init->value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->name, type_to_str(member_type), type_to_str(init->value->type));
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(member), "Here is the member '%s' in %s", member->name, struct_defn->identifier->name);
