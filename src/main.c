@@ -18,7 +18,7 @@ typedef struct Command {
 
 // Add new commands here
 static Command commands[] = {
-    { "build", COMMAND_BUILD, "Compile the program to ./build/out.exe without running it. --debug makes it with nasm and gcc, with debug information for gdb" },
+    { "build", COMMAND_BUILD, "Compile the program to ./build/out.exe without running it. --debug adds debug information, for LLDB or GDB" },
     { "run",   COMMAND_RUN,   "Compile the program and run it in the current folder. Takes --debug too. Arguments after -- are for the program, e.g saad run tool.sd -- a.txt" },
     { "check", COMMAND_CHECK, "Check the program for errors without compiling it. With --json, the errors are written as JSON" },
     { "index", COMMAND_INDEX, "Write where every name of the program is declared and used, and its errors, as JSON for an editor. --overlay path=file reads file instead of path. --std also writes the standard library, and --all-std checks all of it with the program, e.g for an editor that has a file of it open" },

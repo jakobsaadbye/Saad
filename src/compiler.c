@@ -11,6 +11,7 @@
 #include "llvm_emit.c"
 #include "x64_asm.c"
 #include "object_writer.c"
+#include "dwarf.c"
 
 #ifdef _WIN32
     #include <io.h>
@@ -598,34 +599,16 @@ static bool write_program(CompilerConfig *config, IrModule *module, AsmObject *o
 }
 
 // Makes ./build/out.exe from the assembly. The compiler assembles it itself (x64_asm.c) and writes the program
-// (object_writer.c), so nothing has to be installed. With --debug, nasm and gcc make it instead, with debug information
-// for gdb. With --elf, it writes ./build/out.o for running it on Linux (tools/linux)
-static bool assemble_and_link(CompilerConfig *config, IrModule *module, StringBuilder *assembly) {
-    if (config->debug) {
-        if (system("nasm -fwin64 -g ./build/out.asm -o ./build/out.obj") != 0) {
-            printf("error: Failed to assemble ./build/out.asm. 'saad build --debug' needs nasm\n");
-            return false;
-        }
-#ifdef _WIN32
-        char link_command[2048];
-        snprintf(link_command, sizeof(link_command),
-            "gcc -o ./build/out.exe ./build/out.obj "
-            "-L\"%s/packages/raylib/lib\" -lraylib "
-            "-lkernel32 -lmsvcrt -lgdi32 -lwinmm -lopengl32 -ld3d9 -ldxguid",
-            config->compiler_path
-        );
-        return system(link_command) == 0;
-#else
-        printf("note: Skipping linking. 'saad build --debug' can only link on Windows\n");
-        return true;
-#endif
-    }
-
+// (object_writer.c), so nothing has to be installed. With --debug, it has debug information (dwarf.c). With --elf, it
+// writes ./build/out.o for running it on Linux (tools/linux)
+static bool assemble_and_link(CompilerConfig *config, IrModule *module, X64Output *x64) {
+    StringBuilder *assembly = &x64->assembly;
     AsmObject obj;
     if (!x64_assemble(assembly->buffer, (int) assembly->cursor, &obj)) {
         printf("Compiler Error: The assembler failed on ./build/out.asm, %s\n", obj.error);
         return false;
     }
+    if (config->debug) dwarf_write(&obj, module, x64->debug_functions, x64->debug_function_count, !config->emit_elf);
     return write_program(config, module, &obj);
 }
 
@@ -919,14 +902,14 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
 
     // ----------- x64 -----------
     report.codegen_time_start = clock();
-    X64Output x64 = x64_emit_module(module);
+    X64Output x64 = x64_emit_module(module, config->debug);
     write_text_file("./build/out.regalloc.txt", x64.regalloc_dump);
     write_text_file("./build/out.asm", x64.assembly);
     report.codegen_time_end = clock();
 
     // ----------- Assemble + link -----------
     report.asm_and_link_time_start = clock();
-    if (!assemble_and_link(config, module, &x64.assembly)) {
+    if (!assemble_and_link(config, module, &x64)) {
         cleanup();
         return false;
     }

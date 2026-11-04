@@ -196,17 +196,31 @@ bool elf_write(AsmObject *obj, const char *path, const char *prefix) {
     resolve_local_relocs(obj);
     if (!prefix) prefix = "";
 
-    // Sections: 0 null, 1 .text, 2 .data, 3 .rodata, 4-6 .rela.*, 7 .symtab, 8 .strtab, 9 .shstrtab
-    static const char *names[] = { "", ".text", ".data", ".rodata", ".rela.text", ".rela.data", ".rela.rodata", ".symtab", ".strtab", ".shstrtab" };
+    // Sections: 0 null, 1..n the sections of the object (.text, .data, .rodata, then the extra ones, e.g .debug_info),
+    // n+1..2n their .rela, then .symtab, .strtab and .shstrtab
+    int n = ASM_SECTION_COUNT + obj->extra_section_count;
+    int total = 2 * n + 4;
+    int symtab_index = 2 * n + 1, strtab_index = 2 * n + 2, shstrtab_index = 2 * n + 3;
+    static const char *base_names[ASM_SECTION_COUNT] = { ".text", ".data", ".rodata" };
     OutBytes shstrtab = {0};
-    uint32_t name_at[10];
-    for (int i = 0; i < 10; i++) { name_at[i] = (uint32_t)shstrtab.size; out_put(&shstrtab, names[i], strlen(names[i]) + 1); }
+    uint32_t *name_at = calloc(total, sizeof(uint32_t));
+    out_u8(&shstrtab, 0);
+    for (int s = 0; s < n; s++) {
+        const char *name = s < ASM_SECTION_COUNT ? base_names[s] : obj->extra_names[s - ASM_SECTION_COUNT];
+        name_at[1 + n + s] = (uint32_t)shstrtab.size;
+        out_put(&shstrtab, ".rela", 5);
+        name_at[1 + s] = (uint32_t)shstrtab.size;
+        out_put(&shstrtab, name, strlen(name) + 1);
+    }
+    name_at[symtab_index] = (uint32_t)shstrtab.size;   out_put(&shstrtab, ".symtab", 8);
+    name_at[strtab_index] = (uint32_t)shstrtab.size;   out_put(&shstrtab, ".strtab", 8);
+    name_at[shstrtab_index] = (uint32_t)shstrtab.size; out_put(&shstrtab, ".shstrtab", 10);
 
-    // Symbols: null, the 3 sections (local), then the globals and externs
+    // Symbols: null, the sections (local), then the globals and externs
     OutBytes symtab = {0}, strtab = {0};
     out_u8(&strtab, 0);
     out_zeros(&symtab, 24);
-    for (int s = 0; s < ASM_SECTION_COUNT; s++) {
+    for (int s = 0; s < n; s++) {
         out_u32(&symtab, 0);
         out_u8(&symtab, 3);              // STB_LOCAL, STT_SECTION
         out_u8(&symtab, 0);
@@ -214,9 +228,9 @@ bool elf_write(AsmObject *obj, const char *path, const char *prefix) {
         out_u64(&symtab, 0);
         out_u64(&symtab, 0);
     }
-    int first_global = 4;
+    int first_global = 1 + n;
     int *symbol_index = calloc(obj->symbol_count, sizeof(int));
-    int count = 4;
+    int count = 1 + n;
     for (int i = 0; i < obj->symbol_count; i++) {
         AsmSymbol *s = &obj->symbols[i];
         symbol_index[i] = -1;
@@ -232,7 +246,7 @@ bool elf_write(AsmObject *obj, const char *path, const char *prefix) {
         symbol_index[i] = count++;
     }
 
-    OutBytes rela[ASM_SECTION_COUNT] = {0};
+    OutBytes *rela = calloc(n, sizeof(OutBytes));
     for (int i = 0; i < obj->reloc_count; i++) {
         AsmReloc *r = &obj->relocs[i];
         if (reloc_is_resolved(obj, r)) continue;
@@ -241,7 +255,8 @@ bool elf_write(AsmObject *obj, const char *path, const char *prefix) {
         int target = symbol_index[r->symbol];
         if (target < 0) { target = 1 + s->section; addend += s->offset; }
         uint32_t type;
-        if (r->kind == ASM_RELOC_ABS64) type = 1;                        // R_X86_64_64
+        if (r->kind == ASM_RELOC_ABS64)          type = 1;               // R_X86_64_64
+        else if (r->kind == ASM_RELOC_SECREL32)  type = 10;              // R_X86_64_32: an offset in a section, e.g of the debug information
         else { type = 2; addend -= 4 + r->trailing; }                    // R_X86_64_PC32
         out_u64(&rela[r->section], (uint64_t)r->offset);
         out_u64(&rela[r->section], ((uint64_t)target << 32) | type);
@@ -250,33 +265,34 @@ bool elf_write(AsmObject *obj, const char *path, const char *prefix) {
 
     OutBytes o = {0};
     out_zeros(&o, 64);
-    uint64_t offsets[10] = {0}, sizes[10] = {0};
-    for (int s = 0; s < ASM_SECTION_COUNT; s++) {
+    uint64_t *offsets = calloc(total, sizeof(uint64_t)), *sizes = calloc(total, sizeof(uint64_t));
+    for (int s = 0; s < n; s++) {
         out_pad(&o, 16);
         offsets[1 + s] = o.size;
         sizes[1 + s] = obj->sections[s].size;
         out_put(&o, obj->sections[s].data, obj->sections[s].size);
     }
-    for (int s = 0; s < ASM_SECTION_COUNT; s++) {
+    for (int s = 0; s < n; s++) {
         out_pad(&o, 8);
-        offsets[4 + s] = o.size;
-        sizes[4 + s] = rela[s].size;
+        offsets[1 + n + s] = o.size;
+        sizes[1 + n + s] = rela[s].size;
         out_put(&o, rela[s].data, rela[s].size);
     }
     out_pad(&o, 8);
-    offsets[7] = o.size; sizes[7] = symtab.size; out_put(&o, symtab.data, symtab.size);
-    offsets[8] = o.size; sizes[8] = strtab.size; out_put(&o, strtab.data, strtab.size);
-    offsets[9] = o.size; sizes[9] = shstrtab.size; out_put(&o, shstrtab.data, shstrtab.size);
+    offsets[symtab_index] = o.size;   sizes[symtab_index] = symtab.size;     out_put(&o, symtab.data, symtab.size);
+    offsets[strtab_index] = o.size;   sizes[strtab_index] = strtab.size;     out_put(&o, strtab.data, strtab.size);
+    offsets[shstrtab_index] = o.size; sizes[shstrtab_index] = shstrtab.size; out_put(&o, shstrtab.data, shstrtab.size);
     out_pad(&o, 8);
     uint64_t section_headers = o.size;
 
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < total; i++) {
         uint32_t type = 0, link = 0, info = 0;
         uint64_t flags = 0, align = 1, entsize = 0;
-        if (i >= 1 && i <= 3) { type = 1; align = 16; flags = i == 1 ? 6 : i == 2 ? 3 : 2; } // PROGBITS: AX, WA, A
-        if (i >= 4 && i <= 6) { type = 4; link = 7; info = (uint32_t)(i - 3); align = 8; entsize = 24; flags = 0x40; } // RELA, INFO_LINK
-        if (i == 7) { type = 2; link = 8; info = (uint32_t)first_global; align = 8; entsize = 24; }
-        if (i == 8 || i == 9) type = 3;
+        if (i >= 1 && i <= ASM_SECTION_COUNT) { type = 1; align = 16; flags = i == 1 ? 6 : i == 2 ? 3 : 2; } // PROGBITS: AX, WA, A
+        if (i > ASM_SECTION_COUNT && i <= n) { type = 1; align = 1; }                                       // PROGBITS, not loaded, e.g .debug_info
+        if (i > n && i <= 2 * n) { type = 4; link = (uint32_t)symtab_index; info = (uint32_t)(i - n); align = 8; entsize = 24; flags = 0x40; } // RELA, INFO_LINK
+        if (i == symtab_index) { type = 2; link = (uint32_t)strtab_index; info = (uint32_t)first_global; align = 8; entsize = 24; }
+        if (i == strtab_index || i == shstrtab_index) type = 3;
         out_u32(&o, name_at[i]);
         out_u32(&o, type);
         out_u64(&o, flags);
@@ -299,12 +315,13 @@ bool elf_write(AsmObject *obj, const char *path, const char *prefix) {
     put_u64_at(h + 40, section_headers);
     put_u16_at(h + 52, 64);                     // e_ehsize
     put_u16_at(h + 58, 64);                     // e_shentsize
-    put_u16_at(h + 60, 10);                     // e_shnum
-    put_u16_at(h + 62, 9);                      // e_shstrndx
+    put_u16_at(h + 60, (uint16_t)total);        // e_shnum
+    put_u16_at(h + 62, (uint16_t)shstrtab_index);
 
     bool ok = write_file_bytes(path, &o);
     free(o.data); free(symtab.data); free(strtab.data); free(shstrtab.data); free(symbol_index);
-    for (int s = 0; s < ASM_SECTION_COUNT; s++) free(rela[s].data);
+    for (int s = 0; s < n; s++) free(rela[s].data);
+    free(rela); free(offsets); free(sizes); free(name_at);
     return ok;
 }
 

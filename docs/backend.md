@@ -82,8 +82,8 @@ LLVM takes longer: about 8 seconds for `examples/blog/server.sd` at `-O2`, again
 
 ## Debug information
 
-`saad build main.sd --llvm --debug` makes the program with DWARF debug information, at `-O0` unless an `-O` is given.
-A debugger (LLDB, e.g through CodeLLDB in VS Code, or GDB) can then stop at a line of a `.sd` file, step through the
+`saad build main.sd --debug` makes the program with DWARF debug information, with both backends (with `--llvm` at `-O0`
+unless an `-O` is given). A debugger (LLDB, e.g through CodeLLDB in VS Code, or GDB) can then stop at a line of a `.sd` file, step through the
 lines, and show the calls with the names of the program, e.g `List<int>.add` or `json.Parser.parse`.
 
 * Each IR function has its file and line (`IrFunction.source_file`, `source_line`) and its name in the program
@@ -109,12 +109,18 @@ The variables and parameters have debug information too:
 * `tools/linux/check_debug.sh` (part of `runtests.sh` when LLDB is installed) stops in `tests/debug/variables.sd` with
   LLDB and checks what it shows.
 
-The global variables, and the x64 backend, don't have debug information yet.
+The x64 backend makes the same debug information itself, with dwarf.c:
 
-## Debugging
+* With `--debug`, x64_emit.c puts a label in the code where the line or the scope of the instructions changes, after the
+  prologue and at the end of each function, and keeps the rbp offsets of the slots (`X64DebugFunction`).
+* After x64_assemble(), the labels have their addresses, and `dwarf_write()` writes `.debug_abbrev`, `.debug_info`,
+  `.debug_line` and `.debug_ranges` into the AsmObject: a subprogram per function, its variables at `rbp + offset`, a
+  lexical block for each scope with variables, and the types like llvm_emit.c makes them. An address is a relocation to
+  a label, and an offset into another debug section a section relative one, so `pe_write()` and `elf_write()` write them.
+* For Windows it writes the unwind tables too. Every function starts with `push rbp; mov rbp, rsp`, so all of them have
+  the same unwind information: rbp is the frame register.
 
-With the x64 backend, `saad build main.sd --debug` makes the program the old way, with `nasm -fwin64 -g` and `gcc`, so
-gdb can step through its assembly (see gdb_guide.md). That needs nasm and MinGW's gcc.
+The global variables don't have debug information yet.
 
 ## Testing
 

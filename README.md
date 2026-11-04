@@ -73,8 +73,8 @@ saad build main.sd        # compile to build\out.exe
 saad check main.sd        # only check for errors
 ```
 
-`saad build main.sd --debug` makes the program with nasm and gcc instead, with debug information for gdb (see
-`gdb_guide.md`). `saad build main.sd --llvm` makes an optimized program with LLVM (`-O0` to `-O3`, `-O2` when not
+`saad build main.sd --debug` makes the program with debug information, so a debugger (LLDB, e.g CodeLLDB in VS Code,
+or GDB) can stop at the lines of the program and show its variables (see `gdb_guide.md`). `saad build main.sd --llvm` makes an optimized program with LLVM (`-O0` to `-O3`, `-O2` when not
 given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the compiler, and it makes Windows programs too. See `docs/backend.md`.
 
 # Changelog
