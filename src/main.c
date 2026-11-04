@@ -10,30 +10,85 @@ typedef enum CommandKind {
     COMMAND_COMPLETE,
 } CommandKind;
 
+typedef struct CommandOption {
+    const char *name;
+    const char *description;
+} CommandOption;
+
 typedef struct Command {
-    const char  *name;
-    CommandKind  kind;
-    const char  *description;
+    const char    *name;
+    CommandKind    kind;
+    const char    *description;
+    bool           for_editors;   // Used by the language server, not typed by people. Listed apart
+    CommandOption  options[12];   // What 'saad <command> help' shows
 } Command;
+
+#ifdef SAAD_LLVM
+#define LLVM_DESCRIPTION "Optimize with LLVM"
+#else
+#define LLVM_DESCRIPTION "Optimize with LLVM (not in this build)"
+#endif
+
+#define BUILD_OPTIONS \
+    { "--debug",     "Add debug information, for LLDB or GDB" }, \
+    { "--llvm",      LLVM_DESCRIPTION }, \
+    { "-O0 .. -O3",  "How much LLVM optimizes: -O2, or -O0 with --debug" }, \
+    { "--unchecked", "Leave out the bounds checks of indexes" }, \
+    { "--os <os>",   "The OS of #if: windows or linux" }, \
+    { "--elf",       "Write build/out.o for Linux (tools/linux)" }
 
 // Add new commands here
 static Command commands[] = {
-    { "build", COMMAND_BUILD, "Compile the program to ./build/out.exe without running it. --debug adds debug information, for LLDB or GDB" },
-    { "run",   COMMAND_RUN,   "Compile the program and run it in the current folder. Takes --debug too. Arguments after -- are for the program, e.g saad run tool.sd -- a.txt" },
-    { "check", COMMAND_CHECK, "Check the program for errors without compiling it. With --json, the errors are written as JSON" },
-    { "index", COMMAND_INDEX, "Write where every name of the program is declared and used, and its errors, as JSON for an editor. --overlay path=file reads file instead of path. --std also writes the standard library, and --all-std checks all of it with the program, e.g for an editor that has a file of it open" },
-    { "complete", COMMAND_COMPLETE, "Write what can be written at --at file:line:character (from 0), and the signature of the call there, as JSON for an editor. Takes --overlay too" },
+    { "build", COMMAND_BUILD, "Compile the program to build/out.exe", false, { BUILD_OPTIONS } },
+    { "run",   COMMAND_RUN,   "Compile the program and run it", false, {
+        BUILD_OPTIONS,
+        { "-- <args>",   "Arguments for the program, e.g -- a.txt" } } },
+    { "check", COMMAND_CHECK, "Report the errors of the program", true, {
+        { "--json",      "Write the errors as JSON" },
+        { "--os <os>",   "The OS of #if: windows or linux" } } },
+    { "index", COMMAND_INDEX, "Write the names of the program as JSON", true, {
+        { "--overlay <path>=<file>", "Read file instead of path" },
+        { "--std",       "Also the standard library" },
+        { "--all-std",   "Check all of the standard library too" },
+        { "--os <os>",   "The OS of #if: windows or linux" } } },
+    { "complete", COMMAND_COMPLETE, "Write the completions at a place as JSON", true, {
+        { "--at <file:line:character>", "Where, from 0 (needed)" },
+        { "--overlay <path>=<file>", "Read file instead of path" } } },
 };
 static const int commands_count = sizeof(commands) / sizeof(commands[0]);
 
 void print_usage() {
-    printf("Usage:\n");
-    printf("   saad.exe <command> <input_file.sd> [options]\n\n");
+    printf("Usage: saad <command> <file.sd> [options]\n\n");
     printf("Commands:\n");
     for (int i = 0; i < commands_count; i++) {
-        printf("   %-10s %s\n", commands[i].name, commands[i].description);
+        if (!commands[i].for_editors) printf("  %-10s %s\n", commands[i].name, commands[i].description);
+    }
+    printf("\nOptions of a command: saad <command> help\n\n");
+    printf("For editors (used by the language server):\n");
+    for (int i = 0; i < commands_count; i++) {
+        if (commands[i].for_editors) printf("  %-10s %s\n", commands[i].name, commands[i].description);
     }
     printf("\n");
+}
+
+// The options of a command: 'saad build help'
+void print_command_usage(Command *command) {
+    printf("Usage: saad %s <file.sd> [options]\n\n", command->name);
+    printf("%s.\n\n", command->description);
+    printf("Options:\n");
+    int width = 0;
+    for (int i = 0; i < 12 && command->options[i].name; i++) {
+        int length = (int) strlen(command->options[i].name);
+        if (length > width) width = length;
+    }
+    for (int i = 0; i < 12 && command->options[i].name; i++) {
+        printf("  %-*s  %s\n", width, command->options[i].name, command->options[i].description);
+    }
+    printf("\n");
+}
+
+static bool is_help(const char *arg) {
+    return strcmp(arg, "help") == 0 || strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0;
 }
 
 Command *find_command(const char *name) {
@@ -125,8 +180,11 @@ int main(int argc, char const *argv[]) {
     }
 
     const char *command_name = argv[1];
-    if (strcmp(command_name, "help") == 0 || strcmp(command_name, "-h") == 0 || strcmp(command_name, "--help") == 0) {
-        print_usage();
+    if (is_help(command_name)) {
+        // saad help, or saad help build
+        Command *about = argc >= 3 ? find_command(argv[2]) : NULL;
+        if (about) print_command_usage(about);
+        else       print_usage();
         return 0;
     }
 
@@ -138,9 +196,13 @@ int main(int argc, char const *argv[]) {
     }
 
     if (argc < 3) {
-        printf("Error: Missing input file\n\n");
-        print_usage();
+        printf("Error: Missing the file of the program\n\n");
+        print_command_usage(command);
         return 1;
+    }
+    if (is_help(argv[2])) {
+        print_command_usage(command);
+        return 0;
     }
 
     const char *main_file_path = argv[2];
@@ -153,7 +215,7 @@ int main(int argc, char const *argv[]) {
     config.caller_directory = get_current_directory();
 
     if (!parse_options(&config, argc, argv, 3)) {
-        print_usage();
+        print_command_usage(command);
         return 1;
     }
 
