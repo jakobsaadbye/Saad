@@ -106,8 +106,27 @@ typedef struct X64FloatConstant {
     int      id;
 } X64FloatConstant;
 
+// For the debug information (dwarf.c): labels in the code of a function, whose addresses are known after assembling.
+// The label .Ldbg<label> of a function is the symbol '<function>.Ldbg<label>' of the AsmObject
+typedef struct X64DebugMark {
+    int label;
+    int line;          // The code from the label on is of this line and scope, until the next mark
+    int scope;
+} X64DebugMark;
+
+typedef struct X64DebugFunction {
+    IrFunction *func;
+    int        *slot_offsets;     // rbp relative offset of every IR slot
+    int         prologue_label;   // After the prologue, where the code of the function starts
+    int         end_label;        // After the last instruction
+    IrArray(X64DebugMark) marks;
+} X64DebugFunction;
+
 typedef struct X64Emitter {
     IrModule       *module;
+    bool            debug;          // Labels for the debug information (debug_functions)
+    IrArray(X64DebugFunction) debug_functions;
+    int             next_debug_label;
     TargetDesc      target;
     StringBuilder   text;
     StringBuilder   regalloc_dump;
@@ -930,6 +949,13 @@ static void x64_emit_terminator(X64Emitter *x, IrBlock *block) {
     }
 }
 
+// A label for the debug information, at the current place in the code
+static int x64_debug_label(X64Emitter *x) {
+    int label = x->next_debug_label++;
+    x64_label(x, ".Ldbg%d", label);
+    return label;
+}
+
 static void x64_emit_function(X64Emitter *x, IrFunction *func) {
     x->func = func;
     x->ra   = regalloc_function(func, &x->target);
@@ -979,18 +1005,34 @@ static void x64_emit_function(X64Emitter *x, IrFunction *func) {
         x64_parallel_move(x, moves, move_count);
     }
 
+    X64DebugFunction *debug = NULL;
+    if (x->debug) {
+        X64DebugFunction entry = { func, x->slot_offsets, x64_debug_label(x), -1, {0} };
+        ir_array_push(x->debug_functions, entry);
+        debug = &x->debug_functions.items[x->debug_functions.count - 1];
+    }
+    int line = -1, scope = -1;
+
     for (int b = 0; b < func->blocks.count; b++) {
         IrBlock *block = func->blocks.items[b];
         x->next_block = b + 1 < func->blocks.count ? func->blocks.items[b + 1] : NULL;
 
         x64_label(x, ".L%d", block->id);
         for (int i = 0; i < block->insts.count; i++) {
-            x64_emit_inst(x, &block->insts.items[i]);
+            IrInst *inst = &block->insts.items[i];
+            if (debug && inst->line > 0 && (inst->line != line || inst->scope != scope)) {
+                line = inst->line;
+                scope = inst->scope;
+                X64DebugMark mark = { x64_debug_label(x), line, scope };
+                ir_array_push(debug->marks, mark);
+            }
+            x64_emit_inst(x, inst);
         }
         x64_emit_terminator(x, block);
     }
 
-    free(x->slot_offsets);
+    if (debug) debug->end_label = x64_debug_label(x);   // The slot offsets are kept for the debug information
+    else       free(x->slot_offsets);
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -1108,11 +1150,15 @@ static bool x64_is_runtime_function(const char *name) {
 typedef struct X64Output {
     StringBuilder assembly;
     StringBuilder regalloc_dump;
+    X64DebugFunction *debug_functions;   // With debug, for dwarf.c
+    int               debug_function_count;
 } X64Output;
 
-X64Output x64_emit_module(IrModule *module) {
+// The assembly of the module. With debug, it has labels for the debug information, which the output describes
+X64Output x64_emit_module(IrModule *module, bool debug) {
     X64Emitter *x = calloc(1, sizeof(X64Emitter));
     x->module = module;
+    x->debug = debug;
     x->target = x64_target();
     x->text = sb_init(1 << 16);
     x->regalloc_dump = sb_init(1 << 12);
@@ -1179,6 +1225,6 @@ X64Output x64_emit_module(IrModule *module) {
     if (uses_compare) sb_append(&out, "%s", x64_runtime_compare_strings);
     if (uses_assert)  sb_append(&out, "%s", x64_runtime_builtin_assert);
 
-    X64Output output = { out, x->regalloc_dump };
+    X64Output output = { out, x->regalloc_dump, x->debug_functions.items, x->debug_functions.count };
     return output;
 }

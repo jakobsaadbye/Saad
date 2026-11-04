@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Checks the debug information of the LLVM backend with LLDB: builds tests/debug/variables.sd with --llvm --debug,
+# Checks the debug information with LLDB: builds tests/debug/variables.sd with --debug (and --llvm when given),
 # stops in it, and checks that what LLDB shows has each 'expect-debug' line of the program. It also checks the line of
 # the call in the calls (bt) and the line of the 'break here' stop.
 #
-#   tools/linux/check_debug.sh
+#   tools/linux/check_debug.sh            the x64 backend (dwarf.c)
+#   tools/linux/check_debug.sh --llvm     the LLVM backend
 #
-# Requirements: lldb, and a saad built with LLVM. Build the compiler first with ./build.sh
+# Requirements: lldb, and for --llvm a saad built with LLVM. Build the compiler first with ./build.sh
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 PROGRAM="$REPO/tests/debug/variables.sd"
 cd "$REPO/tests/debug"
 
-"$REPO/bin/saad" build variables.sd --elf --llvm --debug > /dev/null || { "$REPO/bin/saad" build variables.sd --elf --llvm --debug; exit 1; }
+FLAGS="--elf --debug $1"
+"$REPO/bin/saad" build variables.sd $FLAGS > /dev/null || { "$REPO/bin/saad" build variables.sd $FLAGS; exit 1; }
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 gcc -O0 -w -c -I"$REPO/src" "$HERE/shim.c" -o "$TMP/shim.o" && gcc -no-pie -z noexecstack build/out.o "$TMP/shim.o" -o "$TMP/variables" -lm -lpthread || exit 1

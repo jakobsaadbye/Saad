@@ -950,7 +950,7 @@ typedef struct CompilerConfig {
     bool               run_program;        // Run the executable after a successful build
     bool               check_only;         // Stop after type checking: 'saad check'
     bool               json;               // Write the diagnostics as JSON: 'saad check --json'
-    bool               debug;              // Make the program with nasm and gcc, with debug information: 'saad build --debug'
+    bool               debug;              // Make the program with debug information (DWARF): 'saad build --debug'
     bool               emit_elf;           // Write ./build/out.o for Linux instead of out.exe: 'saad build --elf' (tools/linux)
     bool               use_llvm;           // Make the program with LLVM instead of the x64 backend: 'saad build --llvm'
     int                opt_level;          // The -O of LLVM with --llvm, 2 when it isn't given
