@@ -1,7 +1,10 @@
 @echo off
 
-:: Set compiler flags
-set CFLAGS=-Wall -Wextra -pedantic -ggdb
+:: Set compiler flags: optimized, with debug information. Set SAAD_DEBUG=1 to build without optimizations, for debugging
+:: the compiler
+set OPTIMIZE=-O2
+if "%SAAD_DEBUG%"=="1" set OPTIMIZE=-O0
+set CFLAGS=-Wall -Wextra -pedantic -ggdb %OPTIMIZE%
 
 :: List of source files (space-separated)
 set FILES=ast lexer parser scope

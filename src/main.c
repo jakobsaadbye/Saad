@@ -35,7 +35,8 @@ typedef struct Command {
     { "-O0 .. -O3",  "How much LLVM optimizes: -O2, or -O0 with --debug" }, \
     { "--unchecked", "Leave out the bounds checks of indexes" }, \
     { "--os <os>",   "The OS of #if: windows or linux" }, \
-    { "--elf",       "Write build/out.o for Linux (tools/linux)" }
+    { "--elf",       "Write build/out.o for Linux (tools/linux)" }, \
+    { "--dump",      "Write the IR and the registers to build/out.ir and out.regalloc.txt" }
 
 // Add new commands here
 static Command commands[] = {
@@ -117,6 +118,7 @@ bool parse_options(CompilerConfig *config, int argc, char const *argv[], int fir
         if (strcmp(option, "--std") == 0)  { program_index.with_std = true; continue; }
         if (strcmp(option, "--all-std") == 0) { program_index.with_std = true; program_index.all_std = true; continue; }
         if (strcmp(option, "--debug") == 0) { config->debug = true; continue; }
+        if (strcmp(option, "--dump") == 0)  { config->dump = true; continue; }
         if (strcmp(option, "--elf") == 0)   { config->emit_elf = true; if (!os_given) target_os = "linux"; continue; }
         if (strcmp(option, "--os") == 0 && i + 1 < argc) {
             // The OS of #if, e.g for 'saad index' of the code for Linux

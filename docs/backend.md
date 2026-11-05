@@ -7,7 +7,9 @@ IR (ir_lower.c) -> registers (regalloc.c) -> assembly text (x64_emit.c) -> machi
 The compiler makes the program itself. No assembler or linker has to be installed: `saad.exe` and `std/` are all it
 needs, and `packages/` for the libraries of the standard library, e.g `raylib.dll`.
 
-* **x64_emit.c** writes the assembly in NASM's syntax, to `build/out.asm`, which is kept for reading.
+* **x64_emit.c** writes the assembly in NASM's syntax, to `build/out.asm`, which is kept for reading. `saad build --dump`
+  also writes the IR to `build/out.ir` and the registers that regalloc.c gave each value to `build/out.regalloc.txt`
+  (the IR is also written when it is invalid).
 * **x64_asm.c** is an assembler for the part of NASM's syntax that x64_emit.c writes: the instructions it uses (about 45),
   the sections `.text`, `.data` and `.rdata`, labels, and `db`/`dd`/`dq`/`times`/`align`. Jumps to labels are made as short
   as they can be. A new instruction in x64_emit.c needs a case in `asm_encode()`; the assembler reports one it doesn't

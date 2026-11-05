@@ -27,7 +27,8 @@ void close_block(Parser *parser) {
 AstIdentifier *find_identifier_in_scope(AstBlock *scope, char *ident_name) {
     for (int i = 0; i < scope->identifiers.count; i++) {
         AstIdentifier *ident = ((AstIdentifier **)scope->identifiers.items)[i];
-        if (strcmp(ident->name, ident_name) == 0) {
+        // The first letter before strcmp, as most names in a scope differ there and this runs for every name used
+        if (ident->name[0] == ident_name[0] && strcmp(ident->name, ident_name) == 0) {
             return ident;
         }
     }

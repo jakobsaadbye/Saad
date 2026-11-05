@@ -125,6 +125,7 @@ typedef struct X64DebugFunction {
 typedef struct X64Emitter {
     IrModule       *module;
     bool            debug;          // Labels for the debug information (debug_functions)
+    bool            dump;           // The registers of each function as text, in regalloc_dump
     IrArray(X64DebugFunction) debug_functions;
     int             next_debug_label;
     TargetDesc      target;
@@ -144,14 +145,18 @@ typedef struct X64Emitter {
 } X64Emitter;
 
 static void x64_line(X64Emitter *x, const char *mnemonic, const char *format, ...) {
-    sb_append(&x->text, "\t%-12s", mnemonic);
+    // "\t%-12s" by hand, as printf is slow at it and there is a line for each instruction
+    int length = (int) strlen(mnemonic);
+    sb_copy(&x->text, "\t", 1);
+    sb_copy(&x->text, (char *) mnemonic, length);
+    if (length < 12) sb_copy(&x->text, "            ", 12 - length);
     if (format && format[0]) {
         va_list args;
         va_start(args, format);
         sb_vappend(&x->text, format, args);
         va_end(args);
     }
-    sb_append(&x->text, "\n");
+    sb_copy(&x->text, "\n", 1);
 }
 
 static void x64_label(X64Emitter *x, const char *format, ...) {
@@ -962,7 +967,7 @@ static void x64_emit_function(X64Emitter *x, IrFunction *func) {
     x->next_local_label = 0;
     for (int r = 0; r < X64_REG_COUNT; r++) x->saved_gpr_offset[r] = 0;
 
-    regalloc_dump(func, &x->ra, &x->target, &x->regalloc_dump);
+    if (x->dump) regalloc_dump(func, &x->ra, &x->target, &x->regalloc_dump);
 
     x64_layout_frame(x);
 
@@ -1039,29 +1044,51 @@ static void x64_emit_function(X64Emitter *x, IrFunction *func) {
 // Module
 //////////////////////////////////////////////////////////////////////////////////////////
 
+static int x64_compare_relocs(const void *a, const void *b) {
+    return ((const IrReloc *) a)->offset - ((const IrReloc *) b)->offset;
+}
+
+// ", 123" for each byte, without printf, as the data of a program is many bytes
+static void x64_byte_list(StringBuilder *sb, const uint8_t *bytes, int count) {
+    char line[16 * 5];
+    int length = 0;
+    for (int i = 0; i < count; i++) {
+        if (i > 0) { line[length++] = ','; line[length++] = ' '; }
+        uint8_t byte = bytes[i];
+        if (byte >= 100) line[length++] = '0' + byte / 100;
+        if (byte >= 10)  line[length++] = '0' + byte / 10 % 10;
+        line[length++] = '0' + byte % 10;
+    }
+    sb_copy(sb, line, length);
+}
+
 static void x64_emit_global_data(X64Emitter *x, StringBuilder *sb, IrGlobal *global) {
     sb_append(sb, "\talign %d\n", global->align);
     sb_append(sb, "%s:\n", x64_symbol(x, global->index));
 
+    // The relocations by offset, so the data is written in one pass
+    IrReloc *relocs = NULL;
+    int reloc_count = global->relocs.count;
+    if (reloc_count > 0) {
+        relocs = malloc(reloc_count * sizeof(IrReloc));
+        memcpy(relocs, global->relocs.items, reloc_count * sizeof(IrReloc));
+        qsort(relocs, reloc_count, sizeof(IrReloc), x64_compare_relocs);
+    }
+    int next_reloc = 0;
+
     int offset = 0;
     while (offset < global->size) {
+        while (next_reloc < reloc_count && relocs[next_reloc].offset < offset) next_reloc++;
+
         // A relocation at this offset?
-        IrReloc *reloc = NULL;
-        for (int r = 0; r < global->relocs.count; r++) {
-            if (global->relocs.items[r].offset == offset) { reloc = &global->relocs.items[r]; break; }
-        }
-        if (reloc) {
-            sb_append(sb, "\tdq %s\n", x64_symbol(x, reloc->target));
+        if (next_reloc < reloc_count && relocs[next_reloc].offset == offset) {
+            sb_append(sb, "\tdq %s\n", x64_symbol(x, relocs[next_reloc].target));
             offset += 8;
             continue;
         }
 
         // Next relocation (bytes before it are emitted as plain data)
-        int stop = global->size;
-        for (int r = 0; r < global->relocs.count; r++) {
-            int ro = global->relocs.items[r].offset;
-            if (ro > offset && ro < stop) stop = ro;
-        }
+        int stop = next_reloc < reloc_count && relocs[next_reloc].offset < global->size ? relocs[next_reloc].offset : global->size;
 
         // Runs of zeros are compressed
         int zeros = 0;
@@ -1072,20 +1099,22 @@ static void x64_emit_global_data(X64Emitter *x, StringBuilder *sb, IrGlobal *glo
             continue;
         }
 
-        sb_append(sb, "\tdb ");
+        // Up to 16 bytes, until 8 zeros or more
         int n = 0;
-        while (offset < stop && n < 16) {
-            if (n > 0 && global->data[offset] == 0) {
+        while (offset + n < stop && n < 16) {
+            if (n > 0 && global->data[offset + n] == 0) {
                 int z = 0;
-                while (offset + z < stop && global->data[offset + z] == 0) z++;
+                while (offset + n + z < stop && global->data[offset + n + z] == 0) z++;
                 if (z >= 8) break;
             }
-            sb_append(sb, "%s%u", n ? ", " : "", global->data[offset]);
-            offset++;
             n++;
         }
-        sb_append(sb, "\n");
+        sb_copy(sb, "\tdb ", 4);
+        x64_byte_list(sb, &global->data[offset], n);
+        sb_copy(sb, "\n", 1);
+        offset += n;
     }
+    free(relocs);
     if (global->size == 0) sb_append(sb, "\tdb 0\n");
 }
 
@@ -1154,11 +1183,13 @@ typedef struct X64Output {
     int               debug_function_count;
 } X64Output;
 
-// The assembly of the module. With debug, it has labels for the debug information, which the output describes
-X64Output x64_emit_module(IrModule *module, bool debug) {
+// The assembly of the module. With debug, it has labels for the debug information, which the output describes. With
+// dump, the output also has the registers that each function got, as text
+X64Output x64_emit_module(IrModule *module, bool debug, bool dump) {
     X64Emitter *x = calloc(1, sizeof(X64Emitter));
     x->module = module;
     x->debug = debug;
+    x->dump = dump;
     x->target = x64_target();
     x->text = sb_init(1 << 16);
     x->regalloc_dump = sb_init(1 << 12);

@@ -805,7 +805,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
 
     old_stdout = dup(1);
     if (!output_to_console) {
-        freopen(NULL_DEVICE, "w", stdout);
+        if (freopen(NULL_DEVICE, "w", stdout) == NULL) { /* The output then goes to the console, which is fine */ }
     }
     
     Lexer lexer           = lexer_init();
@@ -871,11 +871,19 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
         return false;
     }
 
-    StringBuilder ir_text = sb_init(1 << 14);
-    ir_dump_module(module, &ir_text);
-    write_text_file("./build/out.ir", ir_text);
-
-    if (!ir_verify_module(module)) {
+    // The IR as text is only for reading, so it is written when asked or when it is wrong
+    bool ir_valid = ir_verify_module(module);
+    if (!config->dump) {
+        // Not the dumps of an earlier build, which would be mistaken for this one
+        remove("./build/out.ir");
+        remove("./build/out.regalloc.txt");
+    }
+    if (config->dump || !ir_valid) {
+        StringBuilder ir_text = sb_init(1 << 14);
+        ir_dump_module(module, &ir_text);
+        write_text_file("./build/out.ir", ir_text);
+    }
+    if (!ir_valid) {
         printf("Compiler Error: The generated IR is invalid. See ./build/out.ir\n");
         cleanup();
         return false;
@@ -902,8 +910,8 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
 
     // ----------- x64 -----------
     report.codegen_time_start = clock();
-    X64Output x64 = x64_emit_module(module, config->debug);
-    write_text_file("./build/out.regalloc.txt", x64.regalloc_dump);
+    X64Output x64 = x64_emit_module(module, config->debug, config->dump);
+    if (config->dump) write_text_file("./build/out.regalloc.txt", x64.regalloc_dump);
     write_text_file("./build/out.asm", x64.assembly);
     report.codegen_time_end = clock();
 
