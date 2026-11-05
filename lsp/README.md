@@ -52,9 +52,24 @@ its own for the file, as with the default theme (Seti).
 Install **Saad** (`jakobsaadbye.saad`) from the Extensions view: it is on the Visual Studio Marketplace and on Open VSX
 (for VSCodium and Cursor). VS Code updates it by itself.
 
+[![VS Code extension](https://github.com/jakobsaadbye/Saad/actions/workflows/vscode-extension.yml/badge.svg)](https://github.com/jakobsaadbye/Saad/actions/workflows/vscode-extension.yml)
+[![Marketplace](https://img.shields.io/visual-studio-marketplace/v/jakobsaadbye.saad?label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=jakobsaadbye.saad)
+[![Open VSX](https://img.shields.io/open-vsx/v/jakobsaadbye/saad?label=Open%20VSX)](https://open-vsx.org/extension/jakobsaadbye/saad)
+
 To publish a new version, raise `version` in `lsp/vscode/package.json` and add it to `lsp/vscode/CHANGELOG.md`. When it
 is merged to `main`, `.github/workflows/vscode-extension.yml` publishes it to both. A version that is published already is
 skipped. The workflow needs the secrets `VSCE_PAT` (Marketplace) and `OVSX_PAT` (Open VSX, optional) of the repository.
+
+Whether a version went through is on GitHub, so there is no need to log in to the Marketplace:
+
+* The run waits until the Marketplace has verified the version and gives it to everyone, which takes some minutes. A
+  green check on the commit in `main` means the version is live; a red one means it wasn't verified in 30 minutes (see
+  the publisher's page on the Marketplace for why).
+* The summary of the run says, for each store, if it was published, live, or skipped (published already, or no token).
+* Each store is an environment, `vscode-marketplace` and `open-vsx`, so **Deployments** on the repository's page lists
+  every version that went live, with a link to the store.
+* When the Marketplace has the version, the release `vscode-v<version>` is made, with the notes of `CHANGELOG.md` and
+  the `.vsix`.
 
 To try a change before it is published:
 
