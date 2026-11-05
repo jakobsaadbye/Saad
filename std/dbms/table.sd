@@ -4,7 +4,8 @@ namespace dbms;
 //
 //     context := dbms.newContext(&conn);
 //     users := dbms.keyedTable<User, i64>(context, "users", "id");   // the column of the key, and its type
-//     users.generated = ["id", "created_at"];                        // what the database makes, e.g a serial or now()
+//     users.generated = ["id"];                                      // what the database makes, e.g a serial key
+//     users.defaulted = ["created_at"];                              // what has a computed default, e.g now()
 //
 //     all, err := users.all();
 //     ada, err2 := users.get(1);              // a *User, null when no row has the key 1
@@ -16,7 +17,9 @@ namespace dbms;
 //
 // The columns are the members of T, in snake case: createdAt is created_at, and a _ at the end is left out, so for_
 // is the column for. The generated columns are left to the database by create and update, and read back by
-// saveChanges. @dbms.Column on a member says the same for a struct written by hand. postgres.EntityGenerator writes
+// saveChanges. The defaulted columns are written like the others by update, and by create when the member isn't the zero
+// value (e.g an empty string, null or the zero time.Time); a zero one is left to the default of the database, and read
+// back by saveChanges. @dbms.Column on a member says the same for a struct written by hand. postgres.EntityGenerator writes
 // the structs and tables of a database
 import fmt;
 use c;
@@ -26,7 +29,8 @@ Table :: struct <T> {
     context:   *Context;
     name:      string;      // e.g users
     schema:    string;      // e.g sales. Empty is the schema the connection uses, e.g public
-    generated: [..]string;  // The columns the database makes, e.g id and created_at
+    generated: [..]string;  // The columns the database makes, which are never written, e.g a serial id
+    defaulted: [..]string;  // The columns with a default the database computes, e.g created_at of now()
     keyColumn: string;      // The key of a KeyedTable, so that the rows of its queries are tracked
     relations: [..]Relation; // The foreign keys to one row of another table, for p.author().name in a query
 
@@ -107,7 +111,7 @@ Table :: struct <T> {
     }
 
     info :: method (key: string) -> TableInfo {
-        return TableInfo{name: self.name, schema: self.schema, key: key, generated: self.generated, type: rowType<T>(), relations: self.relations};
+        return TableInfo{name: self.name, schema: self.schema, key: key, generated: self.generated, defaulted: self.defaulted, type: rowType<T>(), relations: self.relations};
     }
 }
 
@@ -198,6 +202,7 @@ TableColumn :: struct {
     member:    *StructMember;
     key:       bool;
     generated: bool;
+    defaulted: bool;   // Left to the default of the database by an insert when the member is the zero value
 }
 
 @private
@@ -207,10 +212,10 @@ rowType :: <T>() -> *TypeStruct {
     return boxed.type as *TypeStruct;
 }
 
-// The columns of the members of a row struct, without the skipped ones. The generated columns and the key come from the
-// table, and from @dbms.Column
+// The columns of the members of a row struct, without the skipped ones. The generated and defaulted columns and the key
+// come from the table, and from @dbms.Column
 @private
-columnsOf :: (type: *TypeStruct, generated: [..]string, key: string) -> [..]TableColumn {
+columnsOf :: (type: *TypeStruct, generated: [..]string, defaulted: [..]string, key: string) -> [..]TableColumn {
     columns: [..]TableColumn;
     for i in 0..type.members.count {
         member := &type.members[i];
@@ -225,9 +230,11 @@ columnsOf :: (type: *TypeStruct, generated: [..]string, key: string) -> [..]Tabl
             if attribute.name.len > 0 { column.name = attribute.name; }
             column.key       = attribute.key;
             column.generated = attribute.generated;
+            column.defaulted = attribute.defaulted;
         }
         if column.name == key           { column.key = true; }
         if generated.contains(column.name) { column.generated = true; }
+        if defaulted.contains(column.name) { column.defaulted = true; }
         columns.add(column);
     }
     return columns;

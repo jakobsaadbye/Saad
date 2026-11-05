@@ -56,6 +56,7 @@ TableInfo :: struct {
     schema:    string;
     key:       string;
     generated: [..]string;
+    defaulted: [..]string;
     type:      *TypeStruct;   // Of the rows
     relations: [..]Relation;
 }
@@ -239,7 +240,7 @@ isDirty :: method (context: *Context, t: *Tracked) -> bool {
 @private
 changedColumns :: (t: *Tracked) -> [..]TableColumn {
     changed: [..]TableColumn;
-    columns := columnsOf(t.table.type, t.table.generated, t.table.key);
+    columns := columnsOf(t.table.type, t.table.generated, t.table.defaulted, t.table.key);
     for column in columns {
         if column.generated || column.key { continue; }
         if !sameValue(column.member.type, column.member.valueIn(t.row), column.member.valueIn(t.snapshot)) {
@@ -279,7 +280,7 @@ isChangedByChange :: method (context: *Context, t: *Tracked) -> bool {
 // If the key of the tracked row (as it was read) is the key
 @private
 sameKey :: (t: *Tracked, key: any) -> bool {
-    columns := columnsOf(t.table.type, t.table.generated, t.table.key);
+    columns := columnsOf(t.table.type, t.table.generated, t.table.defaulted, t.table.key);
     keyColumn, hasKey := keyOf(columns);
     columns.free();
     if !hasKey { return false; }
@@ -311,36 +312,51 @@ insertRows :: method (context: *Context, from: int, to: int, stored: *[..]Stored
     table := context.changes[from].table;
     type  := table.type;
 
-    columns := columnsOf(type, table.generated, "");
-    written: [..]TableColumn;
+    // The columns that can be written: all but the generated ones
+    columns := columnsOf(type, table.generated, table.defaulted, "");
+    writable: [..]TableColumn;
     for column in columns {
-        if !column.generated { written.add(column); }
-    }
-
-    // A row of only generated columns has no values to write, so each is an INSERT of its own
-    if written.count == 0 {
-        columns.free();
-        written.free();
-        for i in from..to {
-            sql := fmt.sprint("INSERT INTO % DEFAULT VALUES RETURNING *", qualifiedName(table.schema, table.name));
-            result, err := conn.run(sql);
-            sql.free();
-            if err != "" { return err; }
-            e := conn.readStored(result, 0, context.changes[i].row, type, stored);
-            if e != "" { return e; }
-        }
-        return "";
+        if !column.generated { writable.add(column); }
     }
 
     // At most 65535 parameters in a statement
     rowsPerInsert := to - from;
-    if rowsPerInsert * written.count > 65535 { rowsPerInsert = (65535 / written.count) as int; }
+    if writable.count > 0 && rowsPerInsert * writable.count > 65535 { rowsPerInsert = (65535 / writable.count) as int; }
 
     start := from;
     err := "";
     while start < to && err == "" {
         end := start + rowsPerInsert;
         if end > to { end = to; }
+
+        // A defaulted column is written when one of the rows sets it, i.e it isn't the zero value. The rows that don't
+        // set it get DEFAULT
+        written: [..]TableColumn;
+        for column in writable {
+            if !column.defaulted { written.add(column); continue; }
+            for i in start..end {
+                if !isZero(column.member.type, column.member.valueIn(context.changes[i].row)) {
+                    written.add(column);
+                    break;
+                }
+            }
+        }
+
+        // A row of only generated columns, or of defaulted ones that aren't set, has no values to write, so each is an
+        // INSERT of its own
+        if written.count == 0 {
+            written.free();
+            for i in start..end {
+                sql := fmt.sprint("INSERT INTO % DEFAULT VALUES RETURNING *", qualifiedName(table.schema, table.name));
+                result, e := conn.run(sql);
+                sql.free();
+                if e != "" { err = e; break; }
+                e2 := conn.readStored(result, 0, context.changes[i].row, type, stored);
+                if e2 != "" { err = e2; break; }
+            }
+            start = end;
+            continue;
+        }
 
         args: [..]any;
         sb: fmt.StringBuilder;
@@ -355,12 +371,18 @@ insertRows :: method (context: *Context, from: int, to: int, stored: *[..]Stored
             sb.addChar('(');
             for column, c in written {
                 if c > 0 { sb.addString(", "); }
-                args.add(valueOf(column, context.changes[i].row));
+                row := context.changes[i].row;
+                if column.defaulted && isZero(column.member.type, column.member.valueIn(row)) {
+                    sb.addString("DEFAULT");
+                    continue;
+                }
+                args.add(valueOf(column, row));
                 sb.add("$%", args.count);
             }
             sb.addChar(')');
         }
         sb.addString(" RETURNING *");
+        written.free();
 
         result, e := conn.run(sb.toString(), ...args.elements());
         sb.free();
@@ -384,8 +406,26 @@ insertRows :: method (context: *Context, from: int, to: int, stored: *[..]Stored
         start = end;
     }
     columns.free();
-    written.free();
+    writable.free();
     return err;
+}
+
+// If the value is the zero value of its type: an empty string, an empty optional, or all bytes 0 (e.g 0, false and the
+// zero time.Time)
+@private
+isZero :: (type: *Type, value: *void) -> bool {
+    if type.kind == .string {
+        return (*(value as *string)).len == 0;
+    }
+    if type.isOptional() {
+        _, _, has := (type as *TypeStruct).optionalValue(value);
+        return !has;
+    }
+    bytes := value as *u8;
+    for i in 0..type.size {
+        if bytes[i] != 0 { return false; }
+    }
+    return true;
 }
 
 // Reads the row of the result as it was stored into a copy of the row, so that members without a column keep their value,
@@ -414,7 +454,7 @@ readStoredRow :: method (conn: *Connection, result: *void, index: i64, row: *voi
 @private
 updateTracked :: method (context: *Context, t: *Tracked) -> string {
     changed := changedColumns(t);
-    columns := columnsOf(t.table.type, t.table.generated, t.table.key);
+    columns := columnsOf(t.table.type, t.table.generated, t.table.defaulted, t.table.key);
     keyColumn, hasKey := keyOf(columns);
     columns.free();
     if !hasKey {
@@ -455,7 +495,7 @@ apply :: method (context: *Context, change: Change) -> string {
             return "Compiler Error: creates are written by insertRows";
         }
         case .update {
-            columns := columnsOf(type, table.generated, table.key);
+            columns := columnsOf(type, table.generated, table.defaulted, table.key);
             keyColumn, hasKey := keyOf(columns);
             if !hasKey {
                 columns.free();

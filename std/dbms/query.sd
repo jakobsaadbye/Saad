@@ -765,7 +765,7 @@ SqlWriter :: struct {
 // The column of a member of the rows of the table
 @private
 columnIn :: (table: TableInfo, member: string) -> string {
-    columns := columnsOf(table.type, table.generated, table.key);
+    columns := columnsOf(table.type, table.generated, table.defaulted, table.key);
     name := columnName(member);
     for column in columns {
         if column.member.name == member { name = column.name; }

@@ -30,7 +30,8 @@ open :: (conn: *dbms.Connection) -> Database {
     tables.orders.table     = dbms.keyedTable<Order, i32>(tables.context, "orders", "id", schema: "saad_shop");
     tables.users.table      = dbms.keyedTable<User, i64>(tables.context, "users", "id", schema: "saad_shop");
     tables.orders.generated = ["id"];
-    tables.users.generated = ["id", "created_at"];
+    tables.users.generated = ["id"];
+    tables.users.defaulted = ["created_at"];
     tables.orderItems.relations = [dbms.Relation{name: "order", column: "order_id", table: "orders", references: "id"}];
     tables.orders.relations = [dbms.Relation{name: "orderItems", column: "order_id", table: "order_items", references: "id", many: true}, dbms.Relation{name: "user", column: "user_id", table: "users", references: "id"}];
     tables.users.relations = [dbms.Relation{name: "orders", column: "user_id", table: "orders", references: "id", many: true}, dbms.Relation{name: "referredByRow", column: "referred_by", table: "users", references: "id"}, dbms.Relation{name: "usersByReferredBy", column: "referred_by", table: "users", references: "id", many: true}];

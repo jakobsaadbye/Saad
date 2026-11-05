@@ -110,7 +110,7 @@ linkRow :: (context: *Context, type: *TypeStruct, row: *void) {
 // The member of a column of the rows of the table
 @private
 memberOfColumn :: (info: TableInfo, column: string) -> string {
-    columns := columnsOf(info.type, info.generated, info.key);
+    columns := columnsOf(info.type, info.generated, info.defaulted, info.key);
     name := column;
     for c in columns {
         if c.name == column { name = c.member.name; }
