@@ -952,6 +952,7 @@ typedef struct CompilerConfig {
     bool               json;               // Write the diagnostics as JSON: 'saad check --json'
     bool               debug;              // Make the program with debug information (DWARF): 'saad build --debug'
     bool               emit_elf;           // Write ./build/out.o for Linux instead of out.exe: 'saad build --elf' (tools/linux)
+    bool               dump;               // Also write the IR and the register allocation to ./build: 'saad build --dump'
     bool               use_llvm;           // Make the program with LLVM instead of the x64 backend: 'saad build --llvm'
     int                opt_level;          // The -O of LLVM with --llvm, 2 when it isn't given
     char              *caller_directory;   // Where saad was started. 'saad run' runs the program there

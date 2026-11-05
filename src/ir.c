@@ -134,6 +134,57 @@ static char *ir_strdup(IrModule *module, const char *str) {
     return copy;
 }
 
+//
+// The globals by name
+//
+
+static uint32_t ir_hash_name(const char *name) {
+    uint32_t hash = 2166136261u; // FNV-1a
+    for (const char *c = name; *c; c++) hash = (hash ^ (uint8_t) *c) * 16777619u;
+    return hash;
+}
+
+// The slot of the name: the one that has it, or the free one where it goes
+static int ir_name_slot(IrModule *module, const char *name) {
+    int mask = module->names_capacity - 1;
+    int slot = ir_hash_name(name) & mask;
+    while (module->names[slot] != 0 && strcmp(module->globals.items[module->names[slot] - 1]->name, name) != 0) {
+        slot = (slot + 1) & mask;
+    }
+    return slot;
+}
+
+// Makes the name refer to the global. A name that is taken already keeps its global
+static void ir_name_set(IrModule *module, int index) {
+    if (2 * (module->globals.count + 1) > module->names_capacity) {
+        // Grows the table, and puts each name in again
+        int *old = module->names;
+        int old_capacity = module->names_capacity;
+        module->names_capacity = old_capacity ? old_capacity * 2 : 256;
+        module->names = calloc(module->names_capacity, sizeof(int));
+        for (int i = 0; i < old_capacity; i++) {
+            if (old[i] != 0) module->names[ir_name_slot(module, module->globals.items[old[i] - 1]->name)] = old[i];
+        }
+        free(old);
+    }
+    int slot = ir_name_slot(module, module->globals.items[index]->name);
+    if (module->names[slot] == 0) module->names[slot] = index + 1;
+}
+
+int ir_find_global(IrModule *module, const char *name) {
+    if (module->names_capacity == 0) return -1;
+    int entry = module->names[ir_name_slot(module, name)];
+    return entry - 1;
+}
+
+// A name that no global has: the name, or the name with __2, __3 ... after it
+void ir_unique_name(IrModule *module, const char *name, char *unique, int size) {
+    snprintf(unique, size, "%s", name);
+    for (int n = 2; ir_find_global(module, unique) >= 0; n++) {
+        snprintf(unique, size, "%s__%d", name, n);
+    }
+}
+
 IrGlobal *ir_global_new(IrModule *module, IrGlobalKind kind, const char *name) {
     IrGlobal *global = ir_allocate(module, sizeof(IrGlobal));
     global->index = module->globals.count;
@@ -141,6 +192,7 @@ IrGlobal *ir_global_new(IrModule *module, IrGlobalKind kind, const char *name) {
     global->name  = ir_strdup(module, name);
     global->align = 1;
     ir_array_push(module->globals, global);
+    ir_name_set(module, global->index);
     return global;
 }
 
@@ -165,27 +217,24 @@ IrGlobal *ir_global_data(IrModule *module, const char *debug_name, const void *b
 }
 
 int ir_find_or_add_extern(IrModule *module, const char *name) {
-    for (int i = 0; i < module->globals.count; i++) {
-        IrGlobal *global = module->globals.items[i];
-        if (global->kind != IR_GLOBAL_DATA && strcmp(global->name, name) == 0) {
-            if (!global->is_saad) return i;
+    int existing = ir_find_global(module, name);
+    if (existing < 0) return ir_global_new(module, IR_GLOBAL_EXTERN, name)->index;
+    IrGlobal *global = module->globals.items[existing];
+    if (!global->is_saad) return existing;
 
-            // A function of the program has the name of the C function, e.g 'exit :: () {...}' and C's exit(). It gets another symbol
-            char unique[256];
-            for (int n = 2; ; n++) {
-                snprintf(unique, sizeof(unique), "%s__%d", name, n);
-                bool taken = false;
-                for (int j = 0; j < module->globals.count; j++) {
-                    if (strcmp(module->globals.items[j]->name, unique) == 0) { taken = true; break; }
-                }
-                if (!taken) break;
-            }
-            global->name = ir_strdup(module, unique);
-            if (global->function) global->function->name = global->name;
-            break;
-        }
+    // A function of the program has the name of the C function, e.g 'exit :: () {...}' and C's exit(). It gets another
+    // symbol, and the name goes to the C function
+    char unique[256];
+    for (int n = 2; ; n++) {
+        snprintf(unique, sizeof(unique), "%s__%d", name, n);
+        if (ir_find_global(module, unique) < 0) break;
     }
-    return ir_global_new(module, IR_GLOBAL_EXTERN, name)->index;
+    int extern_index = ir_global_new(module, IR_GLOBAL_EXTERN, name)->index;
+    module->names[ir_name_slot(module, name)] = extern_index + 1;
+    global->name = ir_strdup(module, unique);
+    if (global->function) global->function->name = global->name;
+    ir_name_set(module, existing);
+    return extern_index;
 }
 
 IrFunction *ir_function_new(IrModule *module, const char *name) {
@@ -195,13 +244,8 @@ IrFunction *ir_function_new(IrModule *module, const char *name) {
 
     // The function symbol may already exist as an extern (e.g it was referenced before being defined)
     IrGlobal *global = NULL;
-    for (int i = 0; i < module->globals.count; i++) {
-        IrGlobal *g = module->globals.items[i];
-        if (g->kind == IR_GLOBAL_EXTERN && strcmp(g->name, name) == 0) {
-            global = g;
-            break;
-        }
-    }
+    int existing = ir_find_global(module, name);
+    if (existing >= 0 && module->globals.items[existing]->kind == IR_GLOBAL_EXTERN) global = module->globals.items[existing];
     if (global == NULL) {
         global = ir_global_new(module, IR_GLOBAL_FUNCTION, name);
     }

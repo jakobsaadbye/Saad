@@ -177,17 +177,60 @@ static const char *asm_reg32[16] = { "eax", "ecx", "edx", "ebx", "esp", "ebp", "
 static const char *asm_reg16[16] = { "ax", "cx", "dx", "bx", "sp", "bp", "si", "di", "r8w", "r9w", "r10w", "r11w", "r12w", "r13w", "r14w", "r15w" };
 static const char *asm_reg8[16]  = { "al", "cl", "dl", "bl", "spl", "bpl", "sil", "dil", "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b", "r15b" };
 
+// Whether the text of the given length is the name. By hand, as the names are short and it runs for every operand
+static bool asm_is_name(const char *s, int length, const char *name) {
+    int i = 0;
+    while (i < length && s[i] == name[i]) i++;
+    return i == length && name[length] == 0;
+}
+
+// The general registers by name: a hash table of the 64 names, filled the first time
+typedef struct AsmRegisterName {
+    const char *name;   // NULL when the slot is free
+    int         reg;
+    int         width;
+} AsmRegisterName;
+
+#define ASM_REGISTER_SLOTS 256
+static AsmRegisterName asm_register_names[ASM_REGISTER_SLOTS];
+
+static int asm_register_hash(const char *s, int length) {
+    unsigned hash = 0;
+    for (int i = 0; i < length; i++) hash = hash * 31 + (unsigned char) s[i];
+    return hash % ASM_REGISTER_SLOTS;
+}
+
+static void asm_add_register_name(const char *name, int reg, int width) {
+    int slot = asm_register_hash(name, (int) strlen(name));
+    while (asm_register_names[slot].name) slot = (slot + 1) % ASM_REGISTER_SLOTS;
+    asm_register_names[slot] = (AsmRegisterName) { name, reg, width };
+}
+
 static bool asm_parse_register(const char *s, int length, AsmOperand *op) {
-    char name[16];
-    if (length <= 0 || length >= (int)sizeof(name)) return false;
+    // The names are 2 to 5 letters, and start with one of these. Most operands that aren't registers stop here
+    if (length < 2 || length > 5 || strchr("abcdersx", s[0]) == NULL) return false;
+    static bool filled = false;
+    if (!filled) {
+        for (int r = 0; r < 16; r++) {
+            asm_add_register_name(asm_reg64[r], r, 8);
+            asm_add_register_name(asm_reg32[r], r, 4);
+            asm_add_register_name(asm_reg16[r], r, 2);
+            asm_add_register_name(asm_reg8[r],  r, 1);
+        }
+        filled = true;
+    }
+    for (int slot = asm_register_hash(s, length); asm_register_names[slot].name; slot = (slot + 1) % ASM_REGISTER_SLOTS) {
+        AsmRegisterName *entry = &asm_register_names[slot];
+        if (!asm_is_name(s, length, entry->name)) continue;
+        op->kind  = ASM_REG;
+        op->reg   = entry->reg;
+        op->width = entry->width;
+        op->high8 = entry->width == 1 && entry->reg >= 4 && entry->reg <= 7;
+        return true;
+    }
+    char name[8];
     memcpy(name, s, length);
     name[length] = 0;
-    for (int r = 0; r < 16; r++) {
-        if (strcmp(name, asm_reg64[r]) == 0) { op->kind = ASM_REG; op->reg = r; op->width = 8; return true; }
-        if (strcmp(name, asm_reg32[r]) == 0) { op->kind = ASM_REG; op->reg = r; op->width = 4; return true; }
-        if (strcmp(name, asm_reg16[r]) == 0) { op->kind = ASM_REG; op->reg = r; op->width = 2; return true; }
-        if (strcmp(name, asm_reg8[r])  == 0) { op->kind = ASM_REG; op->reg = r; op->width = 1; op->high8 = r >= 4 && r <= 7; return true; }
-    }
     if (strncmp(name, "xmm", 3) == 0 && isdigit((unsigned char)name[3])) {
         int r = atoi(name + 3);
         if (r < 0 || r > 15) return false;
@@ -285,10 +328,10 @@ static bool asm_parse_operand(const char *s, int length, AsmOperand *op, const c
     if (length <= 0) return false;
 
     // A size keyword before a memory operand
-    static const struct { const char *word; int width; } sizes[] = { {"byte", 1}, {"word", 2}, {"dword", 4}, {"qword", 8} };
+    static const struct { const char *word; int length; int width; } sizes[] = { {"byte", 4, 1}, {"word", 4, 2}, {"dword", 5, 4}, {"qword", 5, 8} };
     int width = 0;
     for (int i = 0; i < 4; i++) {
-        int l = (int)strlen(sizes[i].word);
+        int l = sizes[i].length;
         if (length > l && strncmp(s, sizes[i].word, l) == 0 && (s[l] == ' ' || s[l] == '[')) {
             width = sizes[i].width;
             s += l;
@@ -734,7 +777,7 @@ static void asm_set_label_item(Assembler *as, int symbol, int item) {
 }
 
 static bool asm_fail(Assembler *as, int line, const char *message, const char *text) {
-    snprintf(as->obj->error, sizeof(as->obj->error), "line %d: %s: %s", line, message, text);
+    snprintf(as->obj->error, sizeof(as->obj->error), "line %d: %s: %.200s", line, message, text);
     return false;
 }
 
@@ -929,15 +972,17 @@ bool x64_assemble(const char *source, int length, AsmObject *obj) {
         line[line_length] = 0;
         p = eol + 1;
 
-        // Comments
+        // Comments. Most lines have none, which memchr finds out quickly
         char *comment = NULL;
         bool in_string = false;
-        for (char *c = line; *c; c++) {
-            if (*c == '"' || *c == '\'') in_string = !in_string;
-            if (*c == ';' && !in_string) { comment = c; break; }
+        if (memchr(line, ';', line_length)) {
+            for (char *c = line; *c; c++) {
+                if (*c == '"' || *c == '\'') in_string = !in_string;
+                if (*c == ';' && !in_string) { comment = c; break; }
+            }
         }
         if (comment) *comment = 0;
-        int n = (int)strlen(line);
+        int n = comment ? (int)(comment - line) : line_length;
         while (n > 0 && (line[n - 1] == ' ' || line[n - 1] == '\t' || line[n - 1] == '\r')) line[--n] = 0;
         const char *text = asm_skip_spaces(line);
         if (!*text) continue;

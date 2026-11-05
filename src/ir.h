@@ -296,6 +296,10 @@ typedef struct IrModule {
     Arena                arena;
     IrArray(IrGlobal *)  globals;
     IrArray(IrFunction *) functions;
+
+    // The globals by name: a hash table of 1 + the index of the global, 0 when the slot is free
+    int                 *names;
+    int                  names_capacity;
 } IrModule;
 
 //
@@ -306,6 +310,8 @@ void       *ir_allocate(IrModule *module, size_t size);
 IrGlobal   *ir_global_new(IrModule *module, IrGlobalKind kind, const char *name);
 IrGlobal   *ir_global_data(IrModule *module, const char *debug_name, const void *bytes, int size, int align, bool readonly);
 int         ir_find_or_add_extern(IrModule *module, const char *name);
+int         ir_find_global(IrModule *module, const char *name);   // The index of the global, or -1
+void        ir_unique_name(IrModule *module, const char *name, char *unique, int size);
 IrFunction *ir_function_new(IrModule *module, const char *name);
 int         ir_new_vreg(IrFunction *func, IrType type);
 IrType      ir_vreg_type(IrFunction *func, int vreg);

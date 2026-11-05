@@ -50,47 +50,36 @@ StringBuilder *sb_new(int init_capicity) {
     return sb;
 }
 
-void sb_vappend(StringBuilder *sb, const char *template, va_list args) {
-    // The length first, so a text of any length fits
-    va_list counting;
-    va_copy(counting, args);
-    int   string_len = vsnprintf(NULL, 0, template, counting);
-    va_end(counting);
-    if (string_len < 0) return;
-    char *string = (char *)(malloc(string_len + 1));
-    vsnprintf(string, string_len + 1, template, args);
-
-    if ((sb->cursor + string_len) < sb->capacity) {
-        char *dst = &sb->buffer[sb->cursor];
-        memcpy(dst, string, string_len);
-        sb->cursor += string_len;
-
-        free(string);
-        return;
-    } else {
-        size_t new_capacity = sb->capacity;
-        while (new_capacity <= sb->cursor + string_len) {
-            new_capacity = new_capacity * 2;
-        }
-
-        char *new_buffer = (char *)(realloc(sb->buffer, new_capacity));
-        if (new_buffer == NULL) {
-            printf("%s:%d: error: Buy more ram!", __FILE__, __LINE__);
-            exit(1);
-        }
-
-        sb->buffer   = new_buffer;
-        sb->capacity = new_capacity;
-
-        memset(&sb->buffer[sb->cursor], '\0', new_capacity - sb->cursor);
-
-        // Append the string
-        char *dst = &sb->buffer[sb->cursor];
-        memcpy(dst, string, string_len);
-        sb->cursor += string_len;
-
-        free(string);
+// Makes room for length more characters and the 0 after them. The free part of the buffer is kept 0
+static void sb_reserve(StringBuilder *sb, size_t length) {
+    if (sb->cursor + length < sb->capacity) return;
+    size_t new_capacity = sb->capacity;
+    while (new_capacity <= sb->cursor + length) {
+        new_capacity = new_capacity * 2;
     }
+
+    char *new_buffer = (char *)(realloc(sb->buffer, new_capacity));
+    if (new_buffer == NULL) {
+        printf("%s:%d: error: Buy more ram!", __FILE__, __LINE__);
+        exit(1);
+    }
+    memset(&new_buffer[sb->capacity], '\0', new_capacity - sb->capacity);
+    sb->buffer   = new_buffer;
+    sb->capacity = new_capacity;
+}
+
+void sb_vappend(StringBuilder *sb, const char *template, va_list args) {
+    // Formats into the free part of the buffer, and only formats again when it didn't fit
+    va_list again;
+    va_copy(again, args);
+    size_t free_space = sb->capacity - sb->cursor;
+    int string_len = vsnprintf(&sb->buffer[sb->cursor], free_space, template, args);
+    if (string_len >= 0 && (size_t)string_len >= free_space) {
+        sb_reserve(sb, string_len);
+        vsnprintf(&sb->buffer[sb->cursor], string_len + 1, template, again);
+    }
+    va_end(again);
+    if (string_len > 0) sb->cursor += string_len;
 }
 
 void sb_append(StringBuilder *sb, const char *template, ...) {
@@ -102,35 +91,10 @@ void sb_append(StringBuilder *sb, const char *template, ...) {
 
 // Copies length amount of characters from src to the builder
 void sb_copy(StringBuilder *sb, char *src, int length) {
-    if (length == 0) return;
-    
-    if ((sb->cursor + length) < sb->capacity) {
-        char *dst = &sb->buffer[sb->cursor];
-        memcpy(dst, src, length);
-        sb->cursor += length;
-
-        return;
-    } else {
-        size_t new_capacity = sb->capacity;
-        while (new_capacity <= sb->cursor + length) {
-            new_capacity = new_capacity * 2;
-        }
-
-        char *new_buffer = (char *)(realloc(sb->buffer, new_capacity));
-        if (new_buffer == NULL) {
-            printf("%s:%d: error: Buy more ram!", __FILE__, __LINE__);
-            exit(1);
-        }
-
-        sb->buffer   = new_buffer;
-        sb->capacity = new_capacity;
-
-        memset(&sb->buffer[sb->cursor], '\0', new_capacity - sb->cursor);
-
-        char *dst = &sb->buffer[sb->cursor];
-        memcpy(dst, src, length);
-        sb->cursor += length;
-    }
+    if (length <= 0) return;
+    sb_reserve(sb, length);
+    memcpy(&sb->buffer[sb->cursor], src, length);
+    sb->cursor += length;
 }
 
 // Copies the null-terminated src string to the builder

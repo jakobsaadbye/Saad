@@ -3159,15 +3159,7 @@ static int function_global(Lowerer *L, AstFunctionDefn *func_defn) {
         // Different functions can share a name (e.g inner functions in different scopes), so a Saad
         // function whose name is already taken gets a unique symbol
         char unique[256];
-        snprintf(unique, sizeof(unique), "%s", name);
-        for (int n = 2; ; n++) {
-            bool taken = false;
-            for (int i = 0; i < L->module->globals.count; i++) {
-                if (strcmp(L->module->globals.items[i]->name, unique) == 0) { taken = true; break; }
-            }
-            if (!taken) break;
-            snprintf(unique, sizeof(unique), "%s__%d", name, n);
-        }
+        ir_unique_name(L->module, name, unique, sizeof(unique));
         IrGlobal *g = ir_global_new(L->module, IR_GLOBAL_EXTERN, unique); // Becomes a FUNCTION when lowered
         g->is_saad = true;
         global = g->index;
@@ -3184,15 +3176,7 @@ static int thunk_global(Lowerer *L, AstFunctionDefn *target, int *argument_offse
     char name[300];
     snprintf(name, sizeof(name), "invoke_%s", target->identifier ? target->identifier->name : "function");
     char unique[320];
-    snprintf(unique, sizeof(unique), "%s", name);
-    for (int n = 2; ; n++) {
-        bool taken = false;
-        for (int i = 0; i < L->module->globals.count; i++) {
-            if (strcmp(L->module->globals.items[i]->name, unique) == 0) { taken = true; break; }
-        }
-        if (!taken) break;
-        snprintf(unique, sizeof(unique), "%s__%d", name, n);
-    }
+    ir_unique_name(L->module, name, unique, sizeof(unique));
     IrGlobal *g = ir_global_new(L->module, IR_GLOBAL_EXTERN, unique); // Becomes a FUNCTION when lowered
     g->is_saad = true;
     PendingThunk thunk = { target, g->index, argument_offsets, result_offsets };

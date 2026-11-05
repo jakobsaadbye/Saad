@@ -25,7 +25,8 @@ cd Saad
 make.bat
 ```
 
-This makes `bin\saad.exe`. It finds the standard library in `std\` next to it, so leave it in the repository (or set
+This makes `bin\saad.exe`, optimized (`set SAAD_DEBUG=1` before `make.bat` builds it without optimizations, for
+debugging the compiler). It finds the standard library in `std\` next to it, so leave it in the repository (or set
 `SAAD_ROOT` to the folder of the repository).
 
 **3. Put `saad` on the PATH**, so it works from any folder. In PowerShell, in the Saad folder:

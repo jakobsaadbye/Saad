@@ -7,7 +7,10 @@ set -e
 
 cd "$(dirname "$0")"
 
-CFLAGS="-Wall -Wextra -pedantic -ggdb"
+# Optimized, with debug information. SAAD_DEBUG=1 ./build.sh builds without optimizations, for debugging the compiler
+OPTIMIZE="-O2"
+if [ "${SAAD_DEBUG:-0}" = "1" ]; then OPTIMIZE="-O0"; fi
+CFLAGS="-Wall -Wextra -pedantic -ggdb $OPTIMIZE"
 FILES="ast lexer parser scope"
 
 mkdir -p build bin
