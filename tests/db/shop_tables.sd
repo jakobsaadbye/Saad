@@ -268,6 +268,34 @@ main :: () {
     admins := users.filter(u => u.role == .admin).map(u => u.name);
     assert(admins.count == 1 && admins[0] == "Ada");
 
+    // created_at has a default the database computes, now(), so it is defaulted, not generated: an update writes it
+    // like any other column, and a create writes it when it is set, and otherwise leaves it to now()
+    later := time.date(2030, 6, 1, 12);
+    tracked, _ := db.users.get(ada.id);
+    tracked.createdAt = later;
+    tracked.age = 37;
+    assert(db.pendingChanges() == 1 && db.saveChanges() == null);
+    moved, _ := db.users.get(ada.id);
+    assert(moved.createdAt.equal(later) && moved.age ?? 0 == 37);
+
+    moved.createdAt = later.addDate(0, 0, 1);  // update writes it too
+    db.users.update(moved);
+    assert(db.saveChanges() == null);
+    movedAgain, _ := db.users.get(ada.id);
+    assert(movedAgain.createdAt.equal(later.addDate(0, 0, 1)));
+
+    early := time.date(2020, 1, 2, 3, 4, 5);
+    eve := db.users.create();
+    eve.name      = "Eve";
+    eve.createdAt = early;
+    fay := db.users.create();                  // In the same INSERT, with DEFAULT for created_at
+    fay.name = "Fay";
+    assert(db.saveChanges() == null);
+    assert(eve.createdAt.equal(early) && time.since(fay.createdAt) < time.Hour);
+    eveRead, _ := db.users.get(eve.id);
+    fayRead, _ := db.users.get(fay.id);
+    assert(eveRead.createdAt.equal(early) && fayRead.createdAt.equal(fay.createdAt));
+
     conn.close();
     print("shop tables ok");
 }

@@ -275,7 +275,8 @@ Member :: struct {
     attribute: string;   // @dbms.Column(name: ...) when the column is not the name of the member in snake case, or empty
     value:     string;   // The default, e.g .guest, or empty
     comment:   string;   // e.g timestamp with time zone, or empty
-    generated: bool;     // Made by the database, e.g a serial or now()
+    generated: bool;     // Made by the database and never written, e.g an identity, GENERATED ALWAYS or a serial key
+    defaulted: bool;     // Has a default the database computes, e.g now(), but the program can write it
 }
 
 // The file of a row or an enum, e.g entity/order_item.sd. A row with the name of an enum gets _table
@@ -316,7 +317,7 @@ enumFile :: method (w: *Writer, e: SchemaEnum) -> string {
 rowFile :: method (w: *Writer, table: SchemaTable) -> string {
     members: [..]Member;
     for column in table.columns {
-        members.add(w.memberOf(column));
+        members.add(w.memberOf(column, table.key));
     }
 
     nameWidth := 0;
@@ -526,14 +527,20 @@ databaseFile :: method (w: *Writer, tables: [..]SchemaTable, files: [..]Generate
         sb.addLine(");");
     }
 
-    // The columns the database makes
+    // The columns the database makes, and the ones with a default it computes
     for table in tables {
         generated: [..]string;
+        defaulted: [..]string;
         for column in table.columns {
-            if w.memberOf(column).generated { generated.add(saadString(column.columnName)); }
+            m := w.memberOf(column, table.key);
+            if m.generated { generated.add(saadString(column.columnName)); }
+            if m.defaulted { defaulted.add(saadString(column.columnName)); }
         }
         if generated.count > 0 {
             sb.addLine("    tables.%.generated = [%];", camelCase(table.name), fmt.join(generated.elements(), ", "));
+        }
+        if defaulted.count > 0 {
+            sb.addLine("    tables.%.defaulted = [%];", camelCase(table.name), fmt.join(defaulted.elements(), ", "));
         }
     }
 
@@ -592,7 +599,7 @@ tableTypeOf :: method (w: *Writer, table: SchemaTable) -> string {
 }
 
 @private
-memberOf :: method (w: *Writer, column: SchemaColumn) -> Member {
+memberOf :: method (w: *Writer, column: SchemaColumn, key: string) -> Member {
     m: Member;
     m.name   = memberName(column.columnName);
     m.column = column.columnName;
@@ -610,13 +617,15 @@ memberOf :: method (w: *Writer, column: SchemaColumn) -> Member {
     if column.udtName == "timestamp" { m.comment = "timestamp without time zone, which is UTC"; }
     if column.udtName == "date"      { m.comment = "date, at midnight UTC"; }
 
-    // A default that is a constant becomes the default of the member. One that is computed, e.g nextval(...) of a
-    // serial or now(), is made by the database
+    // A default that is a constant becomes the default of the member. One that is computed is the database's to make:
+    // always for an identity, a GENERATED ALWAYS column and the key, e.g nextval(...) of a serial key, and otherwise
+    // only when the program doesn't set it, e.g now() of created_at, which can still be changed by an update
     m.generated = column.isIdentity == "YES" || column.isGenerated == "ALWAYS";
     if column.columnDefault.hasValue() && !m.generated {
         value, isConstant := w.defaultValue(column.columnDefault.value(), base);
-        if isConstant { m.value = value; }
-        else          { m.generated = true; }
+        if isConstant                    { m.value = value; }
+        else if column.columnName == key { m.generated = true; }
+        else                             { m.defaulted = true; }
     }
 
     // The column of a member is its name in snake case, e.g createdAt is created_at and for_ is for. Others are named

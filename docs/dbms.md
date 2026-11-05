@@ -245,7 +245,8 @@ The rows of one table, as structs of `T`:
 ```odin
 context := dbms.newContext(&conn);                              // keeps the changes until saveChanges
 users := dbms.keyedTable<User, i64>(context, "users", "id");    // the column of the key, and its type
-users.generated = ["id", "created_at"];                         // the columns the database makes
+users.generated = ["id"];                                       // the columns the database makes
+users.defaulted = ["created_at"];                               // the columns with a default it computes, e.g now()
 
 all, err := users.all();                    // reads go to the database at once
 ada, err2 := users.get(1);                  // a *User, null when no row has the key 1
@@ -269,10 +270,20 @@ items := dbms.table<OrderItem>(context, "order_items");    // no key of one colu
 * `schema:` gives another schema than the one of the connection, e.g `dbms.table<Sale>(context, "sales", schema: "shop")`.
 * The columns are the members of `T`, in snake case: `createdAt` is `created_at`. A `_` at the end of a name is left
   out, so the member `for_` is the column `for`.
-* The `generated` columns are left out of `create` and `update`, and `saveChanges` reads them back into the created
-  rows (`RETURNING *`).
-* For a struct written by hand, `@dbms.Column(name: "mail", key: true, generated: true, skip: true)` says the same on a
-  member.
+* The `generated` columns are the database's alone: an identity, a `GENERATED ALWAYS` column, or a key with a
+  computed default (a serial). They are left out of `create` and `update`, and `saveChanges` reads them back into the
+  created rows (`RETURNING *`).
+* The `defaulted` columns have a default the database computes, e.g `created_at DEFAULT now()` or `uid DEFAULT
+  gen_random_uuid()`, but the program may write them:
+  * `update`, and a change of a tracked row, write them like any other column, so `job.nextAttemptAt = later;
+    db.saveChanges();` saves it.
+  * `create` writes one when the member isn't the zero value of its type (an empty string, an empty optional, or all
+    bytes 0, e.g `0`, `false` and the zero `time.Time`). A zero one gets `DEFAULT` in the `INSERT`, so the database
+    computes it, and `saveChanges` reads it back. So `created_at` is `now()` when the program never sets it, and the
+    time it was set to when it does. A zero value can't be written by `create`, as it means "not set": write it
+    with an update after the create.
+* For a struct written by hand, `@dbms.Column(name: "mail", key: true, generated: true, defaulted: true, skip: true)`
+  says the same on a member.
 * Names are quoted in the SQL, so columns like `order` or `for` work.
 
 #### The generator
@@ -347,7 +358,8 @@ open :: (conn: *dbms.Connection) -> Database {
     tables.context = dbms.newContext(conn);
     tables.orderItems.table = dbms.table<OrderItem>(tables.context, "order_items");
     tables.users.table      = dbms.keyedTable<User, i64>(tables.context, "users", "id");
-    tables.users.generated = ["id", "created_at"];
+    tables.users.generated = ["id"];
+    tables.users.defaulted = ["created_at"];
     return tables;
 }
 
@@ -383,13 +395,15 @@ err2 := db.saveChanges();
 | anything else, e.g `numeric`, `uuid`, `json` | `string`, with the type of the column as a comment |
 | a column that can be `NULL` | `?T` |
 
-* The rows are plain structs: no attributes. What the tables need to know (the key, and the columns the database
-  makes) is in `open`.
+* The rows are plain structs: no attributes. What the tables need to know (the key, the columns the database
+  makes, and the ones with a computed default) is in `open`.
 * The column `created_at` is the member `createdAt`. A column that is a keyword gets a `_`, e.g `"for"` is `for_`.
   Only a column that the snake case of its member isn't, e.g `"Type"`, gets `@dbms.Column(name: "Type")`.
 * A default that is a constant becomes the default of the member, e.g `role: Role = .guest`, so a struct literal
-  has the values the database would give. A default that is computed (`nextval(...)`, `now()`, ...) and identity
-  columns are `generated`.
+  has the values the database would give. Identity columns, `GENERATED ALWAYS` columns and a key with a
+  computed default (`nextval(...)` of a serial) are `generated`. Other columns with a computed default (`now()`,
+  `gen_random_uuid()`, ...) are `defaulted`: the database fills them in on a create that doesn't set them, and an
+  update writes them (see the table section).
 * A table with a key of one column is a `dbms.KeyedTable`, typed by its key. Others are a `dbms.Table`.
 * Names: the table `order_items` is the row `OrderItem` in `entity/order_item.sd` (most English plurals become
   singular), the table type `OrderItemsTable` and the member `orderItems` of `Database`.
@@ -427,13 +441,13 @@ print("%", ada.id);           // what the database made, e.g the serial id and c
   key 12345`.
 * `create()` gives a new row, with the defaults of the struct (which are the constant defaults of the database), made
   with the allocator of the connection. Set its members before `saveChanges`. After the commit, the row as the database
-  stored it (with its generated columns) is written into it. Nothing is written into it when the save fails.
+  stored it (with its generated and defaulted columns) is written into it. Nothing is written into it when the save fails.
 * Creates of one table that follow each other are one `INSERT ... VALUES (...), (...) RETURNING *`, of at most
   `dbms.MaxRowsInInsert` (1000) rows, and fewer when the rows have so many columns that they would take more than the
   65535 parameters Postgres allows. Postgres gives the rows back in the order of the values, so each row gets its own
   id. A create of another table in between starts a new `INSERT`, so the order of the changes stays the same.
-* `update` takes a pointer to a row and writes every column that isn't the key or generated. It is for a row that
-  isn't tracked: a row that `get` or `all` gave is saved without it.
+* `update` takes a pointer to a row and writes every column that isn't the key or generated, defaulted ones too. It
+  is for a row that isn't tracked: a row that `get` or `all` gave is saved without it.
 * `delete` takes the key, which is copied.
 * `db.pendingChanges()` is the number of changes that `saveChanges` would write, with the tracked rows that changed.
 * The context, its list of changes and the copies of the tracked rows are made with the allocator of the connection.
