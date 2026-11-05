@@ -5,18 +5,78 @@
 #   VSCE_PAT  a token of Azure DevOps with the scope Marketplace > Manage, for the publisher in package.json
 #   OVSX_PAT  a token of open-vsx.org, for the namespace of the publisher. Optional
 #
-# A version that is published already is skipped, so only raising the version publishes.
+# A version that is published already is skipped, so only raising the version publishes. What a run did is visible on
+# GitHub, without logging in to the Marketplace:
+#   * The run waits until the Marketplace has verified the version and gives it to everyone, and fails when that
+#     doesn't happen in 30 minutes. So a green check on the commit means the version is live, a red one that it isn't
+#   * Each store is an environment (vscode-marketplace, open-vsx), so the repository's Deployments list each version
+#     that went live, with a link to the store
+#   * A release vscode-v<version> with the notes of CHANGELOG.md and the .vsix is made when the Marketplace has it
+#   * The summary of the run says, for each store, what was done
 
 name: VS Code extension
 
 on:
   push:
     branches: [main]
-    paths: ["lsp/vscode/**"]
+    paths: ["lsp/vscode/**", ".github/workflows/vscode-extension.yml"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  EXTENSION: jakobsaadbye.saad
+
 jobs:
-  publish:
+  # What there is to do: the version, and if each store has it already
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version:     ${{ steps.check.outputs.version }}
+      marketplace: ${{ steps.check.outputs.marketplace }}
+      openvsx:     ${{ steps.check.outputs.openvsx }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the stores
+        id: check
+        env:
+          HAS_VSCE: ${{ secrets.VSCE_PAT != '' }}
+          HAS_OVSX: ${{ secrets.OVSX_PAT != '' }}
+        run: |
+          set -euo pipefail
+          source .github/workflows/vscode-stores.sh
+          version="$(jq -r .version lsp/vscode/package.json)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if marketplace_has "$version"; then marketplace=published
+          elif [ "$HAS_VSCE" != true ]; then marketplace=no-token
+          else marketplace=publish
+          fi
+          if openvsx_has "$version"; then openvsx=published
+          elif [ "$HAS_OVSX" != true ]; then openvsx=no-token
+          else openvsx=publish
+          fi
+          echo "marketplace=$marketplace" >> "$GITHUB_OUTPUT"
+          echo "openvsx=$openvsx" >> "$GITHUB_OUTPUT"
+
+          describe() {
+            case "$1" in
+              published) echo "has $version already, so it isn't published again" ;;
+              no-token)  echo "doesn't have $version, but there is no $2 secret, so it isn't published" ;;
+              publish)   echo "doesn't have $version yet: it is published by this run" ;;
+            esac
+          }
+          {
+            echo "## VS Code extension $version"
+            echo "* Visual Studio Marketplace: $(describe "$marketplace" VSCE_PAT)"
+            echo "* Open VSX: $(describe "$openvsx" OVSX_PAT)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  package:
+    needs: check
+    if: needs.check.outputs.marketplace == 'publish' || needs.check.outputs.openvsx == 'publish'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -34,21 +94,120 @@ jobs:
       - name: Package
         run: npx --yes @vscode/vsce@3 package --out saad.vsix
 
-      - name: Publish to the Visual Studio Marketplace
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: |
-          if [ -z "$VSCE_PAT" ]; then echo "No VSCE_PAT secret, so it isn't published to the Marketplace"; exit 0; fi
-          npx --yes @vscode/vsce@3 publish --packagePath saad.vsix --skip-duplicate
-
-      - name: Publish to Open VSX
-        env:
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: |
-          if [ -z "$OVSX_PAT" ]; then echo "No OVSX_PAT secret, so it isn't published to Open VSX"; exit 0; fi
-          npx --yes ovsx@0.10 publish saad.vsix --skip-duplicate
-
       - uses: actions/upload-artifact@v4
         with:
           name: saad-vsix
           path: lsp/vscode/saad.vsix
+
+  marketplace:
+    needs: [check, package]
+    if: needs.check.outputs.marketplace == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: vscode-marketplace
+      url: https://marketplace.visualstudio.com/items?itemName=jakobsaadbye.saad
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: saad-vsix
+
+      - name: Publish to the Visual Studio Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: npx --yes @vscode/vsce@3 publish --packagePath saad.vsix --skip-duplicate
+
+      # The Marketplace verifies a version (e.g scans it for viruses) before it gives it to anyone, which takes minutes
+      - name: Wait for the Marketplace to verify it
+        run: |
+          set -uo pipefail
+          source .github/workflows/vscode-stores.sh
+          for i in $(seq 1 60); do
+            if marketplace_has "$VERSION"; then
+              echo "The Marketplace has verified $VERSION, after about $(( (i - 1) / 2 )) minutes"
+              echo "* Visual Studio Marketplace: $VERSION is verified and live: https://marketplace.visualstudio.com/items?itemName=$EXTENSION" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Not verified yet ($i of 60)"
+            sleep 30
+          done
+          echo "::error::The Marketplace hasn't verified $VERSION in 30 minutes. It may have been rejected: see https://marketplace.visualstudio.com/manage/publishers/${EXTENSION%%.*}"
+          echo "* Visual Studio Marketplace: $VERSION was published, but not verified in 30 minutes" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+  openvsx:
+    needs: [check, package]
+    if: needs.check.outputs.openvsx == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: open-vsx
+      url: https://open-vsx.org/extension/jakobsaadbye/saad
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: saad-vsix
+
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npx --yes ovsx@0.10 publish saad.vsix --skip-duplicate
+
+      # Open VSX may also scan a version before it is active
+      - name: Wait for Open VSX to have it
+        run: |
+          set -uo pipefail
+          source .github/workflows/vscode-stores.sh
+          for i in $(seq 1 60); do
+            if openvsx_has "$VERSION"; then
+              echo "* Open VSX: $VERSION is live: https://open-vsx.org/extension/${EXTENSION/./\/}" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Not active yet ($i of 60)"
+            sleep 30
+          done
+          echo "::error::Open VSX doesn't give $VERSION after 30 minutes"
+          echo "* Open VSX: $VERSION was published, but isn't active after 30 minutes" >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+  # A release of the version, once the Marketplace has it, with its notes and the .vsix
+  release:
+    needs: [check, marketplace]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: saad-vsix
+
+      - name: Make the release
+        run: |
+          set -euo pipefail
+          tag="vscode-v$VERSION"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "The release $tag is there already"
+            exit 0
+          fi
+          # The section of the version in CHANGELOG.md
+          awk -v v="$VERSION" '/^## / { on = ($2 == v); next } on' lsp/vscode/CHANGELOG.md > notes.md
+          {
+            echo
+            echo "On the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=$EXTENSION) and [Open VSX](https://open-vsx.org/extension/${EXTENSION/./\/}). Installed copies update by themselves."
+          } >> notes.md
+          mv saad.vsix "saad-$VERSION.vsix"
+          gh release create "$tag" "saad-$VERSION.vsix" --target "$GITHUB_SHA" --title "VS Code extension $VERSION" --notes-file notes.md --latest=false
+          echo "* Release: https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
