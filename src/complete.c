@@ -1111,6 +1111,7 @@ static bool complete_compile_time_if(const char *text, int start) {
 
     add_item("OS", "constant", "The operating system of the target: .windows or .linux", "e.g `#if OS == .windows { ... }`");
     add_item("ARCH", "constant", "The processor of the target: .x64", "e.g `#if ARCH == .x64 { ... }`");
+    add_item("CHECK_MEMORY", "constant", "If the program is built with --check-memory", "e.g `#if CHECK_MEMORY { ... }`");
     add_item("true", "keyword", "", NULL);
     add_item("false", "keyword", "", NULL);
     return true;

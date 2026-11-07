@@ -145,7 +145,7 @@ allocator :: method (arena: *Arena) -> Allocator {
 free :: method (arena: *Arena) {
     chunk := arena.currentChunk;
     while chunk != null {
-        c.free(chunk.data);
+        freeChunkData(chunk);
         previous := chunk.prev;
         c.free(chunk);
         chunk = previous;
@@ -153,15 +153,20 @@ free :: method (arena: *Arena) {
     arena.currentChunk = null;
 }
 
-// Makes all the memory of the arena free to use again. It keeps the biggest chunk, so the next use doesn't allocate
+// Makes all the memory of the arena free to use again. It keeps the biggest chunk, so the next use doesn't allocate.
+// With saad build --check-memory it keeps none, so a pointer into what was cleared is found when it is used
 clear :: method (arena: *Arena) {
+    #if CHECK_MEMORY {
+        arena.free();
+        return;
+    }
     chunk := arena.currentChunk;
     if chunk == null {
         return;
     }
     previous := chunk.prev;
     while previous != null {
-        c.free(previous.data);
+        freeChunkData(previous);
         next := previous.prev;
         c.free(previous);
         previous = next;
@@ -184,12 +189,25 @@ used :: method (arena: *Arena) -> int {
 newChunk :: (oldChunk: *Chunk, capacity: int) -> *Chunk {
     chunk := c.malloc(sizeof(Chunk)) as *Chunk;
     assert(chunk != null); // Out of memory
-    chunk.data     = c.malloc(capacity) as *u8;
+    #if CHECK_MEMORY {
+        chunk.data = checkedAllocate(capacity);   // See std/prelude/errors.sd
+    } else {
+        chunk.data = c.malloc(capacity) as *u8;
+    }
     assert(chunk.data != null);
     chunk.cursor   = 0;
     chunk.capacity = capacity;
     chunk.prev     = oldChunk;
     return chunk;
+}
+
+@private
+freeChunkData :: (chunk: *Chunk) {
+    #if CHECK_MEMORY {
+        checkedFree(chunk.data, chunk.capacity);
+    } else {
+        c.free(chunk.data);
+    }
 }
 
 // Each block of the allocator starts with its size, so a bigger block can copy the old one

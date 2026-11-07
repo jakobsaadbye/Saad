@@ -865,6 +865,9 @@ static Value lower_place(Lowerer *L, AstExpr *expr);
 static void emit_errors_call(Lowerer *L, const char *name, int arg_count, int *args);
 bool bounds_checks = true; // Indexes of arrays, slices, lists and strings, and pointers that are dereferenced, are checked, unless built with --unchecked
 static void emit_null_check(Lowerer *L, int ptr, AstExpr *expr);
+static void emit_memory_check(Lowerer *L, int ptr, AstExpr *expr);
+static void emit_string_memory_check(Lowerer *L, int string_ptr, AstExpr *expr);
+bool memory_checks = false; // saad build --check-memory: pointers into the memory of arenas that were cleared or freed are found
 static bool is_receiver_of_method(Lowerer *L, AstExpr *expr);
 // The place whose address & takes, e.g p[i] of &p[i]. Its last step only computes an address, so it isn't checked for null
 static AstExpr *address_taken_of = NULL;
@@ -1540,6 +1543,8 @@ static IrAddr array_access_addr(Lowerer *L, AstArrayAccess *aa) {
         emit_unwind(L);
         set_block(L, inside);
     }
+    // The bytes of a string, slice or list, which can be in an arena that was cleared (--check-memory)
+    if (count >= 0 && !is_fixed_array(left_type) && (AstExpr *) aa != address_taken_of) emit_memory_check(L, data, aa->left);
     int offset = emit_binop(L, IR_MUL, IR_I64, index, emit_const(L, IR_I64, elem_type->size));
     return addr_vreg(emit_ptr_add(L, data, offset), 0);
 }
@@ -1702,6 +1707,8 @@ static int lower_comparison(Lowerer *L, AstBinary *bin) {
         int args[2];
         args[0] = addr_to_ptr(L, value_to_place(L, lower_expr(L, bin->left)).addr);
         args[1] = addr_to_ptr(L, value_to_place(L, lower_expr(L, bin->right)).addr);
+        emit_string_memory_check(L, args[0], bin->left);    // C compares them, so they are checked before (--check-memory)
+        emit_string_memory_check(L, args[1], bin->right);
         int result = emit_c_call(L, "runtime_compare_strings", IR_I32, 2, args);
         IrCmp cmp = comparison_predicate(bin->operator, false, true);
         return emit_cmp(L, IR_ICMP, cmp, IR_I32, result, emit_const(L, IR_I32, 0));
@@ -2803,10 +2810,13 @@ static bool is_receiver_of_method(Lowerer *L, AstExpr *expr) {
 // checked, but the steps before it are, e.g p.next of &p.next.value. --unchecked leaves the check out. The functions of errors.sd aren't checked, as the
 // compiler calls some of them before a Panic can be thrown
 static void emit_null_check(Lowerer *L, int ptr, AstExpr *expr) {
-    if (!bounds_checks) return;
     AstFile *file = L->ast_func ? L->ast_func->head.head.file : NULL;
     if (file == NULL || file == L->parser->errors_file) return;
     if (is_receiver_of_method(L, expr)) return;   // self: the call checked it
+    if (!bounds_checks) {
+        emit_memory_check(L, ptr, expr);
+        return;
+    }
 
     IrType ir_type = ir_vreg_type(L->func, ptr);
     IrBlock *is_null  = create_block(L, "null.pointer");
@@ -2820,6 +2830,57 @@ static void emit_null_check(Lowerer *L, int ptr, AstExpr *expr) {
     emit_trace_frame(L, expr->head.start.line);
     emit_unwind(L);
     set_block(L, not_null);
+    emit_memory_check(L, ptr, expr);
+}
+
+static int emit_errors_global_load(Lowerer *L, IrType type, const char *name) {
+    return emit_load(L, type, addr_global(global_variable(L, errors_declaration(L, name)), 0));
+}
+
+// With --check-memory: a pointer into the memory of an arena that was cleared or freed throws a Panic. The chunks of
+// arenas are in one range of addresses, with a byte for each page that is 1 when the page was freed (see
+// checkedAllocate in std/prelude/errors.sd), so the check is a subtraction, a compare and, for a pointer in the range,
+// the load of that byte. Pointers outside the range, e.g into the heap or the stack, aren't checked
+static void emit_memory_check(Lowerer *L, int ptr, AstExpr *expr) {
+    if (!memory_checks) return;
+    AstFile *file = L->ast_func ? L->ast_func->head.head.file : NULL;
+    if (file == NULL || file == L->parser->errors_file) return;
+
+    int address = ir_vreg_type(L->func, ptr) == IR_I64 ? ptr : emit_unop(L, IR_BITCAST, IR_I64, ptr);
+    int offset  = emit_binop(L, IR_SUB, IR_I64, address, emit_errors_global_load(L, IR_I64, "checkedBase"));
+    IrBlock *in_range = create_block(L, "checked.memory");
+    IrBlock *freed    = create_block(L, "freed.memory");
+    IrBlock *done     = create_block(L, "memory.checked");
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_ULT, IR_I64, offset, emit_errors_global_load(L, IR_I64, "checkedSize")), in_range, done);
+
+    set_block(L, in_range);
+    int page  = emit_binop(L, IR_LSHR, IR_I64, offset, emit_const(L, IR_I64, 12));   // CheckedPageSize is 4096
+    int state = emit_load(L, IR_I8, addr_vreg(emit_ptr_add(L, emit_errors_global_load(L, IR_PTR, "checkedPages"), page), 0));
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_I8, state, emit_const(L, IR_I8, 0)), freed, done);
+
+    set_block(L, freed);
+    char text[64];
+    expr_source_text(expr, text, sizeof(text));
+    int args[1] = { emit_c_text(L, text) };
+    emit_errors_call(L, "panicFreedMemory", 1, args);
+    emit_trace_frame(L, expr->head.start.line);
+    emit_unwind(L);
+    set_block(L, done);
+}
+
+// The memory check of the bytes of a string, slice or list, at string_ptr, when it has any
+static void emit_string_memory_check(Lowerer *L, int string_ptr, AstExpr *expr) {
+    if (!memory_checks) return;
+    AstFile *file = L->ast_func ? L->ast_func->head.head.file : NULL;
+    if (file == NULL || file == L->parser->errors_file) return;
+    IrBlock *has_bytes = create_block(L, "string.has.bytes");
+    IrBlock *done      = create_block(L, "string.checked");
+    int count = emit_load(L, IR_I64, addr_vreg(string_ptr, 8));
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_I64, count, emit_const(L, IR_I64, 0)), has_bytes, done);
+    set_block(L, has_bytes);
+    emit_memory_check(L, emit_load(L, IR_PTR, addr_vreg(string_ptr, 0)), expr);
+    terminate_jmp(L, done);
+    set_block(L, done);
 }
 
 // Calls a function of errors.sd that takes no results, without the check for a thrown error after it

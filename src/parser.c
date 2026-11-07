@@ -2,6 +2,7 @@
 #include "scope.h"
 
 #include <stdarg.h>
+extern bool memory_checks; // saad build --check-memory, in ir_lower.c
 
 #define MAX_PRECEDENCE 99
 #define MIN_PRECEDENCE -99
@@ -427,11 +428,15 @@ static bool if_condition_primary(IfPass *pass, int *i) {
         *i += 1;
         return token.as_value.value.boolean;
     }
+    if (token.type == TOKEN_LITERAL_IDENTIFIER && strcmp(token.as_value.value.identifier.name, "CHECK_MEMORY") == 0) {
+        *i += 1;
+        return memory_checks; // saad build --check-memory
+    }
     if (token.type == TOKEN_LITERAL_IDENTIFIER) {
         char *name = token.as_value.value.identifier.name;
         const char *actual = strcmp(name, "OS") == 0 ? target_os : strcmp(name, "ARCH") == 0 ? target_arch : NULL;
         if (actual == NULL) {
-            if (!pass->bad) report_error_token(pass->parser, LABEL_ERROR, token, "'%s' isn't known to #if, which knows OS and ARCH", name);
+            if (!pass->bad) report_error_token(pass->parser, LABEL_ERROR, token, "'%s' isn't known to #if, which knows OS, ARCH and CHECK_MEMORY", name);
             pass->failed = pass->bad = true;
             return false;
         }

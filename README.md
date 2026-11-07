@@ -82,6 +82,16 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
 
 # Changelog
 
+## Update v0.15.0 - 7. Nov 2026
+
+* `saad build --check-memory` finds uses of the memory of arenas that were cleared or freed: they throw a `Panic`, e.g
+  `Use of freed memory: entry.key points into an arena that was cleared or freed`. It finds e.g a cache of a server
+  that keeps memory of a request, which is cleared after the response. Without it, the cache gives the data of
+  another request. See `docs/check_memory.md`
+* `#if CHECK_MEMORY { ... }` for code of that build only
+* Errors and their traces are on the heap, so an error thrown out of an arena, e.g of a request, outlives it. Before,
+  its trace kept the allocator of the arena, which could be gone
+
 ## Update v0.14.2 - 7. Nov 2026
 
 * A null pointer that is dereferenced throws a `Panic` instead of crashing the program: a member of it

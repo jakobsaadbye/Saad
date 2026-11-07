@@ -210,6 +210,10 @@ MS int ms_pthread_mutex_init(pthread_mutex_t *m, void *attributes) { return pthr
 MS int ms_pthread_mutex_lock(pthread_mutex_t *m) { return pthread_mutex_lock(m); }
 MS int ms_pthread_mutex_unlock(pthread_mutex_t *m) { return pthread_mutex_unlock(m); }
 MS int ms_pthread_mutex_destroy(pthread_mutex_t *m) { return pthread_mutex_destroy(m); }
+#include <sys/mman.h>
+MS void *ms_mmap(void *address, size_t size, int protect, int flags, int fd, long long offset) { return mmap(address, size, protect, flags, fd, (off_t)offset); }
+MS int ms_mprotect(void *address, size_t size, int protect) { return mprotect(address, size, protect); }
+MS int ms_madvise(void *address, size_t size, int advice) { return madvise(address, size, advice); }
 MS int ms_pthread_cond_init(pthread_cond_t *c, void *attributes) { return pthread_cond_init(c, (pthread_condattr_t *)attributes); }
 MS int ms_pthread_cond_wait(pthread_cond_t *c, pthread_mutex_t *m) { return pthread_cond_wait(c, m); }
 MS int ms_pthread_cond_signal(pthread_cond_t *c) { return pthread_cond_signal(c); }
