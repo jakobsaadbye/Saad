@@ -103,7 +103,7 @@ main :: () {
     assert(misses == 4 && xs[2] == 3 && list[0] == 1 && text[1] == 'b');
 
     // A null pointer that is dereferenced is a Panic, which names the pointer: a member, a write, *p, an index into a
-    // pointer and self of a method. The defers on the way run
+    // pointer and the receiver of a method. The defers on the way run
     last := Link{value: 1};
     nothing: *Link;
     bytes: *u8;
@@ -123,7 +123,7 @@ main :: () {
             if i <= 1 || i == 4 { assert(e.message == "Null pointer dereference: self.next is null" || e.message == "Null pointer dereference: last.next is null"); }
             if i == 2 { assert(e.message == "Null pointer dereference: nothing is null"); }
             if i == 3 { assert(e.message == "Null pointer dereference: bytes is null"); }
-            if i == 5 { assert(e.message == "Null pointer dereference: self is null"); }
+            if i == 5 { assert(e.message == "Null pointer dereference: nothing is null"); }   // The call checks the receiver
             nulls += 1;
         }
     }

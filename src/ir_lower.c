@@ -86,6 +86,7 @@ typedef struct Lowerer {
 
     // Module state
     PtrMap           const_globals;   // AstIdentifier* -> global index of an aggregate constant
+    PtrMap           c_texts;         // const char* that lives as long as the AST, e.g a file path -> global index of it as C text
     int              assert_filename_global; // Cached per file
     AstFile         *assert_filename_file;
 
@@ -864,6 +865,7 @@ static Value lower_place(Lowerer *L, AstExpr *expr);
 static void emit_errors_call(Lowerer *L, const char *name, int arg_count, int *args);
 bool bounds_checks = true; // Indexes of arrays, slices, lists and strings, and pointers that are dereferenced, are checked, unless built with --unchecked
 static void emit_null_check(Lowerer *L, int ptr, AstExpr *expr);
+static bool is_receiver_of_method(Lowerer *L, AstExpr *expr);
 // The place whose address & takes, e.g p[i] of &p[i]. Its last step only computes an address, so it isn't checked for null
 static AstExpr *address_taken_of = NULL;
 static void emit_trace_frame(Lowerer *L, int line);
@@ -2378,7 +2380,14 @@ static Value lower_call(Lowerer *L, AstFunctionCall *call, int *ret_slots, int m
         }
         if (param_type->kind == TYPE_VARIADIC) param_type = (Type *) ((TypeVariadic *) param_type)->slice;
 
-        call_add_arg(ir_call, lower_argument(L, arg, param_type, is_vararg), is_vararg);
+        int value = lower_argument(L, arg, param_type, is_vararg);
+        // The receiver of a method, when it is a pointer, so that the method doesn't check self. &x, e.g of x.m() of a
+        // struct x, isn't null
+        bool is_receiver = func_defn->is_method && i == 0 && param_type->kind == TYPE_POINTER;
+        if (is_receiver && !(arg->head.kind == AST_UNARY && ((AstUnary *) arg)->operator == OP_ADDRESS_OF)) {
+            emit_null_check(L, value, arg);
+        }
+        call_add_arg(ir_call, value, is_vararg);
     }
 
     int result = emit_call(L, ir_call);
@@ -2752,6 +2761,17 @@ static int emit_c_text(Lowerer *L, const char *text) {
     return emit_global_addr(L, data->index);
 }
 
+// Like emit_c_text, for a text that lives as long as the AST, e.g the name of a function or the path of a file. It is
+// one global however many times it is used, e.g by the frames of the traces of a file
+static int emit_shared_c_text(Lowerer *L, const char *text) {
+    int global = ptr_map_get(&L->c_texts, (void *) text);
+    if (global < 0) {
+        global = ir_global_data(L->module, "text", text, (int) strlen(text) + 1, 1, true)->index;
+        ptr_map_put(&L->c_texts, (void *) text, global);
+    }
+    return emit_global_addr(L, global);
+}
+
 // The text of the expression in its file, e.g user.manager, for a message. Empty when it isn't one short line
 static void expr_source_text(AstExpr *expr, char *out, int size) {
     out[0] = 0;
@@ -2769,6 +2789,15 @@ static void expr_source_text(AstExpr *expr, char *out, int size) {
     out[len] = 0;
 }
 
+// If the expression is the receiver of the method that is being lowered, e.g self. A call of a method checks a receiver
+// that is a pointer (see lower_call), so self isn't checked again each time it is used
+static bool is_receiver_of_method(Lowerer *L, AstExpr *expr) {
+    if (L->ast_func == NULL || L->ast_func->receiver == NULL) return false;
+    if (expr->head.kind != AST_LITERAL || ((AstLiteral *) expr)->kind != LITERAL_IDENTIFIER) return false;
+    AstIdentifier *ident = ((AstLiteral *) expr)->as.value.identifier.resolved_identifier;
+    return ident != NULL && resolve_override(ident) == resolve_override(L->ast_func->receiver);
+}
+
 // A pointer that is null when it is dereferenced (p.x, *p and p[i]) throws a Panic, with the place in the trace,
 // instead of crashing the program. Taking an address, e.g &p[i] or &p.x, only computes it, so its last step isn't
 // checked, but the steps before it are, e.g p.next of &p.next.value. --unchecked leaves the check out. The functions of errors.sd aren't checked, as the
@@ -2777,6 +2806,7 @@ static void emit_null_check(Lowerer *L, int ptr, AstExpr *expr) {
     if (!bounds_checks) return;
     AstFile *file = L->ast_func ? L->ast_func->head.head.file : NULL;
     if (file == NULL || file == L->parser->errors_file) return;
+    if (is_receiver_of_method(L, expr)) return;   // self: the call checked it
 
     IrType ir_type = ir_vreg_type(L->func, ptr);
     IrBlock *is_null  = create_block(L, "null.pointer");
@@ -2807,7 +2837,7 @@ static void emit_trace_frame(Lowerer *L, int line) {
     AstFile *file = L->ast_func ? L->ast_func->head.head.file : NULL;
     if (file == NULL || file == L->parser->errors_file) return;
     const char *function = L->ast_func->identifier && L->ast_func->identifier->name ? L->ast_func->identifier->name : "lambda";
-    int args[3] = { emit_c_text(L, function), emit_c_text(L, file->absolute_path), emit_const(L, IR_I64, line) };
+    int args[3] = { emit_shared_c_text(L, function), emit_shared_c_text(L, file->absolute_path), emit_const(L, IR_I64, line) };
     emit_errors_call(L, "traceThrow", 3, args);
 }
 
