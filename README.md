@@ -82,6 +82,13 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
 
 # Changelog
 
+## Update v0.14.2 - 7. Nov 2026
+
+* A null pointer that is dereferenced throws a `Panic` instead of crashing the program: a member of it
+  (`user.manager.name`, also a write), `*p` and `p[i]`. The message names the pointer, e.g `Null pointer dereference:
+  user.manager is null`, and the trace has the place, so a web server answers with a 500 and goes on, like for an
+  index out of bounds. `saad build --unchecked` leaves the checks out, with the bounds checks
+
 ## Update v0.14.1 - 4. Nov 2026
 
 * An endpoint of `web` can have defaults, e.g `listPosts :: (session: *Session, page := 1)`: a parameter that isn't

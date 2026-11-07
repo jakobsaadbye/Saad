@@ -33,7 +33,7 @@ typedef struct Command {
     { "--debug",     "Add debug information, for LLDB or GDB" }, \
     { "--llvm",      LLVM_DESCRIPTION }, \
     { "-O0 .. -O3",  "How much LLVM optimizes: -O2, or -O0 with --debug" }, \
-    { "--unchecked", "Leave out the bounds checks of indexes" }, \
+    { "--unchecked", "Leave out the bounds checks of indexes and the null checks of pointers" }, \
     { "--os <os>",   "The OS of #if: windows or linux" }, \
     { "--elf",       "Write build/out.o for Linux (tools/linux)" }, \
     { "--dump",      "Write the IR and the registers to build/out.ir and out.regalloc.txt" }
