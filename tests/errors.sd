@@ -23,6 +23,13 @@ save :: (ok: bool) -> error {
 
 third :: (sl: []int) -> int { return sl[2]; }
 
+Link :: struct {
+    value: int;
+    next:  *Link;
+
+    nextValue :: method () -> int { return self.next.value; }
+}
+
 divide :: (a: int, b: int) -> int {
     return a / b;
 }
@@ -94,6 +101,33 @@ main :: () {
         }
     }
     assert(misses == 4 && xs[2] == 3 && list[0] == 1 && text[1] == 'b');
+
+    // A null pointer that is dereferenced is a Panic, which names the pointer: a member, a write, *p, an index into a
+    // pointer and self of a method. The defers on the way run
+    last := Link{value: 1};
+    nothing: *Link;
+    bytes: *u8;
+    nulls := 0;
+    deferred := 0;
+    for i in 0..6 {
+        try {
+            defer deferred += 1;
+            if i == 0 { n := last.next.value; }
+            if i == 1 { last.next.value = 2; }
+            if i == 2 { copy := *nothing; }
+            if i == 3 { b := bytes[3]; }
+            if i == 4 { n := last.nextValue(); }
+            if i == 5 { n := nothing.nextValue(); }
+        } catch (e) {
+            assert(e.is(Panic));
+            if i <= 1 || i == 4 { assert(e.message == "Null pointer dereference: self.next is null" || e.message == "Null pointer dereference: last.next is null"); }
+            if i == 2 { assert(e.message == "Null pointer dereference: nothing is null"); }
+            if i == 3 { assert(e.message == "Null pointer dereference: bytes is null"); }
+            if i == 5 { assert(e.message == "Null pointer dereference: self is null"); }
+            nulls += 1;
+        }
+    }
+    assert(nulls == 6 && deferred == 6);
 
     // A failed assert is a Panic too, with the place of the assert first in its trace
     try {

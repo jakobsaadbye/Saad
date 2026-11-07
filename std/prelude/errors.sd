@@ -96,6 +96,20 @@ panicAssertion :: () {
     panic("Assertion failed");
 }
 
+// For a pointer that is null when it is dereferenced, e.g user.manager of user.manager.name. The text is empty when the
+// compiler has none
+panicNullPointer :: (text: *u8) {
+    if text[0] == 0 { panic("Null pointer dereference"); return; }
+    buffer: [96]u8;
+    sprintf(buffer.data, "Null pointer dereference: %s is null", text);
+    copied := c.string{buffer.data}.toString();
+    message: string;
+    message.data = resizeMemory(null, null, copied.len) as *u8;
+    message.len  = copied.len;
+    for i in 0..copied.len { message.data[i] = copied.data[i]; }
+    panic(message);
+}
+
 // For an index outside of the elements of an array, a slice, a list or a string
 panicIndexOutOfBounds :: (index: i64, count: i64) {
     buffer: [96]u8;

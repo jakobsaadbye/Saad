@@ -862,7 +862,8 @@ static int enter_scope(Lowerer *L, Ast *node) {
 static Value lower_expr(Lowerer *L, AstExpr *expr);
 static Value lower_place(Lowerer *L, AstExpr *expr);
 static void emit_errors_call(Lowerer *L, const char *name, int arg_count, int *args);
-bool bounds_checks = true; // Indexes of arrays, slices, lists and strings are checked, unless built with --unchecked
+bool bounds_checks = true; // Indexes of arrays, slices, lists and strings, and pointers that are dereferenced, are checked, unless built with --unchecked
+static void emit_null_check(Lowerer *L, int ptr, AstExpr *expr);
 static void emit_trace_frame(Lowerer *L, int line);
 static void emit_unwind(Lowerer *L);
 static void emit_throw_check(Lowerer *L, int threw, bool confirm);
@@ -1440,6 +1441,7 @@ static bool is_fixed_array(Type *type) {
 static IrAddr member_base(Lowerer *L, AstExpr *left) {
     if (left->type->kind == TYPE_POINTER) {
         int ptr = value_to_scalar(L, lower_expr(L, left));
+        emit_null_check(L, ptr, left);
         return addr_vreg(ptr, 0);
     }
     return lower_place(L, left).addr;
@@ -1503,6 +1505,7 @@ static IrAddr array_access_addr(Lowerer *L, AstArrayAccess *aa) {
     int count = -1; // The number of elements, for the bounds check. A pointer has none
     if (left_type->kind == TYPE_POINTER) {
         data = value_to_scalar(L, lower_expr(L, aa->left));
+        emit_null_check(L, data, aa->left);
     } else if (is_fixed_array(left_type)) {
         data = addr_to_ptr(L, lower_place(L, aa->left).addr);
         count = emit_const(L, IR_I64, fixed_array_count((TypeArray *) left_type));
@@ -1510,7 +1513,11 @@ static IrAddr array_access_addr(Lowerer *L, AstArrayAccess *aa) {
         // slices, dynamic arrays, variadics and strings all start with a data pointer, and the count after it
         IrAddr place = lower_place(L, aa->left).addr;
         data  = emit_load(L, IR_PTR, place);
-        count = emit_load(L, IR_I64, addr_add(place, 8));
+        if (aa->head.head.flags & AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER) {
+            emit_null_check(L, data, aa->left); // A *T that the typer gave the type of a slice, e.g p[i]
+        } else {
+            count = emit_load(L, IR_I64, addr_add(place, 8));
+        }
     }
 
     int index  = lower_scalar_as(L, aa->index_expr, primitive_type(PRIMITIVE_I64));
@@ -1845,6 +1852,7 @@ static Value lower_unary(Lowerer *L, AstUnary *unary) {
     }
     case OP_POINTER_DEREFERENCE: {
         int ptr = value_to_scalar(L, lower_expr(L, unary->expr));
+        emit_null_check(L, ptr, unary->expr);
         return value_place(addr_vreg(ptr, 0), type);
     }
     case OP_SPREAD:
@@ -2736,6 +2744,45 @@ static int emit_c_text(Lowerer *L, const char *text) {
     int len = (int) strlen(text);
     IrGlobal *data = ir_global_data(L->module, "text", text, len + 1, 1, true);
     return emit_global_addr(L, data->index);
+}
+
+// The text of the expression in its file, e.g user.manager, for a message. Empty when it isn't one short line
+static void expr_source_text(AstExpr *expr, char *out, int size) {
+    out[0] = 0;
+    AstFile *file = expr->head.file;
+    if (file == NULL || file->text == NULL) return;
+    int start = expr->head.start.input_idx;
+    int end   = expr->head.end.input_idx;
+    int len   = end - start;
+    if (start < 0 || len <= 0 || len >= size || len > 60 || start + len > (int) strlen(file->text)) return;
+    for (int i = 0; i < len; i++) {
+        char c = file->text[start + i];
+        if (c == '\n' || c == '\r') { out[0] = 0; return; }
+        out[i] = c;
+    }
+    out[len] = 0;
+}
+
+// A pointer that is null when it is dereferenced (p.x, *p and p[i]) throws a Panic, with the place in the trace,
+// instead of crashing the program. --unchecked leaves the check out. The functions of errors.sd aren't checked, as the
+// compiler calls some of them before a Panic can be thrown
+static void emit_null_check(Lowerer *L, int ptr, AstExpr *expr) {
+    if (!bounds_checks) return;
+    AstFile *file = L->ast_func ? L->ast_func->head.head.file : NULL;
+    if (file == NULL || file == L->parser->errors_file) return;
+
+    IrType ir_type = ir_vreg_type(L->func, ptr);
+    IrBlock *is_null  = create_block(L, "null.pointer");
+    IrBlock *not_null = create_block(L, "not.null");
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_EQ, ir_type, ptr, emit_const(L, ir_type, 0)), is_null, not_null);
+    set_block(L, is_null);
+    char text[64];
+    expr_source_text(expr, text, sizeof(text));
+    int args[1] = { emit_c_text(L, text) };
+    emit_errors_call(L, "panicNullPointer", 1, args);
+    emit_trace_frame(L, expr->head.start.line);
+    emit_unwind(L);
+    set_block(L, not_null);
 }
 
 // Calls a function of errors.sd that takes no results, without the check for a thrown error after it
