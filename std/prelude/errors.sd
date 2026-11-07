@@ -215,10 +215,9 @@ newThreadBlock :: () {
 
 CheckedPageSize :: 4096;
 
-// 64 GB of addresses. Only the pages of the chunks that are in use have memory. Variables of i64, as a constant this big
-// is cut to 32 bits by a default int
-checkedRegionSize: i64 = 68719476736;
-checkedPageCount:  i64 = 16777216;      // checkedRegionSize / CheckedPageSize
+// 64 GB of addresses. Only the pages of the chunks that are in use have memory
+CheckedRegionSize :: 68719476736;
+CheckedPageCount  :: CheckedRegionSize / CheckedPageSize;
 
 checkedBase:  u64;     // The start of the range, 0 until the first chunk
 checkedSize:  u64;     // Its size: 0 until the first chunk, so that no pointer is in it
@@ -232,12 +231,12 @@ checkedAllocate :: (size: i64) -> *u8 {
     size = (size + CheckedPageSize - 1) / CheckedPageSize * CheckedPageSize;
     #if OS == .windows { AcquireSRWLockExclusive(&checkedLock); } else { pthread_mutex_lock(&checkedLock); }
     if checkedBase == 0 {
-        pageCount := checkedPageCount as u64;
+        pageCount := CheckedPageCount as u64;
         #if OS == .windows {
-            checkedStart = VirtualAlloc(null, checkedRegionSize as u64, 0x2000, 1) as *u8;   // MEM_RESERVE, PAGE_NOACCESS
+            checkedStart = VirtualAlloc(null, CheckedRegionSize as u64, 0x2000, 1) as *u8;   // MEM_RESERVE, PAGE_NOACCESS
             checkedPages = VirtualAlloc(null, pageCount, 0x3000, 4) as *u8;          // MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE
         } else {
-            checkedStart = mmap(null, checkedRegionSize as u64, 0, 0x4022, -1, 0) as *u8;  // PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE
+            checkedStart = mmap(null, CheckedRegionSize as u64, 0, 0x4022, -1, 0) as *u8;  // PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE
             checkedPages = mmap(null, pageCount, 3, 0x4022, -1, 0) as *u8;          // PROT_READ | PROT_WRITE
         }
         failed := 0xFFFFFFFFFFFFFFFF as u64;   // MAP_FAILED of mmap
@@ -246,11 +245,11 @@ checkedAllocate :: (size: i64) -> *u8 {
             exit(1);
         }
         checkedBase = checkedStart as u64;
-        checkedSize = checkedRegionSize as u64;
+        checkedSize = CheckedRegionSize as u64;
     }
     offset := checkedUsed;
     checkedUsed += size + CheckedPageSize;   // A page between chunks that is never readable, so a read past the end of a chunk crashes
-    full := checkedUsed > checkedRegionSize;
+    full := checkedUsed > CheckedRegionSize;
     #if OS == .windows { ReleaseSRWLockExclusive(&checkedLock); } else { pthread_mutex_unlock(&checkedLock); }
     if full {
         printf("--check-memory: the 64 GB of addresses for the arenas are used up. Their memory is never used again, so that freed memory is found\n");
