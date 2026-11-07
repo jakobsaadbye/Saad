@@ -1,0 +1,74 @@
+// saad build --check-memory: a server that keeps memory of a request in a cache. The memory of a request is in its
+// arena, which is cleared after the response, so the next request that reads the cache gets a Panic, and a 500,
+// instead of the data of another request. tools/linux/runtests.sh builds the tests of this folder with --check-memory
+
+import net.http;
+import thread;
+import fmt;
+import mem;
+use fmt;
+
+cache: Map<string, string>;   // On the heap, but what the broken handler puts in it isn't
+kept:  Map<string, string>;   // What the fixed handler puts in it is copied to the heap
+lastError: string;
+
+// The bug: the key and the title are in the arena of the request
+broken :: (w: *http.ResponseWriter, r: *http.Request) {
+    try {
+        name  := fmt.sprint("%", r.pathValue("name"));
+        found := cache.tryGet(name);
+        if found != null { w.write(found ?? ""); return; }
+        title := fmt.sprint("Title of %", name);
+        cache[name] = title;
+        w.write(title);
+    } catch (err) {
+        lastError = err.message.copy(mem.heap());
+        throw err;
+    }
+}
+
+// The fix: what is kept is copied to the heap
+fixed :: (w: *http.ResponseWriter, r: *http.Request) {
+    name  := fmt.sprint("%", r.pathValue("name"));
+    found := kept.tryGet(name);
+    if found != null { w.write(fmt.sprint("cached %", found ?? "")); return; }
+    title := fmt.sprint("Title of %", name);
+    kept[name.copy(mem.heap())] = title.copy(mem.heap());
+    w.write(title);
+}
+
+run :: (server: *http.Server) {
+    server.serve();
+}
+
+main :: () {
+    cache.allocator = mem.heap();
+    kept.allocator  = mem.heap();
+
+    router: http.Router;
+    router.handle("GET /broken/{name}", broken);
+    router.handle("GET /fixed/{name}", fixed);
+    server: http.Server;
+    server.router  = &router;
+    server.workers = 1;
+    server.log     = false;
+    assert(server.listen("127.0.0.1:0") == null);
+    base := fmt.sprint("http://%", server.listener.addr.toString());
+    serving := thread.spawn(run, &server);
+
+    // The first request fills the cache. The next one reads a key that was in the arena of the first
+    first := http.get(fmt.sprint("%/broken/a", base));
+    assert(first.status == 200 && first.body == "Title of a");
+    second := http.get(fmt.sprint("%/broken/a", base));
+    assert(second.status == 500);
+    assert(lastError == "Use of freed memory: entry.key points into an arena that was cleared or freed");
+
+    // Copied to the heap, it is kept across requests
+    one := http.get(fmt.sprint("%/fixed/b", base));
+    two := http.get(fmt.sprint("%/fixed/b", base));
+    assert(one.status == 200 && two.status == 200 && two.body == "cached Title of b");
+
+    server.shutdown();
+    serving.join();
+    print("check memory ok");
+}

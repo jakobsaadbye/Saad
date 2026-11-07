@@ -229,7 +229,7 @@ def main():
 
     print("completion in the condition of an #if")
     labels = [item["label"] for item in complete_at("    #if |")]
-    check(labels == ["OS", "ARCH", "true", "false"], f"the names of an #if: {labels}")
+    check(labels == ["OS", "ARCH", "CHECK_MEMORY", "true", "false"], f"the names of an #if: {labels}")
     labels = [item["label"] for item in complete_at("    #if OS == .|")]
     check(labels == ["windows", "linux"], f"the values of OS: {labels}")
     labels = [item["label"] for item in complete_at("    #if OS == .linux && ARCH != .|")]

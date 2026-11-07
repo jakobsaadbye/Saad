@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs every test on Linux: tests/*.sd must compile and run with exit code 0,
-# tests/should_fail/*.sd must be rejected by the compiler.
+# Runs every test on Linux: tests/*.sd must compile and run with exit code 0, tests/check_memory/*.sd too when they are
+# built with --check-memory, and tests/should_fail/*.sd must be rejected by the compiler.
 #
 #   tools/linux/runtests.sh            with the x64 backend
 #   tools/linux/runtests.sh --llvm     with the LLVM backend, also for the language server
@@ -24,6 +24,25 @@ passed=0; failed=0
 for f in tests/*.sd tests/std/*.sd tests/backend/*.sd; do
     printf "%-56s " "$f"
     if ! output=$(./bin/saad build "$f" --elf $SAAD_BUILD_FLAGS 2>&1); then
+        echo "${RED}COMPILE ERROR${RESET}"
+        echo "$output" | grep -iE 'error' | head -3 | sed 's/^/    /'
+        failed=$((failed + 1))
+        continue
+    fi
+    if output=$(bash "$HERE/run.sh" "$(dirname "$f")/build/out.o" 2>&1); then
+        echo "${GREEN}OK${RESET}"
+        passed=$((passed + 1))
+    else
+        echo "${RED}RUN FAILED${RESET}"
+        echo "$output" | tail -3 | sed 's/^/    /'
+        failed=$((failed + 1))
+    fi
+done
+
+# tests/check_memory: built with --check-memory, which finds uses of the memory of arenas that were cleared or freed
+for f in tests/check_memory/*.sd; do
+    printf "%-56s " "$f"
+    if ! output=$(./bin/saad build "$f" --elf --check-memory $SAAD_BUILD_FLAGS 2>&1); then
         echo "${RED}COMPILE ERROR${RESET}"
         echo "$output" | grep -iE 'error' | head -3 | sed 's/^/    /'
         failed=$((failed + 1))

@@ -20,6 +20,8 @@
 
 * A condition compares `OS` (`.windows` or `.linux`) or `ARCH` (`.x64`) with `==` or `!=`, and can use `true`,
   `false`, `!`, `&&`, `||` and parentheses.
+* `CHECK_MEMORY` is a condition of its own, true when the program is built with `--check-memory` (see
+  `docs/check_memory.md`), e.g `#if CHECK_MEMORY { ... }` and `#if !CHECK_MEMORY { ... }`.
 * `else { ... }` and `else #if ... { ... }` follow an `#if`.
 * It can be at the top of a file and in a block. What a branch declares is in the scope around the `#if`, as if the
   braces weren't there: `closeSocket` above is a function of the file.

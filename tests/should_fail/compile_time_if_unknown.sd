@@ -1,4 +1,4 @@
-// expect-error: 'DEBUG' isn't known to #if, which knows OS and ARCH
+// expect-error: 'DEBUG' isn't known to #if, which knows OS, ARCH and CHECK_MEMORY
 main :: () {
     #if DEBUG {
         x := 1;
