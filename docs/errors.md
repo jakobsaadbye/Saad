@@ -66,6 +66,8 @@ handlePost :: (req: Request) -> Response {
   * a null pointer that is dereferenced: a member of it (`user.manager.name`, also a write), `*p`, and an index into it
     (`p[i]`). The message names the pointer, e.g `Null pointer dereference: user.manager is null`. A method called on a
     null pointer throws where it uses `self`, e.g `self is null`
+    Taking an address, e.g `&p[i]` or `&p.x`, only computes it, so it doesn't throw for a null `p`; a read on the way
+    does, e.g `p.next` of `&p.next.value`
   * `saad build --unchecked` leaves the bounds checks and the null checks out
   * an `assert` whose condition is false, with the place of the assert first in the trace
   * `mem.allocate` and `mem.resize` when there is no memory left

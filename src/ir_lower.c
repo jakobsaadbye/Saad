@@ -864,6 +864,8 @@ static Value lower_place(Lowerer *L, AstExpr *expr);
 static void emit_errors_call(Lowerer *L, const char *name, int arg_count, int *args);
 bool bounds_checks = true; // Indexes of arrays, slices, lists and strings, and pointers that are dereferenced, are checked, unless built with --unchecked
 static void emit_null_check(Lowerer *L, int ptr, AstExpr *expr);
+// The place whose address & takes, e.g p[i] of &p[i]. Its last step only computes an address, so it isn't checked for null
+static AstExpr *address_taken_of = NULL;
 static void emit_trace_frame(Lowerer *L, int line);
 static void emit_unwind(Lowerer *L);
 static void emit_throw_check(Lowerer *L, int threw, bool confirm);
@@ -1438,10 +1440,10 @@ static bool is_fixed_array(Type *type) {
 }
 
 // The address of the struct that a member access reads from. Pointers are dereferenced automatically
-static IrAddr member_base(Lowerer *L, AstExpr *left) {
+static IrAddr member_base(Lowerer *L, AstExpr *left, AstExpr *access) {
     if (left->type->kind == TYPE_POINTER) {
         int ptr = value_to_scalar(L, lower_expr(L, left));
-        emit_null_check(L, ptr, left);
+        if (access != address_taken_of) emit_null_check(L, ptr, left);
         return addr_vreg(ptr, 0);
     }
     return lower_place(L, left).addr;
@@ -1466,7 +1468,7 @@ static Value lower_member_access(Lowerer *L, AstMemberAccess *ma) {
             LOWER_NOT_IMPLEMENTED(L, ma, "this member of a fixed array");
         }
 
-        IrAddr base = member_base(L, ma->left);
+        IrAddr base = member_base(L, ma->left, (AstExpr *) ma);
         return value_place(addr_add(base, member->member_offset), type);
     }
     case MEMBER_ACCESS_STATIC_STRUCT_MEMBER:
@@ -1505,7 +1507,7 @@ static IrAddr array_access_addr(Lowerer *L, AstArrayAccess *aa) {
     int count = -1; // The number of elements, for the bounds check. A pointer has none
     if (left_type->kind == TYPE_POINTER) {
         data = value_to_scalar(L, lower_expr(L, aa->left));
-        emit_null_check(L, data, aa->left);
+        if ((AstExpr *) aa != address_taken_of) emit_null_check(L, data, aa->left);
     } else if (is_fixed_array(left_type)) {
         data = addr_to_ptr(L, lower_place(L, aa->left).addr);
         count = emit_const(L, IR_I64, fixed_array_count((TypeArray *) left_type));
@@ -1514,7 +1516,8 @@ static IrAddr array_access_addr(Lowerer *L, AstArrayAccess *aa) {
         IrAddr place = lower_place(L, aa->left).addr;
         data  = emit_load(L, IR_PTR, place);
         if (aa->head.head.flags & AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER) {
-            emit_null_check(L, data, aa->left); // A *T that the typer gave the type of a slice, e.g p[i]
+            // A *T that the typer gave the type of a slice, e.g p[i]
+            if ((AstExpr *) aa != address_taken_of) emit_null_check(L, data, aa->left);
         } else {
             count = emit_load(L, IR_I64, addr_add(place, 8));
         }
@@ -1847,12 +1850,15 @@ static Value lower_unary(Lowerer *L, AstUnary *unary) {
         return value_scalar(emit_unop(L, IR_NOT, ir_type_of(type), value), type);
     }
     case OP_ADDRESS_OF: {
+        AstExpr *outer = address_taken_of;
+        address_taken_of = unary->expr;
         Value place = lower_place(L, unary->expr);
+        address_taken_of = outer;
         return value_scalar(addr_to_ptr(L, place.addr), type);
     }
     case OP_POINTER_DEREFERENCE: {
         int ptr = value_to_scalar(L, lower_expr(L, unary->expr));
-        emit_null_check(L, ptr, unary->expr);
+        if ((AstExpr *) unary != address_taken_of) emit_null_check(L, ptr, unary->expr);
         return value_place(addr_vreg(ptr, 0), type);
     }
     case OP_SPREAD:
@@ -2764,7 +2770,8 @@ static void expr_source_text(AstExpr *expr, char *out, int size) {
 }
 
 // A pointer that is null when it is dereferenced (p.x, *p and p[i]) throws a Panic, with the place in the trace,
-// instead of crashing the program. --unchecked leaves the check out. The functions of errors.sd aren't checked, as the
+// instead of crashing the program. Taking an address, e.g &p[i] or &p.x, only computes it, so its last step isn't
+// checked, but the steps before it are, e.g p.next of &p.next.value. --unchecked leaves the check out. The functions of errors.sd aren't checked, as the
 // compiler calls some of them before a Panic can be thrown
 static void emit_null_check(Lowerer *L, int ptr, AstExpr *expr) {
     if (!bounds_checks) return;

@@ -129,6 +129,17 @@ main :: () {
     }
     assert(nulls == 6 && deferred == 6);
 
+    // Taking an address only computes it, so &p[i] and &p.x of a null p don't throw, but a read on the way does
+    at := &bytes[3];
+    member := &nothing.next;
+    assert(at as u64 == 3 && member as u64 == 8);
+    try {
+        through := &nothing.next.value;
+        assert(false);
+    } catch (e) {
+        assert(e.message == "Null pointer dereference: nothing is null");
+    }
+
     // A failed assert is a Panic too, with the place of the assert first in its trace
     try {
         assert(misses == 0);
