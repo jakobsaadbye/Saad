@@ -103,8 +103,8 @@ getSeries :: (session: *Session, slug: string) -> SeriesView {
 * **Errors**: a query that fails throws, and the server answers with a 500. What the client did wrong is thrown with
   a kind of `web`, e.g `web.NotFound`, which gives its status.
 * **Queries** are lambdas made into SQL, with relations as joins (`p.author().name`) and subqueries
-  (`p.likes().count()`, `p.postTags().where(t => t.tag == name).exists()`). `feed` is plain SQL with
-  `conn.query<PostSummary>`, for a join the tables can't say yet.
+  (`p.likes().count()`, `p.postTags().where(t => t.tag == name).exists()`). `feed` goes through two relations,
+  `p.author().follows().where(f => f.readerId == readerId).exists()`, for the posts of the authors a reader follows.
 * **Changes** to the rows that a query gave are saved by `saveChanges`, e.g the views of `getPost`.
 
 ## What the demo prints
@@ -319,7 +319,7 @@ are kept until they are fixed or `db.discardChanges()`.
 
 ### 6. Plain SQL
 
-What the tables can't say yet, like a join, is plain SQL with `conn.query<T>`, which reads the rows into any struct:
+What the tables can't say yet, like a `GROUP BY`, is plain SQL with `conn.query<T>`, which reads the rows into any struct:
 
 ```odin
 AuthorStats :: struct { name: string; posts: i64; views: i64; }

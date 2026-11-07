@@ -94,18 +94,17 @@ publishPost :: (session: *Session, slug: string) -> PostSummary {
     return PostSummary{slug: post.slug, title: post.title, author: author.name, category: category?.name ?? ""};
 }
 
-// The posts of the authors the reader follows. Plain SQL, for a join that the tables can't say
+// The posts of the authors the reader follows, newest first
 @web.endpoint(.get)
 feed :: (session: *Session) -> [..]PostSummary {
     reader := loggedIn(session);
-    return session.conn.query<PostSummary>("
-        SELECT p.slug, p.title, a.name AS author, coalesce(c.name, '') AS category, p.views,
-               (SELECT count(*) FROM saad_blog.likes l WHERE l.post_id = p.id) AS likes,
-               (SELECT count(*) FROM saad_blog.comments m WHERE m.post_id = p.id) AS comments
-        FROM saad_blog.posts p
-        JOIN saad_blog.follows f ON f.author_id = p.author_id AND f.reader_id = $1
-        JOIN saad_blog.authors a ON a.id = p.author_id
-        LEFT JOIN saad_blog.categories c ON c.id = p.category_id
-        WHERE p.status = 'published'
-        ORDER BY p.published_at DESC", reader.id);
+    readerId := reader.id;
+    return session.db.posts
+        .where(p => p.status == .published && p.author().follows().where(f => f.readerId == readerId).exists())
+        .orderByDescending(p => p.publishedAt)
+        .select(p => PostSummary{
+            slug: p.slug, title: p.title, author: p.author().name, category: p.category().name, views: p.views,
+            likes: p.likes().count(), comments: p.comments().count(),
+        })
+        .all();
 }
