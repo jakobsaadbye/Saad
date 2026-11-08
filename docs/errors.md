@@ -109,6 +109,35 @@ q := err as *QueryError;                          // a Panic when there is none
   * `q := err as *QueryError`: throws a `Panic` when there is none, e.g `The error is a NotFound, not a QueryError`
   * So after `err.is(QueryError)` is true, `err as *QueryError` always gives one.
 * `as` finds what `errors.typed` made, of exactly that type.
+
+### A switch on an error
+
+For more than one error type, a `switch` has a case for each, like the switch on an interface (`docs/interfaces.md`):
+
+```odin
+describe :: (err: error) -> string {
+    switch e in err {
+        case *QueryError { return fmt.sprint("the query % failed", e.sql); }    // e: *QueryError
+        case *Timeout    { return fmt.sprint("no answer in % s", e.seconds); } // e: *Timeout
+        case *NotAllowed
+        case *LoggedOut  { return e.message; }                                 // more types: e is the error
+        else {
+            if err == null         { return "it worked"; }
+            if err.is(NotFound)    { return "not there"; }                     // a kind is asked in the else
+            return err.message;
+        }
+    }
+    return "";
+}
+```
+
+* A case asks what `err as *QueryError` asks: if the error, or one of its causes, is one. The first case that matches
+  is taken, so a wrapped `QueryError` still goes to its case.
+* A null error, and one of no case, go to the `else`. A switch expression on an error needs one, as an error can be of
+  any type, or null.
+* A case is an error type. A kind, e.g `case NotFound`, is an error of the compiler, with the hint to ask
+  `err.is(NotFound)` in the `else`, and so is a type that doesn't embed `Error`.
+* Without a name, `switch err { case *Timeout { ... } }`, the cases only choose.
 * What isn't an error type is an error of the compiler, with a hint:
   * `err as *Plain`: `An error is never a *Plain`, and `hint: Plain isn't an error. An error type of its own embeds
     Error: give it a member '@embed base: Error;'`
@@ -197,3 +226,5 @@ handlePost :: (req: Request) -> Response {
 * `err as *QueryError` (`AstCast.is_error_cast`) walks the error and its causes and compares their `type` with the
   descriptor of `QueryError` (`error_as()` in `ir_lower.c`), so it doesn't need to know where in the struct the `Error`
   is: `value` points to the whole of it. Without `ok`, none is `panicErrorCast` of the prelude.
+* `switch e in err` is `check_error_switch()`: a chain of ifs, each on a type test of the cases (`is_type_test` and
+  `is_error_cast`), with `e` declared as the cast of its case, like `check_interface_switch()`.

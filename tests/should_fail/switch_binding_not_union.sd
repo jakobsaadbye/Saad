@@ -1,4 +1,4 @@
-// expect-error: Only a switch on a union or an interface can give its value a name
+// expect-error: Only a switch on a union, an interface or an error can give its value a name
 
 main :: () {
     x := 1;

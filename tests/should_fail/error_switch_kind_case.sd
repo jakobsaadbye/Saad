@@ -1,0 +1,13 @@
+// expect-error: A case of a switch on an error is a pointer to an error type, e.g case *QueryError { ... }
+// expect-error: For a kind, e.g NotFound, ask in the else: if err.is(NotFound) { ... }
+import errors;
+
+NotFound :: ErrorKind{"NotFound"};
+
+main :: () {
+    err := errors.make("nope", kind: NotFound);
+    switch e in err {
+        case NotFound { }
+        else { }
+    }
+}

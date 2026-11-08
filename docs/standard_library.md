@@ -122,6 +122,7 @@ return null, errors.typed(QueryError{sql: sql}, "the query failed");    // of a 
 
 if err.is(QueryError) { ... }                                          // an error type is a kind
 q, ok := err as *QueryError;                                           // and 'as' gives it back
+switch e in err { case *QueryError { ... } else { ... } }              // a case for each error type
 ```
 
 Without values, the message is as it is written, so `errors.make(text)` takes a text from elsewhere as it is, also with a

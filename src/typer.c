@@ -72,6 +72,7 @@ int   embedded_offset(TypeStruct *outer, TypeStruct *inner, int depth);
 static void hint_optional_unwrap(Typer *typer, Type *wanted, Type *given);
 static void hint_error_embed(Typer *typer, Type *wanted, Type *given);
 static AstExpr *tree_string(Typer *typer, char *text, Ast *at);
+static Type *error_type(Typer *typer);
 static bool is_null_type(Type *type);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
@@ -4796,6 +4797,119 @@ bool check_interface_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject,
     return true;
 }
 
+// The dotted name of a type in a case, e.g QueryError or dbms.QueryError, or NULL
+static char *case_type_name(AstExpr *named) {
+    if (named->head.kind == AST_LITERAL && ((AstLiteral *)named)->kind == LITERAL_IDENTIFIER) {
+        return ((AstLiteral *)named)->as.value.identifier.name;
+    }
+    if (named->head.kind == AST_MEMBER_ACCESS) {
+        AstMemberAccess *ma = (AstMemberAccess *)named;
+        char *left = case_type_name(ma->left);
+        char *right = case_type_name(ma->right);
+        if (!left || !right) return NULL;
+        size_t length = strlen(left) + strlen(right) + 2;
+        char *name = malloc(length);
+        snprintf(name, length, "%s.%s", left, right);
+        return name;
+    }
+    return NULL;
+}
+
+// The type of a case of a switch on an error, e.g the *QueryError of 'case *QueryError { ... }'
+static Type *case_error_type(Typer *typer, AstExpr *value) {
+    bool is_pointer = value->head.kind == AST_UNARY && ((AstUnary *)value)->operator == OP_POINTER_DEREFERENCE;
+    char *type_name = is_pointer ? case_type_name(((AstUnary *)value)->expr) : NULL;
+    if (!type_name) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "A case of a switch on an error is a pointer to an error type, e.g case *QueryError { ... }");
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "For a kind, e.g NotFound, ask in the else: if err.is(NotFound) { ... }");
+        return NULL;
+    }
+    Type *name = type_alloc(&typer->parser->type_table, sizeof(Type));
+    name->head  = value->head;
+    name->head.kind = AST_TYPE;
+    name->kind  = TYPE_NAME;
+    name->name  = type_name;
+    Type *pointer = (Type *) generate_pointer_to_type(typer->parser, name);
+    pointer->head = value->head;
+    pointer->head.kind = AST_TYPE;
+    Type *type = resolve_type(typer, pointer);
+    if (!type) return NULL;
+    if (!is_embedding_error_type(typer, type)) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "An error is never a %s", text_bold(type_to_str(type)));
+        hint_error_embed(typer, error_type(typer), type);
+        return NULL;
+    }
+    return type;
+}
+
+// An error as a type, e.g of a case 'case *QueryError': if it or a cause is one, or with 'test' false, that error
+static AstCast *make_error_cast(Typer *typer, AstIdentifier *subject, Type *type, bool test, Ast *at) {
+    AstCast *cast = make_interface_cast(typer, subject, type, test, at);
+    cast->is_error_cast = true;
+    return cast;
+}
+
+// switch e in err { case *QueryError { ... } else { ... } }: each case asks if the error, or one of its causes, is of
+// that type, like 'err as *QueryError', and declares e as a pointer of that type. The first case that is one is taken.
+// A null error, or one of no case, goes to the else. Any error can be of another type, so only an else handles all
+bool check_error_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject, AstBlock *lowered, AstBlock *scope_before) {
+    AstIf *first = NULL;
+    for (int i = 0; i < sw->cases.count; i++) {
+        AstCase *c = ((AstCase **)sw->cases.items)[i];
+        if (c->is_else) {
+            if (first) first->else_block = c->block;
+            else       da_append(&lowered->statements, c->block);
+            break;
+        }
+
+        AstExpr *condition = NULL;
+        Type    *only      = NULL;
+        for (int j = 0; j < c->values.count; j++) {
+            AstExpr *value = ((AstExpr **)c->values.items)[j];
+            Type *type = case_error_type(typer, value);
+            if (!type) { typer->current_scope = scope_before; return false; }
+            only = type;
+            AstExpr *test = (AstExpr *)make_error_cast(typer, subject, type, true, (Ast *)value);
+            condition = condition ? (AstExpr *)make_binary(typer, TOKEN_LOGICAL_OR, condition, test, (Ast *)value) : test;
+        }
+
+        if (sw->binding.type != TOKEN_NONE) {
+            // One type: a pointer of it. More: the error itself
+            AstExpr *value = c->values.count == 1 ? (AstExpr *)make_error_cast(typer, subject, only, false, (Ast *)c)
+                                                  : (AstExpr *)make_resolved_identifier_literal(typer, subject, (Ast *)c);
+            if (!declare_switch_binding(typer, sw, c, value)) { typer->current_scope = scope_before; return false; }
+        }
+
+        AstIf *ast_if      = ast_allocate(typer->parser, sizeof(AstIf));
+        ast_if->head.kind  = AST_IF;
+        ast_if->head.file  = c->head.file;
+        ast_if->head.start = c->head.start;
+        ast_if->head.end   = c->head.end;
+        ast_if->head.flags = AST_FLAG_COMPILER_GENERATED;
+        ast_if->condition  = condition;
+        ast_if->then_block = c->block;
+        ast_if->else_ifs   = da_init(1, sizeof(AstIf *));
+        if (first == NULL) {
+            first = ast_if;
+            da_append(&lowered->statements, first);
+        } else {
+            da_append(&first->else_ifs, ast_if);
+        }
+    }
+
+    bool ok = check_block(typer, lowered);
+    typer->current_scope = scope_before;
+    if (!ok) return false;
+
+    bool has_else = sw->cases.count > 0 && ((AstCase **)sw->cases.items)[sw->cases.count - 1]->is_else;
+    sw->is_exhaustive = has_else;
+    if (!has_else && sw->is_expression) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)sw->subject, "A switch expression on an error needs an else, as an error can be of any type, or null");
+        return false;
+    }
+    return true;
+}
+
 // choice := switch x { case 1 => "icecream"; else => "mango"; }. The switch gives the type that is wanted, or the type of its first case
 Type *check_switch_expression(Typer *typer, AstSwitch *sw, Type *ctx_type) {
     if (sw->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) return sw->result_type;
@@ -4923,9 +5037,12 @@ bool check_switch(Typer *typer, AstSwitch *sw) {
     if (subject && is_interface_type(subject->type)) {
         return check_interface_switch(typer, sw, subject, (TypeStruct *)subject->type, lowered, scope_before);
     }
+    if (subject && is_error_type(typer, subject->type)) {
+        return check_error_switch(typer, sw, subject, lowered, scope_before);
+    }
 
     if (sw->binding.type != TOKEN_NONE) {
-        report_error_token(parser, LABEL_ERROR, sw->binding, "Only a switch on a union or an interface can give its value a name");
+        report_error_token(parser, LABEL_ERROR, sw->binding, "Only a switch on a union, an interface or an error can give its value a name");
         report_error_ast(parser, LABEL_HINT, NULL, "e.g switch v in shape { case .circle { ... } }");
         return false;
     }
@@ -9126,6 +9243,7 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
         }
         cast->cast_to       = wanted_type;
         cast->is_error_cast = true;
+        if (cast->is_type_test) return primitive_type(PRIMITIVE_BOOL);   // Made by check_error_switch
         if (cast->with_ok) {
             DynamicArray types = da_init(2, sizeof(Type *));
             Type *bool_type = primitive_type(PRIMITIVE_BOOL);

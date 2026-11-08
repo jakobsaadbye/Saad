@@ -81,7 +81,7 @@ Future development
   [x] try / catch, e.g for the errors that the functions of dbms give as their last value
   [x] The errors package: errors.make with a format, errors.wrap, and error types of their own with errors.typed
   [x] err.is(QueryError) and 'q, ok := err as *QueryError' for error types of their own
-  [] 'switch e in err { case *QueryError { ... } }', like the switch on an interface
+  [x] 'switch e in err { case *QueryError { ... } }', like the switch on an interface
   [] dbms.QueryError as an error type with the SQL, instead of a kind
 
 * Optionals (see docs/optionals.md)

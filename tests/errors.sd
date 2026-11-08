@@ -11,6 +11,21 @@ QueryError :: struct {
     code: int;
 }
 
+Timeout :: struct {
+    @embed base: Error;
+    seconds: int;
+}
+
+// A switch on an error: a case for each error type, the first that it or a cause is, and else for the rest and null
+describe :: (err: error) -> string {
+    switch e in err {
+        case *QueryError { return sprint("query % (%)", e.sql, e.code); }   // e: *QueryError
+        case *Timeout    { return sprint("timeout after %", e.seconds); }   // e: *Timeout
+        else             { if err == null { return "none"; } return err.message; }
+    }
+    return "";
+}
+
 query :: (sql: string) -> (int, error) {
     if sql == "" { return 0, errors.make("no sql"); }
     if sql.startsWith("DROP") { return 0, errors.typed(QueryError{sql: sql, code: 42}, "% isn't allowed", sql); }
@@ -212,6 +227,25 @@ main :: () {
     noError: error = null;
     _, isOne := noError as *QueryError;
     assert(!isOne);
+
+    // A switch on an error
+    assert(describe(qerr) == "query DROP users (42)");
+    assert(describe(errors.typed(Timeout{seconds: 3}, "slow")) == "timeout after 3");
+    assert(describe(errors.wrap(errors.typed(Timeout{seconds: 9}, "slow"), "loading")) == "timeout after 9");   // a cause
+    assert(describe(plain) == "no sql" && describe(null) == "none");
+    either := 0;
+    for e in [qerr, errors.typed(Timeout{seconds: 1}, "slow") as error, plain] {
+        switch x in e {
+            case *QueryError
+            case *Timeout { either += 1; assert(x.message.len > 0); }      // more types: x is the error
+        }
+    }
+    assert(either == 2);
+    seconds := switch t in errors.typed(Timeout{seconds: 5}, "slow") as error {
+        case *Timeout => t.seconds;
+        else => 0;
+    };
+    assert(seconds == 5);
 
     // Without values, the message is as written, so a % stays a %
     assert(errors.make("100% sure").message == "100% sure");

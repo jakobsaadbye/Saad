@@ -2030,7 +2030,8 @@ static Value lower_cast(Lowerer *L, AstCast *cast) {
     // If an interface is of a type, for a case of a switch on it
     if (cast->is_type_test) {
         int is_type;
-        interface_as(L, cast->expr, to, &is_type);
+        if (cast->is_error_cast) error_as(L, cast->expr, to, &is_type);
+        else                     interface_as(L, cast->expr, to, &is_type);
         return value_scalar(is_type, cast->head.type);
     }
 
