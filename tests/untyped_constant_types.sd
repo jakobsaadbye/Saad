@@ -1,0 +1,46 @@
+// An untyped integer that doesn't fit an int gets a type it fits in, instead of being cut to an int.
+// A cast of an untyped constant expression folds it first, e.g (Big / 4096) as u64 is 16777216
+
+use fmt;
+
+Big   :: 68719476736;               // 2^36
+Huge  :: 0xFFFF_FFFF_FFFF_FFFF;     // Above the biggest i64
+Small :: 1000;
+
+main :: () {
+    // Declared from an untyped constant
+    d := Big;
+    assert(typeof(d) == "i64");
+    assert(d == 68719476736);
+    assert(d / 4096 == 16777216);
+
+    n := -Big;
+    assert(typeof(n) == "i64" && n == -68719476736);
+
+    h := Huge;
+    assert(typeof(h) == "u64" && h == 0xFFFF_FFFF_FFFF_FFFF);
+
+    l := 68719476736;
+    assert(typeof(l) == "i64" && l == Big);
+
+    // Still an int when it fits
+    s := Small;
+    assert(typeof(s) == "int");
+    q := Big / 4096;
+    assert(typeof(q) == "int" && q == 16777216);
+
+    // Cast: folded before it is converted
+    assert((Big / 4096) as u64 == 16777216);
+    assert((68719476736 / 4096) as u64 == 16777216);
+    assert(Big as u64 == 68719476736);
+    assert((Big * 2) as i64 == 137438953472);
+
+    // Printed as the value
+    assert(sprint("%", Big) == "68719476736");
+    assert(sprint("%", 68719476736) == "68719476736");
+    assert(sprint("% %", Big / 4096, (Big / 4096) as u64) == "16777216 16777216");
+
+    // An explicit type is unchanged
+    e: i64 = Big;
+    assert(e == d);
+}

@@ -112,6 +112,7 @@ Type *resolve_type(Typer *typer, Type *type);
 bool is_generic_function(AstFunctionDefn *func_defn);
 void append_mangled_name(StringBuilder *sb, char *name);
 Type *solidify_untyped_type(Type *untyped_type);
+Type *solidify_untyped_expr(AstExpr *expr, Type *untyped_type);
 Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic);
 AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall *call, AstFunctionDefn *generic);
 Type *check_short_lambda(Typer *typer, AstFunctionDefn *lambda, Type **param_types, int count, Type *return_type);
@@ -2543,6 +2544,93 @@ Type *solidify_untyped_type(Type *untyped_type) {
     return untyped_type;
 }
 
+// The value of an untyped integer constant expression, e.g 68719476736 / 4096 or Big / 4096 with 'Big :: 68719476736;'.
+// 'big' is set for a value above the biggest i64, e.g 0xFFFF_FFFF_FFFF_FFFF. Returns false if it isn't known
+static bool untyped_integer_value(AstExpr *expr, long long *out, bool *big, int depth) {
+    if (expr == NULL || depth > 32) return false;
+    switch (expr->head.kind) {
+    case AST_LITERAL: {
+        AstLiteral *lit = (AstLiteral *)expr;
+        if (lit->kind == LITERAL_INTEGER) {
+            *out = lit->as.value.integer;
+            if (lit->as.flags & VALUE_IS_BIGGER_THAN_SIGNED_64_BIT_INTEGER) *big = true;
+            return true;
+        }
+        if (lit->kind == LITERAL_IDENTIFIER) {
+            AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
+            if (ident && ident->imported_from) ident = ident->imported_from;
+            if (!ident || !(ident->flags & IDENTIFIER_IS_CONSTANT) || !ident->value) return false;
+            return untyped_integer_value(ident->value, out, big, depth + 1);
+        }
+        return false;
+    }
+    case AST_UNARY: {
+        AstUnary *unary = (AstUnary *)expr;
+        long long v;
+        if (!untyped_integer_value(unary->expr, &v, big, depth + 1)) return false;
+        if (unary->operator == OP_UNARY_MINUS)  { *out = (long long)(0ULL - (unsigned long long)v); return true; }
+        if (unary->operator == OP_BITWISE_NOT)  { *out = ~v; return true; }
+        return false;
+    }
+    case AST_BINARY: {
+        AstBinary *bin = (AstBinary *)expr;
+        long long a, b;
+        if (!untyped_integer_value(bin->left, &a, big, depth + 1))  return false;
+        if (!untyped_integer_value(bin->right, &b, big, depth + 1)) return false;
+        unsigned long long ua = (unsigned long long)a, ub = (unsigned long long)b;
+        switch ((int)bin->operator) {
+        case '+': *out = (long long)(ua + ub); return true;
+        case '-': *out = (long long)(ua - ub); return true;
+        case '*': *out = (long long)(ua * ub); return true;
+        case '/': if (b == 0 || (a == LLONG_MIN && b == -1)) return false; *out = a / b; return true;
+        case '%': if (b == 0 || (a == LLONG_MIN && b == -1)) return false; *out = a % b; return true;
+        case '|': *out = a | b; return true;
+        case '&': *out = a & b; return true;
+        case '^': *out = a ^ b; return true;
+        case TOKEN_BITWISE_SHIFT_LEFT:  if (b < 0 || b >= 64) return false; *out = (long long)(ua << b); return true;
+        case TOKEN_BITWISE_SHIFT_RIGHT: if (b < 0 || b >= 64) return false; *out = a >> b; return true;
+        default: return false;
+        }
+    }
+    default:
+        return false;
+    }
+}
+
+// The concrete type of an untyped expression, from its value: an untyped integer is an int,
+// or an i64 when it doesn't fit an int (u64 above the biggest i64), e.g 'x := 68719476736;' is an i64
+Type *solidify_untyped_expr(AstExpr *expr, Type *untyped_type) {
+    if (untyped_type->kind != TYPE_INTEGER || ((TypePrimitive *)untyped_type)->kind != PRIMITIVE_UNTYPED_INT) return solidify_untyped_type(untyped_type);
+
+    long long value = 0;
+    bool big = false;
+    if (untyped_integer_value(expr, &value, &big, 0)) {
+        if (big)                                     return primitive_type(PRIMITIVE_U64);
+        if (value > S32_MAX || value < -S32_MAX - 1) return primitive_type(PRIMITIVE_I64);
+    }
+    return primitive_type(PRIMITIVE_INT);
+}
+
+// An untyped integer constant expression folded into a literal of the type its value fits in, e.g (Big / 4096) is the
+// literal 16777216, an int, so it isn't computed in a type that Big doesn't fit. Returns the expression if it isn't constant
+AstExpr *fold_untyped_integer(Typer *typer, AstExpr *expr) {
+    if (!expr->type || expr->type->kind != TYPE_INTEGER || ((TypePrimitive *)expr->type)->kind != PRIMITIVE_UNTYPED_INT) return expr;
+    if (expr->head.kind == AST_LITERAL && ((AstLiteral *)expr)->kind == LITERAL_INTEGER) return expr;
+
+    long long value = 0;
+    bool big = false;
+    if (!untyped_integer_value(expr, &value, &big, 0)) return expr;
+
+    AstLiteral *lit = (AstLiteral *)make_literal_integer(typer->const_evaluator, value);
+    lit->head.head.start = expr->head.start;
+    lit->head.head.end   = expr->head.end;
+    lit->head.head.file  = expr->head.file;
+    lit->head.head.flags = expr->head.flags;
+    if (big) lit->as.flags |= VALUE_IS_BIGGER_THAN_SIGNED_64_BIT_INTEGER;
+    lit->head.type = expr->type;
+    return (AstExpr *)lit;
+}
+
 TypeTuple *make_tuple_type_from_expression_list(Typer *typer, DynamicArray exprs) {
     TypeTuple *tuple      = ast_allocate(typer->parser, sizeof(TypeTuple));
     tuple->head.head.kind = AST_TYPE;
@@ -3200,7 +3288,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[ident_index];
 
         if (is_untyped_type(value->type) && decl->flags & DECLARATION_INFER) {
-            Type *solidified_type = solidify_untyped_type(value->type);
+            Type *solidified_type = solidify_untyped_expr(value, value->type);
             ident->type = solidified_type;
         }
 
@@ -4187,7 +4275,7 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "A lambda of one expression gives one value, but this gives %s", text_bold(type_to_str(type)));
                 return false;
             }
-            if (is_untyped_type(type)) type = solidify_untyped_type(type); // Like x := 1
+            if (is_untyped_type(type)) type = solidify_untyped_expr(value, type); // Like x := 1
             ((Type **)ef->return_types.items)[0] = type;
             ef->infer_return_type = false;
             wanted = type;
@@ -4567,7 +4655,7 @@ bool check_switch_arm(Typer *typer, AstSwitchArm *arm) {
 
     if (sw->result_type == NULL) {
         // The first case decides, like 'x := value;'
-        if (is_untyped_type(type) && type->kind == TYPE_INTEGER)    type = primitive_type(PRIMITIVE_INT);
+        if (is_untyped_type(type) && type->kind == TYPE_INTEGER)    type = solidify_untyped_expr(arm->value, type);
         else if (is_untyped_type(type) && type->kind == TYPE_FLOAT) type = primitive_type(PRIMITIVE_FLOAT);
         if (type->kind == TYPE_VOID) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arm->value, "The case of a switch expression must give a value");
@@ -7926,7 +8014,7 @@ static Type *check_inferred_struct_literal(Typer *typer, AstStructLiteral *liter
         AstStructInitializer *init = ((AstStructInitializer **)literal->initializers.items)[i];
         Type *type = check_expression(typer, init->value, NULL);
         if (!type) return NULL;
-        if (is_untyped_type(type)) type = solidify_untyped_type(type); // Like x := 1
+        if (is_untyped_type(type)) type = solidify_untyped_expr(init->value, type); // Like x := 1
 
         bool fixed_array = type->kind == TYPE_ARRAY && ((TypeArray *)type)->array_kind == ARRAY_FIXED;
         if (is_null_type(type)) {
@@ -8618,8 +8706,10 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
         return NULL;
     }
 
+    // An untyped number is folded and gets a type it fits in, e.g (68719476736 / 4096) as u64 is 16777216 before it is converted
     if (is_untyped_type(expr_type)) {
-        Type *solidified_type = solidify_untyped_type(expr_type);
+        cast->expr = fold_untyped_integer(typer, cast->expr);
+        Type *solidified_type = solidify_untyped_expr(cast->expr, expr_type);
         cast->expr->type = solidified_type;
     }
 
@@ -8675,8 +8765,8 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             }
 
             if (ctx_type->kind == TYPE_ANY) {
-                // @Todo: It should probably return the biggest integer type based on the literal value
-                return primitive_type(PRIMITIVE_INT);
+                // An int, or a bigger type when the value doesn't fit, e.g print("%", 68719476736)
+                return solidify_untyped_expr((AstExpr *)literal, primitive_type(PRIMITIVE_UNTYPED_INT));
             }
 
             if (ctx_type->kind == TYPE_INTEGER) {
