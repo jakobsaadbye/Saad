@@ -1,0 +1,200 @@
+//////////////////////////////////
+// Allocators: the Allocator interface, the allocator of the thread, the heap and the memory of --check-memory. This is
+// the lowest layer of the prelude with thread_blocks.sd and runtime.sd (see docs/standard_library.md): List, Map, new and
+// errors are built on it, so it imports only std/c, and doesn't use panic. The allocators of their own, e.g Arena and
+// Pool, are in the namespace allocators (std/allocators). See docs/allocators.md
+//////////////////////////////////
+
+use c;
+
+#if OS == .windows {
+    extern "kernel32.dll" {
+        AcquireSRWLockExclusive :: (lock: *void);
+        ReleaseSRWLockExclusive :: (lock: *void);
+        VirtualAlloc :: (address: *void, size: u64, type: u32, protect: u32) -> *void;
+        VirtualFree  :: (address: *void, size: u64, type: u32) -> bool;
+    }
+} else {
+    extern "C" {
+        pthread_mutex_lock    :: (mutex: *void) -> i32;
+        pthread_mutex_unlock  :: (mutex: *void) -> i32;
+        mmap     :: (address: *void, size: u64, protect: i32, flags: i32, fd: i32, offset: i64) -> *void;
+        mprotect :: (address: *void, size: u64, protect: i32) -> i32;
+        madvise  :: (address: *void, size: u64, advice: i32) -> i32;
+    }
+}
+
+// Where memory comes from: every allocation of Saad goes through one, e.g of new(T), a string, a list or json. Any type
+// with these methods is one, e.g Arena, the heap, or an allocator of a library, so they all work with the rest. A null
+// Allocator means the allocator of the thread: the heap, unless it is set, e.g to the arena of a request while a server
+// answers it (see currentAllocator).
+//
+// A size is what the caller knows of the size of a block: at least the bytes it uses of it, and at most the size it asked
+// for. align is a power of two, the alignment the block must have
+Allocator :: interface {
+    // A new block of the size, or null when there is no memory
+    allocate   :: method * (size: i64, align: i64) -> *void;
+    // The block with another size, keeping what fits of it. It can move, so the result is the block
+    resize     :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void;
+    // Gives back the block
+    deallocate :: method * (memory: *void, size: i64, align: i64);
+}
+
+// The realloc of an allocator (null is the allocator of the thread): a new block when memory is null, none when
+// newSize is 0, and else the block with another size
+resizeMemory :: (allocator: Allocator, memory: *void, oldSize: i64, newSize: i64, align: i64 = 8) -> *void {
+    if allocator == null {
+        allocator = currentAllocator();
+    }
+    if memory == null {
+        if newSize == 0 { return null; }
+        return allocator.allocate(newSize, align);
+    }
+    if newSize == 0 {
+        allocator.deallocate(memory, oldSize, align);
+        return null;
+    }
+    return allocator.resize(memory, oldSize, newSize, align);
+}
+
+// A block that was made with allocate as a block of the new size, for an allocator that can't change a block where it
+// is: a new block, with what fits of the old one, which is given back
+resizeByCopy :: (allocator: Allocator, memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
+    result := allocator.allocate(newSize, align);
+    if result == null { return null; }
+    keep := oldSize;
+    if keep > newSize { keep = newSize; }
+    if memory != null {
+        memcpy(result, memory, keep);
+        allocator.deallocate(memory, oldSize, align);
+    }
+    return result;
+}
+
+// The allocator of the thread, which a null allocator means, e.g of new(T), a string or a list. Null is the heap. A
+// server sets it to the arena of a request while it answers it, so what the handler allocates is freed with the request.
+// See mem.setAllocator and mem.heap
+@threadLocal threadAllocator: Allocator;
+
+currentAllocator :: () -> Allocator {
+    allocator := threadAllocator;
+    if allocator != null { return allocator; }
+    return heapAllocator();
+}
+
+heapValue: Heap;
+
+// The heap, for what lives longer than the allocator of the thread, e.g a list that a request adds to
+heapAllocator :: () -> Allocator {
+    return &heapValue;
+}
+
+// Gives back memory of resizeMemory to the allocator it came from (null is the allocator of the thread), with what is
+// known of its size
+freeMemory :: (memory: *void, size: i64, allocator: Allocator = null, align: i64 = 8) {
+    if memory != null {
+        resizeMemory(allocator, memory, size, 0, align);
+    }
+}
+
+// The heap: realloc and free of C. A block with an alignment over 16, which malloc doesn't promise, is made bigger, and
+// has the pointer that malloc gave right before it
+Heap :: struct {
+    unused: u8;
+
+    allocate :: method * (size: i64, align: i64) -> *void {
+        if align <= 16 { return malloc(size); }
+        raw := malloc(size + align + 8) as *u8;
+        if raw == null { return null; }
+        address := (&raw[8]) as u64;
+        pad := ((align as u64 - address % align as u64) % align as u64) as i64;
+        result := &raw[8 + pad];
+        *((&result[-8]) as **u8) = raw;   // For deallocate
+        return result;
+    }
+
+    resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
+        if align <= 16 { return realloc(memory, newSize); }
+        return resizeByCopy(self, memory, oldSize, newSize, align);
+    }
+
+    deallocate :: method * (memory: *void, size: i64, align: i64) {
+        if align <= 16 { free(memory); return; }
+        free(*((&(memory as *u8)[-8]) as **u8));
+    }
+}
+
+//
+// The checking of memory, of saad build --check-memory. The chunks of arenas (see allocators.Arena) come from one big range of
+// addresses that is never used again, and the pages of a chunk that is freed or cleared are marked, so that a pointer
+// into one is found when it is used: the compiler checks a pointer before it reads or writes through it, like for null
+// (see emit_memory_check in ir_lower.c), and that throws a Panic. The pages are also made unreadable, so a read by C,
+// e.g memcpy, crashes instead of giving what the memory holds now.
+//
+// These only call C, as the compiler doesn't check their pointers
+//
+
+CheckedPageSize :: 4096;
+
+// 64 GB of addresses. Only the pages of the chunks that are in use have memory
+CheckedRegionSize :: 68719476736;
+CheckedPageCount  :: CheckedRegionSize / CheckedPageSize;
+
+checkedBase:  u64;     // The start of the range, 0 until the first chunk
+checkedSize:  u64;     // Its size: 0 until the first chunk, so that no pointer is in it
+checkedStart: *u8;     // checkedBase as a pointer
+checkedUsed:  i64;     // How much of the range was given out: the next chunk starts here
+checkedPages: *u8;     // A byte for each page of the range: 1 when it was freed
+checkedLock:  [8]u64;  // A pthread_mutex_t or an SRWLOCK, which are ready to use when they are zeros
+
+// The memory of a chunk of an arena, of at least the size
+checkedAllocate :: (size: i64) -> *u8 {
+    size = (size + CheckedPageSize - 1) / CheckedPageSize * CheckedPageSize;
+    #if OS == .windows { AcquireSRWLockExclusive(&checkedLock); } else { pthread_mutex_lock(&checkedLock); }
+    if checkedBase == 0 {
+        pageCount := CheckedPageCount as u64;
+        #if OS == .windows {
+            checkedStart = VirtualAlloc(null, CheckedRegionSize as u64, 0x2000, 1) as *u8;   // MEM_RESERVE, PAGE_NOACCESS
+            checkedPages = VirtualAlloc(null, pageCount, 0x3000, 4) as *u8;          // MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE
+        } else {
+            checkedStart = mmap(null, CheckedRegionSize as u64, 0, 0x4022, -1, 0) as *u8;  // PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE
+            checkedPages = mmap(null, pageCount, 3, 0x4022, -1, 0) as *u8;          // PROT_READ | PROT_WRITE
+        }
+        failed := 0xFFFFFFFFFFFFFFFF as u64;   // MAP_FAILED of mmap
+        if checkedStart == null || checkedPages == null || checkedStart as u64 == failed || checkedPages as u64 == failed {
+            printf("--check-memory: the range of addresses for the arenas couldn't be reserved\n");
+            exit(1);
+        }
+        checkedBase = checkedStart as u64;
+        checkedSize = CheckedRegionSize as u64;
+    }
+    offset := checkedUsed;
+    checkedUsed += size + CheckedPageSize;   // A page between chunks that is never readable, so a read past the end of a chunk crashes
+    full := checkedUsed > CheckedRegionSize;
+    #if OS == .windows { ReleaseSRWLockExclusive(&checkedLock); } else { pthread_mutex_unlock(&checkedLock); }
+    if full {
+        printf("--check-memory: the 64 GB of addresses for the arenas are used up. Their memory is never used again, so that freed memory is found\n");
+        exit(1);
+    }
+    at := &checkedStart[offset];
+    #if OS == .windows {
+        VirtualAlloc(at, size as u64, 0x1000, 4);   // MEM_COMMIT, PAGE_READWRITE
+    } else {
+        mprotect(at, size as u64, 3);
+    }
+    return at;
+}
+
+// Frees the memory of a chunk of checkedAllocate: its pages are marked, unreadable and given back to the system, and
+// its addresses are never given out again
+checkedFree :: (memory: *u8, size: i64) {
+    size = (size + CheckedPageSize - 1) / CheckedPageSize * CheckedPageSize;
+    first := (memory as u64 - checkedBase) / CheckedPageSize as u64;
+    for i in 0..size / CheckedPageSize { checkedPages[first + i as u64] = 1; }
+    #if OS == .windows {
+        VirtualFree(memory, size as u64, 0x4000);   // MEM_DECOMMIT
+    } else {
+        mprotect(memory, size as u64, 0);
+        madvise(memory, size as u64, 4);           // MADV_DONTNEED
+    }
+}

@@ -3,6 +3,7 @@
 
 import dbms;
 import mem;
+import allocators;
 use fmt;
 use c;
 
@@ -134,11 +135,11 @@ main :: () {
     assert(hasId && e8 == null && id == 1);
 
     // Memory from an arena
-    arena: mem.Arena;
+    arena: allocators.Arena;
     alloc := arena.allocator();
-    conn.allocator = &alloc;
+    conn.allocator = alloc;
     fromArena, e9 := conn.query<Post>("SELECT");
-    assert(e9 == null && fromArena.count == 2 && fromArena.allocator == &alloc);
+    assert(e9 == null && fromArena.count == 2 && fromArena.allocator == alloc);
     assert(fromArena[0].title == "Hello" && fromArena[0].authorId == 7 && *fromArena[0].authorPointer == 7);
     assert(arena.used() > 0);
     arena.free();

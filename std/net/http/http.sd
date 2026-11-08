@@ -20,6 +20,7 @@ use c;
 import net;
 import bytes;
 import mem;
+import allocators;
 import fmt;
 
 Header :: struct {
@@ -82,7 +83,7 @@ statusText :: (status: int) -> string {
 }
 
 // %XX and + of a URL decoded, e.g "a%20b+c" is "a b c". Text that has neither is given back as it is
-decodeUrl :: (text: string, arena: *mem.Arena) -> string {
+decodeUrl :: (text: string, arena: *allocators.Arena) -> string {
     if text.indexOf("%") < 0 && text.indexOf("+") < 0 { return text; }
     out := arena.allocate(text.len as int) as *u8;
     n := 0;
@@ -107,7 +108,7 @@ decodeUrl :: (text: string, arena: *mem.Arena) -> string {
 }
 
 // A copy of the text in the arena
-keep :: (text: string, arena: *mem.Arena) -> string {
+keep :: (text: string, arena: *allocators.Arena) -> string {
     if text.len == 0 { return ""; }
     data := arena.allocate(text.len as int) as *u8;
     mem.copy(data, text.data, text.len);
@@ -151,7 +152,7 @@ Limits :: struct {
 
 // Reads until the buffer has the head, and gives the first line, with the headers added to the list. The texts are
 // kept in the arena
-readHead :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, arena: *mem.Arena, headers: *[..]Header) -> string, int {
+readHead :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, arena: *allocators.Arena, headers: *[..]Header) -> string, int {
     while buffer.unread().indexOf("\r\n\r\n") < 0 {
         if buffer.available() > limits.headBytes { return "", 431; }
         started := buffer.available() > 0;
@@ -192,7 +193,7 @@ readHead :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, arena: *me
 
 // Reads the body that the headers say: Content-Length bytes, chunks of Transfer-Encoding: chunked, or, with
 // untilClose, all that comes until the other end closes (a response without either)
-readBody :: (conn: *net.Conn, buffer: *bytes.Buffer, headers: []Header, limits: *Limits, arena: *mem.Arena, untilClose: bool) -> string, int {
+readBody :: (conn: *net.Conn, buffer: *bytes.Buffer, headers: []Header, limits: *Limits, arena: *allocators.Arena, untilClose: bool) -> string, int {
     encoding, chunked := findHeader(headers, "Transfer-Encoding");
     if chunked {
         if !equalFold(encoding, "chunked") { return "", 501; }
@@ -229,7 +230,7 @@ fill :: (conn: *net.Conn, buffer: *bytes.Buffer, count: int) -> bool {
 }
 
 // The chunks of Transfer-Encoding: chunked: a size in hex, the bytes, ..., a size of 0 and the trailer
-readChunks :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, arena: *mem.Arena) -> string, int {
+readChunks :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, arena: *allocators.Arena) -> string, int {
     body: bytes.Buffer;
     defer body.free();
     while true {

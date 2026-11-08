@@ -76,7 +76,7 @@ total := sum(xs);   // sum :: (values: []int) -> int
 | `reverse()`, `copy() -> List<T>` | |
 | `reserve(capacity)`, `clear()` (keeps the memory), `free()` | |
 
-Members: `data: *T`, `count: i64`, `capacity: i64`, `allocator: *Allocator`. The capacity starts at
+Members: `data: *T`, `count: i64`, `capacity: i64`, `allocator: Allocator`. The capacity starts at
 4 and doubles.
 
 ## `Map<K, V>`
@@ -129,12 +129,15 @@ A key type without a `hash` method is reported where the map is used, e.g.
 
 ## Allocators
 
-`List` and `Map` get their memory through `allocator: *Allocator`, or the heap when it is null:
+`List` and `Map` get their memory through `allocator: Allocator`, or the allocator of the thread when it is null.
+`Allocator` is an interface, so any type with its methods is one, e.g `list.allocator = &arena` (see
+`docs/allocators.md`):
 
 ```odin
-Allocator :: struct {
-    context: *void;
-    resize:  (context: *void, memory: *void, size: i64) -> *void; // Like realloc. A size of 0 frees
+Allocator :: interface {
+    allocate   :: method * (size: i64, align: i64) -> *void;
+    resize     :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void;
+    deallocate :: method * (memory: *void, size: i64, align: i64);
 }
 ```
 

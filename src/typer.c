@@ -496,6 +496,7 @@ bool is_prelude_identifier(Typer *typer, AstIdentifier *ident) {
     if (file == parser->collections_file) return true;
     if (file == parser->expression_trees_file) return true;
     if (file == parser->errors_file) return true;
+    if (file == parser->allocator_file || file == parser->thread_blocks_file) return true;
     if (parser->runtime_file_path && strcmp(file->absolute_path, parser->runtime_file_path) == 0) return true;
     if (parser->builtin_string_file_path && strcmp(file->absolute_path, parser->builtin_string_file_path) == 0) return true;
     if (parser->slices_file_path && strcmp(file->absolute_path, parser->slices_file_path) == 0) return true;

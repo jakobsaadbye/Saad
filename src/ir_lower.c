@@ -1389,7 +1389,7 @@ static int global_variable(Lowerer *L, AstIdentifier *ident) {
 //
 // @threadLocal globals: each thread has a block of them, a copy of their start values (L->thread_template). A function
 // that uses one loads the block of its thread when it starts, into a slot, in a block of its own before the others
-// (lower_function). The block is made the first time a thread needs it, by newThreadBlock() of std/prelude/errors.sd,
+// (lower_function). The block is made the first time a thread needs it, by newThreadBlock() of std/prelude/thread_blocks.sd,
 // and main sets up the key of the blocks with startThreadBlocks() first. thrownError is one of them
 //
 
@@ -1423,6 +1423,11 @@ static void layout_thread_locals(Lowerer *L) {
 }
 
 static AstIdentifier *errors_declaration(Lowerer *L, const char *name);
+// The files of the prelude that the compiler calls into before a function is set up, e.g to throw or for the block of
+// the @threadLocal globals. Their pointers aren't checked (null, --check-memory), as the checks call them
+static bool is_runtime_file(Lowerer *L, AstFile *file) {
+    return file != NULL && (file == L->parser->errors_file || file == L->parser->allocator_file || file == L->parser->thread_blocks_file);
+}
 static void emit_errors_call(Lowerer *L, const char *name, int arg_count, int *args);
 
 // Looks up the block of the thread, and makes it the first time: FlsGetValue or pthread_getspecific with the key of
@@ -2937,9 +2942,14 @@ static void emit_defers(Lowerer *L, int down_to) {
 // the defers on the way. Each place it leaves adds a frame to its trace. main reports an error that nothing caught
 //
 
+// A declaration of the prelude that the compiler uses, e.g panic or checkedBase: of errors.sd, allocator.sd or
+// thread_blocks.sd
 static AstIdentifier *errors_declaration(Lowerer *L, const char *name) {
-    AstFile *file = L->parser->errors_file;
-    AstIdentifier *ident = file ? find_identifier_in_scope(file->scope, (char *)name) : NULL;
+    AstFile *files[3] = { L->parser->errors_file, L->parser->allocator_file, L->parser->thread_blocks_file };
+    AstIdentifier *ident = NULL;
+    for (int i = 0; i < 3 && ident == NULL; i++) {
+        if (files[i]) ident = find_identifier_in_scope(files[i]->scope, (char *)name);
+    }
     if (ident == NULL) lower_fail(L, NULL, "Compiler Error: '%s' of std/prelude/errors.sd isn't loaded", name);
     return ident;
 }
@@ -2994,11 +3004,11 @@ static bool is_receiver_of_method(Lowerer *L, AstExpr *expr) {
 
 // A pointer that is null when it is dereferenced (p.x, *p and p[i]) throws a Panic, with the place in the trace,
 // instead of crashing the program. Taking an address, e.g &p[i] or &p.x, only computes it, so its last step isn't
-// checked, but the steps before it are, e.g p.next of &p.next.value. --unchecked leaves the check out. The functions of errors.sd aren't checked, as the
+// checked, but the steps before it are, e.g p.next of &p.next.value. --unchecked leaves the check out. The functions of errors.sd, allocator.sd and thread_blocks.sd aren't checked, as the
 // compiler calls some of them before a Panic can be thrown
 static void emit_null_check(Lowerer *L, int ptr, AstExpr *expr) {
     AstFile *file = L->ast_func ? L->ast_func->head.head.file : NULL;
-    if (file == NULL || file == L->parser->errors_file) return;
+    if (file == NULL || is_runtime_file(L, file)) return;
     if (is_receiver_of_method(L, expr)) return;   // self: the call checked it
     if (!bounds_checks) {
         emit_memory_check(L, ptr, expr);
@@ -3026,12 +3036,12 @@ static int emit_errors_global_load(Lowerer *L, IrType type, const char *name) {
 
 // With --check-memory: a pointer into the memory of an arena that was cleared or freed throws a Panic. The chunks of
 // arenas are in one range of addresses, with a byte for each page that is 1 when the page was freed (see
-// checkedAllocate in std/prelude/errors.sd), so the check is a subtraction, a compare and, for a pointer in the range,
+// checkedAllocate in std/prelude/allocator.sd), so the check is a subtraction, a compare and, for a pointer in the range,
 // the load of that byte. Pointers outside the range, e.g into the heap or the stack, aren't checked
 static void emit_memory_check(Lowerer *L, int ptr, AstExpr *expr) {
     if (!memory_checks) return;
     AstFile *file = L->ast_func ? L->ast_func->head.head.file : NULL;
-    if (file == NULL || file == L->parser->errors_file) return;
+    if (file == NULL || is_runtime_file(L, file)) return;
 
     int address = ir_vreg_type(L->func, ptr) == IR_I64 ? ptr : emit_unop(L, IR_BITCAST, IR_I64, ptr);
     int offset  = emit_binop(L, IR_SUB, IR_I64, address, emit_errors_global_load(L, IR_I64, "checkedBase"));
@@ -3059,7 +3069,7 @@ static void emit_memory_check(Lowerer *L, int ptr, AstExpr *expr) {
 static void emit_string_memory_check(Lowerer *L, int string_ptr, AstExpr *expr) {
     if (!memory_checks) return;
     AstFile *file = L->ast_func ? L->ast_func->head.head.file : NULL;
-    if (file == NULL || file == L->parser->errors_file) return;
+    if (file == NULL || is_runtime_file(L, file)) return;
     IrBlock *has_bytes = create_block(L, "string.has.bytes");
     IrBlock *done      = create_block(L, "string.checked");
     int count = emit_load(L, IR_I64, addr_vreg(string_ptr, 8));
@@ -3070,7 +3080,7 @@ static void emit_string_memory_check(Lowerer *L, int string_ptr, AstExpr *expr) 
     set_block(L, done);
 }
 
-// Calls a function of errors.sd that takes no results, without the check for a thrown error after it
+// Calls a function of errors.sd, allocator.sd or thread_blocks.sd that takes no results, without the check for a thrown error after it
 static void emit_errors_call(Lowerer *L, const char *name, int arg_count, int *args) {
     AstIdentifier *ident = errors_declaration(L, name);
     AstFunctionDefn *func = ((TypeFunction *) ident->type)->node;
@@ -3083,7 +3093,7 @@ static void emit_errors_call(Lowerer *L, const char *name, int arg_count, int *a
 // errors.sd, e.g panic, are left out
 static void emit_trace_frame(Lowerer *L, int line) {
     AstFile *file = L->ast_func ? L->ast_func->head.head.file : NULL;
-    if (file == NULL || file == L->parser->errors_file) return;
+    if (file == NULL || is_runtime_file(L, file)) return;
     const char *function = L->ast_func->identifier && L->ast_func->identifier->name ? L->ast_func->identifier->name : "lambda";
     int args[3] = { emit_shared_c_text(L, function), emit_shared_c_text(L, file->absolute_path), emit_const(L, IR_I64, line) };
     emit_errors_call(L, "traceThrow", 3, args);
@@ -3630,7 +3640,7 @@ static void lower_function(Lowerer *L, AstFunctionDefn *func_defn) {
         int args[2] = { emit_global_addr(L, L->thread_template), emit_const(L, IR_I64, L->thread_block_size) };
         emit_errors_call(L, "startThreadBlocks", 2, args);
     }
-    bool is_thread_helper = func_defn->head.head.file == L->parser->errors_file && func_defn->identifier &&
+    bool is_thread_helper = func_defn->head.head.file == L->parser->thread_blocks_file && func_defn->identifier &&
                             (strcmp(func_defn->identifier->name, "startThreadBlocks") == 0 || strcmp(func_defn->identifier->name, "newThreadBlock") == 0);
     if (L->thread_block_slot >= 0) {
         if (is_thread_helper) lower_fail(L, (Ast *)func_defn, "Compiler Error: %s uses a @threadLocal global", func_defn->identifier->name);

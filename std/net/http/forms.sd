@@ -9,12 +9,13 @@ namespace net.http;
 //     w.setCookie(http.Cookie{name: "lang", value: "de", maxAge: 365 * 24 * 3600});
 
 import mem;
+import allocators;
 import fmt;
 import base64;
 
 // The value of a name in text like a=1&b=2, with %XX and + decoded
 @private
-findValue :: (text: string, name: string, arena: *mem.Arena) -> string, bool {
+findValue :: (text: string, name: string, arena: *allocators.Arena) -> string, bool {
     rest := text;
     while rest.len > 0 {
         end := rest.indexOf("&");

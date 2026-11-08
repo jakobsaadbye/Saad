@@ -1,12 +1,15 @@
 namespace mem;
 
-// Memory: the standard library takes its memory from here (and from new), not from C, so a program can give it an
-// Allocator, and C is only called in one place
+// Memory: the standard library takes its memory from here (and from new), not from C. All of it goes through an
+// Allocator, the interface of the prelude (std/prelude/allocator.sd), so a program, or a library, can give it any
+// allocator. See docs/allocators.md
 //
-//     p := mem.allocate(64);              // 64 zeroed bytes from the allocator of the thread, or mem.allocate(64, &allocator)
-//     p = mem.resize(p, 128);             // like realloc
+//     p := mem.allocate(64);              // 64 zeroed bytes from the allocator of the thread, or mem.allocate(64, &arena)
+//     p = mem.resize(p, 64, 128);         // like realloc: the size it has, and the size it gets
 //     mem.copy(to, from, 16);             // like memcpy
-//     mem.free(p);
+//     mem.free(p, 128);                   // with its size
+//     point := new(Point);
+//     mem.delete(point);                  // a T of new, which knows its size
 //
 // The allocator of the thread is what a null allocator means, e.g for new(T), strings, lists and fmt.sprint. It is the
 // heap, unless it is set: a server sets it to the arena of a request while it answers the request, so everything the
@@ -15,56 +18,59 @@ namespace mem;
 //     store.posts.allocator = mem.heap();
 //     title := post.title.copy(mem.heap());
 //
-//     previous := mem.setAllocator(&alloc);    // The allocator of the thread, until it is set back
+//     previous := mem.setAllocator(&arena);    // The allocator of the thread, until it is set back
 //     defer mem.setAllocator(previous);
 //
-// Arenas: memory that is taken bit by bit and freed all at once, e.g for everything of one request
-//
-//     arena: mem.Arena;
-//     p := arena.allocate(64);
-//     alloc := arena.allocator();       // An Allocator for lists, maps, new(T, &alloc) and e.g dbms.Connection
-//     arena.clear();                    // Everything is free to use again
-//     arena.free();
+// The allocators of their own, e.g allocators.Arena and allocators.Pool, are in the namespace allocators (std/allocators)
 
 import c;
 
 // The heap: realloc and free. For what lives longer than the allocator of the thread, e.g a request
-heap :: () -> *Allocator {
+heap :: () -> Allocator {
     return heapAllocator();
 }
 
 // The allocator of the thread: what a null allocator means
-allocator :: () -> *Allocator {
+allocator :: () -> Allocator {
     return currentAllocator();
 }
 
 // Sets the allocator of the thread, and gives the one before, to set it back. Null is the heap
-setAllocator :: (allocator: *Allocator) -> *Allocator {
+setAllocator :: (allocator: Allocator) -> Allocator {
     previous := threadAllocator;
     threadAllocator = allocator;
     return previous;
 }
 
-// Zeroed memory of the size, from the allocator (null is the allocator of the thread). Free it with mem.free and the
-// same allocator
-allocate :: (size: int, allocator: *Allocator = null) -> *void {
+// Zeroed memory of the size, from the allocator (null is the allocator of the thread), aligned to 'align' bytes. Free
+// it with mem.free, its size and the same allocator
+allocate :: (size: int, allocator: Allocator = null, align := 8) -> *void {
     if size <= 0 { size = 1; }
-    memory := resizeMemory(allocator, null, size);
+    memory := resizeMemory(allocator, null, 0, size, align);
     if memory == null { panic("Out of memory"); }
     c.memset(memory, 0, size);
     return memory;
 }
 
-// The memory with a new size, keeping what fits of it, like realloc. A null memory is new memory, and a size of 0 frees it
-resize :: (memory: *void, size: int, allocator: *Allocator = null) -> *void {
-    result := resizeMemory(allocator, memory, size);
-    if result == null && size > 0 { panic("Out of memory"); }
+// The memory with another size, keeping what fits of it, like realloc: the size it has, and the size it gets. A null
+// memory is new memory, and a size of 0 frees it
+resize :: (memory: *void, oldSize: int, newSize: int, allocator: Allocator = null, align := 8) -> *void {
+    result := resizeMemory(allocator, memory, oldSize, newSize, align);
+    if result == null && newSize > 0 { panic("Out of memory"); }
     return result;
 }
 
-// Gives back memory of allocate, resize or new to the allocator it came from (null is the allocator of the thread)
-free :: (memory: *void, allocator: *Allocator = null) {
-    freeMemory(memory, allocator);
+// Gives back memory of allocate or resize, with its size, to the allocator it came from (null is the allocator of the
+// thread)
+free :: (memory: *void, size: int, allocator: Allocator = null, align := 8) {
+    freeMemory(memory, size, allocator, align);
+}
+
+// Gives back a T of new(T) to the allocator it came from (null is the allocator of the thread)
+delete :: <T>(memory: *T, allocator: Allocator = null) {
+    size := sizeof(T);
+    if size == 0 { size = 1; }
+    freeMemory(memory, size, allocator);
 }
 
 // Copies count bytes, like memcpy. The two may not overlap
@@ -84,150 +90,3 @@ equal :: (a: *void, b: *void, count: int) -> bool {
 
 Kilobyte :: 1024;
 Megabyte :: 1048576;
-
-Arena :: struct {
-    currentChunk: *Chunk;
-}
-
-Chunk :: struct {
-    data:     *u8;
-    cursor:   int;
-    capacity: int;
-    prev:     *Chunk;
-}
-
-@private DefaultCapacity :: 4096;
-
-newArena :: (capacity: int) -> Arena {
-    arena := Arena{};
-    arena.currentChunk = newChunk(null, capacity);
-    return arena;
-}
-
-// Zeroed memory of the size, aligned to 8 bytes
-allocate :: method (arena: *Arena, size: int) -> *void {
-    size = (size + 7) / 8 * 8;
-    chunk := arena.currentChunk;
-    if chunk == null {
-        capacity := DefaultCapacity;
-        while capacity < size {
-            capacity *= 2;
-        }
-        arena.currentChunk = newChunk(null, capacity);
-        return arena.allocate(size);
-    }
-
-    if chunk.cursor + size <= chunk.capacity {
-        ptr := &chunk.data[chunk.cursor];
-        chunk.cursor += size;
-        c.memset(ptr, 0, size);
-        return ptr;
-    }
-
-    newCap := chunk.capacity * 2;
-    while newCap < size {
-        newCap *= 2;
-    }
-    arena.currentChunk = newChunk(chunk, newCap);
-    return arena.allocate(size);
-}
-
-// An Allocator that takes its memory from the arena, e.g for a list: 'list.allocator = &alloc'. The memory is freed
-// with the arena, so the allocator doesn't free anything itself
-allocator :: method (arena: *Arena) -> Allocator {
-    a: Allocator;
-    a.context = arena;
-    a.resize  = arenaResize;
-    return a;
-}
-
-// Frees all the memory of the arena
-free :: method (arena: *Arena) {
-    chunk := arena.currentChunk;
-    while chunk != null {
-        freeChunkData(chunk);
-        previous := chunk.prev;
-        c.free(chunk);
-        chunk = previous;
-    }
-    arena.currentChunk = null;
-}
-
-// Makes all the memory of the arena free to use again. It keeps the biggest chunk, so the next use doesn't allocate.
-// With saad build --check-memory it keeps none, so a pointer into what was cleared is found when it is used
-clear :: method (arena: *Arena) {
-    #if CHECK_MEMORY {
-        arena.free();
-        return;
-    }
-    chunk := arena.currentChunk;
-    if chunk == null {
-        return;
-    }
-    previous := chunk.prev;
-    while previous != null {
-        freeChunkData(previous);
-        next := previous.prev;
-        c.free(previous);
-        previous = next;
-    }
-    chunk.prev   = null;
-    chunk.cursor = 0;
-}
-
-// The bytes of the arena that are in use
-used :: method (arena: *Arena) -> int {
-    total := 0;
-    chunk := arena.currentChunk;
-    while chunk != null {
-        total += chunk.cursor;
-        chunk = chunk.prev;
-    }
-    return total;
-}
-
-newChunk :: (oldChunk: *Chunk, capacity: int) -> *Chunk {
-    chunk := c.malloc(sizeof(Chunk)) as *Chunk;
-    assert(chunk != null); // Out of memory
-    #if CHECK_MEMORY {
-        chunk.data = checkedAllocate(capacity);   // See std/prelude/errors.sd
-    } else {
-        chunk.data = c.malloc(capacity) as *u8;
-    }
-    assert(chunk.data != null);
-    chunk.cursor   = 0;
-    chunk.capacity = capacity;
-    chunk.prev     = oldChunk;
-    return chunk;
-}
-
-@private
-freeChunkData :: (chunk: *Chunk) {
-    #if CHECK_MEMORY {
-        checkedFree(chunk.data, chunk.capacity);
-    } else {
-        c.free(chunk.data);
-    }
-}
-
-// Each block of the allocator starts with its size, so a bigger block can copy the old one
-@private
-arenaResize :: (context: *void, memory: *void, size: i64) -> *void {
-    if size == 0 {
-        return null; // Freed with the arena
-    }
-    arena := context as *Arena;
-    block := arena.allocate(size as int + 8) as *u8;
-    *(block as *i64) = size;
-    result := &block[8];
-    if memory != null {
-        old := memory as *u8;
-        header := &old[-8];
-        oldSize := *(header as *i64);
-        if oldSize > size {
-            oldSize = size;
-        }
-        c.memcpy(result, memory, oldSize as int);
-    }
-    return result;
-}

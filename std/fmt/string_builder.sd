@@ -23,7 +23,7 @@ StringBuilder :: struct {
     buffer:    *u8;          // The text and a 0 byte, or null before anything is added
     cursor:    int;          // The length of the text
     capacity:  int;          // The bytes the buffer has room for
-    allocator: *Allocator;   // Of the buffer: the allocator of the thread when it got its first memory
+    allocator: Allocator;    // Of the buffer: the allocator of the thread when it got its first memory
 }
 
 newStringBuilder :: (initialCapacity := 64) -> StringBuilder {
@@ -47,7 +47,7 @@ reserve :: method (sb: *StringBuilder, extra: int) {
     }
 
     if sb.allocator == null { sb.allocator = currentAllocator(); }
-    buffer := mem.resize(sb.buffer, capacity, sb.allocator) as *u8;
+    buffer := mem.resize(sb.buffer, sb.capacity, capacity, sb.allocator) as *u8;
     if buffer == null {
         printf("Out of memory: a StringBuilder couldn't grow to %d bytes\n", capacity);
         exit(1);
@@ -173,7 +173,7 @@ toString :: method (sb: StringBuilder) -> string {
 }
 
 free :: method (sb: *StringBuilder) {
-    mem.free(sb.buffer, sb.allocator);
+    mem.free(sb.buffer, sb.capacity, sb.allocator);
     sb.buffer   = null;
     sb.cursor   = 0;
     sb.capacity = 0;

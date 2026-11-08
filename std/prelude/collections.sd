@@ -85,75 +85,28 @@ Optional :: struct <T> {
 // Allocators
 //
 
-// Where a collection gets its memory from. A null allocator means the allocator of the thread: the heap, unless it is
-// set, e.g to the arena of a request while a server answers it (see currentAllocator)
-Allocator :: struct {
-    context: *void;
-
-    // Changes the size of a block of memory, like realloc. A null 'memory' gives a new block and a 'size' of 0 frees the block
-    resize: (context: *void, memory: *void, size: i64) -> *void;
-}
-
-resizeMemory :: (allocator: *Allocator, memory: *void, size: i64) -> *void {
-    if allocator == null {
-        allocator = currentAllocator();
-    }
-    return allocator.resize(allocator.context, memory, size);
-}
-
-// The allocator of the thread, which a null allocator means, e.g of new(T), a string or a list. Null is the heap. A
-// server sets it to the arena of a request while it answers it, so what the handler allocates is freed with the request.
-// See mem.setAllocator and mem.heap
-@threadLocal threadAllocator: *Allocator;
-
-currentAllocator :: () -> *Allocator {
-    allocator := threadAllocator;
-    if allocator != null { return allocator; }
-    return heapAllocator();
-}
-
-// realloc and free
-heapResize :: (context: *void, memory: *void, size: i64) -> *void {
-    if size == 0 {
-        free(memory);
-        return null;
-    }
-    return realloc(memory, size);
-}
-
-heapAllocatorValue: Allocator;
-
-// The heap, for what lives longer than the allocator of the thread, e.g a list that a request adds to
-heapAllocator :: () -> *Allocator {
-    if heapAllocatorValue.resize == null { heapAllocatorValue.resize = heapResize; }   // The same value on every thread
-    return &heapAllocatorValue;
-}
+// The Allocator interface, the allocator of the thread, resizeMemory, freeMemory and the heap are in
+// std/prelude/allocator.sd
 
 // What new(T) and new(T, allocator) are: a T with the defaults of its type, in memory of the allocator (null is the
-// heap). Free it with freeMemory(p, allocator), or with the arena it is in
-allocateNew :: <T>(allocator: *Allocator = null) -> *T {
+// allocator of the thread). Free it with mem.delete(p, allocator), or with the arena it is in
+allocateNew :: <T>(allocator: Allocator = null) -> *T {
     size := sizeof(T);
     if size == 0 { size = 1; }
-    memory := resizeMemory(allocator, null, size) as *T;
+    memory := resizeMemory(allocator, null, 0, size) as *T;
     value: T;
     *memory = value;
     return memory;
 }
 
-// What new value is, e.g new Point{1, 2}: a copy of the value in memory of the allocator (null is the heap)
-allocateCopy :: <T>(value: T, allocator: *Allocator = null) -> *T {
+// What new value is, e.g new Point{1, 2}: a copy of the value in memory of the allocator (null is the allocator of the
+// thread)
+allocateCopy :: <T>(value: T, allocator: Allocator = null) -> *T {
     size := sizeof(T);
     if size == 0 { size = 1; }
-    memory := resizeMemory(allocator, null, size) as *T;
+    memory := resizeMemory(allocator, null, 0, size) as *T;
     *memory = value;
     return memory;
-}
-
-// Gives back memory of new or of resizeMemory to the allocator it came from (null is the heap)
-freeMemory :: (memory: *void, allocator: *Allocator = null) {
-    if memory != null {
-        resizeMemory(allocator, memory, 0);
-    }
 }
 
 // The names of the flags of an enum flags that are set in the value, e.g ["verbose", "color"] of 3. A value that has a name
@@ -185,7 +138,7 @@ List :: struct <T> {
     data:      *T;
     count:     i64;
     capacity:  i64;
-    allocator: *Allocator; // Null until it has memory: then the allocator of the thread, which it keeps
+    allocator: Allocator; // Null until it has memory: then the allocator of the thread, which it keeps
 
     // Adds a value at the end
     add :: method * (value: T) {
@@ -307,7 +260,7 @@ List :: struct <T> {
         if self.allocator == null {
             self.allocator = currentAllocator();
         }
-        self.data     = resizeMemory(self.allocator, self.data, capacity * sizeof(T)) as *T;
+        self.data     = resizeMemory(self.allocator, self.data, self.capacity * sizeof(T), capacity * sizeof(T)) as *T;
         self.capacity = capacity;
     }
 
@@ -319,7 +272,7 @@ List :: struct <T> {
     // Gives back the memory of the list. The list is empty afterwards
     free :: method * () {
         if self.data != null {
-            resizeMemory(self.allocator, self.data, 0);
+            resizeMemory(self.allocator, self.data, self.capacity * sizeof(T), 0);
         }
         self.data     = null;
         self.count    = 0;
@@ -434,7 +387,7 @@ Map :: struct <K, V> {
     entries:   [..]Entry<K, V>; // In the order they were added
     slots:     [..]i64;         // Open addressing table. 0 is an empty slot, otherwise the index of an entry + 1. The count is a power of two
     count:     i64;
-    allocator: *Allocator;      // Null until it has memory: then the allocator of the thread, which it keeps
+    allocator: Allocator;       // Null until it has memory: then the allocator of the thread, which it keeps
 
     // Adds the key with the value, or changes the value if the key is already there
     set :: method * (key: K, value: V) {

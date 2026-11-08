@@ -3,6 +3,7 @@
 import dbms;
 import dbms.postgres;
 import mem;
+import allocators;
 use fmt;
 use c;
 
@@ -133,12 +134,12 @@ main :: () {
     run(&conn, "UPDATE saad_users SET score = 0 WHERE name = 'Cy'");
 
     // The rows, strings and pointers from an arena, freed all at once
-    arena: mem.Arena;
+    arena: allocators.Arena;
     alloc := arena.allocator();
-    conn.allocator = &alloc;
+    conn.allocator = alloc;
     fromArena, err4 := conn.query<User>("SELECT * FROM saad_users ORDER BY id");
     assert(err4 == null && fromArena.count == 4);
-    assert(fromArena.allocator == &alloc);
+    assert(fromArena.allocator == alloc);
     assert(fromArena[0].email ?? "" == "ada@example.com");
     assert(arena.used() > 0);
     arena.free();

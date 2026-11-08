@@ -85,7 +85,7 @@ put :: method (pool: *Pool, conn: *Connection) {
         pool.open -= 1;
         pool.mutex.unlock();
         conn.close();
-        mem.free(conn, mem.heap());
+        mem.delete(conn, mem.heap());
         return;
     }
     pool.idle.add(conn);
@@ -99,7 +99,7 @@ close :: method (pool: *Pool) {
     pool.closed = true;
     for conn in pool.idle {
         conn.close();
-        mem.free(conn, mem.heap());
+        mem.delete(conn, mem.heap());
         pool.open -= 1;
     }
     pool.idle.clear();

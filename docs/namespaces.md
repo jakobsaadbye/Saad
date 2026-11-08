@@ -88,7 +88,7 @@ Slot :: struct { index: int; }
 ```
 
 The `@threadLocal` globals of a program are laid out in one block, and each thread gets a copy of their start values
-the first time it runs a function that uses one (`newThreadBlock()` in `std/prelude/errors.sd`). A function that uses
+the first time it runs a function that uses one (`newThreadBlock()` in `std/prelude/thread_blocks.sd`). A function that uses
 one looks up the block of its thread once, when it starts: `FlsGetValue` on Windows and `pthread_getspecific` on
 Linux. The block is freed when the thread ends. `thrownError` of the prelude is one, so threads throw and catch at the
 same time without seeing each other's errors.

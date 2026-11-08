@@ -249,7 +249,7 @@ dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
 
     // The results: an error that is given, and the values
     values: [..]FunctionValue;
-    values.allocator = &r.allocator;
+    values.allocator = r.allocator;
     for result in f.results {
         if isErrorType(result.type) {
             given := *((&results[result.offset]) as *error);
