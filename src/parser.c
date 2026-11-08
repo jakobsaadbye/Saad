@@ -1123,12 +1123,19 @@ bool starts_function_defn_at(Parser *parser, int cursor) {
 
     if (peek_token(parser, cursor).type == '<') {
         // Type parameters of a generic function e.g max :: <T>(...)
+        // Names, and constraints of them, e.g <S: Shape> and <C: Iterable<T>, T>
         cursor += 1;
-        while (peek_token(parser, cursor).type == TOKEN_LITERAL_IDENTIFIER || peek_token(parser, cursor).type == ',') {
+        int depth = 1;
+        while (depth > 0) {
+            TokenType t = peek_token(parser, cursor).type;
+            if      (t == TOKEN_LITERAL_IDENTIFIER || t == ',' || t == ':' || t == '.' || t == '*' || t == '?' || t == '[' || t == ']' ||
+                     t == TOKEN_DOUBLE_DOT || t == TOKEN_STRING || t == TOKEN_ANY || is_primitive_type_token(peek_token(parser, cursor))) { }
+            else if (t == '<') depth += 1;
+            else if (t == '>') depth -= 1;
+            else if (t == TOKEN_BITWISE_SHIFT_RIGHT && depth >= 2) depth -= 2;   // the >> of <C: Iterable<T>>
+            else return false;
             cursor += 1;
         }
-        if (peek_token(parser, cursor).type != '>') return false;
-        cursor += 1;
 
         return peek_token(parser, cursor).type == '(';
     }
@@ -2314,6 +2321,12 @@ bool parse_type_parameters(Parser *parser, DynamicArray *type_params) {
             param->constraint = parse_type(parser);
             if (!param->constraint) return false;
             next = peek_next_token(parser);
+            // The second '>' of the '>>' of <C: Iterable<int>>, whose first one closed the type arguments of the constraint
+            if (next.type == TOKEN_BITWISE_SHIFT_RIGHT && parser->split_shift_right_token == parser->current_token_index + 1) {
+                parser->split_shift_right_token = 0;
+                eat_token(parser);
+                return true;
+            }
         }
         if (next.type == ',') {
             eat_token(parser);

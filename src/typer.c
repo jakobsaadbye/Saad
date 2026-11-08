@@ -4104,7 +4104,7 @@ bool check_for(Typer *typer, AstFor *ast_for) {
             TypeStruct *collection = (TypeStruct *)(type->kind == TYPE_POINTER ? ((TypePointer *)type)->pointer_to : type);
             if (!find_method(collection, "elements")) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ast_for->iterable), "Cannot iterate through expression of type %s", type_to_str(type));
-                report_error_ast(typer->parser, LABEL_HINT, NULL, "Give %s a method 'elements :: method () -> []T' to make it iterable", collection->head.name);
+                report_error_ast(typer->parser, LABEL_HINT, NULL, "Give %s a method 'elements :: method () -> []T' to make it iterable, which makes it an Iterable<T>", collection->head.name);
                 return NULL;
             }
 
@@ -6990,7 +6990,7 @@ Type *check_collection_index(Typer *typer, AstArrayAccess *array_ac, TypeStruct 
 
     if (!index && !index_ref) {
         report_error_range(typer->parser, array_ac->left->head.start, array_ac->open_bracket.start, "Cannot index into expression of type %s", type_to_str((Type *)collection));
-        report_error_ast(typer->parser, LABEL_HINT, NULL, "Give %s a method 'index :: method (key: K) -> V' to read with c[k], or 'indexRef :: method (key: K) -> *V' to also change c[k]", collection->head.name);
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Give %s a method 'index :: method (key: K) -> V' to read with c[k], or 'indexRef :: method (key: K) -> *V' to also change c[k], which makes it an Indexable<K, V>", collection->head.name);
         return NULL;
     }
     if (place && !index_ref) {

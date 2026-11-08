@@ -1,0 +1,9 @@
+// expect-error: Circle isn't a Shape: its method 'area' is
+
+Shape :: interface { area :: method (scale: f64) -> f64; }
+Circle :: struct { radius: f64; area :: method () -> f64 { return self.radius; } }
+
+main :: () {
+    c := Circle{radius: 2};
+    s: Shape = &c;
+}

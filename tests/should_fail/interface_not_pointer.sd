@@ -1,0 +1,10 @@
+// expect-error: c is a Circle, not a pointer: pass &c to share it as a Shape
+
+Shape :: interface { area :: method () -> f64; }
+Circle :: struct { radius: f64; area :: method () -> f64 { return self.radius; } }
+describe :: (s: Shape) {}
+
+main :: () {
+    c := Circle{radius: 2};
+    describe(c);
+}

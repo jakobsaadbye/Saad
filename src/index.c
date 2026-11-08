@@ -124,6 +124,7 @@ static const char *kind_of(AstIdentifier *ident) {
     Type *type = ident->type;
 
     if (flags & IDENTIFIER_IS_NAME_OF_STRUCT) {
+        if (type && type->kind == TYPE_STRUCT && ((TypeStruct *)type)->node->is_interface) return "interface";
         return (type && type->kind == TYPE_STRUCT && ((TypeStruct *)type)->node->is_union) ? "union" : "struct";
     }
     if (flags & IDENTIFIER_IS_NAME_OF_ENUM) return "enum";
@@ -214,7 +215,7 @@ static char *signature_of(AstFunctionDefn *func) {
 static char *detail_of(AstIdentifier *ident, const char *kind) {
     AstFunctionDefn *func = function_of(ident);
     if (func && (strcmp(kind, "function") == 0 || strcmp(kind, "method") == 0)) return signature_of(func);
-    if (strcmp(kind, "struct") == 0 || strcmp(kind, "union") == 0 || strcmp(kind, "enum") == 0) return strdup(kind);
+    if (strcmp(kind, "struct") == 0 || strcmp(kind, "union") == 0 || strcmp(kind, "interface") == 0 || strcmp(kind, "enum") == 0) return strdup(kind);
     if (ident->type && ident->type->kind != TYPE_NAME) return type_to_str(ident->type);
     return strdup("");
 }

@@ -1,0 +1,10 @@
+// expect-error: takes its receiver by value, but an interface calls it with a pointer
+
+Shape :: interface { area :: method () -> f64; }
+Circle :: struct { radius: f64; }
+area :: method (c: Circle) -> f64 { return c.radius; }
+
+main :: () {
+    c := Circle{radius: 2};
+    s: Shape = &c;
+}

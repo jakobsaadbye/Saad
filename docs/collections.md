@@ -44,6 +44,13 @@ s[0] += 10;
 for x in s { ... }
 ```
 
+### As interfaces
+
+The protocol is also a set of generic interfaces of the prelude: `Iterable<T>` (`elements`), `Growable<T>` (`add`),
+`Indexable<K, V>` (`indexRef`) and `Keyed<K, V>` (`set`). A collection doesn't name them, it is each one whose methods
+it has, so a function can take any collection, e.g `total :: (xs: Iterable<int>) -> int`, and `for x in xs` and
+`xs[k]` work on the interface values too. See `docs/interfaces.md`.
+
 ## `List<T>` (`[..]T`)
 
 ```odin

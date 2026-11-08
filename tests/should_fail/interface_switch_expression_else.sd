@@ -1,0 +1,11 @@
+// expect-error: A switch expression on an interface needs an else
+
+Shape :: interface { area :: method () -> f64; }
+Circle :: struct { radius: f64; area :: method () -> f64 { return self.radius; } }
+
+main :: () {
+    s: Shape;
+    label := switch s {
+        case *Circle => "round";
+    };
+}

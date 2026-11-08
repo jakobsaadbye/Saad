@@ -1,27 +1,8 @@
-# Interfaces (a proposal)
-
-This is a design note: nothing of it is in the compiler yet. It is for deciding the syntax and the rules first.
+# Interfaces
 
 An interface is a set of methods. Any type that has them is one, without saying so, like in Go. A value of an
 interface is a pointer to the value and the methods of its type, so code can work with any of them, and a library can
 add its own types that work with the code of others.
-
-Today Saad does this by hand, with a `*void` and function pointers, e.g `Allocator`. The compiler can't check that the
-`*void` is what the functions expect, and every implementation casts it back:
-
-```odin
-Allocator :: struct {
-    context: *void;
-    resize: (context: *void, memory: *void, size: i64) -> *void;
-}
-
-arenaResize :: (context: *void, memory: *void, size: i64) -> *void {
-    arena := context as *Arena;    // Nothing checks that context is an Arena
-    ...
-}
-```
-
-## A small example
 
 ```odin
 Shape :: interface {
@@ -55,7 +36,7 @@ main :: () {
     describe(&q);
 
     shapes: [..]Shape = [&c, &q];
-    total := 0.0;
+    total: f64 = 0.0;
     for s in shapes { total += s.area(); }
 }
 ```
@@ -63,66 +44,67 @@ main :: () {
 `Circle` and `Square` don't name `Shape`. They are Shapes because they have its methods, with the same parameters
 and results. A struct of a library that doesn't know `Shape` is one too, if it has them.
 
-## The rules
+## Declaring one
 
-### Declaring one
+* `Name :: interface { ... }` with the methods, as in a struct but without bodies: `name :: method (...) -> T;`, and
+  `name :: method * (...);` for one that changes `self`. A body is an error.
+* Only methods, no members.
+* `Name :: interface <T> { ... }` is a generic interface, like a generic struct (see below).
 
-* `Name :: interface { ... }` with the methods, as in a struct but without bodies: `name :: method (...) -> T;` and
-  `name :: method * (...);` for one that changes `self`.
-* Only methods. No members, and no bodies.
-* `@embed` of another interface adds its methods, as for structs (`docs/embedding.md`):
-
-  ```odin
-  Reader :: interface { read :: method * (into: []u8) -> int, error; }
-  Writer :: interface { write :: method * (bytes: []u8) -> int, error; }
-  ReadWriter :: interface {
-      @embed reader: Reader;
-      @embed writer: Writer;
-  }
-  ```
-
-### Being one
+## Being one
 
 * A type is an interface when it has a method of each name, with the same parameters and results. The compiler checks
-  it where a value becomes the interface, and the error says which method is missing or different:
-  `*Circle isn't a Shape: it has no method 'name'`.
-* A method of an embedded member counts, so a struct that embeds a `Circle` is a Shape too.
-* Methods of primitive types and enums count, e.g `doubled :: method (x: int) -> int`.
+  it where a value becomes the interface, and the hint says why one isn't:
 
-### A value of an interface
+  ```
+  error: Type mismatch. Wanted type Shape, got type *Circle
+  hint: Circle isn't a Shape: it has no method 'name'
+  ```
 
-* An interface value is two pointers: the value, and a table of the methods of its type for the interface. The
-  compiler makes one table for each type and interface that are used together, in the program's read-only data.
-* An interface value points at the value, so it never copies it and never allocates, and a `method *` changes the
-  value itself. Where the value lives is up to you, e.g the stack, an arena or the heap.
-* Only a pointer becomes an interface, and the `&` is written: `describe(&c)`. So the code shows where the value
-  is shared. `describe(c)` is an error that says so: `c is a Circle, not a pointer: pass &c to share it as a Shape`.
-* A value is never copied into an interface, also not a small one like an `int` with methods.
-* The zero value is no value: `s: Shape;` is null, `s == null` tells, and a call of a method of a null interface
-  throws a `Panic`, like a null pointer.
+* The methods declared inside a struct count. So do methods declared outside it that take a pointer, e.g
+  `area :: method (t: *Triangle) -> f64`. One that takes its value, e.g `area :: method (t: Triangle)`, doesn't, as
+  the interface calls it with a pointer, and the hint says so.
+
+## A value of an interface
+
+* An interface value is two pointers, 16 bytes: the value, and a table of the methods of its type for the interface.
+  The compiler makes one table for each type and interface that meet, in read-only data.
+* Only a pointer becomes an interface, and the `&` is written: `describe(&c)`. So the code shows where a value is
+  shared, nothing is copied, and nothing is allocated. `describe(c)` is an error:
+
+  ```
+  hint: c is a Circle, not a pointer: pass &c to share it as a Shape
+  ```
+
+* A `method *` called through the interface changes the value itself.
+* The zero value is no value: `s: Shape;` is null and `s == null` tells. A null pointer becomes a null interface, so
+  `s == null` tells for it too. A call of a method of a null interface throws a `Panic`, like a null pointer:
+  `Null pointer dereference: s is null`.
 * A call `s.area()` loads the method from the table and calls it with the value as `self`: one load more than a
   direct call.
+* Interface values can be stored, e.g in a list or a struct member, passed and returned, like any other value. The
+  value they point at must live as long, as for any pointer. `--check-memory` finds one that points into an arena that
+  was cleared (`docs/check_memory.md`).
 
 ### Sizes
 
 The methods aren't in the values. A `Circle` with its two methods is 8 bytes, as without them, also when it is used
-as a `Shape`. The table of the methods is there once for each type and interface, in read-only data, and the
-interface value points at it:
+as a `Shape`. The table is there once for each type and interface, and the interface value points at it:
 
 ```
 c: Circle                 s: Shape                     the table of Circle for Shape (once in the program)
 ┌──────────────┐          ┌──────────────┐             ┌────────────────────┐
-│ radius: f64  │ ◄─────── │ value        │             │ area → Circle.area │
-└──────────────┘          │ table ───────┼──────────►  │ name → Circle.name │
-  8 bytes                 └──────────────┘             │ type → Circle      │
+│ radius: f64  │ ◄─────── │ value        │             │ type → Circle      │
+└──────────────┘          │ table ───────┼──────────►  │ area → Circle.area │
+  8 bytes                 └──────────────┘             │ name → Circle.name │
                             16 bytes                   └────────────────────┘
 ```
 
-So only a value of an interface costs something, 16 bytes, and a list of a million circles is 8 MB. In C++ an object
-of a class with virtual methods has the pointer to its table in it. Here, like in Go and in Rust's `dyn`, it is in
-the interface value.
+So only a value of an interface costs something, and a list of a million circles is 8 MB. In C++ an object of a class
+with virtual methods has the pointer to its table in it. Here, like in Go and in Rust's `dyn`, it is in the interface
+value.
 
-### Getting the type back
+## Getting the type back
 
 The table has the type of the value, so the value can be had with its own type again:
 
@@ -134,7 +116,7 @@ grow :: (s: Shape) {
 }
 
 growIfCircle :: (s: Shape) {
-    // With a second result, as takes the miss: ok is false and circle is null, and nothing is thrown
+    // With a second name, as takes the miss: ok is false and circle is null, and nothing is thrown
     circle, ok := s as *Circle;
     if !ok { return; }
     circle.radius *= 2;
@@ -156,101 +138,124 @@ main :: () {
     describeExact(&q);       // a square of side 3
     growIfCircle(&q);        // nothing: it is a Square
     grow(&c);                // c.radius is 4 now: s points at c itself
-    grow(&q);                // Panic: Shape is a *Square, not a *Circle
+    grow(&q);                // Panic: The Shape is a *Square, not a *Circle
 }
 ```
 
-* `s as *Circle` compares the type in the table with `Circle`, and gives the pointer. It is like taking a value out
-  of an `any`.
 * It is the same choice as for errors (`docs/errors.md`): `circle := s as *Circle` throws a `Panic` when it is
-  another type, and `circle, ok := s as *Circle` takes it at the call, with `ok` false and `circle` null instead.
-* `switch v in s` is the switch of unions (`docs/switch_and_unions.md`) with a type in each case instead of a
-  variant.
-* The table has the `*Type` of the value, so `print(s)`, `json.encode(s)` and the debugger show the value itself.
+  another type or null, and `circle, ok := s as *Circle` takes it at the call, with `ok` false and `circle` null.
+* `as` gives a pointer, and a type that can never be the interface is an error: `A Shape is never a *Plain`.
+* `switch v in s` is the switch of unions (`docs/switch_and_unions.md`) with a pointer type in each case. A case with
+  more than one type gives `v` as the interface. A switch expression on an interface needs an `else`, as any type can
+  be one.
+* `print(s)`, and an `any` of an interface, show the value itself, e.g `Circle{radius: 2.000000}`.
 
-### As a constraint of a generic
+## As a constraint of a generic
 
-The same interface constrains a type parameter. Then nothing is looked up at run time: the function is made for
-each type, and the calls are direct:
+An interface also constrains a type parameter. Then nothing is looked up at run time: the function is made for each
+type, and the calls are direct:
 
 ```odin
 totalArea :: <S: Shape>(shapes: []S) -> f64 {
-    total := 0.0;
+    total: f64 = 0.0;
     for *s in shapes { total += s.area(); }    // a direct call of Circle.area for a []Circle
     return total;
 }
 ```
 
+* `S` is the type of the values, e.g `Circle`, and a pointer to it must be the interface.
+* A type that isn't is an error at the call, instead of an error inside the generic function:
+
+  ```
+  error: 'S' of 'totalArea' must be a Shape, but it is Plain
+  hint: Plain isn't a Shape: it has no method 'area'
+  ```
+
 * Use an interface value where different types are mixed or kept, e.g a list of Shapes or the allocator of a list.
   Use a constraint where one type is used and speed matters.
-* This also gives generics the constraints that `docs/generics.md` lists as not supported yet: an error at the
-  call for a type that doesn't fit, instead of an error inside the generic function.
 
-## Allocators with interfaces
+## Generic interfaces
 
-The `Allocator` of the standard library would be the first user. The interface also passes the old size and the
-alignment, which the allocator plan needs:
+An interface can have type parameters, like a struct. Its methods use them:
 
 ```odin
-Allocator :: interface {
-    // A new block when memory is null, a bigger or smaller one, or none when newSize is 0. Like realloc
-    resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void;
+Source :: interface <T> {
+    next :: method * () -> ?T;
 }
 
-Arena :: struct {
-    ...
-    resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void { ... }
-}
-
-// An allocator of a library: it works with lists, maps, strings, json and dbms, as it has resize
-Counting :: struct {
-    inner: Allocator;
-    bytes: i64;
-
-    resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
-        self.bytes += newSize - oldSize;
-        return self.inner.resize(memory, oldSize, newSize, align);
+Countdown :: struct {
+    from: int;
+    next :: method * () -> ?int {
+        if self.from == 0 { return null; }
+        self.from -= 1;
+        return self.from + 1;
     }
 }
 
-arena: mem.Arena;
-counting := Counting{inner: &arena};
-list: [..]int;
-list.allocator = &counting;      // an Allocator
+drain :: (source: Source<int>) -> [..]int { ... }
+
+down := Countdown{from: 3};
+drain(&down);                        // [3, 2, 1]
 ```
 
-`memory: *void` stays: it is raw memory, which has no type.
+* `Source<int>` is an interface whose `next` gives a `?int`. A generic struct is one too, with its own type
+  arguments, e.g a `List<int>` is an `Iterable<int>`.
+* A generic interface is a constraint too: `largest :: <C: Iterable<int>>(c: *C) -> int`.
+* A method of an interface can't have type parameters of its own.
 
-## What it isn't
+## The collection protocol
 
-* No `implements` and no list of interfaces on a type. A type of a library works with an interface the library
-  doesn't know.
-* No inheritance and no bodies in an interface. Code that many types share is a function that takes the interface.
-* No values of an interface that own their value. It points at it, and the value must live as long as the interface
-  value, as for any pointer. `--check-memory` finds one that points into an arena that was cleared.
+The collection protocol (`docs/collections.md`) is a set of generic interfaces of the prelude
+(`std/prelude/collections.sd`). A collection doesn't name them: it is each one whose methods it has.
 
-## How it would be built
+| Interface | Method | The syntax it gives |
+| --- | --- | --- |
+| `Iterable<T>` | `elements :: method () -> []T` | `for x in c`, `c` where a `[]T` is wanted |
+| `Growable<T>` | `add :: method * (value: T)` | `[a, b, c]` where the collection is wanted |
+| `Indexable<K, V>` | `indexRef :: method (key: K) -> *V` | `c[k]`, `c[k] = v` |
+| `Keyed<K, V>` | `set :: method * (key: K, value: V)` | `[k1: v1, k2: v2]` where the collection is wanted |
 
-* The parser: `interface { ... }` as a type, with the method declarations.
-* The typer: the check that a type has the methods, the conversion of a pointer to an interface, the calls of its
-  methods, `as` and `switch`, and the constraints of type parameters.
-* The IR lowering: a table for each type and interface, in read-only data, made the first time they meet. A call
-  is a load from the table and a call through the pointer, so both backends get it from the IR.
-* Reflection: a `TypeInterface`, with its methods.
-* The language server: hover, completion of the methods of an interface value, and later "go to implementations".
+So a `[..]int` is an `Iterable<int>`, a `Growable<int>` and an `Indexable<i64, int>`, and a `Map<string, int>` is an
+`Iterable<Entry<string, int>>` and a `Keyed<string, int>`. Code can take any collection, and the syntax works on the
+interface values too:
 
-## Decided
+```odin
+total :: (xs: Iterable<int>) -> int {
+    sum := 0;
+    for x in xs { sum += x; }        // xs.elements() through the table
+    return sum;
+}
 
-* The name is `interface`.
-* The `&` is written where a value becomes an interface, and a value is never copied into one.
-* `as` throws a `Panic` when the type isn't the one asked for, and `x, ok := s as *T` takes the miss instead.
-* Generic interfaces, e.g `Iterator<T> :: interface { next :: method * () -> ?T; }`, aren't in the first version.
+bumpFirst :: (xs: Indexable<i64, int>) {
+    xs[0] += 100;                    // *xs.indexRef(0)
+}
 
-## After the first version
+list: [..]int = [1, 2, 3];
+total(&list);                        // 6
+bumpFirst(&list);                    // list[0] is 101
+```
 
-* Generic interfaces.
-* The collection protocol (`docs/collections.md`) as interfaces: e.g `Collection<T> :: interface { elements :: method
-  () -> []T; }` and `Growable<T> :: interface { add :: method * (value: T); }`, with `for`, `[a, b, c]` and `xs[i]`
-  defined by them instead of by names the compiler knows. Its methods take and give the type of the elements, so it
-  needs generic interfaces and comes with them. Until then, the protocol stays as it is.
+A collection of a library works with them as well, as long as it has the methods.
+
+## Not supported yet
+
+* Embedding an interface in another, e.g a `ReadWriter` of a `Reader` and a `Writer`. List the methods instead.
+* The methods of an embedded struct member (`docs/embedding.md`) don't count yet for the outer struct.
+* One interface as another, e.g a `ReadWriter` as a `Reader`. Make the value of the other from the pointer instead.
+* An interface as a constraint of a generic struct, e.g `Box :: struct <T: Shape>`. Constraints are checked for
+  generic functions.
 * "Go to implementations" in the language server.
+
+## How it works
+
+* The parser makes an interface an `AstStruct` with `is_interface`, like a union is one with `is_union`. Its members
+  are the hidden `$value` and `$table`, and its methods are `AstFunctionDefn`s with `is_interface_method` and no body.
+  So a generic interface is a generic struct, and copying, storing and passing one is as for any struct.
+* The typer checks that a type is an interface in `types_are_equal()` (`interface_mismatch()`), so it is checked
+  wherever a value is wanted. A method of a generic interface or of a generic struct is the instance of the generic
+  method for the type arguments (`method_of_instance()`). `x, ok := s as *T` has the type `(*T, bool)`, and a switch
+  on an interface is a chain of ifs of `is_type_test` casts (`check_interface_switch()`).
+* The IR lowering makes an interface value of a pointer (`make_interface_value()`), and the table of a type for an
+  interface (`interface_table_global()`): the descriptor of the type, then the methods in the order of the interface.
+  A call of a method of an interface loads it from the table and calls it through the pointer, so both backends get
+  it from the IR.

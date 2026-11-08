@@ -147,10 +147,16 @@ Map :: struct <K, V> {
   for a pointer receiver, `*x` for a value receiver called through a pointer. A non-addressable receiver like
   `make_map().set(k, v)` is put in a temporary whose address is passed, so changes to it are lost.
 
+## Constraints
+
+A type parameter can be constrained to an interface, e.g `totalArea :: <S: Shape>(shapes: []S) -> f64`: a pointer to
+the type must be a `Shape`, which is checked at the call, with a hint of the missing method. The calls in the
+instance are direct. See `docs/interfaces.md`.
+
 ## Not supported yet
 
-Generic functions as values, constraints, constants and function type members in generic structs, and
-generic type aliases like `Pair2<T> :: Pair<T, T>`.
+Generic functions as values, constraints of generic structs, constants and function type members in generic structs,
+and generic type aliases like `Pair2<T> :: Pair<T, T>`.
 
 ## Type aliases
 

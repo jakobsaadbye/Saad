@@ -1,0 +1,11 @@
+// expect-error: Wanted type Shape, got type *Circle
+// expect-error: Circle isn't a Shape: it has no method 'name'
+
+Shape :: interface { area :: method () -> f64; name :: method () -> string; }
+Circle :: struct { radius: f64; area :: method () -> f64 { return self.radius; } }
+describe :: (s: Shape) {}
+
+main :: () {
+    c := Circle{radius: 2};
+    describe(&c);
+}
