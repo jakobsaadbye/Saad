@@ -8,6 +8,7 @@ import dbms;
 import dbms.postgres;
 import database;
 use entities;
+import errors;
 
 // What each request gets
 Session :: struct {
@@ -46,7 +47,7 @@ newApp :: (connectionString: string) -> *web.App {
 // The reader who is logged in
 loggedIn :: (session: *Session) -> *Reader {
     if session.reader == null {
-        throw newError("Log in with the header 'Authorization: Bearer <token>'", web.Unauthorized);
+        throw errors.make("Log in with the header 'Authorization: Bearer <token>'", kind: web.Unauthorized);
     }
     return session.reader;
 }
@@ -56,13 +57,13 @@ loggedInAuthor :: (session: *Session) -> *Author {
     reader := loggedIn(session);
     email := reader.email;
     author := session.db.authors.where(a => a.email == email).first();
-    if author == null { throw newError("Only authors can do that", web.Forbidden); }
+    if author == null { throw errors.make("Only authors can do that", kind: web.Forbidden); }
     return author;
 }
 
 // A published post
 publishedPost :: (session: *Session, slug: string) -> *Post {
     post := session.db.posts.where(p => p.slug == slug && p.status == .published).first();
-    if post == null { throw newError(fmt.sprint("No post has the slug '%'", slug), web.NotFound); }
+    if post == null { throw errors.make("No post has the slug '%'", slug, kind: web.NotFound); }
     return post;
 }

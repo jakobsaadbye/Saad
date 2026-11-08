@@ -18,6 +18,7 @@ namespace thread;
 // The zero value of a Mutex, a Condition and a WaitGroup is ready to use. Don't copy one that is in use
 
 use c;
+import errors;
 
 #if OS == .windows {
     extern "kernel32.dll" {
@@ -130,13 +131,13 @@ start :: (function: ()) -> Thread, error {
         handle := CreateThread(null, 0, run, start, 0, null);
         if handle == null {
             freeMemory(start, sizeof(Start), heapAllocator());
-            return t, newError("A thread couldn't be started");
+            return t, errors.make("A thread couldn't be started");
         }
         t.handle = handle;
     } else {
         if pthread_create((&t.handle) as *u64, null, run, start) != 0 {
             freeMemory(start, sizeof(Start), heapAllocator());
-            return t, newError("A thread couldn't be started");
+            return t, errors.make("A thread couldn't be started");
         }
     }
     return t, null;

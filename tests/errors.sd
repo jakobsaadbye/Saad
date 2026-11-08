@@ -1,11 +1,25 @@
 // Errors: a value when it is taken, thrown when it isn't, and caught with try and catch
 use fmt;
+import errors;
 
 NotFound :: ErrorKind{"NotFound"};
 
+// An error type of its own: a struct that embeds Error, with what a catch wants to know besides the message
+QueryError :: struct {
+    @embed base: Error;
+    sql:  string;
+    code: int;
+}
+
+query :: (sql: string) -> (int, error) {
+    if sql == "" { return 0, errors.make("no sql"); }
+    if sql.startsWith("DROP") { return 0, errors.typed(QueryError{sql: sql, code: 42}, "% isn't allowed", sql); }
+    return 1, null;
+}
+
 find :: (name: string) -> (int, error) {
     if name == "ada" { return 36, null; }
-    return 0, newError(sprint("no one is called %", name), NotFound);
+    return 0, errors.make("no one is called %", name, kind: NotFound);
 }
 
 log: [..]string;
@@ -18,7 +32,7 @@ age :: (name: string) -> int {
 
 save :: (ok: bool) -> error {
     if ok { return null; }
-    return errorf("can't save %", 42);
+    return errors.make("can't save %", 42);
 }
 
 third :: (sl: []int) -> int { return sl[2]; }
@@ -39,7 +53,7 @@ load :: (name: string) -> int {
     try {
         return age(name);
     } catch (err) {
-        throw newError("loading failed", cause: err);
+        throw errors.make("loading failed", cause: err);
     }
     return 0;
 }
@@ -158,7 +172,7 @@ main :: () {
     count := 0;
     for i in 0..5 {
         try {
-            if i % 2 == 1 { throw newError("odd"); }
+            if i % 2 == 1 { throw errors.make("odd"); }
             count += 1;
         } catch (e) {
             count += 10;
@@ -166,6 +180,29 @@ main :: () {
     }
     assert(count == 23);
     assert(thrownError == null);
+
+    // An error type of its own: made with errors.typed, given back by find, also from the causes
+    n, qerr := query("DROP users");
+    assert(n == 0 && qerr.message == "DROP users isn't allowed" && qerr.kind.name == "QueryError");
+    q := qerr.find<QueryError>();
+    assert(q != null && q.sql == "DROP users" && q.code == 42 && q.message == qerr.message);
+    _, plain := query("");
+    assert(plain.find<QueryError>() == null && plain.message == "no sql");
+    wrapped := errors.wrap(qerr, "loading %", "users");
+    assert(wrapped.message == "loading users" && wrapped.kind.name == "QueryError" && wrapped.find<QueryError>().code == 42);
+    try {
+        throw errors.typed(QueryError{sql: "x"}, "thrown");    // A *QueryError is an error
+    } catch (e) {
+        assert(e.find<QueryError>().sql == "x" && e.trace.count == 1);
+    }
+    try {
+        query("DROP posts");                                    // Not taken: thrown, and still a QueryError
+    } catch (e) {
+        assert(e.find<QueryError>().sql == "DROP posts");
+    }
+
+    // Without values, the message is as written, so a % stays a %
+    assert(errors.make("100% sure").message == "100% sure");
 
     print("errors ok");
 }

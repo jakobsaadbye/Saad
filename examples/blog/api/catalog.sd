@@ -3,6 +3,7 @@ namespace api;
 import web;
 import fmt;
 use entities;
+import errors;
 
 // Categories, series, the newsletter and the numbers of the authors
 
@@ -18,7 +19,7 @@ listCategories :: (session: *Session) -> [..]CategoryView {
 @web.endpoint(.get)
 getSeries :: (session: *Session, slug: string) -> SeriesView {
     series := session.db.series.where(s => s.slug == slug).first();
-    if series == null { throw newError(fmt.sprint("No series has the slug '%'", slug), web.NotFound); }
+    if series == null { throw errors.make("No series has the slug '%'", slug, kind: web.NotFound); }
     view := SeriesView{title: series.title, description: series.description, author: series.author().name};
     view.parts = series.seriesPosts()
         .orderBy(s => s.position)
@@ -29,9 +30,9 @@ getSeries :: (session: *Session, slug: string) -> SeriesView {
 
 @web.endpoint
 subscribe :: (session: *Session, email: string) -> string {
-    if email.indexOf("@") < 0 { throw newError(fmt.sprint("'%' isn't an email", email), web.BadRequest); }
+    if email.indexOf("@") < 0 { throw errors.make("'%' isn't an email", email, kind: web.BadRequest); }
     if session.db.subscribers.where(s => s.email == email).exists() {
-        throw newError("That email is subscribed already", web.Conflict);
+        throw errors.make("That email is subscribed already", kind: web.Conflict);
     }
     subscriber := session.db.subscribers.create();
     subscriber.email = email;

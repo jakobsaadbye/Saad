@@ -4,13 +4,14 @@ import web;
 import fmt;
 import random;
 use entities;
+import errors;
 
 // A new reader, with the token to log in with
 @web.endpoint
 register :: (session: *Session, name: string, email: string) -> Registration {
-    if email.indexOf("@") < 0 { throw newError(fmt.sprint("'%' isn't an email", email), web.BadRequest); }
+    if email.indexOf("@") < 0 { throw errors.make("'%' isn't an email", email, kind: web.BadRequest); }
     if session.db.readers.where(r => r.email == email).exists() {
-        throw newError("A reader has that email", web.Conflict);
+        throw errors.make("A reader has that email", kind: web.Conflict);
     }
     reader := session.db.readers.create();
     reader.name  = name;

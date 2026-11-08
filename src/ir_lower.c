@@ -3430,7 +3430,8 @@ static void lower_statement(Lowerer *L, Ast *stmt) {
         return;
     }
     case AST_THROW: {
-        int err = lower_scalar_as(L, ((AstThrow *) stmt)->value, ((AstThrow *) stmt)->value->type);
+        AstThrow *ast_throw = (AstThrow *) stmt;
+        int err = lower_scalar_as(L, ast_throw->value, ast_throw->error_type ? ast_throw->error_type : ast_throw->value->type);
         emit_throw(L, err);
         return;
     }

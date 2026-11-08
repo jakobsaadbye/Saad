@@ -12,7 +12,7 @@ describe :: (name: string, count: i64, point: Point, flag: bool) -> string, int 
 
 @Call
 fails :: (n: int) -> int {
-    if n < 0 { throw newError("negative"); }
+    if n < 0 { throw errors.make("negative"); }
     return n * 2;
 }
 
@@ -45,3 +45,4 @@ main :: () {
     fmt.print("function invoke ok");
 }
 use c;
+import errors;

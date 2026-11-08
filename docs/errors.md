@@ -3,8 +3,10 @@
 An error is a value that says what went wrong, and where. A function that can fail gives it as its last result:
 
 ```odin
+import errors;
+
 readConfig :: (path: string) -> (Config, error) {
-    if !os.fileExists(path) { return Config{}, fmt.errorf("% isn't there", path); }
+    if !os.fileExists(path) { return Config{}, errors.make("% isn't there", path); }
     ...
     return config, null;                          // null: no error
 }
@@ -19,16 +21,91 @@ if err != null { ... }
 config := readConfig(path);                       // not taken: if there is an error, it is thrown
 ```
 
-The rule: **an error that is taken is a value, and one that isn't is thrown.** A function that gives only an error,
-e.g `save :: () -> error`, throws it when it is called as a statement, `save();`, and gives it with `err := save();`.
+## The rules
 
-An error isn't a condition: `if err { }`, `!err` and `assert(err)` are compile errors, as they read the other way
-round. Compare it with `null`: `if err != null { }`. The same goes for any pointer, as a condition is a `bool`.
+1. **An error that is taken is a value, and one that isn't is thrown.** `v, err := f()` takes it, `v := f()` doesn't.
+   A function that gives only an error, e.g `save :: () -> error`, throws it when it is called as a statement,
+   `save();`, and gives it with `err := save();`.
+2. **Any function can throw**, whatever its results are. There is no `throws` to write: an error thrown in a function
+   leaves every function it is thrown through, up to a `try`, or ends the program. So a function without an `error`
+   in its results still throws what its calls throw, e.g `total :: () -> int { return readCount(); }`.
+3. **`return f()` gives the error along**, as it gives all of the results of `f`, when the function has the same
+   results, e.g `(Config, error)`.
+4. **Only a call whose last result is an `error` can be taken.** `v, err := f()` of a `f :: () -> int` is an error of
+   the compiler, as there is one value. To get a value from a function that throws, put it in a `try`.
+5. **An error isn't a condition**: `if err { }`, `!err` and `assert(err)` are compile errors, as they read the other way
+   round. Compare it with `null`: `if err != null { }`. The same goes for any pointer, as a condition is a `bool`.
+
+### When a function gives an error, and when it throws
+
+* **Give an `error` as the last result** when failing is one of the things that happen when the function does its job:
+  a file that isn't there, input that isn't valid, a network that is down, a row that isn't found. The caller knows
+  best what that means, so it gets to choose: take it and look at it, or let it be thrown. It costs the caller nothing
+  when it doesn't care, as `v := f()` throws for it. The standard library does it like that, e.g `os.readFile`.
+* **Throw**, without an error in the results, when no caller can do anything better than let it go up: a mistake of
+  the program (`panic("unreachable")`, a failed `assert`), or an error deep in a function that has no error of its own
+  to give, e.g in the handler of a request, where the server turns it into a 500.
+* What only asks a question and can't fail stays a `bool`, e.g `os.fileExists` and the `found` of `os.getEnv`.
 
 The standard library gives errors: `dbms` (`dbms.DatabaseError`, `dbms.QueryError`, `dbms.NoLink`), `json.decode`,
 `json.decodeInto` and `json.parse` (`json.DecodeError`), and the file functions of `os`, `readFile`, `writeFile`,
-`appendFile`, `makeDir`, `removeFile` and `renameFile` (`os.NotFound`, `os.IOError`). What asks a question and can't fail
-stays a `bool`, e.g `os.fileExists` and the `found` of `os.getEnv`.
+`appendFile`, `makeDir`, `removeFile` and `renameFile` (`os.NotFound`, `os.IOError`).
+
+## Making errors
+
+The package `errors` makes them:
+
+```odin
+import errors;
+
+errors.make("no port")                                     // a message
+errors.make("no user with the id %", id)                   // in a format, like fmt.sprint
+errors.make("no user with the id %", id, kind: NotFound)   // of a kind, for err.is(NotFound)
+errors.make("loading % failed", path, cause: err)          // because of another error
+errors.wrap(err, "loading %", path)                        // the same, and of the kind of err
+```
+
+* Without values, the message is as it is written, so `errors.make(text)` takes a text from elsewhere as it is, also
+  with a `%` in it.
+* The message is on the heap, like the error and its trace, so it outlives the arena it was made in, e.g of a
+  request.
+* A kind is declared as a constant: `NotFound :: ErrorKind{"NotFound"};`. Two kinds are the same when their names are.
+
+## Error types of their own
+
+An error can carry more than a message: what a catch needs to decide or to report, e.g the SQL of a query that failed.
+Its type is a struct that embeds `Error` (see `docs/embedding.md`):
+
+```odin
+QueryError :: struct {
+    @embed base: Error;          // message, kind, cause and trace
+    sql:  string;
+    code: int;
+}
+
+run :: (sql: string) -> (Rows, error) {
+    ...
+    return Rows{}, errors.typed(QueryError{sql: sql, code: code}, "the query failed: %", reason);
+}
+
+rows, err := run(sql);
+if err != null {
+    q := err.find<QueryError>();     // the QueryError, in the error or in its causes, or null
+    if q != null { log("% failed with %", q.sql, q.code); }
+}
+```
+
+* `errors.typed(value, format, ...values, cause: err)` makes one on the heap and gives a `*QueryError`. It is an `error`
+  where one is wanted, as a `*QueryError` converts to the `*Error` it embeds: it can be returned as one, and thrown,
+  `throw errors.typed(...)`. Its members are reached on it directly, `q.message` and `q.sql`.
+* Its kind is the name of its type, e.g `QueryError`, or `dbms.QueryError` in a namespace, unless the value has one.
+  So an error that nothing catches is reported as `QueryError: the query failed: ...`.
+* `err.find<QueryError>()` gives it back from an `error`, also from the causes, like `err.is(kind)` looks at them, or
+  null when there is none. It finds an error that `errors.typed` made, of exactly that type.
+* A struct that doesn't embed `Error` isn't an error, and the compiler says so:
+  `hint: Plain isn't an error. An error type of its own embeds Error: give it a member '@embed base: Error;'`.
+
+A kind is enough to tell errors apart. An error type of its own is for when a catch needs more than the message.
 
 ## try, catch and throw
 
@@ -49,8 +126,8 @@ handlePost :: (req: Request) -> Response {
 }
 ```
 
-* `throw err;` throws an error the program made itself, e.g `throw newError("no port");`. A `catch` can throw again,
-  e.g with the error as the cause: `throw newError("loading failed", cause: err);`.
+* `throw err;` throws an error the program made itself, e.g `throw errors.make("no port");`. A `catch` can throw
+  again, e.g with the error as the cause: `throw errors.wrap(err, "loading failed");`.
 * An error that nothing catches ends the program, with its kind, message and trace:
 
   ```
@@ -58,6 +135,8 @@ handlePost :: (req: Request) -> Response {
       at age (main.sd:11)
       at main (main.sd:37)
   ```
+
+  and its causes after it, each with `caused by`, e.g `caused by QueryError: the query failed: ...`.
 
 * These throw a `Panic`, so a web server can turn them into a 500 instead of crashing:
   * a division by zero
@@ -81,11 +160,14 @@ handlePost :: (req: Request) -> Response {
 | --- | --- |
 | `err.message` | What went wrong |
 | `err.kind` | An `ErrorKind`, for a catch to tell errors apart: `err.is(NotFound)`. Two kinds are the same when their names are |
-| `err.cause` | The error it was made because of, or null. `is` looks at the causes too |
+| `err.cause` | The error it was made because of, or null. `is` and `find` look at the causes too |
 | `err.trace` | Where it was made or thrown, and every function it was thrown through: `function`, `file` and `line` |
+| `err.type` | The error type of its own that it is embedded in, e.g `QueryError`, or null. `err.find<T>()` gives it back |
 
-* `newError(message, kind, cause)` makes one, and `fmt.errorf("no user %", id)` with a format.
-* A kind is declared as a constant: `NotFound :: ErrorKind{"NotFound"};`. `Panic` is the kind of the panics.
+* The prelude has the type, `err.is`, `err.find` and `newError(message, kind, cause)`, as the compiler throws and
+  catches errors. The package `errors` makes them with a format, as it uses `fmt`, which is above the prelude.
+  `newError` is what `errors.make` and `panic` are built on, and takes the message as it is.
+* `Panic` is the kind of the panics.
 
 ## How it works
 
@@ -97,6 +179,10 @@ handlePost :: (req: Request) -> Response {
   checks `thrownError` too when `eax` isn't 0. There is no stack unwinding of the system: the code of the function
   does it, so it works the same on Windows and Linux.
 * A call whose error isn't taken (`AST_FLAG_THROWS_ON_ERROR`) throws the error when it isn't null.
+* `throw` takes an `error`, or a pointer to a struct that embeds `Error` (`is_embedding_error_type()`), which is
+  converted to the `*Error` in it (`AstThrow.error_type`).
+* `errors.typed<T>` sets `type` to the descriptor of `T` and `value` to the whole error, so `find<T>()` compares the
+  descriptors and gives `value` back, without knowing where in `T` the `Error` is.
 * While the `defer`s run during a throw, the error is put aside, so their calls run as usual.
 * `main` reports an error that nothing caught (`reportUncaught`), and the program ends with the exit code 1.
 * A call of C, e.g `printf`, has no check: C doesn't throw.

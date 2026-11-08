@@ -23,6 +23,8 @@ Error :: struct {
     kind:    ErrorKind;
     cause:   error;            // The error this one was made because of, or null
     trace:   [..]TraceFrame;   // Where it was made or thrown, and each call it was thrown through after
+    type:    *Type;            // The error type of its own it is embedded in, e.g dbms.QueryError, or null (see errors.typed)
+    value:   *void;            // That error, of the type, which err.find<T>() gives back
 }
 
 // An error, or null for none
@@ -64,6 +66,20 @@ is :: method (err: *Error, kind: ErrorKind) -> bool {
         e = e.cause;
     }
     return false;
+}
+
+// The error of the type in the error or its causes, or null, e.g 'q := err.find<dbms.QueryError>();' of an error made
+// with errors.typed. The type is a struct with '@embed base: Error;'
+find :: method <T> (err: *Error) -> *T {
+    none: *T = null;
+    pointer: any = none;
+    wanted := (pointer.type as *TypePointer).pointerTo;
+    e := err;
+    while e != null {
+        if e.type != null && (e.type == wanted || e.type.name == wanted.name) { return e.value as *T; }
+        e = e.cause;
+    }
+    return null;
 }
 
 // Throws an error of the kind Panic, e.g panic("unreachable")
@@ -153,6 +169,16 @@ reportUncaught :: () {
     printf("%.*s: %.*s\n", kind.len as i32, kind.data, err.message.len as i32, err.message.data);
     for frame in err.trace {
         printf("    at %s (%s:%lld)\n", frame.function.data, frame.file.data, frame.line);   // C varargs: the pointers
+    }
+    cause := err.cause;
+    while cause != null {
+        kind = cause.kind.name;
+        if kind.len == 0 { kind = "error"; }
+        printf("caused by %.*s: %.*s\n", kind.len as i32, kind.data, cause.message.len as i32, cause.message.data);
+        for frame in cause.trace {
+            printf("    at %s (%s:%lld)\n", frame.function.data, frame.file.data, frame.line);
+        }
+        cause = cause.cause;
     }
     fflush(null);
     exit(1);

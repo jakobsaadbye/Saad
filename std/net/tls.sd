@@ -16,6 +16,7 @@ use c;
 import fmt;
 import mem;
 import thread;
+import errors;
 
 TlsError :: ErrorKind{"net.TlsError"};   // The TLS handshake failed, e.g the certificate isn't valid for the host
 
@@ -340,7 +341,7 @@ x509VerifyCertErrorString :: (code: i64) -> c.string {
 // Starts TLS on the connection, as a client of the host: the handshake, which checks the certificate of the server
 startTls :: method (conn: *Conn, host: string) -> error {
     if !loadOpenSsl() {
-        return newError("TLS needs OpenSSL 3: libssl-3-x64.dll and libcrypto-3-x64.dll next to the program or on the PATH", TlsError);
+        return errors.make("TLS needs OpenSSL 3: libssl-3-x64.dll and libcrypto-3-x64.dll next to the program or on the PATH", kind: TlsError);
     }
     ctx := sslCtxNew(tlsClientMethod());
     if ctx == null { return tlsError("TLS isn't available (OpenSSL couldn't start)"); }
@@ -360,7 +361,7 @@ startTls :: method (conn: *Conn, host: string) -> error {
         verify := sslGetVerifyResult(ssl);
         failed: error;
         if verify != 0 {
-            failed = newError(fmt.sprint("TLS with %: the certificate isn't valid: %", host, x509VerifyCertErrorString(verify).toString()), TlsError);
+            failed = errors.make("TLS with %: the certificate isn't valid: %", host, x509VerifyCertErrorString(verify).toString(), kind: TlsError);
         } else {
             failed = tlsError(fmt.sprint("TLS with % failed", host));
         }
@@ -375,10 +376,10 @@ startTls :: method (conn: *Conn, host: string) -> error {
 @private
 tlsError :: (what: string) -> error {
     code := errGetError();
-    if code == 0 { return newError(what, TlsError); }
+    if code == 0 { return errors.make(what, kind: TlsError); }
     buffer: [256]u8;
     errErrorStringN(code, &buffer[0], 256);
-    return newError(fmt.sprint("%: %", what, c.string{&buffer[0]}.toString()), TlsError);
+    return errors.make("%: %", what, c.string{&buffer[0]}.toString(), kind: TlsError);
 }
 
 // read of a connection with TLS
@@ -389,9 +390,9 @@ readTls :: (conn: *Conn, buffer: []u8) -> int, error {
     n := sslRead(conn.tls, buffer.data, count as i32);
     if n > 0 { return n as int, null; }
     code := sslGetError(conn.tls, n);
-    if code == SslErrorZeroReturn { return 0, newError("The connection was closed", Closed); }
-    if code == SslErrorSyscall && n == 0 { return 0, newError("The connection was closed", Closed); }
-    if code == SslErrorWantRead || code == SslErrorWantWrite { return 0, newError("read: TLS timed out", Timeout); }
+    if code == SslErrorZeroReturn { return 0, errors.make("The connection was closed", kind: Closed); }
+    if code == SslErrorSyscall && n == 0 { return 0, errors.make("The connection was closed", kind: Closed); }
+    if code == SslErrorWantRead || code == SslErrorWantWrite { return 0, errors.make("read: TLS timed out", kind: Timeout); }
     if code == SslErrorSyscall { return 0, lastError("read"); }
     return 0, tlsError("read");
 }

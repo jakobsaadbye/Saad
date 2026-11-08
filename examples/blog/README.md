@@ -85,7 +85,7 @@ An endpoint is a function whose first parameter is the session of the request:
 @web.endpoint(.get)
 getSeries :: (session: *Session, slug: string) -> SeriesView {
     series := session.db.series.where(s => s.slug == slug).first();
-    if series == null { throw newError(fmt.sprint("No series has the slug '%'", slug), web.NotFound); }
+    if series == null { throw errors.make("No series has the slug '%'", slug, kind: web.NotFound); }
     view := SeriesView{title: series.title, description: series.description, author: series.author().name};
     view.parts = series.seriesPosts()
         .orderBy(s => s.position)

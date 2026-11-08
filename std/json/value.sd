@@ -8,6 +8,7 @@ namespace json;
 
 import fmt;
 use c;
+import errors;
 
 Kind :: enum {
     null,
@@ -173,7 +174,7 @@ parse :: (text: string) -> Value, error {
         }
     }
     if !ok {
-        return Value{}, newError(p.error, DecodeError);
+        return Value{}, errors.make(p.error, kind: DecodeError);
     }
     return value, null;
 }

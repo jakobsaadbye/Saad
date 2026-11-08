@@ -15,6 +15,7 @@ import bytes;
 import mem;
 import allocators;
 import fmt;
+import errors;
 
 Response :: struct {
     status:     int;           // e.g 200
@@ -58,7 +59,7 @@ parseUrl :: (url: string) -> Url, error {
         result.port = 443;
         result.tls = true;
     } else {
-        return result, newError(fmt.sprint("'%' isn't an http url, e.g http://localhost:8080/", url), ProtocolError);
+        return result, errors.make("'%' isn't an http url, e.g http://localhost:8080/", url, kind: ProtocolError);
     }
     slash := rest.indexOf("/");
     hostPort := rest;
@@ -74,7 +75,7 @@ parseUrl :: (url: string) -> Url, error {
         result.host = host;
         result.port = port;
     }
-    if result.host.len == 0 { return result, newError(fmt.sprint("'%' has no host", url), ProtocolError); }
+    if result.host.len == 0 { return result, errors.make("'%' has no host", url, kind: ProtocolError); }
     return result, null;
 }
 
@@ -127,14 +128,14 @@ request :: (verb: string, url: string, headers: []Header = [], body := "") -> *R
     first, status := readHead(conn, &buffer, &limits, &response.arena, &response.headers);
     if status != 0 {
         response.free();
-        return null, newError(fmt.sprint("% %: no response", verb, url), ProtocolError);
+        return null, errors.make("% %: no response", verb, url, kind: ProtocolError);
     }
 
     // HTTP/1.1 200 OK
     space := first.indexOf(" ");
     if space <= 0 || !first.startsWith("HTTP/1.") {
         response.free();
-        return null, newError(fmt.sprint("% %: the response isn't HTTP: %", verb, url, first), ProtocolError);
+        return null, errors.make("% %: the response isn't HTTP: %", verb, url, first, kind: ProtocolError);
     }
     response.version = first.slice(0, space);
     rest := first.slice(space + 1);
@@ -147,7 +148,7 @@ request :: (verb: string, url: string, headers: []Header = [], body := "") -> *R
     response.status = parseCount(code) as int;
     if response.status < 100 || code.len != 3 {
         response.free();
-        return null, newError(fmt.sprint("% %: the status of the response isn't a number: %", verb, url, first), ProtocolError);
+        return null, errors.make("% %: the status of the response isn't a number: %", verb, url, first, kind: ProtocolError);
     }
 
     // No body for HEAD, 204 and 304
@@ -155,7 +156,7 @@ request :: (verb: string, url: string, headers: []Header = [], body := "") -> *R
         response.body, status = readBody(conn, &buffer, response.headers, &limits, &response.arena, true);
         if status != 0 {
             response.free();
-            return null, newError(fmt.sprint("% %: the body of the response couldn't be read", verb, url), ProtocolError);
+            return null, errors.make("% %: the body of the response couldn't be read", verb, url, kind: ProtocolError);
         }
     }
     return response, null;

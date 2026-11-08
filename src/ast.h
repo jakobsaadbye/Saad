@@ -524,6 +524,7 @@ typedef struct AstTry {
 typedef struct AstThrow {
     Ast      head;
     AstExpr *value;
+    Type    *error_type;   // error: the value is converted to it, e.g a *QueryError that embeds Error
 } AstThrow;
 
 typedef struct AstReturn {

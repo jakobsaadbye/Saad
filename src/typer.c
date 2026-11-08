@@ -70,6 +70,7 @@ Type *check_optional_chain(Typer *typer, AstExpr *whole, AstMemberAccess *ma);
 bool  types_fit_either_way(Type *wanted, Type *given);
 int   embedded_offset(TypeStruct *outer, TypeStruct *inner, int depth);
 static void hint_optional_unwrap(Typer *typer, Type *wanted, Type *given);
+static void hint_error_embed(Typer *typer, Type *wanted, Type *given);
 static bool is_null_type(Type *type);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
@@ -161,6 +162,7 @@ static bool check_condition_type(Typer *typer, AstExpr *expr, Type *type);
 bool check_try(Typer *typer, AstTry *ast_try);
 bool check_throw(Typer *typer, AstThrow *ast_throw);
 bool is_error_type(Typer *typer, Type *type);
+bool is_embedding_error_type(Typer *typer, Type *type);
 bool is_c_string_type(Type *type);
 bool identifier_is_type(AstIdentifier *ident);
 Type *resolve_anonymous_type(Typer *typer, Type *type);
@@ -3156,6 +3158,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", ident->name, type_to_str(decl->type), type_to_str(value->type));
                 explain_interface_mismatch(typer, decl->type, value->type, value);
                 hint_optional_unwrap(typer, decl->type, value->type);
+                hint_error_embed(typer, decl->type, value->type);
                 return false;
             }
         }
@@ -3729,6 +3732,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Assignment type mismatch. Wanted type %s. Got type %s", type_to_str(lhs_type), type_to_str(expr_type));
         explain_interface_mismatch(typer, lhs_type, expr_type, assign->expr);
         hint_optional_unwrap(typer, lhs_type, expr_type);
+        hint_error_embed(typer, lhs_type, expr_type);
         return false;
     }
 
@@ -5150,6 +5154,25 @@ bool is_error_type(Typer *typer, Type *type) {
     return node && node->head.file == typer->parser->errors_file && node->identifier && strcmp(node->identifier->name, "Error") == 0;
 }
 
+// A pointer to a struct that embeds Error, e.g a *QueryError of 'QueryError :: struct { @embed base: Error; sql: string; }'.
+// It converts to an error
+// A *Plain where an error is wanted: an error type of its own embeds Error
+static void hint_error_embed(Typer *typer, Type *wanted, Type *given) {
+    if (!is_error_type(typer, wanted) || given == NULL || given->kind != TYPE_POINTER) return;
+    Type *to = ((TypePointer *)given)->pointer_to;
+    if (to->kind != TYPE_STRUCT || is_error_type(typer, given)) return;
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "%s isn't an error. An error type of its own embeds Error: give it a member '@embed base: Error;'", text_bold(type_to_str(to)));
+}
+
+bool is_embedding_error_type(Typer *typer, Type *type) {
+    Type *wanted = error_type(typer);
+    if (wanted == NULL || type == NULL || type->kind != TYPE_POINTER) return false;
+    Type *outer = ((TypePointer *)type)->pointer_to;
+    Type *inner = ((TypePointer *)wanted)->pointer_to;
+    if (outer->kind != TYPE_STRUCT || inner->kind != TYPE_STRUCT || outer == inner) return false;
+    return embedded_offset((TypeStruct *)outer, (TypeStruct *)inner, 0) >= 0;
+}
+
 bool check_try(Typer *typer, AstTry *ast_try) {
     if (!check_block(typer, ast_try->body)) return false;
     Type *type = error_type(typer);
@@ -5164,14 +5187,14 @@ bool check_try(Typer *typer, AstTry *ast_try) {
 }
 
 bool check_throw(Typer *typer, AstThrow *ast_throw) {
-    Type *type = check_expression(typer, ast_throw->value, error_type(typer));
+    Type *wanted = error_type(typer);
+    Type *type = check_expression(typer, ast_throw->value, wanted);
     if (!type) return false;
-    if (!is_error_type(typer, type)) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_throw->value, "throw takes an error, not %s", text_bold(type_to_str(type)));
-        report_error_ast(typer->parser, LABEL_HINT, NULL, "Make one with newError(\"what went wrong\"), or fmt.errorf(\"...\", values)");
-        return false;
-    }
-    return true;
+    ast_throw->error_type = wanted;
+    if (is_error_type(typer, type) || is_embedding_error_type(typer, type)) return true;
+    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_throw->value, "throw takes an error, not %s", text_bold(type_to_str(type)));
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "Make one with errors.make(\"what went wrong: %%\", value), or of a type of its own with errors.typed(MyError{...}, \"...\")");
+    return false;
 }
 
 bool check_defer(Typer *typer, AstDefer *defer) {
@@ -5840,6 +5863,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(wanted_type)), text_bold(type_to_str(given_type)));
                 explain_interface_mismatch(typer, wanted_type, given_type, arg->value);
                 hint_optional_unwrap(typer, wanted_type, given_type);
+                hint_error_embed(typer, wanted_type, given_type);
                 hint_c_string(typer, wanted_type, given_type);
                 if (given_type->kind == TYPE_VARIADIC && ((TypeVariadic *)given_type)->type->kind == wanted_type->kind) {
                     report_error_ast(typer->parser, LABEL_HINT, (Ast *)(arg), "Use ... to spread the variadic argument into the parameter");
@@ -5972,6 +5996,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg->value->type)));
                 explain_interface_mismatch(typer, param->type, arg->value->type, arg->value);
                 hint_optional_unwrap(typer, param->type, arg->value->type);
+                hint_error_embed(typer, param->type, arg->value->type);
                 hint_c_string(typer, param->type, arg->value->type);
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param->decl), "Here is the definition of '%s'", param->name);
                 return NULL;

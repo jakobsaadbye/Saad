@@ -48,6 +48,7 @@ import os;
 import thread;
 import net.http;
 import io;
+import errors;
 
 // A value in a template
 Value :: union {
@@ -145,7 +146,7 @@ render :: method (t: *Templates, name: string, data: any, context: *void = null)
     } catch (thrown) {
         r.out.free();
         if thrown.is(TemplateError) { return "", thrown; }
-        return "", newError(fmt.sprint("%: %", name, thrown.message), TemplateError);
+        return "", errors.make("%: %", name, thrown.message, kind: TemplateError);
     }
     return r.out.toString(), null;
 }
@@ -480,7 +481,7 @@ functionRange :: (call: *Call) -> Value {
     if call.args.count == 1 { stop = integerOf(call.args[0]); }
     if call.args.count >= 2 { start = integerOf(call.args[0]); stop = integerOf(call.args[1]); }
     if call.args.count >= 3 { step = integerOf(call.args[2]); }
-    if step == 0 { throw newError("range: the step is 0", TemplateError); }
+    if step == 0 { throw errors.make("range: the step is 0", kind: TemplateError); }
     list := new(ValueList);
     i := start;
     while (step > 0 && i < stop) || (step < 0 && i > stop) {
@@ -616,7 +617,7 @@ TemplateParser :: struct {
 
 @private
 fail :: method (p: *TemplateParser, message: string) {
-    throw newError(fmt.sprint("%:%: %", p.name, p.line, message), TemplateError);
+    throw errors.make("%:%: %", p.name, p.line, message, kind: TemplateError);
 }
 
 // The tags and texts of the template, until one of the end tags, e.g endif. The end tag that was found, or "" at the end
@@ -1207,7 +1208,7 @@ load :: method (r: *TemplateRenderer, name: string) -> *Template {
     if err != null {
         mem.setAllocator(previous);
         t.mutex.unlock();
-        throw newError(fmt.sprint("The template % can't be read: %", name, err.message), TemplateError);
+        throw errors.make("The template % can't be read: %", name, err.message, kind: TemplateError);
     }
     template: *Template;
     try {
@@ -1313,7 +1314,7 @@ renderNode :: method (r: *TemplateRenderer, node: *TemplateNode) {
 @private
 enter :: method (r: *TemplateRenderer, line: int) {
     r.depth += 1;
-    if r.depth > 100 { throw newError(fmt.sprint("line %: includes or macros 100 deep in each other", line), TemplateError); }
+    if r.depth > 100 { throw errors.make("line %: includes or macros 100 deep in each other", line, kind: TemplateError); }
 }
 
 @private
@@ -1370,7 +1371,7 @@ eval :: method (r: *TemplateRenderer, e: *TemplateExpr) -> Value {
         case .binary { return r.evalBinary(e); }
         case .filter {
             filter := r.templates.filters.tryGet(e.name);
-            if filter == null { throw newError(fmt.sprint("line %: there is no filter %", e.line, e.name), TemplateError); }
+            if filter == null { throw errors.make("line %: there is no filter %", e.line, e.name, kind: TemplateError); }
             call := r.newCall(e);
             f := filter.value();
             return f(&call, r.eval(e.left));
@@ -1381,7 +1382,7 @@ eval :: method (r: *TemplateRenderer, e: *TemplateExpr) -> Value {
                 value := r.lookup(e.left.name);
                 if value.kind != .macro {
                     function := r.templates.functions.tryGet(e.left.name);
-                    if function == null { throw newError(fmt.sprint("line %: there is no function or macro %", e.line, e.left.name), TemplateError); }
+                    if function == null { throw errors.make("line %: there is no function or macro %", e.line, e.left.name, kind: TemplateError); }
                     call := r.newCall(e);
                     f := function.value();
                     return f(&call);
@@ -1410,7 +1411,7 @@ callMacro :: method (r: *TemplateRenderer, value: Value, e: *TemplateExpr) -> Va
     macro: *Macro;
     switch v in value {
         case .macro { macro = v; }
-        else { throw newError(fmt.sprint("line %: only a macro or a function can be called", e.line), TemplateError); }
+        else { throw errors.make("line %: only a macro or a function can be called", e.line, kind: TemplateError); }
     }
     // The arguments, by position and by name, and the defaults
     values: [..]Value;
@@ -1423,11 +1424,11 @@ callMacro :: method (r: *TemplateRenderer, value: Value, e: *TemplateExpr) -> Va
         index := -1;
         if name.len > 0 {
             for param, j in macro.params { if param.name == name { index = j as int; } }
-            if index < 0 { throw newError(fmt.sprint("line %: the macro % has no parameter %", e.line, macro.name, name), TemplateError); }
+            if index < 0 { throw errors.make("line %: the macro % has no parameter %", e.line, macro.name, name, kind: TemplateError); }
         } else {
             index = position;
             position += 1;
-            if index >= macro.params.count { throw newError(fmt.sprint("line %: the macro % takes % arguments", e.line, macro.name, macro.params.count), TemplateError); }
+            if index >= macro.params.count { throw errors.make("line %: the macro % takes % arguments", e.line, macro.name, macro.params.count, kind: TemplateError); }
         }
         values[index] = r.eval(arg);
         given[index] = true;

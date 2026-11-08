@@ -6,6 +6,7 @@ import thread;
 import json;
 import fmt;
 import mem;
+import errors;
 
 Post :: struct {
     id:       int;
@@ -58,7 +59,7 @@ createPost :: (session: *Session, post: Post) -> Post, error {
     session.store.mutex.lock();
     defer session.store.mutex.unlock();
     for p in session.store.posts {
-        if p.title == post.title { return post, newError("A post has that title", web.Conflict); }
+        if p.title == post.title { return post, errors.make("A post has that title", kind: web.Conflict); }
     }
     post.id = session.store.posts.count as int + 1;
     post.title = post.title.copy(mem.heap());   // The store lives longer than the request
@@ -73,14 +74,14 @@ getPost :: (session: *Session, id: int) -> Post {
     for p in session.store.posts {
         if p.id == id { return p; }
     }
-    throw newError(fmt.sprint("No post has the id %", id), web.NotFound);
+    throw errors.make("No post has the id %", id, kind: web.NotFound);
     none: Post;
     return none;
 }
 
 @web.endpoint(.get)
 whoami :: (session: *Session) -> string {
-    if session.user == "" { throw newError("Log in first", web.Unauthorized); }
+    if session.user == "" { throw errors.make("Log in first", kind: web.Unauthorized); }
     return session.user;
 }
 

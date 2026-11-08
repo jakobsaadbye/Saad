@@ -23,6 +23,7 @@ import fmt;
 import thread;
 import net.sys;
 import mem;
+import errors;
 
 Timeout  :: ErrorKind{"net.Timeout"};   // A read or a write took longer than its timeout
 Closed   :: ErrorKind{"net.Closed"};    // The other end closed the connection, or it was reset
@@ -46,7 +47,7 @@ lastError :: (what: string) -> error {
             case sys.WsaeAddrInUse => InUse;
             else => NetError;
         };
-        return newError(fmt.sprint("%: Winsock error %", what, code), kind);
+        return errors.make("%: Winsock error %", what, code, kind: kind);
     } else {
         code := *sys.__errno_location();
         kind := switch code {
@@ -57,7 +58,7 @@ lastError :: (what: string) -> error {
             case sys.EaddrInUse => InUse;
             else => NetError;
         };
-        return newError(fmt.sprint("%: %", what, sys.strerror(code).toString()), kind);
+        return errors.make("%: %", what, sys.strerror(code).toString(), kind: kind);
     }
 }
 
@@ -72,7 +73,7 @@ startup :: () -> error {
         if started { return null; }
         data: sys.WsaData;
         code := sys.WSAStartup(0x0202, &data);   // Version 2.2
-        if code != 0 { return newError(fmt.sprint("Winsock couldn't start: error %", code), NetError); }
+        if code != 0 { return errors.make("Winsock couldn't start: error %", code, kind: NetError); }
         started = true;
     }
     return null;
@@ -114,18 +115,18 @@ splitHostPort :: (address: string) -> string, int, error {
         if ch == ':' { colon = i as int; }
     }
     if colon < 0 {
-        return "", 0, newError(fmt.sprint("'%' has no port, e.g localhost:8080", address), NetError);
+        return "", 0, errors.make("'%' has no port, e.g localhost:8080", address, kind: NetError);
     }
     host := address.slice(0, colon);
     portText := address.slice(colon + 1);
     if portText.len == 0 {
-        return "", 0, newError(fmt.sprint("'%' has no port, e.g localhost:8080", address), NetError);
+        return "", 0, errors.make("'%' has no port, e.g localhost:8080", address, kind: NetError);
     }
     port := 0;
     for ch in portText {
-        if !ch.isDigit() { return "", 0, newError(fmt.sprint("The port of '%' isn't a number", address), NetError); }
+        if !ch.isDigit() { return "", 0, errors.make("The port of '%' isn't a number", address, kind: NetError); }
         port = port * 10 + ch.digitValue();
-        if port > 65535 { return "", 0, newError(fmt.sprint("The port of '%' is above 65535", address), NetError); }
+        if port > 65535 { return "", 0, errors.make("The port of '%' is above 65535", address, kind: NetError); }
     }
     return host, port, null;
 }
@@ -148,9 +149,9 @@ resolve :: (host: string, port: int) -> Addr, error {
     code := sys.getaddrinfo(name, c.string{}, &hints, &found);
     if code != 0 || found == null {
         #if OS == .windows {
-            return result, newError(fmt.sprint("The address of '%' couldn't be found: error %", host, code), NetError);
+            return result, errors.make("The address of '%' couldn't be found: error %", host, code, kind: NetError);
         } else {
-            return result, newError(fmt.sprint("The address of '%' couldn't be found: %", host, sys.gai_strerror(code).toString()), NetError);
+            return result, errors.make("The address of '%' couldn't be found: %", host, sys.gai_strerror(code).toString(), kind: NetError);
         }
     }
     result.ip = found.addr.addr;
@@ -210,7 +211,7 @@ accept :: method (listener: *Listener) -> *Conn, error {
     s := sys.accept(listener.socket, &remote, &length);
     if s == sys.InvalidSocket {
         if listener.socket == sys.InvalidSocket {
-            return null, newError("The listener is closed", Closed);
+            return null, errors.make("The listener is closed", kind: Closed);
         }
         return null, lastError("accept");
     }
@@ -315,7 +316,7 @@ read :: method (conn: *Conn, buffer: []u8) -> int, error {
     if buffer.count == 0 { return 0, null; }
     if conn.tls != null { return readTls(conn, buffer); }
     n := sys.recv(conn.socket, buffer.data, buffer.count as sys.Length, 0) as int;
-    if n == 0 { return 0, newError("The connection was closed", Closed); }
+    if n == 0 { return 0, errors.make("The connection was closed", kind: Closed); }
     if n < 0  { return 0, lastError("read"); }
     return n, null;
 }
