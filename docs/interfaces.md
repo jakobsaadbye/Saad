@@ -51,10 +51,10 @@ describe :: (s: Shape) {
 main :: () {
     c := Circle{radius: 2};
     q := Square{side: 3};
-    describe(&c);                         // a *Circle is a Shape, as Circle has area and name
-    describe(&q);
+    describe(c);                          // c is a Shape, as Circle has area and name. It passes &c, see below
+    describe(q);
 
-    shapes: [..]Shape = [&c, &q];
+    shapes: [..]Shape = [c, q];
     total := 0.0;
     for s in shapes { total += s.area(); }
 }
@@ -93,27 +93,69 @@ and results. A struct of a library that doesn't know `Shape` is one too, if it h
 
 * An interface value is two pointers: the value, and a table of the methods of its type for the interface. The
   compiler makes one table for each type and interface that are used together, in the program's read-only data.
-* Only a pointer becomes an interface: `describe(&c)`, not `describe(c)`. So making an interface value never copies
-  the value and never allocates, and a `method *` changes the value itself. Where the value lives is up to you, e.g
-  the stack, an arena or the heap.
+* An interface value points at the value, so it never copies it and never allocates, and a `method *` changes the
+  value itself. Where the value lives is up to you, e.g the stack, an arena or the heap.
+* A pointer becomes an interface: `describe(&c)`. A variable or a member does too, by its address, as for the
+  receiver of a `method *`: `describe(c)` is `describe(&c)`. A temporary is an error, as nothing is left for the
+  interface to point at after the call: `describe(Circle{radius: 2})` says to put it in a variable first.
 * The zero value is no value: `s: Shape;` is null, `s == null` tells, and a call of a method of a null interface
   throws a `Panic`, like a null pointer.
 * A call `s.area()` loads the method from the table and calls it with the value as `self`: one load more than a
   direct call.
 
+### Sizes
+
+The methods aren't in the values. A `Circle` with its two methods is 8 bytes, as without them, also when it is used
+as a `Shape`. The table of the methods is there once for each type and interface, in read-only data, and the
+interface value points at it:
+
+```
+c: Circle                 s: Shape                     the table of Circle for Shape (once in the program)
+┌──────────────┐          ┌──────────────┐             ┌────────────────────┐
+│ radius: f64  │ ◄─────── │ value        │             │ area → Circle.area │
+└──────────────┘          │ table ───────┼──────────►  │ name → Circle.name │
+  8 bytes                 └──────────────┘             │ type → Circle      │
+                            16 bytes                   └────────────────────┘
+```
+
+So only a value of an interface costs something, 16 bytes, and a list of a million circles is 8 MB. In C++ an object
+of a class with virtual methods has the pointer to its table in it. Here, like in Go and in Rust's `dyn`, it is in
+the interface value.
+
 ### Getting the type back
 
-* `s as *Circle` is the value, like taking a value out of an `any`, and it throws a `Panic` when it is another type.
-* `switch v in s`, as for unions (`docs/switch_and_unions.md`), with a type in each case instead of a variant, and
-  `v` of that type:
+The table has the type of the value, so the value can be had with its own type again:
 
-  ```odin
-  switch v in s {
-      case *Circle { v.radius *= 2; }
-      case *Square { v.side *= 2; }
-      else         { }                 // other Shapes, e.g of other libraries
-  }
-  ```
+```odin
+grow :: (s: Shape) {
+    // When one type is expected: as. Another type throws a Panic
+    circle := s as *Circle;
+    circle.radius *= 2;
+}
+
+describeExact :: (s: Shape) {
+    // When it can be one of many: switch, as for unions. In each case v has the type of the case
+    switch v in s {
+        case *Circle { print("a circle of radius %", v.radius); }   // v: *Circle
+        case *Square { print("a square of side %", v.side); }       // v: *Square
+        else         { print("another shape: %", s.name()); }       // e.g a type of another library
+    }
+}
+
+main :: () {
+    c := Circle{radius: 2};
+    q := Square{side: 3};
+    describeExact(c);        // a circle of radius 2
+    describeExact(q);        // a square of side 3
+    grow(c);                 // c.radius is 4 now: s points at c itself
+    grow(q);                 // Panic: the Shape is a *Square, not a *Circle
+}
+```
+
+* `s as *Circle` compares the type in the table with `Circle`, and gives the pointer. It is like taking a value out
+  of an `any`.
+* `switch v in s` is the switch of unions (`docs/switch_and_unions.md`) with a type in each case instead of a
+  variant.
 * The table has the `*Type` of the value, so `print(s)`, `json.encode(s)` and the debugger show the value itself.
 
 ### As a constraint of a generic
@@ -175,7 +217,7 @@ list.allocator = &counting;      // an Allocator
   doesn't know.
 * No inheritance and no bodies in an interface. Code that many types share is a function that takes the interface.
 * No values of an interface that own their value. It points at it, and the value must live as long as the interface
-  value, as for any pointer. `--check-memory` finds one that points into an arena that was cleared.
+  value, as for any pointer. The name is `interface`. `--check-memory` finds one that points into an arena that was cleared.
 
 ## How it would be built
 
@@ -189,9 +231,8 @@ list.allocator = &counting;      // an Allocator
 
 ## Questions
 
-* The name: `interface`, like Go, or `protocol`, which the docs already use for the collection protocol? Or should
-  the collection protocol become interfaces?
-* Should the value of an interface be allowed to be a non-pointer when it is small, e.g an `int` with methods, by
-  copying it into the interface? This proposal says no, so it never allocates.
+* Should the collection protocol (`docs/collections.md`) become interfaces?
+* Should the value of an interface be allowed to be a copy when it is small, e.g an `int` with methods? This
+  proposal says no, so it never copies or allocates.
 * `s as *Circle` throwing, or giving an optional like `?*Circle`?
 * Generic interfaces, e.g `Iterator<T> :: interface { next :: method * () -> ?T; }`: now, or after the first version?
