@@ -51,10 +51,10 @@ describe :: (s: Shape) {
 main :: () {
     c := Circle{radius: 2};
     q := Square{side: 3};
-    describe(c);                          // c is a Shape, as Circle has area and name. It passes &c, see below
-    describe(q);
+    describe(&c);                         // a *Circle is a Shape, as Circle has area and name
+    describe(&q);
 
-    shapes: [..]Shape = [c, q];
+    shapes: [..]Shape = [&c, &q];
     total := 0.0;
     for s in shapes { total += s.area(); }
 }
@@ -95,9 +95,9 @@ and results. A struct of a library that doesn't know `Shape` is one too, if it h
   compiler makes one table for each type and interface that are used together, in the program's read-only data.
 * An interface value points at the value, so it never copies it and never allocates, and a `method *` changes the
   value itself. Where the value lives is up to you, e.g the stack, an arena or the heap.
-* A pointer becomes an interface: `describe(&c)`. A variable or a member does too, by its address, as for the
-  receiver of a `method *`: `describe(c)` is `describe(&c)`. A temporary is an error, as nothing is left for the
-  interface to point at after the call: `describe(Circle{radius: 2})` says to put it in a variable first.
+* Only a pointer becomes an interface, and the `&` is written: `describe(&c)`. So the code shows where the value
+  is shared. `describe(c)` is an error that says so: `c is a Circle, not a pointer: pass &c to share it as a Shape`.
+* A value is never copied into an interface, also not a small one like an `int` with methods.
 * The zero value is no value: `s: Shape;` is null, `s == null` tells, and a call of a method of a null interface
   throws a `Panic`, like a null pointer.
 * A call `s.area()` loads the method from the table and calls it with the value as `self`: one load more than a
@@ -133,6 +133,13 @@ grow :: (s: Shape) {
     circle.radius *= 2;
 }
 
+growIfCircle :: (s: Shape) {
+    // With a second result, as takes the miss: ok is false and circle is null, and nothing is thrown
+    circle, ok := s as *Circle;
+    if !ok { return; }
+    circle.radius *= 2;
+}
+
 describeExact :: (s: Shape) {
     // When it can be one of many: switch, as for unions. In each case v has the type of the case
     switch v in s {
@@ -145,15 +152,18 @@ describeExact :: (s: Shape) {
 main :: () {
     c := Circle{radius: 2};
     q := Square{side: 3};
-    describeExact(c);        // a circle of radius 2
-    describeExact(q);        // a square of side 3
-    grow(c);                 // c.radius is 4 now: s points at c itself
-    grow(q);                 // Panic: the Shape is a *Square, not a *Circle
+    describeExact(&c);       // a circle of radius 2
+    describeExact(&q);       // a square of side 3
+    growIfCircle(&q);        // nothing: it is a Square
+    grow(&c);                // c.radius is 4 now: s points at c itself
+    grow(&q);                // Panic: Shape is a *Square, not a *Circle
 }
 ```
 
 * `s as *Circle` compares the type in the table with `Circle`, and gives the pointer. It is like taking a value out
   of an `any`.
+* It is the same choice as for errors (`docs/errors.md`): `circle := s as *Circle` throws a `Panic` when it is
+  another type, and `circle, ok := s as *Circle` takes it at the call, with `ok` false and `circle` null instead.
 * `switch v in s` is the switch of unions (`docs/switch_and_unions.md`) with a type in each case instead of a
   variant.
 * The table has the `*Type` of the value, so `print(s)`, `json.encode(s)` and the debugger show the value itself.
@@ -217,7 +227,7 @@ list.allocator = &counting;      // an Allocator
   doesn't know.
 * No inheritance and no bodies in an interface. Code that many types share is a function that takes the interface.
 * No values of an interface that own their value. It points at it, and the value must live as long as the interface
-  value, as for any pointer. The name is `interface`. `--check-memory` finds one that points into an arena that was cleared.
+  value, as for any pointer. `--check-memory` finds one that points into an arena that was cleared.
 
 ## How it would be built
 
@@ -229,10 +239,18 @@ list.allocator = &counting;      // an Allocator
 * Reflection: a `TypeInterface`, with its methods.
 * The language server: hover, completion of the methods of an interface value, and later "go to implementations".
 
-## Questions
+## Decided
 
-* Should the collection protocol (`docs/collections.md`) become interfaces?
-* Should the value of an interface be allowed to be a copy when it is small, e.g an `int` with methods? This
-  proposal says no, so it never copies or allocates.
-* `s as *Circle` throwing, or giving an optional like `?*Circle`?
-* Generic interfaces, e.g `Iterator<T> :: interface { next :: method * () -> ?T; }`: now, or after the first version?
+* The name is `interface`.
+* The `&` is written where a value becomes an interface, and a value is never copied into one.
+* `as` throws a `Panic` when the type isn't the one asked for, and `x, ok := s as *T` takes the miss instead.
+* Generic interfaces, e.g `Iterator<T> :: interface { next :: method * () -> ?T; }`, aren't in the first version.
+
+## After the first version
+
+* Generic interfaces.
+* The collection protocol (`docs/collections.md`) as interfaces: e.g `Collection<T> :: interface { elements :: method
+  () -> []T; }` and `Growable<T> :: interface { add :: method * (value: T); }`, with `for`, `[a, b, c]` and `xs[i]`
+  defined by them instead of by names the compiler knows. Its methods take and give the type of the elements, so it
+  needs generic interfaces and comes with them. Until then, the protocol stays as it is.
+* "Go to implementations" in the language server.
