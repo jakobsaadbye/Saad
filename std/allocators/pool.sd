@@ -1,0 +1,82 @@
+namespace allocators;
+
+import c;
+
+// A block of a Pool that was given back: it holds the next one. It is declared before Pool, as the compiler asserted when
+// it came after it in std/mem.sd (it doesn't in a small namespace of the same shape)
+@private
+FreeBlock :: struct {
+    next: *FreeBlock;
+}
+
+// Blocks of one size, e.g for the many nodes of a tree. A block that is given back goes on a list and is the next one
+// given out, so there is no searching and no fragmentation, and blocks can be given back one by one, unlike an arena.
+// It takes chunks of blocks from another allocator (inner, the heap when it is null), which free() gives back
+//
+//     pool := allocators.Pool{blockSize: sizeof(Node)};
+//     node := new(Node, &pool);
+//     mem.delete(node, &pool);         // the next new(Node, &pool) gets this block
+//     pool.free();                     // all of it
+Pool :: struct {
+    blockSize: i64;            // At least 8, as a free block holds the pointer to the next one
+    perChunk:  i64 = 64;       // The blocks of each chunk
+    inner:     Allocator;      // Where the chunks come from
+    freeList:  *FreeBlock;     // The blocks that were given back
+    chunks:    *Chunk;         // The chunks, newest first. cursor is the next block that wasn't given out yet
+    inUse:     i64;            // The blocks given out and not given back
+
+    allocate :: method * (size: i64, align: i64) -> *void {
+        // A Panic when a block bigger than blockSize, or with an alignment over 8, is asked for. It is an assert, as the
+        // prelude, which has panic, is built on this namespace
+        assert(size <= self.blockSize && align <= 8);
+        self.inUse += 1;
+        if self.freeList != null {
+            block := self.freeList;
+            self.freeList = block.next;
+            c.memset(block, 0, self.blockSize as int);
+            return block;
+        }
+        size = self.blockSize;
+        if size < 8 { size = 8; }
+        size = (size + 7) / 8 * 8;
+        if self.chunks == null || self.chunks.cursor + size as int > self.chunks.capacity {
+            chunk := new(Chunk, heapAllocator());
+            chunk.capacity = (size * self.perChunk) as int;
+            chunk.data     = resizeMemory(self.inner, null, 0, chunk.capacity) as *u8;
+            assert(chunk.data != null);   // Out of memory
+            c.memset(chunk.data, 0, chunk.capacity);
+            chunk.prev     = self.chunks;
+            self.chunks    = chunk;
+        }
+        block := &self.chunks.data[self.chunks.cursor];
+        self.chunks.cursor += size as int;
+        return block;
+    }
+
+    // A block can't grow: it is blockSize bytes
+    resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
+        assert(newSize <= self.blockSize);   // A block of a pool can't grow over the blockSize of the pool
+        return memory;
+    }
+
+    deallocate :: method * (memory: *void, size: i64, align: i64) {
+        block := memory as *FreeBlock;
+        block.next = self.freeList;
+        self.freeList = block;
+        self.inUse -= 1;
+    }
+
+    // Gives back all the chunks to the allocator they came from
+    free :: method * () {
+        chunk := self.chunks;
+        while chunk != null {
+            previous := chunk.prev;
+            freeMemory(chunk.data, chunk.capacity, self.inner);
+            freeMemory(chunk, sizeof(Chunk), heapAllocator());
+            chunk = previous;
+        }
+        self.chunks   = null;
+        self.freeList = null;
+        self.inUse    = 0;
+    }
+}

@@ -3,6 +3,7 @@
 import bytes;
 import fmt;
 import mem;
+import allocators;
 
 main :: () {
     buffer: bytes.Buffer;
@@ -55,7 +56,7 @@ main :: () {
     big.free();
 
     // With an arena
-    arena: mem.Arena;
+    arena: allocators.Arena;
     alloc := arena.allocator();
     held := bytes.newBuffer(8, alloc);
     held.write("in the arena");

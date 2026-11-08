@@ -41,7 +41,7 @@ The server answers it with a 500 and goes on. What is kept must be copied to mem
 
 ## How it works
 
-* The chunks of `mem.Arena` come from one range of 64 GB of addresses (reserved, not memory), and addresses are never
+* The chunks of `allocators.Arena` come from one range of 64 GB of addresses (reserved, not memory), and addresses are never
   used again: `clear()` gives back all chunks, also the one it keeps without the check. So a pointer into a freed chunk
   can't point at something new
 * A byte for each page of 4 KB says if the page was freed. The check of a pointer is a subtraction and a compare, and
@@ -51,7 +51,7 @@ The server answers it with a 500 and goes on. What is kept must be copied to mem
   it that the compiler doesn't see, e.g by C (`memcpy`, `printf`), crashes instead of giving what the memory holds now.
   So does a read past the end of a chunk, as there is an unreadable page after each
 * Errors and their traces are on the heap, so an error thrown out of an arena, e.g of a request, outlives it
-* `#if CHECK_MEMORY { ... }` keeps code for this build only, as `mem.Arena` does
+* `#if CHECK_MEMORY { ... }` keeps code for this build only, as `allocators.Arena` does
 
 ## What it doesn't find
 

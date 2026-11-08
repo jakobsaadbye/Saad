@@ -1,0 +1,167 @@
+namespace allocators;
+
+// Arenas: memory that is taken bit by bit and freed all at once, e.g for everything of one request. An Arena is an
+// Allocator, so &arena can be given wherever one is wanted
+//
+//     arena: allocators.Arena;
+//     p := arena.allocate(64);
+//     list.allocator = &arena;          // lists, maps, new(T, &arena) and e.g dbms.Connection
+//     arena.clear();                    // Everything is free to use again
+//     arena.free();
+
+import c;
+
+Arena :: struct {
+    currentChunk: *Chunk;
+}
+
+Chunk :: struct {
+    data:     *u8;
+    cursor:   int;
+    capacity: int;
+    prev:     *Chunk;
+}
+
+@private DefaultCapacity :: 4096;
+
+newArena :: (capacity: int) -> Arena {
+    arena := Arena{};
+    arena.currentChunk = newChunk(null, capacity);
+    return arena;
+}
+
+// Zeroed memory of the size, aligned to 'align' bytes (8 unless it is given), which is a power of two. It is the allocate
+// of an Allocator too
+allocate :: method (arena: *Arena, size: i64, align: i64 = 8) -> *void {
+    if align < 8 { align = 8; }
+    size = (size + 7) / 8 * 8;
+    chunk := arena.currentChunk;
+    if chunk != null {
+        pad := padding(&chunk.data[chunk.cursor], align as int);
+        if chunk.cursor + pad + size as int <= chunk.capacity {
+            ptr := &chunk.data[chunk.cursor + pad];
+            chunk.cursor += pad + size as int;
+            c.memset(ptr, 0, size as int);
+            return ptr;
+        }
+    }
+
+    // A new chunk, at least twice as big as the last one, with room for the alignment
+    capacity := DefaultCapacity;
+    if chunk != null { capacity = chunk.capacity * 2; }
+    while capacity < (size + align) as int {
+        capacity *= 2;
+    }
+    arena.currentChunk = newChunk(chunk, capacity);
+    return arena.allocate(size, align);
+}
+
+// The Allocator of the arena: the arena itself, which is one. For a struct member of the type Allocator, e.g
+// 'r.allocator = r.arena.allocator()'
+allocator :: method (arena: *Arena) -> Allocator {
+    return arena;
+}
+
+// The resize of an Allocator: a smaller size keeps the block, the last block of the arena grows where it is when there
+// is room, and a bigger one is a new block with what the old one had
+resize :: method (arena: *Arena, memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
+    if newSize <= oldSize { return memory; }
+
+    chunk := arena.currentChunk;
+    if chunk != null && oldSize > 0 {
+        // The last block of the chunk, which can grow up to the end of it
+        old := memory as *u8;
+        rounded := ((oldSize + 7) / 8 * 8) as int;
+        start := chunk.cursor - rounded;
+        grown := ((newSize + 7) / 8 * 8) as int;
+        if start >= 0 && &chunk.data[start] == old && start + grown <= chunk.capacity {
+            c.memset(&chunk.data[chunk.cursor], 0, grown - rounded);
+            chunk.cursor = start + grown;
+            return memory;
+        }
+    }
+
+    block := arena.allocate(newSize, align);
+    c.memcpy(block, memory, oldSize as int);
+    return block;
+}
+
+// The deallocate of an Allocator: nothing, as the memory is freed with the arena
+deallocate :: method (arena: *Arena, memory: *void, size: i64, align: i64) {
+}
+
+// The bytes to skip from the pointer to an address that is a multiple of align
+@private
+padding :: (at: *u8, align: int) -> int {
+    address := at as u64;
+    return ((align as u64 - address % align as u64) % align as u64) as int;
+}
+
+// Frees all the memory of the arena
+free :: method (arena: *Arena) {
+    chunk := arena.currentChunk;
+    while chunk != null {
+        freeChunkData(chunk);
+        previous := chunk.prev;
+        c.free(chunk);
+        chunk = previous;
+    }
+    arena.currentChunk = null;
+}
+
+// Makes all the memory of the arena free to use again. It keeps the biggest chunk, so the next use doesn't allocate.
+// With saad build --check-memory it keeps none, so a pointer into what was cleared is found when it is used
+clear :: method (arena: *Arena) {
+    #if CHECK_MEMORY {
+        arena.free();
+        return;
+    }
+    chunk := arena.currentChunk;
+    if chunk == null {
+        return;
+    }
+    previous := chunk.prev;
+    while previous != null {
+        freeChunkData(previous);
+        next := previous.prev;
+        c.free(previous);
+        previous = next;
+    }
+    chunk.prev   = null;
+    chunk.cursor = 0;
+}
+
+// The bytes of the arena that are in use
+used :: method (arena: *Arena) -> int {
+    total := 0;
+    chunk := arena.currentChunk;
+    while chunk != null {
+        total += chunk.cursor;
+        chunk = chunk.prev;
+    }
+    return total;
+}
+
+newChunk :: (oldChunk: *Chunk, capacity: int) -> *Chunk {
+    chunk := c.malloc(sizeof(Chunk)) as *Chunk;
+    assert(chunk != null); // Out of memory
+    #if CHECK_MEMORY {
+        chunk.data = checkedAllocate(capacity);   // See std/prelude/errors.sd
+    } else {
+        chunk.data = c.malloc(capacity) as *u8;
+    }
+    assert(chunk.data != null);
+    chunk.cursor   = 0;
+    chunk.capacity = capacity;
+    chunk.prev     = oldChunk;
+    return chunk;
+}
+
+@private
+freeChunkData :: (chunk: *Chunk) {
+    #if CHECK_MEMORY {
+        checkedFree(chunk.data, chunk.capacity);
+    } else {
+        c.free(chunk.data);
+    }
+}

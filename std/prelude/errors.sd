@@ -17,6 +17,7 @@
 //
 // Every file imports this file like the rest of the prelude. The compiler calls the functions at the bottom.
 use c;
+import allocators;
 
 Error :: struct {
     message: string;
@@ -48,8 +49,8 @@ Panic :: ErrorKind{"Panic"};
 // on the heap, as it is thrown out of the function that made it, and can be thrown out of the arena it was made in,
 // e.g of a request
 newError :: (message: string, kind := ErrorKind{}, cause: error = null) -> error {
-    err := new(Error, heapAllocator());
-    err.trace.allocator = heapAllocator();
+    err := new(Error, allocators.heapAllocator());
+    err.trace.allocator = allocators.heapAllocator();
     err.message = message;
     err.kind    = kind;
     err.cause   = cause;
@@ -107,7 +108,7 @@ panicNullPointer :: (text: *u8) {
     sprintf(buffer.data, "Null pointer dereference: %s is null", text);
     copied := c.string{buffer.data}.toString();
     message: string;
-    message.data = resizeMemory(heapAllocator(), null, 0, copied.len) as *u8;
+    message.data = allocators.resizeMemory(allocators.heapAllocator(), null, 0, copied.len) as *u8;
     message.len  = copied.len;
     for i in 0..copied.len { message.data[i] = copied.data[i]; }
     panic(message);
@@ -125,7 +126,7 @@ panicInterfaceCast :: (table: *void, named: *u8, wanted: *u8) {
     }
     copied := c.string{buffer.data}.toString();
     message: string;
-    message.data = resizeMemory(heapAllocator(), null, 0, copied.len) as *u8;
+    message.data = allocators.resizeMemory(allocators.heapAllocator(), null, 0, copied.len) as *u8;
     message.len  = copied.len;
     for i in 0..copied.len { message.data[i] = copied.data[i]; }
     panic(message);
@@ -137,7 +138,7 @@ panicIndexOutOfBounds :: (index: i64, count: i64) {
     sprintf(buffer.data, "Index %lld is out of bounds, as there are %lld elements", index, count);
     text := c.string{buffer.data}.toString();
     message: string;
-    message.data = resizeMemory(heapAllocator(), null, 0, text.len) as *u8;
+    message.data = allocators.resizeMemory(allocators.heapAllocator(), null, 0, text.len) as *u8;
     message.len  = text.len;
     for i in 0..text.len { message.data[i] = text.data[i]; }
     panic(message);
@@ -222,7 +223,7 @@ newThreadBlock :: () {
 }
 
 //
-// The checking of memory, of saad build --check-memory. The chunks of arenas (see mem.Arena) come from one big range of
+// The checking of memory, of saad build --check-memory. The chunks of arenas (see allocators.Arena) come from one big range of
 // addresses that is never used again, and the pages of a chunk that is freed or cleared are marked, so that a pointer
 // into one is found when it is used: the compiler checks a pointer before it reads or writes through it, like for null
 // (see emit_memory_check in ir_lower.c), and that throws a Panic. The pages are also made unreadable, so a read by C,
@@ -303,7 +304,7 @@ panicFreedMemory :: (text: *u8) {
     sprintf(buffer.data, "Use of freed memory: %s points into an arena that was cleared or freed", text);
     copied := c.string{buffer.data}.toString();
     message: string;
-    message.data = resizeMemory(heapAllocator(), null, 0, copied.len) as *u8;
+    message.data = allocators.resizeMemory(allocators.heapAllocator(), null, 0, copied.len) as *u8;
     message.len  = copied.len;
     for i in 0..copied.len { message.data[i] = copied.data[i]; }
     panic(message);

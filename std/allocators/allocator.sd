@@ -1,0 +1,79 @@
+namespace allocators;
+
+use c;
+
+// The allocators of Saad: the Allocator interface (here), the heap (heap.sd), Arena (arena.sd) and Pool (pool.sd). The
+// functions that use them, e.g mem.allocate and mem.free, are in std/mem.sd, and new(T) in the prelude. See docs/allocators.md
+//
+// Where memory comes from: every allocation of Saad goes through one, e.g of new(T), a string, a list or json. Any type
+// with these methods is one, e.g Arena, the heap, or an allocator of a library, so they all work with the rest. A null
+// Allocator means the allocator of the thread: the heap, unless it is set, e.g to the arena of a request while a server
+// answers it (see currentAllocator).
+//
+// A size is what the caller knows of the size of a block: at least the bytes it uses of it, and at most the size it asked
+// for. align is a power of two, the alignment the block must have
+Allocator :: interface {
+    // A new block of the size, or null when there is no memory
+    allocate   :: method * (size: i64, align: i64) -> *void;
+    // The block with another size, keeping what fits of it. It can move, so the result is the block
+    resize     :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void;
+    // Gives back the block
+    deallocate :: method * (memory: *void, size: i64, align: i64);
+}
+
+// The realloc of an allocator (null is the allocator of the thread): a new block when memory is null, none when
+// newSize is 0, and else the block with another size
+resizeMemory :: (allocator: Allocator, memory: *void, oldSize: i64, newSize: i64, align: i64 = 8) -> *void {
+    if allocator == null {
+        allocator = currentAllocator();
+    }
+    if memory == null {
+        if newSize == 0 { return null; }
+        return allocator.allocate(newSize, align);
+    }
+    if newSize == 0 {
+        allocator.deallocate(memory, oldSize, align);
+        return null;
+    }
+    return allocator.resize(memory, oldSize, newSize, align);
+}
+
+// A block that was made with allocate as a block of the new size, for an allocator that can't change a block where it
+// is: a new block, with what fits of the old one, which is given back
+resizeByCopy :: (allocator: Allocator, memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
+    result := allocator.allocate(newSize, align);
+    if result == null { return null; }
+    keep := oldSize;
+    if keep > newSize { keep = newSize; }
+    if memory != null {
+        memcpy(result, memory, keep);
+        allocator.deallocate(memory, oldSize, align);
+    }
+    return result;
+}
+
+// The allocator of the thread, which a null allocator means, e.g of new(T), a string or a list. Null is the heap. A
+// server sets it to the arena of a request while it answers it, so what the handler allocates is freed with the request.
+// See mem.setAllocator and mem.heap
+@threadLocal threadAllocator: Allocator;
+
+currentAllocator :: () -> Allocator {
+    allocator := threadAllocator;
+    if allocator != null { return allocator; }
+    return heapAllocator();
+}
+
+heapValue: Heap;
+
+// The heap, for what lives longer than the allocator of the thread, e.g a list that a request adds to
+heapAllocator :: () -> Allocator {
+    return &heapValue;
+}
+
+// Gives back memory of resizeMemory to the allocator it came from (null is the allocator of the thread), with what is
+// known of its size
+freeMemory :: (memory: *void, size: i64, allocator: Allocator = null, align: i64 = 8) {
+    if memory != null {
+        resizeMemory(allocator, memory, size, 0, align);
+    }
+}

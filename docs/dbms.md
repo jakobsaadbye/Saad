@@ -145,7 +145,7 @@ An arena is the easy way for a web request: everything of the request is freed a
 ```odin
 import mem;
 
-arena: mem.Arena;
+arena: allocators.Arena;
 conn.allocator = &arena;
 
 orders, err := conn.query<Order>("SELECT * FROM orders WHERE customer = $1", id);
@@ -154,7 +154,7 @@ orders, err := conn.query<Order>("SELECT * FROM orders WHERE customer = $1", id)
 arena.free();   // or arena.clear() to use the memory again for the next request
 ```
 
-`mem.Arena` (in `std/mem.sd`) works without setting up: the zero value takes memory when it is first used.
+`allocators.Arena` (in `std/mem.sd`) works without setting up: the zero value takes memory when it is first used.
 `arena.allocate(size)` gives zeroed memory, an arena is an `Allocator` (`&arena`) for lists, maps and connections,
 `arena.used()` the bytes in use, `arena.clear()` makes all of it free again (keeping the newest chunk) and
 `arena.free()` gives it back.
@@ -226,7 +226,7 @@ complete driver of 20 lines.
 ## The plan
 
 1. **Done** `dbms.postgres`: connect, run SQL with parameters, read rows, close.
-2. **Done** Rows into structs with `query` and `queryOne`, transactions, `conn.allocator`, `mem.Arena`.
+2. **Done** Rows into structs with `query` and `queryOne`, transactions, `conn.allocator`, `allocators.Arena`.
 3. **Done** `dbms.Table<T>`, `dbms.KeyedTable<T, K>` and a generator that writes the tables as structs.
 4. **Done** Queries with lambdas, like LINQ: `db.users.where(u => u.age >= 18).select(u => {name: u.name}).all()`.
 5. **Done** A unit of work: `create`, `update` and `delete` keep the changes, and `db.saveChanges()` writes them all

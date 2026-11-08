@@ -3,6 +3,7 @@
 
 import dbms;
 import mem;
+import allocators;
 use fmt;
 use c;
 
@@ -134,7 +135,7 @@ main :: () {
     assert(hasId && e8 == null && id == 1);
 
     // Memory from an arena
-    arena: mem.Arena;
+    arena: allocators.Arena;
     alloc := arena.allocator();
     conn.allocator = alloc;
     fromArena, e9 := conn.query<Post>("SELECT");

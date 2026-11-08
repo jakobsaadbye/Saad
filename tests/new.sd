@@ -1,5 +1,6 @@
 // new(T), new(T, allocator) and new value: memory for one value, from an allocator (the heap when there is none)
 import mem;
+import allocators;
 use fmt;
 
 Player :: struct {
@@ -30,7 +31,7 @@ main :: () {
     assert(r.y == 6);
 
     // From an arena: freed all at once
-    arena: mem.Arena;
+    arena: allocators.Arena;
     allocator := arena.allocator();
     players: [..]*Player;
     for i in 0..10 {
@@ -42,7 +43,7 @@ main :: () {
     arena.free();
 
     // A type of a namespace, and a pointer type
-    other := new(mem.Arena);
+    other := new(allocators.Arena);
     assert(other.used() == 0);
     pp := new(*Player);
     assert(*pp == null);

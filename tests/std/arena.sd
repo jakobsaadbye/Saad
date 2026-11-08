@@ -1,13 +1,14 @@
-// mem.Arena: memory that is taken bit by bit and freed all at once
+// allocators.Arena: memory that is taken bit by bit and freed all at once
 
 import mem;
+import allocators;
 use fmt;
 
 Point :: struct { x: i64; y: i64; }
 
 main :: () {
     // The zero value is usable
-    arena: mem.Arena;
+    arena: allocators.Arena;
     assert(arena.used() == 0);
 
     p := arena.allocate(sizeof(Point)) as *Point;
@@ -55,7 +56,7 @@ main :: () {
     assert(arena.used() == 0);
 
     // An arena with a capacity
-    other := mem.newArena(64);
+    other := allocators.newArena(64);
     other.allocate(100);
     assert(other.used() == 104);
     other.free();

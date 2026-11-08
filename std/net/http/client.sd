@@ -13,6 +13,7 @@ namespace net.http;
 import net;
 import bytes;
 import mem;
+import allocators;
 import fmt;
 
 Response :: struct {
@@ -22,8 +23,8 @@ Response :: struct {
     headers:    [..]Header;
     body:       string;
 
-    arena:      mem.Arena;     // The memory of the texts, freed by free()
-    allocator:  Allocator;
+    arena:      allocators.Arena;     // The memory of the texts, freed by free()
+    allocator:  allocators.Allocator;
 }
 
 header :: method (response: *Response, name: string) -> string, bool {

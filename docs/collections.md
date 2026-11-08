@@ -130,7 +130,7 @@ A key type without a `hash` method is reported where the map is used, e.g.
 ## Allocators
 
 `List` and `Map` get their memory through `allocator: Allocator`, or the allocator of the thread when it is null.
-`Allocator` is an interface of the prelude, so any type with its methods is one, e.g `list.allocator = &arena` (see
+`allocators.Allocator` is an interface, so any type with its methods is one, e.g `list.allocator = &arena` (see
 `docs/allocators.md`):
 
 ```odin

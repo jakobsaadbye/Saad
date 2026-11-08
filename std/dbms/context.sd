@@ -24,6 +24,7 @@ namespace dbms;
 
 import fmt;
 import mem;
+import allocators;
 
 Context :: struct {
     conn:    *Connection;
@@ -66,7 +67,7 @@ MaxRowsInInsert :: 1000;
 
 // A context for the connection, made with its allocator
 newContext :: (conn: *Connection) -> *Context {
-    context := resizeMemory(conn.allocator, null, 0, sizeof(Context)) as *Context;
+    context := allocators.resizeMemory(conn.allocator, null, 0, sizeof(Context)) as *Context;
     mem.set(context, 0, sizeof(Context));
     context.conn  = conn;
     context.track = true;
@@ -197,7 +198,7 @@ trackRow :: method (context: *Context, table: TableInfo, row: *void) {
             return;
         }
     }
-    snapshot := resizeMemory(context.conn.allocator, null, 0, size as i64);
+    snapshot := allocators.resizeMemory(context.conn.allocator, null, 0, size as i64);
     mem.copy(snapshot, row, size);
     context.tracked.add(Tracked{table: table, row: row, snapshot: snapshot});
 }
@@ -440,7 +441,7 @@ readStored :: method (conn: *Connection, result: *void, index: i64, row: *void, 
 @private
 readStoredRow :: method (conn: *Connection, result: *void, index: i64, row: *void, type: *TypeStruct, stored: *[..]StoredRow) -> string {
     size := type.head.size;
-    copy := resizeMemory(conn.allocator, null, 0, size as i64);
+    copy := allocators.resizeMemory(conn.allocator, null, 0, size as i64);
     mem.copy(copy, row, size);
     readColumns := conn.columnsOf(result, type);
     err := conn.readRow(result, index, copy, type, readColumns);

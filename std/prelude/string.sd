@@ -1,4 +1,5 @@
 use c;
+use allocators;
 
 // A copy of the string as a c.string, with a 0 after its bytes, e.g for a function of C. Free it with .free(). It is on
 // the heap, as C frees it

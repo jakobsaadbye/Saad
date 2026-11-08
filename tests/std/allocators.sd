@@ -2,11 +2,12 @@
 // allocator of their first memory, so they grow and are freed with it, also after the allocator of the thread changed
 
 import mem;
+import allocators;
 import fmt;
 import bytes;
 import thread;
 
-other :: (seen: *Allocator) {
+other :: (seen: *allocators.Allocator) {
     *seen = mem.allocator();   // Each thread has its own
 }
 
@@ -18,7 +19,7 @@ main :: () {
     heapList.add(1);
     assert(heapList.allocator == mem.heap());
 
-    arena: mem.Arena;
+    arena: allocators.Arena;
     alloc := arena.allocator();
     previous := mem.setAllocator(alloc);
     assert(previous == null && mem.allocator() == alloc);
@@ -48,7 +49,7 @@ main :: () {
     kept := text.copy(mem.heap());
 
     // Another thread has the heap
-    seen: Allocator;
+    seen: allocators.Allocator;
     t := thread.spawn(other, &seen);
     t.join();
     assert(seen == mem.heap());

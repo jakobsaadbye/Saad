@@ -562,13 +562,13 @@ mem.delete(p);                     // with the allocator it came from, e.g mem.d
 ```
 
 `new(T, allocator)` is `allocateNew<T>(allocator)` and `new value` is `allocateCopy(value)`, functions of the prelude
-(`std/prelude/collections.sd`) that take the memory with `resizeMemory`.
+(`std/prelude/collections.sd`) that take the memory with `allocators.resizeMemory`.
 
 ## math, mem, c
 
 * `math`: the functions of C's `math.h` (`sin`, `sqrt`, `pow`, ...).
-* `mem`: memory, so the standard library and programs don't call C for it. All of it goes through an `Allocator`, an
-  interface any type can be (see `docs/allocators.md`). `mem.allocate(size, allocator, align)` gives zeroed memory,
+* `mem`: memory, so the standard library and programs don't call C for it. All of it goes through an
+  `allocators.Allocator`, an interface any type can be (see `docs/allocators.md`). `mem.allocate(size, allocator, align)` gives zeroed memory,
   `mem.resize(p, oldSize, newSize, allocator)` is like `realloc`, `mem.free(p, size, allocator)` frees it,
   `mem.delete(p, allocator)` frees a `new(T)`, and `mem.copy(to, from, n)`, `mem.set(to, byte, n)` and
   `mem.equal(a, b, n)` are like `memcpy`, `memset` and `memcmp`. The allocator is optional: the allocator of the
@@ -582,14 +582,14 @@ mem.delete(p);                     // with the allocator it came from, e.g mem.d
   are freed with it after the allocator of the thread changed.
 * What lives longer than a request is given the heap, `mem.heap()`: `store.posts.allocator = mem.heap();` or
   `title.copy(mem.heap())` (`copy` and `free` of a string take an allocator).
-* `mem.Pool`: blocks of one size, given back one by one and given out again, e.g for the nodes of a tree:
-  `pool := mem.Pool{blockSize: sizeof(Node)}; node := new(Node, &pool); mem.delete(node, &pool);`.
-* `mem.Arena`: memory that is freed all at once, and the sizes `Kilobyte` and `Megabyte`. The zero value is
+* `allocators.Pool`: blocks of one size, given back one by one and given out again, e.g for the nodes of a tree:
+  `pool := allocators.Pool{blockSize: sizeof(Node)}; node := new(Node, &pool); mem.delete(node, &pool);`.
+* `allocators.Arena`: memory that is freed all at once, and the sizes `Kilobyte` and `Megabyte`. The zero value is
   ready to use: `arena.allocate(size)` gives zeroed memory, an arena is an `Allocator` (`&arena`) for lists, maps and
   `dbms.Connection`, and `arena.clear()` and `arena.free()` free all of it.
 
 ```odin
-arena: mem.Arena;
+arena: allocators.Arena;
 names: [..]string;
 names.allocator = &arena;      // the list grows inside the arena
 arena.free();
