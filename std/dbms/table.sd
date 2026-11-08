@@ -1,6 +1,5 @@
 namespace dbms;
 
-import allocators;
 // The rows of one table, as structs of T, e.g
 //
 //     context := dbms.newContext(&conn);
@@ -98,7 +97,7 @@ Table :: struct <T> {
     // that. Then what the database made, e.g its id, is written into it. It is made with the allocator of the connection
     create :: method () -> *T {
         empty: T;
-        row := allocators.resizeMemory(self.context.conn.allocator, null, 0, sizeof(T)) as *T;
+        row := resizeMemory(self.context.conn.allocator, null, 0, sizeof(T)) as *T;
         *row = empty;
         linkRow(self.context, rowType<T>(), row as *void);
         none: any;
@@ -124,7 +123,7 @@ KeyedTable :: struct <T, K> {
     // A new row, like create of Table, which is tracked after it is saved
     create :: method () -> *T {
         empty: T;
-        row := allocators.resizeMemory(self.context.conn.allocator, null, 0, sizeof(T)) as *T;
+        row := resizeMemory(self.context.conn.allocator, null, 0, sizeof(T)) as *T;
         *row = empty;
         linkRow(self.context, rowType<T>(), row as *void);
         none: any;
@@ -152,7 +151,7 @@ KeyedTable :: struct <T, K> {
         if !found || err != null {
             return null, err;
         }
-        stored := allocators.resizeMemory(conn.allocator, null, 0, sizeof(T)) as *T;
+        stored := resizeMemory(conn.allocator, null, 0, sizeof(T)) as *T;
         *stored = row;
         linkRow(self.context, rowType<T>(), stored as *void);
         self.context.trackRow(self.info(self.key), stored);
@@ -168,7 +167,7 @@ KeyedTable :: struct <T, K> {
 
     // Removes the row with the key when the context saves its changes
     delete :: method (key: K) {
-        copy := allocators.resizeMemory(self.context.conn.allocator, null, 0, sizeof(K)) as *K;
+        copy := resizeMemory(self.context.conn.allocator, null, 0, sizeof(K)) as *K;
         *copy = key;
         boxed: any = key;
         stored: any;

@@ -17,7 +17,6 @@
 //
 // Every file imports this file like the rest of the prelude. The compiler calls the functions at the bottom.
 use c;
-import allocators;
 
 Error :: struct {
     message: string;
@@ -49,8 +48,8 @@ Panic :: ErrorKind{"Panic"};
 // on the heap, as it is thrown out of the function that made it, and can be thrown out of the arena it was made in,
 // e.g of a request
 newError :: (message: string, kind := ErrorKind{}, cause: error = null) -> error {
-    err := new(Error, allocators.heapAllocator());
-    err.trace.allocator = allocators.heapAllocator();
+    err := new(Error, heapAllocator());
+    err.trace.allocator = heapAllocator();
     err.message = message;
     err.kind    = kind;
     err.cause   = cause;
@@ -108,7 +107,7 @@ panicNullPointer :: (text: *u8) {
     sprintf(buffer.data, "Null pointer dereference: %s is null", text);
     copied := c.string{buffer.data}.toString();
     message: string;
-    message.data = allocators.resizeMemory(allocators.heapAllocator(), null, 0, copied.len) as *u8;
+    message.data = resizeMemory(heapAllocator(), null, 0, copied.len) as *u8;
     message.len  = copied.len;
     for i in 0..copied.len { message.data[i] = copied.data[i]; }
     panic(message);
@@ -126,7 +125,7 @@ panicInterfaceCast :: (table: *void, named: *u8, wanted: *u8) {
     }
     copied := c.string{buffer.data}.toString();
     message: string;
-    message.data = allocators.resizeMemory(allocators.heapAllocator(), null, 0, copied.len) as *u8;
+    message.data = resizeMemory(heapAllocator(), null, 0, copied.len) as *u8;
     message.len  = copied.len;
     for i in 0..copied.len { message.data[i] = copied.data[i]; }
     panic(message);
@@ -138,7 +137,7 @@ panicIndexOutOfBounds :: (index: i64, count: i64) {
     sprintf(buffer.data, "Index %lld is out of bounds, as there are %lld elements", index, count);
     text := c.string{buffer.data}.toString();
     message: string;
-    message.data = allocators.resizeMemory(allocators.heapAllocator(), null, 0, text.len) as *u8;
+    message.data = resizeMemory(heapAllocator(), null, 0, text.len) as *u8;
     message.len  = text.len;
     for i in 0..text.len { message.data[i] = text.data[i]; }
     panic(message);
@@ -159,144 +158,6 @@ reportUncaught :: () {
     exit(1);
 }
 
-//
-// The block of the @threadLocal globals of a thread, e.g thrownError. The compiler lays them out in one block, and each
-// thread gets a copy of their start values the first time it runs a function that uses one. A function finds the block
-// of its thread when it starts (see thread_block in ir_lower.c). The block is freed when the thread ends.
-//
-// These functions only call C, as the compiler calls them before the block is there. The compiler sets the globals
-//
-
-#if OS == .windows {
-    extern "kernel32.dll" {
-        FlsAlloc    :: (callback: (data: *void)) -> u32;   // Calls callback with the value of a thread when it ends
-        FlsGetValue :: (index: u32) -> *void;
-        FlsSetValue :: (index: u32, data: *void) -> bool;
-        AcquireSRWLockExclusive :: (lock: *void);
-        ReleaseSRWLockExclusive :: (lock: *void);
-        VirtualAlloc :: (address: *void, size: u64, type: u32, protect: u32) -> *void;
-        VirtualFree  :: (address: *void, size: u64, type: u32) -> bool;
-    }
-} else {
-    extern "C" {
-        pthread_key_create  :: (key: *u32, destructor: (data: *void)) -> i32;
-        pthread_getspecific :: (key: u32) -> *void;
-        pthread_setspecific :: (key: u32, data: *void) -> i32;
-        pthread_mutex_lock    :: (mutex: *void) -> i32;
-        pthread_mutex_unlock  :: (mutex: *void) -> i32;
-        mmap     :: (address: *void, size: u64, protect: i32, flags: i32, fd: i32, offset: i64) -> *void;
-        mprotect :: (address: *void, size: u64, protect: i32) -> i32;
-        madvise  :: (address: *void, size: u64, advice: i32) -> i32;
-    }
-}
-
-threadBlockKey:      u32;
-threadBlockTemplate: *u8;   // The start values of the @threadLocal globals
-threadBlockSize:     i64;
-
-// Called by main before anything else
-startThreadBlocks :: (template: *u8, size: i64) {
-    threadBlockTemplate = template;
-    threadBlockSize     = size;
-    #if OS == .windows {
-        threadBlockKey = FlsAlloc(c.free);
-    } else {
-        pthread_key_create(&threadBlockKey, c.free);
-    }
-}
-
-// The block of the thread that runs it, made the first time
-newThreadBlock :: () {
-    size := threadBlockSize;
-    if size < 8 { size = 8; }
-    block := c.malloc(size as int);
-    if block == null {
-        c.printf("No memory for the @threadLocal globals of a thread\n");
-        c.exit(1);
-    }
-    c.memcpy(block, threadBlockTemplate, threadBlockSize as int);
-    #if OS == .windows {
-        FlsSetValue(threadBlockKey, block);
-    } else {
-        pthread_setspecific(threadBlockKey, block);
-    }
-}
-
-//
-// The checking of memory, of saad build --check-memory. The chunks of arenas (see allocators.Arena) come from one big range of
-// addresses that is never used again, and the pages of a chunk that is freed or cleared are marked, so that a pointer
-// into one is found when it is used: the compiler checks a pointer before it reads or writes through it, like for null
-// (see emit_memory_check in ir_lower.c), and that throws a Panic. The pages are also made unreadable, so a read by C,
-// e.g memcpy, crashes instead of giving what the memory holds now.
-//
-// These only call C, as the compiler doesn't check their pointers
-//
-
-CheckedPageSize :: 4096;
-
-// 64 GB of addresses. Only the pages of the chunks that are in use have memory
-CheckedRegionSize :: 68719476736;
-CheckedPageCount  :: CheckedRegionSize / CheckedPageSize;
-
-checkedBase:  u64;     // The start of the range, 0 until the first chunk
-checkedSize:  u64;     // Its size: 0 until the first chunk, so that no pointer is in it
-checkedStart: *u8;     // checkedBase as a pointer
-checkedUsed:  i64;     // How much of the range was given out: the next chunk starts here
-checkedPages: *u8;     // A byte for each page of the range: 1 when it was freed
-checkedLock:  [8]u64;  // A pthread_mutex_t or an SRWLOCK, which are ready to use when they are zeros
-
-// The memory of a chunk of an arena, of at least the size
-checkedAllocate :: (size: i64) -> *u8 {
-    size = (size + CheckedPageSize - 1) / CheckedPageSize * CheckedPageSize;
-    #if OS == .windows { AcquireSRWLockExclusive(&checkedLock); } else { pthread_mutex_lock(&checkedLock); }
-    if checkedBase == 0 {
-        pageCount := CheckedPageCount as u64;
-        #if OS == .windows {
-            checkedStart = VirtualAlloc(null, CheckedRegionSize as u64, 0x2000, 1) as *u8;   // MEM_RESERVE, PAGE_NOACCESS
-            checkedPages = VirtualAlloc(null, pageCount, 0x3000, 4) as *u8;          // MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE
-        } else {
-            checkedStart = mmap(null, CheckedRegionSize as u64, 0, 0x4022, -1, 0) as *u8;  // PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE
-            checkedPages = mmap(null, pageCount, 3, 0x4022, -1, 0) as *u8;          // PROT_READ | PROT_WRITE
-        }
-        failed := 0xFFFFFFFFFFFFFFFF as u64;   // MAP_FAILED of mmap
-        if checkedStart == null || checkedPages == null || checkedStart as u64 == failed || checkedPages as u64 == failed {
-            printf("--check-memory: the range of addresses for the arenas couldn't be reserved\n");
-            exit(1);
-        }
-        checkedBase = checkedStart as u64;
-        checkedSize = CheckedRegionSize as u64;
-    }
-    offset := checkedUsed;
-    checkedUsed += size + CheckedPageSize;   // A page between chunks that is never readable, so a read past the end of a chunk crashes
-    full := checkedUsed > CheckedRegionSize;
-    #if OS == .windows { ReleaseSRWLockExclusive(&checkedLock); } else { pthread_mutex_unlock(&checkedLock); }
-    if full {
-        printf("--check-memory: the 64 GB of addresses for the arenas are used up. Their memory is never used again, so that freed memory is found\n");
-        exit(1);
-    }
-    at := &checkedStart[offset];
-    #if OS == .windows {
-        VirtualAlloc(at, size as u64, 0x1000, 4);   // MEM_COMMIT, PAGE_READWRITE
-    } else {
-        mprotect(at, size as u64, 3);
-    }
-    return at;
-}
-
-// Frees the memory of a chunk of checkedAllocate: its pages are marked, unreadable and given back to the system, and
-// its addresses are never given out again
-checkedFree :: (memory: *u8, size: i64) {
-    size = (size + CheckedPageSize - 1) / CheckedPageSize * CheckedPageSize;
-    first := (memory as u64 - checkedBase) / CheckedPageSize as u64;
-    for i in 0..size / CheckedPageSize { checkedPages[first + i as u64] = 1; }
-    #if OS == .windows {
-        VirtualFree(memory, size as u64, 0x4000);   // MEM_DECOMMIT
-    } else {
-        mprotect(memory, size as u64, 0);
-        madvise(memory, size as u64, 4);           // MADV_DONTNEED
-    }
-}
-
 // For a pointer into memory that checkedFree freed, e.g of an arena that was cleared after a request
 panicFreedMemory :: (text: *u8) {
     if text[0] == 0 { panic("Use of freed memory: the memory of an arena that was cleared or freed"); return; }
@@ -304,7 +165,7 @@ panicFreedMemory :: (text: *u8) {
     sprintf(buffer.data, "Use of freed memory: %s points into an arena that was cleared or freed", text);
     copied := c.string{buffer.data}.toString();
     message: string;
-    message.data = allocators.resizeMemory(allocators.heapAllocator(), null, 0, copied.len) as *u8;
+    message.data = resizeMemory(heapAllocator(), null, 0, copied.len) as *u8;
     message.len  = copied.len;
     for i in 0..copied.len { message.data[i] = copied.data[i]; }
     panic(message);

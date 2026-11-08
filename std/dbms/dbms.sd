@@ -49,7 +49,7 @@ Connection :: struct {
 
     // Where the rows, strings and pointers read by query come from. Null means the heap (malloc), so they are
     // freed one by one. With an arena, e.g allocators.Arena.allocator(), they are freed all at once
-    allocator: allocators.Allocator;
+    allocator: Allocator;
 }
 
 // Gives a struct member another column name, leaves it out of the rows, or says what the column is, e.g
@@ -471,7 +471,7 @@ readValue :: method (conn: *Connection, text: c.string, data: *void, type: *Type
             if pointee.kind == .void || pointee.kind == .struct || pointee.kind == .array {
                 return fmt.sprint("%: Can't read a column into a %", column, type.name);
             }
-            memory := allocators.resizeMemory(conn.allocator, null, 0, pointee.size as i64);
+            memory := resizeMemory(conn.allocator, null, 0, pointee.size as i64);
             mem.set(memory, 0, pointee.size);
             *(data as **void) = memory;
             return conn.readValue(text, memory, pointee, column);
@@ -486,7 +486,7 @@ readValue :: method (conn: *Connection, text: c.string, data: *void, type: *Type
 @private
 copyString :: method (conn: *Connection, s: string) -> string {
     copy: string;
-    copy.data = allocators.resizeMemory(conn.allocator, null, 0, s.len + 1) as *u8;
+    copy.data = resizeMemory(conn.allocator, null, 0, s.len + 1) as *u8;
     mem.copy(copy.data, s.data, s.len);
     copy.data[s.len] = 0;
     copy.len = s.len;

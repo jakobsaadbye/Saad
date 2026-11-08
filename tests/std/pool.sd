@@ -45,7 +45,7 @@ main :: () {
         mem.allocate(sizeof(Node) + 8, &pool);
         assert(false);
     } catch (e) {
-        assert(e.is(Panic));
+        assert(e.is(Panic) && e.message == "A pool was asked for a block bigger than its blockSize, or with an alignment over 8");
     }
 
     // The chunks come from another allocator, here an arena

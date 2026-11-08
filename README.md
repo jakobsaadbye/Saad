@@ -90,13 +90,17 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
   * Changed: an allocator is a value of the interface, not a `*Allocator`: `list.allocator = &arena`,
     `new(Point, &arena)`, `mem.setAllocator(&arena)`. `arena.allocator()` gives `&arena` as an `Allocator`
   * Changed: `mem.resize(p, oldSize, newSize)` and `mem.free(p, size)` take the size, and `mem.delete(p)` frees a
-    `new(T)`. `allocators.freeMemory` and `allocators.resizeMemory` too
+    `new(T)`. `freeMemory` and `resizeMemory` too
   * An alignment: `mem.allocate(size, allocator, align)`, e.g 64 for a cache line. The heap and arenas give it
   * `allocators.Arena` has no header before each block any more, and grows its last block where it is
   * `allocators.Pool`: blocks of one size, given back one by one and given out again, e.g for the nodes of a tree
-  * The allocators are in the namespace `allocators` (`std/allocators`), a file for each: `allocators.Allocator`,
-    `allocators.Arena`, `allocators.Pool` and the heap. `mem` has the functions that use them, e.g `mem.allocate`.
-    Changed: `mem.Arena` is `allocators.Arena`, and `Allocator`, `resizeMemory` and `freeMemory` are of `allocators`
+  * The allocators of their own are in the namespace `allocators` (`std/allocators`), a file for each:
+    `allocators.Arena` and `allocators.Pool`. Changed: `mem.Arena` is `allocators.Arena`. `mem` has the functions that
+    use them, e.g `mem.allocate`
+  * The prelude is in layers, and a file of it only uses the layers below it, see `docs/standard_library.md`. The
+    `Allocator` interface, the heap and the allocator of the thread are in `std/prelude/allocator.sd`, at the bottom,
+    as `List`, `Map` and `new` are built on them. `errors.sd` has only errors: the blocks of the `@threadLocal` globals
+    are in `thread_blocks.sd`, and the memory of `--check-memory` in `allocator.sd`
   * A thread frees its start with the heap it came from, instead of C's `free`
 
 ## Update v0.16.0 - 8. Nov 2026

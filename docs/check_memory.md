@@ -45,7 +45,7 @@ The server answers it with a 500 and goes on. What is kept must be copied to mem
   used again: `clear()` gives back all chunks, also the one it keeps without the check. So a pointer into a freed chunk
   can't point at something new
 * A byte for each page of 4 KB says if the page was freed. The check of a pointer is a subtraction and a compare, and
-  for a pointer into the range the load of that byte. See `checkedAllocate` in `std/prelude/errors.sd` and
+  for a pointer into the range the load of that byte. See `checkedAllocate` in `std/prelude/allocator.sd` and
   `emit_memory_check` in `src/ir_lower.c`
 * A freed page is made unreadable (`mprotect`, `VirtualFree`), and its memory is given back to the system. A read of
   it that the compiler doesn't see, e.g by C (`memcpy`, `printf`), crashes instead of giving what the memory holds now.

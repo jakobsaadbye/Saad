@@ -1,6 +1,5 @@
 namespace thread;
 
-import allocators;
 // Threads, and what they share safely: Mutex, Condition and WaitGroup. On Windows and Linux, e.g
 //
 //     import thread;
@@ -110,7 +109,7 @@ Start :: struct {
 // Starts a thread that runs function(argument), e.g spawn(work, &job) for 'work :: (job: *Job)'. join() waits for it
 // to end. The argument must live until the function is done with it
 spawn :: <T>(function: (argument: *T), argument: *T) -> Thread, error {
-    start := new(Start, allocators.heapAllocator());   // Freed by the thread
+    start := new(Start, heapAllocator());   // Freed by the thread
     address := function as *void;
     start.function = address as (argument: *void);
     start.argument = argument;
@@ -119,7 +118,7 @@ spawn :: <T>(function: (argument: *T), argument: *T) -> Thread, error {
 
 // Starts a thread that runs a function without an argument
 start :: (function: ()) -> Thread, error {
-    start := new(Start, allocators.heapAllocator());   // Freed by the thread
+    start := new(Start, heapAllocator());   // Freed by the thread
     start.alone = function;
     return startThread(start);
 }
@@ -130,13 +129,13 @@ start :: (function: ()) -> Thread, error {
     #if OS == .windows {
         handle := CreateThread(null, 0, run, start, 0, null);
         if handle == null {
-            allocators.freeMemory(start, sizeof(Start), allocators.heapAllocator());
+            freeMemory(start, sizeof(Start), heapAllocator());
             return t, newError("A thread couldn't be started");
         }
         t.handle = handle;
     } else {
         if pthread_create((&t.handle) as *u64, null, run, start) != 0 {
-            allocators.freeMemory(start, sizeof(Start), allocators.heapAllocator());
+            freeMemory(start, sizeof(Start), heapAllocator());
             return t, newError("A thread couldn't be started");
         }
     }
@@ -146,7 +145,7 @@ start :: (function: ()) -> Thread, error {
 // The function a new thread starts in. An error that the function doesn't catch ends the program
 @private run :: (data: *void) {
     start := *(data as *Start);
-    allocators.freeMemory(data, sizeof(Start), allocators.heapAllocator());   // The heap it came from, which isn't C's free when the heap is replaced
+    freeMemory(data, sizeof(Start), heapAllocator());   // The heap it came from, which isn't C's free when the heap is replaced
     try {
         if start.alone != null { start.alone(); }
         else                   { start.function(start.argument); }

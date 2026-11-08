@@ -11,7 +11,6 @@
 //////////////////////////////////
 
 use c;
-use allocators;
 
 //
 // The collection protocol as interfaces (docs/collections.md, docs/interfaces.md). A collection doesn't name them: it is
@@ -86,8 +85,8 @@ Optional :: struct <T> {
 // Allocators
 //
 
-// The allocator of the thread, resizeMemory and freeMemory are in std/allocators/allocator.sd, with the Allocator
-// interface, and the heap in std/allocators/heap.sd
+// The Allocator interface, the allocator of the thread, resizeMemory, freeMemory and the heap are in
+// std/prelude/allocator.sd
 
 // What new(T) and new(T, allocator) are: a T with the defaults of its type, in memory of the allocator (null is the
 // allocator of the thread). Free it with mem.delete(p, allocator), or with the arena it is in

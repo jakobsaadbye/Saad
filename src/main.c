@@ -133,7 +133,7 @@ bool parse_options(CompilerConfig *config, int argc, char const *argv[], int fir
             continue;
         }
         if (strcmp(option, "--unchecked") == 0) { bounds_checks = false; continue; } // No bounds checks of indexes
-        if (strcmp(option, "--check-memory") == 0) { memory_checks = true; continue; } // See checkedAllocate in std/prelude/errors.sd
+        if (strcmp(option, "--check-memory") == 0) { memory_checks = true; continue; } // See checkedAllocate in std/prelude/allocator.sd
         if (strcmp(option, "--llvm") == 0)  { config->use_llvm = true; continue; }
         if (option[0] == '-' && option[1] == 'O' && option[2] >= '0' && option[2] <= '3' && option[3] == 0) {
             config->opt_level = option[2] - '0';   // -O0 to -O3, with --llvm

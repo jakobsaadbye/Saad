@@ -26,8 +26,17 @@ typedef struct Parser {
     int split_shift_right_token; // Index + 1 of a '>>' token whose first '>' has been eaten as the end of a list of type arguments e.g List<List<int>>. 0 if none
     AstStruct *reparse_self_struct; // Set when parsing an instance of a generic method that was declared inside this struct
 
-    // The prelude in std/prelude is imported by every file without an import
+    // The prelude in std/prelude is imported by every file without an import. Its files are in layers, and a file only
+    // imports the layers below it (see docs/standard_library.md):
+    //   0  runtime.sd, allocator.sd, thread_blocks.sd, std/c   only std/c and the runtime
+    //   1  slices.sd, collections.sd                           and allocator.sd
+    //   2  string.sd, expression_trees.sd, errors.sd           and the collections
+    //   Every other file imports all of them
     char *runtime_file_path;
+    char *allocator_file_path;     // std/prelude/allocator.sd: Allocator, the heap, the allocator of the thread, --check-memory
+    AstFile *allocator_file;
+    char *thread_blocks_file_path; // std/prelude/thread_blocks.sd: the blocks of the @threadLocal globals
+    AstFile *thread_blocks_file;
     char *collections_file_path;
     AstFile *collections_file; // std/prelude/collections.sd, holding List and Map. Every other file imports it
     char *slices_file_path;    // std/prelude/slices.sd, the methods on slices. Every file but itself imports it

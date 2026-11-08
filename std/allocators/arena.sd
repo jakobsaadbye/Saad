@@ -146,7 +146,7 @@ newChunk :: (oldChunk: *Chunk, capacity: int) -> *Chunk {
     chunk := c.malloc(sizeof(Chunk)) as *Chunk;
     assert(chunk != null); // Out of memory
     #if CHECK_MEMORY {
-        chunk.data = checkedAllocate(capacity);   // See std/prelude/errors.sd
+        chunk.data = checkedAllocate(capacity);   // See std/prelude/allocator.sd
     } else {
         chunk.data = c.malloc(capacity) as *u8;
     }

@@ -26,9 +26,9 @@ Pool :: struct {
     inUse:     i64;            // The blocks given out and not given back
 
     allocate :: method * (size: i64, align: i64) -> *void {
-        // A Panic when a block bigger than blockSize, or with an alignment over 8, is asked for. It is an assert, as the
-        // prelude, which has panic, is built on this namespace
-        assert(size <= self.blockSize && align <= 8);
+        if size > self.blockSize || align > 8 {
+            panic("A pool was asked for a block bigger than its blockSize, or with an alignment over 8");
+        }
         self.inUse += 1;
         if self.freeList != null {
             block := self.freeList;
@@ -43,7 +43,7 @@ Pool :: struct {
             chunk := new(Chunk, heapAllocator());
             chunk.capacity = (size * self.perChunk) as int;
             chunk.data     = resizeMemory(self.inner, null, 0, chunk.capacity) as *u8;
-            assert(chunk.data != null);   // Out of memory
+            if chunk.data == null { panic("Out of memory"); }
             c.memset(chunk.data, 0, chunk.capacity);
             chunk.prev     = self.chunks;
             self.chunks    = chunk;
@@ -55,7 +55,7 @@ Pool :: struct {
 
     // A block can't grow: it is blockSize bytes
     resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
-        assert(newSize <= self.blockSize);   // A block of a pool can't grow over the blockSize of the pool
+        if newSize > self.blockSize { panic("A block of a pool can't grow over the blockSize of the pool"); }
         return memory;
     }
 

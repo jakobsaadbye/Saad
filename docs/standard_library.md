@@ -4,11 +4,15 @@
 std/
   prelude/      Always there, without an import
     runtime.sd      Types for reflection (Type, TypeStruct, ...), attributeOf and the runtime functions
-    collections.sd  List<T> ([..]T) and Map<K, V>
+    allocator.sd    The Allocator interface, the heap, the allocator of the thread, and the memory of --check-memory
+    thread_blocks.sd  The blocks of the @threadLocal globals of each thread
+    collections.sd  List<T> ([..]T), Map<K, V>, Optional<T> and the collection interfaces (Iterable<T>, ...)
     slices.sd       Methods on slices, arrays and lists: sort, reverse, indexOf, contains, ...
     expression_trees.sd  Expr<F> and ExprNode: a lambda as the tree of what it does (see docs/expression_trees.md)
     string.sd       The methods of string (slice, split, indexOf, free, ...) and of char (isDigit, isLetter, isSpace,
                     toUpper, toLower, digitValue, ...)
+    errors.sd       error, newError and panic, and the functions the compiler calls to throw, e.g for a null pointer
+  allocators/   namespace allocators: Arena (arena.sd) and Pool (pool.sd) (see docs/allocators.md)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
   dbms/         namespace dbms: run SQL and read rows into structs, dbms.Table<T> and dbms.KeyedTable<T, K> (see docs/dbms.md)
     postgres/       namespace dbms.postgres: the Postgres driver, through libpq.dll, and EntityGenerator, which writes the
@@ -30,14 +34,31 @@ std/
   base64.sd     namespace base64: encode and decode, also for urls
   bytes.sd      namespace bytes: Buffer, bytes written at the end and read from the front
   math.sd       namespace math
-  mem.sd        namespace mem: allocate, resize, free, copy, set, equal, and arenas
+  mem.sd        namespace mem: allocate, resize, free, delete, copy, set, equal
   random.sd     namespace random
   time.sd       namespace time
 ```
 
 The folders only keep things tidy: a namespace is what a file says it is (see `docs/namespaces.md`). The prelude
-is imported by the compiler, the rest by `import` or `use`. The files in `c/` and `prelude/runtime.sd` don't
-get the prelude, as the prelude is built on them.
+is imported by the compiler, the rest by `import` or `use`.
+
+## The layers of the prelude
+
+The prelude is built in layers. A file of a layer imports only the layers below it, so the prelude has no circular
+imports, and what a file may use follows from its layer:
+
+| Layer | Files | Imports | So it may use |
+| --- | --- | --- | --- |
+| 0 | `runtime.sd`, `allocator.sd`, `thread_blocks.sd`, `std/c` | only `std/c` and `runtime.sd` | C, and itself. No `List`, no `panic`: a misuse is an `assert` |
+| 1 | `slices.sd`, `collections.sd` | layer 0 | allocators, but no `panic` or strings |
+| 2 | `string.sd`, `expression_trees.sd`, `errors.sd` | layers 0 and 1 | lists, maps and each other |
+| | every other file, e.g `std/allocators`, `std/mem.sd`, a program | all of the prelude | everything |
+
+* Something that `List`, `Map` or `new` need goes in a low layer, e.g the `Allocator` interface in `allocator.sd`.
+  Something nothing in the prelude needs, e.g `Arena` and `Pool`, goes in a namespace, which can use all of the prelude.
+* The compiler imports the layers (`parse_file()` in `src/parser.c`), and calls functions of `errors.sd`,
+  `allocator.sd` and `thread_blocks.sd` by name, e.g `panicNullPointer`, `checkedBase` and `newThreadBlock`
+  (`errors_declaration()` in `src/ir_lower.c`). It doesn't check the pointers in these three, as the checks call them.
 
 ## fmt
 
@@ -562,13 +583,13 @@ mem.delete(p);                     // with the allocator it came from, e.g mem.d
 ```
 
 `new(T, allocator)` is `allocateNew<T>(allocator)` and `new value` is `allocateCopy(value)`, functions of the prelude
-(`std/prelude/collections.sd`) that take the memory with `allocators.resizeMemory`.
+(`std/prelude/collections.sd`) that take the memory with `resizeMemory`.
 
 ## math, mem, c
 
 * `math`: the functions of C's `math.h` (`sin`, `sqrt`, `pow`, ...).
 * `mem`: memory, so the standard library and programs don't call C for it. All of it goes through an
-  `allocators.Allocator`, an interface any type can be (see `docs/allocators.md`). `mem.allocate(size, allocator, align)` gives zeroed memory,
+  `Allocator`, an interface any type can be (see `docs/allocators.md`). `mem.allocate(size, allocator, align)` gives zeroed memory,
   `mem.resize(p, oldSize, newSize, allocator)` is like `realloc`, `mem.free(p, size, allocator)` frees it,
   `mem.delete(p, allocator)` frees a `new(T)`, and `mem.copy(to, from, n)`, `mem.set(to, byte, n)` and
   `mem.equal(a, b, n)` are like `memcpy`, `memset` and `memcmp`. The allocator is optional: the allocator of the

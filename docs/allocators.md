@@ -1,21 +1,21 @@
 # Allocators
 
 All memory of Saad comes from an `Allocator`: `new(T)`, strings, `fmt.sprint`, lists, maps, `json`, `dbms` and
-`mem.allocate`. `allocators.Allocator` is an interface (see `docs/interfaces.md`), so any type with its three methods
+`mem.allocate`. `Allocator` is an interface (see `docs/interfaces.md`), so any type with its three methods
 is one: the heap, `allocators.Arena`, `allocators.Pool`, and an allocator that a program or a library writes. They all
 work with the rest of the standard library.
 
-The namespace `allocators` (`std/allocators`) has a file for each:
+Where they are:
 
 | File | |
 | --- | --- |
-| `allocator.sd` | The `Allocator` interface, the allocator of the thread, `resizeMemory`, `freeMemory` and `resizeByCopy` |
-| `heap.sd` | `Heap`, the heap: `malloc`, `realloc` and `free` |
-| `arena.sd` | `Arena` |
-| `pool.sd` | `Pool` |
+| `std/prelude/allocator.sd` | The `Allocator` interface, the allocator of the thread, `resizeMemory`, `freeMemory`, `resizeByCopy` and the heap (`Heap`). In the prelude, as `List`, `Map` and `new` need them |
+| `std/allocators/arena.sd` | `allocators.Arena` |
+| `std/allocators/pool.sd` | `allocators.Pool` |
+| `std/mem.sd` | The functions that use them, e.g `mem.allocate`, `mem.free` and `mem.heap()` |
 
-`mem` (`std/mem.sd`) has the functions that use them, e.g `mem.allocate` and `mem.free`, and the prelude `new(T)`. The
-prelude is built on `allocators`, so its files don't use the prelude's `panic`: a misuse is an `assert`.
+`allocator.sd` is in the lowest layer of the prelude (see `docs/standard_library.md`), so it can't use `panic`. The
+allocators of the namespace can use all of the prelude. A new allocator goes in the namespace, as a file of its own.
 
 ```odin
 Allocator :: interface {
@@ -48,7 +48,7 @@ title := post.title.copy(mem.heap());   // a string that lives longer
 * A null allocator is the allocator of the thread: the heap, unless it is set. `mem.setAllocator(&arena)` sets it
   and gives the one before, and the http server sets it to the arena of a request while a handler runs.
 * A list, a map, a `StringBuilder` and a `bytes.Buffer` keep the allocator of their first memory.
-* `allocators.resizeMemory(allocator, memory, oldSize, newSize, align)` is the realloc of an allocator: it calls
+* `resizeMemory(allocator, memory, oldSize, newSize, align)` is the realloc of an allocator: it calls
   `allocate` when memory is null, `deallocate` when newSize is 0, and else `resize`.
 
 ## The allocators of the standard library
@@ -84,7 +84,7 @@ Pool :: struct {
     inUse:     i64;
 
     allocate :: method * (size: i64, align: i64) -> *void {
-        assert(size <= self.blockSize && align <= 8);   // a bigger block is a Panic
+        if size > self.blockSize || align > 8 { panic("A pool was asked for a block bigger than its blockSize"); }
         self.inUse += 1;
         if self.freeList != null {                       // a block that was given back
             block := self.freeList;
@@ -97,7 +97,7 @@ Pool :: struct {
 
     // A block can't grow: it is blockSize bytes
     resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
-        assert(newSize <= self.blockSize);
+        if newSize > self.blockSize { panic("A block of a pool can't grow over the blockSize of the pool"); }
         return memory;
     }
 
@@ -112,26 +112,26 @@ Pool :: struct {
 }
 ```
 
-An allocator that can't change a block where it is can write its `resize` with `allocators.resizeByCopy(self, memory, oldSize,
+An allocator that can't change a block where it is can write its `resize` with `resizeByCopy(self, memory, oldSize,
 newSize, align)` of `allocators`, which makes a new block with `allocate`, copies what fits, and gives the old one back
 with `deallocate`. A wrapper calls another allocator, e.g one that counts:
 
 ```odin
 Counting :: struct {
-    inner: allocators.Allocator;
+    inner: Allocator;
     bytes: i64;
 
     allocate :: method * (size: i64, align: i64) -> *void {
         self.bytes += size;
-        return allocators.resizeMemory(self.inner, null, 0, size, align);
+        return resizeMemory(self.inner, null, 0, size, align);
     }
     resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
         self.bytes += newSize - oldSize;
-        return allocators.resizeMemory(self.inner, memory, oldSize, newSize, align);
+        return resizeMemory(self.inner, memory, oldSize, newSize, align);
     }
     deallocate :: method * (memory: *void, size: i64, align: i64) {
         self.bytes -= size;
-        allocators.resizeMemory(self.inner, memory, size, 0, align);
+        resizeMemory(self.inner, memory, size, 0, align);
     }
 }
 

@@ -1,4 +1,3 @@
-use allocators;
 // Expression trees: a lambda given as the tree of what it does instead of as a function. See docs/expression_trees.md
 //
 // Every file imports this file like the rest of the prelude. The compiler builds an Expr<F> with the functions below

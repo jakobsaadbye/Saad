@@ -1,6 +1,5 @@
 namespace dbms;
 
-import allocators;
 // Queries with lambdas, like LINQ of C#, e.g
 //
 //     adults, err := db.users.where(u => u.age >= minAge && u.active).orderBy(u => u.name).limit(10).all();
@@ -122,7 +121,7 @@ Query :: struct <T> {
             rows.free();
             return null, err;
         }
-        row := allocators.resizeMemory(self.context.conn.allocator, null, 0, sizeof(T)) as *T;
+        row := resizeMemory(self.context.conn.allocator, null, 0, sizeof(T)) as *T;
         *row = rows[0];
         rows.free();
         if self.isTracked() {

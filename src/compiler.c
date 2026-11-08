@@ -818,6 +818,8 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     parser.slices_file_path         = join_path(prelude_path, "slices.sd");
     parser.expression_trees_file_path = join_path(prelude_path, "expression_trees.sd");
     parser.errors_file_path         = join_path(prelude_path, "errors.sd");
+    parser.allocator_file_path      = join_path(prelude_path, "allocator.sd");
+    parser.thread_blocks_file_path  = join_path(prelude_path, "thread_blocks.sd");
     parser.c_bindings_path          = get_absolute_path(c_bindings_path);
     parser.read_source              = read_source;
     ConstEvaluator ce     = const_evaluator_init(&parser);

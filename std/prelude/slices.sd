@@ -1,4 +1,3 @@
-use allocators;
 //////////////////////////////////
 // Methods on slices
 //

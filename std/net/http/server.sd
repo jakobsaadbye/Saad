@@ -40,7 +40,7 @@ Request :: struct {
     server:  *Server;           // That answers it
 
     arena:     allocators.Arena;       // The memory of the request, freed when the handler returned
-    allocator: allocators.Allocator;
+    allocator: Allocator;
 }
 
 // The value of a header, e.g r.header("Content-Type"). Without case

@@ -176,6 +176,8 @@ void dump_file_declarations(AstFile *file) {
 // import it, so that there are no circular imports
 bool is_file_below_collections(Parser *parser, char *file_path) {
     if (parser->runtime_file_path && strcmp(file_path, parser->runtime_file_path) == 0) return true;
+    if (parser->allocator_file_path && strcmp(file_path, parser->allocator_file_path) == 0) return true;
+    if (parser->thread_blocks_file_path && strcmp(file_path, parser->thread_blocks_file_path) == 0) return true;
     if (parser->slices_file_path && strcmp(file_path, parser->slices_file_path) == 0) return true;
     if (parser->c_bindings_path == NULL) return false;
 
@@ -612,6 +614,32 @@ AstFile *parse_file(Parser *parser, char *file_path) {
     if (parser->runtime_file_path == NULL || strcmp(parser->current_file->absolute_path, parser->runtime_file_path) != 0) {
         ok = generate_and_add_import(parser, "runtime", parser->runtime_file_path);
         if (!ok) return NULL;
+    }
+
+    // The lowest layer of the prelude: the allocators and the blocks of the @threadLocal globals, which only use std/c.
+    // Every file above it imports them
+    if (parser->allocator_file_path && strcmp(file_path, parser->allocator_file_path) == 0) parser->allocator_file = file;
+    if (parser->thread_blocks_file_path && strcmp(file_path, parser->thread_blocks_file_path) == 0) parser->thread_blocks_file = file;
+    bool is_lowest_layer = (parser->runtime_file_path && strcmp(file_path, parser->runtime_file_path) == 0) ||
+                           (parser->allocator_file_path && strcmp(file_path, parser->allocator_file_path) == 0) ||
+                           (parser->thread_blocks_file_path && strcmp(file_path, parser->thread_blocks_file_path) == 0);
+    if (!is_lowest_layer && is_file_below_collections(parser, file_path)) {
+        // std/c is below the allocators too
+        char *absolute = get_absolute_path(file_path);
+        is_lowest_layer = absolute && parser->c_bindings_path && strncmp(absolute, parser->c_bindings_path, strlen(parser->c_bindings_path)) == 0;
+        free(absolute);
+    }
+    if (!is_lowest_layer) {
+        if (parser->allocator_file_path) {
+            ok = generate_and_add_import(parser, "allocator", parser->allocator_file_path);
+            if (!ok) return NULL;
+            ((AstImport **)file->imports.items)[file->imports.count - 1]->is_prelude = true;
+        }
+        if (parser->thread_blocks_file_path) {
+            ok = generate_and_add_import(parser, "thread_blocks", parser->thread_blocks_file_path);
+            if (!ok) return NULL;
+            ((AstImport **)file->imports.items)[file->imports.count - 1]->is_prelude = true;
+        }
     }
 
     // Every file imports the standard collections (List, Map), except the files they are built on

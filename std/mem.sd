@@ -1,7 +1,8 @@
 namespace mem;
 
 // Memory: the standard library takes its memory from here (and from new), not from C. All of it goes through an
-// Allocator, the interface of std/allocators, so a program, or a library, can give it any allocator. See docs/allocators.md
+// Allocator, the interface of the prelude (std/prelude/allocator.sd), so a program, or a library, can give it any
+// allocator. See docs/allocators.md
 //
 //     p := mem.allocate(64);              // 64 zeroed bytes from the allocator of the thread, or mem.allocate(64, &arena)
 //     p = mem.resize(p, 64, 128);         // like realloc: the size it has, and the size it gets
@@ -20,11 +21,9 @@ namespace mem;
 //     previous := mem.setAllocator(&arena);    // The allocator of the thread, until it is set back
 //     defer mem.setAllocator(previous);
 //
-// The allocators themselves, e.g the arena and the pool, and the Allocator interface, are in the namespace allocators
-// (std/allocators)
+// The allocators of their own, e.g allocators.Arena and allocators.Pool, are in the namespace allocators (std/allocators)
 
 import c;
-use allocators;
 
 // The heap: realloc and free. For what lives longer than the allocator of the thread, e.g a request
 heap :: () -> Allocator {

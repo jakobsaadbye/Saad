@@ -3,7 +3,6 @@ namespace fmt; // StringBuilder and the formatting of values for fmt
 import time;
 use c;
 import mem;
-import allocators;
 
 ////////////////////////////////////////////////////////////////////////////////////
 //   StringBuilder
@@ -24,7 +23,7 @@ StringBuilder :: struct {
     buffer:    *u8;          // The text and a 0 byte, or null before anything is added
     cursor:    int;          // The length of the text
     capacity:  int;          // The bytes the buffer has room for
-    allocator: allocators.Allocator;    // Of the buffer: the allocator of the thread when it got its first memory
+    allocator: Allocator;    // Of the buffer: the allocator of the thread when it got its first memory
 }
 
 newStringBuilder :: (initialCapacity := 64) -> StringBuilder {
@@ -47,7 +46,7 @@ reserve :: method (sb: *StringBuilder, extra: int) {
         capacity *= 2;
     }
 
-    if sb.allocator == null { sb.allocator = allocators.currentAllocator(); }
+    if sb.allocator == null { sb.allocator = currentAllocator(); }
     buffer := mem.resize(sb.buffer, sb.capacity, capacity, sb.allocator) as *u8;
     if buffer == null {
         printf("Out of memory: a StringBuilder couldn't grow to %d bytes\n", capacity);

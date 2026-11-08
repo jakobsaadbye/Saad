@@ -24,7 +24,7 @@ Response :: struct {
     body:       string;
 
     arena:      allocators.Arena;     // The memory of the texts, freed by free()
-    allocator:  allocators.Allocator;
+    allocator:  Allocator;
 }
 
 header :: method (response: *Response, name: string) -> string, bool {

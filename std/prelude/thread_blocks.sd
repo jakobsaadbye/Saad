@@ -1,0 +1,60 @@
+//////////////////////////////////
+// The blocks of the @threadLocal globals (the lowest layer of the prelude, see docs/standard_library.md). It imports
+// only std/c, as the compiler calls these functions before anything else of a thread runs
+//////////////////////////////////
+
+use c;
+
+//
+// The block of the @threadLocal globals of a thread, e.g thrownError. The compiler lays them out in one block, and each
+// thread gets a copy of their start values the first time it runs a function that uses one. A function finds the block
+// of its thread when it starts (see thread_block in ir_lower.c). The block is freed when the thread ends.
+//
+// These functions only call C, as the compiler calls them before the block is there. The compiler sets the globals
+//
+
+#if OS == .windows {
+    extern "kernel32.dll" {
+        FlsAlloc    :: (callback: (data: *void)) -> u32;   // Calls callback with the value of a thread when it ends
+        FlsGetValue :: (index: u32) -> *void;
+        FlsSetValue :: (index: u32, data: *void) -> bool;
+    }
+} else {
+    extern "C" {
+        pthread_key_create  :: (key: *u32, destructor: (data: *void)) -> i32;
+        pthread_getspecific :: (key: u32) -> *void;
+        pthread_setspecific :: (key: u32, data: *void) -> i32;
+    }
+}
+
+threadBlockKey:      u32;
+threadBlockTemplate: *u8;   // The start values of the @threadLocal globals
+threadBlockSize:     i64;
+
+// Called by main before anything else
+startThreadBlocks :: (template: *u8, size: i64) {
+    threadBlockTemplate = template;
+    threadBlockSize     = size;
+    #if OS == .windows {
+        threadBlockKey = FlsAlloc(c.free);
+    } else {
+        pthread_key_create(&threadBlockKey, c.free);
+    }
+}
+
+// The block of the thread that runs it, made the first time
+newThreadBlock :: () {
+    size := threadBlockSize;
+    if size < 8 { size = 8; }
+    block := c.malloc(size as int);
+    if block == null {
+        c.printf("No memory for the @threadLocal globals of a thread\n");
+        c.exit(1);
+    }
+    c.memcpy(block, threadBlockTemplate, threadBlockSize as int);
+    #if OS == .windows {
+        FlsSetValue(threadBlockKey, block);
+    } else {
+        pthread_setspecific(threadBlockKey, block);
+    }
+}
