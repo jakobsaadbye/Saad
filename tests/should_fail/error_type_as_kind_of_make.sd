@@ -1,0 +1,8 @@
+// expect-error: QueryError is an error type, so an error of it is made with errors.typed
+import errors;
+
+QueryError :: struct { @embed base: Error; sql: string; }
+
+main :: () {
+    err := errors.make("nope", kind: QueryError);
+}

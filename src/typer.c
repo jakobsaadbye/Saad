@@ -71,6 +71,7 @@ bool  types_fit_either_way(Type *wanted, Type *given);
 int   embedded_offset(TypeStruct *outer, TypeStruct *inner, int depth);
 static void hint_optional_unwrap(Typer *typer, Type *wanted, Type *given);
 static void hint_error_embed(Typer *typer, Type *wanted, Type *given);
+static AstExpr *tree_string(Typer *typer, char *text, Ast *at);
 static bool is_null_type(Type *type);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
@@ -5157,11 +5158,61 @@ bool is_error_type(Typer *typer, Type *type) {
 // A pointer to a struct that embeds Error, e.g a *QueryError of 'QueryError :: struct { @embed base: Error; sql: string; }'.
 // It converts to an error
 // A *Plain where an error is wanted: an error type of its own embeds Error
+static bool is_error_kind_type(Typer *typer, Type *type);
+
 static void hint_error_embed(Typer *typer, Type *wanted, Type *given) {
+    if (is_error_kind_type(typer, wanted) && given && given->kind == TYPE_STRUCT) {
+        TypePointer pointer = {0};
+        pointer.head.kind  = TYPE_POINTER;
+        pointer.pointer_to = given;
+        if (is_embedding_error_type(typer, (Type *)&pointer)) {
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "%s is an error type, so an error of it is made with errors.typed(%s{...}, \"...\"), and then err.is(%s) tells", text_bold(type_to_str(given)), type_to_str(given), type_to_str(given));
+        }
+        return;
+    }
     if (!is_error_type(typer, wanted) || given == NULL || given->kind != TYPE_POINTER) return;
     Type *to = ((TypePointer *)given)->pointer_to;
     if (to->kind != TYPE_STRUCT || is_error_type(typer, given)) return;
     report_error_ast(typer->parser, LABEL_HINT, NULL, "%s isn't an error. An error type of its own embeds Error: give it a member '@embed base: Error;'", text_bold(type_to_str(to)));
+}
+
+// The ErrorKind of the prelude, of err.is(kind)
+static bool is_error_kind_type(Typer *typer, Type *type) {
+    if (type == NULL || type->kind != TYPE_STRUCT) return false;
+    AstStruct *node = ((TypeStruct *)type)->node;
+    return node && node->head.file == typer->parser->errors_file && node->identifier && strcmp(node->identifier->name, "ErrorKind") == 0;
+}
+
+// The name of an error type of its own where an ErrorKind is wanted, e.g QueryError or dbms.QueryError of
+// err.is(QueryError), as ErrorKind{"QueryError"}: errors.typed gives an error the name of its type as its kind. Else NULL
+static AstExpr *error_kind_of_type_name(Typer *typer, AstExpr *expr, Type *wanted) {
+    if (!is_error_kind_type(typer, wanted) || expr->type == NULL || expr->type->kind != TYPE_STRUCT) return NULL;
+    AstExpr *name = expr->head.kind == AST_MEMBER_ACCESS ? ((AstMemberAccess *)expr)->right : expr;
+    if (!is_literal_identifier(name)) return NULL;
+    AstIdentifier *ident = ((AstLiteral *)name)->as.value.identifier.resolved_identifier;
+    if (ident == NULL) ident = lookup_from_scope(typer->parser, typer->current_scope, ((AstLiteral *)name)->as.value.identifier.name);
+    if (expr->head.kind == AST_LITERAL && (ident == NULL || !(ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT))) return NULL;
+    if (expr->head.kind == AST_MEMBER_ACCESS && ident != NULL && !(ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT)) return NULL;
+
+    TypePointer pointer = {0};
+    pointer.head.kind = TYPE_POINTER;
+    pointer.pointer_to = expr->type;
+    if (!is_embedding_error_type(typer, (Type *)&pointer)) return NULL;
+
+    TypeStruct *type = (TypeStruct *)expr->type;
+    char *text = type->qualified_name ? type->qualified_name : type->head.name;
+    AstStructLiteral *literal = ast_allocate(typer->parser, sizeof(AstStructLiteral));
+    literal->head.head       = expr->head;
+    literal->head.head.kind  = AST_STRUCT_LITERAL;
+    literal->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    literal->explicit_type   = NULL;
+    literal->initializers    = da_init(1, sizeof(AstStructInitializer *));
+    AstStructInitializer *init = ast_allocate(typer->parser, sizeof(AstStructInitializer));
+    init->head      = expr->head;
+    init->head.kind = AST_STRUCT_INITIALIZER;
+    init->value     = tree_string(typer, text, (Ast *)expr);
+    da_append(&literal->initializers, init);
+    return (AstExpr *)literal;
 }
 
 bool is_embedding_error_type(Typer *typer, Type *type) {
@@ -5979,6 +6030,13 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             AstArgument *arg = ((AstArgument **)(call->arguments.items))[i];
             Type *resolved = check_expression(typer, arg->value, param->type);
             if (!resolved) return NULL;
+
+            // An error type of its own is a kind, e.g err.is(QueryError) or errors.make("...", kind: QueryError)
+            AstExpr *kind = error_kind_of_type_name(typer, arg->value, param->type);
+            if (kind) {
+                arg->value = kind;
+                if (!check_expression(typer, arg->value, param->type)) return NULL;
+            }
 
             if (!types_are_equal(arg->value->type, param->type)) {
                 AstExpr *slice = collection_as_slice(typer, arg->value, param->type); // e.g passing a [..]int where a []int is wanted
@@ -9048,6 +9106,26 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
             return NULL;
         }
         cast->cast_to = wanted_type;
+        if (cast->with_ok) {
+            DynamicArray types = da_init(2, sizeof(Type *));
+            Type *bool_type = primitive_type(PRIMITIVE_BOOL);
+            da_append(&types, wanted_type);
+            da_append(&types, bool_type);
+            return (Type *) make_tuple_type_from_type_list(typer, types);
+        }
+        return wanted_type;
+    }
+    // An error as the error type of its own that it was made as, e.g err as *QueryError. It looks at the causes too, like
+    // err.is(QueryError). It throws a Panic when there is none, and with 'q, ok :=' it gives if there is one instead
+    if (is_error_type(typer, expr_type) && !cast->is_auto && wanted_type->kind == TYPE_POINTER && !is_error_type(typer, wanted_type) &&
+        ((TypePointer *)wanted_type)->pointer_to->kind == TYPE_STRUCT) {
+        if (!is_embedding_error_type(typer, wanted_type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "An error is never a %s", text_bold(type_to_str(wanted_type)));
+            hint_error_embed(typer, expr_type, wanted_type);
+            return NULL;
+        }
+        cast->cast_to       = wanted_type;
+        cast->is_error_cast = true;
         if (cast->with_ok) {
             DynamicArray types = da_init(2, sizeof(Type *));
             Type *bool_type = primitive_type(PRIMITIVE_BOOL);

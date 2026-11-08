@@ -90,8 +90,11 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
   the cause and of its kind. Changed: `fmt.errorf` is `errors.make`, and the standard library uses it
 * Error types of their own: a struct with `@embed base: Error;` and what a catch needs, e.g the SQL of a query.
   `errors.typed(QueryError{sql: sql}, "the query failed: %", reason)` makes one, which is an `error` where one is
-  wanted and can be thrown, and `err.find<QueryError>()` gives it back, also from the causes. Its kind is the name of
-  its type. A struct that doesn't embed `Error` gets a hint that says to
+  wanted and can be thrown. Functions still give and take `error`
+  * The type is the kind: `err.is(QueryError)`, also of the causes
+  * `q, ok := err as *QueryError` gives it back, like the cast of an interface, also from the causes, and
+    `q := err as *QueryError` throws a `Panic` when there is none
+  * A struct that doesn't embed `Error` gets a hint that says to
 * An error that nothing catches is reported with its causes, each after `caused by`
 * `docs/errors.md` has the rules: what is taken and what is thrown, that any function can throw, and when a function
   should give an error and when it should throw

@@ -1,6 +1,6 @@
 namespace errors;
 
-// Making errors. The error type itself, err.is and err.find are in the prelude (std/prelude/errors.sd), as the compiler
+// Making errors. The error type itself and err.is are in the prelude (std/prelude/errors.sd), as the compiler
 // throws and catches them; what makes an error with a message in a format is here, as it uses fmt.
 //
 //     return null, errors.make("no user with the id %", id);                    // an error with a message
@@ -16,8 +16,9 @@ namespace errors;
 //
 //     return null, errors.typed(QueryError{sql: sql}, "the query failed: %", reason);
 //
-//     q := err.find<QueryError>();          // the QueryError, also in the causes, or null
-//     if q != null { print(q.sql); }
+//     if err.is(QueryError) { ... }                 // the type is a kind
+//     q, ok := err as *QueryError;                  // the QueryError, also from the causes
+//     if ok { print(q.sql); }
 
 import fmt;
 
@@ -29,8 +30,8 @@ make :: (format: string, args: ...any, kind := ErrorKind{}, cause: error = null)
 }
 
 // A new error of a type of its own, a struct with '@embed base: Error;', e.g
-// errors.typed(QueryError{sql: sql}, "the query failed: %", reason). The kind is the name of the type, e.g
-// dbms.QueryError, unless the value has one, and err.find<QueryError>() gives it back
+// errors.typed(QueryError{sql: sql}, "the query failed: %", reason). It is returned and thrown as an error. Its kind is
+// its type, so err.is(QueryError) tells, and 'err as *QueryError' gives it back
 typed :: <T> (value: T, format: string, args: ...any, cause: error = null) -> *T {
     result := new(T, heapAllocator());
     *result = value;
@@ -42,7 +43,7 @@ typed :: <T> (value: T, format: string, args: ...any, cause: error = null) -> *T
     e.message = message(format, ...args);
     e.cause = cause;
     e.trace.allocator = heapAllocator();
-    if e.kind.name.len == 0 { e.kind = ErrorKind{e.type.name}; }
+    e.kind  = ErrorKind{e.type.name};
     return result;
 }
 

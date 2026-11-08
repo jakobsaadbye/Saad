@@ -74,7 +74,8 @@ errors.wrap(err, "loading %", path)                        // the same, and of t
 ## Error types of their own
 
 An error can carry more than a message: what a catch needs to decide or to report, e.g the SQL of a query that failed.
-Its type is a struct that embeds `Error` (see `docs/embedding.md`):
+Its type is a struct that embeds `Error` (see `docs/embedding.md`). Functions still give and take `error`: the type of
+its own is only seen where it is made, and where a catch asks for it.
 
 ```odin
 QueryError :: struct {
@@ -83,27 +84,36 @@ QueryError :: struct {
     code: int;
 }
 
-run :: (sql: string) -> (Rows, error) {
+run :: (sql: string) -> (Rows, error) {          // an error, not a *QueryError
     ...
     return Rows{}, errors.typed(QueryError{sql: sql, code: code}, "the query failed: %", reason);
 }
 
 rows, err := run(sql);
-if err != null {
-    q := err.find<QueryError>();     // the QueryError, in the error or in its causes, or null
-    if q != null { log("% failed with %", q.sql, q.code); }
-}
+if err.is(QueryError) { ... }                     // the type is a kind
+
+q, ok := err as *QueryError;                      // the QueryError, in the error or in its causes
+if ok { log("% failed with %", q.sql, q.code); }
+
+q := err as *QueryError;                          // a Panic when there is none
 ```
 
-* `errors.typed(value, format, ...values, cause: err)` makes one on the heap and gives a `*QueryError`. It is an `error`
-  where one is wanted, as a `*QueryError` converts to the `*Error` it embeds: it can be returned as one, and thrown,
-  `throw errors.typed(...)`. Its members are reached on it directly, `q.message` and `q.sql`.
-* Its kind is the name of its type, e.g `QueryError`, or `dbms.QueryError` in a namespace, unless the value has one.
-  So an error that nothing catches is reported as `QueryError: the query failed: ...`.
-* `err.find<QueryError>()` gives it back from an `error`, also from the causes, like `err.is(kind)` looks at them, or
-  null when there is none. It finds an error that `errors.typed` made, of exactly that type.
-* A struct that doesn't embed `Error` isn't an error, and the compiler says so:
-  `hint: Plain isn't an error. An error type of its own embeds Error: give it a member '@embed base: Error;'`.
+* `errors.typed(value, format, ...values, cause: err)` makes one on the heap and gives a `*QueryError`, so its members
+  can be set. Where an `error` is wanted it is one, as a `*QueryError` converts to the `*Error` it embeds: it is
+  returned as one, and thrown, `throw errors.typed(...)`.
+* **The type is its kind.** Its kind is the name of its type, e.g `QueryError`, or `dbms.QueryError` in a namespace, so
+  `err.is(QueryError)` tells, like for any kind, also from the causes. An error that nothing catches is reported as
+  `QueryError: the query failed: ...`.
+* **`as` gives it back**, like the cast of an interface (see `docs/interfaces.md`), and looks at the causes like `is`:
+  * `q, ok := err as *QueryError`: the `*QueryError` and true, or null and false, also for a null error
+  * `q := err as *QueryError`: throws a `Panic` when there is none, e.g `The error is a NotFound, not a QueryError`
+  * So after `err.is(QueryError)` is true, `err as *QueryError` always gives one.
+* `as` finds what `errors.typed` made, of exactly that type.
+* What isn't an error type is an error of the compiler, with a hint:
+  * `err as *Plain`: `An error is never a *Plain`, and `hint: Plain isn't an error. An error type of its own embeds
+    Error: give it a member '@embed base: Error;'`
+  * `errors.make("...", kind: QueryError)`: the kind of an error type comes with its type, so the hint says to make
+    one with `errors.typed`. `err.is(QueryError)` takes the type, as it only asks.
 
 A kind is enough to tell errors apart. An error type of its own is for when a catch needs more than the message.
 
@@ -160,11 +170,11 @@ handlePost :: (req: Request) -> Response {
 | --- | --- |
 | `err.message` | What went wrong |
 | `err.kind` | An `ErrorKind`, for a catch to tell errors apart: `err.is(NotFound)`. Two kinds are the same when their names are |
-| `err.cause` | The error it was made because of, or null. `is` and `find` look at the causes too |
+| `err.cause` | The error it was made because of, or null. `is` and `as` look at the causes too |
 | `err.trace` | Where it was made or thrown, and every function it was thrown through: `function`, `file` and `line` |
-| `err.type` | The error type of its own that it is embedded in, e.g `QueryError`, or null. `err.find<T>()` gives it back |
+| `err.type` | The error type of its own it was made as, e.g `QueryError`, or null. `err as *QueryError` gives it back |
 
-* The prelude has the type, `err.is`, `err.find` and `newError(message, kind, cause)`, as the compiler throws and
+* The prelude has the type, `err.is` and `newError(message, kind, cause)`, as the compiler throws and
   catches errors. The package `errors` makes them with a format, as it uses `fmt`, which is above the prelude.
   `newError` is what `errors.make` and `panic` are built on, and takes the message as it is.
 * `Panic` is the kind of the panics.
@@ -181,8 +191,9 @@ handlePost :: (req: Request) -> Response {
 * A call whose error isn't taken (`AST_FLAG_THROWS_ON_ERROR`) throws the error when it isn't null.
 * `throw` takes an `error`, or a pointer to a struct that embeds `Error` (`is_embedding_error_type()`), which is
   converted to the `*Error` in it (`AstThrow.error_type`).
-* `errors.typed<T>` sets `type` to the descriptor of `T` and `value` to the whole error, so `find<T>()` compares the
-  descriptors and gives `value` back, without knowing where in `T` the `Error` is.
-* While the `defer`s run during a throw, the error is put aside, so their calls run as usual.
-* `main` reports an error that nothing caught (`reportUncaught`), and the program ends with the exit code 1.
-* A call of C, e.g `printf`, has no check: C doesn't throw.
+* `errors.typed<T>` sets `type` to the descriptor of `T`, `value` to the whole error and the kind to the name of `T`.
+* An error type where an `ErrorKind` is wanted, e.g `err.is(QueryError)`, is `ErrorKind{"QueryError"}`
+  (`error_kind_of_type_name()`).
+* `err as *QueryError` (`AstCast.is_error_cast`) walks the error and its causes and compares their `type` with the
+  descriptor of `QueryError` (`error_as()` in `ir_lower.c`), so it doesn't need to know where in the struct the `Error`
+  is: `value` points to the whole of it. Without `ok`, none is `panicErrorCast` of the prelude.

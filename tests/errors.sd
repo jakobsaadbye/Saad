@@ -181,25 +181,37 @@ main :: () {
     assert(count == 23);
     assert(thrownError == null);
 
-    // An error type of its own: made with errors.typed, given back by find, also from the causes
+    // An error type of its own: made with errors.typed, given as an error. The type is its kind, and 'as' gives it back,
+    // also from the causes
     n, qerr := query("DROP users");
     assert(n == 0 && qerr.message == "DROP users isn't allowed" && qerr.kind.name == "QueryError");
-    q := qerr.find<QueryError>();
-    assert(q != null && q.sql == "DROP users" && q.code == 42 && q.message == qerr.message);
+    assert(qerr.is(QueryError) && !qerr.is(NotFound));
+    q, ok := qerr as *QueryError;
+    assert(ok && q.sql == "DROP users" && q.code == 42 && q.message == qerr.message);
     _, plain := query("");
-    assert(plain.find<QueryError>() == null && plain.message == "no sql");
+    absent, found := plain as *QueryError;
+    assert(!found && absent == null && !plain.is(QueryError));
     wrapped := errors.wrap(qerr, "loading %", "users");
-    assert(wrapped.message == "loading users" && wrapped.kind.name == "QueryError" && wrapped.find<QueryError>().code == 42);
+    assert(wrapped.message == "loading users" && wrapped.is(QueryError) && (wrapped as *QueryError).code == 42);
     try {
         throw errors.typed(QueryError{sql: "x"}, "thrown");    // A *QueryError is an error
     } catch (e) {
-        assert(e.find<QueryError>().sql == "x" && e.trace.count == 1);
+        assert(e.is(QueryError) && (e as *QueryError).sql == "x" && e.trace.count == 1);
     }
     try {
         query("DROP posts");                                    // Not taken: thrown, and still a QueryError
     } catch (e) {
-        assert(e.find<QueryError>().sql == "DROP posts");
+        assert((e as *QueryError).sql == "DROP posts");
     }
+    try {
+        other := plain as *QueryError;                          // Not one: a Panic
+        assert(false);
+    } catch (e) {
+        assert(e.is(Panic) && e.message == "The error isn't a QueryError");
+    }
+    noError: error = null;
+    _, isOne := noError as *QueryError;
+    assert(!isOne);
 
     // Without values, the message is as written, so a % stays a %
     assert(errors.make("100% sure").message == "100% sure");

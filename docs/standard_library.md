@@ -11,7 +11,7 @@ std/
     expression_trees.sd  Expr<F> and ExprNode: a lambda as the tree of what it does (see docs/expression_trees.md)
     string.sd       The methods of string (slice, split, indexOf, free, ...) and of char (isDigit, isLetter, isSpace,
                     toUpper, toLower, digitValue, ...)
-    errors.sd       error, err.is, err.find, newError and panic, and the functions the compiler calls to throw, e.g for a
+    errors.sd       error, err.is, newError and panic, and the functions the compiler calls to throw, e.g for a
                     null pointer
   allocators/   namespace allocators: Arena (arena.sd) and Pool (pool.sd) (see docs/allocators.md)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
@@ -119,6 +119,9 @@ return null, errors.make("no user with the id %", id, kind: NotFound);  // of a 
 throw errors.make("loading % failed", path, cause: err);                // because of another error
 throw errors.wrap(err, "loading %", path);                              // the same, with the kind of err
 return null, errors.typed(QueryError{sql: sql}, "the query failed");    // of a type of its own, see docs/errors.md
+
+if err.is(QueryError) { ... }                                          // an error type is a kind
+q, ok := err as *QueryError;                                           // and 'as' gives it back
 ```
 
 Without values, the message is as it is written, so `errors.make(text)` takes a text from elsewhere as it is, also with a
