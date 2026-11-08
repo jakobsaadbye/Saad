@@ -582,6 +582,8 @@ mem.delete(p);                     // with the allocator it came from, e.g mem.d
   are freed with it after the allocator of the thread changed.
 * What lives longer than a request is given the heap, `mem.heap()`: `store.posts.allocator = mem.heap();` or
   `title.copy(mem.heap())` (`copy` and `free` of a string take an allocator).
+* `mem.Pool`: blocks of one size, given back one by one and given out again, e.g for the nodes of a tree:
+  `pool := mem.Pool{blockSize: sizeof(Node)}; node := new(Node, &pool); mem.delete(node, &pool);`.
 * `mem.Arena`: memory that is freed all at once, and the sizes `Kilobyte` and `Megabyte`. The zero value is
   ready to use: `arena.allocate(size)` gives zeroed memory, an arena is an `Allocator` (`&arena`) for lists, maps and
   `dbms.Connection`, and `arena.clear()` and `arena.free()` free all of it.

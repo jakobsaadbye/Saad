@@ -1,0 +1,62 @@
+// mem.Pool: blocks of one size, given back one by one and given out again. It is an Allocator, like the heap and
+// mem.Arena, so new(T, &pool) and mem.delete(p, &pool) work with it
+import mem;
+use fmt;
+
+Node :: struct {
+    value: int;
+    left:  *Node;
+    right: *Node;
+}
+
+insert :: (pool: *mem.Pool, root: *Node, value: int) -> *Node {
+    if root == null {
+        node := new(Node, pool);
+        node.value = value;
+        return node;
+    }
+    if value < root.value { root.left = insert(pool, root.left, value); }
+    else                  { root.right = insert(pool, root.right, value); }
+    return root;
+}
+
+sum :: (root: *Node) -> int {
+    if root == null { return 0; }
+    return root.value + sum(root.left) + sum(root.right);
+}
+
+main :: () {
+    pool := mem.Pool{blockSize: sizeof(Node), perChunk: 4};
+    root: *Node;
+    for v in [50, 30, 70, 20, 40, 60, 80, 10, 90] { root = insert(&pool, root, v); }
+    assert(pool.inUse == 9 && sum(root) == 450);
+
+    // A block that is given back is the next one given out, and is zeroed
+    leaf := root.left.left.left;    // 10
+    root.left.left.left = null;
+    mem.delete(leaf, &pool);
+    assert(pool.inUse == 8);
+    again := new(Node, &pool);
+    assert(again == leaf && again.value == 0 && pool.inUse == 9);
+
+    // A block fits a smaller size, and a bigger one is a Panic
+    try {
+        mem.allocate(sizeof(Node) + 8, &pool);
+        assert(false);
+    } catch (e) {
+        assert(e.is(Panic));
+    }
+
+    // The chunks come from another allocator, here an arena
+    arena: mem.Arena;
+    small := mem.Pool{blockSize: 16, inner: &arena};
+    a := mem.allocate(16, &small);
+    b := mem.allocate(16, &small);
+    assert(a != b && arena.used() > 0);
+    small.free();
+    arena.free();
+
+    pool.free();
+    assert(pool.inUse == 0);
+    print("pool ok");
+}

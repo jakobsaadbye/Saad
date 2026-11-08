@@ -84,15 +84,16 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
 
 ## Update v0.17.0 - 8. Nov 2026
 
-* `Allocator` is an interface: `resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void`.
-  Any type with the method is an allocator, and all memory of the standard library goes through one, so an allocator
-  of a program or a library works with lists, strings, `json`, `dbms` and the rest. See `docs/allocators.md`
+* `Allocator` is an interface with the methods `allocate`, `resize` and `deallocate`, which are told the size and the
+  alignment. Any type with them is an allocator, and all memory of the standard library goes through one, so an
+  allocator of a program or a library works with lists, strings, `json`, `dbms` and the rest. See `docs/allocators.md`
   * Changed: an allocator is a value of the interface, not a `*Allocator`: `list.allocator = &arena`,
     `new(Point, &arena)`, `mem.setAllocator(&arena)`. `arena.allocator()` gives `&arena` as an `Allocator`
   * Changed: `mem.resize(p, oldSize, newSize)` and `mem.free(p, size)` take the size, and `mem.delete(p)` frees a
     `new(T)`. `freeMemory` and `resizeMemory` of the prelude too
   * An alignment: `mem.allocate(size, allocator, align)`, e.g 64 for a cache line. The heap and arenas give it
   * `mem.Arena` has no header before each block any more, and grows its last block where it is
+  * `mem.Pool`: blocks of one size, given back one by one and given out again, e.g for the nodes of a tree
   * A thread frees its start with the heap it came from, instead of C's `free`
 
 ## Update v0.16.0 - 8. Nov 2026

@@ -89,18 +89,47 @@ Optional :: struct <T> {
 // with this method is one, e.g mem.Arena, the heap, or an allocator of a library, so they all work with the rest. A
 // null Allocator means the allocator of the thread: the heap, unless it is set, e.g to the arena of a request while a
 // server answers it (see currentAllocator). See docs/allocators.md
+//
+// A size is what the caller knows of the size of a block: at least the bytes it uses of it, and at most the size it asked
+// for. align is a power of two, the alignment the block must have
 Allocator :: interface {
-    // A new block when memory is null, the block with another size, keeping what fits of it, or none when newSize is
-    // 0. oldSize is what the caller knows of the size of the block: at least the bytes it uses of it, at most the size
-    // it asked for, and 0 for a new block. align is a power of two, the alignment the block must have
-    resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void;
+    // A new block of the size, or null when there is no memory
+    allocate   :: method * (size: i64, align: i64) -> *void;
+    // The block with another size, keeping what fits of it. It can move, so the result is the block
+    resize     :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void;
+    // Gives back the block
+    deallocate :: method * (memory: *void, size: i64, align: i64);
 }
 
+// The realloc of an allocator (null is the allocator of the thread): a new block when memory is null, none when
+// newSize is 0, and else the block with another size
 resizeMemory :: (allocator: Allocator, memory: *void, oldSize: i64, newSize: i64, align: i64 = 8) -> *void {
     if allocator == null {
         allocator = currentAllocator();
     }
+    if memory == null {
+        if newSize == 0 { return null; }
+        return allocator.allocate(newSize, align);
+    }
+    if newSize == 0 {
+        allocator.deallocate(memory, oldSize, align);
+        return null;
+    }
     return allocator.resize(memory, oldSize, newSize, align);
+}
+
+// A block that was made with allocate as a block of the new size, for an allocator that can't change a block where it
+// is: a new block, with what fits of the old one, which is given back
+resizeByCopy :: (allocator: Allocator, memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
+    result := allocator.allocate(newSize, align);
+    if result == null { return null; }
+    keep := oldSize;
+    if keep > newSize { keep = newSize; }
+    if memory != null {
+        memcpy(result, memory, keep);
+        allocator.deallocate(memory, oldSize, align);
+    }
+    return result;
 }
 
 // The allocator of the thread, which a null allocator means, e.g of new(T), a string or a list. Null is the heap. A
@@ -119,33 +148,25 @@ currentAllocator :: () -> Allocator {
 Heap :: struct {
     unused: u8;
 
-    resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
-        if align <= 16 {
-            if newSize == 0 {
-                free(memory);
-                return null;
-            }
-            return realloc(memory, newSize);
-        }
-
-        result: *u8 = null;
-        if newSize > 0 {
-            raw := malloc(newSize + align + 8) as *u8;
-            if raw == null { return null; }
-            address := (&raw[8]) as u64;
-            pad := ((align as u64 - address % align as u64) % align as u64) as i64;
-            result = &raw[8 + pad];
-            *((&result[-8]) as **u8) = raw;
-            if memory != null {
-                keep := oldSize;
-                if keep > newSize { keep = newSize; }
-                memcpy(result, memory, keep);
-            }
-        }
-        if memory != null {
-            free(*((&(memory as *u8)[-8]) as **u8));
-        }
+    allocate :: method * (size: i64, align: i64) -> *void {
+        if align <= 16 { return malloc(size); }
+        raw := malloc(size + align + 8) as *u8;
+        if raw == null { return null; }
+        address := (&raw[8]) as u64;
+        pad := ((align as u64 - address % align as u64) % align as u64) as i64;
+        result := &raw[8 + pad];
+        *((&result[-8]) as **u8) = raw;   // For deallocate
         return result;
+    }
+
+    resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
+        if align <= 16 { return realloc(memory, newSize); }
+        return resizeByCopy(self, memory, oldSize, newSize, align);
+    }
+
+    deallocate :: method * (memory: *void, size: i64, align: i64) {
+        if align <= 16 { free(memory); return; }
+        free(*((&(memory as *u8)[-8]) as **u8));
     }
 }
 

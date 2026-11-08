@@ -2,22 +2,23 @@
 
 All memory of Saad comes from an `Allocator`: `new(T)`, strings, `fmt.sprint`, lists, maps, `json`, `dbms` and
 `mem.allocate`. `Allocator` is an interface of the prelude (`std/prelude/collections.sd`, see `docs/interfaces.md`), so
-any type with its one method is one: the heap, `mem.Arena`, and an allocator that a program or a library writes. They
-all work with the rest of the standard library.
+any type with its three methods is one: the heap, `mem.Arena`, `mem.Pool`, and an allocator that a program or a library
+writes. They all work with the rest of the standard library.
 
 ```odin
 Allocator :: interface {
-    // A new block when memory is null, the block with another size, keeping what fits of it, or none when newSize is 0
-    resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void;
+    allocate   :: method * (size: i64, align: i64) -> *void;                          // null when there is no memory
+    resize     :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void;   // can move it
+    deallocate :: method * (memory: *void, size: i64, align: i64);
 }
 ```
 
-* `memory` is null for a new block.
-* `oldSize` is what the caller knows of the size of the block: at least the bytes it uses of it, at most the size it
-  asked for, and 0 for a new one. An allocator can rely on it to copy what a block has when it grows, as `mem.Arena`
-  does, but not on it being exact: a string of a `StringBuilder` is shorter than the buffer it came from.
-* `newSize` is 0 to free the block.
+* A size is what the caller knows of the size of a block: at least the bytes it uses of it, and at most the size it
+  asked for. An allocator can rely on it to copy what a block has when it grows, as `mem.Arena` does, but not on it
+  being exact: a string of a `StringBuilder` is shorter than the buffer it came from.
 * `align` is a power of two, 8 unless the caller asks for more, e.g `mem.allocate(4096, &arena, 4096)`.
+* What frees all of an allocator at once, e.g `arena.clear()` and `pool.free()`, isn't in the interface, as not every
+  allocator can do it, e.g the heap. It is a method of the allocator itself.
 
 ## Using them
 
@@ -35,34 +36,96 @@ title := post.title.copy(mem.heap());   // a string that lives longer
 * A null allocator is the allocator of the thread: the heap, unless it is set. `mem.setAllocator(&arena)` sets it
   and gives the one before, and the http server sets it to the arena of a request while a handler runs.
 * A list, a map, a `StringBuilder` and a `bytes.Buffer` keep the allocator of their first memory.
-* `mem.heap()` is the heap. A block with an alignment over 16, which `malloc` doesn't promise, is made a bit bigger.
-* `mem.Arena` is an allocator: `&arena`. Freeing a block of it does nothing, as its memory is freed all at once
-  with `arena.clear()` or `arena.free()`. A smaller size keeps the block, and the last block of the arena grows where
-  it is when there is room, so a list that grows in an arena isn't copied each time.
+* `resizeMemory(allocator, memory, oldSize, newSize, align)` of the prelude is the realloc of an allocator: it calls
+  `allocate` when memory is null, `deallocate` when newSize is 0, and else `resize`.
+
+## The allocators of the standard library
+
+* `mem.heap()`: `malloc`, `realloc` and `free`. A block with an alignment over 16, which `malloc` doesn't promise, is
+  made a bit bigger.
+* `mem.Arena`: memory that is freed all at once with `arena.clear()` or `arena.free()`. `deallocate` does nothing. A
+  smaller size keeps the block, and the last block grows where it is when there is room, so a list that grows in an
+  arena isn't copied each time.
+* `mem.Pool`: blocks of one size, e.g for the nodes of a tree. A block that is given back goes on a list and is the
+  next one given out, so there is no searching and no fragmentation, and unlike an arena, blocks are given back one by
+  one. It takes chunks of `perChunk` blocks from another allocator, `inner` (the heap when it is null).
+
+```odin
+pool := mem.Pool{blockSize: sizeof(Node)};
+node := new(Node, &pool);
+mem.delete(node, &pool);               // the next new(Node, &pool) gets this block
+pool.free();                           // gives back all the chunks
+```
 
 ## Writing one
 
-A struct with the method is an allocator, without naming the interface:
+A struct with the three methods is an allocator, without naming the interface. This is the `Pool` of `std/mem.sd`,
+shortened:
 
 ```odin
-// Counts the bytes in use, and takes the memory from another allocator
+Pool :: struct {
+    blockSize: i64;            // At least 8, as a free block holds the pointer to the next one
+    perChunk:  i64 = 64;       // The blocks of each chunk
+    inner:     Allocator;      // Where the chunks come from, the heap when it is null
+    freeList:  *FreeBlock;     // The blocks that were given back
+    chunks:    *Chunk;         // The chunks, newest first
+    inUse:     i64;
+
+    allocate :: method * (size: i64, align: i64) -> *void {
+        if size > self.blockSize || align > 8 { panic("A pool was asked for a block bigger than its blockSize"); }
+        self.inUse += 1;
+        if self.freeList != null {                       // a block that was given back
+            block := self.freeList;
+            self.freeList = block.next;
+            c.memset(block, 0, self.blockSize as int);
+            return block;
+        }
+        ...                                              // else the next block of the newest chunk, or a new chunk
+    }
+
+    // A block can't grow: it is blockSize bytes
+    resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
+        if newSize > self.blockSize { panic("A block of a pool can't grow over the blockSize of the pool"); }
+        return memory;
+    }
+
+    deallocate :: method * (memory: *void, size: i64, align: i64) {
+        block := memory as *FreeBlock;                   // the block holds the next free one
+        block.next = self.freeList;
+        self.freeList = block;
+        self.inUse -= 1;
+    }
+
+    free :: method * () { ... }                          // gives back all the chunks to inner
+}
+```
+
+An allocator that can't change a block where it is can write its `resize` with `resizeByCopy(self, memory, oldSize,
+newSize, align)` of the prelude, which makes a new block with `allocate`, copies what fits, and gives the old one back
+with `deallocate`. A wrapper calls another allocator, e.g one that counts:
+
+```odin
 Counting :: struct {
     inner: Allocator;
     bytes: i64;
 
+    allocate :: method * (size: i64, align: i64) -> *void {
+        self.bytes += size;
+        return resizeMemory(self.inner, null, 0, size, align);
+    }
     resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
         self.bytes += newSize - oldSize;
         return resizeMemory(self.inner, memory, oldSize, newSize, align);
     }
+    deallocate :: method * (memory: *void, size: i64, align: i64) {
+        self.bytes -= size;
+        resizeMemory(self.inner, memory, size, 0, align);
+    }
 }
 
 counting := Counting{inner: mem.heap()};
-names: [..]string;
 names.allocator = &counting;
 ```
-
-`resizeMemory(allocator, memory, oldSize, newSize, align)` of the prelude calls the allocator, or the allocator of the
-thread when it is null.
 
 ## Not done yet
 
@@ -70,4 +133,4 @@ thread when it is null.
 * The chunks of `mem.Arena` come from C, not from an allocator it is given.
 * `toCString` and `c.string.free()` use C's `free` for what the heap gave.
 * A check that an allocator works with the standard library, e.g `mem.testAllocator`.
-* More allocators: a pool for many values of one size, and a scratch arena of the thread with marks.
+* A scratch arena of the thread with marks.

@@ -20,14 +20,20 @@ Counter :: struct {
     bytes: i64;
     calls: int;
 
+    allocate :: method * (size: i64, align: i64) -> *void {
+        self.calls += 1;
+        self.bytes += size;
+        return malloc(size);
+    }
     resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
         self.calls += 1;
         self.bytes += newSize - oldSize;
-        if newSize == 0 {
-            free(memory);
-            return null;
-        }
         return realloc(memory, newSize);
+    }
+    deallocate :: method * (memory: *void, size: i64, align: i64) {
+        self.calls += 1;
+        self.bytes -= size;
+        free(memory);
     }
 }
 
