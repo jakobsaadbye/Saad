@@ -237,6 +237,7 @@ typedef struct AstIdentifier {
     Ast      head;
     char    *name;
     Type    *type;
+    Type    *constraint; // Of a type parameter: the interface its type must be, e.g the Shape of <S: Shape>
     AstExpr *value;     // The value the identifier is set to in a declaration. @Note: Only available after typechecking
     IdentifierFlags flags;
 
@@ -353,6 +354,8 @@ typedef struct AstStruct {
     bool           is_anonymous;     // e.g struct { name: string; age: int; }. Anonymous structs with the same members are the same type
     bool           is_attribute;     // Marked with @attribute, so its values can be given to struct members e.g @json.Field(name: "id")
     bool           is_union;         // Shape :: union { circle: Circle; empty; }. The first member is the hidden '$tag' (u32), the index of the variant + 1
+    bool           is_interface;     // Shape :: interface { area :: method () -> f64; }. Its members are the hidden '$value' and '$table' (*void): the
+                                     // value and the methods of its type. Its methods have no bodies. See docs/interfaces.md
                                      // that is held. The other members are the variants, which all start at the same offset
 } AstStruct;
 
@@ -412,6 +415,7 @@ typedef struct AstFunctionDefn {
     bool            is_expression_tree;  // A short lambda given for an Expr<F>. It is only checked, and can use the variables around it.
                                          // head.replacement is the expression that makes the Expr<F>, which the backend lowers instead
     bool            is_extern;
+    bool            is_interface_method; // A method of an interface, without a body. A call of it goes through the table of the interface value
     char           *extern_library; // The library of an extern function, e.g "kernel32.dll". NULL for the C runtime
     bool            is_variadic;
     bool            has_default_parameters;
@@ -695,6 +699,8 @@ typedef struct AstCast {
     Type    *cast_to;     // Explicit type cast e.g "x as f64"
     bool     is_auto;     // Whether its an auto-cast "xx 2 / 4.0"
     bool     is_as_cast;  // E.g `a := 5 as int`
+    bool     with_ok;     // `c, ok := s as *Circle` of an interface: the pointer and if it is that type, instead of a Panic when it isn't
+    bool     is_type_test; // If an interface is of the type, a bool. For the cases of a switch on an interface
 } AstCast;
 
 typedef struct AstStructLiteral {

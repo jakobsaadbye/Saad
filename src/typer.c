@@ -78,6 +78,13 @@ Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn);
 
 char *type_to_str(Type *type);
 bool types_are_equal(Type *lhs, Type *rhs);
+bool check_constraint(Typer *typer, AstFunctionDefn *generic, AstIdentifier *type_param, Type *type, Ast *site);
+bool is_interface_type(Type *type);
+const char *interface_mismatch(Typer *typer, TypeStruct *interface, Type *given, char *why, int size);
+void explain_interface_mismatch(Typer *typer, Type *wanted, Type *given, AstExpr *expr);
+DynamicArray interface_methods(TypeStruct *interface);
+AstFunctionDefn *method_for_interface(Typer *typer, Type *type, char *name);
+AstFunctionDefn *instantiate_generic_function(Typer *typer, AstFunctionDefn *generic, DynamicArray type_args, Ast *site);
 bool can_cast_implicitly(Type *from, Type *to);
 bool can_cast_explicitly(Type *from, Type *to);
 bool is_bitwise_operator(TokenType op);
@@ -331,7 +338,10 @@ static bool check_statement_and_recover(Typer *typer, Ast *stmt) {
     return ok;
 }
 
+static Typer *active_typer; // The typer of the program, for types_are_equal, which looks up the methods of a type for an interface
+
 bool check_file(Typer *typer, AstFile *ast_file) {
+    active_typer = typer;
     // Files can use each other, so a file that is being checked is not checked again
     if (ast_file->check_state != 0) return true;
     ast_file->check_state = 1;
@@ -886,6 +896,7 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
     node->generic_struct = generic;
     node->type_args      = type_args;
     node->is_union       = generic->is_union;
+    node->is_interface   = generic->is_interface;
 
     TypeStruct *struct_type      = ast_allocate(parser, sizeof(TypeStruct));
     struct_type->head.head       = generic_type->head.head;
@@ -1163,6 +1174,10 @@ bool bind_type_param(Typer *typer, AstFunctionDefn *generic, TypeBinding *bindin
         if (is_optional_type(type) && !is_optional_type(binding->type) && (is_null_type(binding->type) || types_are_identical(optional_inner_type(type), binding->type))) {
             binding->type   = type;
             binding->source = (Ast *)arg;
+            return true;
+        }
+        // A pointer to a value of a type that is the interface T got, e.g &c for the add of a [..]Shape
+        if (is_interface_type(binding->type) && !is_interface_type(type) && types_are_equal(binding->type, type)) {
             return true;
         }
         if (!types_are_identical(binding->type, type)) {
@@ -2060,6 +2075,7 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
             report_error_ast(parser, LABEL_ERROR, binding.source, "Type parameter '%s' of '%s' cannot be void", type_param->name, generic->identifier->name);
             return NULL;
         }
+        if (type_param->constraint && !check_constraint(typer, generic, type_param, type, binding.source)) return NULL;
 
         da_append(&type_args, type);
     }
@@ -2067,6 +2083,31 @@ AstFunctionDefn *instantiate_generic_function_call(Typer *typer, AstFunctionCall
     free(explicit);
 
     return instantiate_generic_function(typer, generic, type_args, (Ast *)call);
+}
+
+// A type parameter with a constraint, e.g the S of 'totalArea :: <S: Shape>(shapes: []S)': its type must have the methods
+// of the interface, which are called on a pointer to it. The interface is found where the generic function is
+bool check_constraint(Typer *typer, AstFunctionDefn *generic, AstIdentifier *type_param, Type *type, Ast *site) {
+    Parser *parser = typer->parser;
+    AstBlock *scope = typer->current_scope;
+    typer->current_scope = generic->body->parent ? generic->body->parent : scope;
+    Type *constraint = resolve_type(typer, type_param->constraint);
+    typer->current_scope = scope;
+    if (!constraint) return false;
+    if (!is_interface_type(constraint)) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)type_param->constraint, "The constraint of '%s' is a %s, but a constraint is an interface", type_param->name, type_to_str(constraint));
+        return false;
+    }
+    type_param->constraint = constraint;
+
+    char why[512];
+    Type *pointer = (Type *) generate_pointer_to_type(parser, type);
+    if (interface_mismatch(typer, (TypeStruct *)constraint, pointer, why, sizeof(why))) {
+        report_error_ast(parser, LABEL_ERROR, site, "'%s' of '%s' must be a %s, but it is %s", type_param->name, generic->identifier->name, type_to_str(constraint), type_to_str(type));
+        report_error_ast(parser, LABEL_HINT, NULL, "%s", why);
+        return false;
+    }
+    return true;
 }
 
 // The default value of a struct member e.g the 30 in 'age: int = 30;', or NULL
@@ -3024,6 +3065,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
 
             if (!untyped_fits && !types_are_equal(decl->type, value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", ident->name, type_to_str(decl->type), type_to_str(value->type));
+                explain_interface_mismatch(typer, decl->type, value->type, value);
                 hint_optional_unwrap(typer, decl->type, value->type);
                 return false;
             }
@@ -3380,6 +3422,13 @@ bool types_are_equal(Type *lhs, Type *rhs) {
         assert(false && "Comparing an unresolved struct or enum in types_are_equal()"); 
     }
 
+    // A pointer to a value of a type that has the methods of an interface, or null, where the interface is wanted. The
+    // backend makes the interface value of the pointer and the table of the methods (convert_aggregate)
+    if (is_interface_type(lhs) && !is_interface_type(rhs)) {
+        if (is_null_type(rhs)) return true;
+        return interface_mismatch(active_typer, (TypeStruct *) lhs, rhs, NULL, 0) == NULL;
+    }
+
     // A T or null where a ?T is wanted. The backend wraps it (convert_aggregate)
     if (is_optional_type(lhs) && !is_optional_type(rhs)) {
         if (is_null_type(rhs)) return true;
@@ -3589,6 +3638,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
 
     if (!untyped_fits && !types_are_equal(lhs_type, expr_type)) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Assignment type mismatch. Wanted type %s. Got type %s", type_to_str(lhs_type), type_to_str(expr_type));
+        explain_interface_mismatch(typer, lhs_type, expr_type, assign->expr);
         hint_optional_unwrap(typer, lhs_type, expr_type);
         return false;
     }
@@ -4385,6 +4435,8 @@ AstIdentifier *case_variant(Typer *typer, TypeStruct *union_type, AstExpr *value
     return variant;
 }
 
+bool declare_switch_binding(Typer *typer, AstSwitch *sw, AstCase *c, AstExpr *value);
+
 // Declares the name of 'switch v in shape' at the start of a case: the value of the variant, or a pointer to it when switching on a pointer
 bool declare_case_binding(Typer *typer, AstSwitch *sw, AstCase *c, AstIdentifier *subject, AstIdentifier *variant, bool by_pointer) {
     Parser *parser = typer->parser;
@@ -4406,6 +4458,12 @@ bool declare_case_binding(Typer *typer, AstSwitch *sw, AstCase *c, AstIdentifier
         }
     }
 
+    return declare_switch_binding(typer, sw, c, value);
+}
+
+// Declares the name of 'switch v in x' at the start of a case, with the value
+bool declare_switch_binding(Typer *typer, AstSwitch *sw, AstCase *c, AstExpr *value) {
+    Parser *parser = typer->parser;
     AstIdentifier *binding = make_identifier_from_string(parser, sw->binding.as_value.value.identifier.name, NULL);
     binding->head.file  = sw->head.head.file;
     binding->head.start = sw->binding.start;
@@ -4544,6 +4602,106 @@ bool check_union_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject, Typ
     return true;
 }
 
+// The type of a case of a switch on an interface, e.g the *Circle of 'case *Circle { ... }'
+static Type *case_interface_type(Typer *typer, TypeStruct *interface, AstExpr *value) {
+    bool is_pointer = value->head.kind == AST_UNARY && ((AstUnary *)value)->operator == OP_POINTER_DEREFERENCE;
+    AstExpr *named = is_pointer ? ((AstUnary *)value)->expr : NULL;
+    if (!named || named->head.kind != AST_LITERAL || ((AstLiteral *)named)->kind != LITERAL_IDENTIFIER) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "A case of a switch on an interface is a pointer type, e.g case *Circle { ... }");
+        return NULL;
+    }
+    Type *name = type_alloc(&typer->parser->type_table, sizeof(Type));
+    name->head  = value->head;
+    name->head.kind = AST_TYPE;
+    name->kind  = TYPE_NAME;
+    name->name  = ((AstLiteral *)named)->as.value.identifier.name;
+    Type *pointer = (Type *) generate_pointer_to_type(typer->parser, name);
+    pointer->head = value->head;
+    pointer->head.kind = AST_TYPE;
+    Type *type = resolve_type(typer, pointer);
+    if (!type) return NULL;
+    char why[512];
+    if (interface_mismatch(typer, interface, type, why, sizeof(why))) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "A %s is never a %s", interface->head.name, type_to_str(type));
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "%s", why);
+        return NULL;
+    }
+    return type;
+}
+
+// An interface as a type, e.g of a case 'case *Circle': if its value is of that type, or with 'test' false, the value
+static AstCast *make_interface_cast(Typer *typer, AstIdentifier *subject, Type *type, bool test, Ast *at) {
+    AstCast *cast = ast_allocate(typer->parser, sizeof(AstCast));
+    cast->head.head       = *at;
+    cast->head.head.kind  = AST_CAST;
+    cast->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    cast->expr            = (AstExpr *)make_resolved_identifier_literal(typer, subject, at);
+    cast->cast_to         = type;
+    cast->is_as_cast      = true;
+    cast->is_type_test    = test;
+    return cast;
+}
+
+// switch v in shape { case *Circle { ... } else { ... } }: each case tests the type of the value of the interface, and
+// declares v as a pointer of that type. The types of an interface are open, so only an else makes it handle all
+bool check_interface_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject, TypeStruct *interface, AstBlock *lowered, AstBlock *scope_before) {
+    AstIf *first = NULL;
+    for (int i = 0; i < sw->cases.count; i++) {
+        AstCase *c = ((AstCase **)sw->cases.items)[i];
+        if (c->is_else) {
+            if (first) first->else_block = c->block;
+            else       da_append(&lowered->statements, c->block);
+            break;
+        }
+
+        AstExpr *condition = NULL;
+        Type    *only      = NULL;
+        for (int j = 0; j < c->values.count; j++) {
+            AstExpr *value = ((AstExpr **)c->values.items)[j];
+            Type *type = case_interface_type(typer, interface, value);
+            if (!type) { typer->current_scope = scope_before; return false; }
+            only = type;
+            AstExpr *test = (AstExpr *)make_interface_cast(typer, subject, type, true, (Ast *)value);
+            condition = condition ? (AstExpr *)make_binary(typer, TOKEN_LOGICAL_OR, condition, test, (Ast *)value) : test;
+        }
+
+        if (sw->binding.type != TOKEN_NONE) {
+            // One type: a pointer of it. More: the interface itself
+            AstExpr *value = c->values.count == 1 ? (AstExpr *)make_interface_cast(typer, subject, only, false, (Ast *)c)
+                                                  : (AstExpr *)make_resolved_identifier_literal(typer, subject, (Ast *)c);
+            if (!declare_switch_binding(typer, sw, c, value)) { typer->current_scope = scope_before; return false; }
+        }
+
+        AstIf *ast_if      = ast_allocate(typer->parser, sizeof(AstIf));
+        ast_if->head.kind  = AST_IF;
+        ast_if->head.file  = c->head.file;
+        ast_if->head.start = c->head.start;
+        ast_if->head.end   = c->head.end;
+        ast_if->head.flags = AST_FLAG_COMPILER_GENERATED;
+        ast_if->condition  = condition;
+        ast_if->then_block = c->block;
+        ast_if->else_ifs   = da_init(1, sizeof(AstIf *));
+        if (first == NULL) {
+            first = ast_if;
+            da_append(&lowered->statements, first);
+        } else {
+            da_append(&first->else_ifs, ast_if);
+        }
+    }
+
+    bool ok = check_block(typer, lowered);
+    typer->current_scope = scope_before;
+    if (!ok) return false;
+
+    bool has_else = sw->cases.count > 0 && ((AstCase **)sw->cases.items)[sw->cases.count - 1]->is_else;
+    sw->is_exhaustive = has_else;
+    if (!has_else && sw->is_expression) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)sw->subject, "A switch expression on an interface needs an else, as any type can be a %s", interface->head.name);
+        return false;
+    }
+    return true;
+}
+
 // choice := switch x { case 1 => "icecream"; else => "mango"; }. The switch gives the type that is wanted, or the type of its first case
 Type *check_switch_expression(Typer *typer, AstSwitch *sw, Type *ctx_type) {
     if (sw->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) return sw->result_type;
@@ -4668,9 +4826,12 @@ bool check_switch(Typer *typer, AstSwitch *sw) {
     if (union_type) {
         return check_union_switch(typer, sw, subject, union_type, by_pointer, lowered, scope_before);
     }
+    if (subject && is_interface_type(subject->type)) {
+        return check_interface_switch(typer, sw, subject, (TypeStruct *)subject->type, lowered, scope_before);
+    }
 
     if (sw->binding.type != TOKEN_NONE) {
-        report_error_token(parser, LABEL_ERROR, sw->binding, "Only a switch on a union can give its value a name");
+        report_error_token(parser, LABEL_ERROR, sw->binding, "Only a switch on a union or an interface can give its value a name");
         report_error_ast(parser, LABEL_HINT, NULL, "e.g switch v in shape { case .circle { ... } }");
         return false;
     }
@@ -4983,7 +5144,7 @@ bool check_if_function_needs_a_return(Typer *typer, AstFunctionDefn *func_defn) 
     bool has_return = always_returns((Ast *)func_defn->body);
 
     Type *return_type_0 = ((Type **)func_defn->return_types.items)[0];
-    if (!has_return && return_type_0->kind != TYPE_VOID && !func_defn->is_extern && !func_defn->is_lambda) {
+    if (!has_return && return_type_0->kind != TYPE_VOID && !func_defn->is_extern && !func_defn->is_interface_method && !func_defn->is_lambda) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)func_defn, "Function is missing a return");
         report_error_ast(typer->parser, LABEL_NOTE, (Ast *)func_defn, "Every way through the function must end in a return, e.g an if needs an else that returns too");
         return false;
@@ -5588,6 +5749,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
 
             if (!types_fit_either_way(wanted_type, given_type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(wanted_type)), text_bold(type_to_str(given_type)));
+                explain_interface_mismatch(typer, wanted_type, given_type, arg->value);
                 hint_optional_unwrap(typer, wanted_type, given_type);
                 hint_c_string(typer, wanted_type, given_type);
                 if (given_type->kind == TYPE_VARIADIC && ((TypeVariadic *)given_type)->type->kind == wanted_type->kind) {
@@ -5719,6 +5881,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             // @Incomplete: Arguments are allowed to both widen (i32 to i64) and narrow (i64 to i32), as existing code depends on narrowing
             if (!types_fit_either_way(param->type, arg->value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg->value->type)));
+                explain_interface_mismatch(typer, param->type, arg->value->type, arg->value);
                 hint_optional_unwrap(typer, param->type, arg->value->type);
                 hint_c_string(typer, param->type, arg->value->type);
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param->decl), "Here is the definition of '%s'", param->name);
@@ -7258,7 +7421,10 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     if      (expr->head.kind == AST_LITERAL)        result = check_literal(typer, (AstLiteral *)(expr), ctx_type);
     else if (expr->head.kind == AST_BINARY)         result = check_binary(typer, (AstBinary *)(expr), ctx_type);
     else if (expr->head.kind == AST_UNARY)          result = check_unary(typer, (AstUnary *)(expr), ctx_type);
-    else if (expr->head.kind == AST_CAST)           result = check_cast(typer, (AstCast *)(expr), ctx_type);
+    else if (expr->head.kind == AST_CAST) {
+        ((AstCast *)expr)->with_ok = wants_all_results;   // c, ok := s as *Circle
+        result = check_cast(typer, (AstCast *)(expr), ctx_type);
+    }
     else if (expr->head.kind == AST_FUNCTION_CALL)  result = check_function_call(typer, (AstFunctionCall *)(expr));
     else if (expr->head.kind == AST_FUNCTION_DEFN)  result = check_lambda_expression(typer, (AstFunctionDefn *)(expr), ctx_type);
     else if (expr->head.kind == AST_STRUCT_LITERAL) result = check_struct_literal(typer, (AstStructLiteral *)(expr), ctx_type);
@@ -7410,6 +7576,144 @@ static AstExpr *make_member_access_of(Typer *typer, AstExpr *left, char *name) {
     ma->left            = left;
     ma->right           = (AstExpr *)member;
     return (AstExpr *)ma;
+}
+
+//
+// Interfaces (docs/interfaces.md)
+//
+
+bool is_interface_type(Type *type) {
+    return type != NULL && type->kind == TYPE_STRUCT && ((TypeStruct *) type)->node->is_interface;
+}
+
+// The methods of an interface, in the order of its table: each is the AstFunctionDefn of a method without a body
+DynamicArray interface_methods(TypeStruct *interface) {
+    AstStruct *node = interface->node->generic_struct ? interface->node->generic_struct : interface->node;
+    DynamicArray methods = da_init(4, sizeof(AstFunctionDefn *));
+    for (int i = 0; i < node->inside_methods.count; i++) {
+        AstDeclaration *decl = ((AstDeclaration **) node->inside_methods.items)[i];
+        for (int j = 0; j < decl->values.count; j++) {
+            AstExpr *value = ((AstExpr **) decl->values.items)[j];
+            if (value->head.kind == AST_FUNCTION_DEFN && ((AstFunctionDefn *) value)->is_interface_method) {
+                da_append(&methods, value);
+            }
+        }
+    }
+    return methods;
+}
+
+// A method of a struct as the function of an instance of the struct: a method of a generic struct is a generic function
+// with the type parameters of the struct, so for List<int> it is instantiated with int. Other methods are themselves
+AstFunctionDefn *method_of_instance(Typer *typer, AstFunctionDefn *method, TypeStruct *owner, Ast *site) {
+    if (!is_generic_function(method)) return method;
+    DynamicArray type_args = owner->node->type_args;
+    if (owner->node->generic_struct == NULL || type_args.count != method->type_params.count) return NULL; // e.g a method with type parameters of its own
+    return instantiate_generic_function(typer, method, type_args, site);
+}
+
+// The method of the type that a method of an interface calls, or NULL
+AstFunctionDefn *method_for_interface(Typer *typer, Type *type, char *name) {
+    TypeStruct *holder = method_holder_of(typer, type);
+    if (holder == NULL) return NULL;
+    AstIdentifier *ident = find_method(holder, name);
+    if (ident == NULL || ident->type == NULL || ident->type->kind != TYPE_FUNCTION) return NULL;
+    return method_of_instance(typer, ((TypeFunction *) ident->type)->node, holder, (Ast *) ident);
+}
+
+static bool same_types(Type *a, Type *b) {
+    return a == b || strcmp(type_identity(a), type_identity(b)) == 0;
+}
+
+// Why 'given' can't be the interface, or NULL when it can: a pointer to a value of a type that has each method of the
+// interface, with the same parameters and results. The reason is written into 'why' when it is given
+const char *interface_mismatch(Typer *typer, TypeStruct *interface, Type *given, char *why, int size) {
+    static char none[1];
+    if (why == NULL) { why = none; size = 1; }
+    const char *iface = interface->head.name;
+
+    Type *type = given;
+    bool is_pointer = given->kind == TYPE_POINTER;
+    if (is_pointer) type = ((TypePointer *) given)->pointer_to;
+    if (typer == NULL || type == NULL || method_holder_of(typer, type) == NULL || is_interface_type(type)) {
+        snprintf(why, size, "a %s isn't a %s: only a pointer to a value whose type has the methods of %s is", type_to_str(given), iface, iface);
+        return why;
+    }
+
+    DynamicArray methods = interface_methods(interface);
+    const char *reason = NULL;
+    for (int i = 0; i < methods.count && reason == NULL; i++) {
+        AstFunctionDefn *wanted = ((AstFunctionDefn **) methods.items)[i];
+        char *name = wanted->identifier->name;
+        // Of a generic interface, e.g Iterator<int>: the method with the types of the instance
+        wanted = method_of_instance(typer, wanted, interface, (Ast *) wanted);
+        if (wanted == NULL) {
+            snprintf(why, size, "the method '%s' of %s has type parameters of its own, which a method of an interface can't have", name, iface);
+            reason = why;
+            break;
+        }
+        AstFunctionDefn *method = method_for_interface(typer, type, name);
+        if (method == NULL) {
+            snprintf(why, size, "%s isn't a %s: it has no method '%s'", type_to_str(type), iface, name);
+            reason = why;
+            break;
+        }
+        if (!check_function_defn(typer, wanted) || !check_function_defn(typer, method)) {
+            snprintf(why, size, "%s isn't a %s: its method '%s' has errors", type_to_str(type), iface, name);
+            reason = why;
+            break;
+        }
+        // The receiver is a pointer, as the interface calls the method with the pointer it holds
+        AstIdentifier *receiver = ((AstIdentifier **) method->parameters.items)[0];
+        if (receiver->type->kind != TYPE_POINTER) {
+            snprintf(why, size, "the method '%s' of %s takes its receiver by value, but an interface calls it with a pointer: make it '%s :: method (x: *%s ...)', or declare it inside the struct",
+                name, type_to_str(type), name, type_to_str(type));
+            reason = why;
+            break;
+        }
+        bool same = method->parameters.count == wanted->parameters.count && method->return_types.count == wanted->return_types.count;
+        for (int p = 1; same && p < method->parameters.count; p++) {
+            AstIdentifier *a = ((AstIdentifier **) method->parameters.items)[p];
+            AstIdentifier *b = ((AstIdentifier **) wanted->parameters.items)[p];
+            same = same_types(a->type, b->type);
+        }
+        for (int r = 0; same && r < method->return_types.count; r++) {
+            same = same_types(((Type **) method->return_types.items)[r], ((Type **) wanted->return_types.items)[r]);
+        }
+        if (!same) {
+            snprintf(why, size, "%s isn't a %s: its method '%s' is %s, but %s wants %s", type_to_str(type), iface, name,
+                type_to_str(method->head.type), iface, type_to_str(wanted->head.type));
+            reason = why;
+        }
+    }
+    da_free(&methods);
+    if (reason) return reason;
+
+    if (!is_pointer) {
+        snprintf(why, size, "%s isn't a pointer: pass a pointer to it, e.g &x, to share it as a %s", type_to_str(given), iface);
+        return why;
+    }
+    return NULL;
+}
+
+// After a type mismatch: why the given type isn't the interface that is wanted, as a hint. For a value that isn't a
+// pointer, the hint says to pass its address, e.g &c
+void explain_interface_mismatch(Typer *typer, Type *wanted, Type *given, AstExpr *expr) {
+    if (!is_interface_type(wanted) || given == NULL || is_interface_type(given)) return;
+    char why[512];
+    if (!interface_mismatch(typer, (TypeStruct *) wanted, given, why, sizeof(why))) return;
+
+    // The text of the expression, when it is a short name
+    AstFile *file = expr ? expr->head.file : NULL;
+    int start = expr ? expr->head.start.input_idx : 0, end = expr ? expr->head.end.input_idx : 0;
+    if (given->kind != TYPE_POINTER && file && file->text && end > start && end - start < 40 && end <= (int) strlen(file->text)) {
+        char text[48];
+        memcpy(text, &file->text[start], end - start);
+        text[end - start] = 0;
+        if (strchr(text, '\n') == NULL && strstr(why, "isn't a pointer")) {
+            snprintf(why, sizeof(why), "%s is a %s, not a pointer: pass &%s to share it as a %s", text, type_to_str(given), text, ((TypeStruct *) wanted)->head.name);
+        }
+    }
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "%s", why);
 }
 
 // How far into the struct 'outer' the embedded struct 'inner' is, through embedded members by value, or -1. For *Outer as *Inner
@@ -8396,6 +8700,10 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         if (is_equality && ((lhs == TYPE_FUNCTION && is_null_type(ti_rhs)) || (is_null_type(ti_lhs) && rhs == TYPE_FUNCTION))) {
             return primitive_type(PRIMITIVE_BOOL);
         }
+        // An interface with null: if it has a value
+        if (is_equality && ((is_interface_type(ti_lhs) && is_null_type(ti_rhs)) || (is_null_type(ti_lhs) && is_interface_type(ti_rhs)))) {
+            return primitive_type(PRIMITIVE_BOOL);
+        }
 
         if (lhs == TYPE_ENUM    && rhs == TYPE_ENUM) {
             if (strcmp(ti_lhs->name, ti_rhs->name) == 0) {
@@ -8609,6 +8917,33 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
 
     Type *expr_type = check_expression(typer, cast->expr, NULL);
     if (!expr_type) return NULL;
+
+    // An interface as a pointer to the type of its value, e.g s as *Circle. It throws a Panic when it is another type,
+    // and with 'c, ok :=' it gives if it is that type instead
+    if (is_interface_type(expr_type) && !cast->is_auto && wanted_type->kind != TYPE_ANY) {
+        TypeStruct *interface = (TypeStruct *) expr_type;
+        if (cast->is_type_test) return primitive_type(PRIMITIVE_BOOL);   // Made by check_interface_switch
+        if (wanted_type->kind != TYPE_POINTER) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "A %s is a pointer to a value, so 'as' gives a pointer, e.g %s as *%s", interface->head.name, "s", type_to_str(wanted_type));
+            return NULL;
+        }
+        char why[512];
+        if (interface_mismatch(typer, interface, wanted_type, why, sizeof(why))) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "A %s is never a %s", interface->head.name, type_to_str(wanted_type));
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "%s", why);
+            return NULL;
+        }
+        cast->cast_to = wanted_type;
+        if (cast->with_ok) {
+            DynamicArray types = da_init(2, sizeof(Type *));
+            Type *bool_type = primitive_type(PRIMITIVE_BOOL);
+            da_append(&types, wanted_type);
+            da_append(&types, bool_type);
+            return (Type *) make_tuple_type_from_type_list(typer, types);
+        }
+        return wanted_type;
+    }
+    cast->with_ok = false;
 
     if (!can_cast_explicitly(expr_type, wanted_type)) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "Invalid Cast: Type %s can not be casted to %s", type_to_str(expr_type), type_to_str(wanted_type));

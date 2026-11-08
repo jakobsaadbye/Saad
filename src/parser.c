@@ -1363,7 +1363,7 @@ Ast *parse_statement(Parser *parser) {
         return parse_attributed_declaration(parser);
     }
 
-    if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && (peek_token(parser, 2).type == TOKEN_STRUCT || peek_token(parser, 2).type == TOKEN_UNION)) {
+    if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && (peek_token(parser, 2).type == TOKEN_STRUCT || peek_token(parser, 2).type == TOKEN_UNION || peek_token(parser, 2).type == TOKEN_INTERFACE)) {
         stmt = (Ast *)(parse_struct_defn(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
@@ -2308,6 +2308,13 @@ bool parse_type_parameters(Parser *parser, DynamicArray *type_params) {
         da_append(type_params, param);
 
         Token next = peek_next_token(parser);
+        // A constraint: an interface that the type must be, e.g <S: Shape>. See docs/interfaces.md
+        if (next.type == ':') {
+            eat_token(parser);
+            param->constraint = parse_type(parser);
+            if (!param->constraint) return false;
+            next = peek_next_token(parser);
+        }
         if (next.type == ',') {
             eat_token(parser);
             continue;
@@ -2735,11 +2742,12 @@ AstStruct *parse_struct_defn(Parser *parser) {
     eat_token(parser);
 
     Token struct_token = peek_next_token(parser);
-    if (struct_token.type != TOKEN_UNION) expect(parser, struct_token, TOKEN_STRUCT);
+    if (struct_token.type != TOKEN_UNION && struct_token.type != TOKEN_INTERFACE) expect(parser, struct_token, TOKEN_STRUCT);
     eat_token(parser);
 
     AstStruct *struct_defn = (AstStruct *)(ast_allocate(parser, sizeof(AstStruct)));
     struct_defn->is_union       = struct_token.type == TOKEN_UNION;
+    struct_defn->is_interface   = struct_token.type == TOKEN_INTERFACE;
     struct_defn->static_members = make_empty_struct_scope(parser, struct_defn);
     struct_defn->static_members->parent = parser->current_scope;
     struct_defn->type_params    = da_init(1, sizeof(AstIdentifier *));
@@ -2762,6 +2770,24 @@ AstStruct *parse_struct_defn(Parser *parser) {
         tag->head.start = struct_token.start;
         tag->head.end   = struct_token.end;
         add_union_member(parser, tag, primitive_type(PRIMITIVE_U32));
+    }
+    if (struct_defn->is_interface) {
+        // The value, and the table of the methods of its type for the interface. See docs/interfaces.md
+        const char *names[2] = { "$value", "$table" };
+        for (int i = 0; i < 2; i++) {
+            TypePointer *pointer     = type_alloc(&parser->type_table, sizeof(TypePointer));
+            pointer->head.head.kind  = AST_TYPE;
+            pointer->head.head.file  = parser->current_file;
+            pointer->head.head.start = struct_token.start;
+            pointer->head.head.end   = struct_token.end;
+            pointer->head.kind       = TYPE_POINTER;
+            pointer->head.size       = 8;
+            pointer->pointer_to      = primitive_type(PRIMITIVE_VOID);
+            AstIdentifier *member = make_identifier_from_string(parser, (char *) names[i], (Type *) pointer);
+            member->head.start = struct_token.start;
+            member->head.end   = struct_token.end;
+            add_union_member(parser, member, (Type *) pointer);
+        }
     }
     scope = parse_block(parser, scope);
     if (!scope) return NULL;
@@ -3718,7 +3744,20 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
         func_defn->extern_library = parser->extern_library;
     }
 
-    if (!func_defn->is_extern) {
+    // A method of an interface has no body: it is a method that the types of the interface have, e.g 'area :: method () -> f64;'
+    if (self_struct && self_struct->is_interface) {
+        func_defn->is_interface_method = true;
+        next = peek_next_token(parser);
+        if (next.type == '{') {
+            report_error_token(parser, LABEL_ERROR, next, "A method of an interface has no body");
+            report_error_ast(parser, LABEL_HINT, NULL, "The types of the interface have the methods, e.g 'area :: method () -> f64;' in the interface, and 'area :: method () -> f64 { ... }' in a struct");
+            return NULL;
+        }
+        expect(parser, next, ';');
+        eat_token(parser);
+    }
+
+    if (!func_defn->is_extern && !func_defn->is_interface_method) {
         AstBlock *body_parsed = parse_block(parser, func_defn->body); // Here we tell parse_block to explicitly not make a new lexical scope, but instead use our existing function header
         if (!body_parsed) return NULL;
     }
