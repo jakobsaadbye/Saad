@@ -67,7 +67,7 @@ swap :: method <T>(elements: []T, i: int, j: int) {
 //
 
 // A list of f of each element, e.g [1, 2, 3].map(double) is [2, 4, 6]
-map :: method <T, U>(elements: []T, f: (T) -> U, allocator: *Allocator = null) -> [..]U {
+map :: method <T, U>(elements: []T, f: (T) -> U, allocator: Allocator = null) -> [..]U {
     result: [..]U;
     result.allocator = allocator;
     result.reserve(elements.count);
@@ -78,7 +78,7 @@ map :: method <T, U>(elements: []T, f: (T) -> U, allocator: *Allocator = null) -
 }
 
 // A list of the elements that keep is true for, in the same order
-filter :: method <T>(elements: []T, keep: (T) -> bool, allocator: *Allocator = null) -> [..]T {
+filter :: method <T>(elements: []T, keep: (T) -> bool, allocator: Allocator = null) -> [..]T {
     result: [..]T;
     result.allocator = allocator;
     for element in elements {

@@ -4175,7 +4175,7 @@ AstExpr *parse_new(Parser *parser) {
         }
         Token close = peek_next_token(parser);
         if (close.type != ')') {
-            report_error_token(parser, LABEL_ERROR, close, "Expected a ')' after the type of new, e.g new(Point) or new(Point, &allocator)");
+            report_error_token(parser, LABEL_ERROR, close, "Expected a ')' after the type of new, e.g new(Point) or new(Point, &arena)");
             return NULL;
         }
         eat_token(parser);

@@ -44,7 +44,7 @@ finishSession :: (session: *Session) {
 @web.endpoint(.get)
 getPosts :: (session: *Session, authorId: int) -> [..]Post {
     result: [..]Post;   // In the arena of the request, as everything the endpoint allocates
-    assert(mem.allocator() == &session.request.allocator);
+    assert(mem.allocator() == session.request.allocator);
     session.store.mutex.lock();
     for p in session.store.posts {
         if p.authorId == authorId { result.add(p); }

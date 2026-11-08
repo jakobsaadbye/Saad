@@ -476,7 +476,7 @@ users.findIndex(isAdult);                               // -1 when there is none
 users.some(isAdult);  users.every(isAdult);  users.countWhere(isAdult);
 ```
 
-`map` and `filter` take an allocator for the new list as their last argument, e.g `xs.filter(isEven, &alloc)`. Null,
+`map` and `filter` take an allocator for the new list as their last argument, e.g `xs.filter(isEven, &arena)`. Null,
 the default, is the heap. A function type can leave out the names of its parameters: `(T) -> U`.
 
 A type's own method of the same name wins, e.g `List` has its own `indexOf`, `contains` and `reverse`.
@@ -555,10 +555,10 @@ when none is given, so a program doesn't need `malloc`:
 
 ```odin
 p := new(Player);                  // a *Player with the defaults of Player, e.g health: int = 100
-q := new(Player, &allocator);      // from an allocator, e.g of an arena
+q := new(Player, &arena);          // from an allocator, e.g an arena
 r := new Point{3, 4};              // a copy of a value, also new(Point{3, 4})
 n := new(int);
-freeMemory(p);                     // or mem.free(p), with the allocator it came from
+mem.delete(p);                     // with the allocator it came from, e.g mem.delete(q, &arena)
 ```
 
 `new(T, allocator)` is `allocateNew<T>(allocator)` and `new value` is `allocateCopy(value)`, functions of the prelude
@@ -567,13 +567,15 @@ freeMemory(p);                     // or mem.free(p), with the allocator it came
 ## math, mem, c
 
 * `math`: the functions of C's `math.h` (`sin`, `sqrt`, `pow`, ...).
-* `mem`: memory, so the standard library and programs don't call C for it. `mem.allocate(size, allocator)` gives
-  zeroed memory, `mem.resize(p, size, allocator)` is like `realloc`, `mem.free(p, allocator)`, and `mem.copy(to, from,
-  n)`, `mem.set(to, byte, n)` and `mem.equal(a, b, n)` are like `memcpy`, `memset` and `memcmp`. The allocator is
-  optional: the allocator of the thread when there is none. The standard library uses these and `new`; `mem` and the
-  prelude are the only places that call C for memory.
+* `mem`: memory, so the standard library and programs don't call C for it. All of it goes through an `Allocator`, an
+  interface any type can be (see `docs/allocators.md`). `mem.allocate(size, allocator, align)` gives zeroed memory,
+  `mem.resize(p, oldSize, newSize, allocator)` is like `realloc`, `mem.free(p, size, allocator)` frees it,
+  `mem.delete(p, allocator)` frees a `new(T)`, and `mem.copy(to, from, n)`, `mem.set(to, byte, n)` and
+  `mem.equal(a, b, n)` are like `memcpy`, `memset` and `memcmp`. The allocator is optional: the allocator of the
+  thread when there is none. The standard library uses these and `new`; `mem` and the prelude are the only places that
+  call C for memory.
 * **The allocator of the thread** is what a null allocator means, e.g for `new(T)`, strings, `fmt.sprint`, lists,
-  maps, `json` and `dbms`. It is the heap unless it is set: `mem.setAllocator(&alloc)` sets it and gives the one before,
+  maps, `json` and `dbms`. It is the heap unless it is set: `mem.setAllocator(&arena)` sets it and gives the one before,
   and `mem.allocator()` reads it. The http server sets it to the arena of the request while a handler or an endpoint
   runs, so everything it allocates, also its result, is freed after the response, without `free`.
 * A list, a map, a `StringBuilder` and a `bytes.Buffer` keep the allocator of their first memory, so they grow and
@@ -581,14 +583,13 @@ freeMemory(p);                     // or mem.free(p), with the allocator it came
 * What lives longer than a request is given the heap, `mem.heap()`: `store.posts.allocator = mem.heap();` or
   `title.copy(mem.heap())` (`copy` and `free` of a string take an allocator).
 * `mem.Arena`: memory that is freed all at once, and the sizes `Kilobyte` and `Megabyte`. The zero value is
-  ready to use: `arena.allocate(size)` gives zeroed memory, `arena.allocator()` an `Allocator` for lists, maps and
+  ready to use: `arena.allocate(size)` gives zeroed memory, an arena is an `Allocator` (`&arena`) for lists, maps and
   `dbms.Connection`, and `arena.clear()` and `arena.free()` free all of it.
 
 ```odin
 arena: mem.Arena;
-alloc := arena.allocator();
 names: [..]string;
-names.allocator = &alloc;      // the list grows inside the arena
+names.allocator = &arena;      // the list grows inside the arena
 arena.free();
 ```
 * `c`: `printf`, `fopen`, `strlen`, ... Use it when nothing else fits; for memory, use `new` and `mem`. Sizes that are

@@ -23,10 +23,10 @@ Buffer :: struct {
     length:    int;          // The bytes in it, read or not
     capacity:  int;
     position:  int;          // Where the next read starts
-    allocator: *Allocator;   // Null for the allocator of the thread, which it keeps when it gets its first memory
+    allocator: Allocator;    // Null for the allocator of the thread, which it keeps when it gets its first memory
 }
 
-newBuffer :: (capacity := 256, allocator: *Allocator = null) -> Buffer {
+newBuffer :: (capacity := 256, allocator: Allocator = null) -> Buffer {
     b: Buffer;
     b.allocator = allocator;
     b.reserve(capacity);
@@ -66,7 +66,7 @@ reserve :: method (b: *Buffer, extra: int) {
     if capacity < 64 { capacity = 64; }
     while capacity < b.length + extra { capacity *= 2; }
     if b.allocator == null { b.allocator = currentAllocator(); }   // Kept, so it grows and is freed with the same one
-    b.data = resizeMemory(b.allocator, b.data, capacity) as *u8;
+    b.data = resizeMemory(b.allocator, b.data, b.capacity, capacity) as *u8;
     b.capacity = capacity;
 }
 
@@ -174,7 +174,7 @@ clear :: method (b: *Buffer) {
 }
 
 free :: method (b: *Buffer) {
-    if b.data != null { resizeMemory(b.allocator, b.data, 0); }
+    if b.data != null { resizeMemory(b.allocator, b.data, b.capacity, 0); }
     b.data = null;
     b.length = 0;
     b.capacity = 0;

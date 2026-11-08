@@ -36,7 +36,7 @@ output :: (command: string) -> string, int {
     quoted[command.len + 2] = 0;
 
     pipe := _popen(c.string{quoted}, "rb");
-    mem.free(quoted);
+    mem.free(quoted, command.len + 3);
     if pipe == null {
         return "", -1;
     }
@@ -110,8 +110,8 @@ readAll :: (file: *void) -> string {
     data     := mem.allocate(capacity) as *u8;
     while true {
         if count == capacity {
+            data = mem.resize(data, capacity, capacity * 2) as *u8;
             capacity *= 2;
-            data = mem.resize(data, capacity) as *u8;
         }
         read := fread(&data[count], 1, (capacity - count) as i64, file) as int;
         if read <= 0 {

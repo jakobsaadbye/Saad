@@ -121,7 +121,7 @@ Query :: struct <T> {
             rows.free();
             return null, err;
         }
-        row := resizeMemory(self.context.conn.allocator, null, sizeof(T)) as *T;
+        row := resizeMemory(self.context.conn.allocator, null, 0, sizeof(T)) as *T;
         *row = rows[0];
         rows.free();
         if self.isTracked() {

@@ -74,7 +74,7 @@ handleFiles :: method (router: *Router, prefix: string, folder: string) {
 @private
 filePath :: (route: *Route, r: *Request) -> string, bool {
     segments: [..]string;
-    segments.allocator = &r.allocator;
+    segments.allocator = r.allocator;
     for segment in r.path.split("/") {
         if segment.len > 0 { segments.add(segment); }
     }

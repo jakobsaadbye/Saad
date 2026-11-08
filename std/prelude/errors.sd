@@ -107,7 +107,7 @@ panicNullPointer :: (text: *u8) {
     sprintf(buffer.data, "Null pointer dereference: %s is null", text);
     copied := c.string{buffer.data}.toString();
     message: string;
-    message.data = resizeMemory(heapAllocator(), null, copied.len) as *u8;
+    message.data = resizeMemory(heapAllocator(), null, 0, copied.len) as *u8;
     message.len  = copied.len;
     for i in 0..copied.len { message.data[i] = copied.data[i]; }
     panic(message);
@@ -125,7 +125,7 @@ panicInterfaceCast :: (table: *void, named: *u8, wanted: *u8) {
     }
     copied := c.string{buffer.data}.toString();
     message: string;
-    message.data = resizeMemory(heapAllocator(), null, copied.len) as *u8;
+    message.data = resizeMemory(heapAllocator(), null, 0, copied.len) as *u8;
     message.len  = copied.len;
     for i in 0..copied.len { message.data[i] = copied.data[i]; }
     panic(message);
@@ -137,7 +137,7 @@ panicIndexOutOfBounds :: (index: i64, count: i64) {
     sprintf(buffer.data, "Index %lld is out of bounds, as there are %lld elements", index, count);
     text := c.string{buffer.data}.toString();
     message: string;
-    message.data = resizeMemory(heapAllocator(), null, text.len) as *u8;
+    message.data = resizeMemory(heapAllocator(), null, 0, text.len) as *u8;
     message.len  = text.len;
     for i in 0..text.len { message.data[i] = text.data[i]; }
     panic(message);
@@ -303,7 +303,7 @@ panicFreedMemory :: (text: *u8) {
     sprintf(buffer.data, "Use of freed memory: %s points into an arena that was cleared or freed", text);
     copied := c.string{buffer.data}.toString();
     message: string;
-    message.data = resizeMemory(heapAllocator(), null, copied.len) as *u8;
+    message.data = resizeMemory(heapAllocator(), null, 0, copied.len) as *u8;
     message.len  = copied.len;
     for i in 0..copied.len { message.data[i] = copied.data[i]; }
     panic(message);

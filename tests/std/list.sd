@@ -15,20 +15,20 @@ firstOf :: <T>(values: []T) -> T {
     return values[0];
 }
 
-// An allocator that counts how much memory is in use
+// An allocator of its own, which counts how much memory is in use: it is an Allocator, as it has resize
 Counter :: struct {
     bytes: i64;
     calls: int;
-}
 
-countingResize :: (context: *void, memory: *void, size: i64) -> *void {
-    counter := context as *Counter;
-    counter.calls += 1;
-    if size == 0 {
-        free(memory);
-        return null;
+    resize :: method * (memory: *void, oldSize: i64, newSize: i64, align: i64) -> *void {
+        self.calls += 1;
+        self.bytes += newSize - oldSize;
+        if newSize == 0 {
+            free(memory);
+            return null;
+        }
+        return realloc(memory, newSize);
     }
-    return realloc(memory, size);
 }
 
 main :: () {
@@ -153,15 +153,13 @@ main :: () {
     {
         // A list with its own allocator
         counter: Counter;
-        allocator := Allocator{&counter, countingResize};
-
         xs: [..]int;
-        xs.allocator = &allocator;
+        xs.allocator = &counter;
         for i in 0..10 { xs.add(i); }
-        assert(counter.calls == 3); // Capacity 4, then 8, then 16
+        assert(counter.calls == 3 && counter.bytes == 16 * sizeof(int)); // Capacity 4, then 8, then 16
         assert(xs[9] == 9);
         xs.free();
-        assert(counter.calls == 4);
+        assert(counter.calls == 4 && counter.bytes == 0);
     }
     {
         // Printing shows the elements

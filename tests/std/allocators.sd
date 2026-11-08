@@ -6,7 +6,7 @@ import fmt;
 import bytes;
 import thread;
 
-other :: (seen: **Allocator) {
+other :: (seen: *Allocator) {
     *seen = mem.allocator();   // Each thread has its own
 }
 
@@ -20,8 +20,8 @@ main :: () {
 
     arena: mem.Arena;
     alloc := arena.allocator();
-    previous := mem.setAllocator(&alloc);
-    assert(previous == null && mem.allocator() == &alloc);
+    previous := mem.setAllocator(alloc);
+    assert(previous == null && mem.allocator() == alloc);
 
     for i in 0..1000 { heapList.add(i); }       // Grows on the heap, not in the arena
     assert(heapList.allocator == mem.heap());
@@ -29,15 +29,15 @@ main :: () {
     // What has no memory yet takes the arena
     arenaList: [..]int;
     arenaList.add(5);
-    assert(arenaList.allocator == &alloc);
+    assert(arenaList.allocator == alloc);
     counts: Map<string, int>;
     counts["a"] = 1;
     sb: fmt.StringBuilder;
     sb.addString("in the arena");
-    assert(sb.allocator == &alloc);
+    assert(sb.allocator == alloc);
     buffer: bytes.Buffer;
     buffer.write("also");
-    assert(buffer.allocator == &alloc);
+    assert(buffer.allocator == alloc);
     text := fmt.sprint("% %", 1, 2);
     p := new(int);
     *p = 3;
@@ -48,7 +48,7 @@ main :: () {
     kept := text.copy(mem.heap());
 
     // Another thread has the heap
-    seen: *Allocator;
+    seen: Allocator;
     t := thread.spawn(other, &seen);
     t.join();
     assert(seen == mem.heap());

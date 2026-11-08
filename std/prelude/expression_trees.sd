@@ -62,7 +62,7 @@ exprValue :: (value: any) -> *ExprNode {
     node := exprNode(.value);
     node.value.type = value.type;
     if value.type != null && value.data != null {
-        copy := resizeMemory(null, null, value.type.size) as *u8;
+        copy := resizeMemory(null, null, 0, value.type.size) as *u8;
         from := value.data as *u8;
         for i in 0..value.type.size {
             copy[i] = from[i];

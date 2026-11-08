@@ -29,7 +29,7 @@ main :: () {
     // As the allocator of a list. Growing copies the old items
     alloc := arena.allocator();
     numbers: [..]int;
-    numbers.allocator = &alloc;
+    numbers.allocator = alloc;
     for i in 0..1000 {
         numbers.add(i);
     }
@@ -39,7 +39,7 @@ main :: () {
     assert(total == 499500);
 
     names: [..]string;
-    names.allocator = &alloc;
+    names.allocator = alloc;
     names.add("a");
     names.add("b");
     names.add("c");

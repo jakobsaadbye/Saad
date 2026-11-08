@@ -146,8 +146,7 @@ An arena is the easy way for a web request: everything of the request is freed a
 import mem;
 
 arena: mem.Arena;
-alloc := arena.allocator();
-conn.allocator = &alloc;
+conn.allocator = &arena;
 
 orders, err := conn.query<Order>("SELECT * FROM orders WHERE customer = $1", id);
 // ... use the orders ...
@@ -156,7 +155,7 @@ arena.free();   // or arena.clear() to use the memory again for the next request
 ```
 
 `mem.Arena` (in `std/mem.sd`) works without setting up: the zero value takes memory when it is first used.
-`arena.allocate(size)` gives zeroed memory, `arena.allocator()` an `Allocator` for lists, maps and connections,
+`arena.allocate(size)` gives zeroed memory, an arena is an `Allocator` (`&arena`) for lists, maps and connections,
 `arena.used()` the bytes in use, `arena.clear()` makes all of it free again (keeping the newest chunk) and
 `arena.free()` gives it back.
 

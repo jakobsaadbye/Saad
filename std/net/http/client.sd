@@ -32,7 +32,7 @@ header :: method (response: *Response, name: string) -> string, bool {
 
 free :: method (response: *Response) {
     response.arena.free();
-    mem.free(response);
+    mem.delete(response);
 }
 
 ProtocolError :: ErrorKind{"http.ProtocolError"};   // A url that isn't http, or a response that isn't HTTP
@@ -95,7 +95,7 @@ request :: (verb: string, url: string, headers: []Header = [], body := "") -> *R
     if err != null { return null, err; }
     defer {
         conn.close();
-        mem.free(conn, mem.heap());
+        mem.delete(conn, mem.heap());
     }
     if parts.tls {
         err = conn.startTls(parts.host);
@@ -117,8 +117,8 @@ request :: (verb: string, url: string, headers: []Header = [], body := "") -> *R
     if err != null { return null, err; }
 
     response := new(Response);
-    response.allocator = response.arena.allocator();
-    response.headers.allocator = &response.allocator;
+    response.allocator = &response.arena;
+    response.headers.allocator = &response.arena;
     buffer: bytes.Buffer;
     defer buffer.free();
     limits: Limits;
