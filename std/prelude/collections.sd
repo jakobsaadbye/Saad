@@ -13,6 +13,37 @@
 use c;
 
 //
+// The collection protocol as interfaces (docs/collections.md, docs/interfaces.md). A collection doesn't name them: it is
+// each one whose methods it has, e.g a [..]int is an Iterable<int>, a Growable<int> and an Indexable<i64, int>. So code
+// can take any collection, as a value or a constraint:
+//
+//     total :: (xs: Iterable<int>) -> int { sum := 0; for x in xs { sum += x; } return sum; }
+//     total(&list);
+//
+// The syntax of collections works on them too: for x in xs, xs[k], and the literals where one is wanted
+//
+
+// for x in c, and c where a []T is wanted
+Iterable :: interface <T> {
+    elements :: method () -> []T;
+}
+
+// [a, b, c] where the collection is wanted
+Growable :: interface <T> {
+    add :: method * (value: T);
+}
+
+// c[k] and c[k] = v
+Indexable :: interface <K, V> {
+    indexRef :: method (key: K) -> *V;
+}
+
+// [k1: v1, k2: v2] where the collection is wanted
+Keyed :: interface <K, V> {
+    set :: method * (key: K, value: V);
+}
+
+//
 // Optionals
 //
 

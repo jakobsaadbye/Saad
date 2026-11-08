@@ -1,0 +1,10 @@
+// expect-error: A Shape is never a *Plain
+// expect-error: Plain isn't a Shape: it has no method 'area'
+
+Shape :: interface { area :: method () -> f64; }
+Plain :: struct { x: int; }
+
+main :: () {
+    s: Shape;
+    p := s as *Plain;
+}

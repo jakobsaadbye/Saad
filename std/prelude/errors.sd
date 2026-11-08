@@ -113,6 +113,24 @@ panicNullPointer :: (text: *u8) {
     panic(message);
 }
 
+// For 's as *Circle' of an interface whose value is of another type, or that is null. The table of the interface value
+// starts with the descriptor of the type of its value
+panicInterfaceCast :: (table: *void, named: *u8, wanted: *u8) {
+    buffer: [256]u8;
+    if table == null {
+        sprintf(buffer.data, "The %s is null, not a %s", named, wanted);
+    } else {
+        type := *(table as **Type);
+        sprintf(buffer.data, "The %s is a *%.*s, not a %s", named, type.name.len as i32, type.name.data, wanted);
+    }
+    copied := c.string{buffer.data}.toString();
+    message: string;
+    message.data = resizeMemory(heapAllocator(), null, copied.len) as *u8;
+    message.len  = copied.len;
+    for i in 0..copied.len { message.data[i] = copied.data[i]; }
+    panic(message);
+}
+
 // For an index outside of the elements of an array, a slice, a list or a string
 panicIndexOutOfBounds :: (index: i64, count: i64) {
     buffer: [96]u8;

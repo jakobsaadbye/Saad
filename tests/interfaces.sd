@@ -1,0 +1,228 @@
+// Interfaces: a type is an interface when it has its methods, and a value of the interface is a pointer to the value and
+// the table of the methods of its type. See docs/interfaces.md
+use fmt;
+
+Shape :: interface {
+    area :: method () -> f64;
+    name :: method () -> string;
+}
+
+Circle :: struct {
+    radius: f64;
+    area :: method () -> f64 { return 3.0 * self.radius * self.radius; }
+    name :: method () -> string { return "circle"; }
+}
+
+Square :: struct {
+    side: f64;
+    area :: method () -> f64 { return self.side * self.side; }
+    name :: method () -> string { return "square"; }
+}
+
+// A method declared outside the struct counts too, when it takes a pointer
+Triangle :: struct { base: f64; height: f64; }
+area :: method (t: *Triangle) -> f64 { return t.base * t.height / 2.0; }
+name :: method (t: *Triangle) -> string { return "triangle"; }
+
+describe :: (s: Shape) -> string {
+    return sprint("a % of %", s.name(), s.area());
+}
+
+// method * changes the value itself, as the interface points at it
+Counter :: interface {
+    bump  :: method * (by: int);
+    value :: method () -> int;
+}
+
+Tally :: struct {
+    n: int;
+    bump  :: method * (by: int) { self.n += by; }
+    value :: method () -> int { return self.n; }
+}
+
+Holder :: struct { counter: Counter; }
+
+asCounter :: (t: *Tally) -> Counter { return t; }
+
+// Getting the type back
+grow :: (s: Shape) {
+    circle := s as *Circle;            // A Panic when it is another type
+    circle.radius *= 2.0;
+}
+
+growIfCircle :: (s: Shape) -> bool {
+    circle, ok := s as *Circle;        // ok is false and circle null when it is another type
+    if !ok { return false; }
+    circle.radius *= 2.0;
+    return true;
+}
+
+exactly :: (s: Shape) -> string {
+    switch v in s {
+        case *Circle { return sprint("circle %", v.radius); }
+        case *Square { return sprint("square %", v.side); }
+        else         { return sprint("other %", s.name()); }
+    }
+    return "";
+}
+
+kind :: (s: Shape) -> string {
+    return switch s {
+        case *Circle => "round";
+        case *Square
+        case *Triangle => "pointy";
+        else => "nothing";
+    };
+}
+
+// As a constraint: made for each type, with direct calls
+totalArea :: <S: Shape>(shapes: []S) -> f64 {
+    total: f64 = 0.0;
+    for *s in shapes { total += s.area(); }
+    return total;
+}
+
+// A generic interface
+Source :: interface <T> {
+    next :: method * () -> ?T;
+}
+
+Countdown :: struct {
+    from: int;
+    next :: method * () -> ?int {
+        if self.from == 0 { return null; }
+        self.from -= 1;
+        return self.from + 1;
+    }
+}
+
+drain :: (source: Source<int>) -> [..]int {
+    out: [..]int;
+    while true {
+        n := source.next();
+        if n == null { break; }
+        out.add(n ?? 0);
+    }
+    return out;
+}
+
+// The collection protocol: Iterable, Growable, Indexable and Keyed of the prelude
+Last3 :: struct {
+    items: [..]int;
+    add :: method * (value: int) {
+        self.items.add(value);
+        if self.items.count > 3 { self.items.removeAt(0); }
+    }
+    elements :: method () -> []int { return self.items.elements(); }
+}
+
+total :: (xs: Iterable<int>) -> int {
+    sum := 0;
+    for x in xs { sum += x; }
+    return sum;
+}
+
+fill :: (into: Growable<int>, n: int) {
+    for i in 1..n + 1 { into.add(i); }
+}
+
+largest :: <C: Iterable<int>>(c: *C) -> int {
+    best := 0;
+    for x in c.elements() { if x > best { best = x; } }
+    return best;
+}
+
+bumpFirst :: (xs: Indexable<i64, int>) {
+    xs[0] += 100;
+}
+
+setAll :: (m: Keyed<string, int>) {
+    m.set("a", 1);
+    m.set("b", 2);
+}
+
+main :: () {
+    c := Circle{radius: 2};
+    q := Square{side: 3};
+    t := Triangle{base: 4, height: 2};
+
+    // Calls through the table
+    assert(describe(&c) == "a circle of 12.000000");
+    assert(describe(&q) == "a square of 9.000000");
+    assert(describe(&t) == "a triangle of 4.000000");
+    shapes: [..]Shape = [&c, &q, &t];
+    sum: f64 = 0.0;
+    for s in shapes { sum += s.area(); }
+    assert(sum == 25.0);
+    assert(sizeof(Shape) == 16 && sizeof(Circle) == 8);   // The methods aren't in the values
+
+    // Null
+    none: Shape;
+    assert(none == null && shapes[0] != null);
+    nothing: *Circle = null;
+    fromNull: Shape = nothing;                            // A null pointer is a null interface
+    assert(fromNull == null);
+    try {
+        fromNull.area();
+        assert(false);
+    } catch (e) {
+        assert(e.is(Panic) && e.message == "Null pointer dereference: fromNull is null");
+    }
+
+    // method *, a member, a result
+    tally := Tally{};
+    h := Holder{counter: &tally};
+    h.counter.bump(5);
+    counter := asCounter(&tally);
+    counter.bump(2);
+    assert(tally.n == 7 && h.counter.value() == 7);
+
+    // as and switch
+    assert(growIfCircle(&c) && c.radius == 4.0 && !growIfCircle(&q));
+    grow(&c);
+    assert(c.radius == 8.0);
+    try {
+        grow(&q);
+        assert(false);
+    } catch (e) {
+        assert(e.is(Panic) && e.message == "The Shape is a *Square, not a *Circle");
+    }
+    try {
+        grow(none);
+        assert(false);
+    } catch (e) {
+        assert(e.message == "The Shape is null, not a *Circle");
+    }
+    _, isCircle := none as *Circle;
+    assert(!isCircle);
+    assert(exactly(&c) == "circle 8.000000" && exactly(&q) == "square 3.000000" && exactly(&t) == "other triangle");
+    assert(kind(&c) == "round" && kind(&q) == "pointy" && kind(&t) == "pointy" && kind(none) == "nothing");
+
+    // print shows the value
+    one: Shape = &q;
+    assert(sprint("%", one) == "Square{side: 3.000000}");
+
+    // A constraint
+    circles := [Circle{radius: 1}, Circle{radius: 2}];
+    assert(totalArea(circles) == 15.0);
+
+    // A generic interface
+    down := Countdown{from: 3};
+    assert(sprint("%", drain(&down)) == "[3, 2, 1]");
+
+    // The collection protocol
+    list: [..]int;
+    last: Last3;
+    fill(&list, 3);
+    fill(&last, 6);
+    assert(sprint("% %", list, last.elements()) == "[1, 2, 3] [4, 5, 6]");
+    assert(total(&list) == 6 && total(&last) == 15);
+    assert(largest(&list) == 3 && largest(&last) == 6);
+    bumpFirst(&list);
+    assert(list[0] == 101);
+    ages: Map<string, int>;
+    setAll(&ages);
+    assert(ages["a"] == 1 && ages["b"] == 2 && ages.count == 2);
+
+    print("interfaces ok");
+}

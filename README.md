@@ -82,6 +82,21 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
 
 # Changelog
 
+## Update v0.16.0 - 8. Nov 2026
+
+* Interfaces: `Shape :: interface { area :: method () -> f64; }`. A type is one when it has the methods, without
+  naming the interface, and a pointer to it becomes one: `describe(&c)`. An interface value is the pointer and a table
+  of the methods of its type, so it never copies or allocates, and the values don't grow. See `docs/interfaces.md`
+  * `circle := s as *Circle` throws a `Panic` when it is another type, `circle, ok := s as *Circle` doesn't, and
+    `switch v in s { case *Circle { ... } else { ... } }` has a case for each type
+  * Constraints of type parameters: `totalArea :: <S: Shape>(shapes: []S)`, checked at the call, with direct calls
+  * Generic interfaces: `Source :: interface <T> { next :: method * () -> ?T; }`
+  * The collection protocol is the interfaces `Iterable<T>`, `Growable<T>`, `Indexable<K, V>` and `Keyed<K, V>` of the
+    prelude, so a function can take any collection, e.g `total :: (xs: Iterable<int>) -> int`, and `for x in xs`
+    works on it
+  * The errors say why a type isn't an interface, e.g `Circle isn't a Shape: it has no method 'name'` and
+    `c is a Circle, not a pointer: pass &c to share it as a Shape`
+
 ## Update v0.15.0 - 7. Nov 2026
 
 * `saad build --check-memory` finds uses of the memory of arenas that were cleared or freed: they throw a `Panic`, e.g

@@ -499,7 +499,7 @@ static void add_namespace_declarations(Namespace *ns, AstFile *from) {
 }
 
 static const char *keywords[] = {
-    "if", "else", "for", "while", "in", "switch", "case", "return", "defer", "try", "catch", "throw", "break", "continue", "struct", "union", "enum",
+    "if", "else", "for", "while", "in", "switch", "case", "return", "defer", "try", "catch", "throw", "break", "continue", "struct", "union", "interface", "enum",
     "method", "import", "use", "namespace", "extern", "as", "new", "assert", "typeof", "sizeof", "true", "false", "null",
     "int", "uint", "float", "bool", "string", "any", "void", "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "f32", "f64",
 };

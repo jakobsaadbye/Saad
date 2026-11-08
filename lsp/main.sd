@@ -628,6 +628,7 @@ signatureOf :: (p: *project.Project, sym: *project.Symbol) -> string {
         case "method"
         case "struct"
         case "union"
+        case "interface"
         case "enum"
         case "typeAlias"     => fmt.sprint("% :: %", name, sym.detail);
         case "namespace"     => fmt.sprint("namespace %", name);
@@ -655,6 +656,7 @@ symbolKind :: (kind: string) -> int {
         case "variant"       => 22;
         case "struct"
         case "union"         => 23;
+        case "interface"     => 11;
         case "typeAlias"     => 5;
         case "typeParameter" => 26;
         else                 => 13;  // Variable
@@ -857,6 +859,7 @@ completionKind :: (kind: string) -> int {
         case "struct"
         case "union"
         case "typeAlias"     => 22;
+        case "interface"     => 8;
         case "typeParameter" => 25;
         else                 => 1;
     };
@@ -952,7 +955,8 @@ tokenType :: (kind: string) -> int {
         case "namespace"     => 0;
         case "typeAlias"     => 1;
         case "struct"
-        case "union"         => 2;
+        case "union"
+        case "interface"     => 2;
         case "enum"          => 3;
         case "enumMember"
         case "variant"       => 4;
@@ -1109,7 +1113,7 @@ isName :: (text: string) -> bool {
     return !Keywords.contains(text);
 }
 
-Keywords :: ["if", "else", "for", "while", "in", "switch", "case", "return", "defer", "try", "catch", "throw", "break", "continue", "struct", "union", "enum",
+Keywords :: ["if", "else", "for", "while", "in", "switch", "case", "return", "defer", "try", "catch", "throw", "break", "continue", "struct", "union", "interface", "enum",
              "method", "import", "use", "namespace", "extern", "as", "new", "assert", "typeof", "sizeof", "true", "false",
              "null", "self", "int", "uint", "float", "bool", "string", "any", "void", "u8", "u16", "u32", "u64", "i8", "i16",
              "i32", "i64", "f32", "f64", "xx"];

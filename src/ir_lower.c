@@ -97,6 +97,7 @@ typedef struct Lowerer {
 
     AstBlock        *runtime_scope;   // The declarations of runtime.sd, for the layouts of the type descriptors
     IrArray(TypeInfoEntry) type_infos; // The descriptor of each type, by the name of the type
+    IrArray(TypeInfoEntry) interface_tables; // The table of the methods of a type for an interface, by "type|interface"
 
     jmp_buf          on_error;
 } Lowerer;
@@ -1023,9 +1024,18 @@ static Value wrap_in_optional(Lowerer *L, Value value, Type *optional_type, Ast 
 }
 
 // Converts an aggregate value to another aggregate type with a compatible layout, e.g a fixed array to a slice
+static Value make_interface_value(Lowerer *L, Value value, TypeStruct *interface, Ast *site);
+static void write_pointer_field(IrGlobal *global, int offset, int target);
+static int type_info_global(Lowerer *L, Type *type);
+static int emit_c_text(Lowerer *L, const char *text);
+
 static Value convert_aggregate(Lowerer *L, Value value, Type *to, Ast *site) {
     Type *from = value.type;
     if (from == to) return value;
+
+    if (is_interface_type(to) && !is_interface_type(from)) {
+        return make_interface_value(L, value, (TypeStruct *) to, site);
+    }
 
     if (is_optional_type(to) && !is_optional_type(from)) {
         return wrap_in_optional(L, value, to, site);
@@ -1054,6 +1064,60 @@ static Value convert_aggregate(Lowerer *L, Value value, Type *to, Ast *site) {
     // used (slice <-> dynamic array data/count, struct downcasts, variadic <-> slice ...)
     value.type = to;
     return value;
+}
+
+// The table of the methods of a type for an interface, in read-only data: the descriptor of the type, for 'as' and
+// 'switch', and then the methods in the order of the interface. One for each type and interface
+static int interface_table_global(Lowerer *L, Type *type, TypeStruct *interface, Ast *site) {
+    char key[600];
+    snprintf(key, sizeof(key), "%s|%s", type_identity(type), type_identity((Type *) interface));
+    for (int i = 0; i < L->interface_tables.count; i++) {
+        if (strcmp(L->interface_tables.items[i].key, key) == 0) return L->interface_tables.items[i].global;
+    }
+    DynamicArray methods = interface_methods(interface);
+    IrGlobal *table = ir_global_data(L->module, "interface_table", NULL, 8 * (1 + methods.count), 8, true);
+    int index = table->index;
+    TypeInfoEntry entry = { ir_strdup(L->module, key), index };
+    ir_array_push(L->interface_tables, entry);   // Before the methods, which can make tables too
+
+    write_pointer_field(table, 0, type_info_global(L, type));
+    for (int i = 0; i < methods.count; i++) {
+        AstFunctionDefn *wanted = ((AstFunctionDefn **) methods.items)[i];
+        AstFunctionDefn *method = method_for_interface(active_typer, type, wanted->identifier->name);
+        if (method == NULL) lower_fail(L, site, "Compiler Error: %s has no method '%s' for %s", type_to_str(type), wanted->identifier->name, interface->head.name);
+        if (is_generic_function(method)) lower_fail(L, site, "Compiler Error: the method '%s' of %s for %s is generic", wanted->identifier->name, type_to_str(type), interface->head.name);
+        write_pointer_field(L->module->globals.items[index], 8 * (1 + i), function_global(L, method));
+    }
+    da_free(&methods);
+    return index;
+}
+
+// A pointer, or null, as a value of an interface: the pointer and the table of the methods of its type. A null pointer
+// is a null interface, with no table, so 'x == null' tells for both
+static Value make_interface_value(Lowerer *L, Value value, TypeStruct *interface, Ast *site) {
+    Value result = temp_place(L, (Type *) interface, "interface");
+    Type *from = value.type;
+    if (from == NULL || from->kind != TYPE_POINTER || ((TypePointer *) from)->pointer_to->kind == TYPE_VOID) {
+        emit_store(L, IR_PTR, result.addr, emit_const(L, IR_PTR, 0));
+        emit_store(L, IR_PTR, addr_add(result.addr, 8), emit_const(L, IR_PTR, 0));
+        return result;
+    }
+    int ptr   = value_to_scalar(L, value);
+    int table = emit_global_addr(L, interface_table_global(L, ((TypePointer *) from)->pointer_to, interface, site));
+    emit_store(L, IR_PTR, result.addr, ptr);
+    // The table only when there is a value
+    IrBlock *has_value = create_block(L, "interface.value");
+    IrBlock *no_value  = create_block(L, "interface.null");
+    IrBlock *done      = create_block(L, "interface.made");
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_PTR, ptr, emit_const(L, IR_PTR, 0)), has_value, no_value);
+    set_block(L, has_value);
+    emit_store(L, IR_PTR, addr_add(result.addr, 8), table);
+    terminate_jmp(L, done);
+    set_block(L, no_value);
+    emit_store(L, IR_PTR, addr_add(result.addr, 8), emit_const(L, IR_PTR, 0));
+    terminate_jmp(L, done);
+    set_block(L, done);
+    return result;
 }
 
 // Stores a value that has already been computed into memory of type 'dst_type'
@@ -1694,6 +1758,15 @@ static int lower_comparison(Lowerer *L, AstBinary *bin) {
         return equal;
     }
 
+    // An interface with null: if it has a value
+    if (is_interface_type(left) != is_interface_type(right) && (is_interface_type(left) || is_interface_type(right))) {
+        AstExpr *interface = is_interface_type(left) ? bin->left : bin->right;
+        IrAddr at = value_to_place(L, lower_expr(L, interface)).addr;
+        int value = emit_load(L, IR_PTR, at);
+        IrCmp cmp = bin->operator == TOKEN_NOT_EQUAL ? IR_CMP_NE : IR_CMP_EQ;
+        return emit_cmp(L, IR_ICMP, cmp, IR_PTR, value, emit_const(L, IR_PTR, 0));
+    }
+
     if (left->kind == TYPE_STRUCT && right->kind == TYPE_STRUCT) {
         IrAddr a = value_to_place(L, lower_expr(L, bin->left)).addr;
         IrAddr b = value_to_place(L, lower_expr(L, bin->right)).addr;
@@ -1879,9 +1952,57 @@ static Value lower_unary(Lowerer *L, AstUnary *unary) {
     return value_none();
 }
 
+// The pointer of an interface value when its value is of the type 'to' points to, else null, and if it is: the type is
+// the first entry of the table, the descriptor of the type
+static int interface_as(Lowerer *L, AstExpr *expr, Type *to, int *is_type) {
+    IrAddr at = value_to_place(L, lower_expr(L, expr)).addr;
+    int value = emit_load(L, IR_PTR, at);
+    int table = emit_load(L, IR_PTR, addr_add(at, 8));
+    int wanted = emit_global_addr(L, type_info_global(L, ((TypePointer *) to)->pointer_to));
+    Value type_slot = temp_place(L, primitive_type(PRIMITIVE_U64), "interface type");
+    emit_store(L, IR_PTR, type_slot.addr, emit_const(L, IR_PTR, 0));
+    IrBlock *has_table = create_block(L, "interface.has.table");
+    IrBlock *done      = create_block(L, "interface.typed");
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_PTR, table, emit_const(L, IR_PTR, 0)), has_table, done);
+    set_block(L, has_table);
+    emit_store(L, IR_PTR, type_slot.addr, emit_load(L, IR_PTR, addr_vreg(table, 0)));
+    terminate_jmp(L, done);
+    set_block(L, done);
+    int type = emit_load(L, IR_PTR, type_slot.addr);
+    *is_type = emit_cmp(L, IR_ICMP, IR_CMP_EQ, IR_PTR, type, wanted);
+    return value;
+}
+
 static Value lower_cast(Lowerer *L, AstCast *cast) {
     Type *from = cast->expr->type;
     Type *to   = cast->cast_to;
+
+    // If an interface is of a type, for a case of a switch on it
+    if (cast->is_type_test) {
+        int is_type;
+        interface_as(L, cast->expr, to, &is_type);
+        return value_scalar(is_type, cast->head.type);
+    }
+
+    // s as *Circle of an interface: a Panic when its value is of another type
+    if (is_interface_type(from) && to->kind == TYPE_POINTER) {
+        int is_type;
+        int value = interface_as(L, cast->expr, to, &is_type);
+        IrBlock *other = create_block(L, "interface.other.type");
+        IrBlock *same  = create_block(L, "interface.same.type");
+        terminate_br(L, is_type, same, other);
+        set_block(L, other);
+        IrAddr at = value_to_place(L, lower_expr(L, cast->expr)).addr;
+        int table = emit_load(L, IR_PTR, addr_add(at, 8));
+        char wanted[200];
+        snprintf(wanted, sizeof(wanted), "%s", type_to_str(to));
+        int args[3] = { table, emit_c_text(L, ((TypeStruct *) from)->head.name), emit_c_text(L, wanted) };
+        emit_errors_call(L, "panicInterfaceCast", 3, args);
+        emit_trace_frame(L, cast->head.head.start.line);
+        emit_unwind(L);
+        set_block(L, same);
+        return value_scalar(value, to);
+    }
 
     if (to->kind == TYPE_ANY && from->kind != TYPE_ANY) {
         return box_to_any(L, lower_expr(L, cast->expr), to, (Ast *) cast);
@@ -2247,6 +2368,30 @@ static Value box_to_any(Lowerer *L, Value value, Type *any_type, Ast *site) {
     Type *from = value.type;
     Value boxed;
 
+    // An interface is its value, of the type of its value, e.g for print. A null one is a null pointer
+    if (is_interface_type(from)) {
+        IrAddr at = value_to_place(L, value).addr;
+        int table = emit_load(L, IR_PTR, addr_add(at, 8));
+        Value any = temp_place(L, any_type, "any");
+        Value null_pointer = temp_place(L, primitive_type(PRIMITIVE_U64), "null");
+        emit_store(L, IR_PTR, null_pointer.addr, emit_const(L, IR_PTR, 0));
+        IrBlock *has_value = create_block(L, "any.of.interface");
+        IrBlock *no_value  = create_block(L, "any.of.null.interface");
+        IrBlock *done      = create_block(L, "any.made");
+        terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_PTR, table, emit_const(L, IR_PTR, 0)), has_value, no_value);
+        set_block(L, has_value);
+        emit_store(L, IR_PTR, any.addr, emit_load(L, IR_PTR, at));
+        emit_store(L, IR_PTR, addr_add(any.addr, 8), emit_load(L, IR_PTR, addr_vreg(table, 0)));
+        terminate_jmp(L, done);
+        set_block(L, no_value);
+        Type *void_pointer = (Type *) type_defn_null_ptr;
+        emit_store(L, IR_PTR, any.addr, addr_to_ptr(L, null_pointer.addr));
+        emit_store(L, IR_PTR, addr_add(any.addr, 8), emit_global_addr(L, type_info_global(L, void_pointer)));
+        terminate_jmp(L, done);
+        set_block(L, done);
+        return any;
+    }
+
     boxed = temp_place(L, from, "boxed value");
     store_value(L, boxed.addr, from, value, site);
 
@@ -2338,7 +2483,28 @@ static Value lower_call(Lowerer *L, AstFunctionCall *call, int *ret_slots, int m
     // Callee (evaluated before the arguments)
     IrCalleeKind callee_kind;
     int callee;
-    if (call_is_direct(call)) {
+    int interface_value = IR_NO_VREG;   // The value of the interface a method of an interface is called on: its self
+    if (func_defn->is_interface_method) {
+        // Through the table of the interface value: its receiver is a pointer to the interface value
+        AstExpr *receiver = da_get_deref(call->lowered_arguments, 0);
+        int at = lower_scalar_as(L, receiver, receiver->type);
+        Type *interface = receiver->type->kind == TYPE_POINTER ? ((TypePointer *) receiver->type)->pointer_to : receiver->type;
+        if (!is_interface_type(interface)) lower_fail(L, (Ast *) call, "Compiler Error: A method of an interface called on a %s", type_to_str(receiver->type));
+        interface_value = emit_load(L, IR_PTR, addr_vreg(at, 0));
+        AstExpr *named = receiver;
+        if (named->head.kind == AST_UNARY && ((AstUnary *) named)->operator == OP_ADDRESS_OF) named = ((AstUnary *) named)->expr;
+        emit_null_check(L, interface_value, named);   // A null interface has no table either
+        int table = emit_load(L, IR_PTR, addr_vreg(at, 8));
+        DynamicArray methods = interface_methods((TypeStruct *) interface);
+        int index = -1;
+        for (int i = 0; i < methods.count; i++) {
+            if (strcmp(((AstFunctionDefn **) methods.items)[i]->identifier->name, func_defn->identifier->name) == 0) index = i;
+        }
+        da_free(&methods);
+        if (index < 0) lower_fail(L, (Ast *) call, "Compiler Error: '%s' isn't a method of %s", func_defn->identifier->name, type_to_str(interface));
+        callee_kind = IR_CALLEE_VREG;
+        callee = emit_load(L, IR_PTR, addr_vreg(table, 8 * (1 + index)));
+    } else if (call_is_direct(call)) {
         callee_kind = IR_CALLEE_DIRECT;
         callee = function_global(L, func_defn);
     } else {
@@ -2387,11 +2553,11 @@ static Value lower_call(Lowerer *L, AstFunctionCall *call, int *ret_slots, int m
         }
         if (param_type->kind == TYPE_VARIADIC) param_type = (Type *) ((TypeVariadic *) param_type)->slice;
 
-        int value = lower_argument(L, arg, param_type, is_vararg);
+        int value = (i == 0 && interface_value != IR_NO_VREG) ? interface_value : lower_argument(L, arg, param_type, is_vararg);
         // The receiver of a method, when it is a pointer, so that the method doesn't check self. &x, e.g of x.m() of a
         // struct x, isn't null
         bool is_receiver = func_defn->is_method && i == 0 && param_type->kind == TYPE_POINTER;
-        if (is_receiver && !(arg->head.kind == AST_UNARY && ((AstUnary *) arg)->operator == OP_ADDRESS_OF)) {
+        if (is_receiver && interface_value == IR_NO_VREG && !(arg->head.kind == AST_UNARY && ((AstUnary *) arg)->operator == OP_ADDRESS_OF)) {
             emit_null_check(L, value, arg);
         }
         call_add_arg(ir_call, value, is_vararg);
@@ -2584,6 +2750,27 @@ static void lower_condition(Lowerer *L, AstExpr *expr, IrBlock *on_true, IrBlock
 static void lower_declaration(Lowerer *L, AstDeclaration *decl) {
     if (decl->flags & DECLARATION_CONSTANT) {
         return; // Constants are materialized where they are used
+    }
+
+    // `c, ok := s as *Circle` of an interface: the pointer, or null, and if it is of that type
+    if (decl->values.count == 1 && decl->idents.count == 2 && ((AstExpr *) da_get_deref(decl->values, 0))->head.kind == AST_CAST &&
+        ((AstCast *) da_get_deref(decl->values, 0))->with_ok) {
+        AstCast *cast = da_get_deref(decl->values, 0);
+        int is_type;
+        int value = interface_as(L, cast->expr, cast->cast_to, &is_type);
+        int pointer = ir_new_slot(L->func, 8, 8, "as");
+        emit_store(L, IR_PTR, addr_slot(pointer, 0), emit_const(L, IR_PTR, 0));
+        IrBlock *same = create_block(L, "as.same");
+        IrBlock *done = create_block(L, "as.done");
+        terminate_br(L, is_type, same, done);
+        set_block(L, same);
+        emit_store(L, IR_PTR, addr_slot(pointer, 0), value);
+        terminate_jmp(L, done);
+        set_block(L, done);
+        AstIdentifier *first = da_get_deref(decl->idents, 0), *second = da_get_deref(decl->idents, 1);
+        emit_store(L, IR_PTR, addr_slot(declare_local(L, first), 0), emit_load(L, IR_PTR, addr_slot(pointer, 0)));
+        emit_store(L, IR_I8, addr_slot(declare_local(L, second), 0), is_type);
+        return;
     }
 
     // `a, b := foo()` with a function returning multiple values

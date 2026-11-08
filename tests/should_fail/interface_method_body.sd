@@ -1,0 +1,7 @@
+// expect-error: A method of an interface has no body
+
+Shape :: interface {
+    area :: method () -> f64 { return 0.0; }
+}
+
+main :: () {}

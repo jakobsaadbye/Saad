@@ -119,6 +119,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_SWITCH:                return "switch";
         case TOKEN_CASE:                  return "case";
         case TOKEN_UNION:                 return "union";
+        case TOKEN_INTERFACE:             return "interface";
         case TOKEN_FAT_ARROW:             return "=>";
         case TOKEN_END:                   return "END";
     }
@@ -529,6 +530,7 @@ KeywordMatch match_keyword(Lexer *lexer) {
     }
     if (keyword_len == 9) {
         if (strcmp(text, "namespace") == 0) token = TOKEN_NAMESPACE;
+        if (strcmp(text, "interface") == 0) token = TOKEN_INTERFACE;
     }
 
     if (token == TOKEN_NONE) {
