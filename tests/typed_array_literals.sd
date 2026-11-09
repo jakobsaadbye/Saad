@@ -1,0 +1,33 @@
+// An array literal gets the type of its first element that has one, and its untyped numbers get it too
+use fmt;
+
+K :: [0xdeadbeef as u32, 0xfefefe, 0xcecece];   // [3]u32: no cast for the rest
+Big :: 0xffffffff;
+Bytes :: [1, 2 as u8, 255];                     // The typed one can be anywhere
+
+main :: () {
+    assert(typeof(K) == "[3]u32");
+    assert(K[0] == 0xdeadbeef && K[1] == 0xfefefe && K[2] == 0xcecece);
+    sum: u32 = K[1] + K[2];                     // u32 arithmetic, as the elements are u32
+    assert(sum == 0xfefefe + 0xcecece);
+
+    assert(typeof(Bytes) == "[3]u8" && Bytes[2] == 255);
+
+    // In a function, with constants among the numbers
+    words := [Big, 1 as u32, 7];
+    assert(typeof(words) == "[3]u32" && words[0] == 0xffffffff);
+
+    // Untyped only: int, or float when one of them is
+    ints := [1, 2, 3];
+    floats := [1, 2.5, 3];
+    assert(typeof(ints) == "[3]int" && typeof(floats) == "[3]float" && floats[0] == 1.0);
+
+    // Typed floats
+    halves := [0.5 as f64, 1.5, 2];
+    assert(typeof(halves) == "[3]f64" && halves[2] == 2.0);
+
+    // As before: the first element gives the type
+    first := [3 as i64, 4];
+    assert(typeof(first) == "[2]i64");
+    print("typed array literals ok");
+}

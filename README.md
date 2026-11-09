@@ -82,6 +82,13 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
 
 # Changelog
 
+## Update v0.20.0 - 10. Nov 2026
+
+* An array literal has the type of its first element that has a type, and its untyped numbers get it too:
+  `K :: [0xdeadbeef as u32, 0xfefefe, 0xcecece]` is a `[3]u32`, without a cast for each. When no element has a type,
+  the numbers are `int`, or `float` when one of them is a float, e.g `[1, 2.5]`
+* `examples/`: a tutorial of Saad in 28 small lessons, see `examples/README.md`
+
 ## Update v0.19.0 - 9. Nov 2026
 
 * `net.http`: the server is event loops. Each worker is a thread with a `net.Poller` (epoll on Linux) of its own
