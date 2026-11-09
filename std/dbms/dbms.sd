@@ -41,6 +41,10 @@ Driver :: struct {
     freeResult:  (result: *void);
 
     close: (conn: *void);
+
+    // Optional: runs the SQL with the arguments as they are, for a database that binds numbers and texts by their type,
+    // e.g SQLite. When it is set, it is used instead of execute, and the arguments aren't made into texts
+    executeArgs: (conn: *void, sql: string, args: []any, err: *string) -> *void;
 }
 
 // A connection to a database, made by a driver, e.g postgres.connect(...)
@@ -218,6 +222,19 @@ run :: method (conn: *Connection, sql: string, args: ...any) -> *void, string {
         return null, "The connection is closed";
     }
 
+    if conn.driver.executeArgs != null {
+        failed := "";
+        list: []any;
+        list.data  = args.data;
+        list.count = args.count;
+        given := conn.driver.executeArgs(conn.handle, sql, list, &failed);
+        if given == null {
+            if failed == "" { failed = "The query failed"; }
+            return null, failed;
+        }
+        return given, "";
+    }
+
     err := "";
     params: [..]c.string;
     for arg, i in args {
@@ -247,8 +264,8 @@ run :: method (conn: *Connection, sql: string, args: ...any) -> *void, string {
     return result, "";
 }
 
-// The value as the text of a parameter, allocated with malloc. Null is NULL
-@private
+// The value as the text of a parameter, allocated with malloc, and false when it can't be one. A null c.string is NULL.
+// For drivers too, e.g for a type they don't bind themselves
 paramText :: (arg: any) -> c.string, bool {
     sb: fmt.StringBuilder;
     switch arg.type.kind {

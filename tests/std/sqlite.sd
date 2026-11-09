@@ -1,0 +1,70 @@
+// dbms.sqlite: a database in memory, statements used again, ? and $N parameters, NULLs, types and errors
+import dbms;
+import dbms.sqlite;
+use fmt;
+
+User :: struct {
+    id:    i64;
+    name:  string;
+    email: ?string;
+    score: f64;
+    admin: bool;
+}
+
+main :: () {
+    conn, err := sqlite.open(":memory:");
+    assert(err == null);
+    defer conn.close();
+
+    conn.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT, score REAL, admin INTEGER)");
+    for i in 1..6 {
+        email: ?string;
+        if i % 2 == 0 { email = sprint("u%@x.dk", i); }
+        changed := conn.exec("INSERT INTO users (name, email, score, admin) VALUES (?, ?, ?, ?)", sprint("user%", i), email, i as f64 * 1.5, i == 1);
+        assert(changed == 1);
+    }
+    assert(sqlite.lastInsertId(&conn) == 5);
+
+    // ? in order, numbers bound as numbers (LIMIT), the same statement again
+    for round in 0..3 {
+        users := conn.query<User>("SELECT id, name, email, score, admin FROM users WHERE id > ? ORDER BY id LIMIT ?", 1, 3);
+        assert(users.count == 3 && users[0].id == 2 && users[0].name == "user2");
+        assert(users[0].email.hasValue() && users[0].email.value() == "u2@x.dk" && !users[1].email.hasValue());
+        assert(users[2].score == 6.0 && !users[0].admin);
+    }
+
+    // $N like Postgres, also out of order
+    found, ok, e1 := conn.queryOne<User>("SELECT * FROM users WHERE name = $2 AND id = $1", 1, "user1");
+    assert(e1 == null && ok && found.admin && found.score == 1.5);
+    total, _, e2 := conn.queryOne<i64>("SELECT count(*) FROM users");
+    assert(e2 == null && total == 5);
+    none, there, e3 := conn.queryOne<User>("SELECT * FROM users WHERE id = ?", 99);
+    assert(e3 == null && !there);
+
+    // RETURNING, and NULL from a null pointer
+    nothing: *string = null;
+    made, _, e4 := conn.queryOne<User>("INSERT INTO users (name, email) VALUES (?, ?) RETURNING id, name, email", "ada", nothing);
+    assert(e4 == null && made.id == 6 && made.name == "ada" && !made.email.hasValue());
+
+    // Several statements at once, and a transaction
+    conn.exec("BEGIN; UPDATE users SET score = 0 WHERE id = 6; COMMIT;");
+    zero, _, e5 := conn.queryOne<f64>("SELECT score FROM users WHERE id = 6");
+    assert(e5 == null && zero == 0.0);
+
+    // Errors: bad SQL, a broken constraint, and the connection goes on after them
+    _, bad := conn.query<User>("SELECT * FROM nowhere");
+    assert(bad != null && bad.is(dbms.DatabaseError) && bad.message.indexOf("no such table") >= 0);
+    _, broken := conn.exec("INSERT INTO users (name) VALUES (?)", nothing);
+    assert(broken != null && broken.message.indexOf("NOT NULL") >= 0);
+    again, _, e6 := conn.queryOne<i64>("SELECT count(*) FROM users");
+    assert(e6 == null && again == 6);
+
+    // A thrown error when it isn't taken
+    try {
+        conn.exec("INSERT INTO users (id, name) VALUES (1, 'dup')");
+        assert(false);
+    } catch (e) {
+        assert(e.message.indexOf("UNIQUE") >= 0);
+    }
+    print("sqlite ok");
+}

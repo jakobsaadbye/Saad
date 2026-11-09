@@ -19,6 +19,7 @@ std/
   dbms/         namespace dbms: run SQL and read rows into structs, dbms.Table<T> and dbms.KeyedTable<T, K> (see docs/dbms.md)
     postgres/       namespace dbms.postgres: the Postgres driver, through libpq.dll, and EntityGenerator, which writes the
                     tables of a schema as Saad files
+    sqlite/         namespace dbms.sqlite: the SQLite driver, with prepared statements kept per connection
   fmt/          namespace fmt: print, sprint and StringBuilder
   io/           namespace io: bytes on stdin, stdout and stderr
   json/         namespace json: encode, decode, parse and json.Value

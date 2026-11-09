@@ -1,0 +1,479 @@
+namespace dbms.sqlite;
+
+// The SQLite driver of dbms, through the SQLite library (sqlite3.dll, or libsqlite3 on Linux), e.g
+//
+//     import dbms;
+//     import dbms.sqlite;
+//
+//     conn, err := sqlite.open("app.db");
+//     conn.exec("PRAGMA journal_mode = WAL");
+//     users, err2 := conn.query<User>("SELECT id, name FROM users WHERE id > ?", 10);
+//     conn.close();
+//
+// * Parameters are ? in order, or $1, $2, ... like for Postgres, so the SQL of dbms.Table and queries works too
+// * Numbers, bools and texts are bound as what they are, not as texts, e.g for LIMIT ?
+// * Each SQL is prepared once per connection, and its statement is used again the next time, so a query that runs
+//   often doesn't parse its SQL each time. The statements are freed by close
+// * A connection is used by one thread at a time: give each thread its own, e.g with dbms.Pool
+//
+// See docs/dbms.md
+
+import dbms;
+import mem;
+use c;
+
+// Opens the database of the file, and makes it when it isn't there. ":memory:" is a database in memory
+open :: (path: string, options := Options{}) -> dbms.Connection, error {
+    conn: dbms.Connection;
+    file := path.toCString();
+    handle: *void = null;
+    flags := OpenReadWrite | OpenNoMutex;
+    if options.create { flags |= OpenCreate; }
+    if options.readOnly { flags = OpenReadOnly | OpenNoMutex; }
+    code := sqlite3_open_v2(file, &handle, flags, c.string{});
+    file.free();
+    if code != Ok {
+        message := "SQLite couldn't open the database";
+        if handle != null {
+            message = copyMessage(sqlite3_errmsg(handle));
+            sqlite3_close_v2(handle);
+        }
+        return conn, dbms.databaseError(message);
+    }
+    if options.busyTimeout > 0 { sqlite3_busy_timeout(handle, options.busyTimeout as i32); }
+
+    db := new(Database, heapAllocator());
+    db.handle = handle;
+    db.statements.allocator = heapAllocator();
+    conn.driver = driver();
+    conn.handle = db;
+    return conn, null;
+}
+
+// How a database is opened
+Options :: struct {
+    create:      bool = true;    // Make the file when it isn't there
+    readOnly:    bool = false;
+    busyTimeout: int  = 5000;    // Milliseconds a statement waits while another connection writes, before it fails
+}
+
+// The id of the last row that an INSERT made on the connection
+lastInsertId :: (conn: *dbms.Connection) -> i64 {
+    db := conn.handle as *Database;
+    return sqlite3_last_insert_rowid(db.handle);
+}
+
+// The driver for dbms.Connection
+driver :: () -> *dbms.Driver {
+    if theDriver == null {
+        d := new(dbms.Driver, heapAllocator());
+        d.name        = "sqlite";
+        d.execute     = execute;
+        d.executeArgs = executeArgs;
+        d.rowCount    = rowCount;
+        d.columnCount = columnCount;
+        d.columnName  = columnName;
+        d.value       = value;
+        d.affected    = affected;
+        d.freeResult  = freeResult;
+        d.close       = close;
+        theDriver = d;
+    }
+    return theDriver;
+}
+
+@private theDriver: *dbms.Driver = null;
+
+// A connection: the handle of SQLite and its prepared statements
+@private
+Database :: struct {
+    handle:     *void;
+    statements: Map<string, *Statement>;
+    spare:      *Result;          // A result to use again, so a query allocates nothing once it has run before
+}
+
+// A prepared statement, and the argument of each of its parameters
+@private
+Statement :: struct {
+    handle: *void;
+    argOf:  [..]int;    // For parameter i + 1: the index of its argument, from ?, ?NNN or $NNN
+    single: bool;       // The SQL is one statement, so it can be kept
+}
+
+// The rows of a query, as texts. A value is an offset into text, or -1 for NULL
+@private
+Result :: struct {
+    owner:   *Database;
+    columns: int;
+    rows:    int;
+    names:   [..]u8;          // The names of the columns, each with a 0 after it
+    nameAt:  [..]int;
+    text:    [..]u8;          // The values, each with a 0 after it
+    offsets: [..]i64;
+    values:  [..]c.string;    // Made from text and offsets when the rows are read
+    changes: i64;
+}
+
+@private
+execute :: (conn: *void, sql: c.string, params: []c.string, err: *string) -> *void {
+    args: [..]any;
+    args.allocator = heapAllocator();
+    for p in params {
+        text := p.toString();
+        if p.isNull() { nothing: *u8 = null; args.add(nothing); }
+        else          { args.add(text); }
+    }
+    result := executeArgs(conn, sql.toString(), args.elements(), err);
+    args.free();
+    return result;
+}
+
+@private
+executeArgs :: (conn: *void, sql: string, args: []any, err: *string) -> *void {
+    db := conn as *Database;
+    nothing: *Statement = null;
+    statement := db.statements.get(sql, nothing);
+    if statement == null {
+        statement = prepare(db, sql, err);
+        if statement == null { return null; }
+        if statement.single { db.statements.set(sql.copy(heapAllocator()), statement); }
+    }
+
+    result := db.spare;
+    db.spare = null;
+    if result == null {
+        result = new(Result, heapAllocator());
+        result.owner = db;
+        result.names.allocator   = heapAllocator();
+        result.nameAt.allocator  = heapAllocator();
+        result.text.allocator    = heapAllocator();
+        result.offsets.allocator = heapAllocator();
+        result.values.allocator  = heapAllocator();
+    }
+    result.rows = 0;
+    result.names.clear();
+    result.nameAt.clear();
+    result.text.clear();
+    result.offsets.clear();
+    result.values.clear();
+
+    ok := run(db, statement, args, result, err);
+    if !statement.single {
+        // More statements, e.g "BEGIN; ...; COMMIT", run each in turn
+        rest := sql;
+        first := true;
+        while ok {
+            tail: *u8 = null;
+            handle: *void = null;
+            code := sqlite3_prepare_v2(db.handle, rest.data, rest.len as i32, &handle, &tail);
+            if code != Ok { *err = copyMessage(sqlite3_errmsg(db.handle)); ok = false; break; }
+            used := (tail as i64) - (rest.data as i64);
+            rest = rest.slice(used as int);
+            if handle == null { break; }   // Only spaces or comments were left
+            if !first {
+                once := Statement{handle: handle};
+                once.argOf.allocator = heapAllocator();
+                ok = run(db, &once, args, result, err);
+            }
+            sqlite3_finalize(handle);
+            first = false;
+        }
+        sqlite3_finalize(statement.handle);
+        statement.argOf.free();
+        mem.delete(statement, heapAllocator());
+    }
+    if !ok {
+        freeResult(result);
+        return null;
+    }
+    result.values.reserve(result.offsets.count);
+    for offset in result.offsets {
+        if offset < 0 { result.values.add(c.string{}); }
+        else          { result.values.add(c.string{&result.text.data[offset]}); }
+    }
+    return result;
+}
+
+// Prepares the first statement of the SQL, and finds the argument of each parameter
+@private
+prepare :: (db: *Database, sql: string, err: *string) -> *Statement {
+    handle: *void = null;
+    tail: *u8 = null;
+    code := sqlite3_prepare_v2(db.handle, sql.data, sql.len as i32, &handle, &tail);
+    if code != Ok {
+        *err = copyMessage(sqlite3_errmsg(db.handle));
+        return null;
+    }
+    statement := new(Statement, heapAllocator());
+    statement.handle = handle;
+    statement.argOf.allocator = heapAllocator();
+    used := (tail as i64) - (sql.data as i64);
+    statement.single = true;
+    for ch in sql.slice(used as int) {
+        if ch != ' ' && ch != '\n' && ch != '\r' && ch != '\t' && ch != ';' { statement.single = false; }
+    }
+    if handle == null {
+        *err = "The SQL has no statement";
+        mem.delete(statement, heapAllocator());
+        return null;
+    }
+    count := sqlite3_bind_parameter_count(handle) as int;
+    for i in 1..count + 1 {
+        index := i - 1;
+        name := sqlite3_bind_parameter_name(handle, i as i32);
+        if !name.isNull() {
+            text := name.toString();
+            if text.len > 1 && (text[0] == '$' || text[0] == '?') {
+                n := 0;
+                digits := true;
+                for ch in text.slice(1) {
+                    if !ch.isDigit() { digits = false; break; }
+                    n = n * 10 + ch.digitValue();
+                }
+                if digits && n > 0 { index = n - 1; }
+            }
+        }
+        statement.argOf.add(index);
+    }
+    return statement;
+}
+
+// Binds the arguments, steps through the rows into the result, and resets the statement for its next use
+@private
+run :: (db: *Database, statement: *Statement, args: []any, result: *Result, err: *string) -> bool {
+    handle := statement.handle;
+    texts: [..]c.string;   // Arguments made into texts here, freed after the rows are read
+    texts.allocator = heapAllocator();
+    ok := true;
+    for index, i in statement.argOf {
+        place := (i + 1) as i32;
+        if index >= args.count {
+            *err = copyMessage(c.string{"A parameter has no argument".data});
+            ok = false;
+            break;
+        }
+        if !bind(handle, place, args[index], &texts) {
+            *err = paramError(index, args[index]);
+            ok = false;
+            break;
+        }
+    }
+
+    if ok {
+        columns := sqlite3_column_count(handle) as int;
+        if result.nameAt.count == 0 {
+            result.columns = columns;
+            for column in 0..columns {
+                result.nameAt.add(result.names.count);
+                name := sqlite3_column_name(handle, column as i32).toString();
+                for ch in name { result.names.add(ch); }
+                result.names.add(0);
+            }
+        }
+        while true {
+            code := sqlite3_step(handle);
+            if code == Done { break; }
+            if code != Row {
+                *err = copyMessage(sqlite3_errmsg(db.handle));
+                ok = false;
+                break;
+            }
+            result.rows += 1;
+            for column in 0..columns {
+                if sqlite3_column_type(handle, column as i32) == Null {
+                    result.offsets.add(-1);
+                    continue;
+                }
+                data := sqlite3_column_text(handle, column as i32);
+                length := sqlite3_column_bytes(handle, column as i32) as int;
+                result.offsets.add(result.text.count as i64);
+                needed := result.text.count + length + 1;
+                if needed > result.text.capacity {
+                    capacity := result.text.capacity * 2;
+                    if capacity < 1024 { capacity = 1024; }
+                    if capacity < needed { capacity = needed; }
+                    result.text.reserve(capacity);
+                }
+                for k in 0..length { result.text.data[result.text.count + k] = data[k]; }
+                result.text.count += length;
+                result.text.add(0);
+            }
+        }
+        result.changes = sqlite3_changes64(db.handle);
+    }
+    sqlite3_reset(handle);
+    sqlite3_clear_bindings(handle);
+    for t in texts { t.free(); }
+    texts.free();
+    return ok;
+}
+
+// Binds an argument by its type: integers, floats, bools and texts as they are, null pointers and empty optionals as
+// NULL, and the rest as the text dbms makes of it, e.g a time.Time or an enum
+@private
+bind :: (handle: *void, place: i32, arg: any, texts: *[..]c.string) -> bool {
+    switch arg.type.kind {
+        case .int {
+            prim := arg.type as *TypePrimitive;
+            n: i64 = 0;
+            switch prim.kind {
+                case .i8  { n = (*(arg.data as *i8)) as i64; }
+                case .i16 { n = (*(arg.data as *i16)) as i64; }
+                case .i32 { n = (*(arg.data as *i32)) as i64; }
+                case .i64 { n = *(arg.data as *i64); }
+                case .u8  { n = (*(arg.data as *u8)) as i64; }
+                case .u16 { n = (*(arg.data as *u16)) as i64; }
+                case .u32 { n = (*(arg.data as *u32)) as i64; }
+                case .u64 { n = (*(arg.data as *u64)) as i64; }
+                else      { n = (*(arg.data as *u8)) as i64; }   // A char is a text of one byte
+            }
+            if prim.kind == .char {
+                return sqlite3_bind_text(handle, place, arg.data as *u8, 1, null) == Ok;   // The argument lives until the reset
+            }
+            return sqlite3_bind_int64(handle, place, n) == Ok;
+        }
+        case .float {
+            value: f64 = 0.0;
+            if arg.type.size == 4 { value = (*(arg.data as *f32)) as f64; }
+            else                  { value = *(arg.data as *f64); }
+            return sqlite3_bind_double(handle, place, value) == Ok;
+        }
+        case .bool {
+            n: i64 = 0;
+            if *(arg.data as *bool) { n = 1; }
+            return sqlite3_bind_int64(handle, place, n) == Ok;
+        }
+        case .string {
+            text := *(arg.data as *string);
+            return sqlite3_bind_text(handle, place, text.data, text.len as i32, null) == Ok;   // Lives until the reset
+        }
+        case .pointer {
+            pointer := *(arg.data as **void);
+            if pointer == null { return sqlite3_bind_null(handle, place) == Ok; }
+            pointee := (arg.type as *TypePointer).pointerTo;
+            if pointee.kind == .void || pointee.kind == .pointer { return false; }
+            inner: any;
+            inner.type = pointee;
+            inner.data = pointer;
+            return bind(handle, place, inner, texts);
+        }
+        case .struct {
+            if arg.type.isOptional() {
+                data, valueType, present := (arg.type as *TypeStruct).optionalValue(arg.data);
+                if !present { return sqlite3_bind_null(handle, place) == Ok; }
+                inner: any;
+                inner.type = valueType;
+                inner.data = data;
+                return bind(handle, place, inner, texts);
+            }
+        }
+        else {}
+    }
+    text, ok := dbms.paramText(arg);
+    if !ok { return false; }
+    if text.isNull() { return sqlite3_bind_null(handle, place) == Ok; }
+    texts.add(text);
+    return sqlite3_bind_text(handle, place, text.data, -1, null) == Ok;
+}
+
+@private
+paramError :: (index: int, arg: any) -> string {
+    sb: fmt.StringBuilder;
+    sb.allocator = heapAllocator();
+    sb.add("Parameter % can't be a %", index + 1, arg.type.name);
+    return sb.toString();
+}
+
+@private rowCount    :: (result: *void) -> i64 { return (result as *Result).rows as i64; }
+@private columnCount :: (result: *void) -> i64 { return (result as *Result).columns as i64; }
+@private affected    :: (result: *void) -> i64 { return (result as *Result).changes; }
+
+@private
+columnName :: (result: *void, column: i64) -> c.string {
+    r := result as *Result;
+    return c.string{&r.names.data[r.nameAt[column as int]]};
+}
+
+@private
+value :: (result: *void, row: i64, column: i64) -> c.string {
+    r := result as *Result;
+    return r.values[(row * (r.columns as i64) + column) as int];
+}
+
+// The result is kept for the next query of its connection, unless one is kept already
+@private
+freeResult :: (result: *void) {
+    r := result as *Result;
+    if r.owner != null && r.owner.spare == null {
+        r.owner.spare = r;
+        return;
+    }
+    r.names.free();
+    r.nameAt.free();
+    r.text.free();
+    r.offsets.free();
+    r.values.free();
+    mem.delete(r, heapAllocator());
+}
+
+@private
+close :: (conn: *void) {
+    db := conn as *Database;
+    for sql, statement in db.statements {
+        sqlite3_finalize(statement.handle);
+        statement.argOf.free();
+        mem.delete(statement, heapAllocator());
+        sql.free(heapAllocator());
+    }
+    db.statements.free();
+    if db.spare != null {
+        db.spare.owner = null;
+        freeResult(db.spare);
+    }
+    sqlite3_close_v2(db.handle);
+    mem.delete(db, heapAllocator());
+}
+
+// A copy of an error message of SQLite, on the heap
+@private
+copyMessage :: (text: c.string) -> string {
+    if text.isNull() { return "Unknown error"; }
+    return text.toString().copy(heapAllocator());
+}
+
+@private Ok   :: 0;
+@private Row  :: 100;
+@private Done :: 101;
+@private Null :: 5;    // SQLITE_NULL, the type of a NULL column
+
+@private OpenReadOnly  :: 0x00000001;
+@private OpenReadWrite :: 0x00000002;
+@private OpenCreate    :: 0x00000004;
+@private OpenNoMutex   :: 0x00008000;
+
+// On Linux, tools/linux/link.sh links libsqlite3 (shim_sqlite.c)
+extern "sqlite3.dll" {
+    sqlite3_open_v2              :: (filename: c.string, db: **void, flags: int, vfs: c.string) -> int;
+    sqlite3_close_v2             :: (db: *void) -> int;
+    sqlite3_errmsg               :: (db: *void) -> c.string;
+    sqlite3_busy_timeout         :: (db: *void, ms: i32) -> int;
+    sqlite3_prepare_v2           :: (db: *void, sql: *u8, bytes: i32, statement: **void, tail: **u8) -> int;
+    sqlite3_finalize             :: (statement: *void) -> int;
+    sqlite3_reset                :: (statement: *void) -> int;
+    sqlite3_clear_bindings       :: (statement: *void) -> int;
+    sqlite3_step                 :: (statement: *void) -> int;
+    sqlite3_bind_parameter_count :: (statement: *void) -> int;
+    sqlite3_bind_parameter_name  :: (statement: *void, index: i32) -> c.string;
+    sqlite3_bind_int64           :: (statement: *void, index: i32, value: i64) -> int;
+    sqlite3_bind_double          :: (statement: *void, index: i32, value: f64) -> int;
+    sqlite3_bind_text            :: (statement: *void, index: i32, text: *u8, bytes: i32, destructor: *void) -> int;
+    sqlite3_bind_null            :: (statement: *void, index: i32) -> int;
+    sqlite3_column_count         :: (statement: *void) -> int;
+    sqlite3_column_name          :: (statement: *void, column: i32) -> c.string;
+    sqlite3_column_type          :: (statement: *void, column: i32) -> int;
+    sqlite3_column_text          :: (statement: *void, column: i32) -> *u8;
+    sqlite3_column_bytes         :: (statement: *void, column: i32) -> int;
+    sqlite3_column_int64         :: (statement: *void, column: i32) -> i64;
+    sqlite3_changes64            :: (db: *void) -> i64;
+    sqlite3_last_insert_rowid    :: (db: *void) -> i64;
+}
