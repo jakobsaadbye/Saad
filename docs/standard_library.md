@@ -401,8 +401,40 @@ POST /v1/createPost   {"post": {"title": "Hi"}}      -> {"id": 3, "title": "Hi"}
   constant: `newApp` gives an error for one that is computed, e.g `size := pageSize()`.
 * The result is JSON: the value, an array of the values when there are more, or `null`. A given or thrown error is
   `{"error": message, "kind": kind}`, with the status of its kind: `web.BadRequest` 400, `web.Unauthorized` 401,
-  `web.Forbidden` 403, `web.NotFound` 404, `web.Conflict` 409, others 500. A `Panic` is a 500 that doesn't tell what
-  went wrong.
+  `web.Forbidden` 403, `web.NotFound` 404, `web.Conflict` 409, others 500. A 500 doesn't tell what went wrong, e.g
+  of a database: its message is "Internal Server Error", and the error is written to stderr (`app.server.log`).
+* `session.response.status = 201` gives another status to a result.
+
+### Paths, authorization and the messages of errors
+
+An endpoint can have a path of its own, with `{segments}` that its parameters of the same name are read from, so an
+app can be a REST API:
+
+```odin
+@web.endpoint(.get, path: "/posts/{id}")
+getPost :: (session: *Session, id: i64) -> PostReply { ... }        // GET /posts/42
+
+@web.endpoint(.post, path: "/posts/{id}/like", authorize: true)
+like :: (session: *Session, id: i64) -> Liked { ... }
+
+app.useJson(json.SnakeCase);            // likeCount is written as like_count, and a parameter pageSize is read from page_size
+app.onAuthorize(checkToken);            // Before the parameters of an endpoint with authorize are read
+app.errorKinds = false;                 // {"error": message}
+app.setMessage(web.NoEndpoint, "not found");
+app.setMessage(web.InternalError, "internal server error");
+```
+
+* A path is matched segment by segment; an endpoint without one is at the prefix and its name, as before. Another
+  method at the path is a 405 with `Allow`, and no endpoint a 404.
+* With `authorize: true`, the hook of `app.onAuthorize` runs after `onStart` and before the parameters are read, so a
+  request without a token is a 401 even when its parameters are wrong. The hook throws, e.g `web.Unauthorized`, to
+  refuse it, and can put what it found in the session, e.g the user.
+* The errors of the app itself have kinds of their own, so a program can give them its own messages with
+  `app.setMessage(kind, message)`: `web.MalformedJson` (the body isn't JSON), `web.MissingParameter`,
+  `web.InvalidParameter` (a parameter isn't of its type, e.g `abc` for an `i64`), `web.NoEndpoint` and
+  `web.MethodNotAllowed`, and `web.InternalError` for the message of every 500. Any kind can be given a message,
+  also the program's own.
+* `onStart` and `onFinish` run for every request that has an endpoint, also when its parameters are wrong.
 * The session is new for each request, and freed with it. While the endpoint runs, the allocator of the thread is the
   arena of the request, so what it allocates, also its result, is freed after the response. Give what lives longer
   the heap, e.g `post.title.copy(mem.heap())`. A `dbms.Pool` gives each session a connection (see `docs/dbms.md`).

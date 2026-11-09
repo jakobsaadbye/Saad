@@ -210,7 +210,7 @@ main :: () {
     app.server.shutdown();
     serving.join();
     finishMutex.lock();
-    assert(finished == 14);   // Every endpoint that was called, also the ones that threw
+    assert(finished == 18);   // Every session that was started: of the endpoints that were called, also the ones that threw, and of the 4 with bad parameters
     finishMutex.unlock();
     fmt.print("web ok");
 }

@@ -97,6 +97,14 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
 * `dbms.sqlite`: the SQLite driver. Parameters are `?` or `$1`, numbers and texts are bound by their type, and each SQL
   is prepared once per connection and used again. See `docs/dbms.md`
 * `crypto`: SHA-256 and HMAC-SHA256. `jwt`: JSON Web Tokens signed with HS256, made and verified
+* `web`: endpoints at paths of their own, e.g `@web.endpoint(.get, path: "/posts/{id}")`, with parameters from the
+  `{segments}`. `authorize: true` and `app.onAuthorize(hook)`, which runs before the parameters are read.
+  `app.useJson(json.SnakeCase)` for the names of results and parameters. `app.errorKinds = false` for
+  `{"error": message}`, and `app.setMessage(kind, message)`, also for the errors of the app itself, which have kinds
+  of their own: `web.MalformedJson`, `web.MissingParameter`, `web.InvalidParameter`, `web.NoEndpoint`,
+  `web.MethodNotAllowed` and `web.InternalError`
+  * Changed: a 500 doesn't tell its message, also when it isn't a `Panic`, and the error is written to stderr.
+    `onStart` and `onFinish` also run for a request whose parameters are wrong
 
 ## Update v0.18.0 - 8. Nov 2026
 
