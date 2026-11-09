@@ -80,11 +80,24 @@ SockAddrIn :: struct {
         revents: i16;
     }
     PollIn   :: 0x0100;   // POLLRDNORM: there is something to read, or the other end closed
+    PollOut  :: 0x0010;   // POLLWRNORM
+    PollErr  :: 0x0001;
+    PollHup  :: 0x0002;
+    PollNval :: 0x0004;
     PollDone :: 0x0100 | 0x0001 | 0x0002 | 0x0004;   // Readable, POLLERR, POLLHUP or POLLNVAL
 
     extern "ws2_32.dll" {
         WSAPoll :: (fds: *PollFd, count: u32, milliseconds: i32) -> i32;
     }
+
+    TcpNoDelay :: 1;   // TCP_NODELAY, of IpprotoTcp
+
+    // Non-blocking sockets, for net.Poller
+    FionBio :: 0x8004667E;   // FIONBIO of ioctlsocket
+    extern "ws2_32.dll" {
+        ioctlsocket :: (s: Socket, command: i32, argument: *u32) -> i32;
+    }
+    WsaeWouldBlock  :: 10035;
 
     WsaeTimedOut    :: 10060;
     WsaeConnReset   :: 10054;
@@ -154,7 +167,48 @@ SockAddrIn :: struct {
         poll :: (fds: *PollFd, count: u64, milliseconds: i32) -> i32;
     }
 
-    Eagain       :: 11;    // A timeout of SO_RCVTIMEO or SO_SNDTIMEO
+    SoReusePort :: 15;     // SO_REUSEPORT: more sockets, e.g of more processes, listen at the same port
+    TcpNoDelay  :: 1;      // TCP_NODELAY, of IpprotoTcp
+    SockNonBlock :: 0x800;     // SOCK_NONBLOCK of accept4
+    SockCloexec  :: 0x80000;   // SOCK_CLOEXEC
+    FionBio      :: 0x5421;    // FIONBIO of ioctl
+
+    // epoll, for net.Poller. The struct epoll_event of the kernel is packed (12 bytes), so the shim takes this one and
+    // packs it
+    EpollEvent :: struct {
+        events: u32;
+        data:   u64;
+    }
+    EpollIn        :: 0x001;
+    EpollOut       :: 0x004;
+    EpollErr       :: 0x008;
+    EpollHup       :: 0x010;
+    EpollRdHup     :: 0x2000;
+    EpollExclusive :: 0x10000000;   // Only one of the pollers that wait for a listener is woken for a connection
+    EpollCtlAdd    :: 1;
+    EpollCtlDel    :: 2;
+    EpollCtlMod    :: 3;
+    EpollCloexec   :: 0x80000;
+
+    // struct rlimit, for the number of files a process may have open
+    RLimit :: struct {
+        current: u64;
+        maximum: u64;
+    }
+    RlimitNofile :: 7;
+
+    extern "C" {
+        epoll_create1 :: (flags: i32) -> i32;
+        epoll_ctl     :: (epoll: i32, operation: i32, fd: i32, event: *EpollEvent) -> i32;
+        epoll_wait    :: (epoll: i32, events: *EpollEvent, count: i32, milliseconds: i32) -> i32;
+        accept4       :: (s: Socket, address: *SockAddrIn, length: *u32, flags: i32) -> Socket;
+        ioctl         :: (fd: i32, request: u64, argument: *i32) -> i32;
+        getrlimit     :: (resource: i32, limit: *RLimit) -> i32;
+        setrlimit     :: (resource: i32, limit: *RLimit) -> i32;
+    }
+
+    Eintr        :: 4;
+    Eagain       :: 11;    // A timeout of SO_RCVTIMEO or SO_SNDTIMEO, or nothing to read or write on a non-blocking socket
     Epipe        :: 32;
     EconnReset   :: 104;
     EconnRefused :: 111;

@@ -169,8 +169,10 @@ Listener :: struct {
     addr:   Addr;    // Where it listens, with the port the system chose for port 0
 }
 
-// Listens at "host:port", e.g ":8080", "127.0.0.1:8080", or ":0" for a port the system chooses (listener.addr.port)
-listen :: (address: string, backlog := 128) -> *Listener, error {
+// Listens at "host:port", e.g ":8080", "127.0.0.1:8080", or ":0" for a port the system chooses (listener.addr.port).
+// backlog is how many connections may wait to be accepted (the system caps it). With reusePort, other sockets, e.g of
+// other processes, can listen at the same port too, and the system shares the connections between them (Linux)
+listen :: (address: string, backlog := 1024, reusePort := false) -> *Listener, error {
     host, port, err := splitHostPort(address);
     if err != null { return null, err; }
     addr: Addr;
@@ -185,6 +187,9 @@ listen :: (address: string, backlog := 128) -> *Listener, error {
     // A port that was just used can be listened at again right away
     yes: sys.OptionValue = 1;
     sys.setsockopt(s, sys.SolSocket, sys.SoReuseAddr, (&yes) as *u8, sizeof(sys.OptionValue) as sys.AddrLength);
+    #if OS != .windows {
+        if reusePort { sys.setsockopt(s, sys.SolSocket, sys.SoReusePort, (&yes) as *u8, sizeof(sys.OptionValue) as sys.AddrLength); }
+    }
 
     sockAddr := addr.toSockAddr();
     if sys.bind(s, &sockAddr, sys.addrLength()) != 0 || sys.listen(s, backlog as i32) != 0 {
@@ -219,6 +224,37 @@ accept :: method (listener: *Listener) -> *Conn, error {
     conn.socket = s;
     conn.remote = fromSockAddr(&remote);
     return conn, null;
+}
+
+// Accepts a connection that waits, on a listener made non-blocking. null, without an error, when none waits. The
+// connection is non-blocking too
+tryAccept :: method (listener: *Listener) -> *Conn, error {
+    remote: sys.SockAddrIn;
+    length := sys.addrLength();
+    #if OS == .windows {
+        s := sys.accept(listener.socket, &remote, &length);
+        if s == sys.InvalidSocket {
+            if sys.WSAGetLastError() == sys.WsaeWouldBlock { return null, null; }
+            return null, lastError("accept");
+        }
+        setNonBlocking(s);
+    } else {
+        s := sys.accept4(listener.socket, &remote, &length, sys.SockNonBlock | sys.SockCloexec);
+        if s == sys.InvalidSocket {
+            code := *sys.__errno_location();
+            if code == sys.Eagain || code == sys.Eintr { return null, null; }
+            return null, lastError("accept");
+        }
+    }
+    conn := new(Conn, mem.heap());
+    conn.socket = s;
+    conn.remote = fromSockAddr(&remote);
+    return conn, null;
+}
+
+// Makes accept on the listener give null instead of waiting, see tryAccept
+setNonBlocking :: method (listener: *Listener) {
+    setNonBlocking(listener.socket);
 }
 
 // Stops listening. An accept() that waits gives an error of the kind net.Closed
@@ -331,6 +367,79 @@ write :: method (conn: *Conn, data: string) -> error {
         sent += n;
     }
     return null;
+}
+
+// Reads what has come, on a non-blocking connection: 0 without an error when nothing has come yet. 0 with an error of
+// the kind net.Closed when the other end closed it
+tryRead :: method (conn: *Conn, buffer: []u8) -> int, error {
+    if buffer.count == 0 { return 0, null; }
+    n := sys.recv(conn.socket, buffer.data, buffer.count as sys.Length, 0) as int;
+    if n > 0 { return n, null; }
+    if n == 0 { return 0, errors.make("The connection was closed", kind: Closed); }
+    if wouldBlock() { return 0, null; }
+    return 0, lastError("read");
+}
+
+// Writes what the connection takes now, on a non-blocking connection, and gives how many bytes that was: fewer than
+// all, maybe 0, when the system's buffer of the connection is full. Write the rest when it is writable (Poller)
+tryWrite :: method (conn: *Conn, data: string) -> int, error {
+    sent := 0;
+    while sent < data.len {
+        n := sys.send(conn.socket, &data.data[sent], (data.len - sent) as sys.Length, sys.SendFlags) as int;
+        if n <= 0 {
+            if n < 0 && wouldBlock() { return sent, null; }
+            return sent, lastError("write");
+        }
+        sent += n;
+    }
+    return sent, null;
+}
+
+// Makes reads and writes give what they can at once instead of waiting, see tryRead and tryWrite
+setNonBlocking :: method (conn: *Conn) {
+    setNonBlocking(conn.socket);
+}
+
+// Sends small writes at once instead of waiting to put them together (TCP_NODELAY), e.g for the responses of a server
+setNoDelay :: method (conn: *Conn) {
+    yes: sys.OptionValue = 1;
+    sys.setsockopt(conn.socket, sys.IpprotoTcp, sys.TcpNoDelay, (&yes) as *u8, sizeof(sys.OptionValue) as sys.AddrLength);
+}
+
+setNonBlocking :: (s: sys.Socket) {
+    #if OS == .windows {
+        yes: u32 = 1;
+        sys.ioctlsocket(s, sys.FionBio as i32, &yes);
+    } else {
+        yes: i32 = 1;
+        sys.ioctl(s, sys.FionBio, &yes);
+    }
+}
+
+// If the last call failed only because a non-blocking socket had nothing to give or no room
+wouldBlock :: () -> bool {
+    #if OS == .windows {
+        return sys.WSAGetLastError() == sys.WsaeWouldBlock;
+    } else {
+        code := *sys.__errno_location();
+        return code == sys.Eagain || code == sys.Eintr;
+    }
+}
+
+// Lets the process have as many sockets and files open as the system allows it (Linux), e.g for a server with many
+// connections. Gives how many that is
+raiseOpenFileLimit :: () -> int {
+    #if OS == .windows {
+        return 16777216;   // Windows has no such limit for sockets
+    } else {
+        limit: sys.RLimit;
+        if sys.getrlimit(sys.RlimitNofile, &limit) != 0 { return 1024; }
+        if limit.current < limit.maximum {
+            limit.current = limit.maximum;
+            sys.setrlimit(sys.RlimitNofile, &limit);
+        }
+        return limit.current as int;
+    }
 }
 
 // A read that waits longer than this gives an error of the kind net.Timeout. 0 waits for ever

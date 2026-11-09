@@ -39,11 +39,16 @@ import json;
 import fmt;
 import mem;
 import errors;
+import io;
 
-// The attribute of an endpoint: @web.endpoint for POST, @web.endpoint(.get) for GET
+// The attribute of an endpoint: @web.endpoint for POST, @web.endpoint(.get) for GET. With a path, it is called at the
+// path instead of the url of its name, e.g @web.endpoint(.get, path: "/posts/{id}"), and a parameter with the name of a
+// {segment} is read from it. With authorize, the hook of app.onAuthorize runs first, before the parameters are read
 @attribute
 endpoint :: struct {
-    method: Method = .post;
+    method:    Method = .post;
+    path:      string;
+    authorize: bool = false;
 }
 
 Method :: enum {
@@ -58,6 +63,14 @@ Forbidden    :: ErrorKind{"web.Forbidden"};      // 403
 NotFound     :: ErrorKind{"web.NotFound"};       // 404
 Conflict     :: ErrorKind{"web.Conflict"};       // 409
 
+// The kinds of the errors of the app itself, so their messages can be the program's own (app.setMessage)
+MalformedJson    :: ErrorKind{"web.MalformedJson"};      // 400: the body of a POST isn't JSON
+MissingParameter :: ErrorKind{"web.MissingParameter"};   // 400: a parameter without a default isn't there
+InvalidParameter :: ErrorKind{"web.InvalidParameter"};   // 400: a parameter isn't of its type
+NoEndpoint       :: ErrorKind{"web.NoEndpoint"};         // 404: no endpoint is at the path
+MethodNotAllowed :: ErrorKind{"web.MethodNotAllowed"};   // 405: the endpoint is called with another method
+InternalError    :: ErrorKind{"web.InternalError"};      // 500: the message of every error that gives a 500
+
 // What every session has. The session of a program embeds it: @embed base: web.Session;
 Session :: struct {
     request:  *http.Request;
@@ -67,9 +80,13 @@ Session :: struct {
 
 // An endpoint of the app
 Endpoint :: struct {
-    name:     string;
-    method:   Method;
-    function: *AttributedFunction;
+    name:      string;
+    method:    Method;
+    function:  *AttributedFunction;
+    path:      string;            // Its own path, e.g /posts/{id}, or empty for the prefix and its name
+    segments:  [..]string;        // Of the path, e.g ["posts", "{id}"]
+    authorize: bool;
+    names:     [..]string;        // The name of each parameter in JSON, in the style of app.jsonOptions
 }
 
 App :: struct {
@@ -77,10 +94,17 @@ App :: struct {
     prefix:    string;            // Of the urls, e.g /v1
     endpoints: [..]Endpoint;
 
+    // How results are written and parameters read, e.g json.SnakeCase, so createdAt is created_at
+    jsonOptions: json.Options;
+    // An error is {"error": message, "kind": kind}, or {"error": message} without
+    errorKinds: bool = true;
+    messages:   Map<string, string>;   // The message of the errors of a kind, by the name of the kind (setMessage)
+
     sessionType:   *TypeStruct;   // Of the session of the program
     sessionOffset: int;           // Where its web.Session is in it
     start:         (session: *u8);
     finish:        (session: *u8);
+    authorizer:    (session: *u8);
 }
 
 // The app of the endpoints whose first parameter is a *S, with urls under the prefix, e.g "/v1". S is web.Session, or a
@@ -133,13 +157,29 @@ newApp :: <S>(prefix: string) -> *App, error {
                 return null, errors.make("The result of the endpoint % can't be written as JSON: %", f.name, problem);
             }
         }
-        for e in app.endpoints {
-            if e.name == f.name {
-                return null, errors.make("Two endpoints are named %: the name of an endpoint is its url, so it must be unique", f.name);
+        added: Endpoint;
+        added.name      = f.name;
+        added.method    = marked.method;
+        added.function  = function;
+        added.path      = marked.path;
+        added.authorize = marked.authorize;
+        if added.path.len > 0 {
+            if !added.path.startsWith("/") { return null, errors.make("The path of the endpoint % must start with /, e.g /posts/{id}", f.name); }
+            for segment in added.path.split("/") {
+                if segment.len > 0 { added.segments.add(segment); }
             }
         }
-        app.endpoints.add(Endpoint{f.name, marked.method, function});
+        for e in app.endpoints {
+            if e.path.len == 0 && added.path.len == 0 && e.name == f.name {
+                return null, errors.make("Two endpoints are named %: the name of an endpoint is its url, so it must be unique", f.name);
+            }
+            if e.path.len > 0 && e.path == added.path && e.method == added.method {
+                return null, errors.make("The endpoints % and % have the same method and path %", e.name, f.name, added.path);
+            }
+        }
+        app.endpoints.add(added);
     }
+    app.useJson(app.jsonOptions);
 
     app.server.handler = dispatch;
     return app, null;
@@ -158,6 +198,33 @@ onFinish :: method <S>(app: *App, hook: (session: *S)) {
     app.finish = address as (session: *u8);
 }
 
+// How results are written and parameters read, e.g app.useJson(json.SnakeCase): createdAt is written as created_at,
+// and a parameter likeCount is read from like_count
+useJson :: method (app: *App, options: json.Options) {
+    app.jsonOptions = options;
+    for i in 0..app.endpoints.count {
+        e := app.endpoints.indexRef(i);
+        e.names.free();
+        e.names.allocator = mem.heap();
+        for p in e.function.parameters { e.names.add(json.styleName(p.name, options.names).copy(mem.heap())); }
+    }
+}
+
+// The message of the errors of a kind, in place of their own, e.g app.setMessage(web.NoEndpoint, "not found") or
+// app.setMessage(web.InternalError, "internal server error") for every 500
+setMessage :: method (app: *App, kind: ErrorKind, message: string) {
+    app.messages.allocator = mem.heap();
+    app.messages.set(kind.name.copy(mem.heap()), message.copy(mem.heap()));
+}
+
+// A function that is called before the parameters of an endpoint with authorize are read, e.g to check a token. It
+// throws when the request isn't allowed, e.g web.Unauthorized, and the endpoint isn't called then. Its session has
+// been given to onStart first
+onAuthorize :: method <S>(app: *App, hook: (session: *S)) {
+    address := hook as *void;
+    app.authorizer = address as (session: *u8);
+}
+
 listenAndServe :: method (app: *App, address: string) -> error {
     return app.server.listenAndServe(address);
 }
@@ -166,57 +233,102 @@ listenAndServe :: method (app: *App, address: string) -> error {
 // Answering a request
 //
 
-ErrorBody :: struct {
-    @json.Field(name: "error")
-    message: string;
-    kind:    string;
-}
-
 // The status of an error, from its kind
 statusOf :: (err: error) -> int {
-    if err.is(BadRequest) || err.is(json.DecodeError) { return 400; }
+    if err.is(BadRequest) || err.is(json.DecodeError) || err.is(MalformedJson) || err.is(MissingParameter) || err.is(InvalidParameter) { return 400; }
     if err.is(Unauthorized) { return 401; }
     if err.is(Forbidden)    { return 403; }
-    if err.is(NotFound)     { return 404; }
+    if err.is(NotFound) || err.is(NoEndpoint) { return 404; }
+    if err.is(MethodNotAllowed) { return 405; }
     if err.is(Conflict)     { return 409; }
     return 500;
 }
 
-respondError :: (w: *http.ResponseWriter, status: int, message: string, kind: string) {
+// The error as JSON: {"error": message, "kind": kind}, or without the kind. The message of a 500 isn't told, as it can
+// be what went wrong inside, e.g of the database: it is written to stderr instead (server.log)
+respondWith :: (app: *App, w: *http.ResponseWriter, err: error) {
+    status := statusOf(err);
+    message := err.message;
+    if status == 500 {
+        if app.server.log { io.writeError(fmt.sprint("web: %: %\n", err.kind.name, err.message)); }
+        message = app.messages.get(InternalError.name, "Internal Server Error");
+    }
+    message = app.messages.get(err.kind.name, message);
     w.status = status;
     w.body.clear();
     w.setHeader("Content-Type", "application/json");
-    w.write(json.encode(ErrorBody{message, kind}));
+    w.write("{\"error\":");
+    w.write(json.encode(message));
+    if app.errorKinds {
+        w.write(",\"kind\":");
+        w.write(json.encode(err.kind.name));
+    }
+    w.write("}");
 }
 
-respondWith :: (w: *http.ResponseWriter, err: error) {
-    status := statusOf(err);
-    message := err.message;
-    if err.is(Panic) { message = "Internal Server Error"; }   // What went wrong inside isn't told
-    respondError(w, status, message, err.kind.name);
+// The endpoint of the request, and the values of the {segments} of its path. Null and the error when there is none
+findEndpoint :: (app: *App, r: *http.Request, values: *[..]http.Header) -> *Endpoint, error {
+    name := "";
+    if r.path.startsWith(app.prefix) && r.path.len > app.prefix.len && r.path[app.prefix.len] == '/' {
+        name = r.path.slice(app.prefix.len + 1);
+    }
+    isGet := r.method == "GET" || r.method == "HEAD";
+    otherMethod: *Endpoint;
+    for i in 0..app.endpoints.count {
+        e := app.endpoints.indexRef(i);
+        matches := false;
+        if e.path.len == 0 {
+            matches = name.len > 0 && e.name == name;
+        } else {
+            values.clear();
+            matches = matchPath(e, r.path, values);
+        }
+        if !matches { continue; }
+        if (e.method == .get) == isGet && (e.method == .get || r.method == "POST") { return e, null; }
+        otherMethod = e;
+    }
+    if otherMethod != null {
+        wanted := "POST";
+        if otherMethod.method == .get { wanted = "GET"; }
+        r.values.clear();
+        return otherMethod, errors.make("% is called with %", otherMethod.name, wanted, kind: MethodNotAllowed);
+    }
+    return null, errors.make("There is no endpoint at %", r.path, kind: NoEndpoint);
+}
+
+// If the path is the path of the endpoint, with the values of its {segments}
+matchPath :: (e: *Endpoint, path: string, values: *[..]http.Header) -> bool {
+    at := 0;
+    for segment in e.segments {
+        while at < path.len && path[at] == '/' { at += 1; }
+        if at >= path.len { return false; }
+        end := at;
+        while end < path.len && path[end] != '/' { end += 1; }
+        part := path.slice(at, end);
+        if segment.len > 2 && segment[0] == '{' && segment[segment.len - 1] == '}' {
+            values.add(http.Header{segment.slice(1, segment.len - 1), part});
+        } else if part != segment {
+            return false;
+        }
+        at = end;
+    }
+    while at < path.len && path[at] == '/' { at += 1; }
+    return at == path.len;
 }
 
 // The handler of the server of an app
 dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
     app := r.server as *App;   // The server is the first member of the app
 
-    name := "";
-    if r.path.startsWith(app.prefix) && r.path.len > app.prefix.len && r.path[app.prefix.len] == '/' {
-        name = r.path.slice(app.prefix.len + 1);
-    }
-    target: *Endpoint;
-    for i in 0..app.endpoints.count {
-        if app.endpoints[i].name == name { target = app.endpoints.indexRef(i); }
-    }
-    if target == null {
-        respondError(w, 404, fmt.sprint("There is no endpoint at %", r.path), "web.NotFound");
-        return;
-    }
-    wanted := "POST";
-    if target.method == .get { wanted = "GET"; }
-    if r.method != wanted && !(wanted == "GET" && r.method == "HEAD") {
-        w.setHeader("Allow", wanted);
-        respondError(w, 405, fmt.sprint("% is called with %", name, wanted), "web.MethodNotAllowed");
+    r.values.allocator = r.allocator;
+    target, notFound := findEndpoint(app, r, &r.values);
+    if notFound != null {
+        if notFound.is(MethodNotAllowed) {
+            wanted := "POST";
+            if target.method == .get { wanted = "GET"; }
+            w.setHeader("Allow", wanted);
+        }
+        respondWith(app, w, notFound);
         return;
     }
 
@@ -232,18 +344,15 @@ dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
     base.app      = app;
     *((&arguments[f.parameters[0].offset]) as **u8) = session;
 
-    err := readArguments(f, r, arguments);
-    if err != null {
-        respondWith(w, err);
-        return;
-    }
-
     try {
         if app.start != null { app.start(session); }
+        if target.authorize && app.authorizer != null { app.authorizer(session); }
+        err := readArguments(app, target, r, arguments);
+        if err != null { throw err; }
         f.invoke(arguments, results);
     } catch (thrown) {
         if app.finish != null { app.finish(session); }
-        respondWith(w, thrown);
+        respondWith(app, w, thrown);
         return;
     }
     if app.finish != null { app.finish(session); }
@@ -255,7 +364,7 @@ dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
         if isErrorType(result.type) {
             given := *((&results[result.offset]) as *error);
             if given != null {
-                respondWith(w, given);
+                respondWith(app, w, given);
                 return;
             }
             continue;
@@ -266,12 +375,12 @@ dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
     if values.count == 0 {
         w.write("null");
     } else if values.count == 1 {
-        w.write(json.encodeAt(&results[values[0].offset], values[0].type));
+        w.write(json.encodeAt(&results[values[0].offset], values[0].type, app.jsonOptions));
     } else {
         w.write("[");
         for v, i in values {
             if i > 0 { w.write(","); }
-            w.write(json.encodeAt(&results[v.offset], v.type));
+            w.write(json.encodeAt(&results[v.offset], v.type, app.jsonOptions));
         }
         w.write("]");
     }
@@ -360,38 +469,40 @@ isErrorType :: (type: *Type) -> bool {
     return type == boxed.type;
 }
 
-// The parameters after the session: the members of the JSON object of the body for POST, or the query for GET. One
-// that isn't there is an error, unless it is an optional
-readArguments :: (f: *AttributedFunction, r: *http.Request, arguments: *u8) -> error {
+// The parameters after the session: the members of the JSON object of the body for POST, or the query for GET, and the
+// {segments} of the path of the endpoint. One that isn't there is an error, unless it has a default or is an optional
+readArguments :: (app: *App, e: *Endpoint, r: *http.Request, arguments: *u8) -> error {
+    f := e.function;
     body: json.Value;
     isGet := r.method == "GET" || r.method == "HEAD";
     if !isGet && f.parameters.count > 1 {
         text := r.body;
         if text.len == 0 { text = "{}"; }
         parsed, err := json.parse(text);
-        if err != null { return errors.make("The body isn't JSON: %", err.message, kind: BadRequest); }
+        if err != null { return errors.make("The body isn't JSON: %", err.message, kind: MalformedJson); }
         if parsed.kind != .object { return errors.make("The body is a JSON object of the parameters, e.g {\"id\": 1}", kind: BadRequest); }
         body = parsed;
     }
 
     for i in 1..f.parameters.count {
         p := f.parameters[i];
+        name := e.names[i];
         place := (&arguments[p.offset]) as *void;
         value: json.Value;
         given := false;
-        if isGet {
-            text, found := r.queryValue(p.name);
-            given = found;
-            if found {
-                // Text is as it is, also for a ?string. Other types are JSON, e.g 2, true or [1, 2]
-                if isText(p.type) { text = json.encode(text); }
-                parsed, err := json.parse(text);
-                if err != null { return errors.make("%: '%' isn't a value of type %", p.name, text, p.type.name, kind: BadRequest); }
-                value = parsed;
-            }
-        } else {
-            given = body.has(p.name);
-            if given { value = body.get(p.name); }
+        text, inPath := pathValue(r, p.name);
+        found := inPath;
+        if !inPath && isGet { text, found = r.queryValue(name); }
+        if found {
+            // A text is as it is, also for a ?string. Other types are JSON, e.g 2, true or [1, 2]
+            given = true;
+            if isText(p.type) { text = json.encode(text); }
+            parsed, err := json.parse(text);
+            if err != null { return errors.make("%: '%' isn't a value of type %", name, text, p.type.name, kind: InvalidParameter); }
+            value = parsed;
+        } else if !isGet {
+            given = body.has(name);
+            if given { value = body.get(name); }
         }
         if !given {
             if p.defaultValue != null {
@@ -399,10 +510,18 @@ readArguments :: (f: *AttributedFunction, r: *http.Request, arguments: *u8) -> e
                 continue;
             }
             if p.type.flags.has(.isOptional) { continue; }
-            return errors.make("The parameter % is missing", p.name, kind: BadRequest);
+            return errors.make("The parameter % is missing", name, kind: MissingParameter);
         }
-        err := json.assignAt(value, place, p.type, p.name);
-        if err != null { return errors.make(err.message, kind: BadRequest); }
+        err := json.assignAt(value, place, p.type, name, app.jsonOptions);
+        if err != null { return errors.make(err.message, kind: InvalidParameter); }
     }
     return null;
+}
+
+// The value of a {segment} of the path of the endpoint
+pathValue :: (r: *http.Request, name: string) -> string, bool {
+    for v in r.values {
+        if v.name == name { return v.value, true; }
+    }
+    return "", false;
 }

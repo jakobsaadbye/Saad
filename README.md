@@ -82,6 +82,35 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
 
 # Changelog
 
+## Update v0.19.0 - 9. Nov 2026
+
+* `net.http`: the server is event loops. Each worker is a thread with a `net.Poller` (epoll on Linux) of its own
+  connections, on non-blocking sockets, and answers the requests it reads itself, so nothing is handed between
+  threads. An idle connection costs no thread and keeps no buffer. On one core, a short response went from 82,000 to
+  163,000 requests a second over 100 connections, and from 45,000 to 88,000 over 5,000 (`wrk`), with 5 MB of memory
+  instead of 25 MB
+  * `server.reusePort`: more processes can listen at the same port (Linux). `server.maxConnections` of each worker
+  * The server raises the open file limit of the process, for many connections
+* `net.Poller`: waits for many non-blocking sockets at once, epoll on Linux and `WSAPoll` on Windows.
+  `listener.tryAccept()`, `conn.tryRead()`, `conn.tryWrite()`, `setNonBlocking()`, `setNoDelay()`,
+  `net.listen(address, reusePort: true)` and `net.raiseOpenFileLimit()`
+* `dbms.sqlite`: the SQLite driver. Parameters are `?` or `$1`, numbers and texts are bound by their type, and each SQL
+  is prepared once per connection and used again. See `docs/dbms.md`
+* `crypto`: SHA-256 and HMAC-SHA256. `jwt`: JSON Web Tokens signed with HS256, made and verified
+* `examples/feed`: the API of the $12 server challenge (a feed of posts on SQLite), with `web`, `dbms.sqlite` and
+  `jwt`, and the scripts to submit it. About 21,500 requests a second of the challenge's mix on one core
+* Faster: `json` writes a struct from a plan worked out once per type, and strings in runs; `dbms` reads integers and
+  strings of a driver that gives them by type (`Driver.integer`, `Driver.text`) without texts to parse or count
+* Errors: when all results but the error are taken, the error is thrown, e.g `post, found := conn.queryOne<Post>(sql)`
+* `web`: endpoints at paths of their own, e.g `@web.endpoint(.get, path: "/posts/{id}")`, with parameters from the
+  `{segments}`. `authorize: true` and `app.onAuthorize(hook)`, which runs before the parameters are read.
+  `app.useJson(json.SnakeCase)` for the names of results and parameters. `app.errorKinds = false` for
+  `{"error": message}`, and `app.setMessage(kind, message)`, also for the errors of the app itself, which have kinds
+  of their own: `web.MalformedJson`, `web.MissingParameter`, `web.InvalidParameter`, `web.NoEndpoint`,
+  `web.MethodNotAllowed` and `web.InternalError`
+  * Changed: a 500 doesn't tell its message, also when it isn't a `Panic`, and the error is written to stderr.
+    `onStart` and `onFinish` also run for a request whose parameters are wrong
+
 ## Update v0.18.0 - 8. Nov 2026
 
 * The package `errors` makes errors: `errors.make("no user %", id, kind: NotFound, cause: err)` has the message in a

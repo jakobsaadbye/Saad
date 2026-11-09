@@ -45,6 +45,12 @@ age :: (name: string) -> int {
     return a + 1;
 }
 
+lookup :: (name: string) -> (int, bool, error) {
+    if name == "bad" { return 0, false, errors.make("lookup failed", kind: NotFound); }
+    if name == "ada" { return 36, true, null; }
+    return 0, false, null;
+}
+
 save :: (ok: bool) -> error {
     if ok { return null; }
     return errors.make("can't save %", 42);
@@ -246,6 +252,20 @@ main :: () {
         else => 0;
     };
     assert(seconds == 5);
+
+    // All results but the error are taken: the error is thrown
+    age1, found1 := lookup("ada");
+    assert(age1 == 36 && found1);
+    age2, found2 := lookup("cy");
+    assert(age2 == 0 && !found2);
+    try {
+        age3, found3 := lookup("bad");
+        assert(false);
+    } catch (e) {
+        assert(e.message == "lookup failed" && e.trace.count == 1);
+    }
+    age4, found4, err4 := lookup("bad");     // All taken: a value
+    assert(!found4 && err4.is(NotFound));
 
     // Without values, the message is as written, so a % stays a %
     assert(errors.make("100% sure").message == "100% sure");

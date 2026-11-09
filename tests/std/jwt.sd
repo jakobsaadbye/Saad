@@ -1,0 +1,45 @@
+// jwt: HS256 tokens signed and verified, a token made by another library, and the tokens that aren't good
+import jwt;
+import base64;
+use fmt;
+
+main :: () {
+    // A token of the $12 server challenge (signed by Node's crypto), with the secret twelve-dollar-challenge
+    key := jwt.newKey("twelve-dollar-challenge", requireExp: true);
+    foreign := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwidXNlcm5hbWUiOiJnb2xkZW5fZW1iZXJfMSIsImlhdCI6MTc5NDI0Mzg3OSwiZXhwIjoyMTA5NjAzODc5fQ.7FQFNJveAbFk_0WAT8cKDRUV1eSg-VugfeQjr5vLERI";
+    claims, err := key.verify(foreign);
+    assert(err == null && claims.get("sub").asString() == "1" && claims.get("username").asString() == "golden_ember_1");
+
+    // Signed here and verified, many times with the same key
+    token := key.sign("{\"sub\":\"42\",\"exp\":4102444800}");
+    for i in 0..3 {
+        mine, e := key.verify(token);
+        assert(e == null && mine.get("sub").asString() == "42");
+    }
+
+    // Another secret, a changed payload, alg none, expired, no exp, not yet valid, and garbage
+    other := jwt.newKey("another secret");
+    _, wrongKey := other.verify(foreign);
+    assert(wrongKey.is(jwt.Invalid));
+    parts := foreign.split(".");
+    changed := sprint("%.%.%", parts[0], base64.encode("{\"sub\":\"2\",\"exp\":2109603879}", url: true), parts[2]);
+    _, forged := key.verify(changed);
+    assert(forged.is(jwt.Invalid));
+    none := sprint("%.%.", base64.encode("{\"alg\":\"none\",\"typ\":\"JWT\"}", url: true), parts[1]);
+    _, unsigned := key.verify(none);
+    assert(unsigned.is(jwt.Invalid));
+    _, expired := key.verify(key.sign("{\"sub\":\"1\",\"exp\":1000}"));
+    assert(expired.is(jwt.Expired));
+    _, noExp := key.verify(key.sign("{\"sub\":\"1\"}"));
+    assert(noExp.is(jwt.Invalid));
+    lax := jwt.newKey("twelve-dollar-challenge");
+    _, fine := lax.verify(lax.sign("{\"sub\":\"1\"}"));
+    assert(fine == null);
+    _, early := key.verify(key.sign("{\"sub\":\"1\",\"exp\":4102444800,\"nbf\":4102444000}"));
+    assert(early.is(jwt.Expired));
+    for bad in ["", "abc", "a.b", "a.b.c.d", "..", "x.y.z", sprint("%.%", parts[0], parts[1])] {
+        _, e := key.verify(bad);
+        assert(e != null && e.is(jwt.Invalid));
+    }
+    print("jwt ok");
+}

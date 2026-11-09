@@ -161,6 +161,36 @@ arena.free();   // or arena.clear() to use the memory again for the next request
 
 The parameters and the result of libpq itself are freed by `dbms` when a call returns.
 
+## SQLite
+
+`dbms.sqlite` is the driver of SQLite, a database in a file of the program's own:
+
+```odin
+import dbms;
+import dbms.sqlite;
+
+conn, err := sqlite.open("app.db");                    // made when it isn't there, sqlite.open(":memory:") in memory
+conn.exec("PRAGMA journal_mode = WAL");
+users := conn.query<User>("SELECT id, name FROM users WHERE id > ? LIMIT ?", 10, 20);
+id    := sqlite.lastInsertId(&conn);
+```
+
+* Parameters are `?` in order, or `$1`, `$2`, ... like for Postgres, so the SQL of `dbms.Table` and of queries works.
+* Integers, floats, bools and texts are bound as what they are (`Driver.executeArgs`), not as texts, so `LIMIT ?` and
+  comparisons with numbers work as in SQL. A null pointer or an empty optional is `NULL`. Other values, e.g a
+  `time.Time` or an enum, are bound as the text `dbms` makes of them.
+* Each SQL is prepared once per connection: the next query with the same SQL binds and steps the statement it made
+  before, so it isn't parsed again. Several statements in one SQL, e.g `"BEGIN; ...; COMMIT"`, are run in turn and
+  aren't kept.
+* A result is read into a buffer of the connection, which the next query uses again, so a query allocates nothing
+  in the driver once it has run before.
+* `sqlite.open(path, sqlite.Options{busyTimeout: 1000, readOnly: true})`: how long a statement waits while another
+  connection writes (5 seconds unless given), and if the file is only read.
+* A connection is for one thread at a time. Give each thread its own, e.g with `dbms.Pool`.
+* On Windows, `sqlite3.dll` is next to the program or on the `PATH`. On Linux, `tools/linux/link.sh` links
+  `libsqlite3` (`libsqlite3-dev`) through `tools/linux/shim_sqlite.c`, or another SQLite with `SAAD_SQLITE_LIB` and
+  `SAAD_SQLITE_INCLUDE`, e.g one built from the amalgamation.
+
 ## Setup
 
 ### Windows
@@ -181,6 +211,7 @@ starts.
   `tests/db/shop/setup.sd`, and that a later run removes the files of tables that are gone. `tests/db/shop_tables.sd`
   uses those files on the database. After a change of the generator, `SAAD_UPDATE_GOLDEN=1 tools/linux/dbtests.sh`
   writes them again. It also checks the names of `typeNames`, `relationNames` and `skip`.
+* `tests/std/sqlite.sd` tests `dbms.sqlite` on a database in memory, with the other tests.
 * `tests/std/dbms.sd` tests `dbms` with a driver written in the test itself. It needs no database and runs with
   the other tests (`tools/linux/runtests.sh`).
 * `tests/db/*.sd` need Postgres. `tools/linux/dbtests.sh` makes a throwaway server in a temporary folder (with
@@ -204,8 +235,13 @@ Driver :: struct {
     affected:    (result: *void) -> i64;
     freeResult:  (result: *void);
     close:       (conn: *void);
+    executeArgs: (conn: *void, sql: string, args: []any, err: *string) -> *void;  // optional, see below
 }
 ```
+
+`executeArgs` is optional: a driver that binds values by their type, e.g SQLite, sets it, and `dbms` gives it the
+arguments as they are instead of making them into texts for `execute`. `dbms.paramText(arg)` makes the text of a value
+it doesn't bind itself.
 
 A driver gives back a `dbms.Connection{driver: ..., handle: ...}` from its own `connect`. `tests/std/dbms.sd` has a
 complete driver of 20 lines.

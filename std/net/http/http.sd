@@ -22,6 +22,7 @@ import bytes;
 import mem;
 import allocators;
 import fmt;
+import errors;
 
 Header :: struct {
     name:  string;
@@ -150,13 +151,20 @@ Limits :: struct {
     bodyBytes: int = 10 * 1048576;
 }
 
+// Reads more of a message into the buffer. Without a connection, e.g when the buffer has all of the message, it is
+// the end of the connection
+readFrom :: (conn: *net.Conn, space: []u8) -> int, error {
+    if conn == null { return 0, errors.make("There is no connection", kind: net.Closed); }
+    return conn.read(space);
+}
+
 // Reads until the buffer has the head, and gives the first line, with the headers added to the list. The texts are
 // kept in the arena
 readHead :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, arena: *allocators.Arena, headers: *[..]Header) -> string, int {
     while buffer.unread().indexOf("\r\n\r\n") < 0 {
         if buffer.available() > limits.headBytes { return "", 431; }
         started := buffer.available() > 0;
-        n, err := conn.read(buffer.space(4096));
+        n, err := readFrom(conn, buffer.space(4096));
         if err != null {
             if started && !err.is(net.Closed) { return "", 408; }
             return "", Gone;
@@ -210,7 +218,7 @@ readBody :: (conn: *net.Conn, buffer: *bytes.Buffer, headers: []Header, limits: 
     }
     if !untilClose { return "", 0; }
     while true {
-        n, err := conn.read(buffer.space(4096));
+        n, err := readFrom(conn, buffer.space(4096));
         if err != null { break; }
         buffer.wrote(n);
         if buffer.available() > limits.bodyBytes { return "", 413; }
@@ -222,7 +230,7 @@ readBody :: (conn: *net.Conn, buffer: *bytes.Buffer, headers: []Header, limits: 
 // Reads until the buffer has at least count bytes that aren't read. False when the connection ends first
 fill :: (conn: *net.Conn, buffer: *bytes.Buffer, count: int) -> bool {
     while buffer.available() < count {
-        n, err := conn.read(buffer.space(count - buffer.available()));
+        n, err := readFrom(conn, buffer.space(count - buffer.available()));
         if err != null { return false; }
         buffer.wrote(n);
     }
@@ -236,7 +244,7 @@ readChunks :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, arena: *
     while true {
         while buffer.unread().indexOf("\r\n") < 0 {
             if buffer.available() > 1024 { return "", 400; }
-            n, err := conn.read(buffer.space(4096));
+            n, err := readFrom(conn, buffer.space(4096));
             if err != null { return "", 400; }
             buffer.wrote(n);
         }
@@ -255,7 +263,7 @@ readChunks :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, arena: *
             // The trailer, up to an empty line
             while true {
                 while buffer.unread().indexOf("\r\n") < 0 {
-                    n, err := conn.read(buffer.space(1024));
+                    n, err := readFrom(conn, buffer.space(1024));
                     if err != null { return "", 400; }
                     buffer.wrote(n);
                 }

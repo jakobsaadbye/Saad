@@ -78,7 +78,7 @@ addStringSlice :: method (sb: *StringBuilder, s: string, start: int, end: int) {
 }
 
 addChar :: method (sb: *StringBuilder, c: u8) {
-    sb.reserve(1);
+    if sb.cursor + 2 > sb.capacity { sb.reserve(1); }   // Room for it and the 0 byte
     sb.buffer[sb.cursor] = c;
     sb.cursor += 1;
     sb.buffer[sb.cursor] = 0;

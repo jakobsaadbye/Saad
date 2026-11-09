@@ -1,0 +1,94 @@
+namespace jwt;
+
+// JSON Web Tokens (RFC 7519) signed with HS256: HMAC-SHA256 of a secret that the server keeps, e.g for the
+// Authorization: Bearer <token> of a request
+//
+//     key := jwt.newKey("secret");                          // The HMAC of the secret is worked out once
+//     token := key.sign("{\"sub\":\"42\",\"exp\":1893456000}");
+//
+//     claims, err := key.verify(token);                     // The payload, a json.Value, when the token is good
+//     if err != null { ... }                                // jwt.Invalid or jwt.Expired
+//     user := claims.get("sub").asString();
+//
+// verify checks that the header says HS256 and nothing else (so a token with "alg":"none" isn't taken), the signature
+// in constant time, and the times of the payload: exp (it expires), and nbf (not before), when they are there
+
+import crypto;
+import base64;
+import json;
+import time;
+import errors;
+import fmt;
+
+// The kinds of errors of verify
+Invalid :: ErrorKind{"jwt.Invalid"};   // Not a token, not HS256, or a signature that isn't right
+Expired :: ErrorKind{"jwt.Expired"};   // Its exp has passed, or its nbf hasn't come
+
+// The secret of HS256
+Key :: struct {
+    mac:        crypto.HmacSha256;
+    requireExp: bool;    // A token without exp is Invalid
+    leeway:     i64;     // Seconds that exp and nbf may be off, for clocks that differ
+}
+
+// The key of the secret
+newKey :: (secret: string, requireExp := false, leeway: i64 = 0) -> Key {
+    return Key{mac: crypto.newHmacSha256(secret), requireExp: requireExp, leeway: leeway};
+}
+
+// A token of the payload, a JSON object, e.g {"sub":"42","exp":1893456000}
+sign :: method (key: *Key, payload: string) -> string {
+    header := base64.encode("{\"alg\":\"HS256\",\"typ\":\"JWT\"}", url: true);
+    body := base64.encode(payload, url: true);
+    signed := fmt.sprint("%.%", header, body);
+    digest := key.mac.sum(signed);
+    return fmt.sprint("%.%", signed, base64.encode(digest.toString(), url: true));
+}
+
+// The payload of the token, when it is signed with the key and hasn't expired
+verify :: method (key: *Key, token: string) -> json.Value, error {
+    nothing: json.Value;
+    first := token.indexOf(".");
+    if first <= 0 { return nothing, errors.make("The token has no parts", kind: Invalid); }
+    second := token.indexOf(".", first + 1);
+    if second <= first + 1 || token.indexOf(".", second + 1) >= 0 {
+        return nothing, errors.make("A token has three parts", kind: Invalid);
+    }
+
+    // The header says HS256
+    headerText, headerOk := base64.decode(token.slice(0, first));
+    if !headerOk { return nothing, errors.make("The header isn't base64", kind: Invalid); }
+    header, headerErr := json.parse(headerText);
+    if headerErr != null || header.kind != .object { return nothing, errors.make("The header isn't a JSON object", kind: Invalid); }
+    alg := header.get("alg");
+    if alg.kind != .string || alg.text != "HS256" { return nothing, errors.make("The token isn't signed with HS256", kind: Invalid); }
+
+    // The signature of the header and the payload
+    signature, signatureOk := base64.decode(token.slice(second + 1));
+    if !signatureOk || signature.len != 32 { return nothing, errors.make("The signature isn't right", kind: Invalid); }
+    digest := key.mac.sum(token.slice(0, second));
+    given: []u8;
+    given.data  = signature.data;
+    given.count = 32;
+    if !crypto.equal(digest.bytes, given) { return nothing, errors.make("The signature isn't right", kind: Invalid); }
+
+    // The payload, and its times
+    payloadText, payloadOk := base64.decode(token.slice(first + 1, second));
+    if !payloadOk { return nothing, errors.make("The payload isn't base64", kind: Invalid); }
+    payload, payloadErr := json.parse(payloadText);
+    if payloadErr != null || payload.kind != .object { return nothing, errors.make("The payload isn't a JSON object", kind: Invalid); }
+    now := time.now().unix();
+    exp := payload.get("exp");
+    if exp.kind == .number {
+        if now >= (exp.number as i64) + key.leeway { return nothing, errors.make("The token has expired", kind: Expired); }
+    } else if exp.kind != .null || key.requireExp {
+        return nothing, errors.make("The token has no exp", kind: Invalid);
+    }
+    nbf := payload.get("nbf");
+    if nbf.kind == .number {
+        if now + key.leeway < nbf.number as i64 { return nothing, errors.make("The token isn't valid yet", kind: Expired); }
+    } else if nbf.kind != .null {
+        return nothing, errors.make("The nbf of the token isn't a number", kind: Invalid);
+    }
+    return payload, null;
+}

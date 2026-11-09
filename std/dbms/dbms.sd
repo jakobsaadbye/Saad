@@ -41,6 +41,16 @@ Driver :: struct {
     freeResult:  (result: *void);
 
     close: (conn: *void);
+
+    // Optional: runs the SQL with the arguments as they are, for a database that binds numbers and texts by their type,
+    // e.g SQLite. When it is set, it is used instead of execute, and the arguments aren't made into texts
+    executeArgs: (conn: *void, sql: string, args: []any, err: *string) -> *void;
+
+    // Optional, for a database that gives values by their type, e.g SQLite: the integer of a value, and true when it
+    // is one, so it isn't written as text and read back
+    integer: (result: *void, row: i64, column: i64, value: *i64) -> bool;
+    // Optional: the text of a value that isn't NULL, with its length, so it isn't counted
+    text:    (result: *void, row: i64, column: i64) -> string;
 }
 
 // A connection to a database, made by a driver, e.g postgres.connect(...)
@@ -218,6 +228,19 @@ run :: method (conn: *Connection, sql: string, args: ...any) -> *void, string {
         return null, "The connection is closed";
     }
 
+    if conn.driver.executeArgs != null {
+        failed := "";
+        list: []any;
+        list.data  = args.data;
+        list.count = args.count;
+        given := conn.driver.executeArgs(conn.handle, sql, list, &failed);
+        if given == null {
+            if failed == "" { failed = "The query failed"; }
+            return null, failed;
+        }
+        return given, "";
+    }
+
     err := "";
     params: [..]c.string;
     for arg, i in args {
@@ -247,8 +270,8 @@ run :: method (conn: *Connection, sql: string, args: ...any) -> *void, string {
     return result, "";
 }
 
-// The value as the text of a parameter, allocated with malloc. Null is NULL
-@private
+// The value as the text of a parameter, allocated with malloc, and false when it can't be one. A null c.string is NULL.
+// For drivers too, e.g for a type they don't bind themselves
 paramText :: (arg: any) -> c.string, bool {
     sb: fmt.StringBuilder;
     switch arg.type.kind {
@@ -399,12 +422,43 @@ readRow :: method (conn: *Connection, result: *void, row: i64, data: *void, type
         column := columns[i];
         if column < 0 { continue; }
         member := &type.members[i];
-        err := conn.readValue(conn.driver.value(result, row, column), member.valueIn(data), member.type, conn.columnName(result, column));
+        if conn.readTyped(result, row, column, member.valueIn(data), member.type) { continue; }
+        text := conn.driver.value(result, row, column);
+        err := conn.readValue(text, member.valueIn(data), member.type, "");
         if err != "" {
-            return err;
+            // Again with the name of the column, which is only made for the message
+            return conn.readValue(text, member.valueIn(data), member.type, conn.columnName(result, column));
         }
     }
     return "";
+}
+
+// Reads an integer or a string without its text, when the driver gives values by their type. False when it can't, and
+// the value is read from its text
+@private
+readTyped :: method (conn: *Connection, result: *void, row: i64, column: i64, data: *void, type: *Type) -> bool {
+    if type.kind == .int && conn.driver.integer != null {
+        n: i64 = 0;
+        if !conn.driver.integer(result, row, column, &n) { return false; }
+        prim := type as *TypePrimitive;
+        switch prim.kind {
+            case .i64 { *(data as *i64) = n; }
+            case .u64 { *(data as *u64) = n as u64; }
+            case .i32
+            case .int { if n < -2147483648 || n > 2147483647 { return false; } *(data as *i32) = n as i32; }
+            case .u32
+            case .uint { if n < 0 || n > 4294967295 { return false; } *(data as *u32) = n as u32; }
+            else { return false; }   // Small ones are checked by readInteger
+        }
+        return true;
+    }
+    if type.kind == .string && conn.driver.text != null {
+        text := conn.driver.value(result, row, column);
+        if text.isNull() { return false; }
+        *(data as *string) = conn.copyString(conn.driver.text(result, row, column));
+        return true;
+    }
+    return false;
 }
 
 // Reads the text of a value (null for NULL) into the memory at data, which holds a value of the type

@@ -1,0 +1,143 @@
+// web: endpoints at paths of their own with {segments}, authorize before the parameters, the messages and kinds of
+// errors, and names in snake_case
+import web;
+import net.http;
+import json;
+import errors;
+import thread;
+use fmt;
+
+Session :: struct {
+    @embed base: web.Session;
+    user: string;
+}
+
+Post :: struct {
+    id:        i64;
+    body:      string;
+    likeCount: i64;
+}
+
+PostReply :: struct { post: Post; }
+
+Liked :: struct {
+    liked:        bool;
+    alreadyLiked: bool;
+    postId:       i64;
+}
+
+likes := 0;
+
+@web.endpoint(.get, path: "/posts/{id}")
+getPost :: (session: *Session, id: string) -> PostReply {
+    if id == "0" { throw errors.make("invalid post id", kind: web.BadRequest); }
+    if id == "404" { throw errors.make("post not found", kind: web.NotFound); }
+    return PostReply{Post{id: 7, body: id, likeCount: 3}};
+}
+
+@web.endpoint(.post, path: "/posts", authorize: true)
+createPost :: (session: *Session, body: string) -> PostReply {
+    session.response.status = 201;
+    return PostReply{Post{id: 8, body: sprint("% by %", body, session.user)}};
+}
+
+@web.endpoint(.post, path: "/posts/{id}/like", authorize: true)
+like :: (session: *Session, id: i64) -> Liked {
+    likes += 1;
+    return Liked{liked: true, alreadyLiked: likes > 1, postId: id};
+}
+
+@web.endpoint(.get, path: "/crash")
+crash :: (session: *Session) -> int {
+    throw errors.make("the database is gone: secret details");
+    return 0;
+}
+
+// The old style next to the new: at the prefix and the name
+@web.endpoint(.get)
+echo :: (session: *Session, pageSize: int) -> int { return pageSize; }
+
+authorize :: (session: *Session) {
+    token, given := session.request.header("Authorization");
+    if !given || token != "Bearer good" { throw errors.make("missing bearer token", kind: web.Unauthorized); }
+    session.user = "ada";
+}
+
+serveApp :: (app: *web.App) {
+    app.server.serve();
+}
+
+main :: () {
+    app := web.newApp<Session>("/v1");
+    app.useJson(json.SnakeCase);
+    app.errorKinds = false;
+    app.setMessage(web.NoEndpoint, "not found");
+    app.setMessage(web.MalformedJson, "malformed JSON body");
+    app.setMessage(web.MissingParameter, "body is required");
+    app.setMessage(web.InvalidParameter, "body is required");
+    app.setMessage(web.InternalError, "internal server error");
+    app.onAuthorize(authorize);
+    app.server.workers = 1;
+    app.server.log = false;
+    assert(app.server.listen("127.0.0.1:0") == null);
+    base := sprint("http://%", app.server.listener.addr.toString());
+    serving := thread.spawn(serveApp, app);
+
+    // A path with a {segment}, a result in snake_case
+    response := http.get(sprint("%/posts/42", base));
+    assert(response.status == 200 && response.body == "{\"post\":{\"id\":7,\"body\":\"42\",\"like_count\":3}}");
+    kind, _ := response.header("Content-Type");
+    assert(kind == "application/json");
+    response = http.get(sprint("%/posts/0", base));
+    assert(response.status == 400 && response.body == "{\"error\":\"invalid post id\"}");
+    response = http.get(sprint("%/posts/404", base));
+    assert(response.status == 404 && response.body == "{\"error\":\"post not found\"}");
+
+    // No endpoint, another method
+    response = http.get(sprint("%/nope", base));
+    assert(response.status == 404 && response.body == "{\"error\":\"not found\"}");
+    response = http.get(sprint("%/posts/1/like/more", base));
+    assert(response.status == 404);
+    response = http.get(sprint("%/posts", base));
+    allow, _ := response.header("Allow");
+    assert(response.status == 405 && allow == "POST");
+
+    // authorize runs before the parameters are read: no token is a 401 also with a bad id or body
+    auth: [..]http.Header;
+    auth.add(http.Header{"Authorization", "Bearer good"});
+    auth.add(http.Header{"Content-Type", "application/json"});
+    response = http.post(sprint("%/posts/abc/like", base), "application/json", "");
+    assert(response.status == 401 && response.body == "{\"error\":\"missing bearer token\"}");
+    response = http.post(sprint("%/posts", base), "application/json", "{bad json");
+    assert(response.status == 401);
+    response = http.request("POST", sprint("%/posts/abc/like", base), auth, "");
+    assert(response.status == 400 && response.body == "{\"error\":\"body is required\"}");   // abc isn't an i64
+
+    // The parameters of the body, and their errors with the messages of the program
+    response = http.request("POST", sprint("%/posts", base), auth, "{\"body\":\"hi\"}");
+    assert(response.status == 201 && response.body == "{\"post\":{\"id\":8,\"body\":\"hi by ada\",\"like_count\":0}}");
+    response = http.request("POST", sprint("%/posts", base), auth, "{bad json");
+    assert(response.status == 400 && response.body == "{\"error\":\"malformed JSON body\"}");
+    response = http.request("POST", sprint("%/posts", base), auth, "{}");
+    assert(response.status == 400 && response.body == "{\"error\":\"body is required\"}");
+    response = http.request("POST", sprint("%/posts", base), auth, "{\"body\":123}");
+    assert(response.status == 400 && response.body == "{\"error\":\"body is required\"}");
+
+    // A {segment} into an i64, and snake_case of the result
+    response = http.request("POST", sprint("%/posts/5/like", base), auth, "");
+    assert(response.status == 200 && response.body == "{\"liked\":true,\"already_liked\":false,\"post_id\":5}");
+    response = http.request("POST", sprint("%/posts/5/like", base), auth, "");
+    assert(response.body == "{\"liked\":true,\"already_liked\":true,\"post_id\":5}");
+
+    // A 500 doesn't tell what went wrong
+    response = http.get(sprint("%/crash", base));
+    assert(response.status == 500 && response.body == "{\"error\":\"internal server error\"}");
+
+    // The url of a name still works, and a query parameter in snake_case
+    response = http.get(sprint("%/v1/echo?page_size=12", base));
+    assert(response.status == 200 && response.body == "12");
+
+    app.server.shutdown();
+    serving.join();
+    print("web rest ok");
+}

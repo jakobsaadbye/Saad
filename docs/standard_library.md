@@ -15,10 +15,12 @@ std/
                     null pointer
   allocators/   namespace allocators: Arena (arena.sd) and Pool (pool.sd) (see docs/allocators.md)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
+  crypto/       namespace crypto: SHA-256 and HMAC-SHA256 (sha256.sd)
   errors/       namespace errors: errors.make, errors.typed and errors.wrap, which make errors (see docs/errors.md)
   dbms/         namespace dbms: run SQL and read rows into structs, dbms.Table<T> and dbms.KeyedTable<T, K> (see docs/dbms.md)
     postgres/       namespace dbms.postgres: the Postgres driver, through libpq.dll, and EntityGenerator, which writes the
                     tables of a schema as Saad files
+    sqlite/         namespace dbms.sqlite: the SQLite driver, with prepared statements kept per connection
   fmt/          namespace fmt: print, sprint and StringBuilder
   io/           namespace io: bytes on stdin, stdout and stderr
   json/         namespace json: encode, decode, parse and json.Value
@@ -34,6 +36,7 @@ std/
   vendor/       Bindings for libraries the standard library doesn't own
     raylib.sd       namespace raylib
   base64.sd     namespace base64: encode and decode, also for urls
+  jwt.sd        namespace jwt: JSON Web Tokens signed with HS256, made and verified
   bytes.sd      namespace bytes: Buffer, bytes written at the end and read from the front
   math.sd       namespace math
   mem.sd        namespace mem: allocate, resize, free, delete, copy, set, equal
@@ -254,6 +257,17 @@ addr := net.resolve("localhost", 80);     // net.Addr: ip and port, toString() i
 * `listener.close()` wakes an `accept()` that waits, which gives `net.Closed`.
 * `net.Poll` waits until one of many sockets can be read: `p.add(conn.socket)`, `n := p.wait(milliseconds)` and
   `p.ready(i)`.
+* `net.Poller` waits for many non-blocking sockets at once, e.g for a server with thousands of connections: epoll on
+  Linux, where a wait costs the same for 10 or 100,000 sockets, and `WSAPoll` on Windows. `p := net.newPoller()`,
+  `p.add(socket, data, write: false, exclusive: false)`, `p.modify(...)`, `p.remove(socket)`, and
+  `for e in p.wait(milliseconds)`, where an `Event` has the `data` the socket was added with, and `readable`,
+  `writable` and `closed`. `exclusive` wakes only one of many pollers that wait for the same listener.
+* Non-blocking sockets: `listener.setNonBlocking()` and `conn.setNonBlocking()`, then `listener.tryAccept()` (null
+  when no connection waits), `conn.tryRead(buffer)` (0 without an error when nothing has come) and
+  `conn.tryWrite(data)` (how many bytes the connection took). `conn.setNoDelay()` sends small writes at once.
+* `net.listen(address, backlog: 1024, reusePort: true)` lets more sockets, e.g of more processes, listen at the same
+  port, and Linux shares the connections between them. `net.raiseOpenFileLimit()` lets the process open as many
+  sockets as the system allows (the soft limit up to the hard one), and gives how many.
 * The bindings are in `net.sys`, with the structs of the headers written out for both systems (`SockAddrIn`,
   `AddrInfo`, `WsaData`, `TimeVal`) and the types of the calls named (`Socket`, `Length`, `AddrLength`).
 * `conn.startTls(host)` starts TLS as a client of the host (`tls.sd`): the handshake checks that the certificate is of
@@ -266,8 +280,8 @@ addr := net.resolve("localhost", 80);     // net.Addr: ip and port, toString() i
 
 ## net.http
 
-HTTP/1.1, like Go's `net/http`: a `Router` routes requests to handlers, a `Server` answers them on a pool of threads,
-and a client sends requests.
+HTTP/1.1, like Go's `net/http`: a `Router` routes requests to handlers, a `Server` answers them with an event loop on
+each of its threads, and a client sends requests.
 
 ```odin
 import net.http;
@@ -302,12 +316,22 @@ response = http.request("PUT", url, headers, body);
   stderr (`server.log`); the server goes on.
 * **Server:** `server.listen(address)`, then `server.serve()`, which returns after `server.shutdown()`. Fields:
   `router` or `handler`, `workers` (0 is 2 for each processor, at least 4), `readTimeout`, `writeTimeout` and
-  `idleTimeout` (milliseconds), and `limits` (`headBytes`, `bodyBytes`). Bodies can be `Content-Length` or chunked.
-  Bad requests get 400, 408, 413, 431, 501 or 505.
-* **Connections** are kept alive without keeping a worker: the thread of `serve()` waits for the listener and the idle
-  connections with `net.Poll` (`poll`, or `WSAPoll` on Windows), and gives a connection to a worker when a request
-  comes on it. A worker that answered keeps the connection for its next request when it comes within 2 ms and no
-  other connection waits, else gives it back. `tools/bench/web_bench.sd` measures it.
+  `idleTimeout` (milliseconds), `limits` (`headBytes`, `bodyBytes`), `reusePort` (other processes may listen at the
+  port too, Linux) and `maxConnections` (of each worker; 0 is what the open files of the process allow). Bodies can
+  be `Content-Length` or chunked. Bad requests get 400, 413, 431, 501 or 505.
+* **Workers are event loops.** Each worker is a thread with a `net.Poller` (epoll on Linux) of its own connections
+  and of the listener, on non-blocking sockets. It reads what has come, answers the requests that are whole in order
+  (also pipelined ones), and sends the response at once; what the client doesn't take is sent when it can take more,
+  and the connection's next requests wait until then. A request is answered by the thread that read it, so nothing
+  is handed between threads. A handler runs to its end on its worker, so one that waits long, e.g for another
+  server, holds up that worker's other connections: there are more workers than processors for that.
+* **Connections** cost no thread, and an idle one keeps no buffer: only a struct of about 100 bytes. The part of a
+  request that came, and the part of a response that the client didn't take, are kept until they are whole. The
+  server raises the open file limit of the process (`net.raiseOpenFileLimit()`), and a worker that has
+  `maxConnections` stops accepting until one closes. Timeouts close a connection whose request doesn't come whole
+  (`readTimeout`), whose response isn't taken (`writeTimeout`) and an idle one (`idleTimeout`).
+  `tools/bench/web_bench.sd` measures it. On one core of a 4-core machine, a handler that writes a short text
+  answers about 160,000 requests a second over 100 connections, and 88,000 over 5,000 (`wrk`).
 * **Memory:** the texts of a request are in an arena of the connection, freed when the handler returns. `copy()`
   what is kept for longer.
 * **Client:** `get`, `post` and `request`, a connection for each request, to `http://` and `https://` urls (TLS of
@@ -377,8 +401,40 @@ POST /v1/createPost   {"post": {"title": "Hi"}}      -> {"id": 3, "title": "Hi"}
   constant: `newApp` gives an error for one that is computed, e.g `size := pageSize()`.
 * The result is JSON: the value, an array of the values when there are more, or `null`. A given or thrown error is
   `{"error": message, "kind": kind}`, with the status of its kind: `web.BadRequest` 400, `web.Unauthorized` 401,
-  `web.Forbidden` 403, `web.NotFound` 404, `web.Conflict` 409, others 500. A `Panic` is a 500 that doesn't tell what
-  went wrong.
+  `web.Forbidden` 403, `web.NotFound` 404, `web.Conflict` 409, others 500. A 500 doesn't tell what went wrong, e.g
+  of a database: its message is "Internal Server Error", and the error is written to stderr (`app.server.log`).
+* `session.response.status = 201` gives another status to a result.
+
+### Paths, authorization and the messages of errors
+
+An endpoint can have a path of its own, with `{segments}` that its parameters of the same name are read from, so an
+app can be a REST API:
+
+```odin
+@web.endpoint(.get, path: "/posts/{id}")
+getPost :: (session: *Session, id: i64) -> PostReply { ... }        // GET /posts/42
+
+@web.endpoint(.post, path: "/posts/{id}/like", authorize: true)
+like :: (session: *Session, id: i64) -> Liked { ... }
+
+app.useJson(json.SnakeCase);            // likeCount is written as like_count, and a parameter pageSize is read from page_size
+app.onAuthorize(checkToken);            // Before the parameters of an endpoint with authorize are read
+app.errorKinds = false;                 // {"error": message}
+app.setMessage(web.NoEndpoint, "not found");
+app.setMessage(web.InternalError, "internal server error");
+```
+
+* A path is matched segment by segment; an endpoint without one is at the prefix and its name, as before. Another
+  method at the path is a 405 with `Allow`, and no endpoint a 404.
+* With `authorize: true`, the hook of `app.onAuthorize` runs after `onStart` and before the parameters are read, so a
+  request without a token is a 401 even when its parameters are wrong. The hook throws, e.g `web.Unauthorized`, to
+  refuse it, and can put what it found in the session, e.g the user.
+* The errors of the app itself have kinds of their own, so a program can give them its own messages with
+  `app.setMessage(kind, message)`: `web.MalformedJson` (the body isn't JSON), `web.MissingParameter`,
+  `web.InvalidParameter` (a parameter isn't of its type, e.g `abc` for an `i64`), `web.NoEndpoint` and
+  `web.MethodNotAllowed`, and `web.InternalError` for the message of every 500. Any kind can be given a message,
+  also the program's own.
+* `onStart` and `onFinish` run for every request that has an endpoint, also when its parameters are wrong.
 * The session is new for each request, and freed with it. While the endpoint runs, the allocator of the thread is the
   arena of the request, so what it allocates, also its result, is freed after the response. Give what lives longer
   the heap, e.g `post.title.copy(mem.heap())`. A `dbms.Pool` gives each session a connection (see `docs/dbms.md`).
@@ -481,6 +537,36 @@ bits  := random.bits();             // 64 random bits
   `rng.choice(names)`, `rng.shuffle(cards)`, ...
 * For secrets: `random.secureBytes(32)` gives random bytes of the system (`BCryptGenRandom`, `getrandom` on Linux),
   and `random.secureToken()` a text of 32 of them in base64 for urls, e.g for a link that confirms something.
+
+## crypto
+
+```odin
+digest := crypto.sha256("hello");                  // a crypto.Digest: its 32 bytes are digest.bytes
+text   := digest.hex();                            // 2cf24dba5fb0a30e...
+mac    := crypto.hmacSha256("secret", "message");  // HMAC-SHA256, a Digest too
+signer := crypto.newHmacSha256("secret");          // the key worked out once, for many messages
+same   := signer.sum("message").equals(mac);       // in constant time
+
+h: crypto.Sha256;                                  // data that comes in parts
+h.write("hel"); h.write("lo");
+digest = h.finish();
+```
+
+`crypto.equal(a, b)` compares bytes in constant time, so the time doesn't tell where they differ.
+
+## jwt
+
+```odin
+key := jwt.newKey("secret", requireExp: true);     // HS256, with the HMAC of the secret worked out once
+token := key.sign("{\"sub\":\"42\",\"exp\":1893456000}");
+claims, err := key.verify(token);                  // the payload, a json.Value
+if err != null { ... }                             // jwt.Invalid or jwt.Expired
+user := claims.get("sub").asString();
+```
+
+`verify` takes only HS256 (a token with `"alg":"none"`, or another algorithm, is `jwt.Invalid`), checks the signature
+in constant time, and `exp` and `nbf` when they are there. With `requireExp`, a token without `exp` is `jwt.Invalid`.
+`leeway` gives seconds for clocks that differ.
 
 ## base64
 
