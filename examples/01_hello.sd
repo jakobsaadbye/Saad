@@ -1,0 +1,19 @@
+// Lesson 1: Hello
+//
+// Every program starts at main. Run this file with:
+//
+//     saad run examples/01_hello.sd
+//
+// 'use fmt;' lets us call print directly. print writes a line, and each % is replaced by the next value.
+
+use fmt;
+
+main :: () {
+    print("Hello, Saad!");
+
+    name := "Ada";
+    print("Hello, %!", name);         // Hello, Ada!
+    print("% + % = %", 2, 3, 2 + 3);  // 2 + 3 = 5
+
+    // This is a comment. The compiler ignores everything after // on the line.
+}

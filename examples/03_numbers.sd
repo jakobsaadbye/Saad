@@ -1,0 +1,36 @@
+// Lesson 3: Numbers
+//
+// int and float are the everyday numbers. There are sized ones too:
+//     i8 i16 i32 i64    whole numbers that can be negative
+//     u8 u16 u32 u64    whole numbers that can't
+//     f32 f64           numbers with a fraction
+// 'as' turns a number into another type.
+
+use fmt;
+
+main :: () {
+    a := 7;
+    b := 2;
+    print("% + % = %", a, b, a + b);
+    print("% - % = %", a, b, a - b);
+    print("% * % = %", a, b, a * b);
+    print("% / % = %", a, b, a / b);    // 3: whole numbers divide without the fraction
+    print("% \% % = %", a, b, a % b);   // 1: the remainder. \% prints a %
+
+    x := 7.0;
+    print("7.0 / 2.0 = %", x / 2.0);    // 3.5
+
+    // Converting between types
+    half := (a as float) / 2.0;
+    whole := 3.9 as int;                 // 3: the fraction is cut off
+    assert(half == 3.5 && whole == 3);
+
+    // Sized types
+    small: u8 = 255;                     // The biggest u8
+    big: i64 = 9_000_000_000;            // _ makes long numbers easy to read
+    assert(small == 255 && big > 0);
+
+    // Other ways to write numbers
+    assert(0xff == 255);                 // Hexadecimal
+    assert(0b1010 == 10);                // Binary
+}

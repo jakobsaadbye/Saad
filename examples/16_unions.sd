@@ -1,0 +1,31 @@
+// Lesson 16: Unions
+//
+// A union is one of several variants, and knows which one it is. 'switch v in shape' gives each case
+// its variant, as v.
+
+use fmt;
+
+Shape :: union {
+    circle: struct { radius: f64; };
+    rect:   struct { width, height: f64; };
+    point;                                     // A variant without a value
+}
+
+area :: (s: Shape) -> f64 {
+    switch v in s {
+        case .circle { return 3.14159 * v.radius * v.radius; }
+        case .rect   { return v.width * v.height; }
+        case .point  { return 0.0; }
+    }
+}
+
+main :: () {
+    shapes := [
+        Shape{circle: {radius: 1.0}},
+        Shape{rect: {width: 2.0, height: 3.0}},
+        Shape.point,
+    ];
+    for s in shapes {
+        print("area: %", area(s));
+    }
+}

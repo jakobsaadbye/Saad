@@ -58,7 +58,7 @@ saad run hello.sd
 It prints `Hello from Saad!`. The program is in `build\out.exe` next to `hello.sd`. More to try:
 
 ```
-saad run examples\fibonacci.sd
+saad run examples\01_hello.sd                # the first of 28 small lessons, see examples\README.md
 saad run examples\breakout\breakout.sd     # a game with raylib. raylib.dll is copied next to out.exe
 ```
 

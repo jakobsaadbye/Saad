@@ -1,0 +1,44 @@
+// Lesson 12: Enums
+//
+// An enum is a type with a fixed set of named values. Where the enum is known, a value is just .name
+
+use fmt;
+
+Direction :: enum {
+    north,
+    east,
+    south,
+    west,
+}
+
+// Values can have numbers of their own
+Status :: enum {
+    ok       = 200,
+    notFound = 404,
+}
+
+// An enum flags is a set of options that can be combined
+Style :: enum flags {
+    bold,
+    italic,
+    underline,
+}
+
+turnRight :: (d: Direction) -> Direction {
+    if d == .west { return .north; }
+    return (d as int + 1) as Direction;
+}
+
+main :: () {
+    heading := Direction.north;
+    heading = turnRight(heading);
+    assert(heading == .east);
+    print("Heading %", heading);              // Heading east
+
+    assert(Status.notFound as int == 404);
+
+    style := Style.bold | .underline;
+    assert(style.has(.bold) && !style.has(.italic));
+    style = style.with(.italic);
+    print("Style: %", style);
+}

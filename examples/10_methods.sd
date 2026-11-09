@@ -1,0 +1,38 @@
+// Lesson 10: Methods
+//
+// A method is a function that belongs to a struct. Inside it, 'self' is the struct it is called on.
+//
+//     name :: method () { ... }       reads self
+//     name :: method * () { ... }     can change self
+
+use fmt;
+
+Rect :: struct {
+    width:  int;
+    height: int;
+
+    area :: method () -> int {
+        return self.width * self.height;
+    }
+
+    scale :: method * (factor: int) {
+        self.width  *= factor;
+        self.height *= factor;
+    }
+}
+
+// A method can also be declared outside its struct: the first parameter is the struct
+isSquare :: method (r: Rect) -> bool {
+    return r.width == r.height;
+}
+
+main :: () {
+    r := Rect{3, 4};
+    print("The area is %", r.area());     // 12
+
+    r.scale(2);                           // r is now 6 x 8
+    assert(r.width == 6 && r.area() == 48);
+    assert(!r.isSquare());
+
+    // Methods work on strings, lists and numbers too, e.g "hi".toUpper()
+}

@@ -1,0 +1,33 @@
+// Lesson 17: Functions as values, and lambdas
+//
+// A function can be stored in a variable and passed to another function. A lambda is a function without a
+// name: (x: int) -> int { ... }, or the short x => x * 2
+
+use fmt;
+
+// Takes a function, and calls it on each value
+apply :: (values: []int, f: (int) -> int) -> [..]int {
+    result: [..]int;
+    for v in values { result.add(f(v)); }
+    return result;
+}
+
+double :: (x: int) -> int { return x * 2; }
+
+main :: () {
+    numbers := [1, 2, 3, 4, 5];
+
+    assert(apply(numbers, double)[4] == 10);                       // A named function
+    assert(apply(numbers, (x: int) -> int { return x + 1; })[0] == 2);   // A lambda
+    assert(apply(numbers, x => x * x)[2] == 9);                    // A short lambda
+
+    // Lists and arrays have map, filter, reduce, find, some and every
+    evens   := numbers.filter(x => x % 2 == 0);
+    squares := numbers.map(x => x * x);
+    total   := numbers.reduce(0, (sum, x) => sum + x);
+    print("evens: %, squares: %, total: %", evens, squares, total);
+
+    // A function in a variable
+    greet := (name: string) { print("Hello %", name); };
+    greet("Ada");
+}

@@ -1,0 +1,52 @@
+// Lesson 8: Arrays and lists
+//
+//     [3]int       a fixed array: always 3 ints
+//     [..]int      a list: grows as values are added
+//     []int        a slice: a view of the values of an array or a list, e.g a parameter that takes either
+
+use fmt;
+
+// Takes any number of ints, from an array or a list
+average :: (values: []int) -> float {
+    total := 0;
+    for v in values { total += v; }
+    return (total as float) / (values.count as float);
+}
+
+main :: () {
+    // A fixed array
+    days: [3]string = ["mon", "tue", "wed"];
+    print("The first day is %", days[0]);
+    days[2] = "WED";
+    assert(days.count == 3);
+
+    // A literal: the type comes from the values
+    primes := [2, 3, 5, 7];
+
+    // A list
+    scores: [..]int;
+    scores.add(90);
+    scores.add(75);
+    scores.add(82);
+    assert(scores.count == 3);
+    scores.removeAt(1);                      // Removes 75
+    assert(scores[1] == 82);
+
+    print("Average of the primes: %", average(primes));
+    print("Average of the scores: %", average(scores));
+
+    // Lists and arrays have helpful methods
+    assert(primes.contains(5) && primes.indexOf(7) == 3);
+    sorted := [3, 1, 2];
+    sorted.sort();
+    assert(sorted[0] == 1);
+
+    // A list of lists
+    grid: [..][..]int;
+    for row in 0..2 {
+        cells: [..]int;
+        for col in 0..3 { cells.add(row * 3 + col); }
+        grid.add(cells);
+    }
+    assert(grid[1][2] == 5);
+}

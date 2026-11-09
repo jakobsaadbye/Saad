@@ -1,0 +1,40 @@
+// Lesson 15: Optionals
+//
+// ?T is a T, or nothing (null). It says in the type that a value can be missing.
+//     x ?? fallback        the value, or the fallback when there is none
+//     x.hasValue()         if there is a value
+//     a?.b                 b of a, or nothing when a is nothing
+
+use fmt;
+
+User :: struct {
+    name:     string;
+    nickname: ?string;      // Not every user has one
+}
+
+// Finds the index of a value, or nothing
+find :: (values: []int, wanted: int) -> ?int {
+    for v, i in values {
+        if v == wanted { return i as int; }
+    }
+    return null;
+}
+
+main :: () {
+    numbers := [4, 8, 15, 16];
+    assert(find(numbers, 15) ?? -1 == 2);
+    assert(find(numbers, 99) == null);
+
+    at := find(numbers, 8);
+    if at.hasValue() { print("8 is at %", at.value()); }
+
+    ada := User{name: "Ada", nickname: "Countess"};
+    bo  := User{name: "Bo"};
+    for u in [ada, bo] {
+        print("% goes by %", u.name, u.nickname ?? u.name);
+    }
+
+    // ?. reads through an optional: nothing gives nothing
+    best: ?User = ada;
+    assert(best?.name ?? "" == "Ada");
+}

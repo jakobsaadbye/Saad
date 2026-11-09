@@ -1,0 +1,37 @@
+// Lesson 6: Loops
+//
+//     for i in 0..5 { }         0, 1, 2, 3, 4 (5 is not included)
+//     for i in 1...5 { }        1, 2, 3, 4, 5 (three dots include 5)
+//     for x in list { }         every value of a list, an array or a string
+//     while condition { }       as long as the condition holds
+//     for { }                   for ever, until break
+
+use fmt;
+
+main :: () {
+    for i in 0..3 {
+        print("i = %", i);
+    }
+
+    total := 0;
+    for i in 1...10 { total += i; }
+    assert(total == 55);
+
+    // The index of each value, too
+    for fruit, i in ["apple", "kiwi", "mango"] {
+        print("% is fruit number %", fruit, i);
+    }
+
+    n := 1;
+    while n < 100 { n *= 2; }
+    assert(n == 128);
+
+    // break leaves the loop, continue goes to the next round
+    count := 0;
+    for {
+        count += 1;
+        if count % 2 == 0 { continue; }   // Skip even numbers
+        if count > 7 { break; }
+        print("odd: %", count);
+    }
+}

@@ -1,0 +1,45 @@
+// Lesson 28: A taste of the standard library
+//
+// A few of the namespaces in std/. See docs/standard_library.md for all of them, and examples/feed for a web
+// server with a database.
+
+import json;
+import time;
+import os;
+import random;
+use fmt;
+
+Recipe :: struct {
+    title:    string;
+    minutes:  int;
+    tags:     [..]string;
+}
+
+main :: () {
+    // json: structs to text and back
+    soup := Recipe{title: "Soup", minutes: 30, tags: ["warm", "easy"]};
+    text := json.encode(soup);
+    print("%", text);                        // {"title":"Soup","minutes":30,"tags":["warm","easy"]}
+    back: Recipe;
+    err := json.decodeInto(text, &back);
+    assert(err == null && back.tags[1] == "easy");
+
+    // time: now, and how long something took
+    start := time.now();
+    total := 0;
+    for i in 0..1000000 { total += i; }
+    print("Counting took % ms", time.now().sub(start) / time.Millisecond);
+
+    // os: files and the environment
+    path := "saad_note.txt";
+    os.writeFile(path, "Saad was here");
+    print("The file says: %", os.readFile(path));
+    os.removeFile(path);
+    home, found := os.getEnv("HOME");
+    if found { print("Home is %", home); }
+
+    // random
+    dice := random.newRandom(42);
+    print("Rolled a %", dice.between(1, 6));
+    print("Picked %", dice.choice(["rock", "paper", "scissors"]));
+}

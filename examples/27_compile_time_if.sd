@@ -1,0 +1,20 @@
+// Lesson 27: #if
+//
+// '#if' keeps code for some targets only. The branches that don't hold aren't even compiled, so they can call
+// things that only exist on another system.
+
+use fmt;
+
+#if OS == .windows {
+    systemName :: () -> string { return "Windows"; }
+} else {
+    systemName :: () -> string { return "Linux"; }
+}
+
+main :: () {
+    print("This program was built for %", systemName());
+
+    #if OS == .linux {
+        print("Only Linux builds print this line");
+    }
+}

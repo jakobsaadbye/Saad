@@ -1,0 +1,29 @@
+// Lesson 22: Embedding
+//
+// '@embed' on a member lends its members and methods to the struct it is in. A *Dog can be used where an
+// *Animal is wanted. It is a way to share code without inheritance.
+
+use fmt;
+
+Animal :: struct {
+    name: string;
+    legs: int;
+
+    describe :: method () -> string { return sprint("% has % legs", self.name, self.legs); }
+}
+
+Dog :: struct {
+    @embed animal: Animal;
+    breed: string;
+}
+
+introduce :: (a: *Animal) { print("This is %", a.name); }
+
+main :: () {
+    d := Dog{animal: Animal{name: "Rex", legs: 4}, breed: "beagle"};
+    print("%", d.name);              // d.animal.name
+    print("%", d.describe());        // d.animal.describe()
+    introduce(&d);                   // A *Dog is an *Animal here
+    d.legs = 3;
+    assert(d.animal.legs == 3);
+}

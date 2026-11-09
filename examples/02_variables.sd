@@ -1,0 +1,30 @@
+// Lesson 2: Variables and constants
+//
+//     name := value;          a variable. Its type comes from the value
+//     name: Type = value;     a variable with its type written out
+//     name: Type;             a variable that starts as zero (0, false, "")
+//     Name :: value;          a constant. It never changes
+
+use fmt;
+
+Greeting :: "Welcome";   // A constant can be outside main
+MaxLives :: 3;
+
+main :: () {
+    lives := 3;              // int
+    speed := 2.5;            // float
+    alive := true;           // bool
+    hero  := "Ada";          // string
+
+    score: int = 100;
+    gold: int;               // 0
+    assert(gold == 0);
+
+    lives = lives - 1;       // Variables can change
+    score += 50;             // The same as: score = score + 50
+
+    print("% %, you have % of % lives, a speed of %, and % points", Greeting, hero, lives, MaxLives, speed, score);
+    assert(lives == 2 && score == 150 && alive);
+
+    // MaxLives = 4;         // Would be an error: a constant can't change
+}

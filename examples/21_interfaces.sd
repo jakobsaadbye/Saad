@@ -1,0 +1,50 @@
+// Lesson 21: Interfaces
+//
+// An interface is a set of methods. Any type that has those methods is that interface, without saying so. A
+// pointer to the value becomes the interface: describe(&circle).
+
+use fmt;
+
+Shape :: interface {
+    area :: method () -> f64;
+    name :: method () -> string;
+}
+
+Circle :: struct {
+    radius: f64;
+    area :: method () -> f64 { return 3.14159 * self.radius * self.radius; }
+    name :: method () -> string { return "circle"; }
+}
+
+Square :: struct {
+    side: f64;
+    area :: method () -> f64 { return self.side * self.side; }
+    name :: method () -> string { return "square"; }
+}
+
+describe :: (s: Shape) {
+    print("a % with an area of %", s.name(), s.area());
+}
+
+main :: () {
+    c := Circle{radius: 1.0};
+    q := Square{side: 2.0};
+    describe(&c);
+    describe(&q);
+
+    // A list of different types, through the interface
+    shapes: [..]Shape = [&c, &q];
+    total: f64 = 0.0;
+    for s in shapes { total += s.area(); }
+    print("total area: %", total);
+
+    // Back to the type of the value: as, or a switch with a case for each type
+    circle, isCircle := shapes[0] as *Circle;
+    assert(isCircle && circle.radius == 1.0);
+    for s in shapes {
+        switch v in s {
+            case *Square { print("a square of side %", v.side); }
+            else         { print("something else: %", s.name()); }
+        }
+    }
+}
