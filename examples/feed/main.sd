@@ -8,7 +8,8 @@
 //     POST /posts               {"body":"..."} -> 201 {"post":<post>}          (Authorization: Bearer <jwt>)
 //     POST /posts/{id}/like     -> 201, or 200 when liked before               (Authorization: Bearer <jwt>)
 //
-// Configured by SQLITE_PATH, JWT_SECRET, HOST and PORT, and WORKERS (threads, 1 unless given). See README.md
+// Configured by SQLITE_PATH, JWT_SECRET, HOST and PORT, and WORKERS (threads, 1 unless given) and CHECKPOINTS (0 when
+// another process makes them). See README.md
 
 import web;
 import json;
@@ -20,6 +21,7 @@ import time;
 import os;
 import fmt;
 import mem;
+import thread;
 
 Session :: struct {
     @embed base: web.Session;
@@ -82,8 +84,28 @@ configure :: (conn: *dbms.Connection) {
     conn.exec("PRAGMA journal_mode = WAL");
     conn.exec("PRAGMA synchronous = NORMAL");
     conn.exec("PRAGMA mmap_size = 1073741824");
-    conn.exec("PRAGMA cache_size = -65536");
+    conn.exec("PRAGMA cache_size = -16384");   // 16 MB: the pages are read through mmap, which the processes share
     conn.exec("PRAGMA temp_store = MEMORY");
+    // The checkpoints are made by a thread of their own (checkpoints below), so a commit doesn't copy the log into
+    // the database and wait for the disk. Past 64 MB of log, a commit does it itself
+    conn.exec("PRAGMA wal_autocheckpoint = 16384");
+}
+
+// Copies the log of WAL into the database, on a connection of its own, while the workers go on. PASSIVE never waits for
+// the workers' locks, and they never wait for it
+Checkpoints :: struct {
+    milliseconds: int;   // Between two checkpoints
+}
+
+checkpoints :: (settings: *Checkpoints) {
+    conn, err := sqlite.open(dbPath, sqlite.Options{create: false});
+    if err != null { return; }
+    while true {
+        thread.sleep(settings.milliseconds);
+        try {
+            conn.exec("PRAGMA wal_checkpoint(PASSIVE)");
+        } catch (e) {}
+    }
 }
 
 @web.endpoint(.get, path: "/health")
@@ -226,6 +248,13 @@ main :: () {
     dbPath = path.copy(mem.heap());
     key = jwt.newKey(secret.copy(mem.heap()), requireExp: true);
     db();   // The database is there, before the first request
+    // One process of start.sh makes the checkpoints for all
+    checkpointing, given := os.getEnv("CHECKPOINTS");
+    if !given || checkpointing != "0" {
+        settings := new(Checkpoints, mem.heap());
+        settings.milliseconds = 250;
+        thread.spawn(checkpoints, settings);
+    }
 
     app := web.newApp<Session>("");
     app.useJson(json.SnakeCase);

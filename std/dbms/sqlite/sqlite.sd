@@ -111,12 +111,18 @@ Result :: struct {
     names:   [..]u8;          // The names of the columns, each with a 0 after it
     nameAt:  [..]int;
     text:    [..]u8;          // The values, each with a 0 after it
-    offsets: [..]i64;
-    lengths: [..]i64;         // Of each value's text
-    numbers: [..]i64;         // The value of each integer
-    kinds:   [..]u8;          // SQLITE_INTEGER, SQLITE_TEXT, ... of each value
-    values:  [..]c.string;    // Made from text and offsets when the rows are read
+    cells:   [..]Cell;        // Each value, row by row
+    values:  [..]c.string;    // Made from text and the cells when the rows are read
     changes: i64;
+}
+
+// A value of a result
+@private
+Cell :: struct {
+    offset: i64;    // Of its text, or -1 for NULL
+    length: i64;    // Of its text
+    number: i64;    // Of an integer
+    kind:   i64;    // SQLITE_INTEGER, SQLITE_TEXT, ...
 }
 
 @private
@@ -152,20 +158,14 @@ executeArgs :: (conn: *void, sql: string, args: []any, err: *string) -> *void {
         result.names.allocator   = heapAllocator();
         result.nameAt.allocator  = heapAllocator();
         result.text.allocator    = heapAllocator();
-        result.offsets.allocator = heapAllocator();
-        result.lengths.allocator = heapAllocator();
-        result.numbers.allocator = heapAllocator();
-        result.kinds.allocator   = heapAllocator();
+        result.cells.allocator   = heapAllocator();
         result.values.allocator  = heapAllocator();
     }
     result.rows = 0;
     result.names.clear();
     result.nameAt.clear();
     result.text.clear();
-    result.offsets.clear();
-    result.lengths.clear();
-    result.numbers.clear();
-    result.kinds.clear();
+    result.cells.clear();
     result.values.clear();
 
     ok := run(db, statement, args, result, err);
@@ -197,10 +197,10 @@ executeArgs :: (conn: *void, sql: string, args: []any, err: *string) -> *void {
         freeResult(result);
         return null;
     }
-    result.values.reserve(result.offsets.count);
-    for offset in result.offsets {
-        if offset < 0 { result.values.add(c.string{}); }
-        else          { result.values.add(c.string{&result.text.data[offset]}); }
+    result.values.reserve(result.cells.count);
+    for cell in result.cells {
+        if cell.offset < 0 { result.values.add(c.string{}); }
+        else               { result.values.add(c.string{&result.text.data[cell.offset]}); }
     }
     return result;
 }
@@ -292,17 +292,13 @@ run :: (db: *Database, statement: *Statement, args: []any, result: *Result, err:
             result.rows += 1;
             for column in 0..columns {
                 kind := sqlite3_column_type(handle, column as i32);
-                result.kinds.add(kind as u8);
                 if kind == Null {
-                    result.offsets.add(-1);
-                    result.lengths.add(0);
-                    result.numbers.add(0);
+                    result.cells.add(Cell{offset: -1, kind: kind as i64});
                     continue;
                 }
                 if kind == Integer {
                     // The number as it is, and its text written here, which is faster than SQLite's
                     n := sqlite3_column_int64(handle, column as i32);
-                    result.numbers.add(n);
                     digits: [24]u8;
                     count := 0;
                     negative := n < 0;
@@ -316,20 +312,17 @@ run :: (db: *Database, statement: *Statement, args: []any, result: *Result, err:
                     }
                     if negative { digits[count] = '-'; count += 1; }
                     reserveText(result, count + 1);
-                    result.offsets.add(result.text.count as i64);
-                    result.lengths.add(count as i64);
+                    result.cells.add(Cell{offset: result.text.count as i64, length: count as i64, number: n, kind: kind as i64});
                     for k in 0..count { result.text.data[result.text.count + k] = digits[count - 1 - k]; }
                     result.text.count += count;
                     result.text.data[result.text.count] = 0;
                     result.text.count += 1;
                     continue;
                 }
-                result.numbers.add(0);
                 data := sqlite3_column_text(handle, column as i32);
                 length := sqlite3_column_bytes(handle, column as i32) as int;
                 reserveText(result, length + 1);
-                result.offsets.add(result.text.count as i64);
-                result.lengths.add(length as i64);
+                result.cells.add(Cell{offset: result.text.count as i64, length: length as i64, kind: kind as i64});
                 mem.copy(&result.text.data[result.text.count], data, length);
                 result.text.count += length;
                 result.text.data[result.text.count] = 0;
@@ -451,20 +444,20 @@ value :: (result: *void, row: i64, column: i64) -> c.string {
 @private
 integer :: (result: *void, row: i64, column: i64, value: *i64) -> bool {
     r := result as *Result;
-    at := (row * (r.columns as i64) + column) as int;
-    if r.kinds[at] != Integer { return false; }
-    *value = r.numbers[at];
+    cell := &r.cells[(row * (r.columns as i64) + column) as int];
+    if cell.kind != Integer { return false; }
+    *value = cell.number;
     return true;
 }
 
 @private
 text :: (result: *void, row: i64, column: i64) -> string {
     r := result as *Result;
-    at := (row * (r.columns as i64) + column) as int;
+    cell := &r.cells[(row * (r.columns as i64) + column) as int];
     t: string;
-    if r.offsets[at] < 0 { return t; }
-    t.data = &r.text.data[r.offsets[at]];
-    t.len  = r.lengths[at];
+    if cell.offset < 0 { return t; }
+    t.data = &r.text.data[cell.offset];
+    t.len  = cell.length;
     return t;
 }
 
@@ -479,10 +472,7 @@ freeResult :: (result: *void) {
     r.names.free();
     r.nameAt.free();
     r.text.free();
-    r.offsets.free();
-    r.lengths.free();
-    r.numbers.free();
-    r.kinds.free();
+    r.cells.free();
     r.values.free();
     mem.delete(r, heapAllocator());
 }
