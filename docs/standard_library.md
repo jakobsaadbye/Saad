@@ -15,6 +15,7 @@ std/
                     null pointer
   allocators/   namespace allocators: Arena (arena.sd) and Pool (pool.sd) (see docs/allocators.md)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
+  crypto/       namespace crypto: SHA-256 and HMAC-SHA256 (sha256.sd)
   errors/       namespace errors: errors.make, errors.typed and errors.wrap, which make errors (see docs/errors.md)
   dbms/         namespace dbms: run SQL and read rows into structs, dbms.Table<T> and dbms.KeyedTable<T, K> (see docs/dbms.md)
     postgres/       namespace dbms.postgres: the Postgres driver, through libpq.dll, and EntityGenerator, which writes the
@@ -35,6 +36,7 @@ std/
   vendor/       Bindings for libraries the standard library doesn't own
     raylib.sd       namespace raylib
   base64.sd     namespace base64: encode and decode, also for urls
+  jwt.sd        namespace jwt: JSON Web Tokens signed with HS256, made and verified
   bytes.sd      namespace bytes: Buffer, bytes written at the end and read from the front
   math.sd       namespace math
   mem.sd        namespace mem: allocate, resize, free, delete, copy, set, equal
@@ -482,6 +484,36 @@ bits  := random.bits();             // 64 random bits
   `rng.choice(names)`, `rng.shuffle(cards)`, ...
 * For secrets: `random.secureBytes(32)` gives random bytes of the system (`BCryptGenRandom`, `getrandom` on Linux),
   and `random.secureToken()` a text of 32 of them in base64 for urls, e.g for a link that confirms something.
+
+## crypto
+
+```odin
+digest := crypto.sha256("hello");                  // a crypto.Digest: its 32 bytes are digest.bytes
+text   := digest.hex();                            // 2cf24dba5fb0a30e...
+mac    := crypto.hmacSha256("secret", "message");  // HMAC-SHA256, a Digest too
+signer := crypto.newHmacSha256("secret");          // the key worked out once, for many messages
+same   := signer.sum("message").equals(mac);       // in constant time
+
+h: crypto.Sha256;                                  // data that comes in parts
+h.write("hel"); h.write("lo");
+digest = h.finish();
+```
+
+`crypto.equal(a, b)` compares bytes in constant time, so the time doesn't tell where they differ.
+
+## jwt
+
+```odin
+key := jwt.newKey("secret", requireExp: true);     // HS256, with the HMAC of the secret worked out once
+token := key.sign("{\"sub\":\"42\",\"exp\":1893456000}");
+claims, err := key.verify(token);                  // the payload, a json.Value
+if err != null { ... }                             // jwt.Invalid or jwt.Expired
+user := claims.get("sub").asString();
+```
+
+`verify` takes only HS256 (a token with `"alg":"none"`, or another algorithm, is `jwt.Invalid`), checks the signature
+in constant time, and `exp` and `nbf` when they are there. With `requireExp`, a token without `exp` is `jwt.Invalid`.
+`leeway` gives seconds for clocks that differ.
 
 ## base64
 

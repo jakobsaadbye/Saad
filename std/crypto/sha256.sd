@@ -1,0 +1,237 @@
+namespace crypto;
+
+// SHA-256 and HMAC-SHA256, e.g for signatures of tokens (see std/jwt.sd) or a checksum of a file
+//
+//     digest := crypto.sha256("hello");                     // a Digest: digest.bytes are its 32 bytes
+//     text   := digest.hex();                               // 2cf24dba5fb0a30e...
+//
+//     mac := crypto.hmacSha256("secret", "message");        // a Digest
+//     signer := crypto.newHmacSha256("secret");             // The key worked out once, for many messages
+//     same := signer.sum("message").equals(mac);            // In constant time, so the time doesn't tell where they differ
+//
+//     h: crypto.Sha256;                                     // A digest of data that comes in parts
+//     h.write("hel"); h.write("lo");
+//     digest = h.finish();
+
+// The state of a SHA-256 digest. Ready to use: write the data, then finish
+Sha256 :: struct {
+    state:   [8]u32;
+    block:   [64]u8;     // The bytes of the block that isn't full yet
+    filled:  int;        // How many of them there are
+    length:  u64;        // Of all the data, in bytes
+    started: bool;
+}
+
+// The 32 bytes of a SHA-256 digest, or of an HMAC-SHA256
+Digest :: struct {
+    bytes: [32]u8;
+
+    // As lowercase hexadecimal, e.g 2cf24dba...
+    hex :: method () -> string { return crypto.hex(self.bytes); }
+
+    // The bytes, as a string to write or to encode, e.g base64.encode(digest.toString(), url: true). It points into the
+    // digest, so it lives as long as it
+    toString :: method * () -> string { return text(&self.bytes[0], 32); }
+
+    // If it is the same digest, in constant time
+    equals :: method (other: Digest) -> bool { return crypto.equal(self.bytes, other.bytes); }
+}
+
+// The digest of the data
+sha256 :: (data: string) -> Digest {
+    h: Sha256;
+    h.write(data);
+    return h.finish();
+}
+
+// Adds data to the digest
+write :: method (h: *Sha256, data: string) {
+    if !h.started { h.reset(); }
+    h.length += data.len as u64;
+    i := 0;
+    if h.filled > 0 {
+        while h.filled < 64 && i < data.len {
+            h.block[h.filled] = data[i];
+            h.filled += 1;
+            i += 1;
+        }
+        if h.filled < 64 { return; }
+        compress(&h.state[0], &h.block[0]);
+        h.filled = 0;
+    }
+    while i + 64 <= data.len {
+        compress(&h.state[0], &data.data[i]);
+        i += 64;
+    }
+    while i < data.len {
+        h.block[h.filled] = data[i];
+        h.filled += 1;
+        i += 1;
+    }
+}
+
+// The digest of what was written. The state starts over after it
+finish :: method (h: *Sha256) -> Digest {
+    if !h.started { h.reset(); }
+    bits := h.length * 8;
+    h.block[h.filled] = 0x80;
+    h.filled += 1;
+    if h.filled > 56 {
+        while h.filled < 64 { h.block[h.filled] = 0; h.filled += 1; }
+        compress(&h.state[0], &h.block[0]);
+        h.filled = 0;
+    }
+    while h.filled < 56 { h.block[h.filled] = 0; h.filled += 1; }
+    for i in 0..8 { h.block[56 + i] = ((bits >> ((7 - i) * 8) as u64) & 0xFF) as u8; }
+    compress(&h.state[0], &h.block[0]);
+
+    digest: Digest;
+    for i in 0..8 {
+        word := h.state[i];
+        digest.bytes[i * 4]     = (word >> 24) as u8;
+        digest.bytes[i * 4 + 1] = (word >> 16) as u8;
+        digest.bytes[i * 4 + 2] = (word >> 8) as u8;
+        digest.bytes[i * 4 + 3] = word as u8;
+    }
+    h.reset();
+    return digest;
+}
+
+// Starts over, as if nothing was written
+reset :: method (h: *Sha256) {
+    h.state[0] = 0x6a09e667; h.state[1] = 0xbb67ae85; h.state[2] = 0x3c6ef372; h.state[3] = 0xa54ff53a;
+    h.state[4] = 0x510e527f; h.state[5] = 0x9b05688c; h.state[6] = 0x1f83d9ab; h.state[7] = 0x5be0cd19;
+    h.filled  = 0;
+    h.length  = 0;
+    h.started = true;
+}
+
+//
+// HMAC-SHA256 (RFC 2104)
+//
+
+// A key for HMAC-SHA256: the states after the inner and the outer padded key, so a message costs only its own blocks
+HmacSha256 :: struct {
+    inner: Sha256;
+    outer: Sha256;
+}
+
+// The HMAC of the key, worked out once
+newHmacSha256 :: (key: string) -> HmacSha256 {
+    block: [64]u8;
+    if key.len > 64 {
+        digest := sha256(key);
+        for i in 0..32 { block[i] = digest.bytes[i]; }
+    } else {
+        for i in 0..key.len { block[i] = key[i]; }
+    }
+    pad: [64]u8;
+    mac: HmacSha256;
+    for i in 0..64 { pad[i] = block[i] ^ 0x36; }
+    mac.inner.write(text(&pad[0], 64));
+    for i in 0..64 { pad[i] = block[i] ^ 0x5c; }
+    mac.outer.write(text(&pad[0], 64));
+    return mac;
+}
+
+// The HMAC of the message
+sum :: method (mac: *HmacSha256, message: string) -> Digest {
+    inner := mac.inner;      // A copy: the key's state is used again
+    inner.write(message);
+    digest := inner.finish();
+    outer := mac.outer;
+    outer.write(digest.toString());
+    return outer.finish();
+}
+
+// The HMAC-SHA256 of the message with the key
+hmacSha256 :: (key: string, message: string) -> Digest {
+    mac := newHmacSha256(key);
+    return mac.sum(message);
+}
+
+// If the bytes are the same, in a time that doesn't depend on where they differ, e.g for a signature
+equal :: (a: []u8, b: []u8) -> bool {
+    if a.count != b.count { return false; }
+    difference: u8 = 0;
+    for i in 0..a.count { difference |= a[i] ^ b[i]; }
+    return difference == 0;
+}
+
+// The bytes as lowercase hexadecimal, e.g 2cf24dba
+hex :: (bytes: []u8) -> string {
+    digits := "0123456789abcdef";
+    text: string;
+    text.data = mem.allocate(bytes.count * 2) as *u8;
+    text.len  = bytes.count * 2;
+    for b, i in bytes {
+        text.data[i * 2]     = digits[b >> 4];
+        text.data[i * 2 + 1] = digits[b & 15];
+    }
+    return text;
+}
+
+import mem;
+
+// The bytes as a string, without a copy
+@private
+text :: (data: *u8, count: int) -> string {
+    s: string;
+    s.data = data;
+    s.len  = count;
+    return s;
+}
+
+// The round constants. Each is cast, as an array of literals can't be given a type of its elements yet
+@private
+K :: [
+    0x428a2f98 as u32, 0x71374491 as u32, 0xb5c0fbcf as u32, 0xe9b5dba5 as u32,
+    0x3956c25b as u32, 0x59f111f1 as u32, 0x923f82a4 as u32, 0xab1c5ed5 as u32,
+    0xd807aa98 as u32, 0x12835b01 as u32, 0x243185be as u32, 0x550c7dc3 as u32,
+    0x72be5d74 as u32, 0x80deb1fe as u32, 0x9bdc06a7 as u32, 0xc19bf174 as u32,
+    0xe49b69c1 as u32, 0xefbe4786 as u32, 0x0fc19dc6 as u32, 0x240ca1cc as u32,
+    0x2de92c6f as u32, 0x4a7484aa as u32, 0x5cb0a9dc as u32, 0x76f988da as u32,
+    0x983e5152 as u32, 0xa831c66d as u32, 0xb00327c8 as u32, 0xbf597fc7 as u32,
+    0xc6e00bf3 as u32, 0xd5a79147 as u32, 0x06ca6351 as u32, 0x14292967 as u32,
+    0x27b70a85 as u32, 0x2e1b2138 as u32, 0x4d2c6dfc as u32, 0x53380d13 as u32,
+    0x650a7354 as u32, 0x766a0abb as u32, 0x81c2c92e as u32, 0x92722c85 as u32,
+    0xa2bfe8a1 as u32, 0xa81a664b as u32, 0xc24b8b70 as u32, 0xc76c51a3 as u32,
+    0xd192e819 as u32, 0xd6990624 as u32, 0xf40e3585 as u32, 0x106aa070 as u32,
+    0x19a4c116 as u32, 0x1e376c08 as u32, 0x2748774c as u32, 0x34b0bcb5 as u32,
+    0x391c0cb3 as u32, 0x4ed8aa4a as u32, 0x5b9cca4f as u32, 0x682e6ff3 as u32,
+    0x748f82ee as u32, 0x78a5636f as u32, 0x84c87814 as u32, 0x8cc70208 as u32,
+    0x90befffa as u32, 0xa4506ceb as u32, 0xbef9a3f7 as u32, 0xc67178f2 as u32
+];
+
+@private
+rotr :: (x: u32, n: u32) -> u32 {
+    return (x >> n) | (x << (32 - n));
+}
+
+// One block of 64 bytes into the state
+@private
+compress :: (state: *u32, block: *u8) {
+    w: [64]u32;
+    for i in 0..16 {
+        w[i] = (block[i * 4] as u32 << 24) | (block[i * 4 + 1] as u32 << 16) | (block[i * 4 + 2] as u32 << 8) | block[i * 4 + 3] as u32;
+    }
+    for i in 16..64 {
+        s0 := rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+        s1 := rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    a := state[0]; b := state[1]; c := state[2]; d := state[3];
+    e := state[4]; f := state[5]; g := state[6]; h := state[7];
+    for i in 0..64 {
+        s1 := rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+        choose := (e & f) ^ (~e & g);
+        t1 := h + s1 + choose + K[i] + w[i];
+        s0 := rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+        majority := (a & b) ^ (a & c) ^ (b & c);
+        t2 := s0 + majority;
+        h = g; g = f; f = e; e = d + t1;
+        d = c; c = b; b = a; a = t1 + t2;
+    }
+    state[0] += a; state[1] += b; state[2] += c; state[3] += d;
+    state[4] += e; state[5] += f; state[6] += g; state[7] += h;
+}
