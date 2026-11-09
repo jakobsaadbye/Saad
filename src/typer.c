@@ -164,6 +164,7 @@ static bool check_condition_type(Typer *typer, AstExpr *expr, Type *type);
 bool check_try(Typer *typer, AstTry *ast_try);
 bool check_throw(Typer *typer, AstThrow *ast_throw);
 bool is_error_type(Typer *typer, Type *type);
+Type *throw_error_result(Typer *typer, AstFunctionCall *call, TypeTuple *tuple);
 bool is_embedding_error_type(Typer *typer, Type *type);
 bool is_c_string_type(Type *type);
 bool identifier_is_type(AstIdentifier *ident);
@@ -3183,6 +3184,18 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
             typer->wants_all_results = decl->idents.count > decl->values.count; // e.g text, err := os.readFile(path)
             Type *expr_type = check_expression(typer, value, NULL);
             if (!expr_type) return false;
+
+            // All but the error are taken, so the error is thrown, e.g 'post, found := conn.queryOne<Post>(sql)' of
+            // (Post, bool, error)
+            bool in_tree = typer->enclosing_function && typer->enclosing_function->is_expression_tree;
+            if (decl->values.count == 1 && expr_type->kind == TYPE_TUPLE && value->head.kind == AST_FUNCTION_CALL && !in_tree &&
+                ((TypeTuple *)expr_type)->types.count == decl->idents.count + 1) {
+                Type *rest = throw_error_result(typer, (AstFunctionCall *)value, (TypeTuple *)expr_type);
+                if (rest) {
+                    value->type = rest;
+                    expr_type = rest;
+                }
+            }
 
             if (expr_type->kind == TYPE_TUPLE) {
                 TypeTuple *tuple_type = (TypeTuple *) expr_type;
@@ -7693,6 +7706,22 @@ Type *check_sizeof(Typer *typer, AstSizeof *ast_sizeof) {
     return primitive_type(PRIMITIVE_INT);
 }
 
+// The results of a call without its error, which is thrown, e.g (string, bool) of 'v, found := f()' of
+// (string, bool, error). NULL when the last result isn't an error
+Type *throw_error_result(Typer *typer, AstFunctionCall *call, TypeTuple *tuple) {
+    Type *last = tuple->types.count >= 2 ? ((Type **)tuple->types.items)[tuple->types.count - 1] : NULL;
+    if (!last || !is_error_type(typer, last)) return NULL;
+    call->results = (Type *)tuple;
+    call->head.head.flags |= AST_FLAG_THROWS_ON_ERROR;
+    call->head.type = NULL;
+    if (tuple->types.count == 2) return ((Type **)tuple->types.items)[0];
+    TypeTuple *rest = type_alloc(&typer->parser->type_table, sizeof(TypeTuple));
+    *rest = *tuple;
+    rest->types = da_init(tuple->types.count, sizeof(Type *));
+    for (int i = 0; i < tuple->types.count - 1; i++) da_append(&rest->types, ((Type **)tuple->types.items)[i]);
+    return (Type *)rest;
+}
+
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     Type *result = NULL;
     bool wants_all_results = typer->wants_all_results; // Only for this expression, not the ones in it
@@ -7740,22 +7769,8 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     bool in_tree = typer->enclosing_function && typer->enclosing_function->is_expression_tree;
     if (expr->head.kind == AST_FUNCTION_CALL && result->kind == TYPE_TUPLE && !in_tree && !wants_all_results) {
         // A call whose error isn't taken throws it, e.g 'text := os.readFile(path);' of (string, error)
-        TypeTuple *tuple = (TypeTuple *)result;
-        Type *last = tuple->types.count >= 2 ? ((Type **)tuple->types.items)[tuple->types.count - 1] : NULL;
-        if (last && is_error_type(typer, last)) {
-            AstFunctionCall *call = (AstFunctionCall *)expr;
-            call->results = result;
-            expr->head.flags |= AST_FLAG_THROWS_ON_ERROR;
-            if (tuple->types.count == 2) {
-                result = ((Type **)tuple->types.items)[0];
-            } else {
-                TypeTuple *rest = type_alloc(&typer->parser->type_table, sizeof(TypeTuple));
-                *rest = *tuple;
-                rest->types = da_init(tuple->types.count, sizeof(Type *));
-                for (int i = 0; i < tuple->types.count - 1; i++) da_append(&rest->types, ((Type **)tuple->types.items)[i]);
-                result = (Type *)rest;
-            }
-        }
+        Type *rest = throw_error_result(typer, (AstFunctionCall *)expr, (TypeTuple *)result);
+        if (rest) result = rest;
     }
     if (expr->head.kind == AST_FUNCTION_CALL && result->kind == TYPE_TUPLE && in_tree) {
         TypeTuple *tuple = (TypeTuple *)result;

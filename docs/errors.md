@@ -31,9 +31,11 @@ config := readConfig(path);                       // not taken: if there is an e
    in its results still throws what its calls throw, e.g `total :: () -> int { return readCount(); }`.
 3. **`return f()` gives the error along**, as it gives all of the results of `f`, when the function has the same
    results, e.g `(Config, error)`.
-4. **Only a call whose last result is an `error` can be taken.** `v, err := f()` of a `f :: () -> int` is an error of
+4. **All results but the error can be taken, and the error is thrown**: `post, found := conn.queryOne<Post>(sql)` of
+   `(Post, bool, error)` throws, like `v := f()` does for `(V, error)`.
+5. **Only a call whose last result is an `error` can be taken.** `v, err := f()` of a `f :: () -> int` is an error of
    the compiler, as there is one value. To get a value from a function that throws, put it in a `try`.
-5. **An error isn't a condition**: `if err { }`, `!err` and `assert(err)` are compile errors, as they read the other way
+6. **An error isn't a condition**: `if err { }`, `!err` and `assert(err)` are compile errors, as they read the other way
    round. Compare it with `null`: `if err != null { }`. The same goes for any pointer, as a condition is a `bool`.
 
 ### When a function gives an error, and when it throws
