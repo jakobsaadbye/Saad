@@ -237,29 +237,52 @@ matchScore :: (route: *Route, segments: []string) -> int {
 Server :: struct {
     router:       *Router;       // Routes the requests. Or handler, for one handler of every request
     handler:      Handler;
-    workers:      int;           // Threads that answer requests. 0 is 2 for each processor, at least 4
-    readTimeout:  int = 30000;   // Milliseconds for the parts of a request that has started to come
-    writeTimeout: int = 30000;
+    workers:      int;           // Threads, each with an event loop of its own connections. 0 is 2 for each processor, at least 4
+    readTimeout:  int = 30000;   // Milliseconds for the rest of a request that has started to come
+    writeTimeout: int = 30000;   // Milliseconds for a response that the client doesn't take
     idleTimeout:  int = 60000;   // Milliseconds a kept alive connection may wait for its next request
     limits:       Limits;
     log:          bool = true;   // Writes the errors of handlers to stderr
+    reusePort:    bool;          // Other processes may listen at the port too, and the system shares the connections (Linux)
+    maxConnections: int;         // Of each worker. When it has as many, it accepts no more until one closes. 0 is what the
+                                 // open files of the process allow
 
     listener: *net.Listener;
     mutex:    thread.Mutex;
-    ready:    thread.Condition;
-    queue:    [..]*Connection;   // Connections with a request, for the workers
-    returned: [..]*Connection;   // Connections that the workers are done with, for the poller
-    wake:     *net.Conn;         // Wakes the poller, when a connection is returned
-    woke:     bool;              // A byte is on its way to the poller, so no other is written
     stopping: bool;
+    wake:     *net.Conn;         // A byte written to it wakes every loop, for shutdown
+    woken:    *net.Conn;         // The other end, which every loop waits for
+    loops:    [..]*Loop;
     threads:  [..]thread.Thread;
 }
 
-// A connection that is kept alive, and what has come on it that isn't read yet, e.g the next request
+// A worker: a thread that waits for its connections with a Poller and answers the requests that come on them, one
+// after the other. Its request and response are used again for every request
+Loop :: struct {
+    server:      *Server;
+    poller:      *net.Poller;
+    connections: [..]*Connection;   // Open, for the timeouts
+    closed:      [..]*Connection;   // Closed while the events were handled, freed after them
+    input:       bytes.Buffer;      // What has come on the connection that is read, while its requests are answered
+    out:         fmt.StringBuilder; // The response that is sent
+    request:     Request;
+    response:    ResponseWriter;
+    accepting:   bool;
+    now:         i64;               // Milliseconds, as of the last wait
+    limit:       int;               // Of connections
+}
+
+// A connection that is kept alive. An idle connection has no buffers: only what came of a request that isn't whole
+// yet, and what the client didn't take of a response
 Connection :: struct {
-    conn:     *net.Conn;
-    buffer:   bytes.Buffer;
-    lastUsed: time.Time;
+    conn:      *net.Conn;
+    input:     bytes.Buffer;     // The part of the next request that has come
+    output:    bytes.Buffer;     // What the connection didn't take yet. No more requests are answered until it has
+    lastUsed:  i64;              // Milliseconds
+    index:     int;              // In the connections of its loop
+    closing:   bool;             // Closed when its output is written
+    continued: bool;             // 100 Continue was sent for the request that is coming
+    open:      bool;
 }
 
 // Listens at the address, e.g ":8080", and answers the requests with the routes of the router. Returns when it can't
@@ -278,22 +301,23 @@ listenAndServe :: method (server: *Server, address: string) -> error {
 
 // Listens at the address. server.listener.addr says where, e.g the port of ":0"
 listen :: method (server: *Server, address: string) -> error {
-    listener, err := net.listen(address);
+    listener, err := net.listen(address, reusePort: server.reusePort);
     if err != null { return err; }
     server.listener = listener;
     return null;
 }
 
-// Accepts connections and answers them, until shutdown(). This thread is the poller: it waits for the listener and the
-// idle connections, and gives a connection to a worker when a request comes on it. So idle connections, e.g of
-// browsers, don't keep the workers from answering
+// Accepts connections and answers them, until shutdown(). The workers are threads with an event loop each: a Poller
+// (epoll on Linux) waits for their connections, so idle connections, e.g of browsers, cost no thread and almost no
+// memory, and a request is answered by the thread that read it, without being handed to another
 serve :: method (server: *Server) -> error {
     assert(server.listener != null);   // listen() first
-    server.queue.allocator    = mem.heap();
-    server.returned.allocator = mem.heap();
-    server.threads.allocator  = mem.heap();
+    server.loops.allocator   = mem.heap();
+    server.threads.allocator = mem.heap();
+    files := net.raiseOpenFileLimit();
+    server.listener.setNonBlocking();
 
-    // A connection to itself, which a worker writes a byte to when it returns a connection
+    // A connection to itself, which shutdown() writes a byte to
     wakeListener, err := net.listen("127.0.0.1:0");
     if err != null { return err; }
     wake: *net.Conn;
@@ -303,131 +327,49 @@ serve :: method (server: *Server) -> error {
     woken, err = wakeListener.accept();
     wakeListener.close();
     if err != null { return err; }
-    server.wake = wake;
+    server.mutex.lock();
+    server.wake  = wake;
+    server.woken = woken;
+    server.mutex.unlock();
 
     workers := server.workers;
     if workers <= 0 {
         workers = thread.processorCount() * 2;
         if workers < 4 { workers = 4; }
     }
+    limit := server.maxConnections;
+    if limit <= 0 {
+        limit = (files - 64) / workers;
+        if limit < 16 { limit = 16; }
+    }
     for i in 0..workers {
+        loop := new(Loop, mem.heap());
+        loop.server = server;
+        loop.limit  = limit;
+        poller, pollErr := net.newPoller();
+        if pollErr != null { return pollErr; }
+        loop.poller = poller;
+        server.loops.add(loop);
+    }
+    for i in 1..workers {
         t: thread.Thread;
-        t, err = thread.spawn(work, server);
+        t, err = thread.spawn(runLoop, server.loops[i]);
         if err != null { return err; }
         server.threads.add(t);
     }
-
-    idle: [..]*Connection;
-    idle.allocator = mem.heap();
-    p: net.Poll;
-    p.fds.allocator = mem.heap();
-    scratch: [64]u8;
-    while !server.isStopping() {
-        p.clear();
-        p.add(server.listener.socket);
-        p.add(woken.socket);
-        for c in idle { p.add(c.conn.socket); }
-        n, waitErr := p.wait(1000);   // At least once a second, for the idle timeouts
-        if waitErr != null || server.isStopping() { break; }
-
-        // A request came on idle connections: to the workers. The rest wait on
-        now := time.now();
-        if n > 0 {
-            kept: [..]*Connection;
-            kept.allocator = mem.heap();
-            for c, i in idle {
-                if p.ready(i as int + 2) {
-                    server.give(c);
-                } else {
-                    kept.add(c);
-                }
-            }
-            idle.free();
-            idle = kept;
-        }
-
-        // Connections that the workers are done with
-        if n > 0 && p.ready(1) {
-            woken.read(scratch);
-            server.mutex.lock();
-            server.woke = false;
-            for c in server.returned {
-                c.lastUsed = now;
-                idle.add(c);
-            }
-            server.returned.clear();
-            server.mutex.unlock();
-        }
-
-        // A new connection
-        if n > 0 && p.ready(0) {
-            conn, acceptErr := server.listener.accept();
-            if acceptErr == null {
-                c := new(Connection, mem.heap());
-                c.conn = conn;
-                c.buffer.allocator = mem.heap();
-                c.lastUsed = now;
-                idle.add(c);
-            }
-        }
-
-        // Connections that waited too long for their next request
-        kept: [..]*Connection;
-        kept.allocator = mem.heap();
-        for c in idle {
-            if now.sub(c.lastUsed) > (server.idleTimeout as i64) * time.Millisecond { closeConnection(c); }
-            else { kept.add(c); }
-        }
-        idle.free();
-        idle = kept;
-    }
-
-    // The workers end when the queue is empty
-    server.mutex.lock();
-    server.stopping = true;
-    server.ready.broadcast();
-    server.mutex.unlock();
+    runLoop(server.loops[0]);   // This thread is a worker too
     for i in 0..server.threads.count { server.threads.indexRef(i).join(); }
     server.threads.clear();
-    for c in idle { closeConnection(c); }
-    for c in server.returned { closeConnection(c); }
-    server.returned.clear();
-    idle.free();
-    p.free();
+    server.listener.close();   // Connections that come now are refused
+    for loop in server.loops { mem.delete(loop, mem.heap()); }
+    server.loops.clear();
+
     server.mutex.lock();
     server.wake = null;   // Under the lock, as shutdown() writes to it
     server.mutex.unlock();
     wake.close();
     woken.close();
     return null;
-}
-
-// Gives a connection with a request to a worker
-give :: method (server: *Server, c: *Connection) {
-    server.mutex.lock();
-    server.queue.add(c);
-    server.ready.signal();
-    server.mutex.unlock();
-}
-
-// If the next request comes within 2 milliseconds, while no other connection waits for a worker
-nextComesSoon :: method (server: *Server, c: *Connection) -> bool {
-    server.mutex.lock();
-    others := server.queue.count;
-    server.mutex.unlock();
-    if others > 0 { return false; }
-    p: net.Poll;
-    defer p.free();
-    p.add(c.conn.socket);
-    n, err := p.wait(2);
-    return err == null && n > 0;
-}
-
-closeConnection :: (c: *Connection) {
-    c.conn.close();
-    mem.delete(c.conn, mem.heap());
-    c.buffer.free();
-    mem.delete(c, mem.heap());
 }
 
 isStopping :: method (server: *Server) -> bool {
@@ -437,107 +379,371 @@ isStopping :: method (server: *Server) -> bool {
     return stopping;
 }
 
-// Stops listening. serve() returns when the requests that came are answered. Idle connections are closed
+// Stops listening and accepting. serve() returns when the requests that came are answered. Idle connections are closed
 shutdown :: method (server: *Server) {
     server.mutex.lock();
     server.stopping = true;
-    server.ready.broadcast();
-    if server.wake != null { _ := server.wake.write("x"); }   // Wakes the poller
+    if server.wake != null { _ := server.wake.write("x"); }   // Wakes the loops
     server.mutex.unlock();
-    if server.listener != null { server.listener.close(); }
 }
 
-// A worker thread: answers the requests of the connections the poller gives it. Its request and response are used
-// again for every request
-work :: (server: *Server) {
-    r: Request;
-    defer r.arena.free();
-    w: ResponseWriter;
-    w.body.allocator = mem.heap();   // Kept for the next request, so not in its arena
-    defer w.body.free();
+// The event loop of a worker
+runLoop :: (loop: *Loop) {
+    server := loop.server;
+    loop.connections.allocator = mem.heap();
+    loop.closed.allocator      = mem.heap();
+    loop.input.allocator       = mem.heap();
+    loop.out.allocator         = mem.heap();
+    loop.response.body.allocator = mem.heap();   // Kept for the next request, so not in its arena
+    loop.poller.add(server.listener.socket, server.listener as *void, exclusive: true);
+    loop.poller.add(server.woken.socket, server.woken as *void);
+    loop.accepting = true;
+    loop.now = time.now().unixMilli();
+    lastSweep := loop.now;
 
-    while true {
-        server.mutex.lock();
-        while server.queue.count == 0 && !server.stopping {
-            server.ready.wait(&server.mutex);
+    while !server.isStopping() {
+        events, err := loop.poller.wait(1000);   // At least once a second, for the timeouts
+        if err != null { break; }
+        loop.now = time.now().unixMilli();
+        for e in events {
+            if e.data == server.listener as *void {
+                loop.acceptAll();
+                continue;
+            }
+            if e.data == server.woken as *void { continue; }
+            c := e.data as *Connection;
+            if !c.open { continue; }
+            if e.writable && c.output.available() > 0 { loop.flush(c); }
+            if c.open && (e.readable || e.closed) && c.output.available() == 0 { loop.readAndServe(c); }
         }
-        if server.queue.count == 0 {
-            server.mutex.unlock();
+        loop.freeClosed();
+        if loop.now - lastSweep >= 1000 {
+            loop.sweep();
+            lastSweep = loop.now;
+        }
+    }
+
+    // Stopping: the connections are closed
+    while loop.connections.count > 0 { loop.closeConnection(loop.connections[loop.connections.count - 1]); }
+    loop.freeClosed();
+    loop.connections.free();
+    loop.closed.free();
+    loop.input.free();
+    loop.out.free();
+    loop.response.body.free();
+    loop.request.arena.free();
+    loop.poller.free();
+}
+
+// Accepts the connections that wait, up to the limit of the loop
+acceptAll :: method (loop: *Loop) {
+    server := loop.server;
+    for i in 0..256 {
+        if loop.connections.count >= loop.limit {
+            // Full: the listener isn't waited for until a connection closes
+            if loop.accepting {
+                loop.poller.remove(server.listener.socket);
+                loop.accepting = false;
+            }
             return;
         }
-        c := server.queue[0];
-        server.queue.removeAt(0);
-        server.mutex.unlock();
-
-        // The requests that have come: the poller waits for the next one
-        if server.serveRequests(c, &r, &w) {
-            server.mutex.lock();
-            server.returned.add(c);
-            if server.wake != null && !server.woke {
-                server.woke = true;
-                _ := server.wake.write("x");
-            }
-            server.mutex.unlock();
-        } else {
-            closeConnection(c);
-        }
+        conn, err := server.listener.tryAccept();
+        if conn == null { return; }   // None waits, or it failed, e.g no more files: tried again at the next event
+        conn.setNoDelay();
+        c := new(Connection, mem.heap());
+        c.conn = conn;
+        c.input.allocator  = mem.heap();
+        c.output.allocator = mem.heap();
+        c.lastUsed = loop.now;
+        c.open = true;
+        c.index = loop.connections.count as int;
+        loop.connections.add(c);
+        if loop.poller.add(conn.socket, c as *void) != null { loop.closeConnection(c); }
     }
 }
 
-// Answers the requests that have come on the connection. True when it is kept alive, for the next one
-serveRequests :: method (server: *Server, c: *Connection, r: *Request, w: *ResponseWriter) -> bool {
-    conn := c.conn;
-    conn.setReadTimeout(server.readTimeout);
-    conn.setWriteTimeout(server.writeTimeout);
-
+// Reads what has come on the connection, and answers the requests that are whole
+readAndServe :: method (loop: *Loop, c: *Connection) {
+    working := &loop.input;
+    working.clear();
+    if c.input.available() > 0 {
+        working.write(c.input.unread());
+        c.input.clear();
+    }
+    ended := false;
     while true {
-        r.arena.clear();
-        *r = Request{arena: r.arena};
-        r.allocator = &r.arena;
-        r.headers.allocator = &r.arena;
-        r.remote = conn.remote;
-        r.server = server;
+        space := working.space(16384);
+        n, err := c.conn.tryRead(space);
+        if err != null { ended = true; break; }
+        if n == 0 { break; }   // Nothing more has come
+        working.wrote(n);
+        if n < space.count || working.available() > loop.server.limits.headBytes + loop.server.limits.bodyBytes { break; }
+    }
+    c.lastUsed = loop.now;
+    loop.serveWhole(c, working);
+    if ended && c.open { loop.finish(c); }
+}
 
-        w.body.clear();
-        noHeaders: [..]Header;
-        w.headers = noHeaders;
-        w.headers.allocator = r.allocator;
-        w.status = 200;
-
-        status := readRequest(conn, &c.buffer, &server.limits, r);
-        if status == Gone { return false; }
+// Answers the whole requests in the buffer, in order, and keeps the rest for the next read
+serveWhole :: method (loop: *Loop, c: *Connection, working: *bytes.Buffer) {
+    server := loop.server;
+    while c.open && !c.closing && c.output.available() == 0 && working.available() > 0 {
+        length, status, expects := requestLength(working.unread(), &server.limits);
         if status != 0 {
+            w := &loop.response;
+            w.body.clear();
+            noHeaders: [..]Header;
+            w.headers = noHeaders;
+            w.headers.allocator = mem.heap();
             w.error(status, statusText(status));
             w.setHeader("Connection", "close");
-            writeResponse(conn, w, r, true);
-            return false;
+            loop.request.method = "GET";
+            loop.send(c, w, &loop.request, true);
+            w.headers.free();
+            working.clear();
+            return;
         }
-
-        // What the handler allocates is in the arena of the request, unless it says otherwise, e.g mem.heap()
-        previous := mem.setAllocator(r.allocator);
-        try {
-            if server.handler != null      { server.handler(w, r); }
-            else if server.router != null  { server.router.serve(w, r); }
-            else                           { w.error(404, "Not Found"); }
-        } catch (err) {
-            if server.log {
-                io.writeError(fmt.sprint("http: % % failed: %\n", r.method, r.target, err.message));
+        if length == 0 {
+            // Not whole yet. A client that waits for 100 Continue before it sends the body is told to go on
+            if expects && !c.continued {
+                c.continued = true;
+                _, _ := c.conn.tryWrite("HTTP/1.1 100 Continue\r\n\r\n");
             }
-            w.headers.clear();
-            w.error(500, "Internal Server Error");
+            break;
         }
-        mem.setAllocator(previous);
-
-        close := wantsClose(r) || server.isStopping();
-        if close { w.setHeader("Connection", "close"); }
-        if writeResponse(conn, w, r, close) != null || close { return false; }
-
-        // A request that came right after it, e.g pipelined, is answered now. So is one that comes within 2
-        // milliseconds while no other connection waits, as a busy client sends its next one right away. Otherwise the
-        // poller waits for it, and the worker is free
-        if c.buffer.unread().indexOf("\r\n\r\n") < 0 && !server.nextComesSoon(c) { return true; }
+        c.continued = false;
+        loop.serveOne(c, working);
     }
-    return true;
+    if c.open && working.available() > 0 {
+        c.input.write(working.unread());
+    } else if c.input.available() == 0 {
+        c.input.free();   // An idle connection keeps no buffer
+    }
+    working.clear();
+}
+
+// Answers the request at the start of the buffer, which is whole
+serveOne :: method (loop: *Loop, c: *Connection, working: *bytes.Buffer) {
+    server := loop.server;
+    r := &loop.request;
+    w := &loop.response;
+    r.arena.clear();
+    *r = Request{arena: r.arena};
+    r.allocator = &r.arena;
+    r.headers.allocator = &r.arena;
+    r.remote = c.conn.remote;
+    r.server = server;
+
+    w.body.clear();
+    noHeaders: [..]Header;
+    w.headers = noHeaders;
+    w.headers.allocator = r.allocator;
+    w.status = 200;
+
+    status := readRequest(null, working, &server.limits, r);
+    if status != 0 {
+        w.error(status, statusText(status));
+        w.setHeader("Connection", "close");
+        loop.send(c, w, r, true);
+        return;
+    }
+
+    // What the handler allocates is in the arena of the request, unless it says otherwise, e.g mem.heap()
+    previous := mem.setAllocator(r.allocator);
+    try {
+        if server.handler != null      { server.handler(w, r); }
+        else if server.router != null  { server.router.serve(w, r); }
+        else                           { w.error(404, "Not Found"); }
+    } catch (err) {
+        if server.log {
+            io.writeError(fmt.sprint("http: % % failed: %\n", r.method, r.target, err.message));
+        }
+        w.headers.clear();
+        w.error(500, "Internal Server Error");
+    }
+    mem.setAllocator(previous);
+
+    close := wantsClose(r) || server.isStopping();
+    if close { w.setHeader("Connection", "close"); }
+    loop.send(c, w, r, close);
+}
+
+// Sends the response. What the connection doesn't take now is sent when it is writable
+send :: method (loop: *Loop, c: *Connection, w: *ResponseWriter, r: *Request, close: bool) {
+    loop.out.clear();
+    writeResponse(&loop.out, w, r);
+    text := loop.out.toString();
+    if close { c.closing = true; }
+    sent, err := c.conn.tryWrite(text);
+    if err != null {
+        loop.closeConnection(c);
+        return;
+    }
+    c.lastUsed = loop.now;
+    if sent < text.len {
+        c.output.write(text.slice(sent));
+        if loop.poller.modify(c.conn.socket, c as *void, write: true) != null { loop.closeConnection(c); }
+        return;
+    }
+    if close { loop.closeConnection(c); }
+}
+
+// Writes what is left of the responses, when the connection takes more. Then the requests that waited are answered
+flush :: method (loop: *Loop, c: *Connection) {
+    sent, err := c.conn.tryWrite(c.output.unread());
+    if err != null {
+        loop.closeConnection(c);
+        return;
+    }
+    c.lastUsed = loop.now;
+    c.output.skip(sent);
+    if c.output.available() > 0 { return; }
+    c.output.free();
+    if c.closing {
+        loop.closeConnection(c);
+        return;
+    }
+    loop.poller.modify(c.conn.socket, c as *void, write: false);
+    if c.input.available() > 0 {
+        working := &loop.input;
+        working.clear();
+        working.write(c.input.unread());
+        c.input.clear();
+        loop.serveWhole(c, working);
+    }
+}
+
+// The other end closed: the connection is closed, after what it hasn't taken of the responses
+finish :: method (loop: *Loop, c: *Connection) {
+    if c.output.available() > 0 {
+        c.closing = true;
+        return;
+    }
+    loop.closeConnection(c);
+}
+
+// Closes connections that waited too long: for the rest of a request, for the client to take a response, or idle
+sweep :: method (loop: *Loop) {
+    server := loop.server;
+    i := 0;
+    while i < loop.connections.count {
+        c := loop.connections[i];
+        waited := loop.now - c.lastUsed;
+        late := false;
+        if c.output.available() > 0     { late = waited > server.writeTimeout as i64; }
+        else if c.input.available() > 0 { late = waited > server.readTimeout as i64; }
+        else                            { late = waited > server.idleTimeout as i64; }
+        if late { loop.closeConnection(c); }   // The last connection takes its place
+        else    { i += 1; }
+    }
+    loop.freeClosed();
+}
+
+closeConnection :: method (loop: *Loop, c: *Connection) {
+    if !c.open { return; }
+    c.open = false;
+    loop.poller.remove(c.conn.socket);
+    c.conn.close();
+    last := loop.connections[loop.connections.count - 1];
+    loop.connections[c.index] = last;
+    last.index = c.index;
+    loop.connections.count -= 1;
+    loop.closed.add(c);   // Freed after the events, which can still point to it
+    if !loop.accepting && loop.connections.count < loop.limit {
+        loop.poller.add(loop.server.listener.socket, loop.server.listener as *void, exclusive: true);
+        loop.accepting = true;
+    }
+}
+
+freeClosed :: method (loop: *Loop) {
+    for c in loop.closed {
+        mem.delete(c.conn, mem.heap());
+        c.input.free();
+        c.output.free();
+        mem.delete(c, mem.heap());
+    }
+    loop.closed.clear();
+}
+
+// How many bytes the request at the start of the data has when it is whole: its head and its body. 0 when it isn't
+// whole yet, with expects when it waits for 100 Continue. status is what is wrong with it, e.g 431 for a head that is
+// too long, or 0
+requestLength :: (data: string, limits: *Limits) -> int, int, bool {
+    end := data.indexOf("\r\n\r\n");
+    if end < 0 {
+        if data.len > limits.headBytes { return 0, 431, false; }
+        return 0, 0, false;
+    }
+    headLength := end + 4;
+    if headLength > limits.headBytes { return 0, 431, false; }
+
+    // The headers that say how long the body is
+    contentLength: i64 = -1;
+    chunked := false;
+    expects := false;
+    rest := data.slice(0, end);
+    first := true;
+    while rest.len > 0 {
+        lineEnd := rest.indexOf("\r\n");
+        line := rest;
+        if lineEnd >= 0 { line = rest.slice(0, lineEnd); rest = rest.slice(lineEnd + 2); }
+        else            { rest = ""; }
+        if first { first = false; continue; }   // The request line
+        colon := line.indexOf(":");
+        if colon <= 0 { continue; }   // readHead says what is wrong with it
+        name := line.slice(0, colon);
+        value := trimSpaces(line.slice(colon + 1));
+        if equalFold(name, "Content-Length") {
+            contentLength = parseCount(value);
+            if contentLength < 0 { return 0, 400, false; }
+        } else if equalFold(name, "Transfer-Encoding") {
+            if !equalFold(value, "chunked") { return 0, 501, false; }
+            chunked = true;
+        } else if equalFold(name, "Expect") {
+            expects = equalFold(value, "100-continue");
+        }
+    }
+
+    if chunked {
+        at := headLength;
+        total := 0;
+        while true {
+            lineEnd := data.indexOf("\r\n", at);
+            if lineEnd < 0 { return 0, 0, expects; }
+            line := data.slice(at, lineEnd);
+            semicolon := line.indexOf(";");
+            if semicolon >= 0 { line = line.slice(0, semicolon); }
+            line = trimSpaces(line);
+            if line.len == 0 || line.len > 15 { return 0, 400, false; }
+            size := 0;
+            for ch in line {
+                if !ch.isHexDigit() { return 0, 400, false; }
+                size = size * 16 + ch.digitValue();
+            }
+            total += size;
+            if total > limits.bodyBytes { return 0, 413, false; }
+            at = lineEnd + 2;
+            if size == 0 {
+                // The trailer, up to an empty line
+                while true {
+                    trailerEnd := data.indexOf("\r\n", at);
+                    if trailerEnd < 0 { return 0, 0, false; }
+                    empty := trailerEnd == at;
+                    at = trailerEnd + 2;
+                    if empty { return at, 0, false; }
+                }
+            }
+            if data.len < at + size + 2 { return 0, 0, expects; }
+            at += size + 2;
+        }
+    }
+    if contentLength > limits.bodyBytes as i64 { return 0, 413, false; }
+    if contentLength > 0 {
+        whole := headLength + contentLength as int;
+        if data.len < whole { return 0, 0, expects; }
+        return whole, 0, false;
+    }
+    return headLength, 0, false;
 }
 
 // If the connection ends after this request: HTTP/1.0 without keep-alive, or Connection: close
@@ -548,7 +754,8 @@ wantsClose :: (r: *Request) -> bool {
     return false;
 }
 
-// Reads a request: 0 when it worked, Gone when the connection ended, or the status of what was wrong
+// Reads a request: 0 when it worked, Gone when the connection ended, or the status of what was wrong. Without a
+// connection, the buffer has all of the request
 readRequest :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, r: *Request) -> int {
     first, status := readHead(conn, buffer, limits, &r.arena, &r.headers);
     if status != 0 { return status; }
@@ -574,7 +781,7 @@ readRequest :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, r: *Req
 
     // A client that waits for 100 Continue before it sends the body
     expect, expects := r.header("Expect");
-    if expects && equalFold(expect, "100-continue") {
+    if conn != null && expects && equalFold(expect, "100-continue") {
         conn.write("HTTP/1.1 100 Continue\r\n\r\n");
     }
 
@@ -585,19 +792,27 @@ readRequest :: (conn: *net.Conn, buffer: *bytes.Buffer, limits: *Limits, r: *Req
     return 0;
 }
 
-// Sends the response: the status line, the headers with Content-Length, and the body (not for HEAD)
-writeResponse :: (conn: *net.Conn, w: *ResponseWriter, r: *Request, close: bool) -> error {
-    out := fmt.newStringBuilder(256 + w.body.length);
-    defer out.free();
-    out.add("HTTP/1.1 % %\r\n", w.status, statusText(w.status));
+// Writes the response: the status line, the headers with Content-Length, and the body (not for HEAD)
+writeResponse :: (out: *fmt.StringBuilder, w: *ResponseWriter, r: *Request) {
+    out.addString("HTTP/1.1 ");
+    out.addInt64(w.status as i64);
+    out.addChar(' ');
+    out.addString(statusText(w.status));
+    out.addString("\r\n");
     _, typed := findHeader(w.headers, "Content-Type");
     if !typed && w.body.length > 0 { out.addString("Content-Type: text/plain; charset=utf-8\r\n"); }
     for h in w.headers {
         if equalFold(h.name, "Content-Length") { continue; }
-        out.add("%: %\r\n", h.name, h.value);
+        out.addString(h.name);
+        out.addString(": ");
+        out.addString(h.value);
+        out.addString("\r\n");
     }
-    if w.status != 204 && w.status != 304 { out.add("Content-Length: %\r\n", w.body.length); }
+    if w.status != 204 && w.status != 304 {
+        out.addString("Content-Length: ");
+        out.addInt64(w.body.length as i64);
+        out.addString("\r\n");
+    }
     out.addString("\r\n");
     if r.method != "HEAD" && w.status != 204 && w.status != 304 { out.addString(w.body.toString()); }
-    return conn.write(out.toString());
 }

@@ -257,6 +257,17 @@ addr := net.resolve("localhost", 80);     // net.Addr: ip and port, toString() i
 * `listener.close()` wakes an `accept()` that waits, which gives `net.Closed`.
 * `net.Poll` waits until one of many sockets can be read: `p.add(conn.socket)`, `n := p.wait(milliseconds)` and
   `p.ready(i)`.
+* `net.Poller` waits for many non-blocking sockets at once, e.g for a server with thousands of connections: epoll on
+  Linux, where a wait costs the same for 10 or 100,000 sockets, and `WSAPoll` on Windows. `p := net.newPoller()`,
+  `p.add(socket, data, write: false, exclusive: false)`, `p.modify(...)`, `p.remove(socket)`, and
+  `for e in p.wait(milliseconds)`, where an `Event` has the `data` the socket was added with, and `readable`,
+  `writable` and `closed`. `exclusive` wakes only one of many pollers that wait for the same listener.
+* Non-blocking sockets: `listener.setNonBlocking()` and `conn.setNonBlocking()`, then `listener.tryAccept()` (null
+  when no connection waits), `conn.tryRead(buffer)` (0 without an error when nothing has come) and
+  `conn.tryWrite(data)` (how many bytes the connection took). `conn.setNoDelay()` sends small writes at once.
+* `net.listen(address, backlog: 1024, reusePort: true)` lets more sockets, e.g of more processes, listen at the same
+  port, and Linux shares the connections between them. `net.raiseOpenFileLimit()` lets the process open as many
+  sockets as the system allows (the soft limit up to the hard one), and gives how many.
 * The bindings are in `net.sys`, with the structs of the headers written out for both systems (`SockAddrIn`,
   `AddrInfo`, `WsaData`, `TimeVal`) and the types of the calls named (`Socket`, `Length`, `AddrLength`).
 * `conn.startTls(host)` starts TLS as a client of the host (`tls.sd`): the handshake checks that the certificate is of
@@ -269,8 +280,8 @@ addr := net.resolve("localhost", 80);     // net.Addr: ip and port, toString() i
 
 ## net.http
 
-HTTP/1.1, like Go's `net/http`: a `Router` routes requests to handlers, a `Server` answers them on a pool of threads,
-and a client sends requests.
+HTTP/1.1, like Go's `net/http`: a `Router` routes requests to handlers, a `Server` answers them with an event loop on
+each of its threads, and a client sends requests.
 
 ```odin
 import net.http;
@@ -305,12 +316,22 @@ response = http.request("PUT", url, headers, body);
   stderr (`server.log`); the server goes on.
 * **Server:** `server.listen(address)`, then `server.serve()`, which returns after `server.shutdown()`. Fields:
   `router` or `handler`, `workers` (0 is 2 for each processor, at least 4), `readTimeout`, `writeTimeout` and
-  `idleTimeout` (milliseconds), and `limits` (`headBytes`, `bodyBytes`). Bodies can be `Content-Length` or chunked.
-  Bad requests get 400, 408, 413, 431, 501 or 505.
-* **Connections** are kept alive without keeping a worker: the thread of `serve()` waits for the listener and the idle
-  connections with `net.Poll` (`poll`, or `WSAPoll` on Windows), and gives a connection to a worker when a request
-  comes on it. A worker that answered keeps the connection for its next request when it comes within 2 ms and no
-  other connection waits, else gives it back. `tools/bench/web_bench.sd` measures it.
+  `idleTimeout` (milliseconds), `limits` (`headBytes`, `bodyBytes`), `reusePort` (other processes may listen at the
+  port too, Linux) and `maxConnections` (of each worker; 0 is what the open files of the process allow). Bodies can
+  be `Content-Length` or chunked. Bad requests get 400, 413, 431, 501 or 505.
+* **Workers are event loops.** Each worker is a thread with a `net.Poller` (epoll on Linux) of its own connections
+  and of the listener, on non-blocking sockets. It reads what has come, answers the requests that are whole in order
+  (also pipelined ones), and sends the response at once; what the client doesn't take is sent when it can take more,
+  and the connection's next requests wait until then. A request is answered by the thread that read it, so nothing
+  is handed between threads. A handler runs to its end on its worker, so one that waits long, e.g for another
+  server, holds up that worker's other connections: there are more workers than processors for that.
+* **Connections** cost no thread, and an idle one keeps no buffer: only a struct of about 100 bytes. The part of a
+  request that came, and the part of a response that the client didn't take, are kept until they are whole. The
+  server raises the open file limit of the process (`net.raiseOpenFileLimit()`), and a worker that has
+  `maxConnections` stops accepting until one closes. Timeouts close a connection whose request doesn't come whole
+  (`readTimeout`), whose response isn't taken (`writeTimeout`) and an idle one (`idleTimeout`).
+  `tools/bench/web_bench.sd` measures it. On one core of a 4-core machine, a handler that writes a short text
+  answers about 160,000 requests a second over 100 connections, and 88,000 over 5,000 (`wrk`).
 * **Memory:** the texts of a request are in an arena of the connection, freed when the handler returns. `copy()`
   what is kept for longer.
 * **Client:** `get`, `post` and `request`, a connection for each request, to `http://` and `https://` urls (TLS of

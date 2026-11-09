@@ -82,6 +82,22 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
 
 # Changelog
 
+## Update v0.19.0 - 9. Nov 2026
+
+* `net.http`: the server is event loops. Each worker is a thread with a `net.Poller` (epoll on Linux) of its own
+  connections, on non-blocking sockets, and answers the requests it reads itself, so nothing is handed between
+  threads. An idle connection costs no thread and keeps no buffer. On one core, a short response went from 82,000 to
+  163,000 requests a second over 100 connections, and from 45,000 to 88,000 over 5,000 (`wrk`), with 5 MB of memory
+  instead of 25 MB
+  * `server.reusePort`: more processes can listen at the same port (Linux). `server.maxConnections` of each worker
+  * The server raises the open file limit of the process, for many connections
+* `net.Poller`: waits for many non-blocking sockets at once, epoll on Linux and `WSAPoll` on Windows.
+  `listener.tryAccept()`, `conn.tryRead()`, `conn.tryWrite()`, `setNonBlocking()`, `setNoDelay()`,
+  `net.listen(address, reusePort: true)` and `net.raiseOpenFileLimit()`
+* `dbms.sqlite`: the SQLite driver. Parameters are `?` or `$1`, numbers and texts are bound by their type, and each SQL
+  is prepared once per connection and used again. See `docs/dbms.md`
+* `crypto`: SHA-256 and HMAC-SHA256. `jwt`: JSON Web Tokens signed with HS256, made and verified
+
 ## Update v0.18.0 - 8. Nov 2026
 
 * The package `errors` makes errors: `errors.make("no user %", id, kind: NotFound, cause: err)` has the message in a

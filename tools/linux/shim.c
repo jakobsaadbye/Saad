@@ -248,3 +248,26 @@ MS char   *ms_strerror(int code) { return strerror(code); }
 // ---- poll (std/net Poll) ----
 #include <poll.h>
 MS int ms_poll(struct pollfd *fds, uint64_t count, int milliseconds) { return poll(fds, (nfds_t)count, milliseconds); }
+
+// ---- epoll (std/net Poller). struct epoll_event is packed on x86-64, Saad's EpollEvent isn't: they are converted ----
+#include <sys/epoll.h>
+#include <sys/ioctl.h>
+#include <sys/resource.h>
+typedef struct { uint32_t events; uint32_t pad; uint64_t data; } SaadEpollEvent;
+MS int ms_epoll_create1(int flags) { return epoll_create1(flags); }
+MS int ms_epoll_ctl(int ep, int op, int fd, SaadEpollEvent *e) {
+    struct epoll_event k = {0};
+    if (e) { k.events = e->events; k.data.u64 = e->data; }
+    return epoll_ctl(ep, op, fd, &k);
+}
+MS int ms_epoll_wait(int ep, SaadEpollEvent *out, int count, int milliseconds) {
+    struct epoll_event k[512];
+    if (count > 512) count = 512;
+    int n = epoll_wait(ep, k, count, milliseconds);
+    for (int i = 0; i < n; i++) { out[i].events = k[i].events; out[i].pad = 0; out[i].data = k[i].data.u64; }
+    return n;
+}
+MS int ms_accept4(int s, struct sockaddr *address, uint32_t *length, int flags) { return accept4(s, address, (socklen_t *)length, flags); }
+MS int ms_ioctl(int fd, uint64_t request, int *argument) { return ioctl(fd, request, argument); }
+MS int ms_getrlimit(int resource, struct rlimit *limit) { return getrlimit(resource, limit); }
+MS int ms_setrlimit(int resource, const struct rlimit *limit) { return setrlimit(resource, limit); }

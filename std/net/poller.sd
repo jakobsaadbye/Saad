@@ -1,0 +1,197 @@
+namespace net;
+
+// Poller: waits for many sockets at once, e.g for a server with thousands of connections that are mostly idle. A
+// socket is added with a pointer of the program's own, which the events give back, e.g
+//
+//     p := net.newPoller();
+//     defer p.free();
+//     listener.setNonBlocking();
+//     p.add(listener.socket, listener);                 // Readable when a connection comes
+//     while true {
+//         for e in p.wait(1000) {                       // Milliseconds, -1 for ever
+//             if e.data == listener { ... accept ... }
+//             else if e.readable || e.closed { ... conn.tryRead(...) ... }
+//             else if e.writable { ... conn.tryWrite(...) ... }
+//         }
+//     }
+//
+// It is epoll on Linux, where a wait costs the same with 10 or 100,000 sockets, and WSAPoll on Windows. Use it with
+// non-blocking sockets (setNonBlocking, tryRead, tryWrite and tryAccept), and one Poller per thread
+
+import net.sys;
+import errors;
+import mem;
+
+// What happened to a socket of a Poller
+Event :: struct {
+    data:     *void;   // What it was added with
+    readable: bool;    // There is something to read, or a connection to accept
+    writable: bool;    // A write can take more bytes
+    closed:   bool;    // The other end closed it, or it failed. Reading gives the error
+}
+
+#if OS == .windows {
+    Poller :: struct {
+        fds:    [..]sys.PollFd;
+        datas:  [..]*void;
+        writes: [..]bool;
+        events: [..]Event;
+    }
+
+    // A new Poller, on the heap
+    newPoller :: () -> *Poller, error {
+        err := startup();
+        if err != null { return null, err; }
+        p := new(Poller, mem.heap());
+        p.fds.allocator    = mem.heap();
+        p.datas.allocator  = mem.heap();
+        p.writes.allocator = mem.heap();
+        p.events.allocator = mem.heap();
+        return p, null;
+    }
+
+    // Waits for the socket: for it to be readable, and writable too when write is true. exclusive is for Linux
+    add :: method (p: *Poller, socket: sys.Socket, data: *void, write := false, exclusive := false) -> error {
+        events: i16 = sys.PollIn;
+        if write { events |= sys.PollOut; }
+        p.fds.add(sys.PollFd{socket: socket, events: events});
+        p.datas.add(data);
+        p.writes.add(write);
+        return null;
+    }
+
+    // Changes what is waited for
+    modify :: method (p: *Poller, socket: sys.Socket, data: *void, write: bool) -> error {
+        for i in 0..p.fds.count {
+            if p.fds[i].socket == socket {
+                events: i16 = sys.PollIn;
+                if write { events |= sys.PollOut; }
+                p.fds[i].events = events;
+                p.datas[i] = data;
+                p.writes[i] = write;
+                return null;
+            }
+        }
+        return errors.make("The socket isn't in the poller", kind: NetError);
+    }
+
+    // Stops waiting for the socket. Do it before the socket is closed
+    remove :: method (p: *Poller, socket: sys.Socket) {
+        for i in 0..p.fds.count {
+            if p.fds[i].socket == socket {
+                last := p.fds.count - 1;
+                p.fds[i] = p.fds[last];
+                p.datas[i] = p.datas[last];
+                p.writes[i] = p.writes[last];
+                p.fds.count -= 1;
+                p.datas.count -= 1;
+                p.writes.count -= 1;
+                return;
+            }
+        }
+    }
+
+    // Waits until a socket is ready, or the time is up, and gives what happened. The events are kept until the next wait
+    wait :: method (p: *Poller, milliseconds: int) -> []Event, error {
+        p.events.clear();
+        if p.fds.count == 0 {
+            if milliseconds > 0 { thread.sleep(milliseconds); }
+            return p.events.elements(), null;
+        }
+        n := sys.WSAPoll(p.fds.data, p.fds.count as u32, milliseconds as i32) as int;
+        if n < 0 { return p.events.elements(), lastError("poll"); }
+        for i in 0..p.fds.count {
+            r := p.fds[i].revents;
+            if r == 0 { continue; }
+            e: Event;
+            e.data     = p.datas[i];
+            e.readable = (r & sys.PollIn) != 0;
+            e.writable = (r & sys.PollOut) != 0;
+            e.closed   = (r & (sys.PollErr | sys.PollHup | sys.PollNval)) != 0;
+            p.events.add(e);
+        }
+        return p.events.elements(), null;
+    }
+
+    free :: method (p: *Poller) {
+        p.fds.free();
+        p.datas.free();
+        p.writes.free();
+        p.events.free();
+        mem.delete(p, mem.heap());
+    }
+} else {
+    Poller :: struct {
+        epoll:  i32;
+        raw:    [512]sys.EpollEvent;
+        events: [..]Event;
+    }
+
+    // A new Poller, on the heap
+    newPoller :: () -> *Poller, error {
+        epoll := sys.epoll_create1(sys.EpollCloexec);
+        if epoll < 0 { return null, lastError("epoll_create1"); }
+        p := new(Poller, mem.heap());
+        p.epoll = epoll;
+        p.events.allocator = mem.heap();
+        return p, null;
+    }
+
+    // Waits for the socket: for it to be readable, and writable too when write is true. With exclusive, of many pollers
+    // that wait for the same socket, e.g a listener, only one is woken
+    add :: method (p: *Poller, socket: sys.Socket, data: *void, write := false, exclusive := false) -> error {
+        e := epollEvent(data, write);
+        if exclusive { e.events = sys.EpollIn | sys.EpollExclusive; }   // The kernel takes nothing else with it
+        if sys.epoll_ctl(p.epoll, sys.EpollCtlAdd, socket, &e) != 0 { return lastError("epoll_ctl"); }
+        return null;
+    }
+
+    // Changes what is waited for
+    modify :: method (p: *Poller, socket: sys.Socket, data: *void, write: bool) -> error {
+        e := epollEvent(data, write);
+        if sys.epoll_ctl(p.epoll, sys.EpollCtlMod, socket, &e) != 0 { return lastError("epoll_ctl"); }
+        return null;
+    }
+
+    // Stops waiting for the socket. Closing a socket stops it too
+    remove :: method (p: *Poller, socket: sys.Socket) {
+        sys.epoll_ctl(p.epoll, sys.EpollCtlDel, socket, null);
+    }
+
+    // Waits until a socket is ready, or the time is up, and gives what happened. The events are kept until the next wait
+    wait :: method (p: *Poller, milliseconds: int) -> []Event, error {
+        p.events.clear();
+        n := sys.epoll_wait(p.epoll, &p.raw[0], 512, milliseconds as i32) as int;
+        if n < 0 {
+            if *sys.__errno_location() == sys.Eintr { return p.events.elements(), null; }
+            return p.events.elements(), lastError("epoll_wait");
+        }
+        for i in 0..n {
+            raw := &p.raw[i];
+            e: Event;
+            e.data     = *((&raw.data) as **void);
+            e.readable = (raw.events & sys.EpollIn) != 0;
+            e.writable = (raw.events & sys.EpollOut) != 0;
+            e.closed   = (raw.events & (sys.EpollErr | sys.EpollHup | sys.EpollRdHup)) != 0;
+            p.events.add(e);
+        }
+        return p.events.elements(), null;
+    }
+
+    free :: method (p: *Poller) {
+        sys.close(p.epoll);
+        p.events.free();
+        mem.delete(p, mem.heap());
+    }
+
+    @private
+    epollEvent :: (data: *void, write: bool) -> sys.EpollEvent {
+        e: sys.EpollEvent;
+        e.events = sys.EpollIn | sys.EpollRdHup;
+        if write { e.events |= sys.EpollOut; }
+        *((&e.data) as **void) = data;
+        return e;
+    }
+}
+
+import thread;
