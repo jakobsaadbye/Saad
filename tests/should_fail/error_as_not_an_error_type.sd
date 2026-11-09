@@ -1,0 +1,10 @@
+// expect-error: An error is never a *Plain
+// expect-error: Plain isn't an error. An error type of its own embeds Error
+import errors;
+
+Plain :: struct { sql: string; }
+
+main :: () {
+    err := errors.make("nope");
+    p := err as *Plain;
+}

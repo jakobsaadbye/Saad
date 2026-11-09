@@ -3,6 +3,7 @@
 
 import thread;
 import fmt;
+import errors;
 
 @threadLocal mine := 0;      // Each thread counts its own
 @threadLocal label: string = "start";
@@ -20,7 +21,7 @@ Job :: struct {
 }
 
 failing :: (id: int, round: int) -> int, error {
-    if round % 2 == 0 { return 0, fmt.errorf("job % round %", id, round); }
+    if round % 2 == 0 { return 0, errors.make("job % round %", id, round); }
     return round, null;
 }
 

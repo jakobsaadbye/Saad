@@ -82,6 +82,25 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
 
 # Changelog
 
+## Update v0.18.0 - 8. Nov 2026
+
+* The package `errors` makes errors: `errors.make("no user %", id, kind: NotFound, cause: err)` has the message in a
+  format, like `fmt.sprint`, so `newError(fmt.sprint(...))` is one call. Without values the message is as written, so
+  a `%` in a text from elsewhere stays. `errors.wrap(err, "loading %", path)` says what was being done, with `err` as
+  the cause and of its kind. Changed: `fmt.errorf` is `errors.make`, and the standard library uses it
+* Error types of their own: a struct with `@embed base: Error;` and what a catch needs, e.g the SQL of a query.
+  `errors.typed(QueryError{sql: sql}, "the query failed: %", reason)` makes one, which is an `error` where one is
+  wanted and can be thrown. Functions still give and take `error`
+  * The type is the kind: `err.is(QueryError)`, also of the causes
+  * `q, ok := err as *QueryError` gives it back, like the cast of an interface, also from the causes, and
+    `q := err as *QueryError` throws a `Panic` when there is none
+  * `switch e in err { case *QueryError { ... } case *Timeout { ... } else { ... } }`: a case for each error type,
+    with `e` of that type, also for a cause. A null error, and the rest, go to the `else`
+  * A struct that doesn't embed `Error` gets a hint that says to
+* An error that nothing catches is reported with its causes, each after `caused by`
+* `docs/errors.md` has the rules: what is taken and what is thrown, that any function can throw, and when a function
+  should give an error and when it should throw
+
 ## Update v0.17.0 - 8. Nov 2026
 
 * `Allocator` is an interface with the methods `allocate`, `resize` and `deallocate`, which are told the size and the

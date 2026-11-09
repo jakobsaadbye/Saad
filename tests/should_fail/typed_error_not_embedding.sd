@@ -1,0 +1,8 @@
+// expect-error: Plain isn't an error. An error type of its own embeds Error: give it a member '@embed base: Error;'
+import errors;
+
+Plain :: struct { sql: string; }
+
+main :: () {
+    e := errors.typed(Plain{sql: "x"}, "nope");
+}

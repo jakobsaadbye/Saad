@@ -70,6 +70,9 @@ Type *check_optional_chain(Typer *typer, AstExpr *whole, AstMemberAccess *ma);
 bool  types_fit_either_way(Type *wanted, Type *given);
 int   embedded_offset(TypeStruct *outer, TypeStruct *inner, int depth);
 static void hint_optional_unwrap(Typer *typer, Type *wanted, Type *given);
+static void hint_error_embed(Typer *typer, Type *wanted, Type *given);
+static AstExpr *tree_string(Typer *typer, char *text, Ast *at);
+static Type *error_type(Typer *typer);
 static bool is_null_type(Type *type);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
@@ -161,6 +164,7 @@ static bool check_condition_type(Typer *typer, AstExpr *expr, Type *type);
 bool check_try(Typer *typer, AstTry *ast_try);
 bool check_throw(Typer *typer, AstThrow *ast_throw);
 bool is_error_type(Typer *typer, Type *type);
+bool is_embedding_error_type(Typer *typer, Type *type);
 bool is_c_string_type(Type *type);
 bool identifier_is_type(AstIdentifier *ident);
 Type *resolve_anonymous_type(Typer *typer, Type *type);
@@ -3156,6 +3160,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", ident->name, type_to_str(decl->type), type_to_str(value->type));
                 explain_interface_mismatch(typer, decl->type, value->type, value);
                 hint_optional_unwrap(typer, decl->type, value->type);
+                hint_error_embed(typer, decl->type, value->type);
                 return false;
             }
         }
@@ -3729,6 +3734,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Assignment type mismatch. Wanted type %s. Got type %s", type_to_str(lhs_type), type_to_str(expr_type));
         explain_interface_mismatch(typer, lhs_type, expr_type, assign->expr);
         hint_optional_unwrap(typer, lhs_type, expr_type);
+        hint_error_embed(typer, lhs_type, expr_type);
         return false;
     }
 
@@ -4791,6 +4797,119 @@ bool check_interface_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject,
     return true;
 }
 
+// The dotted name of a type in a case, e.g QueryError or dbms.QueryError, or NULL
+static char *case_type_name(AstExpr *named) {
+    if (named->head.kind == AST_LITERAL && ((AstLiteral *)named)->kind == LITERAL_IDENTIFIER) {
+        return ((AstLiteral *)named)->as.value.identifier.name;
+    }
+    if (named->head.kind == AST_MEMBER_ACCESS) {
+        AstMemberAccess *ma = (AstMemberAccess *)named;
+        char *left = case_type_name(ma->left);
+        char *right = case_type_name(ma->right);
+        if (!left || !right) return NULL;
+        size_t length = strlen(left) + strlen(right) + 2;
+        char *name = malloc(length);
+        snprintf(name, length, "%s.%s", left, right);
+        return name;
+    }
+    return NULL;
+}
+
+// The type of a case of a switch on an error, e.g the *QueryError of 'case *QueryError { ... }'
+static Type *case_error_type(Typer *typer, AstExpr *value) {
+    bool is_pointer = value->head.kind == AST_UNARY && ((AstUnary *)value)->operator == OP_POINTER_DEREFERENCE;
+    char *type_name = is_pointer ? case_type_name(((AstUnary *)value)->expr) : NULL;
+    if (!type_name) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "A case of a switch on an error is a pointer to an error type, e.g case *QueryError { ... }");
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "For a kind, e.g NotFound, ask in the else: if err.is(NotFound) { ... }");
+        return NULL;
+    }
+    Type *name = type_alloc(&typer->parser->type_table, sizeof(Type));
+    name->head  = value->head;
+    name->head.kind = AST_TYPE;
+    name->kind  = TYPE_NAME;
+    name->name  = type_name;
+    Type *pointer = (Type *) generate_pointer_to_type(typer->parser, name);
+    pointer->head = value->head;
+    pointer->head.kind = AST_TYPE;
+    Type *type = resolve_type(typer, pointer);
+    if (!type) return NULL;
+    if (!is_embedding_error_type(typer, type)) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "An error is never a %s", text_bold(type_to_str(type)));
+        hint_error_embed(typer, error_type(typer), type);
+        return NULL;
+    }
+    return type;
+}
+
+// An error as a type, e.g of a case 'case *QueryError': if it or a cause is one, or with 'test' false, that error
+static AstCast *make_error_cast(Typer *typer, AstIdentifier *subject, Type *type, bool test, Ast *at) {
+    AstCast *cast = make_interface_cast(typer, subject, type, test, at);
+    cast->is_error_cast = true;
+    return cast;
+}
+
+// switch e in err { case *QueryError { ... } else { ... } }: each case asks if the error, or one of its causes, is of
+// that type, like 'err as *QueryError', and declares e as a pointer of that type. The first case that is one is taken.
+// A null error, or one of no case, goes to the else. Any error can be of another type, so only an else handles all
+bool check_error_switch(Typer *typer, AstSwitch *sw, AstIdentifier *subject, AstBlock *lowered, AstBlock *scope_before) {
+    AstIf *first = NULL;
+    for (int i = 0; i < sw->cases.count; i++) {
+        AstCase *c = ((AstCase **)sw->cases.items)[i];
+        if (c->is_else) {
+            if (first) first->else_block = c->block;
+            else       da_append(&lowered->statements, c->block);
+            break;
+        }
+
+        AstExpr *condition = NULL;
+        Type    *only      = NULL;
+        for (int j = 0; j < c->values.count; j++) {
+            AstExpr *value = ((AstExpr **)c->values.items)[j];
+            Type *type = case_error_type(typer, value);
+            if (!type) { typer->current_scope = scope_before; return false; }
+            only = type;
+            AstExpr *test = (AstExpr *)make_error_cast(typer, subject, type, true, (Ast *)value);
+            condition = condition ? (AstExpr *)make_binary(typer, TOKEN_LOGICAL_OR, condition, test, (Ast *)value) : test;
+        }
+
+        if (sw->binding.type != TOKEN_NONE) {
+            // One type: a pointer of it. More: the error itself
+            AstExpr *value = c->values.count == 1 ? (AstExpr *)make_error_cast(typer, subject, only, false, (Ast *)c)
+                                                  : (AstExpr *)make_resolved_identifier_literal(typer, subject, (Ast *)c);
+            if (!declare_switch_binding(typer, sw, c, value)) { typer->current_scope = scope_before; return false; }
+        }
+
+        AstIf *ast_if      = ast_allocate(typer->parser, sizeof(AstIf));
+        ast_if->head.kind  = AST_IF;
+        ast_if->head.file  = c->head.file;
+        ast_if->head.start = c->head.start;
+        ast_if->head.end   = c->head.end;
+        ast_if->head.flags = AST_FLAG_COMPILER_GENERATED;
+        ast_if->condition  = condition;
+        ast_if->then_block = c->block;
+        ast_if->else_ifs   = da_init(1, sizeof(AstIf *));
+        if (first == NULL) {
+            first = ast_if;
+            da_append(&lowered->statements, first);
+        } else {
+            da_append(&first->else_ifs, ast_if);
+        }
+    }
+
+    bool ok = check_block(typer, lowered);
+    typer->current_scope = scope_before;
+    if (!ok) return false;
+
+    bool has_else = sw->cases.count > 0 && ((AstCase **)sw->cases.items)[sw->cases.count - 1]->is_else;
+    sw->is_exhaustive = has_else;
+    if (!has_else && sw->is_expression) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)sw->subject, "A switch expression on an error needs an else, as an error can be of any type, or null");
+        return false;
+    }
+    return true;
+}
+
 // choice := switch x { case 1 => "icecream"; else => "mango"; }. The switch gives the type that is wanted, or the type of its first case
 Type *check_switch_expression(Typer *typer, AstSwitch *sw, Type *ctx_type) {
     if (sw->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) return sw->result_type;
@@ -4918,9 +5037,12 @@ bool check_switch(Typer *typer, AstSwitch *sw) {
     if (subject && is_interface_type(subject->type)) {
         return check_interface_switch(typer, sw, subject, (TypeStruct *)subject->type, lowered, scope_before);
     }
+    if (subject && is_error_type(typer, subject->type)) {
+        return check_error_switch(typer, sw, subject, lowered, scope_before);
+    }
 
     if (sw->binding.type != TOKEN_NONE) {
-        report_error_token(parser, LABEL_ERROR, sw->binding, "Only a switch on a union or an interface can give its value a name");
+        report_error_token(parser, LABEL_ERROR, sw->binding, "Only a switch on a union, an interface or an error can give its value a name");
         report_error_ast(parser, LABEL_HINT, NULL, "e.g switch v in shape { case .circle { ... } }");
         return false;
     }
@@ -5150,6 +5272,75 @@ bool is_error_type(Typer *typer, Type *type) {
     return node && node->head.file == typer->parser->errors_file && node->identifier && strcmp(node->identifier->name, "Error") == 0;
 }
 
+// A pointer to a struct that embeds Error, e.g a *QueryError of 'QueryError :: struct { @embed base: Error; sql: string; }'.
+// It converts to an error
+// A *Plain where an error is wanted: an error type of its own embeds Error
+static bool is_error_kind_type(Typer *typer, Type *type);
+
+static void hint_error_embed(Typer *typer, Type *wanted, Type *given) {
+    if (is_error_kind_type(typer, wanted) && given && given->kind == TYPE_STRUCT) {
+        TypePointer pointer = {0};
+        pointer.head.kind  = TYPE_POINTER;
+        pointer.pointer_to = given;
+        if (is_embedding_error_type(typer, (Type *)&pointer)) {
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "%s is an error type, so an error of it is made with errors.typed(%s{...}, \"...\"), and then err.is(%s) tells", text_bold(type_to_str(given)), type_to_str(given), type_to_str(given));
+        }
+        return;
+    }
+    if (!is_error_type(typer, wanted) || given == NULL || given->kind != TYPE_POINTER) return;
+    Type *to = ((TypePointer *)given)->pointer_to;
+    if (to->kind != TYPE_STRUCT || is_error_type(typer, given)) return;
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "%s isn't an error. An error type of its own embeds Error: give it a member '@embed base: Error;'", text_bold(type_to_str(to)));
+}
+
+// The ErrorKind of the prelude, of err.is(kind)
+static bool is_error_kind_type(Typer *typer, Type *type) {
+    if (type == NULL || type->kind != TYPE_STRUCT) return false;
+    AstStruct *node = ((TypeStruct *)type)->node;
+    return node && node->head.file == typer->parser->errors_file && node->identifier && strcmp(node->identifier->name, "ErrorKind") == 0;
+}
+
+// The name of an error type of its own where an ErrorKind is wanted, e.g QueryError or dbms.QueryError of
+// err.is(QueryError), as ErrorKind{"QueryError"}: errors.typed gives an error the name of its type as its kind. Else NULL
+static AstExpr *error_kind_of_type_name(Typer *typer, AstExpr *expr, Type *wanted) {
+    if (!is_error_kind_type(typer, wanted) || expr->type == NULL || expr->type->kind != TYPE_STRUCT) return NULL;
+    AstExpr *name = expr->head.kind == AST_MEMBER_ACCESS ? ((AstMemberAccess *)expr)->right : expr;
+    if (!is_literal_identifier(name)) return NULL;
+    AstIdentifier *ident = ((AstLiteral *)name)->as.value.identifier.resolved_identifier;
+    if (ident == NULL) ident = lookup_from_scope(typer->parser, typer->current_scope, ((AstLiteral *)name)->as.value.identifier.name);
+    if (expr->head.kind == AST_LITERAL && (ident == NULL || !(ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT))) return NULL;
+    if (expr->head.kind == AST_MEMBER_ACCESS && ident != NULL && !(ident->flags & IDENTIFIER_IS_NAME_OF_STRUCT)) return NULL;
+
+    TypePointer pointer = {0};
+    pointer.head.kind = TYPE_POINTER;
+    pointer.pointer_to = expr->type;
+    if (!is_embedding_error_type(typer, (Type *)&pointer)) return NULL;
+
+    TypeStruct *type = (TypeStruct *)expr->type;
+    char *text = type->qualified_name ? type->qualified_name : type->head.name;
+    AstStructLiteral *literal = ast_allocate(typer->parser, sizeof(AstStructLiteral));
+    literal->head.head       = expr->head;
+    literal->head.head.kind  = AST_STRUCT_LITERAL;
+    literal->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    literal->explicit_type   = NULL;
+    literal->initializers    = da_init(1, sizeof(AstStructInitializer *));
+    AstStructInitializer *init = ast_allocate(typer->parser, sizeof(AstStructInitializer));
+    init->head      = expr->head;
+    init->head.kind = AST_STRUCT_INITIALIZER;
+    init->value     = tree_string(typer, text, (Ast *)expr);
+    da_append(&literal->initializers, init);
+    return (AstExpr *)literal;
+}
+
+bool is_embedding_error_type(Typer *typer, Type *type) {
+    Type *wanted = error_type(typer);
+    if (wanted == NULL || type == NULL || type->kind != TYPE_POINTER) return false;
+    Type *outer = ((TypePointer *)type)->pointer_to;
+    Type *inner = ((TypePointer *)wanted)->pointer_to;
+    if (outer->kind != TYPE_STRUCT || inner->kind != TYPE_STRUCT || outer == inner) return false;
+    return embedded_offset((TypeStruct *)outer, (TypeStruct *)inner, 0) >= 0;
+}
+
 bool check_try(Typer *typer, AstTry *ast_try) {
     if (!check_block(typer, ast_try->body)) return false;
     Type *type = error_type(typer);
@@ -5164,14 +5355,14 @@ bool check_try(Typer *typer, AstTry *ast_try) {
 }
 
 bool check_throw(Typer *typer, AstThrow *ast_throw) {
-    Type *type = check_expression(typer, ast_throw->value, error_type(typer));
+    Type *wanted = error_type(typer);
+    Type *type = check_expression(typer, ast_throw->value, wanted);
     if (!type) return false;
-    if (!is_error_type(typer, type)) {
-        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_throw->value, "throw takes an error, not %s", text_bold(type_to_str(type)));
-        report_error_ast(typer->parser, LABEL_HINT, NULL, "Make one with newError(\"what went wrong\"), or fmt.errorf(\"...\", values)");
-        return false;
-    }
-    return true;
+    ast_throw->error_type = wanted;
+    if (is_error_type(typer, type) || is_embedding_error_type(typer, type)) return true;
+    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ast_throw->value, "throw takes an error, not %s", text_bold(type_to_str(type)));
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "Make one with errors.make(\"what went wrong: %%\", value), or of a type of its own with errors.typed(MyError{...}, \"...\")");
+    return false;
 }
 
 bool check_defer(Typer *typer, AstDefer *defer) {
@@ -5840,6 +6031,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(wanted_type)), text_bold(type_to_str(given_type)));
                 explain_interface_mismatch(typer, wanted_type, given_type, arg->value);
                 hint_optional_unwrap(typer, wanted_type, given_type);
+                hint_error_embed(typer, wanted_type, given_type);
                 hint_c_string(typer, wanted_type, given_type);
                 if (given_type->kind == TYPE_VARIADIC && ((TypeVariadic *)given_type)->type->kind == wanted_type->kind) {
                     report_error_ast(typer->parser, LABEL_HINT, (Ast *)(arg), "Use ... to spread the variadic argument into the parameter");
@@ -5956,6 +6148,13 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
             Type *resolved = check_expression(typer, arg->value, param->type);
             if (!resolved) return NULL;
 
+            // An error type of its own is a kind, e.g err.is(QueryError) or errors.make("...", kind: QueryError)
+            AstExpr *kind = error_kind_of_type_name(typer, arg->value, param->type);
+            if (kind) {
+                arg->value = kind;
+                if (!check_expression(typer, arg->value, param->type)) return NULL;
+            }
+
             if (!types_are_equal(arg->value->type, param->type)) {
                 AstExpr *slice = collection_as_slice(typer, arg->value, param->type); // e.g passing a [..]int where a []int is wanted
                 if (slice) arg->value = slice;
@@ -5972,6 +6171,7 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(arg), "Type mismatch. Wanted type %s, got type %s", text_bold(type_to_str(param->type)), text_bold(type_to_str(arg->value->type)));
                 explain_interface_mismatch(typer, param->type, arg->value->type, arg->value);
                 hint_optional_unwrap(typer, param->type, arg->value->type);
+                hint_error_embed(typer, param->type, arg->value->type);
                 hint_c_string(typer, param->type, arg->value->type);
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(param->decl), "Here is the definition of '%s'", param->name);
                 return NULL;
@@ -9023,6 +9223,27 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
             return NULL;
         }
         cast->cast_to = wanted_type;
+        if (cast->with_ok) {
+            DynamicArray types = da_init(2, sizeof(Type *));
+            Type *bool_type = primitive_type(PRIMITIVE_BOOL);
+            da_append(&types, wanted_type);
+            da_append(&types, bool_type);
+            return (Type *) make_tuple_type_from_type_list(typer, types);
+        }
+        return wanted_type;
+    }
+    // An error as the error type of its own that it was made as, e.g err as *QueryError. It looks at the causes too, like
+    // err.is(QueryError). It throws a Panic when there is none, and with 'q, ok :=' it gives if there is one instead
+    if (is_error_type(typer, expr_type) && !cast->is_auto && wanted_type->kind == TYPE_POINTER && !is_error_type(typer, wanted_type) &&
+        ((TypePointer *)wanted_type)->pointer_to->kind == TYPE_STRUCT) {
+        if (!is_embedding_error_type(typer, wanted_type)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "An error is never a %s", text_bold(type_to_str(wanted_type)));
+            hint_error_embed(typer, expr_type, wanted_type);
+            return NULL;
+        }
+        cast->cast_to       = wanted_type;
+        cast->is_error_cast = true;
+        if (cast->is_type_test) return primitive_type(PRIMITIVE_BOOL);   // Made by check_error_switch
         if (cast->with_ok) {
             DynamicArray types = da_init(2, sizeof(Type *));
             Type *bool_type = primitive_type(PRIMITIVE_BOOL);

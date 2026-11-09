@@ -524,6 +524,7 @@ typedef struct AstTry {
 typedef struct AstThrow {
     Ast      head;
     AstExpr *value;
+    Type    *error_type;   // error: the value is converted to it, e.g a *QueryError that embeds Error
 } AstThrow;
 
 typedef struct AstReturn {
@@ -701,6 +702,7 @@ typedef struct AstCast {
     bool     is_as_cast;  // E.g `a := 5 as int`
     bool     with_ok;     // `c, ok := s as *Circle` of an interface: the pointer and if it is that type, instead of a Panic when it isn't
     bool     is_type_test; // If an interface is of the type, a bool. For the cases of a switch on an interface
+    bool     is_error_cast; // `q, ok := err as *QueryError` of an error: the error of that type, in it or in its causes
 } AstCast;
 
 typedef struct AstStructLiteral {

@@ -1,0 +1,63 @@
+namespace errors;
+
+// Making errors. The error type itself and err.is are in the prelude (std/prelude/errors.sd), as the compiler
+// throws and catches them; what makes an error with a message in a format is here, as it uses fmt.
+//
+//     return null, errors.make("no user with the id %", id);                    // an error with a message
+//     return null, errors.make("no user with the id %", id, kind: NotFound);    // of a kind, for err.is(NotFound)
+//     throw errors.make("loading % failed", path, cause: err);                  // because of another error
+//
+// An error type of its own carries more than a message. It is a struct that embeds Error:
+//
+//     QueryError :: struct {
+//         @embed base: Error;
+//         sql: string;
+//     }
+//
+//     return null, errors.typed(QueryError{sql: sql}, "the query failed: %", reason);
+//
+//     if err.is(QueryError) { ... }                 // the type is a kind
+//     q, ok := err as *QueryError;                  // the QueryError, also from the causes
+//     if ok { print(q.sql); }
+
+import fmt;
+
+// A new error with the message in the format, like fmt.sprint, e.g errors.make("no user %", id). Without values the
+// message is as it is written, so a text from elsewhere can be the message, e.g errors.make(strerror). The message is
+// on the heap, like the error, so it outlives the arena it was made in, e.g of a request
+make :: (format: string, args: ...any, kind := ErrorKind{}, cause: error = null) -> error {
+    return newError(message(format, ...args), kind, cause);
+}
+
+// A new error of a type of its own, a struct with '@embed base: Error;', e.g
+// errors.typed(QueryError{sql: sql}, "the query failed: %", reason). It is returned and thrown as an error. Its kind is
+// its type, so err.is(QueryError) tells, and 'err as *QueryError' gives it back
+typed :: <T> (value: T, format: string, args: ...any, cause: error = null) -> *T {
+    result := new(T, heapAllocator());
+    *result = value;
+    e: *Error = result;
+    none: *T = null;
+    pointer: any = none;
+    e.type  = (pointer.type as *TypePointer).pointerTo;
+    e.value = result;
+    e.message = message(format, ...args);
+    e.cause = cause;
+    e.trace.allocator = heapAllocator();
+    e.kind  = ErrorKind{e.type.name};
+    return result;
+}
+
+// A new error that says what was being done when the error happened, with the error as its cause, e.g
+// errors.wrap(err, "loading %", path). It is of the kind of the cause, so it is reported as one
+wrap :: (cause: error, format: string, args: ...any) -> error {
+    return newError(message(format, ...args), cause.kind, cause);
+}
+
+@private
+message :: (format: string, args: ...any) -> string {
+    sb: fmt.StringBuilder;
+    sb.allocator = heapAllocator();
+    if args.count == 0 { sb.addString(format); }
+    else               { sb.add(format, ...args); }
+    return sb.toString();
+}

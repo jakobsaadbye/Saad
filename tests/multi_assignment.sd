@@ -1,11 +1,12 @@
 // Several places are given values at once: the values of a call, or a list of values
 
 import fmt;
+import errors;
 
 pair :: () -> int, string { return 7, "seven"; }
 
 parse :: (text: string) -> int, error {
-    if text == "" { return 0, newError("empty"); }
+    if text == "" { return 0, errors.make("empty"); }
     return text.len, null;
 }
 

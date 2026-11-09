@@ -7,6 +7,7 @@ use c;
 import os.windows;
 import mem;
 import fmt;
+import errors;
 
 // Ends the program right away with the exit code
 exit :: (code: int) {
@@ -96,9 +97,9 @@ fileError :: (what: string, path: string) -> error {
     message.add("% %", what, path);
     if !fileExists(path) && what == "Can't read" {
         message.addString(": it isn't there");
-        return newError(message.toString(), NotFound);
+        return errors.make(message.toString(), kind: NotFound);
     }
-    return newError(message.toString(), IOError);
+    return errors.make(message.toString(), kind: IOError);
 }
 
 
@@ -160,7 +161,7 @@ isDirectory :: (path: string) -> bool {
 listDir :: (path: string) -> [..]string, error {
     names: [..]string;
     if !isDirectory(path) {
-        return names, newError(fmt.sprint("Can't list %: it isn't a folder", path), NotFound);
+        return names, errors.make("Can't list %: it isn't a folder", path, kind: NotFound);
     }
     pattern := fmt.sprint("%/*", path);
     cPattern := pattern.toCString();
@@ -189,7 +190,7 @@ fileExists :: (path: string) -> bool {
 
 // Removes the file. An error when it couldn't be, e.g os.NotFound
 removeFile :: (path: string) -> error {
-    if !fileExists(path) { return newError(fmt.sprint("Can't remove %: it isn't there", path), NotFound); }
+    if !fileExists(path) { return errors.make("Can't remove %: it isn't there", path, kind: NotFound); }
     cPath := path.toCString();
     result := remove(cPath);
     cPath.free();
@@ -199,7 +200,7 @@ removeFile :: (path: string) -> error {
 
 // Renames or moves the file. An error when it couldn't be, e.g os.NotFound
 renameFile :: (oldPath: string, newPath: string) -> error {
-    if !fileExists(oldPath) { return newError(fmt.sprint("Can't rename %: it isn't there", oldPath), NotFound); }
+    if !fileExists(oldPath) { return errors.make("Can't rename %: it isn't there", oldPath, kind: NotFound); }
     cOld := oldPath.toCString();
     cNew := newPath.toCString();
     result := rename(cOld, cNew);

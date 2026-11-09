@@ -11,9 +11,11 @@ std/
     expression_trees.sd  Expr<F> and ExprNode: a lambda as the tree of what it does (see docs/expression_trees.md)
     string.sd       The methods of string (slice, split, indexOf, free, ...) and of char (isDigit, isLetter, isSpace,
                     toUpper, toLower, digitValue, ...)
-    errors.sd       error, newError and panic, and the functions the compiler calls to throw, e.g for a null pointer
+    errors.sd       error, err.is, newError and panic, and the functions the compiler calls to throw, e.g for a
+                    null pointer
   allocators/   namespace allocators: Arena (arena.sd) and Pool (pool.sd) (see docs/allocators.md)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
+  errors/       namespace errors: errors.make, errors.typed and errors.wrap, which make errors (see docs/errors.md)
   dbms/         namespace dbms: run SQL and read rows into structs, dbms.Table<T> and dbms.KeyedTable<T, K> (see docs/dbms.md)
     postgres/       namespace dbms.postgres: the Postgres driver, through libpq.dll, and EntityGenerator, which writes the
                     tables of a schema as Saad files
@@ -106,6 +108,25 @@ fmt.print("%", "Ada");                          // Ada. A string on its own has 
 Strings in a struct, an array or a union get quotes, with `"`, `\` and newlines escaped, and a char gets single quotes
 (`'a'`). An enum value is `.open`,
 an anonymous struct `{w: 1.000000, h: 2.000000}`, and the variant without a value of a generic union `.none`.
+
+## errors
+
+```odin
+import errors;
+
+return null, errors.make("no user with the id %", id);                  // a message in a format, like fmt.sprint
+return null, errors.make("no user with the id %", id, kind: NotFound);  // of a kind, for err.is(NotFound)
+throw errors.make("loading % failed", path, cause: err);                // because of another error
+throw errors.wrap(err, "loading %", path);                              // the same, with the kind of err
+return null, errors.typed(QueryError{sql: sql}, "the query failed");    // of a type of its own, see docs/errors.md
+
+if err.is(QueryError) { ... }                                          // an error type is a kind
+q, ok := err as *QueryError;                                           // and 'as' gives it back
+switch e in err { case *QueryError { ... } else { ... } }              // a case for each error type
+```
+
+Without values, the message is as it is written, so `errors.make(text)` takes a text from elsewhere as it is, also with a
+`%` in it. See `docs/errors.md`.
 
 ## os
 

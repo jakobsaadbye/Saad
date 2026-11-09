@@ -38,6 +38,7 @@ import net.http;
 import json;
 import fmt;
 import mem;
+import errors;
 
 // The attribute of an endpoint: @web.endpoint for POST, @web.endpoint(.get) for GET
 @attribute
@@ -103,7 +104,7 @@ newApp :: <S>(prefix: string) -> *App, error {
             }
         }
         if !found {
-            return null, newError(fmt.sprint("The session % has no web.Session: give it a member '@embed base: web.Session;'", app.sessionType.head.name));
+            return null, errors.make("The session % has no web.Session: give it a member '@embed base: web.Session;'", app.sessionType.head.name);
         }
     }
 
@@ -113,28 +114,28 @@ newApp :: <S>(prefix: string) -> *App, error {
         function := &attributedFunctions()[i];
         first := f.parameters.count > 0 && f.parameters[0].type.kind == .pointer && (f.parameters[0].type as *TypePointer).pointerTo == boxed.type;
         if !first {
-            return null, newError(fmt.sprint("The endpoint % must take a *% as its first parameter", f.name, app.sessionType.head.name));
+            return null, errors.make("The endpoint % must take a *% as its first parameter", f.name, app.sessionType.head.name);
         }
         for i in 1..f.parameters.count {
             param := f.parameters[i];
             problem := jsonProblem(param.type, true, 0);
             if problem != "" {
-                return null, newError(fmt.sprint("The parameter % of the endpoint % can't come from JSON: %", param.name, f.name, problem));
+                return null, errors.make("The parameter % of the endpoint % can't come from JSON: %", param.name, f.name, problem);
             }
             if param.hasDefault && param.defaultValue == null {
-                return null, newError(fmt.sprint("The default of the parameter % of the endpoint % must be known when compiling, e.g a number, a string or a constant", param.name, f.name));
+                return null, errors.make("The default of the parameter % of the endpoint % must be known when compiling, e.g a number, a string or a constant", param.name, f.name);
             }
         }
         for result in f.results {
             if isErrorType(result.type) { continue; }
             problem := jsonProblem(result.type, false, 0);
             if problem != "" {
-                return null, newError(fmt.sprint("The result of the endpoint % can't be written as JSON: %", f.name, problem));
+                return null, errors.make("The result of the endpoint % can't be written as JSON: %", f.name, problem);
             }
         }
         for e in app.endpoints {
             if e.name == f.name {
-                return null, newError(fmt.sprint("Two endpoints are named %: the name of an endpoint is its url, so it must be unique", f.name));
+                return null, errors.make("Two endpoints are named %: the name of an endpoint is its url, so it must be unique", f.name);
             }
         }
         app.endpoints.add(Endpoint{f.name, marked.method, function});
@@ -368,8 +369,8 @@ readArguments :: (f: *AttributedFunction, r: *http.Request, arguments: *u8) -> e
         text := r.body;
         if text.len == 0 { text = "{}"; }
         parsed, err := json.parse(text);
-        if err != null { return newError(fmt.sprint("The body isn't JSON: %", err.message), BadRequest); }
-        if parsed.kind != .object { return newError("The body is a JSON object of the parameters, e.g {\"id\": 1}", BadRequest); }
+        if err != null { return errors.make("The body isn't JSON: %", err.message, kind: BadRequest); }
+        if parsed.kind != .object { return errors.make("The body is a JSON object of the parameters, e.g {\"id\": 1}", kind: BadRequest); }
         body = parsed;
     }
 
@@ -385,7 +386,7 @@ readArguments :: (f: *AttributedFunction, r: *http.Request, arguments: *u8) -> e
                 // Text is as it is, also for a ?string. Other types are JSON, e.g 2, true or [1, 2]
                 if isText(p.type) { text = json.encode(text); }
                 parsed, err := json.parse(text);
-                if err != null { return newError(fmt.sprint("%: '%' isn't a value of type %", p.name, text, p.type.name), BadRequest); }
+                if err != null { return errors.make("%: '%' isn't a value of type %", p.name, text, p.type.name, kind: BadRequest); }
                 value = parsed;
             }
         } else {
@@ -398,10 +399,10 @@ readArguments :: (f: *AttributedFunction, r: *http.Request, arguments: *u8) -> e
                 continue;
             }
             if p.type.flags.has(.isOptional) { continue; }
-            return newError(fmt.sprint("The parameter % is missing", p.name), BadRequest);
+            return errors.make("The parameter % is missing", p.name, kind: BadRequest);
         }
         err := json.assignAt(value, place, p.type, p.name);
-        if err != null { return newError(err.message, BadRequest); }
+        if err != null { return errors.make(err.message, kind: BadRequest); }
     }
     return null;
 }

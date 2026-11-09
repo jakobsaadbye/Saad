@@ -1,0 +1,11 @@
+// expect-error: A switch expression on an error needs an else
+import errors;
+
+Timeout :: struct { @embed base: Error; seconds: int; }
+
+main :: () {
+    err := errors.make("nope");
+    seconds := switch e in err {
+        case *Timeout => e.seconds;
+    };
+}

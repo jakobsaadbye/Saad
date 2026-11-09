@@ -23,6 +23,8 @@ Error :: struct {
     kind:    ErrorKind;
     cause:   error;            // The error this one was made because of, or null
     trace:   [..]TraceFrame;   // Where it was made or thrown, and each call it was thrown through after
+    type:    *Type;            // The error type of its own it was made as, e.g dbms.QueryError, or null (see errors.typed)
+    value:   *void;            // That error, which 'err as *QueryError' gives
 }
 
 // An error, or null for none
@@ -154,8 +156,37 @@ reportUncaught :: () {
     for frame in err.trace {
         printf("    at %s (%s:%lld)\n", frame.function.data, frame.file.data, frame.line);   // C varargs: the pointers
     }
+    cause := err.cause;
+    while cause != null {
+        kind = cause.kind.name;
+        if kind.len == 0 { kind = "error"; }
+        printf("caused by %.*s: %.*s\n", kind.len as i32, kind.data, cause.message.len as i32, cause.message.data);
+        for frame in cause.trace {
+            printf("    at %s (%s:%lld)\n", frame.function.data, frame.file.data, frame.line);
+        }
+        cause = cause.cause;
+    }
     fflush(null);
     exit(1);
+}
+
+// For 'err as *QueryError' when neither the error nor its causes are one
+panicErrorCast :: (err: *Error, wanted: *u8) {
+    buffer: [256]u8;
+    if err == null {
+        sprintf(buffer.data, "The error is null, not a %s", wanted);
+    } else if err.kind.name.len == 0 {
+        sprintf(buffer.data, "The error isn't a %s", wanted);
+    } else {
+        kind := err.kind.name;
+        sprintf(buffer.data, "The error is a %.*s, not a %s", kind.len as i32, kind.data, wanted);
+    }
+    copied := c.string{buffer.data}.toString();
+    message: string;
+    message.data = resizeMemory(heapAllocator(), null, 0, copied.len) as *u8;
+    message.len  = copied.len;
+    for i in 0..copied.len { message.data[i] = copied.data[i]; }
+    panic(message);
 }
 
 // For a pointer into memory that checkedFree freed, e.g of an arena that was cleared after a request

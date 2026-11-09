@@ -1978,6 +1978,51 @@ static int interface_as(Lowerer *L, AstExpr *expr, Type *to, int *is_type) {
     return value;
 }
 
+// The offset of a member of Error, e.g "cause"
+static int error_member_offset(TypeStruct *error, const char *name) {
+    DynamicArray members = error->node->members->identifiers;
+    for (int i = 0; i < members.count; i++) {
+        AstIdentifier *member = ((AstIdentifier **)members.items)[i];
+        if (strcmp(member->name, name) == 0) return member->member_offset;
+    }
+    assert(!"Compiler Error: a member of Error isn't there");
+    return 0;
+}
+
+// err as *QueryError: the error of the type 'to' points to, in the error or in its causes, or null, and if there is one.
+// errors.typed sets the type of an error to the descriptor of its type, and its value to the whole error
+static int error_as(Lowerer *L, AstExpr *expr, Type *to, int *found) {
+    TypeStruct *error = (TypeStruct *) ((TypePointer *) expr->type)->pointer_to;
+    int type_at = error_member_offset(error, "type"), value_at = error_member_offset(error, "value"), cause_at = error_member_offset(error, "cause");
+    int wanted = emit_global_addr(L, type_info_global(L, ((TypePointer *) to)->pointer_to));
+    int current = ir_new_slot(L->func, 8, 8, "error as");
+    int result  = ir_new_slot(L->func, 8, 8, "error as result");
+    emit_store(L, IR_PTR, addr_slot(current, 0), lower_scalar_as(L, expr, expr->type));
+    emit_store(L, IR_PTR, addr_slot(result, 0), emit_const(L, IR_PTR, 0));
+    IrBlock *loop = create_block(L, "error.as.loop");
+    IrBlock *body = create_block(L, "error.as.body");
+    IrBlock *hit  = create_block(L, "error.as.hit");
+    IrBlock *next = create_block(L, "error.as.cause");
+    IrBlock *done = create_block(L, "error.as.done");
+    terminate_jmp(L, loop);
+    set_block(L, loop);
+    int e = emit_load(L, IR_PTR, addr_slot(current, 0));
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_PTR, e, emit_const(L, IR_PTR, 0)), body, done);
+    set_block(L, body);
+    int type = emit_load(L, IR_PTR, addr_vreg(e, type_at));
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_EQ, IR_PTR, type, wanted), hit, next);
+    set_block(L, hit);
+    emit_store(L, IR_PTR, addr_slot(result, 0), emit_load(L, IR_PTR, addr_vreg(e, value_at)));
+    terminate_jmp(L, done);
+    set_block(L, next);
+    emit_store(L, IR_PTR, addr_slot(current, 0), emit_load(L, IR_PTR, addr_vreg(e, cause_at)));
+    terminate_jmp(L, loop);
+    set_block(L, done);
+    int value = emit_load(L, IR_PTR, addr_slot(result, 0));
+    *found = emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_PTR, value, emit_const(L, IR_PTR, 0));
+    return value;
+}
+
 static Value lower_cast(Lowerer *L, AstCast *cast) {
     Type *from = cast->expr->type;
     Type *to   = cast->cast_to;
@@ -1985,8 +2030,27 @@ static Value lower_cast(Lowerer *L, AstCast *cast) {
     // If an interface is of a type, for a case of a switch on it
     if (cast->is_type_test) {
         int is_type;
-        interface_as(L, cast->expr, to, &is_type);
+        if (cast->is_error_cast) error_as(L, cast->expr, to, &is_type);
+        else                     interface_as(L, cast->expr, to, &is_type);
         return value_scalar(is_type, cast->head.type);
+    }
+
+    // err as *QueryError: a Panic when neither the error nor its causes are one
+    if (cast->is_error_cast) {
+        int found;
+        int value = error_as(L, cast->expr, to, &found);
+        IrBlock *none = create_block(L, "error.as.none");
+        IrBlock *some = create_block(L, "error.as.some");
+        terminate_br(L, found, some, none);
+        set_block(L, none);
+        char wanted[200];
+        snprintf(wanted, sizeof(wanted), "%s", type_to_str(((TypePointer *) to)->pointer_to));
+        int args[2] = { lower_scalar_as(L, cast->expr, from), emit_c_text(L, wanted) };
+        emit_errors_call(L, "panicErrorCast", 2, args);
+        emit_trace_frame(L, cast->head.head.start.line);
+        emit_unwind(L);
+        set_block(L, some);
+        return value_scalar(value, to);
     }
 
     // s as *Circle of an interface: a Panic when its value is of another type
@@ -2762,7 +2826,7 @@ static void lower_declaration(Lowerer *L, AstDeclaration *decl) {
         ((AstCast *) da_get_deref(decl->values, 0))->with_ok) {
         AstCast *cast = da_get_deref(decl->values, 0);
         int is_type;
-        int value = interface_as(L, cast->expr, cast->cast_to, &is_type);
+        int value = cast->is_error_cast ? error_as(L, cast->expr, cast->cast_to, &is_type) : interface_as(L, cast->expr, cast->cast_to, &is_type);
         int pointer = ir_new_slot(L->func, 8, 8, "as");
         emit_store(L, IR_PTR, addr_slot(pointer, 0), emit_const(L, IR_PTR, 0));
         IrBlock *same = create_block(L, "as.same");
@@ -3430,7 +3494,8 @@ static void lower_statement(Lowerer *L, Ast *stmt) {
         return;
     }
     case AST_THROW: {
-        int err = lower_scalar_as(L, ((AstThrow *) stmt)->value, ((AstThrow *) stmt)->value->type);
+        AstThrow *ast_throw = (AstThrow *) stmt;
+        int err = lower_scalar_as(L, ast_throw->value, ast_throw->error_type ? ast_throw->error_type : ast_throw->value->type);
         emit_throw(L, err);
         return;
     }

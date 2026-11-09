@@ -3,12 +3,13 @@ namespace api;
 import web;
 import fmt;
 use entities;
+import errors;
 
 @web.endpoint
 addComment :: (session: *Session, slug: string, body: string) -> CommentView {
     reader := loggedIn(session);
     post := publishedPost(session, slug);
-    if body.len == 0 { throw newError("A comment has a body", web.BadRequest); }
+    if body.len == 0 { throw errors.make("A comment has a body", kind: web.BadRequest); }
     comment := session.db.comments.create();
     comment.postId     = post.id;
     comment.readerId   = reader.id;
@@ -22,7 +23,7 @@ addComment :: (session: *Session, slug: string, body: string) -> CommentView {
 @web.endpoint
 reportComment :: (session: *Session, commentId: i64, reason: string) -> i64 {
     reader := loggedIn(session);
-    if session.db.comments.get(commentId) == null { throw newError("No comment has that id", web.NotFound); }
+    if session.db.comments.get(commentId) == null { throw errors.make("No comment has that id", kind: web.NotFound); }
     report := session.db.reports.create();
     report.commentId = commentId;
     report.readerId  = reader.id;
@@ -47,7 +48,7 @@ openReports :: (session: *Session) -> [..]ReportView {
 resolveReport :: (session: *Session, reportId: i64, removeComment: bool) -> ReportView {
     loggedInAuthor(session);
     report := session.db.reports.get(reportId);
-    if report == null { throw newError(fmt.sprint("No report has the id %", reportId), web.NotFound); }
+    if report == null { throw errors.make("No report has the id %", reportId, kind: web.NotFound); }
     comment := report.comment();
     view := ReportView{id: report.id, reason: report.reason, comment: comment.body, reporter: report.reader().name};
     if removeComment {

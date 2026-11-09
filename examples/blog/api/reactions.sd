@@ -2,6 +2,7 @@ namespace api;
 
 import web;
 use entities;
+import errors;
 
 // Likes, bookmarks and follows of the reader who is logged in
 
@@ -36,7 +37,7 @@ unlikePost :: (session: *Session, slug: string) -> i64 {
 followAuthor :: (session: *Session, authorId: i64) -> i64 {
     reader := loggedIn(session);
     author := session.db.authors.get(authorId);
-    if author == null { throw newError("No author has that id", web.NotFound); }
+    if author == null { throw errors.make("No author has that id", kind: web.NotFound); }
     if !session.db.follows.where(f => f.readerId == reader.id && f.authorId == authorId).exists() {
         follow := session.db.follows.create();
         follow.readerId = reader.id;

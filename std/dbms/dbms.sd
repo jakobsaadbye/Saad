@@ -20,6 +20,7 @@ import time;
 use c;
 import mem;
 import allocators;
+import errors;
 
 // What a database implements. The handles are the driver's own, e.g a PGconn and a PGresult of libpq.
 // Values are text, as written by the database, and parameters are given as text too
@@ -79,7 +80,7 @@ NoLink        :: ErrorKind{"dbms.NoLink"};        // The relations of a row that
 // The error of the message, or null when it is empty. The functions of dbms give these, and keep the text of errors inside
 databaseError :: (message: string, kind := DatabaseError) -> error {
     if message == "" { return null; }
-    return newError(message, kind);
+    return errors.make(message, kind: kind);
 }
 
 // Runs a statement that returns no rows, e.g INSERT, UPDATE or DELETE. Gives the number of rows it changed.

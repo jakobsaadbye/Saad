@@ -1,11 +1,40 @@
 // Errors: a value when it is taken, thrown when it isn't, and caught with try and catch
 use fmt;
+import errors;
 
 NotFound :: ErrorKind{"NotFound"};
 
+// An error type of its own: a struct that embeds Error, with what a catch wants to know besides the message
+QueryError :: struct {
+    @embed base: Error;
+    sql:  string;
+    code: int;
+}
+
+Timeout :: struct {
+    @embed base: Error;
+    seconds: int;
+}
+
+// A switch on an error: a case for each error type, the first that it or a cause is, and else for the rest and null
+describe :: (err: error) -> string {
+    switch e in err {
+        case *QueryError { return sprint("query % (%)", e.sql, e.code); }   // e: *QueryError
+        case *Timeout    { return sprint("timeout after %", e.seconds); }   // e: *Timeout
+        else             { if err == null { return "none"; } return err.message; }
+    }
+    return "";
+}
+
+query :: (sql: string) -> (int, error) {
+    if sql == "" { return 0, errors.make("no sql"); }
+    if sql.startsWith("DROP") { return 0, errors.typed(QueryError{sql: sql, code: 42}, "% isn't allowed", sql); }
+    return 1, null;
+}
+
 find :: (name: string) -> (int, error) {
     if name == "ada" { return 36, null; }
-    return 0, newError(sprint("no one is called %", name), NotFound);
+    return 0, errors.make("no one is called %", name, kind: NotFound);
 }
 
 log: [..]string;
@@ -18,7 +47,7 @@ age :: (name: string) -> int {
 
 save :: (ok: bool) -> error {
     if ok { return null; }
-    return errorf("can't save %", 42);
+    return errors.make("can't save %", 42);
 }
 
 third :: (sl: []int) -> int { return sl[2]; }
@@ -39,7 +68,7 @@ load :: (name: string) -> int {
     try {
         return age(name);
     } catch (err) {
-        throw newError("loading failed", cause: err);
+        throw errors.make("loading failed", cause: err);
     }
     return 0;
 }
@@ -158,7 +187,7 @@ main :: () {
     count := 0;
     for i in 0..5 {
         try {
-            if i % 2 == 1 { throw newError("odd"); }
+            if i % 2 == 1 { throw errors.make("odd"); }
             count += 1;
         } catch (e) {
             count += 10;
@@ -166,6 +195,60 @@ main :: () {
     }
     assert(count == 23);
     assert(thrownError == null);
+
+    // An error type of its own: made with errors.typed, given as an error. The type is its kind, and 'as' gives it back,
+    // also from the causes
+    n, qerr := query("DROP users");
+    assert(n == 0 && qerr.message == "DROP users isn't allowed" && qerr.kind.name == "QueryError");
+    assert(qerr.is(QueryError) && !qerr.is(NotFound));
+    q, ok := qerr as *QueryError;
+    assert(ok && q.sql == "DROP users" && q.code == 42 && q.message == qerr.message);
+    _, plain := query("");
+    absent, found := plain as *QueryError;
+    assert(!found && absent == null && !plain.is(QueryError));
+    wrapped := errors.wrap(qerr, "loading %", "users");
+    assert(wrapped.message == "loading users" && wrapped.is(QueryError) && (wrapped as *QueryError).code == 42);
+    try {
+        throw errors.typed(QueryError{sql: "x"}, "thrown");    // A *QueryError is an error
+    } catch (e) {
+        assert(e.is(QueryError) && (e as *QueryError).sql == "x" && e.trace.count == 1);
+    }
+    try {
+        query("DROP posts");                                    // Not taken: thrown, and still a QueryError
+    } catch (e) {
+        assert((e as *QueryError).sql == "DROP posts");
+    }
+    try {
+        other := plain as *QueryError;                          // Not one: a Panic
+        assert(false);
+    } catch (e) {
+        assert(e.is(Panic) && e.message == "The error isn't a QueryError");
+    }
+    noError: error = null;
+    _, isOne := noError as *QueryError;
+    assert(!isOne);
+
+    // A switch on an error
+    assert(describe(qerr) == "query DROP users (42)");
+    assert(describe(errors.typed(Timeout{seconds: 3}, "slow")) == "timeout after 3");
+    assert(describe(errors.wrap(errors.typed(Timeout{seconds: 9}, "slow"), "loading")) == "timeout after 9");   // a cause
+    assert(describe(plain) == "no sql" && describe(null) == "none");
+    either := 0;
+    for e in [qerr, errors.typed(Timeout{seconds: 1}, "slow") as error, plain] {
+        switch x in e {
+            case *QueryError
+            case *Timeout { either += 1; assert(x.message.len > 0); }      // more types: x is the error
+        }
+    }
+    assert(either == 2);
+    seconds := switch t in errors.typed(Timeout{seconds: 5}, "slow") as error {
+        case *Timeout => t.seconds;
+        else => 0;
+    };
+    assert(seconds == 5);
+
+    // Without values, the message is as written, so a % stays a %
+    assert(errors.make("100% sure").message == "100% sure");
 
     print("errors ok");
 }

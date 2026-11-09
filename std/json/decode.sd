@@ -10,6 +10,7 @@ namespace json;
 import fmt;
 import time;
 import mem;
+import errors;
 
 // Reads the JSON into the value. err is empty when it worked, otherwise it tells what is wrong and where.
 //
@@ -40,7 +41,7 @@ decodeInto :: <T>(text: string, value: *T, options := Options{}) -> error {
 
     // The strings of the parsed values are used by the decoded value, so only the arrays and objects are freed
     root.free();
-    if failed != "" { return newError(failed, DecodeError); }
+    if failed != "" { return errors.make(failed, kind: DecodeError); }
     return null;
 }
 
@@ -51,7 +52,7 @@ DecodeError :: ErrorKind{"json.DecodeError"};
 // function of attributedFunctions(). 'path' names it in the error, e.g "authorId"
 assignAt :: (v: Value, data: *void, type: *Type, path := "", options := Options{}) -> error {
     failed := assign(v, data, type, path, &options);
-    if failed != "" { return newError(failed, DecodeError); }
+    if failed != "" { return errors.make(failed, kind: DecodeError); }
     return null;
 }
 
