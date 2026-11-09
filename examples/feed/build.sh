@@ -4,7 +4,7 @@
 # instead, e.g a checkout of your own
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SAAD_COMMIT="${SAAD_COMMIT:-main}"
+SAAD_COMMIT="${SAAD_COMMIT:-764e8b9e5dc5eb03afbfb23270f52bb90cc985a6}"
 SAAD="${SAAD_SOURCE:-$HERE/build/saad}"
 
 if [ -z "${SAAD_SOURCE:-}" ]; then
