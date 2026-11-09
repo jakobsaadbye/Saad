@@ -97,6 +97,11 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
 * `dbms.sqlite`: the SQLite driver. Parameters are `?` or `$1`, numbers and texts are bound by their type, and each SQL
   is prepared once per connection and used again. See `docs/dbms.md`
 * `crypto`: SHA-256 and HMAC-SHA256. `jwt`: JSON Web Tokens signed with HS256, made and verified
+* `examples/feed`: the API of the $12 server challenge (a feed of posts on SQLite), with `web`, `dbms.sqlite` and
+  `jwt`, and the scripts to submit it. About 21,500 requests a second of the challenge's mix on one core
+* Faster: `json` writes a struct from a plan worked out once per type, and strings in runs; `dbms` reads integers and
+  strings of a driver that gives them by type (`Driver.integer`, `Driver.text`) without texts to parse or count
+* Errors: when all results but the error are taken, the error is thrown, e.g `post, found := conn.queryOne<Post>(sql)`
 * `web`: endpoints at paths of their own, e.g `@web.endpoint(.get, path: "/posts/{id}")`, with parameters from the
   `{segments}`. `authorize: true` and `app.onAuthorize(hook)`, which runs before the parameters are read.
   `app.useJson(json.SnakeCase)` for the names of results and parameters. `app.errorKinds = false` for
