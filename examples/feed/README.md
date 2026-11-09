@@ -6,7 +6,7 @@ the endpoints, `dbms.sqlite` for the database, `jwt` for the tokens. No framewor
 | | |
 |---|---|
 | Language | Saad, built from source at a pinned commit by `build.sh` (its compiler is written in C) |
-| Compiler backend | LLVM 18 (Ubuntu 24.04's `llvm-18-dev`), `-O2` (`saad build --llvm`) |
+| Compiler backend | LLVM 18 (Ubuntu 24.04's `llvm-18-dev`), `-O3` (`saad build --llvm -O3`) |
 | Framework | Saad's standard library: `web` (endpoints), `net.http` (the server), `jwt`, `json` |
 | SQLite | Ubuntu 24.04's `libsqlite3` (3.45.1), through `dbms.sqlite` |
 | Nginx or direct | **Direct**: serves `HOST:PORT` itself (`0.0.0.0:80` on the benchmark box) |
