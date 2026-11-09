@@ -79,7 +79,11 @@ newline :: method (w: *Writer) {
 @private
 writeString :: method (w: *Writer, s: string) {
     w.sb.addChar('"');
-    for ch in s {
+    plain := 0;   // The start of the characters that are written as they are, which are added at once
+    for ch, i in s {
+        if ch >= ' ' && ch != '"' && ch != '\\' { continue; }
+        if i as int > plain { w.sb.addStringSlice(s, plain, i as int); }
+        plain = i as int + 1;
         switch ch {
             case '"'  { w.sb.addString("\\\""); }
             case '\\' { w.sb.addString("\\\\"); }
@@ -97,6 +101,7 @@ writeString :: method (w: *Writer, s: string) {
             else { w.sb.addChar(ch); }
         }
     }
+    if s.len > plain { w.sb.addStringSlice(s, plain, s.len as int); }
     w.sb.addChar('"');
 }
 
@@ -332,23 +337,72 @@ writeStruct :: method (w: *Writer, data: *void, type: *TypeStruct) {
         return;
     }
 
-    w.beginList('{', type.members.count);
+    // The members that are written, with their keys, worked out once for the type
+    plan := planOf(type, w.options.names);
+    w.beginList('{', plan.members.count);
     written := 0;
-    for i in 0..type.members.count {
-        member := &type.members[i];
-        field, named := fieldOf(member);
-        if field.skip { continue; }
-
-        value := member.valueIn(data);
-        if (field.omitEmpty || w.options.omitEmpty) && isEmpty(value, member.type) { continue; }
+    for i in 0..plan.members.count {
+        member := &plan.members[i];
+        value := (&((data as *u8)[member.offset])) as *void;
+        if (member.omitEmpty || w.options.omitEmpty) && isEmpty(value, member.type) { continue; }
 
         w.nextElement(written);
-        if named { w.writeKey(field.name); }
-        else     { w.writeMemberName(member.name); }
+        w.sb.addString(member.key);
+        if w.options.indent > 0 { w.sb.addChar(' '); }
         w.writeAny(value, member.type);
         written += 1;
     }
     w.endList('}', written);
+}
+
+// How the members of a struct are written: the ones that aren't skipped, with their keys in the style of the names,
+// e.g "created_at":. Each thread works it out once for each type and style, as reflection would cost the same for
+// every value
+@private
+Plan :: struct {
+    type:    *TypeStruct;
+    names:   NameStyle;
+    members: [..]PlanMember;
+}
+
+@private
+PlanMember :: struct {
+    offset:    i64;
+    type:      *Type;
+    key:       string;    // The quoted name and the colon
+    omitEmpty: bool;
+}
+
+@private
+@threadLocal plans: [..]*Plan;
+
+@private
+planOf :: (type: *TypeStruct, names: NameStyle) -> *Plan {
+    for p in plans {
+        if p.type == type && p.names == names { return p; }
+    }
+    plan := new(Plan, heapAllocator());
+    plan.type  = type;
+    plan.names = names;
+    plan.members.allocator = heapAllocator();
+    for i in 0..type.members.count {
+        member := &type.members[i];
+        field, named := fieldOf(member);
+        if field.skip { continue; }
+        key: Writer;
+        key.sb.allocator = heapAllocator();
+        if named { key.writeString(field.name); }
+        else {
+            key.sb.addChar('"');
+            addStyledName(&key.sb, member.name, names);
+            key.sb.addChar('"');
+        }
+        key.sb.addChar(':');
+        plan.members.add(PlanMember{offset: member.offset, type: member.type, key: key.sb.toString(), omitEmpty: field.omitEmpty});
+    }
+    plans.allocator = heapAllocator();
+    plans.add(plan);
+    return plan;
 }
 
 // A union is the name of its variant, e.g "empty", or an object with the name and the value, e.g {"circle": {"radius": 2}}.

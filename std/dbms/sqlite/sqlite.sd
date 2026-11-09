@@ -70,6 +70,8 @@ driver :: () -> *dbms.Driver {
         d.name        = "sqlite";
         d.execute     = execute;
         d.executeArgs = executeArgs;
+        d.integer     = integer;
+        d.text        = text;
         d.rowCount    = rowCount;
         d.columnCount = columnCount;
         d.columnName  = columnName;
@@ -110,6 +112,9 @@ Result :: struct {
     nameAt:  [..]int;
     text:    [..]u8;          // The values, each with a 0 after it
     offsets: [..]i64;
+    lengths: [..]i64;         // Of each value's text
+    numbers: [..]i64;         // The value of each integer
+    kinds:   [..]u8;          // SQLITE_INTEGER, SQLITE_TEXT, ... of each value
     values:  [..]c.string;    // Made from text and offsets when the rows are read
     changes: i64;
 }
@@ -148,6 +153,9 @@ executeArgs :: (conn: *void, sql: string, args: []any, err: *string) -> *void {
         result.nameAt.allocator  = heapAllocator();
         result.text.allocator    = heapAllocator();
         result.offsets.allocator = heapAllocator();
+        result.lengths.allocator = heapAllocator();
+        result.numbers.allocator = heapAllocator();
+        result.kinds.allocator   = heapAllocator();
         result.values.allocator  = heapAllocator();
     }
     result.rows = 0;
@@ -155,6 +163,9 @@ executeArgs :: (conn: *void, sql: string, args: []any, err: *string) -> *void {
     result.nameAt.clear();
     result.text.clear();
     result.offsets.clear();
+    result.lengths.clear();
+    result.numbers.clear();
+    result.kinds.clear();
     result.values.clear();
 
     ok := run(db, statement, args, result, err);
@@ -280,23 +291,49 @@ run :: (db: *Database, statement: *Statement, args: []any, result: *Result, err:
             }
             result.rows += 1;
             for column in 0..columns {
-                if sqlite3_column_type(handle, column as i32) == Null {
+                kind := sqlite3_column_type(handle, column as i32);
+                result.kinds.add(kind as u8);
+                if kind == Null {
                     result.offsets.add(-1);
+                    result.lengths.add(0);
+                    result.numbers.add(0);
                     continue;
                 }
+                if kind == Integer {
+                    // The number as it is, and its text written here, which is faster than SQLite's
+                    n := sqlite3_column_int64(handle, column as i32);
+                    result.numbers.add(n);
+                    digits: [24]u8;
+                    count := 0;
+                    negative := n < 0;
+                    v: u64 = n as u64;
+                    if negative { v = (-(n + 1)) as u64 + 1; }
+                    while true {
+                        digits[count] = (v % 10) as u8 + '0';
+                        count += 1;
+                        v = v / 10;
+                        if v == 0 { break; }
+                    }
+                    if negative { digits[count] = '-'; count += 1; }
+                    reserveText(result, count + 1);
+                    result.offsets.add(result.text.count as i64);
+                    result.lengths.add(count as i64);
+                    for k in 0..count { result.text.data[result.text.count + k] = digits[count - 1 - k]; }
+                    result.text.count += count;
+                    result.text.data[result.text.count] = 0;
+                    result.text.count += 1;
+                    continue;
+                }
+                result.numbers.add(0);
                 data := sqlite3_column_text(handle, column as i32);
                 length := sqlite3_column_bytes(handle, column as i32) as int;
+                reserveText(result, length + 1);
                 result.offsets.add(result.text.count as i64);
-                needed := result.text.count + length + 1;
-                if needed > result.text.capacity {
-                    capacity := result.text.capacity * 2;
-                    if capacity < 1024 { capacity = 1024; }
-                    if capacity < needed { capacity = needed; }
-                    result.text.reserve(capacity);
-                }
-                for k in 0..length { result.text.data[result.text.count + k] = data[k]; }
+                result.lengths.add(length as i64);
+                mem.copy(&result.text.data[result.text.count], data, length);
                 result.text.count += length;
-                result.text.add(0);
+                result.text.data[result.text.count] = 0;
+                result.text.count += 1;
             }
         }
         result.changes = sqlite3_changes64(db.handle);
@@ -376,6 +413,17 @@ bind :: (handle: *void, place: i32, arg: any, texts: *[..]c.string) -> bool {
     return sqlite3_bind_text(handle, place, text.data, -1, null) == Ok;
 }
 
+// Makes room for more bytes of text, doubling the buffer
+@private
+reserveText :: (result: *Result, more: int) {
+    needed := result.text.count + more;
+    if needed <= result.text.capacity { return; }
+    capacity := result.text.capacity * 2;
+    if capacity < 1024 { capacity = 1024; }
+    if capacity < needed { capacity = needed; }
+    result.text.reserve(capacity);
+}
+
 @private
 paramError :: (index: int, arg: any) -> string {
     sb: fmt.StringBuilder;
@@ -400,6 +448,26 @@ value :: (result: *void, row: i64, column: i64) -> c.string {
     return r.values[(row * (r.columns as i64) + column) as int];
 }
 
+@private
+integer :: (result: *void, row: i64, column: i64, value: *i64) -> bool {
+    r := result as *Result;
+    at := (row * (r.columns as i64) + column) as int;
+    if r.kinds[at] != Integer { return false; }
+    *value = r.numbers[at];
+    return true;
+}
+
+@private
+text :: (result: *void, row: i64, column: i64) -> string {
+    r := result as *Result;
+    at := (row * (r.columns as i64) + column) as int;
+    t: string;
+    if r.offsets[at] < 0 { return t; }
+    t.data = &r.text.data[r.offsets[at]];
+    t.len  = r.lengths[at];
+    return t;
+}
+
 // The result is kept for the next query of its connection, unless one is kept already
 @private
 freeResult :: (result: *void) {
@@ -412,6 +480,9 @@ freeResult :: (result: *void) {
     r.nameAt.free();
     r.text.free();
     r.offsets.free();
+    r.lengths.free();
+    r.numbers.free();
+    r.kinds.free();
     r.values.free();
     mem.delete(r, heapAllocator());
 }
@@ -444,7 +515,8 @@ copyMessage :: (text: c.string) -> string {
 @private Ok   :: 0;
 @private Row  :: 100;
 @private Done :: 101;
-@private Null :: 5;    // SQLITE_NULL, the type of a NULL column
+@private Integer :: 1;   // SQLITE_INTEGER
+@private Null    :: 5;   // SQLITE_NULL, the type of a NULL column
 
 @private OpenReadOnly  :: 0x00000001;
 @private OpenReadWrite :: 0x00000002;

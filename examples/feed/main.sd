@@ -70,7 +70,6 @@ db :: () -> *dbms.Connection {
     if connection.handle == null {
         conn, err := sqlite.open(dbPath, sqlite.Options{create: false});
         if err != null { throw err; }
-        conn.allocator = mem.heap();
         connection = conn;
         configure(&connection);
     }
