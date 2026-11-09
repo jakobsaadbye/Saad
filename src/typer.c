@@ -7501,6 +7501,7 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
 
     TypeArray *array = (TypeArray *) ctx_type;
     bool infer_type_from_first_element = ctx_type == NULL;
+    int checked_without_type = 0;   // The elements that were checked to find the type of the elements
 
     if (infer_type_from_first_element) {
 
@@ -7509,12 +7510,24 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
             return NULL;
         }
         
-        Type *first_element_type = check_expression(typer, ((AstExpr **)(array_lit->expressions.items))[0], NULL);
-        if (!first_element_type) return NULL;
-
-        if (is_untyped_type(first_element_type)) {
+        // The type of the elements is the type of the first one that has a type, e.g u32 of
+        // [0xdeadbeef as u32, 0xfefefe, 0xcecece]. The untyped numbers around it get that type. When none has one,
+        // it is the type of the untyped numbers, a float when one of them is
+        Type *first_element_type = NULL;
+        Type *untyped = NULL;
+        for (int i = 0; i < array_lit->expressions.count; i++) {
+            Type *type = check_expression(typer, ((AstExpr **)(array_lit->expressions.items))[i], NULL);
+            if (!type) return NULL;
+            checked_without_type = i + 1;
+            if (!is_untyped_type(type)) {
+                first_element_type = type;
+                break;
+            }
+            if (untyped == NULL || type->kind == TYPE_FLOAT) untyped = type;
+        }
+        if (first_element_type == NULL) {
             // Solidify the type so we don't get arrays of untyped integers for example
-            first_element_type = solidify_untyped_type(first_element_type);
+            first_element_type = solidify_untyped_type(untyped);
         }
 
         TypeStruct *struct_defn = generate_struct_type_with_data_and_count(typer->parser, first_element_type, "Array");
@@ -7551,10 +7564,23 @@ Type *check_array_literal(Typer *typer, AstArrayLiteral *array_lit, Type *ctx_ty
         bool ok = leads_to_integer_overflow(typer, array->elem_type, expr);
         if (!ok) return NULL;
 
-        if (infer_type_from_first_element && i == 0) continue;  // We already type checked this expression
+        // The element that gave the type was checked already. The untyped ones before it get the type now
+        bool gave_type = infer_type_from_first_element && i == checked_without_type - 1 && !is_untyped_type(expr->type);
+        if (gave_type) continue;
+        if (infer_type_from_first_element && i < checked_without_type && is_untyped_type(expr->type)) {
+            expr->head.flags &= ~AST_FLAG_IS_TYPE_CHECKED;
+        }
 
         Type *resolved = check_expression(typer, expr, array->elem_type);
         if (!resolved) return NULL;
+        if (is_untyped_type(resolved) && (resolved->kind == TYPE_INTEGER || resolved->kind == TYPE_FLOAT) &&
+            (array->elem_type->kind == TYPE_INTEGER || array->elem_type->kind == TYPE_FLOAT)) {
+            if (resolved->kind == TYPE_FLOAT && array->elem_type->kind == TYPE_INTEGER) {
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(expr), "Expected element to have type %s, but element is a float", type_to_str(array->elem_type));
+                return NULL;
+            }
+            expr->type = array->elem_type;   // An untyped number, e.g a constant, becomes the type of the elements
+        }
 
         if (array->elem_type->kind == TYPE_ANY && expr->type->kind != TYPE_ANY) {
             // Insert an any cast

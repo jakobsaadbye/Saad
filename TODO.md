@@ -43,11 +43,6 @@ c := a + b;
 
 
 
-[]: A typed array of literals, e.g 'K: [64]u32 = [0x428a2f98, ...]' at the top of a file, is "not known when compiling",
-    and 'K :: [0x428a2f98, ...]' overflows int, so std/crypto/sha256.sd casts each element. Give array literals the
-    type of their elements from the declaration
-
-
 Functions as values:
 
 []: Figure out what the hell to do with annonymous methods? Maybe just don't allow them

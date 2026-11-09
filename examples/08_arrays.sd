@@ -22,6 +22,8 @@ main :: () {
 
     // A literal: the type comes from the values
     primes := [2, 3, 5, 7];
+    masks := [0xff as u8, 0x0f, 0xf0];       // The first value with a type gives it to all: [3]u8
+    assert(typeof(masks) == "[3]u8");
 
     // A list
     scores: [..]int;
