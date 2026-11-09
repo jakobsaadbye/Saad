@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs every test on Linux: tests/*.sd must compile and run with exit code 0, tests/check_memory/*.sd too when they are
-# built with --check-memory, and tests/should_fail/*.sd must be rejected by the compiler.
+# Runs every test on Linux: tests/*.sd and the lessons examples/[0-9]*.sd must compile and run with exit code 0,
+# tests/check_memory/*.sd too when they are built with --check-memory, and tests/should_fail/*.sd must be rejected by
+# the compiler.
 #
 #   tools/linux/runtests.sh            with the x64 backend
 #   tools/linux/runtests.sh --llvm     with the LLVM backend, also for the language server
@@ -21,7 +22,7 @@ bash ./build.sh > /dev/null || exit 1
 RED=$'\e[31m'; GREEN=$'\e[32m'; RESET=$'\e[0m'
 passed=0; failed=0
 
-for f in tests/*.sd tests/std/*.sd tests/backend/*.sd; do
+for f in tests/*.sd tests/std/*.sd tests/backend/*.sd examples/[0-9]*.sd; do
     printf "%-56s " "$f"
     if ! output=$(./bin/saad build "$f" --elf $SAAD_BUILD_FLAGS 2>&1); then
         echo "${RED}COMPILE ERROR${RESET}"

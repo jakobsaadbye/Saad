@@ -1,0 +1,21 @@
+// Lesson 23: Namespaces
+//
+// Bigger programs are split into namespaces. A file starts with 'namespace name;' (see geometry/geometry.sd).
+//
+//     import geometry;          use it as geometry.area(...)
+//     import geometry as g;     use it as g.area(...)
+//     use geometry;             use its names without the prefix: area(...)
+//
+// The standard library is namespaces too: fmt, os, json, time, net.http, ...
+
+import geometry;
+import geometry as g;
+import fmt;
+
+main :: () {
+    c := geometry.Circle{radius: 2.0};
+    fmt.print("The area is %", geometry.area(c));
+    fmt.print("Pi is %", g.Pi);
+
+    // geometry.square(2.0);    // An error: square is @private to geometry
+}

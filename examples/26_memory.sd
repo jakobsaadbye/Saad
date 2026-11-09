@@ -1,0 +1,39 @@
+// Lesson 26: Memory
+//
+// new(T) makes a value on the heap, and mem.delete frees it. Lists, strings and maps take their memory the same
+// way. An arena is faster when many values die together: everything in it is freed at once.
+
+import mem;
+import allocators;
+use fmt;
+
+Particle :: struct {
+    x, y:   f64;
+    energy: int = 100;
+}
+
+main :: () {
+    // One value: made, used, freed
+    p := new(Particle);
+    p.x = 1.5;
+    mem.delete(p);
+
+    // Many values in an arena, freed together
+    arena: allocators.Arena;
+    defer arena.free();
+    for frame in 0..3 {
+        particles: [..]*Particle;
+        particles.allocator = &arena;               // The list grows in the arena too
+        for i in 0..1000 {
+            particles.add(new(Particle, &arena));
+        }
+        print("frame %: % particles", frame, particles.count);
+        arena.clear();                              // All of them are gone. The memory is used again
+    }
+
+    // While a function runs, what it allocates can come from an arena: set it as the allocator of the thread
+    previous := mem.setAllocator(&arena);
+    text := sprint("made in the arena: %", 42);    // sprint allocates with the allocator of the thread
+    print("%", text);
+    mem.setAllocator(previous);
+}

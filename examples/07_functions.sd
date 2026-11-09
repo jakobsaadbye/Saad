@@ -1,0 +1,56 @@
+// Lesson 7: Functions
+//
+//     name :: (parameter: Type, ...) -> ResultType { ... }
+//
+// A function can give back more than one value, and a parameter can have a default.
+
+use fmt;
+
+// Takes two ints and gives back an int
+add :: (a: int, b: int) -> int {
+    return a + b;
+}
+
+// Gives back nothing
+greet :: (name: string) {
+    print("Hi %!", name);
+}
+
+// Two results
+divide :: (a: int, b: int) -> int, int {
+    return a / b, a % b;
+}
+
+// A default: 'times' is 1 when it isn't given
+repeat :: (text: string, times := 1) -> string {
+    result := "";
+    for i in 0..times { result = sprint("%%", result, text); }
+    return result;
+}
+
+// Any number of values: they arrive as a list
+sum :: (numbers: ...int) -> int {
+    total := 0;
+    for n in numbers { total += n; }
+    return total;
+}
+
+main :: () {
+    assert(add(2, 3) == 5);
+    greet("Ada");
+
+    quotient, remainder := divide(17, 5);
+    assert(quotient == 3 && remainder == 2);
+
+    assert(repeat("ha") == "ha");
+    assert(repeat("ha", 3) == "hahaha");
+    assert(repeat("ho", times: 2) == "hoho");   // An argument can be given by its name
+
+    assert(sum(1, 2, 3, 4) == 10);
+    assert(sum() == 0);
+
+    // Functions can be declared after they are used, in any order
+    assert(square(4) == 16);
+}
+
+square :: (x: int) -> int { return x * x; }

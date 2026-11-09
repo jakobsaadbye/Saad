@@ -1,0 +1,45 @@
+// Lesson 24: Attributes
+//
+// An attribute is a note on a declaration, written with @. Some are built in, e.g @private, @deprecated and
+// @embed. You can make your own: a struct marked @attribute. Code reads them with attributeOf (lesson 25 shows
+// more of reflection).
+
+use fmt;
+
+// An attribute of our own, with a default
+@attribute
+Label :: struct {
+    text:  string;
+    width: int = 10;
+}
+
+Product :: struct {
+    @Label(text: "Name", width: 12)
+    name: string;
+
+    @Label(text: "Price")
+    price: f64;
+
+    secret: string;          // No label: not shown
+}
+
+// The struct's members with a Label, as a table
+printTable :: (rows: []Product) {
+    probe: Product;
+    boxed: any = probe;
+    type := boxed.type as *TypeStruct;
+    header := "";
+    for member in type.members {
+        label: Label;
+        if attributeOf(&member, &label) { header = sprint("%% (%) ", header, label.text, label.width); }
+    }
+    print("%", header);
+    for row in rows { print("%  %", row.name, row.price); }
+}
+
+@deprecated("use newTotal")      // A warning where it is used
+oldTotal :: () -> int { return 0; }
+
+main :: () {
+    printTable([Product{"Lamp", 19.5, "x"}, Product{"Desk", 120.0, "y"}]);
+}

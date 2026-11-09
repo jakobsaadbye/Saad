@@ -1,0 +1,27 @@
+// Lesson 5: Making choices with if
+//
+//     ==  !=  <  <=  >  >=      compare two values
+//     &&  ||  !                 and, or, not
+//
+// A condition must be a bool: write 'if count > 0', not 'if count'.
+
+use fmt;
+
+main :: () {
+    temperature := 23;
+
+    if temperature > 30 {
+        print("Hot");
+    } else if temperature > 15 {
+        print("Nice");                 // This one
+    } else {
+        print("Cold");
+    }
+
+    raining := false;
+    if temperature > 15 && !raining {
+        print("Go for a walk");
+    }
+
+    // A pointer is compared with null, e.g if player != null { ... }
+}

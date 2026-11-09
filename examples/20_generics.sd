@@ -1,0 +1,53 @@
+// Lesson 20: Generics
+//
+// <T> makes a function or a struct work for any type. T is worked out from the arguments, or written out,
+// e.g largest<f64>(...).
+
+use fmt;
+
+// The largest of the values, for any type that can be compared with >
+largest :: <T>(values: ...T) -> T {
+    best := values[0];
+    for v in values {
+        if v > best { best = v; }
+    }
+    return best;
+}
+
+// A struct with a type parameter
+Pair :: struct <A, B> {
+    first:  A;
+    second: B;
+}
+
+swap :: <A, B>(p: Pair<A, B>) -> Pair<B, A> {
+    return Pair<B, A>{p.second, p.first};
+}
+
+// A stack of anything
+Stack :: struct <T> {
+    items: [..]T;
+
+    push :: method * (item: T) { self.items.add(item); }
+
+    pop :: method * () -> T {
+        last := self.items[self.items.count - 1];
+        self.items.count -= 1;
+        return last;
+    }
+}
+
+main :: () {
+    assert(largest(3, 9, 4) == 9);
+    assert(largest(1.5, 0.5) == 1.5);
+    assert(largest("pear", "apple") == "pear");
+
+    p := Pair<string, int>{"ada", 36};
+    q := swap(p);
+    print("% %", q.first, q.second);       // 36 ada
+
+    s: Stack<string>;
+    s.push("a");
+    s.push("b");
+    assert(s.pop() == "b" && s.items.count == 1);
+}

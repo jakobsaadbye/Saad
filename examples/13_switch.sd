@@ -1,0 +1,39 @@
+// Lesson 13: switch
+//
+// switch picks the case that matches a value. A switch on an enum must handle every value, or have an else.
+// Cases on the lines right after each other share a block.
+
+use fmt;
+
+Weather :: enum { sunny, cloudy, rainy, snowy }
+
+advice :: (w: Weather) -> string {
+    switch w {
+        case .sunny  { return "Sunglasses"; }
+        case .cloudy { return "A jacket"; }
+        case .rainy
+        case .snowy  { return "Stay inside"; }   // Both rainy and snowy
+    }
+}
+
+grade :: (score: int) -> string {
+    switch score {
+        case 90...100 { return "A"; }            // A range
+        case 75..90   { return "B"; }
+        else          { return "C"; }
+    }
+}
+
+main :: () {
+    assert(advice(.rainy) == "Stay inside");
+    assert(grade(95) == "A" && grade(80) == "B" && grade(10) == "C");
+
+    // A switch can give a value, with =>
+    name := "kiwi";
+    color := switch name {
+        case "banana" => "yellow";
+        case "kiwi"   => "green";
+        else          => "unknown";
+    };
+    print("A % is %", name, color);
+}

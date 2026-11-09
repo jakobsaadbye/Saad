@@ -1,0 +1,42 @@
+// Lesson 9: Structs
+//
+// A struct puts values together under one name. Its members can have defaults.
+
+use fmt;
+
+Point :: struct {
+    x: int;
+    y: int;
+}
+
+Player :: struct {
+    name:   string;
+    health: int = 100;     // A default
+    pos:    Point;         // A struct inside a struct
+}
+
+main :: () {
+    // A struct literal, by the order of the members, or by their names
+    a := Point{1, 2};
+    b := Point{x: 10, y: 20};
+    print("a is (%, %)", a.x, a.y);
+
+    // Without a value, every member is its default
+    p: Player;
+    assert(p.health == 100 && p.name == "");
+    p.name = "Ada";
+    p.pos.x = 5;
+
+    // Members that a literal leaves out get their defaults
+    q := Player{name: "Bo", pos: {3, 4}};
+    assert(q.health == 100 && q.pos.y == 4);
+
+    // A struct is a value: assigning it makes a copy
+    c := a;
+    c.x = 99;
+    assert(a.x == 1);
+
+    // print shows the whole struct
+    print("%", q);
+    assert(a == Point{1, 2} && a != b);   // Structs can be compared
+}

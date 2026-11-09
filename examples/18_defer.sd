@@ -1,0 +1,24 @@
+// Lesson 18: defer
+//
+// 'defer statement;' runs the statement when the block is left: at its end, at a return, a break, or when an
+// error is thrown. It keeps the cleanup next to what it cleans up, e.g closing a file right after opening it.
+
+use fmt;
+
+work :: () {
+    print("open the file");
+    defer print("close the file");     // Runs last, however work ends
+
+    print("read the file");
+    if true { return; }
+    print("never printed");
+}
+
+main :: () {
+    work();
+
+    // Several defers run in the opposite order
+    defer print("third");
+    defer print("second");
+    print("first");
+}

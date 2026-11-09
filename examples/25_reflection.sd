@@ -1,0 +1,37 @@
+// Lesson 25: Reflection
+//
+// A program can look at types while it runs. A value of type 'any' carries the value and its type. typeof(x)
+// gives the name of the type of x. print uses the same to show any value.
+
+use fmt;
+
+Pet :: struct {
+    name: string;
+    age:  int;
+}
+
+describe :: (value: any) {
+    switch value.type.kind {
+        case .int    { print("an int: %", value); }
+        case .string { print("a string: %", value); }
+        case .struct {
+            type := value.type as *TypeStruct;
+            print("a struct % with % members:", type.head.name, type.members.count);
+            for member in type.members {
+                print("    %: %", member.name, member.type.name);
+            }
+        }
+        else { print("something else: %", value); }
+    }
+}
+
+main :: () {
+    describe(42);
+    describe("hello");
+    describe(Pet{"Rex", 3});
+    describe(true);
+
+    x := 3.5;
+    print("x is a %", typeof(x));          // float
+    assert(typeof(Pet) == "Pet");
+}

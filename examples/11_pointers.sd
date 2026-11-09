@@ -1,0 +1,42 @@
+// Lesson 11: Pointers
+//
+// A pointer is the address of a value.
+//     &value       the address of value
+//     *Type        the type of a pointer, e.g *int
+//     *pointer     the value it points to
+//     null         a pointer to nothing
+
+use fmt;
+
+Player :: struct {
+    name:   string;
+    health: int;
+}
+
+// Takes a pointer, so it changes the player of the caller, not a copy
+heal :: (p: *Player, amount: int) {
+    p.health += amount;         // A member of a pointer is reached with . too
+}
+
+main :: () {
+    count := 1;
+    pointer := &count;
+    *pointer = 5;               // Changes count through the pointer
+    assert(count == 5);
+
+    hero := Player{"Ada", 50};
+    heal(&hero, 25);
+    assert(hero.health == 75);
+
+    // new makes a value that lives on after the function, and gives its pointer
+    boss := new(Player);
+    boss.name = "Dragon";
+    boss.health = 500;
+    print("% has % health", boss.name, boss.health);
+
+    // A pointer can be null. Check before you use it
+    nobody: *Player = null;
+    if nobody == null { print("No player there"); }
+
+    // Using a null pointer stops the program with an error you can catch (lesson 19)
+}

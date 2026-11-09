@@ -1,0 +1,41 @@
+// Lesson 4: Strings and characters
+//
+// A string is text in "quotes". A character is one byte in 'quotes'.
+
+use fmt;
+
+main :: () {
+    name := "Saad";
+    print("% has % letters", name, name.len);
+
+    first := name[0];                     // 'S', a character
+    print("It starts with %", first);
+
+    // Comparing
+    assert(name == "Saad");
+    assert("apple" < "banana");
+
+    // Useful methods
+    assert(name.toUpper() == "SAAD");
+    assert(name.startsWith("Sa") && name.endsWith("ad"));
+    assert("hello world".indexOf("world") == 6);
+    assert("a,b,c".split(",").count == 3);
+    assert("hello".slice(1, 3) == "el");   // From 1, up to (not with) 3
+
+    // Characters have methods too
+    assert('7'.isDigit() && 'a'.isLetter() && 'a'.toUpper() == 'A');
+
+    // Walking through the characters
+    vowels := 0;
+    for ch in "programming" {
+        if ch == 'a' || ch == 'o' || ch == 'i' { vowels += 1; }
+    }
+    print("programming has % vowels", vowels);
+
+    // Building a string from values
+    line := sprint("% is % years old", "Ada", 36);   // Like print, but gives the text
+    assert(line == "Ada is 36 years old");
+
+    // Special characters
+    print("A tab:\tand a quote: \"hi\"");
+}

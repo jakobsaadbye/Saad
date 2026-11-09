@@ -1,0 +1,18 @@
+namespace geometry;
+
+// The namespace of lesson 23 (23_namespaces.sd). A file says which namespace it is in on its first line, and the
+// compiler finds it in the folder of the program or below, so it needs no path to be imported.
+
+Circle :: struct {
+    radius: f64;
+}
+
+area :: (c: Circle) -> f64 {
+    return Pi * square(c.radius);
+}
+
+Pi :: 3.14159;
+
+// @private: only the files of this namespace can use it
+@private
+square :: (x: f64) -> f64 { return x * x; }

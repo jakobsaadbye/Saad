@@ -1,0 +1,80 @@
+// Lesson 19: Errors
+//
+// A function that can fail gives an 'error' as its last result: null when it worked. The caller decides:
+//
+//     value, err := f();       takes the error: a value to look at
+//     value := f();            doesn't take it: if there is one, it is thrown
+//
+// A thrown error leaves the functions it passes through, up to a 'try { } catch (err) { }' around it. One that
+// nothing catches ends the program, with its message and where it happened.
+
+import errors;
+use fmt;
+
+NotFound :: ErrorKind{"NotFound"};          // A kind, to tell errors apart: err.is(NotFound)
+
+ageOf :: (name: string) -> int, error {
+    switch name {
+        case "ada" { return 36, null; }
+        case "bo"  { return 17, null; }
+        else       { return 0, errors.make("no one is called %", name, kind: NotFound); }
+    }
+}
+
+// An error type of its own, for when a catch needs more than a message: a struct that embeds Error
+TooYoung :: struct {
+    @embed base: Error;
+    age: int;
+}
+
+checkAdult :: (name: string) -> error {
+    age := ageOf(name);                     // Not taken: an error is thrown out of checkAdult
+    if age < 18 { return errors.typed(TooYoung{age: age}, "% is only %", name, age); }
+    return null;
+}
+
+main :: () {
+    // Taken: a value
+    age, err := ageOf("cy");
+    if err != null { print("Oops: %", err.message); }
+
+    // Thrown, and caught
+    try {
+        checkAdult("bo");
+    } catch (e) {
+        print("Caught: %", e.message);
+        young, isTooYoung := e as *TooYoung;     // The error type it was made as
+        if isTooYoung { print("They are %", young.age); }
+    }
+
+    // A switch with a case for each error type. checkAdult throws both its own TooYoung and the NotFound of ageOf
+    for name in ["ada", "bo", "dan"] {
+        try {
+            checkAdult(name);                // As a statement, the error isn't taken: it is thrown
+            print("% is an adult", name);
+        } catch (e) {
+            switch t in e {
+                case *TooYoung { print("% is too young (%)", name, t.age); }
+                else {
+                    if e.is(NotFound) { print("Who is %?", name); }
+                }
+            }
+        }
+    }
+
+    // throw makes an error of your own fly
+    try {
+        throw errors.make("something broke");
+    } catch (e) {
+        print("Caught: %", e.message);
+    }
+
+    // Mistakes in the program, e.g dividing by zero or a null pointer, are thrown as a Panic
+    try {
+        zero := 0;
+        n := 10 / zero;
+    } catch (e) {
+        assert(e.is(Panic));
+        print("Caught a panic: %", e.message);
+    }
+}

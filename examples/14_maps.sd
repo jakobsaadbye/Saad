@@ -1,0 +1,31 @@
+// Lesson 14: Maps
+//
+// A Map<K, V> finds a value by its key, e.g the age of a name. A literal is [key: value, ...]
+
+use fmt;
+
+main :: () {
+    ages := ["ada": 36, "bo": 17];
+
+    ages["cy"] = 52;                     // Adds a key
+    ages["bo"] = 18;                     // Changes a value
+    print("Ada is %", ages["ada"]);
+
+    assert(ages.count == 3);
+    assert(ages.has("cy") && !ages.has("dan"));
+    assert(ages.get("dan", 0) == 0);     // A fallback for a key that isn't there
+
+    ages.remove("cy");
+
+    // Every key and value, in the order they were added
+    for name, age in ages {
+        print("% is %", name, age);
+    }
+
+    // An empty map with its types written out
+    counts: Map<string, int>;
+    for word in "the cat and the hat".split(" ") {
+        counts[word] = counts.get(word, 0) + 1;
+    }
+    assert(counts["the"] == 2);
+}
