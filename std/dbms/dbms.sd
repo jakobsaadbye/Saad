@@ -354,15 +354,19 @@ paramText :: (arg: any) -> c.string, bool {
 // The column of each member of the struct, or -1
 @private
 columnsOf :: method (conn: *Connection, result: *void, type: *TypeStruct) -> [..]i64 {
-    columns: [..]i64;
+    names: [..]string;
     count := conn.driver.columnCount(result);
+    names.reserve(count);
+    for c in 0..count { names.add(conn.driver.columnName(result, c).toString()); }
+
+    columns: [..]i64;
+    columns.reserve(type.members.count);
     for i in 0..type.members.count {
         member := &type.members[i];
         name, named, skip := columnOf(member);
         found: i64 = -1;
         if !skip {
-            for c in 0..count {
-                column := conn.driver.columnName(result, c).toString();
+            for column, c in names {
                 if (named && column == name) || (!named && sameName(column, name)) {
                     found = c;
                     break;
@@ -371,6 +375,7 @@ columnsOf :: method (conn: *Connection, result: *void, type: *TypeStruct) -> [..
         }
         columns.add(found);
     }
+    names.free();
     return columns;
 }
 
