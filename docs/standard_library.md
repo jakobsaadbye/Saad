@@ -321,8 +321,10 @@ response = http.request("PUT", url, headers, body);
   be `Content-Length` or chunked. Bad requests get 400, 413, 431, 501 or 505.
 * **Workers are event loops.** Each worker is a thread with a `net.Poller` (epoll on Linux) of its own connections
   and of the listener, on non-blocking sockets. It reads what has come, answers the requests that are whole in order
-  (also pipelined ones), and sends the response at once; what the client doesn't take is sent when it can take more,
-  and the connection's next requests wait until then. A request is answered by the thread that read it, so nothing
+  (also pipelined ones), and writes the responses of a round of events after all of its requests are answered, so
+  the handlers run one after the other with the caches of the processor, instead of between writes, which run the
+  network stack of the system. What the client doesn't take is sent when it can take more, and the connection's next
+  requests wait until then. A request is answered by the thread that read it, so nothing
   is handed between threads. A handler runs to its end on its worker, so one that waits long, e.g for another
   server, holds up that worker's other connections: there are more workers than processors for that.
 * **Connections** cost no thread, and an idle one keeps no buffer: only a struct of about 100 bytes. The part of a

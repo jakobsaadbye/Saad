@@ -36,6 +36,13 @@ moved :: (w: *http.ResponseWriter, r: *http.Request) {
     w.redirect("/hello/again");
 }
 
+// A response that is more than a socket takes at once: 4 MB of a, b, c, ...
+big :: (w: *http.ResponseWriter, r: *http.Request) {
+    sb := fmt.newStringBuilder(4194304);
+    for i in 0..4194304 { sb.addChar(('a' + i % 26) as u8); }
+    w.write(sb.toString());
+}
+
 run :: (server: *http.Server) {
     server.serve();
 }
@@ -65,6 +72,7 @@ main :: () {
     router.handle("GET /static/special", hello);   // More specific than the prefix
     router.handle("GET /boom", boom);
     router.handle("GET /old", moved);
+    router.handle("GET /big", big);
 
     server: http.Server;
     server.router = &router;
@@ -126,6 +134,38 @@ main :: () {
     text := raw(address, "GET /hello/one HTTP/1.1\r\nHost: x\r\n\r\nPOST /echo HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n4\r\nwiki\r\n5;ext=1\r\npedia\r\n0\r\n\r\n");
     assert(text.indexOf("HTTP/1.1 200 OK") == 0 && text.indexOf("hello one") > 0);
     assert(text.indexOf("HTTP/1.1 201 Created") > 0 && text.endsWith("wikipedia"));
+
+    // A response the connection doesn't take at once, and the requests after it on the connection, which are answered
+    // after it, in order
+    text = raw(address, "GET /big HTTP/1.1\r\nHost: x\r\n\r\nGET /hello/after HTTP/1.1\r\nHost: x\r\n\r\nGET /big HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    first := text.indexOf("\r\n\r\n") + 4;
+    assert(text.startsWith("HTTP/1.1 200") && text.indexOf("Content-Length: 4194304\r\n") > 0);
+    for i in 0..4194304 { assert(text[first + i] == ('a' + i % 26) as u8); }
+    rest := text.slice(first + 4194304);
+    assert(rest.startsWith("HTTP/1.1 200") && rest.indexOf("hello after") > 0);
+    rest = rest.slice(rest.indexOf("hello after") + 11);
+    assert(rest.startsWith("HTTP/1.1 200") && rest.endsWith("defghij") && rest.len > 4194304);
+
+    // A client that waits for 100 Continue before it sends the body
+    conn := net.dial(address);
+    conn.write("POST /echo HTTP/1.1\r\nHost: x\r\nContent-Type: text/plain\r\nContent-Length: 5\r\nExpect: 100-continue\r\n\r\n");
+    buffer: bytes.Buffer;
+    while buffer.toString().indexOf("\r\n\r\n") < 0 {
+        n, err := conn.read(buffer.space(4096));
+        assert(err == null);
+        buffer.wrote(n);
+    }
+    assert(buffer.toString() == "HTTP/1.1 100 Continue\r\n\r\n");
+    conn.write("hello");
+    buffer.clear();
+    while buffer.toString().indexOf("hello") < 0 {
+        n, err := conn.read(buffer.space(4096));
+        assert(err == null);
+        buffer.wrote(n);
+    }
+    assert(buffer.toString().startsWith("HTTP/1.1 201 Created") && buffer.toString().endsWith("\r\n\r\nhello"));
+    buffer.free();
+    conn.close();
 
     // Requests that are wrong
     text = raw(address, "NOT A REQUEST\r\n\r\n");
