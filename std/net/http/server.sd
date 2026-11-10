@@ -257,19 +257,32 @@ Server :: struct {
 }
 
 // A worker: a thread that waits for its connections with a Poller and answers the requests that come on them, one
-// after the other. Its request and response are used again for every request
+// after the other. Its request and response are used again for every request.
+//
+// The responses of a round of events are written after all of its requests are answered: writing to a socket runs the
+// network stack of the system, which takes the caches of the processor from the handlers, e.g from a database. So the
+// handlers of a round run one after the other, then the responses are written one after the other
 Loop :: struct {
     server:      *Server;
     poller:      *net.Poller;
     connections: [..]*Connection;   // Open, for the timeouts
     closed:      [..]*Connection;   // Closed while the events were handled, freed after them
     input:       bytes.Buffer;      // What has come on the connection that is read, while its requests are answered
-    out:         fmt.StringBuilder; // The response that is sent
+    out:         fmt.StringBuilder; // The responses of this round of events, written by sendAll after them
+    sends:       [..]Send;          // The part of out that is for each connection
     request:     Request;
     response:    ResponseWriter;
     accepting:   bool;
+    stopping:    bool;              // As of the last wait: the requests that come now are answered with Connection: close
     now:         i64;               // Milliseconds, as of the last wait
     limit:       int;               // Of connections
+}
+
+// Responses in the out of a loop for a connection: out[start:end]
+Send :: struct {
+    connection: *Connection;
+    start:      int;
+    end:        int;
 }
 
 // A connection that is kept alive. An idle connection has no buffers: only what came of a request that isn't whole
@@ -282,6 +295,7 @@ Connection :: struct {
     index:     int;              // In the connections of its loop
     closing:   bool;             // Closed when its output is written
     continued: bool;             // 100 Continue was sent for the request that is coming
+    queued:    bool;             // Has responses in the out of its loop, which are written after this round of events
     open:      bool;
 }
 
@@ -394,6 +408,7 @@ runLoop :: (loop: *Loop) {
     loop.closed.allocator      = mem.heap();
     loop.input.allocator       = mem.heap();
     loop.out.allocator         = mem.heap();
+    loop.sends.allocator       = mem.heap();
     loop.response.body.allocator = mem.heap();   // Kept for the next request, so not in its arena
     loop.poller.add(server.listener.socket, server.listener as *void, exclusive: true);
     loop.poller.add(server.woken.socket, server.woken as *void);
@@ -401,10 +416,11 @@ runLoop :: (loop: *Loop) {
     loop.now = time.now().unixMilli();
     lastSweep := loop.now;
 
-    while !server.isStopping() {
+    while !loop.stopping {
         events, err := loop.poller.wait(1000);   // At least once a second, for the timeouts
         if err != null { break; }
         loop.now = time.now().unixMilli();
+        loop.stopping = server.isStopping();
         for e in events {
             if e.data == server.listener as *void {
                 loop.acceptAll();
@@ -416,6 +432,7 @@ runLoop :: (loop: *Loop) {
             if e.writable && c.output.available() > 0 { loop.flush(c); }
             if c.open && (e.readable || e.closed) && c.output.available() == 0 { loop.readAndServe(c); }
         }
+        loop.sendAll();
         loop.freeClosed();
         if loop.now - lastSweep >= 1000 {
             loop.sweep();
@@ -430,6 +447,7 @@ runLoop :: (loop: *Loop) {
     loop.closed.free();
     loop.input.free();
     loop.out.free();
+    loop.sends.free();
     loop.response.body.free();
     loop.request.arena.free();
     loop.poller.free();
@@ -507,7 +525,9 @@ serveWhole :: method (loop: *Loop, c: *Connection, working: *bytes.Buffer) {
             // Not whole yet. A client that waits for 100 Continue before it sends the body is told to go on
             if expects && !c.continued {
                 c.continued = true;
-                _, _ := c.conn.tryWrite("HTTP/1.1 100 Continue\r\n\r\n");
+                start := loop.out.cursor;
+                loop.out.addString("HTTP/1.1 100 Continue\r\n\r\n");
+                loop.queue(c, start);
             }
             break;
         }
@@ -563,29 +583,62 @@ serveOne :: method (loop: *Loop, c: *Connection, working: *bytes.Buffer) {
     }
     mem.setAllocator(previous);
 
-    close := wantsClose(r) || server.isStopping();
+    close := wantsClose(r) || loop.stopping;
     if close { w.setHeader("Connection", "close"); }
     loop.send(c, w, r, close);
 }
 
-// Sends the response. What the connection doesn't take now is sent when it is writable
+// Sends the response, after the other requests of this round of events are answered (sendAll)
 send :: method (loop: *Loop, c: *Connection, w: *ResponseWriter, r: *Request, close: bool) {
-    loop.out.clear();
+    start := loop.out.cursor;
     writeResponse(&loop.out, w, r);
-    text := loop.out.toString();
+    loop.queue(c, start);
     if close { c.closing = true; }
-    sent, err := c.conn.tryWrite(text);
-    if err != null {
-        loop.closeConnection(c);
-        return;
-    }
     c.lastUsed = loop.now;
-    if sent < text.len {
-        c.output.write(text.slice(sent));
-        if loop.poller.modify(c.conn.socket, c as *void, write: true) != null { loop.closeConnection(c); }
+    // A round with many big responses doesn't hold all of them
+    if loop.out.cursor >= SendAllAt { loop.sendAll(); }
+}
+
+// The bytes of responses after which they are written, also when the round of events isn't over
+SendAllAt :: 1048576;
+
+// Gives the connection what out has from start on, which is written by sendAll
+queue :: method (loop: *Loop, c: *Connection, start: int) {
+    last := loop.sends.count - 1;
+    if last >= 0 && loop.sends[last].connection == c {
+        loop.sends.indexRef(last).end = loop.out.cursor;   // e.g pipelined requests: one write for all
         return;
     }
-    if close { loop.closeConnection(c); }
+    loop.sends.add(Send{connection: c, start: start, end: loop.out.cursor});
+    c.queued = true;
+}
+
+// Writes the responses of the round. What a connection doesn't take now is kept and written when it is writable
+sendAll :: method (loop: *Loop) {
+    all := loop.out.toString();
+    for s in loop.sends {
+        c := s.connection;
+        c.queued = false;
+        if !c.open { continue; }
+        text := all.slice(s.start, s.end);
+        if c.output.available() > 0 {
+            c.output.write(text);   // After what it hasn't taken yet
+            continue;
+        }
+        sent, err := c.conn.tryWrite(text);
+        if err != null {
+            loop.closeConnection(c);
+            continue;
+        }
+        if sent < text.len {
+            c.output.write(text.slice(sent));
+            if loop.poller.modify(c.conn.socket, c as *void, write: true) != null { loop.closeConnection(c); }
+            continue;
+        }
+        if c.closing { loop.closeConnection(c); }
+    }
+    loop.sends.clear();
+    loop.out.clear();
 }
 
 // Writes what is left of the responses, when the connection takes more. Then the requests that waited are answered
@@ -615,7 +668,7 @@ flush :: method (loop: *Loop, c: *Connection) {
 
 // The other end closed: the connection is closed, after what it hasn't taken of the responses
 finish :: method (loop: *Loop, c: *Connection) {
-    if c.output.available() > 0 {
+    if c.output.available() > 0 || c.queued {
         c.closing = true;
         return;
     }

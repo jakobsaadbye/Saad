@@ -82,6 +82,18 @@ given), when the compiler is built with LLVM. On Linux, `./build.sh` builds the 
 
 # Changelog
 
+## Update v0.21.0 - 10. Nov 2026
+
+* `net.http`: a worker answers all the requests of a round of events first and writes their responses after them. A
+  write runs the network stack of the system, which took the caches of the processor from the handlers, so handlers
+  that run back to back are faster: the mix of `examples/feed` went from 24,600 to 36,000 requests a second on one core
+  (32,000 with 4 processes), and a `/feed` query from about 32 µs to 22 µs of SQLite. The reads of `stopping` take
+  the lock of the server once per round instead of once per request
+* Faster: `json` finds the characters of a string that need an escape 8 bytes at a time, and `fmt`'s `addUInt64` writes
+  its digits at once. `dbms` reads the names of the columns once per query, and `dbms.sqlite` gives the text of a value
+  from its cell instead of a list made for each query. `web` gives a `string` parameter of the path or the query as it
+  is, without making it JSON and reading it back
+
 ## Update v0.20.0 - 10. Nov 2026
 
 * An array literal has the type of its first element that has a type, and its untyped numbers get it too:

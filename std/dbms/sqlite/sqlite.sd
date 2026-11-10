@@ -112,7 +112,6 @@ Result :: struct {
     nameAt:  [..]int;
     text:    [..]u8;          // The values, each with a 0 after it
     cells:   [..]Cell;        // Each value, row by row
-    values:  [..]c.string;    // Made from text and the cells when the rows are read
     changes: i64;
 }
 
@@ -159,14 +158,12 @@ executeArgs :: (conn: *void, sql: string, args: []any, err: *string) -> *void {
         result.nameAt.allocator  = heapAllocator();
         result.text.allocator    = heapAllocator();
         result.cells.allocator   = heapAllocator();
-        result.values.allocator  = heapAllocator();
     }
     result.rows = 0;
     result.names.clear();
     result.nameAt.clear();
     result.text.clear();
     result.cells.clear();
-    result.values.clear();
 
     ok := run(db, statement, args, result, err);
     if !statement.single {
@@ -196,11 +193,6 @@ executeArgs :: (conn: *void, sql: string, args: []any, err: *string) -> *void {
     if !ok {
         freeResult(result);
         return null;
-    }
-    result.values.reserve(result.cells.count);
-    for cell in result.cells {
-        if cell.offset < 0 { result.values.add(c.string{}); }
-        else               { result.values.add(c.string{&result.text.data[cell.offset]}); }
     }
     return result;
 }
@@ -290,6 +282,7 @@ run :: (db: *Database, statement: *Statement, args: []any, result: *Result, err:
                 break;
             }
             result.rows += 1;
+            result.cells.reserve(result.cells.count + columns);
             for column in 0..columns {
                 kind := sqlite3_column_type(handle, column as i32);
                 if kind == Null {
@@ -438,7 +431,9 @@ columnName :: (result: *void, column: i64) -> c.string {
 @private
 value :: (result: *void, row: i64, column: i64) -> c.string {
     r := result as *Result;
-    return r.values[(row * (r.columns as i64) + column) as int];
+    cell := &r.cells[(row * (r.columns as i64) + column) as int];
+    if cell.offset < 0 { return c.string{}; }
+    return c.string{&r.text.data[cell.offset]};
 }
 
 @private
@@ -473,7 +468,6 @@ freeResult :: (result: *void) {
     r.nameAt.free();
     r.text.free();
     r.cells.free();
-    r.values.free();
     mem.delete(r, heapAllocator());
 }
 

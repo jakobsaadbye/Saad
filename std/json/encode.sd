@@ -80,10 +80,14 @@ newline :: method (w: *Writer) {
 writeString :: method (w: *Writer, s: string) {
     w.sb.addChar('"');
     plain := 0;   // The start of the characters that are written as they are, which are added at once
-    for ch, i in s {
-        if ch >= ' ' && ch != '"' && ch != '\\' { continue; }
-        if i as int > plain { w.sb.addStringSlice(s, plain, i as int); }
-        plain = i as int + 1;
+    i := 0;
+    while i < s.len {
+        i = plainUntil(s, i);
+        if i >= s.len { break; }
+        ch := s[i];
+        if i > plain { w.sb.addStringSlice(s, plain, i); }
+        plain = i + 1;
+        i += 1;
         switch ch {
             case '"'  { w.sb.addString("\\\""); }
             case '\\' { w.sb.addString("\\\\"); }
@@ -103,6 +107,36 @@ writeString :: method (w: *Writer, s: string) {
     }
     if s.len > plain { w.sb.addStringSlice(s, plain, s.len as int); }
     w.sb.addChar('"');
+}
+
+// A byte in each of the 8 bytes of a u64, for plainUntil
+@private EveryOne       :: 0x0101010101010101 as u64;
+@private EveryTopBit    :: 0x8080808080808080 as u64;
+@private EverySpace     :: 0x2020202020202020 as u64;   // ' '
+@private EveryQuote     :: 0x2222222222222222 as u64;   // "
+@private EveryBackslash :: 0x5C5C5C5C5C5C5C5C as u64;   // \
+
+// The index of the first character from 'at' that has to be escaped: a control character, " or \. The length of s when
+// there is none. Texts are mostly plain, so 8 characters are looked at at once, as the bytes of a u64: a byte b of x
+// is below n when (b - n) borrows into its top bit while b's own top bit is clear, and it is c when x ^ c has a zero
+// byte there. These are exact for whether any byte of the word matches, so a word that has none is skipped whole
+@private
+plainUntil :: (s: string, at: int) -> int {
+    i := at;
+    while i + 8 <= s.len {
+        x := *((&s.data[i]) as *u64);
+        quote := x ^ EveryQuote;
+        slash := x ^ EveryBackslash;
+        special := ((x - EverySpace) & ~x) | ((quote - EveryOne) & ~quote) | ((slash - EveryOne) & ~slash);
+        if (special & EveryTopBit) != 0 { break; }
+        i += 8;
+    }
+    while i < s.len {
+        ch := s[i];
+        if ch < ' ' || ch == '"' || ch == '\\' { return i; }
+        i += 1;
+    }
+    return i;
 }
 
 @private

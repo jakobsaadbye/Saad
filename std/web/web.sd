@@ -496,6 +496,10 @@ readArguments :: (app: *App, e: *Endpoint, r: *http.Request, arguments: *u8) -> 
         if found {
             // A text is as it is, also for a ?string. Other types are JSON, e.g 2, true or [1, 2]
             given = true;
+            if p.type.kind == .string {
+                *(place as *string) = text;
+                continue;
+            }
             if isText(p.type) { text = json.encode(text); }
             parsed, err := json.parse(text);
             if err != null { return errors.make("%: '%' isn't a value of type %", name, text, p.type.name, kind: InvalidParameter); }

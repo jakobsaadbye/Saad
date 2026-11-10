@@ -1,6 +1,7 @@
 // std/json: encode, decode and parse
 
 import json;
+import fmt;
 
 Status :: enum { open, closed }
 
@@ -253,5 +254,20 @@ main :: () {
         one: Shape;
         assert(json.decodeInto("{\"square\": 1}", &one).message == "'square' is not a variant of Shape");
         assert(json.decodeInto("\"circle\"", &one).message == "The variant 'circle' of Shape needs a value");
+    }
+    {
+        // Strings are looked at 8 characters at a time: an escape is found at every place, also next to UTF-8
+        letters := "abcdefghijklmnopqrst";
+        escapes := ["\\\"", "\\\\", "\\n", "\\u0001", "\\u001f"];   // As JSON writes them
+        for at in 0..letters.len + 1 {
+            for escaped in escapes {
+                special, err := json.parse(fmt.sprint("\"%\"", escaped));
+                assert(err == null);
+                text := fmt.sprint("%%æ ~", letters.slice(0, at), special.text);
+                assert(json.encode(text) == fmt.sprint("\"%%æ ~\"", letters.slice(0, at), escaped));
+            }
+        }
+        assert(json.encode("") == "\"\"");
+        assert(json.encode("plain ascii and æøå, 24!") == "\"plain ascii and æøå, 24!\"");
     }
 }
