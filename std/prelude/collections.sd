@@ -141,8 +141,9 @@ List :: struct <T> {
     allocator: Allocator; // Null until it has memory: then the allocator of the thread, which it keeps
 
     // An empty list with room for 'capacity' values, so that adding them doesn't need to allocate e.g List<int>.make(64)
-    make :: (capacity := 2) -> List<T> {
+    make :: (capacity := 4, allocator := currentAllocator()) -> List<T> {
         result: List<T>;
+        result.allocator = allocator;
         result.reserve(capacity);
         return result;
     }
