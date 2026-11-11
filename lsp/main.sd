@@ -117,7 +117,7 @@ initialize :: (m: rpc.Message) {
     }
     rpc.log(fmt.sprint("The workspace is '%'. The compiler is %", workspaceRoot, compiler));
 
-    capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]},\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":%,\"tokenModifiers\":%},\"full\":true},\"renameProvider\":{\"prepareProvider\":true},\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\"]}}";
+    capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\",\"@\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]},\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":%,\"tokenModifiers\":%},\"full\":true},\"renameProvider\":{\"prepareProvider\":true},\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\"]}}";
     capabilities = fmt.sprint(capabilities, json.encode(TokenTypes), json.encode(TokenModifiers));
     rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.3.0\"}}", capabilities));
 }
