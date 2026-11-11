@@ -77,7 +77,8 @@ total := sum(xs);   // sum :: (values: []int) -> int
 | `reverse()`, `copy() -> List<T>` | |
 | `reserve(capacity)`, `clear()` (keeps the memory), `free()` | |
 
-`List<T>.make(capacity := 2) -> List<T>` makes an empty list with room for `capacity` values, so adding that many doesn't
+`List<T>.make(capacity := 4, allocator := currentAllocator()) -> List<T>` makes an empty list with room for `capacity`
+values, which keeps the allocator. Adding that many doesn't
 allocate again.
 
 Members: `data: *T`, `count: i64`, `capacity: i64`, `allocator: Allocator`. The capacity starts at

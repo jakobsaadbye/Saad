@@ -160,10 +160,21 @@ main :: () {
         zs.add(1);
         assert(zs.count == 1 && zs[0] == 1);
         ws: [..]string = List<string>.make();
-        assert(ws.capacity == 2);
+        assert(ws.capacity == 4);
+        ws.free();
         zs.free();
         xs.free();
         assert(xs.count == 0 && xs.capacity == 0);
+    }
+    {
+        // A list made with an allocator, which it keeps
+        counter: Counter;
+        xs := List<int>.make(8, allocator: &counter);
+        assert(counter.calls == 1 && counter.bytes == 8 * sizeof(int) && xs.capacity == 8);
+        for i in 0..9 { xs.add(i); }
+        assert(counter.calls == 2 && counter.bytes == 16 * sizeof(int));
+        xs.free();
+        assert(counter.calls == 3 && counter.bytes == 0);
     }
     {
         // A list with its own allocator
