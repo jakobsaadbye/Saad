@@ -194,6 +194,8 @@ typedef struct AstImport {
     AstFile *imported_file;
     bool     is_prelude; // The import of std/prelude/collections.sd that every file gets. A file's own declarations win over the ones it imports
     bool     failed;     // The file or namespace wasn't found. It is reported, and left out (drop_failed_import in compiler.c)
+    bool     declarations_imported; // Its declarations are in the scope of the file, before the imported file is checked. See check_file()
+    bool     declarations_ok;
 
     ImportKind kind;
     char      *path;  // The dotted path e.g "math.sin"
