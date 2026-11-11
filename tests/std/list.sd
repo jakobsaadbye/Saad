@@ -153,6 +153,15 @@ main :: () {
         ys: [..]int;
         ys.reserve(64);
         assert(ys.capacity == 64 && ys.count == 0);
+
+        // A list made with room for its values
+        zs := List<int>.make(16);
+        assert(zs.capacity == 16 && zs.count == 0);
+        zs.add(1);
+        assert(zs.count == 1 && zs[0] == 1);
+        ws: [..]string = List<string>.make();
+        assert(ws.capacity == 2);
+        zs.free();
         xs.free();
         assert(xs.count == 0 && xs.capacity == 0);
     }

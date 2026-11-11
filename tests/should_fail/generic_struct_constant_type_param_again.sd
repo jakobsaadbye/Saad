@@ -1,0 +1,10 @@
+// expect-error: Type parameter 'T' is already a type parameter of 'Box'
+
+Box :: struct <T> {
+    value: T;
+    make :: <T>() -> Box<T> { return Box<T>{}; }
+}
+
+main :: () {
+    b := Box<int>.make();
+}

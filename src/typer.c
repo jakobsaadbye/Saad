@@ -986,6 +986,22 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
         add_identifier_to_scope(parser, members, member);
     }
 
+    // The constants of the struct e.g 'make :: (capacity := 2) -> List<T>' or 'Empty :: List<T>{}'. Each instance parses
+    // them again below the scope that binds its type parameters, as checking changes them. They are checked with the instance
+    node->static_members->parent = params_scope;
+    AstDeclaration *generic_constant = NULL;
+    for (int i = 0; i < generic->static_members->identifiers.count; i++) {
+        AstIdentifier *constant = ((AstIdentifier **)generic->static_members->identifiers.items)[i];
+        if (constant->decl == NULL || constant->decl == generic_constant) continue; // e.g 'A, B :: 1, 2;' is one declaration
+        generic_constant = constant->decl;
+
+        AstDeclaration *copy = reparse_struct_constant(parser, generic_constant, members);
+        if (!copy) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)(constant), "Compiler Error: Couldn't parse the constant '%s' again for '%s'", constant->name, name);
+            return NULL;
+        }
+    }
+
     // Add the instance before it is checked, so that members referring to the instance itself e.g 'next: *Node<T>' find it
     da_append(&generic->instances, struct_type);
 
@@ -1674,6 +1690,7 @@ AstFunctionDefn *instantiate_generic_function(Typer *typer, AstFunctionDefn *gen
     instance->identifier       = ident;
     instance->is_lambda        = generic->is_lambda;
     instance->generic_function = generic;
+    instance->static_struct    = generic->static_struct; // e.g Box$int.convert$f64
     instance->type_args        = type_args;
     instance->instance_name    = name;
     instance->instance_key     = key;
@@ -3798,6 +3815,52 @@ int get_alignment_of_type(Type *type) {
 
 bool check_struct_members(Typer *typer, AstStruct *ast_struct);
 
+// Checks the constants declared inside a struct e.g 'Red :: Color{255, 0, 0, 255};' or 'make :: (capacity := 2) -> List<T>'
+bool check_struct_constants(Typer *typer, AstStruct *ast_struct) {
+    typer->current_scope = ast_struct->static_members;
+    DynamicArray static_members = ast_struct->static_members->identifiers;
+    for (int i = 0; i < static_members.count; i++) {
+        AstIdentifier *member = ((AstIdentifier **)static_members.items)[i];
+
+        if (member->flags & IDENTIFIER_IS_NAME_OF_STRUCT) {
+            continue;
+        }
+
+        bool ok = check_declaration(typer, member->decl);
+        if (!ok) return false;
+    }
+    typer->current_scope = ast_struct->static_members->parent;
+    return true;
+}
+
+// Checks a constant of an instance of a generic struct where it is first used e.g List<int>.make(16), so that a constant
+// that doesn't work for some type arguments e.g 'Limit :: 10 as T' only fails where it is used with them. It is checked
+// where the generic struct is declared, outside of the function that uses it
+static bool check_instance_constant(Typer *typer, AstStruct *instance, AstIdentifier *constant, Ast *site) {
+    AstDeclaration *decl = constant->decl;
+    if (!decl || (decl->head.flags & AST_FLAG_IS_TYPE_CHECKED)) return true;
+    if (decl->head.flags & AST_FLAG_HAS_ERRORS) return false; // Reported where it was first used
+
+    Typer saved_state = *typer;
+    typer->current_file         = instance->generic_struct->head.file;
+    typer->parser->current_file = instance->generic_struct->head.file;
+    typer->current_scope        = instance->static_members;
+    typer->enclosing_function   = NULL;
+
+    bool ok = check_declaration(typer, decl);
+
+    DynamicArray stack = typer->enclosing_function_stack; // Might have been reallocated while checking
+    typer_restore_state(typer, saved_state);
+    typer->enclosing_function_stack = stack;
+    typer->inside_declaration       = saved_state.inside_declaration;
+
+    if (!ok) {
+        decl->head.flags |= AST_FLAG_HAS_ERRORS;
+        if (site) report_error_ast(typer->parser, LABEL_NOTE, site, "... while checking '%s' of '%s' for this use", constant->name, instance->identifier->name);
+    }
+    return ok;
+}
+
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     int waiting = typer->struct_wait_list.count;
     typer->struct_check_depth += 1;
@@ -3955,19 +4018,8 @@ bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
     // Check all constant members
     // NOTE: We first check the constant members after the struct has been sized, as
     // the constants might have expressions of the struct type itself. See constants_in_structs.sd
-    typer->current_scope = ast_struct->static_members;
-    DynamicArray static_members = ast_struct->static_members->identifiers;
-    for (int i = 0; i < static_members.count; i++) {
-        AstIdentifier *member = ((AstIdentifier **)static_members.items)[i];
-
-        if (member->flags & IDENTIFIER_IS_NAME_OF_STRUCT) {
-            continue;
-        }
-
-        bool ok = check_declaration(typer, member->decl);
-        if (!ok) return false;
-    }
-    typer->current_scope = ast_struct->static_members->parent;
+    // The constants of an instance of a generic struct are checked where they are first used. See check_instance_constant()
+    if (!ast_struct->generic_struct && !check_struct_constants(typer, ast_struct)) return false;
 
     // The attributes of the members e.g @json.Field(name: "id")
     for (int i = 0; i < members.count; i++) {
@@ -6915,6 +6967,12 @@ static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *fu
             append_mangled_name(&sb, func_defn->generic_function->method_struct->identifier->name);
             sb_append(&sb, ".%s", func_defn->identifier->name);
             func_defn->symbol_name = sb_to_string(&sb);
+        } else if (func_defn->static_struct) {
+            // A function declared inside a struct e.g Vec.make, or List$int.make in an instance of a generic struct
+            StringBuilder sb = sb_init(32);
+            append_mangled_name(&sb, func_defn->static_struct->identifier->name);
+            sb_append(&sb, ".%s", func_defn->identifier->name);
+            func_defn->symbol_name = sb_to_string(&sb);
         } else {
             func_defn->symbol_name = func_defn->identifier->name;
         }
@@ -6950,6 +7008,7 @@ static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *fu
         } else {
             if (func_defn->is_method) sb_append(&sb, "%s.", func_defn->receiver_struct->identifier->name);
             else if (func_defn->generic_function && func_defn->generic_function->method_struct) sb_append(&sb, "%s.", func_defn->generic_function->method_struct->identifier->name);
+            else if (func_defn->static_struct) sb_append(&sb, "%s.", func_defn->static_struct->identifier->name);
             sb_append(&sb, "%s", func_defn->identifier->name);
         }
         if (func_defn->generic_function && !func_defn->is_method && func_defn->type_args.count > 0) {
@@ -8272,8 +8331,15 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
             return type;
         }
         else if (is_static_member_access) {
+            if (struct_type->node->type_params.count > 0) {
+                // e.g List.make(16). The constants are of the instances, which have the type arguments
+                report_error_ast(typer->parser, LABEL_ERROR, (Ast *)ma->left, "'%s' is generic, so its constants are of its instances", struct_type->head.name);
+                report_error_ast(typer->parser, LABEL_HINT, NULL, "Give it type arguments e.g %s<int>.%s", struct_type->head.name, member_name);
+                return NULL;
+            }
             member = find_identifier_in_scope(struct_type->node->static_members, member_name);
             ma->access_kind = MEMBER_ACCESS_STATIC_STRUCT_MEMBER;
+            if (member && struct_type->node->generic_struct && !check_instance_constant(typer, struct_type->node, member, (Ast *)ma)) return NULL;
         } 
         else if (struct_type->node->is_union && strcmp(member_name, "kind") == 0) {
             // shape.kind is the tag: which variant the union holds. It changes with the variant, so it can't be set
@@ -8362,6 +8428,8 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
     }
 
     if (!member) {
+
+        if (is_static_member_access && is_poisoned_name(typer->parser, member_name)) return NULL; // Its declaration has an error, which is reported
 
         if (is_static_member_access) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(rhs), "'%s' is not a static member of '%s'", member_name, type_to_str((Type *)struct_type));
@@ -9399,7 +9467,13 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             ident = literal->as.value.identifier.resolved_identifier;
         }
         else if (typer->current_scope->belongs_to_struct) {
-            ident = lookup_from_scope(typer->parser, typer->current_scope->belongs_to_struct->static_members, ident_name);
+            AstStruct *holder = typer->current_scope->belongs_to_struct;
+            ident = lookup_from_scope(typer->parser, holder->static_members, ident_name);
+
+            // Another constant of an instance of a generic struct e.g 'Rainbow :: [Red, Green, Blue];'
+            if (ident && holder->generic_struct && find_identifier_in_scope(holder->static_members, ident_name) == ident) {
+                if (!check_instance_constant(typer, holder, ident, NULL)) return NULL;
+            }
         } else {
             ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
         }

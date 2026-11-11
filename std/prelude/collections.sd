@@ -140,6 +140,13 @@ List :: struct <T> {
     capacity:  i64;
     allocator: Allocator; // Null until it has memory: then the allocator of the thread, which it keeps
 
+    // An empty list with room for 'capacity' values, so that adding them doesn't need to allocate e.g List<int>.make(64)
+    make :: (capacity := 2) -> List<T> {
+        result: List<T>;
+        result.reserve(capacity);
+        return result;
+    }
+
     // Adds a value at the end
     add :: method * (value: T) {
         if self.count == self.capacity {

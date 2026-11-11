@@ -274,6 +274,7 @@ typedef struct AstDeclaration {
     DynamicArray     values; // of *AstExpr. For a struct member, its default value
     DeclarationFlags flags;
     int              values_token_index; // The first token of the values. Instances of generic structs parse the default values of their members again from here
+    int              first_token_index;  // The first token of the declaration. Instances of generic structs parse their constants again from here
 } AstDeclaration;
 
 typedef enum AssignOp {
@@ -455,6 +456,8 @@ typedef struct AstFunctionDefn {
     // as a method declared outside the struct with an implicit 'self' receiver e.g 'get :: method <K, V>(self: *Map<K, V>, key: K) -> V'
     AstStruct       *self_struct;     // The struct the method is declared inside. Set if the method has an implicit 'self'
     bool             self_is_mutable; // Declared as 'method *'. Otherwise 'self' is read-only
+
+    AstStruct       *static_struct;   // The struct a function constant is declared inside e.g 'make :: (capacity := 2) -> List<T>' in List :: struct <T> {...}
 } AstFunctionDefn;
 
 typedef struct AstArgument {
