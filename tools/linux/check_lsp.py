@@ -77,8 +77,9 @@ class Client:
 
     notifications = []
 
-    def diagnostics_until(self, uri, wanted, tries=10):
-        """The diagnostics the server sends for the file, skipping the ones of earlier changes until they are as wanted"""
+    def diagnostics_until(self, uri, wanted, tries=20):
+        """The diagnostics the server sends for the file, skipping the ones of earlier changes until they are as wanted. Every
+        change sends some, e.g the ones of the completions, so there can be many before"""
         for _ in range(tries):
             d = self.diagnostics(uri)
             if wanted(d):
@@ -210,6 +211,15 @@ def main():
     check(labels == ["circle", "square", "empty"], f"the variants of Shape for an argument: {labels}")
     items = complete_at("    p2 := Pair<int>{first: 1, |};")
     check([(i["label"], i.get("insertText")) for i in items] == [("second", "second: ")], f"the field of a struct literal that isn't written: {items}")
+
+    print("completion of named arguments")
+    items = complete_at("    c.grow(b|);")
+    named = [(i["label"], i.get("insertText")) for i in items if i["kind"] == 6 and i.get("insertText", "").endswith(": ")]
+    check(named == [("by", "by: ")], f"the parameter of grow, which names its argument: {named}")
+    items = complete_at("    c.grow(by: 1.0, |);")
+    check(not any(i.get("insertText") == "by: " for i in items), f"a parameter that is given isn't suggested again: {[i['label'] for i in items][:5]}")
+    items = complete_at("    c.grow(by: 1|);")
+    check(not any(i.get("insertText") == "by: " for i in items), f"no parameter names for the value of an argument: {[i['label'] for i in items][:5]}")
 
     print("completion of calls and of namespaces that aren't imported")
     items = {i["label"]: i for i in complete_at("    c.gr|")}

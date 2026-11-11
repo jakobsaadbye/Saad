@@ -25,7 +25,8 @@ Everything it does:
 * go to definition, find references and hover (the signature and the doc comment)
 * the outline of a file, and the symbols of the workspace (Ctrl+T in VS Code)
 * completion: the members after a `.`, the names in scope, the values of an enum or union after a `.` where the type is
-  known (`status == .`, `case .`, `f(.`), and the fields of a struct literal that aren't written yet
+  known (`status == .`, `case .`, `f(.`), the fields of a struct literal that aren't written yet, and the parameters of a
+  call as named arguments (`fmt.print("hi", ne` gives `newline: `)
 * signature help: the parameters of the call that is being written
 * semantic highlighting: names colored by what they are, e.g a struct, a field, a parameter or an enum value
 * rename (F2): a name where it is declared and everywhere it is used. A name of the standard library is renamed from a

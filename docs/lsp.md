@@ -204,6 +204,11 @@ before the position stays the same. Then the text before the position says what 
   `insert` set to e.g `"y: "`. After `name:`, a value is written, so it is the names in scope. A literal without a
   type, e.g `people: []Person = [{...}, {|` or `p: Person = {|`, has the type the typer gave it from where it is
   written (`inferred_literals`).
+* Where an argument of a call starts, e.g `fmt.print("hi", ne|`, the parameters of the function as named arguments
+  (`add_parameter_names()`), kind `parameter`, with `insert` set to e.g `"newline: "`, and then the names in scope. The
+  parameters that are given already are left out: the first ones by the arguments given by position (up to a variadic
+  parameter, which takes the rest), and those given by name. The receiver of a method called on a value isn't one.
+  After `name:`, a value is written, so it is the names in scope.
 * The functions that build expression trees (`exprMember`, ...) aren't offered: the compiler calls them.
 * Otherwise, the names in scope: the locals declared above the position and the parameters, the declarations and
   imports of the file, and the keywords. Then the namespaces of the standard library that the file doesn't import,
