@@ -1,0 +1,238 @@
+namespace reflect;
+
+// Calling a function without knowing its type, e.g a handler of a router. A function with attribute values (see
+// attributedFunctions() of the prelude, and docs/reflection.md) can be called with values of any type, which are checked
+// against its parameters:
+//
+//     for f in attributedFunctions() {
+//         call := f.newCall();                  // memory of the allocator of the thread, or f.newCall(&arena)
+//         call.set("name", "ada");              // by the name of the parameter
+//         call.setAt(1, 7);                     // or by its index. A number is converted, e.g 7 to an i32
+//         call.invoke();                        // throws what the function throws
+//         text := call.result(0);               // an any of the result, e.g to print or to write as JSON
+//         if call.error() != null { ... }       // the error the function gave as a result, if it has one
+//     }
+//
+// The arguments and the results are in two blocks of memory laid out like a struct of the parameters and one of the results,
+// which f.invoke(arguments, results) takes. A Call keeps them, and an any of an argument or a result points into them, so
+// nothing is copied but the values that are set.
+
+import mem;
+import errors;
+
+// A value whose type isn't the type of the parameter, or a parameter that the function doesn't have
+WrongArgument :: ErrorKind{"WrongArgument"};
+
+// A call of a function, with the blocks of its arguments and its results. The arguments are zero until they are set, so a
+// parameter that isn't set is its zero value, e.g an empty optional
+Call :: struct {
+    function:  *AttributedFunction;
+    arguments: *u8;
+    results:   *u8;
+
+    // The index of the parameter with the name, or -1
+    indexOf :: method (name: string) -> int {
+        for p, i in self.function.parameters {
+            if p.name == name { return i; }
+        }
+        return -1;
+    }
+
+    // Sets the argument of the parameter with the name. Throws a WrongArgument when the function has no such parameter,
+    // or the value can't be given to it
+    set :: method (name: string, value: any) {
+        index := self.indexOf(name);
+        if index == -1 {
+            throw errors.make("% has no parameter %", self.function.name, name, kind: WrongArgument);
+        }
+        self.setAt(index, value);
+    }
+
+    // Sets the argument of the parameter at the index. A value of the type of the parameter is copied. A number is
+    // converted to the type of a number parameter, when it fits, e.g 7 to an i32 or a u8, and 2 to an f64. A value is
+    // given to an optional of its type, e.g "ada" to a ?string
+    setAt :: method (index: int, value: any) {
+        f := self.function;
+        if index < 0 || index >= f.parameters.count {
+            throw errors.make("% has % parameters, so there is no parameter %", f.name, f.parameters.count, index, kind: WrongArgument);
+        }
+        p := &f.parameters[index];
+        place := (&self.arguments[p.offset]) as *void;
+        if value.type == p.type {
+            copyValue(place, value.data, p.type.size);
+            return;
+        }
+        if !assignValue(place, p.type, value) {
+            throw errors.make("The parameter % of % is a %, which can't be given a %", p.name, f.name, p.type.name, value.type.name, kind: WrongArgument);
+        }
+    }
+
+    // Copies the value at data to the argument of the parameter at the index, without checking its type. For a value
+    // whose type the program knows is the type of the parameter, e.g from f.parameters
+    setFrom :: method (index: int, data: *void) {
+        p := &self.function.parameters[index];
+        copyValue((&self.arguments[p.offset]) as *void, data, p.type.size);
+    }
+
+    // The argument of the parameter at the index, where it is in the block of the arguments, e.g to read a value into it
+    argument :: method (index: int) -> any {
+        p := &self.function.parameters[index];
+        return makeAny((&self.arguments[p.offset]) as *void, p.type);
+    }
+
+    // Calls the function with the arguments. Throws what the function throws
+    invoke :: method () {
+        self.function.invoke(self.arguments, self.results);
+    }
+
+    // The result at the index, where it is in the block of the results
+    result :: method (index: int) -> any {
+        r := &self.function.results[index];
+        return makeAny((&self.results[r.offset]) as *void, r.type);
+    }
+
+    // The error that the function gave as a result, or null when it gave none or has no error result
+    error :: method () -> error {
+        for r in self.function.results {
+            if isError(r.type) {
+                return *((&self.results[r.offset]) as *error);
+            }
+        }
+        return null;
+    }
+}
+
+// A call of the function, with its blocks of memory from the allocator, or the allocator of the thread
+newCall :: method (f: *AttributedFunction, allocator: Allocator = null) -> Call {
+    call: Call;
+    call.function  = f;
+    call.arguments = mem.allocate(f.argumentsSize as i64 + 8, allocator) as *u8;
+    call.results   = mem.allocate(f.resultsSize as i64 + 8, allocator) as *u8;
+    return call;
+}
+
+// If the type is error, a *Error
+isError :: (type: *Type) -> bool {
+    probe: error;
+    boxed: any = probe;
+    return type == boxed.type;
+}
+
+// An any of the value at data, of the type
+makeAny :: (data: *void, type: *Type) -> any {
+    value: any;
+    raw := (&value) as *Any;
+    raw.data = data;
+    raw.type = type;
+    return value;
+}
+
+// Copies a value of the size. Most arguments are a word or two, e.g an int, a pointer or a string, which are copied without
+// a call of memcpy
+copyValue :: (to: *void, from: *void, size: int) {
+    if size == 8 {
+        *(to as *i64) = *(from as *i64);
+    } else if size == 16 {
+        words := to as *i64;
+        source := from as *i64;
+        words[0] = source[0];
+        words[1] = source[1];
+    } else {
+        mem.copy(to, from, size);
+    }
+}
+
+// Stores the value at the place, which has the type. False if the value can't be given to the type
+assignValue :: (place: *void, type: *Type, value: any) -> bool {
+    if value.type == type {
+        copyValue(place, value.data, type.size);
+        return true;
+    }
+    if type.kind == .int && value.type.kind == .int {
+        number, ok := readInteger(value.data, value.type as *TypePrimitive);
+        return ok && writeInteger(place, type as *TypePrimitive, number);
+    }
+    if type.kind == .float && (value.type.kind == .float || value.type.kind == .int) {
+        number: f64;
+        if value.type.kind == .float {
+            if value.type.size == 4 { number = (*(value.data as *f32)) as f64; } else { number = *(value.data as *f64); }
+        } else {
+            whole, ok := readInteger(value.data, value.type as *TypePrimitive);
+            if !ok { return false; }
+            number = whole as f64;
+        }
+        if type.size == 4 { *(place as *f32) = number as f32; } else { *(place as *f64) = number; }
+        return true;
+    }
+    if type.flags.has(.isOptional) {
+        optional := type as *TypeStruct;
+        item, itemType := optional.setOptional(place, true);
+        if assignValue(item, itemType, value) { return true; }
+        optional.setOptional(place, false);
+    }
+    return false;
+}
+
+// The integer at data. False for a u64 that doesn't fit in an i64
+readInteger :: (data: *void, type: *TypePrimitive) -> i64, bool {
+    switch type.kind {
+        case .u8   { return (*(data as *u8)) as i64, true; }
+        case .u16  { return (*(data as *u16)) as i64, true; }
+        case .u32
+        case .uint { return (*(data as *u32)) as i64, true; }
+        case .u64 {
+            value := *(data as *u64);
+            return value as i64, value <= 9223372036854775807;
+        }
+        case .i8   { return (*(data as *i8)) as i64, true; }
+        case .i16  { return (*(data as *i16)) as i64, true; }
+        else {}
+    }
+    if type.head.size == 4 { return (*(data as *i32)) as i64, true; }
+    return *(data as *i64), true;
+}
+
+// Stores the integer at the place, which has the type. False if it doesn't fit
+writeInteger :: (place: *void, type: *TypePrimitive, value: i64) -> bool {
+    switch type.kind {
+        case .u8 {
+            if value < 0 || value > 255 { return false; }
+            *(place as *u8) = value as u8;
+            return true;
+        }
+        case .u16 {
+            if value < 0 || value > 65535 { return false; }
+            *(place as *u16) = value as u16;
+            return true;
+        }
+        case .u32
+        case .uint {
+            if value < 0 || value > 4294967295 { return false; }
+            *(place as *u32) = value as u32;
+            return true;
+        }
+        case .u64 {
+            if value < 0 { return false; }
+            *(place as *u64) = value as u64;
+            return true;
+        }
+        case .i8 {
+            if value < -128 || value > 127 { return false; }
+            *(place as *i8) = value as i8;
+            return true;
+        }
+        case .i16 {
+            if value < -32768 || value > 32767 { return false; }
+            *(place as *i16) = value as i16;
+            return true;
+        }
+        else {}
+    }
+    if type.head.size == 4 {
+        if value < -2147483648 || value > 2147483647 { return false; }
+        *(place as *i32) = value as i32;
+        return true;
+    }
+    *(place as *i64) = value;
+    return true;
+}

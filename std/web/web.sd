@@ -40,6 +40,7 @@ import fmt;
 import mem;
 import errors;
 import io;
+import reflect;
 
 // The attribute of an endpoint: @web.endpoint for POST, @web.endpoint(.get) for GET. With a path, it is called at the
 // path instead of the url of its name, e.g @web.endpoint(.get, path: "/posts/{id}"), and a parameter with the name of a
@@ -332,9 +333,9 @@ dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
         return;
     }
 
+    // The call of the endpoint, in the memory of the request
     f := target.function;
-    arguments := r.arena.allocate(f.argumentsSize as int) as *u8;
-    results   := r.arena.allocate(f.resultsSize as int + 8) as *u8;
+    call := f.newCall(&r.arena);
 
     // A new session, with the request and the response
     session := r.arena.allocate(app.sessionType.head.size) as *u8;
@@ -342,14 +343,14 @@ dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
     base.request  = r;
     base.response = w;
     base.app      = app;
-    *((&arguments[f.parameters[0].offset]) as **u8) = session;
+    call.setFrom(0, &session);   // The first parameter is a *Session of the app, whose type web doesn't know
 
     try {
         if app.start != null { app.start(session); }
         if target.authorize && app.authorizer != null { app.authorizer(session); }
-        err := readArguments(app, target, r, arguments);
+        err := readArguments(app, target, r, &call);
         if err != null { throw err; }
-        f.invoke(arguments, results);
+        call.invoke();
     } catch (thrown) {
         if app.finish != null { app.finish(session); }
         respondWith(app, w, thrown);
@@ -358,29 +359,26 @@ dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
     if app.finish != null { app.finish(session); }
 
     // The results: an error that is given, and the values
-    values: [..]FunctionValue;
+    given := call.error();
+    if given != null {
+        respondWith(app, w, given);
+        return;
+    }
+    values: [..]any;
     values.allocator = r.allocator;
-    for result in f.results {
-        if isErrorType(result.type) {
-            given := *((&results[result.offset]) as *error);
-            if given != null {
-                respondWith(app, w, given);
-                return;
-            }
-            continue;
-        }
-        values.add(result);
+    for result, i in f.results {
+        if !isErrorType(result.type) { values.add(call.result(i)); }
     }
     w.setHeader("Content-Type", "application/json");
     if values.count == 0 {
         w.write("null");
     } else if values.count == 1 {
-        w.write(json.encodeAt(&results[values[0].offset], values[0].type, app.jsonOptions));
+        w.write(json.encodeAt(values[0].data, values[0].type, app.jsonOptions));
     } else {
         w.write("[");
         for v, i in values {
             if i > 0 { w.write(","); }
-            w.write(json.encodeAt(&results[v.offset], v.type, app.jsonOptions));
+            w.write(json.encodeAt(v.data, v.type, app.jsonOptions));
         }
         w.write("]");
     }
@@ -471,7 +469,7 @@ isErrorType :: (type: *Type) -> bool {
 
 // The parameters after the session: the members of the JSON object of the body for POST, or the query for GET, and the
 // {segments} of the path of the endpoint. One that isn't there is an error, unless it has a default or is an optional
-readArguments :: (app: *App, e: *Endpoint, r: *http.Request, arguments: *u8) -> error {
+readArguments :: (app: *App, e: *Endpoint, r: *http.Request, call: *reflect.Call) -> error {
     f := e.function;
     body: json.Value;
     isGet := r.method == "GET" || r.method == "HEAD";
@@ -487,7 +485,7 @@ readArguments :: (app: *App, e: *Endpoint, r: *http.Request, arguments: *u8) -> 
     for i in 1..f.parameters.count {
         p := f.parameters[i];
         name := e.names[i];
-        place := (&arguments[p.offset]) as *void;
+        place := call.argument(i).data;   // Where its argument is, read into from the text or the JSON
         value: json.Value;
         given := false;
         text, inPath := pathValue(r, p.name);

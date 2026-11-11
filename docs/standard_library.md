@@ -41,6 +41,7 @@ std/
   math.sd       namespace math
   mem.sd        namespace mem: allocate, resize, free, delete, copy, set, equal
   random.sd     namespace random
+  reflect.sd    namespace reflect: Call, a function of attributedFunctions() called with values of any type
   time.sd       namespace time
 ```
 
@@ -441,7 +442,7 @@ app.setMessage(web.InternalError, "internal server error");
   arena of the request, so what it allocates, also its result, is freed after the response. Give what lives longer
   the heap, e.g `post.title.copy(mem.heap())`. A `dbms.Pool` gives each session a connection (see `docs/dbms.md`).
 * `app.server` is the `http.Server`, e.g `app.server.workers` or `app.server.shutdown()`.
-* It is built on `attributedFunctions()` and their `invoke()` (see `docs/reflection.md`). A TypeScript client can be
+* It is built on `attributedFunctions()` and calls the endpoints with a `reflect.Call` (see `docs/reflection.md`). A TypeScript client can be
   made from the same: the names, parameters and results of the endpoints.
 
 ## web.html
@@ -693,6 +694,12 @@ mem.delete(p);                     // with the allocator it came from, e.g mem.d
 
 `new(T, allocator)` is `allocateNew<T>(allocator)` and `new value` is `allocateCopy(value)`, functions of the prelude
 (`std/prelude/collections.sd`) that take the memory with `resizeMemory`.
+
+## reflect
+
+`reflect.Call` (`std/reflect.sd`) calls a function of `attributedFunctions()` with values of any type, checked against its
+parameters, e.g `call := f.newCall(); call.set("id", 7); call.invoke(); value := call.result(0);`. See
+`docs/reflection.md`.
 
 ## math, mem, c
 
