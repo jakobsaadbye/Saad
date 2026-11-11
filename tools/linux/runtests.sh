@@ -104,6 +104,24 @@ if command -v python3 > /dev/null; then
         failed=$((failed + 1))
     fi
 
+    # A file of the prelude as the main file, as an editor checks the file it opens. The prelude files import each other
+    printf "%-56s " "the files of std/prelude as the main file"
+    prelude_failed=""
+    for f in std/prelude/*.sd; do
+        ./bin/saad check "$f" > /dev/null 2>&1 || prelude_failed="$prelude_failed $f"
+    done
+    if ! ./bin/saad index std/prelude/collections.sd --all-std 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(any(x['severity'] == 1 for x in d['diagnostics']))"; then
+        prelude_failed="$prelude_failed (index --all-std of collections.sd)"
+    fi
+    if [ -z "$prelude_failed" ]; then
+        echo "${GREEN}OK${RESET}"
+        passed=$((passed + 1))
+    else
+        echo "${RED}FAILED${RESET}"
+        echo "    $prelude_failed"
+        failed=$((failed + 1))
+    fi
+
     # After a mistake, the compiler reports it and goes on, so the index has the rest of the program
     printf "%-56s " "error recovery (check_recovery.py)"
     if output=$(python3 "$HERE/check_recovery.py" 2>&1); then

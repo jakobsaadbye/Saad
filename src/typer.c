@@ -116,6 +116,8 @@ Type *check_switch_expression(Typer *typer, AstSwitch *sw, Type *ctx_type);
 bool check_switch_arm(Typer *typer, AstSwitchArm *arm);
 bool check_switch(Typer *typer, AstSwitch *sw);
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct);
+bool import_declarations(Parser *parser, AstImport *import, AstFile *to_file);
+void add_used_namespace(Typer *typer, AstFile *file, Namespace *ns);
 TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instance);
 Type *copy_type(Typer *typer, Type *type);
 Type *resolve_type(Typer *typer, Type *type);
@@ -371,6 +373,22 @@ bool check_file(Typer *typer, AstFile *ast_file) {
 
     bool all_ok = register_methods_early(typer, ast_file); // A method with an error is skipped
 
+    // The names of the imported files and used namespaces are in its scope before any of them is checked, as one of them
+    // can import this file back. E.g std/prelude/collections.sd as the main file: a file that it imports through others
+    // uses List<T>, whose 'allocator: Allocator' is looked up from collections.sd before its import of allocator.sd is checked
+    for (int i = 0; i < ast_file->imports.count; i++) {
+        AstImport *import = ((AstImport **)ast_file->imports.items)[i];
+        if (import->failed || import->declarations_imported) continue;
+        if (import->kind == IMPORT_USE && import->ns) {
+            add_used_namespace(typer, ast_file, import->ns); // e.g 'use c;' of allocator.sd
+            continue;
+        }
+        if (import->kind != IMPORT_FILE || !import->imported_file) continue;
+        import->declarations_imported = true;
+        import->declarations_ok       = import_declarations(typer->parser, import, ast_file);
+        if (!import->declarations_ok) all_ok = false;
+    }
+
     // The imports first, as the other files of the namespace, which are checked next, can use declarations of this one
     // that need them, e.g 'use c;' of std/fmt/print.sd when it is the main file
     for (int i = 0; i < ast_file->statements.count; i++) {
@@ -571,6 +589,20 @@ bool add_imported_name(Typer *typer, AstFile *file, AstIdentifier *ident, AstImp
     return true;
 }
 
+// The declarations of a namespace in the scope of a file, for 'use math;'. The private ones only in the same namespace
+void add_used_namespace(Typer *typer, AstFile *file, Namespace *ns) {
+    bool same_namespace = file->ns == ns;
+    for (int i = 0; i < ns->files.count; i++) {
+        AstFile *ns_file = ((AstFile **)ns->files.items)[i];
+        for (int j = 0; j < ns_file->scope->identifiers.count; j++) {
+            AstIdentifier *ident = ((AstIdentifier **)ns_file->scope->identifiers.items)[j];
+            if (!is_declared_by(ident, ns_file)) continue;
+            if ((ident->flags & IDENTIFIER_IS_PRIVATE) && !same_namespace) continue;
+            add_used_identifier(typer, file, ident);
+        }
+    }
+}
+
 bool check_namespace_import(Typer *typer, AstImport *import) {
     Parser    *parser = typer->parser;
     AstFile   *file   = typer->current_file;
@@ -580,8 +612,6 @@ bool check_namespace_import(Typer *typer, AstImport *import) {
     bool ok = check_namespace_files(typer, ns);
     if (!ok) return false;
     typer_restore_state(typer, current_state);
-
-    bool same_namespace = file->ns == ns;
 
     // The path is a use of the namespace, or of the declaration for 'import math.sin;'
     char *last_part = strrchr(import->path, '.') ? strrchr(import->path, '.') + 1 : import->path;
@@ -593,15 +623,7 @@ bool check_namespace_import(Typer *typer, AstImport *import) {
     }
 
     if (import->kind == IMPORT_USE) {
-        for (int i = 0; i < ns->files.count; i++) {
-            AstFile *ns_file = ((AstFile **)ns->files.items)[i];
-            for (int j = 0; j < ns_file->scope->identifiers.count; j++) {
-                AstIdentifier *ident = ((AstIdentifier **)ns_file->scope->identifiers.items)[j];
-                if (!is_declared_by(ident, ns_file)) continue;
-                if ((ident->flags & IDENTIFIER_IS_PRIVATE) && !same_namespace) continue;
-                add_used_identifier(typer, file, ident);
-            }
-        }
+        add_used_namespace(typer, file, ns);
         return true;
     }
 
@@ -667,6 +689,7 @@ bool check_import(Typer *typer, AstImport *import) {
     bool ok;
 
     // Copy all the declarations from the imported file into the current files scope
+    if (import->declarations_imported) return import->declarations_ok;
     ok = import_declarations(typer->parser, import, typer->current_file);
     if (!ok) {
         return false;
@@ -2500,9 +2523,11 @@ Type *resolve_type(Typer *typer, Type *type) {
     if (type->kind == TYPE_STRUCT) {
         if (type->flags & TYPE_IS_FULLY_SIZED) {
             return type;
-        } else {
-            XXX;
         }
+        // A struct whose members have an error. That is reported, so its uses fail without another error
+        TypeStruct *struct_type = (TypeStruct *)type;
+        if (struct_type->node && (struct_type->node->head.flags & AST_FLAG_HAS_ERRORS) && errors_reported()) return NULL;
+        XXX;
     }
 
     report_error_ast(typer->parser, LABEL_ERROR, (Ast *) type, "Compiler Error: Failed to resolve type %s", type_to_str(type));
@@ -8269,6 +8294,13 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         }
 
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->left), "Cannot access into expression of type %s", type_to_str(type_lhs));
+        return NULL;
+    }
+
+    // e.g a string member of a struct whose members have an error, so its type isn't resolved. That is reported
+    if (struct_type == NULL) {
+        if (errors_reported()) return NULL;
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->left), "Compiler Error: The type %s has no members to look up", type_to_str(type_lhs));
         return NULL;
     }
 

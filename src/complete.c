@@ -1191,6 +1191,44 @@ static bool complete_compile_time_if(const char *text, int start) {
     return true;
 }
 
+// The type of a literal that ends at 'end', e.g "Hellope", 'a', 42, 0xff, 2.5 or true. The type that 'x := literal' gives. NULL if
+// there is no literal there
+static Type *literal_type_before(Typer *typer, const char *text, int end) {
+    if (end <= 0) return NULL;
+    char last = text[end - 1];
+
+    if (last == '"') {
+        // The string must start the literal, not end one, e.g the " of 'f("a", b).'
+        int quotes = 0;
+        for (int p = end - 1; p >= 0 && text[p] != '\n'; p--) {
+            if (text[p] == '"' && (p == 0 || text[p - 1] != '\\')) quotes++;
+        }
+        if (quotes % 2 != 0) return NULL;
+        Type *string = typer->type_string ? (Type *)typer->type_string : (Type *)type_defn_string;
+        return string;
+    }
+    if (last == '\'' && start_of_character(text, end - 1) != end - 1) return primitive_type(PRIMITIVE_CHAR);
+
+    // A number: digits (and letters of hex, and _ and a '.' of a float) back to where it starts with a digit
+    int start = end;
+    while (start > 0 && (is_name_char(text[start - 1]) || (text[start - 1] == '.' && start > 1 && isdigit((unsigned char)text[start - 2])))) start--;
+    if (start == end) return NULL;
+    if (isdigit((unsigned char)text[start])) {
+        bool is_hex = end - start > 1 && text[start] == '0' && (text[start + 1] == 'x' || text[start + 1] == 'b');
+        for (int p = start; p < end; p++) {
+            if (text[p] == '.' || (!is_hex && (text[p] == 'e' || text[p] == 'E'))) return primitive_type(PRIMITIVE_FLOAT);
+        }
+        return primitive_type(PRIMITIVE_INT);
+    }
+
+    // true and false
+    int length = end - start;
+    if ((length == 4 && strncmp(&text[start], "true", 4) == 0) || (length == 5 && strncmp(&text[start], "false", 5) == 0)) {
+        return primitive_type(PRIMITIVE_BOOL);
+    }
+    return NULL;
+}
+
 void complete_program(Typer *typer, DynamicArray files) {
     program_completion.items = sb_init(4096);
     program_completion.item_count = 0;
@@ -1233,6 +1271,13 @@ void complete_program(Typer *typer, DynamicArray files) {
     // a?.b: the members of the value inside the optional
     bool question = start > 1 && file->text[start - 2] == '?';
     int  dot      = question ? start - 2 : start - 1;
+
+    // A literal before it, e.g "Hellope".hash() or 42.hash(): the members of its type
+    Type *literal = question ? NULL : literal_type_before(typer, file->text, dot);
+    if (literal) {
+        add_members(typer, literal);
+        return;
+    }
 
     // A '.' with nothing before it, e.g 'status == .open', is a value of the type that is wanted there
     char before_dot = dot > 0 ? file->text[dot - 1] : 0;

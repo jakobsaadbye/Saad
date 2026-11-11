@@ -24,7 +24,7 @@ Everything it does:
 * errors and warnings while typing, also for text that isn't saved
 * go to definition, find references and hover (the signature and the doc comment)
 * the outline of a file, and the symbols of the workspace (Ctrl+T in VS Code)
-* completion: the members after a `.`, the names in scope, the values of an enum or union after a `.` where the type is
+* completion: the members after a `.` (also after a literal, e.g `"Hellope".`), the names in scope, the values of an enum or union after a `.` where the type is
   known (`status == .`, `case .`, `f(.`), the fields of a struct literal that aren't written yet, and the parameters of a
   call as named arguments (`fmt.print("hi", ne` gives `newline: `)
 * signature help: the parameters of the call that is being written

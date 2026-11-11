@@ -221,6 +221,14 @@ def main():
     items = complete_at("    c.grow(by: 1|);")
     check(not any(i.get("insertText") == "by: " for i in items), f"no parameter names for the value of an argument: {[i['label'] for i in items][:5]}")
 
+    print("completion after a literal")
+    labels = [i["label"] for i in complete_at('    h := "Hellope".|')]
+    check("hash" in labels and "len" in labels, f"the members of a string literal: {labels}")
+    labels = [i["label"] for i in complete_at("    h := 42.|")]
+    check("hash" in labels, f"the methods of an int literal: {labels}")
+    labels = [i["label"] for i in complete_at("    h := 'x'.|")]
+    check("isDigit" in labels, f"the methods of a character literal: {labels}")
+
     print("completion of calls and of namespaces that aren't imported")
     items = {i["label"]: i for i in complete_at("    c.gr|")}
     grow, area = items.get("grow", {}), items.get("area", {})

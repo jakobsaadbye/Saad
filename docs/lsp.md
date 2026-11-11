@@ -196,6 +196,8 @@ before the position stays the same. Then the text before the position says what 
   enum, the variants of a union), and a value the members of its type: fields and methods, the methods of the generic
   struct that aren't made yet for an instance, the methods of strings, numbers and enums, and `count`, `data` and the
   methods of slices. A pointer is followed to what it points to.
+* After a literal and a `.`, e.g `"Hellope".` or `42.`, the members of the type that `x := literal` gives it: a string, a
+  character, an int, a float or a bool (`literal_type_before()`).
 * A `.` with nothing before it is a value of the type that is wanted there, so it gives the values of an enum or the
   variants of a union. The type comes from what is before it: `a == .` and `a != .` (the type of `a`), `a = .` and
   `a: Status = .` (the type of the place), `case .` (the type of what the switch is on), `f(x, .` (the type of the
