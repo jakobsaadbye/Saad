@@ -511,6 +511,84 @@ static void add_namespace_declarations(Namespace *ns, AstFile *from) {
     }
 }
 
+//
+// Attributes, e.g '@pri|' over a declaration or '@json.|'. The attributes of the language, and the structs marked with @attribute
+//
+
+static bool is_attribute_struct(AstIdentifier *ident) {
+    AstIdentifier *declared = ident->imported_from ? ident->imported_from : ident;
+    if (!(declared->flags & IDENTIFIER_IS_NAME_OF_STRUCT) || !declared->type || declared->type->kind != TYPE_STRUCT) return false;
+    AstStruct *node = ((TypeStruct *)declared->type)->node;
+    return node && node->is_attribute;
+}
+
+static bool namespace_has_attributes(Namespace *ns, AstFile *from) {
+    for (int i = 0; i < ns->files.count; i++) {
+        AstFile *file = ((AstFile **)ns->files.items)[i];
+        for (int j = 0; j < file->scope->identifiers.count; j++) {
+            AstIdentifier *ident = ((AstIdentifier **)file->scope->identifiers.items)[j];
+            if (!is_declared_by(ident, file) || ((ident->flags & IDENTIFIER_IS_PRIVATE) && from->ns != ns)) continue;
+            if (is_attribute_struct(ident)) return true;
+        }
+    }
+    return false;
+}
+
+// The attribute structs of a namespace, after '@json.'
+static void add_namespace_attributes(Namespace *ns, AstFile *from) {
+    DynamicArray seen = da_init(16, sizeof(char *));
+    for (int i = 0; i < ns->files.count; i++) {
+        AstFile *file = ((AstFile **)ns->files.items)[i];
+        for (int j = 0; j < file->scope->identifiers.count; j++) {
+            AstIdentifier *ident = ((AstIdentifier **)file->scope->identifiers.items)[j];
+            if (!is_declared_by(ident, file) || ((ident->flags & IDENTIFIER_IS_PRIVATE) && from->ns != ns)) continue;
+            if (is_attribute_struct(ident) && !already_added(&seen, ident->name)) add_identifier(ident);
+        }
+    }
+}
+
+// After '@': the attributes of the language that the place takes, the attribute structs in scope, and the namespaces that have some
+// True if the offset is directly in the body of a struct or union, e.g over a member. Read from the text, as the attribute
+// that is being written can keep the struct from being parsed
+static bool in_struct_body(const char *text, int offset) {
+    int depth = 0;
+    for (int p = offset - 1; p >= 0; p--) {
+        if (text[p] == '}') depth++;
+        if (text[p] != '{') continue;
+        if (depth-- > 0) continue;
+        int line = p;
+        while (line > 0 && text[line - 1] != '\n') line--;
+        for (int q = line; q + 6 <= p; q++) {
+            if (strncmp(&text[q], "struct", 6) == 0 || strncmp(&text[q], "union", 5) == 0) return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+static void add_attributes(AstFile *file, AstBlock *scope, int offset) {
+    bool in_struct = in_struct_body(file->text, offset);
+    if (in_struct) {
+        add_item("embed", "keyword", "@embed: the members and methods of the member are reached as the struct's own", NULL);
+    } else {
+        add_item("private", "keyword", "@private: only the namespace (or the file) can use it", NULL);
+        add_item_inserting("deprecated", "keyword", "@deprecated(\"message\"): a warning where it is used", NULL, "deprecated(\"\")");
+        add_item("attribute", "keyword", "@attribute: the struct's values can be given as attributes", NULL);
+        add_item("threadLocal", "keyword", "@threadLocal: each thread has its own global variable", NULL);
+    }
+
+    DynamicArray seen = da_init(32, sizeof(char *));
+    for (AstBlock *block = scope; block; block = block->parent) {
+        for (int i = 0; i < block->identifiers.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)block->identifiers.items)[i];
+            if (already_added(&seen, ident->name)) continue;
+            if (is_attribute_struct(ident)) add_identifier(ident);
+            else if ((ident->flags & IDENTIFIER_IS_NAMESPACE) && ident->ns && namespace_has_attributes(ident->ns, file)) add_identifier(ident);
+        }
+        if (block == file->scope) break;
+    }
+}
+
 static const char *keywords[] = {
     "if", "else", "for", "while", "in", "switch", "case", "return", "defer", "try", "catch", "throw", "break", "continue", "struct", "union", "interface", "enum",
     "method", "import", "use", "namespace", "extern", "as", "new", "assert", "typeof", "sizeof", "true", "false", "null",
@@ -1256,6 +1334,16 @@ void complete_program(Typer *typer, DynamicArray files) {
     if (complete_compile_time_if(file->text, start)) return;
 
     bool after_dot = start > 0 && file->text[start - 1] == '.' && !(start > 1 && file->text[start - 2] == '.');
+
+    // An attribute, e.g '@pri' or '@json.Fi': the chain before the name starts with '@'
+    int chain_start = start;
+    while (chain_start > 0 && (is_name_char(file->text[chain_start - 1]) || file->text[chain_start - 1] == '.')) chain_start--;
+    bool in_attribute = chain_start > 0 && file->text[chain_start - 1] == '@';
+    if (in_attribute && !after_dot) {
+        add_attributes(file, scope, chain_start);
+        return;
+    }
+
     if (!after_dot) {
         // The name of a field in a struct literal, e.g 'Point{x: 1, |'
         Literal literal;
@@ -1298,7 +1386,8 @@ void complete_program(Typer *typer, DynamicArray files) {
     if (target.ns && target.ns->is_standard && target.ns != file->ns && !lookup_visible(scope, segments[0].name)) {
         program_completion.missing_import = target.ns->name;
     }
-    if (target.ns)             add_namespace_declarations(target.ns, file);
+    if (target.ns && in_attribute) add_namespace_attributes(target.ns, file);
+    else if (target.ns)        add_namespace_declarations(target.ns, file);
     else if (target.type_name) add_static_members(target.type_name);
     else                       add_members(typer, target.type);
 }

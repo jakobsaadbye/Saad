@@ -229,6 +229,19 @@ def main():
     labels = [i["label"] for i in complete_at("    h := 'x'.|")]
     check("isDigit" in labels, f"the methods of a character literal: {labels}")
 
+    print("completion of attributes")
+    def complete_at_end(lines, line, character):
+        changed = text + "\n" + "\n".join(lines) + "\n"
+        client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 31}, "contentChanges": [{"text": changed}]})
+        first = changed.count("\n") - len(lines)
+        m = client.request("textDocument/completion", {"textDocument": doc, "position": {"line": first + line, "character": character}})
+        return [i["label"] for i in m["result"]]
+    labels = complete_at_end(["@pr", "later :: () {}"], 0, 3)
+    check("private" in labels and "deprecated" in labels and "embed" not in labels, f"the attributes over a function: {labels}")
+    labels = complete_at_end(["Later :: struct {", "    @e", "    x: int;", "}"], 1, 6)
+    check(labels[:1] == ["embed"] and "private" not in labels, f"the attributes over a member: {labels}")
+    client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 32}, "contentChanges": [{"text": text}]})
+
     print("completion of calls and of namespaces that aren't imported")
     items = {i["label"]: i for i in complete_at("    c.gr|")}
     grow, area = items.get("grow", {}), items.get("area", {})

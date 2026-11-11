@@ -196,6 +196,9 @@ before the position stays the same. Then the text before the position says what 
   enum, the variants of a union), and a value the members of its type: fields and methods, the methods of the generic
   struct that aren't made yet for an instance, the methods of strings, numbers and enums, and `count`, `data` and the
   methods of slices. A pointer is followed to what it points to.
+* After `@`, the attributes (`add_attributes()`): `@embed` in the body of a struct, otherwise `@private`, `@deprecated`,
+  `@attribute` and `@threadLocal`, and then the structs marked with `@attribute` in scope and the namespaces that have
+  some. After `@json.`, the attribute structs of the namespace, e.g `Field`. `@` is a trigger character of the server.
 * After a literal and a `.`, e.g `"Hellope".` or `42.`, the members of the type that `x := literal` gives it: a string, a
   character, an int, a float or a bool (`literal_type_before()`).
 * A `.` with nothing before it is a value of the type that is wanted there, so it gives the values of an enum or the
