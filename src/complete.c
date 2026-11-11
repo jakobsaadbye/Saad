@@ -847,6 +847,67 @@ static void add_literal_fields(Literal *literal, const char *text, int offset) {
 }
 
 //
+// Named arguments, e.g 'fmt.print("hi", ne|' gives 'newline: '. The parameters of the call that aren't given by name yet
+//
+
+// True if the name that starts at 'start' starts an argument, e.g after the '(' or a ',' of a call, not after 'name:'
+static bool starts_argument(const char *text, int start) {
+    int p = start - 1;
+    while (p >= 0 && isspace((unsigned char)text[p])) p--;
+    return p >= 0 && (text[p] == '(' || text[p] == ',');
+}
+
+// The number of arguments before 'end' that are given by position, e.g 1 for 'area(2, label: "x", |'
+static int positional_arguments(const char *text, int open, int end) {
+    int count = 0;
+    int depth = 0;
+    bool at_start = true;
+    for (int p = open + 1; p < end; p++) {
+        char c = text[p];
+        if (depth == 0 && at_start && !isspace((unsigned char)c) && c != ',') {
+            // A named argument starts with 'name:'
+            at_start = false;
+            int q = p;
+            while (q < end && is_name_char(text[q])) q++;
+            while (q < end && isspace((unsigned char)text[q])) q++;
+            bool named = q > p && q < end && text[q] == ':' && text[q + 1] != ':';
+            if (!named) count++;
+        }
+        if (c == '"') { // Skips a string
+            for (p++; p < end && !(text[p] == '"' && text[p - 1] != '\\'); p++) {}
+            continue;
+        }
+        if (c == '(' || c == '[' || c == '{') depth++;
+        if (c == ')' || c == ']' || c == '}') depth--;
+        if (depth == 0 && c == ',') at_start = true;
+    }
+    return count;
+}
+
+static void add_parameter_names(Typer *typer, AstFile *file, AstBlock *scope, int start) {
+    if (!starts_argument(file->text, start)) return;
+    Call call;
+    if (!call_at(typer, file, scope, start, &call)) return;
+    int argument;
+    int open = open_paren_of_call(file->text, start, &argument);
+    if (open < 0) return;
+
+    int first = (call.on_value && call.func->is_method) ? 1 : 0; // The receiver of a method called on a value isn't an argument
+    int given = positional_arguments(file->text, open, start);  // The first parameters, up to a variadic one, which takes the rest
+    for (int i = first; i < call.func->parameters.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)call.func->parameters.items)[i];
+        if (param->type && param->type->kind == TYPE_VARIADIC) given = 0;
+        if (i - first < given) continue;
+        if (!is_visible_name(param->name) || (param->head.flags & AST_FLAG_COMPILER_GENERATED)) continue;
+        if (strcmp(param->name, "self") == 0 && call.func->self_struct) continue;
+        if (field_is_written(file->text, open, start, param->name)) continue;
+        char insert[160];
+        snprintf(insert, sizeof(insert), "%s: ", param->name);
+        add_item_inserting(param->name, "parameter", parameter_text(param), NULL, insert);
+    }
+}
+
+//
 // A '.' with nothing before it, e.g 'status == .open'. Its type comes from where it is written
 //
 
@@ -1164,6 +1225,7 @@ void complete_program(Typer *typer, DynamicArray files) {
             add_literal_fields(&literal, file->text, start);
             return;
         }
+        add_parameter_names(typer, file, scope, start);
         add_names_in_scope(file, scope, start);
         return;
     }
