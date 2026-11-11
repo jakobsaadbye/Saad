@@ -55,6 +55,7 @@ it has, so a function can take any collection, e.g `total :: (xs: Iterable<int>)
 
 ```odin
 xs: [..]int = [1, 2, 3];
+ys := List<int>.make(64);   // empty, with room for 64 values
 xs.add(4);
 xs.insertAt(0, 0);
 first := xs.removeAt(0);
@@ -75,6 +76,9 @@ total := sum(xs);   // sum :: (values: []int) -> int
 | `isEmpty()`, `indexOf(value) -> i64` (-1 if missing), `contains(value)` | |
 | `reverse()`, `copy() -> List<T>` | |
 | `reserve(capacity)`, `clear()` (keeps the memory), `free()` | |
+
+`List<T>.make(capacity := 2) -> List<T>` makes an empty list with room for `capacity` values, so adding that many doesn't
+allocate again.
 
 Members: `data: *T`, `count: i64`, `capacity: i64`, `allocator: Allocator`. The capacity starts at
 4 and doubles.

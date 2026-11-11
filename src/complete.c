@@ -113,6 +113,19 @@ static int read_chain(const char *text, int end, Segment *segments) {
             at = p;
         }
 
+        // The type arguments of an instance of a generic struct, e.g the <int> of List<int>.make. Its constants are those of the generic struct
+        if (segment.call == false && segment.index == false && at > 0 && text[at - 1] == '>') {
+            int depth = 0;
+            int p = at - 1;
+            for (; p >= 0; p--) {
+                if (text[p] == '>') depth++;
+                if (text[p] == '<' && --depth == 0) break;
+                if (text[p] == ';' || text[p] == '{' || text[p] == '}' || text[p] == '\n') return -1;
+            }
+            if (p < 0) return -1;
+            at = p;
+        }
+
         int name_end = at;
         while (at > 0 && is_name_char(text[at - 1])) at--;
         int length = name_end - at;
@@ -1161,7 +1174,7 @@ void complete_program(Typer *typer, DynamicArray files) {
 
     // A '.' with nothing before it, e.g 'status == .open', is a value of the type that is wanted there
     char before_dot = dot > 0 ? file->text[dot - 1] : 0;
-    if (!question && !is_name_char(before_dot) && before_dot != ')' && before_dot != ']') {
+    if (!question && !is_name_char(before_dot) && before_dot != ')' && before_dot != ']' && before_dot != '>') {
         add_values_of(expected_type_at(typer, file, scope, start - 1));
         return;
     }

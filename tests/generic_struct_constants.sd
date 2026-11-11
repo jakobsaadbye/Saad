@@ -1,0 +1,80 @@
+use fmt;
+
+// Constants and functions declared inside a generic struct. Each instance has its own, with the type arguments put in
+
+Pair :: struct <A, B> {
+    first:  A;
+    second: B;
+
+    Empty :: Pair<A, B>{};
+    Two   :: [Empty, Empty]; // Constants can use the other constants
+
+    of :: (first: A, second: B) -> Pair<A, B> {
+        return Pair<A, B>{first, second};
+    }
+
+    // A method can use the constants of its own instance
+    swapped :: method () -> Pair<B, A> {
+        return Pair<B, A>.of(self.second, self.first);
+    }
+
+    // A function with type parameters of its own
+    convert :: <C>(value: C) -> Pair<A, B> {
+        return Pair<A, B>{value as A, value as B};
+    }
+
+    // Only fails for the instances it is used with, e.g not for Pair<string, int>
+    Limit :: 10 as A;
+}
+
+Box :: struct <T> {
+    value: T;
+
+    make :: (value: T, times := 2) -> Box<T> {
+        return Box<T>{value * times};
+    }
+}
+
+IntBox :: Box<int>;
+
+// In a generic function, the type arguments can be its type parameters
+twice :: <T>(value: T) -> Pair<T, T> {
+    return Pair<T, T>.of(value, value);
+}
+
+main :: () {
+    p := Pair<int, string>.of(1, "one");
+    assert(p.first == 1 && p.second == "one");
+
+    q := p.swapped();
+    assert(q.first == "one" && q.second == 1);
+
+    e := Pair<int, f64>.Empty;
+    assert(e.first == 0 && e.second == 0.0);
+    assert(Pair<int, int>.Two.count == 2);
+
+    // Instances have their own functions
+    assert(Pair<int, f64>.convert(7).second == 7.0);
+    assert(Pair<f64, int>.convert(7).first == 7.0);
+    assert(Pair<u8, int>.convert<f64>(2.5).first == 2);
+
+    assert(Pair<int, string>.Limit == 10);
+    assert(Pair<f64, string>.Limit == 10.0);
+
+    // Default arguments, and a type alias of an instance
+    assert(Box<int>.make(3).value == 6);
+    assert(Box<f64>.make(1.5, times: 3).value == 4.5);
+    assert(IntBox.make(5).value == 10);
+
+    t := twice(2.5);
+    assert(t.first == 2.5 && t.second == 2.5);
+
+    // Nested type arguments
+    n := Pair<Pair<int, int>, [..]int>.of(Pair<int, int>.of(1, 2), [3, 4]);
+    assert(n.first.second == 2 && n.second.count == 2);
+
+    // In a condition
+    if Pair<int, int>.Empty.first < 1 {
+        print("%", p);
+    }
+}

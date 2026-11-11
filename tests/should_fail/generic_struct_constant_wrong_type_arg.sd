@@ -1,0 +1,12 @@
+// expect-error: can not be casted to string
+// expect-error: while checking 'Limit' of 'Box<string>' for this use
+
+Box :: struct <T> {
+    value: T;
+    Limit :: 10 as T;
+}
+
+main :: () {
+    a := Box<int>.Limit;    // Fine
+    b := Box<string>.Limit;
+}

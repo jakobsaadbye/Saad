@@ -133,7 +133,8 @@ Future development
   [x] Explicit type arguments at call sites e.g max<f64>(a, b)
   [] Generic functions as values, e.g f := max<int>; (calls can give type arguments, values not yet)
   [] Constraints on type parameters
-  [] Constants and function type members in generic structs
+  [x] Constants in generic structs e.g List<int>.make(64)
+  [] Function type members in generic structs
   [x] Type aliases e.g Byte :: u8; MyList :: List<int>
   [] Generic type aliases e.g Pair2<T> :: Pair<T, T>
 

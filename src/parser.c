@@ -2866,12 +2866,6 @@ AstStruct *parse_struct_defn(Parser *parser) {
     struct_defn->members    = scope;
     struct_defn->methods    = make_empty_struct_scope(parser, struct_defn);
 
-    if (struct_defn->type_params.count > 0 && struct_defn->static_members->identifiers.count > 0) {
-        AstIdentifier *constant = ((AstIdentifier **)struct_defn->static_members->identifiers.items)[0];
-        report_error_ast(parser, LABEL_ERROR, (Ast *)constant, "Constants inside generic structs are not yet supported");
-        return NULL;
-    }
-
     if (scope->identifiers.count == 0) {
         struct_defn->is_static_struct = true;
         // report_error_ast(parser, LABEL_ERROR, (Ast *)(struct_defn), "Structs must have atleast one member");
@@ -3741,6 +3735,23 @@ AstFunctionDefn *parse_function_defn(Parser *parser) {
             }
         }
 
+        // A function constant inside a generic struct has the type parameters of the struct e.g 'make :: (capacity := 2) -> List<T>'
+        AstBlock  *around = parser->current_scope;
+        AstStruct *constant_of = !func_is_method && around && around->kind == BLOCK_DECLARATIVE ? around->belongs_to_struct : NULL;
+        if (constant_of) {
+            for (int i = 0; i < func_defn->type_params.count; i++) {
+                AstIdentifier *own = ((AstIdentifier **)func_defn->type_params.items)[i];
+                for (int j = 0; j < constant_of->type_params.count; j++) {
+                    AstIdentifier *of_struct = ((AstIdentifier **)constant_of->type_params.items)[j];
+                    if (strcmp(own->name, of_struct->name) == 0) {
+                        report_error_ast(parser, LABEL_ERROR, (Ast *)own, "Type parameter '%s' is already a type parameter of '%s'", own->name, constant_of->identifier->name);
+                        report_error_ast(parser, LABEL_HINT, NULL, "Leave out <%s>. A function declared inside a generic struct has the type parameters of the struct, as it is used on an instance e.g %s<int>.name(...)", own->name, constant_of->identifier->name);
+                        return NULL;
+                    }
+                }
+            }
+        }
+
         if (parser->inside_extern_block) {
             report_error_token(parser, LABEL_ERROR, next, "External C functions cannot be generic");
             return NULL;
@@ -3931,6 +3942,54 @@ bool reparse_default_values(Parser *parser, AstDeclaration *generic_decl, AstBlo
     parser->current_file            = saved_file;
     parser->split_shift_right_token = saved_split_token;
     return ok;
+}
+
+// Parses a constant declared inside a generic struct again for an instance of it e.g 'make :: (capacity := 2) -> List<T>'
+// or 'Empty :: List<T>{}'. 'scope' is the members of the instance, below the scope that binds its type parameters, so the
+// constant is added to the static members of the instance
+AstDeclaration *reparse_struct_constant(Parser *parser, AstDeclaration *generic_decl, AstBlock *scope) {
+    int              saved_token_index        = parser->current_token_index;
+    AstBlock        *saved_scope              = parser->current_scope;
+    AstFile         *saved_file               = parser->current_file;
+    AstFunctionDefn *saved_enclosing_function = parser->enclosing_function;
+    bool             saved_statement_header   = parser->inside_statement_header;
+    bool             saved_parameter_list     = parser->inside_parameter_list;
+    bool             saved_argument_list      = parser->inside_argument_list;
+    int              saved_split_token        = parser->split_shift_right_token;
+
+    parser->current_token_index     = generic_decl->first_token_index;
+    parser->current_scope           = scope;
+    parser->current_file            = generic_decl->head.file;
+    parser->enclosing_function      = NULL;
+    parser->inside_statement_header = false;
+    parser->inside_parameter_list   = false;
+    parser->inside_argument_list    = false;
+    parser->split_shift_right_token = 0;
+
+    // A syntax error in it was reported when the file was parsed, so it isn't reported again
+    jmp_buf  on_syntax_error;
+    jmp_buf *saved_syntax_error = parser->syntax_error;
+    parser->syntax_error = &on_syntax_error;
+    diagnostics.muted += 1;
+    int skipped = parser->skipped_statements;
+    AstDeclaration *volatile decl = NULL;
+    if (setjmp(on_syntax_error) == 0) {
+        decl = parse_declaration(parser);
+    }
+    if (parser->skipped_statements != skipped) decl = NULL;
+    diagnostics.muted -= 1;
+    parser->syntax_error = saved_syntax_error;
+
+    parser->current_token_index     = saved_token_index;
+    parser->current_scope           = saved_scope;
+    parser->current_file            = saved_file;
+    parser->enclosing_function      = saved_enclosing_function;
+    parser->inside_statement_header = saved_statement_header;
+    parser->inside_parameter_list   = saved_parameter_list;
+    parser->inside_argument_list    = saved_argument_list;
+    parser->split_shift_right_token = saved_split_token;
+
+    return decl;
 }
 
 // True if the next token is the first on its line
@@ -4336,6 +4395,7 @@ AstDeclaration *parse_declaration(Parser *parser) {
 
     decl->idents = da_init(2, sizeof(AstIdentifier *));
     decl->values = da_init(2, sizeof(AstExpr *));
+    decl->first_token_index = parser->current_token_index; // Instances of generic structs parse their constants again from here
 
     // Parse the identifiers
     Token next = {0};
@@ -4458,6 +4518,11 @@ AstDeclaration *parse_declaration(Parser *parser) {
                     ident->flags |= func_defn->identifier->flags | IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN;
                     if (func_defn->is_method) {
                         ident->flags |= IDENTIFIER_IS_STRUCT_METHOD;
+                    }
+
+                    // A function declared inside a struct e.g 'make :: (capacity := 2) -> List<T>'. It is named after the struct
+                    if (parser->current_scope->belongs_to_struct && !func_defn->is_method) {
+                        func_defn->static_struct = parser->current_scope->belongs_to_struct;
                     }
 
                     // Bind the function definitions' identifier to this constant identifier
@@ -4853,6 +4918,41 @@ static AstFunctionDefn *parse_short_lambda(Parser *parser) {
     return func_defn;
 }
 
+// The name of an instance of a generic struct in an expression e.g the List<int> of List<int>.make(16). It is an identifier
+// that names an alias of the instance, which the compiler declares where it is used
+static AstExpr *parse_generic_instance_name(Parser *parser) {
+    Token name_token = peek_next_token(parser);
+    add_referenced_root(parser, name_token.as_value.value.identifier.name);
+
+    Type *type = parse_type(parser);
+    if (!type) return NULL;
+
+    AstDeclaration *decl = ast_allocate(parser, sizeof(AstDeclaration));
+    decl->head.kind  = AST_DECLARATION;
+    decl->head.file  = parser->current_file;
+    decl->head.start = type->head.start;
+    decl->head.end   = type->head.end;
+    decl->head.flags = AST_FLAG_COMPILER_GENERATED;
+    decl->idents     = da_init(1, sizeof(AstIdentifier *));
+    decl->values     = da_init(1, sizeof(AstExpr *));
+    decl->type       = type;
+    decl->flags      = DECLARATION_CONSTANT | DECLARATION_TYPE_ALIAS | DECLARATION_IS_COMPILER_GENERATED;
+
+    AstIdentifier *alias = make_identifier_from_string(parser, name_token.as_value.value.identifier.name, NULL);
+    alias->head.start = type->head.start;
+    alias->head.end   = type->head.end;
+    alias->head.flags |= AST_FLAG_COMPILER_GENERATED;
+    alias->flags     |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_TYPE_ALIAS;
+    alias->decl       = decl;
+    alias->scope      = parser->current_scope;
+    da_append(&decl->idents, alias);
+
+    AstLiteral *literal = (AstLiteral *) make_literal_node(parser, name_token);
+    literal->head.head.end = type->head.end;
+    literal->as.value.identifier.resolved_identifier = alias;
+    return (AstExpr *) literal;
+}
+
 AstExpr *parse_leaf(Parser *parser) {
     Token t = peek_next_token(parser);
     if (t.type == TOKEN_LITERAL_BOOLEAN ||
@@ -5067,6 +5167,15 @@ AstExpr *parse_leaf(Parser *parser) {
 
     if (t.type == TOKEN_NEW) {
         return parse_new(parser);
+    }
+
+    // A constant of an instance of a generic struct e.g List<int>.make(16). The instance is named by a type alias that the
+    // compiler declares, so it is read like 'IntList.make(16)' with 'IntList :: List<int>;'
+    if (t.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == '<') {
+        int end = scan_type_arguments(parser, 1);
+        if (end != -1 && peek_token(parser, end).type == '.') {
+            return parse_generic_instance_name(parser);
+        }
     }
 
     if (t.type == TOKEN_LITERAL_IDENTIFIER) {

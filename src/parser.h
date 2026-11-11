@@ -74,6 +74,7 @@ TypeStruct     *generate_struct_for_slice(Parser *parser, Type *type_data);
 AstFunctionDefn *reparse_generic_function(Parser *parser, AstFunctionDefn *generic, AstBlock *scope);
 AstFunctionDefn *reparse_short_lambda(Parser *parser, AstFunctionDefn *lambda, AstBlock *scope);
 bool            reparse_default_values(Parser *parser, AstDeclaration *generic_decl, AstBlock *scope, DynamicArray *values);
+AstDeclaration *reparse_struct_constant(Parser *parser, AstDeclaration *generic_decl, AstBlock *scope);
 TypeStruct     *generate_empty_struct_type(Parser *parser, char *name);
 TypePointer    *generate_pointer_to_type(Parser *parser, Type *type);
 TypeArray      *generate_slice_of(Parser *parser, Type *type);

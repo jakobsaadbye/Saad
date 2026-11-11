@@ -1,0 +1,11 @@
+// expect-error: 'Box' is generic, so its constants are of its instances
+// expect-error: Give it type arguments e.g Box<int>.make
+
+Box :: struct <T> {
+    value: T;
+    make :: () -> Box<T> { return Box<T>{}; }
+}
+
+main :: () {
+    b := Box.make();
+}

@@ -147,6 +147,33 @@ Map :: struct <K, V> {
   for a pointer receiver, `*x` for a value receiver called through a pointer. A non-addressable receiver like
   `make_map().set(k, v)` is put in a temporary whose address is passed, so changes to it are lost.
 
+## Constants in generic structs
+
+```odin
+List :: struct <T> {
+    ...
+    make  :: (capacity := 2) -> List<T> {...}   // has the T of the struct, so no <T> of its own
+    Empty :: List<T>{};
+}
+xs := List<int>.make(64);
+IntList :: List<int>;
+ys := IntList.make(8);
+```
+
+* A constant inside a generic struct (a value or a function) is a constant of each instance. The parser records the
+  first token of every declaration (`AstDeclaration.first_token_index`), and `instantiate_generic_struct()` parses the
+  constants again for the instance with `reparse_struct_constant()`, below the scope that binds the type parameters. So
+  each instance has its own copies in its `static_members`, like default values of members.
+* They are checked where they are first used (`check_instance_constant()`), not with the instance, so a constant that
+  only works for some type arguments, e.g `Limit :: 10 as T`, is only an error where it is used with the others. A
+  constant used by another constant, e.g `Two :: [Empty, Empty]`, is checked first.
+* `List<int>.make` in an expression: `parse_leaf()` reads `Name<...>` followed by a `.` as an identifier that names an
+  alias of the instance, which the compiler declares there (`parse_generic_instance_name()`). Its static members are then
+  found like those of `IntList :: List<int>;`. `List.make` without type arguments is an error with a hint.
+* A function declared inside a struct (`AstFunctionDefn.static_struct`) is named after the struct, e.g `Vec.make`, or
+  `List$int.make` for an instance, so the instances don't clash. It can have type parameters of its own, e.g
+  `convert :: <U>(value: U) -> Box<T>`, but not one with the name of a type parameter of the struct.
+
 ## Constraints
 
 A type parameter can be constrained to an interface, e.g `totalArea :: <S: Shape>(shapes: []S) -> f64`: a pointer to
@@ -155,7 +182,7 @@ instance are direct. See `docs/interfaces.md`.
 
 ## Not supported yet
 
-Generic functions as values, constraints of generic structs, constants and function type members in generic structs,
+Generic functions as values, constraints of generic structs, function type members in generic structs,
 and generic type aliases like `Pair2<T> :: Pair<T, T>`.
 
 ## Type aliases
