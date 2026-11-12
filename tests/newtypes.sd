@@ -1,0 +1,97 @@
+// newtype: a type made of another, e.g Meters :: newtype f64. It has the values and operators of f64, but is only equal to
+// itself, and has methods of its own
+
+use fmt;
+import json;
+
+Meters :: newtype f64;
+Feet   :: newtype f64;
+UserId :: newtype i64;
+Name   :: newtype string;
+Handle :: newtype *void;
+Km     :: newtype Meters;
+
+Color :: enum { red, green }
+Paint :: newtype Color;
+
+Vec2 :: struct {
+    x: f32;
+    y: f32;
+}
+sum :: method (v: Vec2) -> f32 { return v.x + v.y; }
+
+Position :: newtype Vec2;
+
+// Methods of their own
+toFeet :: method (m: Meters) -> Feet { return (m as f64 * 3.28084) as Feet; }
+shout  :: method (n: Name) -> string { return sprint("%!", n); }
+moved  :: method (p: Position, by: f32) -> Position { return Position{p.x + by, p.y + by}; }
+
+// A key of a Map needs a hash method, which a newtype gets by using the one of its type
+hash :: method (id: UserId) -> u64 { return (id as i64).hash(); }
+
+User :: struct {
+    id:   UserId;
+    name: string;
+}
+
+walk :: (distance: Meters) -> Meters { return distance + 1.5; }
+biggest :: <T>(a: T, b: T) -> T { if a > b { return a; } return b; }
+
+main :: () {
+    // Untyped numbers are numbers of the newtype, and its operators give it
+    d: Meters = 2;
+    d += 0.5;
+    d = d * 2 - 1;
+    d = -d;
+    assert(d == -4.0 && typeof(d) == "Meters");
+    assert(walk(2) == 3.5);
+    assert(walk(d) < 0.0);
+    assert(biggest(d, 1 as Meters) == 1.0);
+
+    // Casts to and from the type it is made of, and between newtypes of the same type
+    raw: f64 = d as f64;
+    assert(raw == -4.0);
+    f := (3 as Meters).toFeet();
+    assert(f > 9.8 && f < 9.9);
+    km: Km = 2;
+    assert((km as Meters) as f64 == 2.0);
+    assert((f as Meters) as f64 > 9.8);
+
+    // Strings have the members of a string
+    n: Name = "ada";
+    assert(n.shout() == "ada!" && n.len == 3);
+    assert(sprint("%", n) == "ada");
+
+    // Pointers and enums
+    h: Handle = null;
+    assert(h == null);
+    p: Paint = .green;
+    assert(p == .green && sprint("%", p) == ".green");
+
+    // Structs have the members, not the methods, of the struct
+    pos := Position{1, 2};
+    pos = pos.moved(1);
+    assert(pos.x == 2.0 && (pos as Vec2).sum() == 5.0);
+    assert(sprint("%", pos) == "Position{x: 2.000000, y: 3.000000}");
+
+    // As members, in lists and maps, in a switch, and in JSON
+    u := User{7, "ada"};
+    assert(json.encode(u) == "{\"id\":7,\"name\":\"ada\"}");
+    back := json.decode<User>("{\"id\": 9, \"name\": \"bo\"}");
+    assert(back.id == 9);
+    ids: [..]UserId;
+    ids.add(1);
+    ids.add(u.id);
+    total: UserId = 0;
+    for id in ids { total += id; }
+    assert(total == 8);
+    names: Map<UserId, string>;
+    names.set(u.id, u.name);
+    assert(names.get(7, "?") == "ada");
+    switch u.id {
+        case 7 { }
+        else { assert(false); }
+    }
+    print("newtypes ok");
+}

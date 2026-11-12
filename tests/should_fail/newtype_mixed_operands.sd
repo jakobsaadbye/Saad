@@ -1,0 +1,11 @@
+// expect-error: Cannot use a Meters with a Feet
+// expect-error: Meters is a newtype, which only goes with itself
+
+Meters :: newtype f64;
+Feet   :: newtype f64;
+
+main :: () {
+    m: Meters = 1;
+    f: Feet = 2;
+    total := m + f;
+}

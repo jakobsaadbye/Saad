@@ -4473,6 +4473,31 @@ AstDeclaration *parse_declaration(Parser *parser) {
         }
     }
 
+    // A new type made of another e.g Meters :: newtype f64; It has the values and the operators of f64, but is only equal to itself
+    else if (next.type == TOKEN_DOUBLE_COLON && peek_token(parser, 1).type == TOKEN_NEWTYPE) {
+        Token newtype_token = peek_token(parser, 1);
+        eat_token(parser);
+        eat_token(parser);
+
+        AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[0];
+        if (decl->idents.count != 1) {
+            report_error_token(parser, LABEL_ERROR, newtype_token, "A newtype declares one name, e.g Meters :: newtype f64;");
+            return NULL;
+        }
+        if (parser->current_scope->belongs_to_struct) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "A newtype can't be declared inside a struct");
+            report_error_ast(parser, LABEL_HINT, NULL, "Declare it at the top of the file, e.g %s :: newtype f64;", ident->name);
+            return NULL;
+        }
+
+        Type *type = parse_type(parser);
+        if (type == NULL) return NULL;
+
+        decl->flags |= DECLARATION_CONSTANT | DECLARATION_TYPE_ALIAS | DECLARATION_NEWTYPE;
+        decl->type   = type;
+        ident->flags |= IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_TYPE_ALIAS;
+    }
+
     // Type alias. e.g. Byte :: u8; or IntList :: List<int>;
     else if (next.type == TOKEN_DOUBLE_COLON && decl->idents.count == 1 && starts_type_alias(parser, 1)) {
         eat_token(parser);
