@@ -22,41 +22,35 @@ import mem;
 import allocators;
 import errors;
 
-// What a database implements. The handles are the driver's own, e.g a PGconn and a PGresult of libpq.
-// Values are text, as written by the database, and parameters are given as text too
-Driver :: struct {
-    name: string;
-
-    // Runs the SQL with the parameters ($1, $2, ...). A null parameter is NULL. On an error, the result is
-    // null and the error is written to 'err', allocated with malloc
-    execute: (conn: *void, sql: c.string, params: []c.string, err: *string) -> *void;
-
-    rowCount:    (result: *void) -> i64;
-    columnCount: (result: *void) -> i64;
-    columnName:  (result: *void, column: i64) -> c.string;
-    // The text of a value, or null for NULL. It lives until freeResult
-    value:       (result: *void, row: i64, column: i64) -> c.string;   // A null c.string for NULL
-    // The number of rows changed by INSERT, UPDATE or DELETE
-    affected:    (result: *void) -> i64;
-    freeResult:  (result: *void);
-
-    close: (conn: *void);
-
-    // Optional: runs the SQL with the arguments as they are, for a database that binds numbers and texts by their type,
-    // e.g SQLite. When it is set, it is used instead of execute, and the arguments aren't made into texts
-    executeArgs: (conn: *void, sql: string, args: []any, err: *string) -> *void;
-
-    // Optional, for a database that gives values by their type, e.g SQLite: the integer of a value, and true when it
-    // is one, so it isn't written as text and read back
-    integer: (result: *void, row: i64, column: i64, value: *i64) -> bool;
-    // Optional: the text of a value that isn't NULL, with its length, so it isn't counted
-    text:    (result: *void, row: i64, column: i64) -> string;
+// What a database implements: a connection of its own, e.g the PGconn of libpq or the database of SQLite, which a
+// dbms.Connection holds. It is an interface, so any type with these methods is a driver, e.g of another library
+Driver :: interface {
+    // Runs the SQL with the arguments, the parameters $1, $2, ... A driver binds them its own way, e.g as text with
+    // textParams, or by their type. On an error, the rows are null and the message is written to 'err'
+    execute :: method (sql: string, args: []any, err: *string) -> Rows;
+    close   :: method ();
 }
 
-// A connection to a database, made by a driver, e.g postgres.connect(...)
+// The rows a statement gives, e.g a PGresult of libpq. Values are text, as written by the database. free() gives
+// them back
+Rows :: interface {
+    count      :: method () -> i64;
+    columns    :: method () -> i64;
+    columnName :: method (column: i64) -> c.string;
+    // The text of a value, or a null c.string for NULL. It lives until free
+    value      :: method (row: i64, column: i64) -> c.string;
+    // The text of a value that isn't NULL, with its length, so it isn't counted
+    text       :: method (row: i64, column: i64) -> string;
+    // The integer of a value, and true when the database gives it as one, e.g SQLite. False makes dbms read its text
+    integer    :: method (row: i64, column: i64, value: *i64) -> bool;
+    // The number of rows changed by INSERT, UPDATE or DELETE
+    affected   :: method () -> i64;
+    free       :: method ();
+}
+
+// A connection to a database, made by a driver, e.g postgres.connect(...). The driver is null when it is closed
 Connection :: struct {
-    driver: *Driver;
-    handle: *void;
+    driver: Driver;
 
     // Where the rows, strings and pointers read by query come from. Null means the heap (malloc), so they are
     // freed one by one. With an arena, e.g allocators.Arena.allocator(), they are freed all at once
@@ -100,8 +94,8 @@ exec :: method (conn: *Connection, sql: string, args: ...any) -> i64, error {
     if err != "" {
         return 0, databaseError(err);
     }
-    changed := conn.driver.affected(result);
-    conn.driver.freeResult(result);
+    changed := result.affected();
+    result.free();
     return changed, null;
 }
 
@@ -134,7 +128,7 @@ query :: method <T>(conn: *Connection, sql: string, args: ...any) -> [..]T, erro
     }
 
     columns := conn.columnsOf(result, rowType as *TypeStruct);
-    count := conn.driver.rowCount(result);
+    count := result.count();
     rows.reserve(count);
     for r in 0..count {
         row: T;
@@ -146,7 +140,7 @@ query :: method <T>(conn: *Connection, sql: string, args: ...any) -> [..]T, erro
         rows.add(row);
     }
     columns.free();
-    conn.driver.freeResult(result);
+    result.free();
     return rows, databaseError(err);
 }
 
@@ -165,22 +159,22 @@ queryOne :: method <T>(conn: *Connection, sql: string, args: ...any) -> T, bool,
 
     boxed: any = row;
     rowType := boxed.type;
-    found := conn.driver.rowCount(result) > 0;
+    found := result.count() > 0;
     if !found {
         // Nothing to read
     } else if rowType.kind != .struct {
         // A single value, e.g SELECT count(*)
-        if conn.driver.columnCount(result) < 1 {
+        if result.columns() < 1 {
             err = "The query gives no columns";
         } else {
-            err = conn.readValue(conn.driver.value(result, 0, 0), &row, rowType, conn.columnName(result, 0));
+            err = conn.readValue(result.value(0, 0), &row, rowType, conn.columnName(result, 0));
         }
     } else {
         columns := conn.columnsOf(result, rowType as *TypeStruct);
         err = conn.readRow(result, 0, &row, rowType as *TypeStruct, columns);
         columns.free();
     }
-    conn.driver.freeResult(result);
+    result.free();
     return row, found, databaseError(err);
 }
 
@@ -211,9 +205,9 @@ rollback :: method (conn: *Connection) -> error {
 
 // Closes the connection
 close :: method (conn: *Connection) {
-    if conn.handle != null {
-        conn.driver.close(conn.handle);
-        conn.handle = null;
+    if conn.driver != null {
+        conn.driver.close();
+        conn.driver = null;
     }
 }
 
@@ -221,53 +215,42 @@ close :: method (conn: *Connection) {
 //   Parameters
 ////////////////////////////////////////////////////////////////////////////////////
 
-// Runs the SQL with the arguments as text parameters
+// Runs the SQL with the arguments, which the driver binds
 @private
-run :: method (conn: *Connection, sql: string, args: ...any) -> *void, string {
-    if conn.handle == null {
+run :: method (conn: *Connection, sql: string, args: ...any) -> Rows, string {
+    if conn.driver == null {
         return null, "The connection is closed";
     }
-
-    if conn.driver.executeArgs != null {
-        failed := "";
-        list: []any;
-        list.data  = args.data;
-        list.count = args.count;
-        given := conn.driver.executeArgs(conn.handle, sql, list, &failed);
-        if given == null {
-            if failed == "" { failed = "The query failed"; }
-            return null, failed;
-        }
-        return given, "";
+    list: []any;
+    list.data  = args.data;
+    list.count = args.count;
+    failed := "";
+    rows := conn.driver.execute(sql, list, &failed);
+    if rows == null {
+        if failed == "" { failed = "The query failed"; }
+        return null, failed;
     }
+    return rows, "";
+}
 
-    err := "";
+// The arguments as the texts of parameters, allocated with malloc, for a driver that binds them as text, e.g Postgres.
+// A null c.string is NULL. On an argument that can't be one, the error names it. freeTextParams gives them back
+textParams :: (args: []any) -> [..]c.string, string {
     params: [..]c.string;
     for arg, i in args {
         text, ok := paramText(arg);
         if !ok {
-            err = fmt.sprint("Parameter $% can't be a %", i + 1, arg.type.name);
-            break;
+            freeTextParams(&params);
+            return params, fmt.sprint("Parameter $% can't be a %", i + 1, arg.type.name);
         }
         params.add(text);
     }
+    return params, "";
+}
 
-    result: *void = null;
-    if err == "" {
-        query := sql.toCString();
-        result = conn.driver.execute(conn.handle, query, params.elements(), &err);
-        query.free();
-    }
+freeTextParams :: (params: *[..]c.string) {
     for p in params { p.free(); }
     params.free();
-
-    if result == null {
-        if err == "" {
-            err = "The query failed";
-        }
-        return null, err;
-    }
-    return result, "";
 }
 
 // The value as the text of a parameter, allocated with malloc, and false when it can't be one. A null c.string is NULL.
@@ -353,11 +336,11 @@ paramText :: (arg: any) -> c.string, bool {
 
 // The column of each member of the struct, or -1
 @private
-columnsOf :: method (conn: *Connection, result: *void, type: *TypeStruct) -> [..]i64 {
+columnsOf :: method (conn: *Connection, result: Rows, type: *TypeStruct) -> [..]i64 {
     names: [..]string;
-    count := conn.driver.columnCount(result);
+    count := result.columns();
     names.reserve(count);
-    for c in 0..count { names.add(conn.driver.columnName(result, c).toString()); }
+    for c in 0..count { names.add(result.columnName(c).toString()); }
 
     columns: [..]i64;
     columns.reserve(type.members.count);
@@ -417,18 +400,18 @@ lower :: (c: u8) -> u8 {
 }
 
 @private
-columnName :: method (conn: *Connection, result: *void, column: i64) -> string {
-    return conn.driver.columnName(result, column).toString();
+columnName :: method (conn: *Connection, result: Rows, column: i64) -> string {
+    return result.columnName(column).toString();
 }
 
 @private
-readRow :: method (conn: *Connection, result: *void, row: i64, data: *void, type: *TypeStruct, columns: [..]i64) -> string {
+readRow :: method (conn: *Connection, result: Rows, row: i64, data: *void, type: *TypeStruct, columns: [..]i64) -> string {
     for i in 0..type.members.count {
         column := columns[i];
         if column < 0 { continue; }
         member := &type.members[i];
         if conn.readTyped(result, row, column, member.valueIn(data), member.type) { continue; }
-        text := conn.driver.value(result, row, column);
+        text := result.value(row, column);
         err := conn.readValue(text, member.valueIn(data), member.type, "");
         if err != "" {
             // Again with the name of the column, which is only made for the message
@@ -441,10 +424,10 @@ readRow :: method (conn: *Connection, result: *void, row: i64, data: *void, type
 // Reads an integer or a string without its text, when the driver gives values by their type. False when it can't, and
 // the value is read from its text
 @private
-readTyped :: method (conn: *Connection, result: *void, row: i64, column: i64, data: *void, type: *Type) -> bool {
-    if type.kind == .int && conn.driver.integer != null {
+readTyped :: method (conn: *Connection, result: Rows, row: i64, column: i64, data: *void, type: *Type) -> bool {
+    if type.kind == .int {
         n: i64 = 0;
-        if !conn.driver.integer(result, row, column, &n) { return false; }
+        if !result.integer(row, column, &n) { return false; }
         prim := type as *TypePrimitive;
         switch prim.kind {
             case .i64 { *(data as *i64) = n; }
@@ -457,10 +440,10 @@ readTyped :: method (conn: *Connection, result: *void, row: i64, column: i64, da
         }
         return true;
     }
-    if type.kind == .string && conn.driver.text != null {
-        text := conn.driver.value(result, row, column);
+    if type.kind == .string {
+        text := result.value(row, column);
         if text.isNull() { return false; }
-        *(data as *string) = conn.copyString(conn.driver.text(result, row, column));
+        *(data as *string) = conn.copyString(result.text(row, column));
         return true;
     }
     return false;

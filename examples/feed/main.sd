@@ -69,7 +69,7 @@ dbPath:   string;
 @threadLocal connection: dbms.Connection;
 
 db :: () -> *dbms.Connection {
-    if connection.handle == null {
+    if connection.driver == null {   // Not opened yet on this thread
         conn, err := sqlite.open(dbPath, sqlite.Options{create: false});
         if err != null { throw err; }
         connection = conn;

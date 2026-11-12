@@ -392,9 +392,9 @@ insertRows :: method (context: *Context, from: int, to: int, stored: *[..]Stored
             break;
         }
         // Postgres gives the rows of RETURNING in the order of the VALUES
-        given := conn.driver.rowCount(result);
+        given := result.count();
         if given != (end - start) as i64 {
-            conn.driver.freeResult(result);
+            result.free();
             err = fmt.sprint("The database gave % rows back for % rows", given, end - start);
             break;
         }
@@ -402,7 +402,7 @@ insertRows :: method (context: *Context, from: int, to: int, stored: *[..]Stored
             e2 := conn.readStoredRow(result, (i - start) as i64, context.changes[i].row, type, stored);
             if e2 != "" { err = e2; break; }
         }
-        conn.driver.freeResult(result);
+        result.free();
         start = end;
     }
     columns.free();
@@ -431,14 +431,14 @@ isZero :: (type: *Type, value: *void) -> bool {
 // Reads the row of the result as it was stored into a copy of the row, so that members without a column keep their value,
 // and frees the result
 @private
-readStored :: method (conn: *Connection, result: *void, index: i64, row: *void, type: *TypeStruct, stored: *[..]StoredRow) -> string {
+readStored :: method (conn: *Connection, result: Rows, index: i64, row: *void, type: *TypeStruct, stored: *[..]StoredRow) -> string {
     err := conn.readStoredRow(result, index, row, type, stored);
-    conn.driver.freeResult(result);
+    result.free();
     return err;
 }
 
 @private
-readStoredRow :: method (conn: *Connection, result: *void, index: i64, row: *void, type: *TypeStruct, stored: *[..]StoredRow) -> string {
+readStoredRow :: method (conn: *Connection, result: Rows, index: i64, row: *void, type: *TypeStruct, stored: *[..]StoredRow) -> string {
     size := type.head.size;
     copy := resizeMemory(conn.allocator, null, 0, size as i64);
     mem.copy(copy, row, size);

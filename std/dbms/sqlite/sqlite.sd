@@ -45,8 +45,7 @@ open :: (path: string, options := Options{}) -> dbms.Connection, error {
     db := new(Database, heapAllocator());
     db.handle = handle;
     db.statements.allocator = heapAllocator();
-    conn.driver = driver();
-    conn.handle = db;
+    conn.driver = db;   // A *Database is a dbms.Driver, by its methods execute and close
     return conn, null;
 }
 
@@ -59,32 +58,9 @@ Options :: struct {
 
 // The id of the last row that an INSERT made on the connection
 lastInsertId :: (conn: *dbms.Connection) -> i64 {
-    db := conn.handle as *Database;
+    db := conn.driver as *Database;   // A Panic when it is the connection of another database
     return sqlite3_last_insert_rowid(db.handle);
 }
-
-// The driver for dbms.Connection
-driver :: () -> *dbms.Driver {
-    if theDriver == null {
-        d := new(dbms.Driver, heapAllocator());
-        d.name        = "sqlite";
-        d.execute     = execute;
-        d.executeArgs = executeArgs;
-        d.integer     = integer;
-        d.text        = text;
-        d.rowCount    = rowCount;
-        d.columnCount = columnCount;
-        d.columnName  = columnName;
-        d.value       = value;
-        d.affected    = affected;
-        d.freeResult  = freeResult;
-        d.close       = close;
-        theDriver = d;
-    }
-    return theDriver;
-}
-
-@private theDriver: *dbms.Driver = null;
 
 // A connection: the handle of SQLite and its prepared statements
 @private
@@ -106,11 +82,11 @@ Statement :: struct {
 @private
 Result :: struct {
     owner:   *Database;
-    columns: int;
+    columnCount: int;
     rows:    int;
     names:   [..]u8;          // The names of the columns, each with a 0 after it
     nameAt:  [..]int;
-    text:    [..]u8;          // The values, each with a 0 after it
+    bytes:   [..]u8;          // The texts of the values, each with a 0 after it
     cells:   [..]Cell;        // Each value, row by row
     changes: i64;
 }
@@ -124,23 +100,8 @@ Cell :: struct {
     kind:   i64;    // SQLITE_INTEGER, SQLITE_TEXT, ...
 }
 
-@private
-execute :: (conn: *void, sql: c.string, params: []c.string, err: *string) -> *void {
-    args: [..]any;
-    args.allocator = heapAllocator();
-    for p in params {
-        text := p.toString();
-        if p.isNull() { nothing: *u8 = null; args.add(nothing); }
-        else          { args.add(text); }
-    }
-    result := executeArgs(conn, sql.toString(), args.elements(), err);
-    args.free();
-    return result;
-}
-
-@private
-executeArgs :: (conn: *void, sql: string, args: []any, err: *string) -> *void {
-    db := conn as *Database;
+// Runs the SQL with the arguments, which are bound by their type. The prepared statement of the SQL is kept for its next run
+execute :: method (db: *Database, sql: string, args: []any, err: *string) -> dbms.Rows {
     nothing: *Statement = null;
     statement := db.statements.get(sql, nothing);
     if statement == null {
@@ -156,13 +117,13 @@ executeArgs :: (conn: *void, sql: string, args: []any, err: *string) -> *void {
         result.owner = db;
         result.names.allocator   = heapAllocator();
         result.nameAt.allocator  = heapAllocator();
-        result.text.allocator    = heapAllocator();
+        result.bytes.allocator    = heapAllocator();
         result.cells.allocator   = heapAllocator();
     }
     result.rows = 0;
     result.names.clear();
     result.nameAt.clear();
-    result.text.clear();
+    result.bytes.clear();
     result.cells.clear();
 
     ok := run(db, statement, args, result, err);
@@ -191,7 +152,7 @@ executeArgs :: (conn: *void, sql: string, args: []any, err: *string) -> *void {
         mem.delete(statement, heapAllocator());
     }
     if !ok {
-        freeResult(result);
+        result.free();
         return null;
     }
     return result;
@@ -265,7 +226,7 @@ run :: (db: *Database, statement: *Statement, args: []any, result: *Result, err:
     if ok {
         columns := sqlite3_column_count(handle) as int;
         if result.nameAt.count == 0 {
-            result.columns = columns;
+            result.columnCount = columns;
             for column in 0..columns {
                 result.nameAt.add(result.names.count);
                 name := sqlite3_column_name(handle, column as i32).toString();
@@ -305,21 +266,21 @@ run :: (db: *Database, statement: *Statement, args: []any, result: *Result, err:
                     }
                     if negative { digits[count] = '-'; count += 1; }
                     reserveText(result, count + 1);
-                    result.cells.add(Cell{offset: result.text.count as i64, length: count as i64, number: n, kind: kind as i64});
-                    for k in 0..count { result.text.data[result.text.count + k] = digits[count - 1 - k]; }
-                    result.text.count += count;
-                    result.text.data[result.text.count] = 0;
-                    result.text.count += 1;
+                    result.cells.add(Cell{offset: result.bytes.count as i64, length: count as i64, number: n, kind: kind as i64});
+                    for k in 0..count { result.bytes.data[result.bytes.count + k] = digits[count - 1 - k]; }
+                    result.bytes.count += count;
+                    result.bytes.data[result.bytes.count] = 0;
+                    result.bytes.count += 1;
                     continue;
                 }
                 data := sqlite3_column_text(handle, column as i32);
                 length := sqlite3_column_bytes(handle, column as i32) as int;
                 reserveText(result, length + 1);
-                result.cells.add(Cell{offset: result.text.count as i64, length: length as i64, kind: kind as i64});
-                mem.copy(&result.text.data[result.text.count], data, length);
-                result.text.count += length;
-                result.text.data[result.text.count] = 0;
-                result.text.count += 1;
+                result.cells.add(Cell{offset: result.bytes.count as i64, length: length as i64, kind: kind as i64});
+                mem.copy(&result.bytes.data[result.bytes.count], data, length);
+                result.bytes.count += length;
+                result.bytes.data[result.bytes.count] = 0;
+                result.bytes.count += 1;
             }
         }
         result.changes = sqlite3_changes64(db.handle);
@@ -402,12 +363,12 @@ bind :: (handle: *void, place: i32, arg: any, texts: *[..]c.string) -> bool {
 // Makes room for more bytes of text, doubling the buffer
 @private
 reserveText :: (result: *Result, more: int) {
-    needed := result.text.count + more;
-    if needed <= result.text.capacity { return; }
-    capacity := result.text.capacity * 2;
+    needed := result.bytes.count + more;
+    if needed <= result.bytes.capacity { return; }
+    capacity := result.bytes.capacity * 2;
     if capacity < 1024 { capacity = 1024; }
     if capacity < needed { capacity = needed; }
-    result.text.reserve(capacity);
+    result.bytes.reserve(capacity);
 }
 
 @private
@@ -418,62 +379,51 @@ paramError :: (index: int, arg: any) -> string {
     return sb.toString();
 }
 
-@private rowCount    :: (result: *void) -> i64 { return (result as *Result).rows as i64; }
-@private columnCount :: (result: *void) -> i64 { return (result as *Result).columns as i64; }
-@private affected    :: (result: *void) -> i64 { return (result as *Result).changes; }
+// A *Result is a dbms.Rows, by these methods
+count    :: method (r: *Result) -> i64 { return r.rows as i64; }
+columns  :: method (r: *Result) -> i64 { return r.columnCount as i64; }
+affected :: method (r: *Result) -> i64 { return r.changes; }
 
-@private
-columnName :: (result: *void, column: i64) -> c.string {
-    r := result as *Result;
+columnName :: method (r: *Result, column: i64) -> c.string {
     return c.string{&r.names.data[r.nameAt[column as int]]};
 }
 
-@private
-value :: (result: *void, row: i64, column: i64) -> c.string {
-    r := result as *Result;
-    cell := &r.cells[(row * (r.columns as i64) + column) as int];
+value :: method (r: *Result, row: i64, column: i64) -> c.string {
+    cell := &r.cells[(row * (r.columnCount as i64) + column) as int];
     if cell.offset < 0 { return c.string{}; }
-    return c.string{&r.text.data[cell.offset]};
+    return c.string{&r.bytes.data[cell.offset]};
 }
 
-@private
-integer :: (result: *void, row: i64, column: i64, value: *i64) -> bool {
-    r := result as *Result;
-    cell := &r.cells[(row * (r.columns as i64) + column) as int];
+integer :: method (r: *Result, row: i64, column: i64, value: *i64) -> bool {
+    cell := &r.cells[(row * (r.columnCount as i64) + column) as int];
     if cell.kind != Integer { return false; }
     *value = cell.number;
     return true;
 }
 
-@private
-text :: (result: *void, row: i64, column: i64) -> string {
-    r := result as *Result;
-    cell := &r.cells[(row * (r.columns as i64) + column) as int];
+text :: method (r: *Result, row: i64, column: i64) -> string {
+    cell := &r.cells[(row * (r.columnCount as i64) + column) as int];
     t: string;
     if cell.offset < 0 { return t; }
-    t.data = &r.text.data[cell.offset];
+    t.data = &r.bytes.data[cell.offset];
     t.len  = cell.length;
     return t;
 }
 
 // The result is kept for the next query of its connection, unless one is kept already
-@private
-freeResult :: (result: *void) {
-    r := result as *Result;
+free :: method (r: *Result) {
     if r.owner != null && r.owner.spare == null {
         r.owner.spare = r;
         return;
     }
     r.names.free();
     r.nameAt.free();
-    r.text.free();
+    r.bytes.free();
     r.cells.free();
     mem.delete(r, heapAllocator());
 }
 
-@private
-close :: (conn: *void) {
-    db := conn as *Database;
+close :: method (db: *Database) {
     for sql, statement in db.statements {
         sqlite3_finalize(statement.handle);
         statement.argOf.free();
@@ -483,7 +433,7 @@ close :: (conn: *void) {
     db.statements.free();
     if db.spare != null {
         db.spare.owner = null;
-        freeResult(db.spare);
+        db.spare.free();
     }
     sqlite3_close_v2(db.handle);
     mem.delete(db, heapAllocator());

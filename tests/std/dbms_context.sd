@@ -12,27 +12,32 @@ User :: struct {
     cache: int = 5;    // Not a column of the answer, so it keeps its value
 }
 
-// The fake database: what it was sent, and what it answers
+// The fake database: what it was sent, and what it answers. A *Fake is a dbms.Driver and a dbms.Rows, by its methods
 Fake :: struct {
-    sent:     [..]string;  // Each statement with its parameters, e.g INSERT ... [Ada, NULL]
-    columns:  []string;
-    cells:    []c.string;
-    affected: i64 = 1;
+    sent:    [..]string;  // Each statement with its parameters, e.g INSERT ... [Ada, NULL]
+    names:   []string;
+    cells:   []c.string;
+    changed: i64 = 1;
 }
 
-fakeExecute :: (conn: *void, sql: c.string, params: []c.string, err: *string) -> *void {
-    fake := conn as *Fake;
+execute :: method (fake: *Fake, sql: string, args: []any, err: *string) -> dbms.Rows {
+    params, failed := dbms.textParams(args);   // As a driver that binds them as text, e.g Postgres
+    if failed != "" {
+        *err = failed;
+        return null;
+    }
     sb: StringBuilder;
-    sb.addString(sql.toString());
+    sb.addString(sql);
     if params.count > 0 {
         sb.addString(" [");
         for p, i in params {
             if i > 0 { sb.addString(", "); }
             if p.isNull() { sb.addString("NULL"); }
-            else         { sb.addString(p.toString()); }
+            else          { sb.addString(p.toString()); }
         }
         sb.addChar(']');
     }
+    dbms.freeTextParams(&params);
     statement := sb.toString();
     fake.sent.add(statement);
     if statement.indexOf("Mallory") >= 0 {
@@ -41,12 +46,15 @@ fakeExecute :: (conn: *void, sql: c.string, params: []c.string, err: *string) ->
     }
     return fake;
 }
-fakeRowCount    :: (result: *void) -> i64 { f := result as *Fake; return f.cells.count / f.columns.count; }
-fakeColumnCount :: (result: *void) -> i64 { return (result as *Fake).columns.count; }
-fakeColumnName  :: (result: *void, column: i64) -> c.string { return c.string{(result as *Fake).columns[column].data}; }
-fakeValue       :: (result: *void, row: i64, column: i64) -> c.string { f := result as *Fake; return f.cells[row * f.columns.count + column]; }
-fakeAffected    :: (result: *void) -> i64 { return (result as *Fake).affected; }
-fakeFreeResult  :: (result: *void) {}
+close      :: method (fake: *Fake) {}
+count      :: method (fake: *Fake) -> i64 { return fake.cells.count / fake.names.count; }
+columns    :: method (fake: *Fake) -> i64 { return fake.names.count; }
+columnName :: method (fake: *Fake, column: i64) -> c.string { return c.string{fake.names[column].data}; }
+value      :: method (fake: *Fake, row: i64, column: i64) -> c.string { return fake.cells[row * fake.names.count + column]; }
+text       :: method (fake: *Fake, row: i64, column: i64) -> string { return fake.value(row, column).toString(); }
+integer    :: method (fake: *Fake, row: i64, column: i64, value: *i64) -> bool { return false; }
+affected   :: method (fake: *Fake) -> i64 { return fake.changed; }
+free       :: method (fake: *Fake) {}
 
 // What the fake database answers: a row of id, name and a NULL email for each
 answer :: (fake: *Fake, ids: []string, names: []string) {
@@ -58,23 +66,11 @@ answer :: (fake: *Fake, ids: []string, names: []string) {
     }
     fake.cells = cells.elements();
 }
-fakeClose       :: (conn: *void) {}
 
 main :: () {
     columns := ["id", "name", "email"];
-    fake := Fake{columns: columns};
-
-    driver: dbms.Driver;
-    driver.name        = "fake";
-    driver.execute     = fakeExecute;
-    driver.rowCount    = fakeRowCount;
-    driver.columnCount = fakeColumnCount;
-    driver.columnName  = fakeColumnName;
-    driver.value       = fakeValue;
-    driver.affected    = fakeAffected;
-    driver.freeResult  = fakeFreeResult;
-    driver.close       = fakeClose;
-    conn := dbms.Connection{driver: &driver, handle: &fake};
+    fake := Fake{names: columns};
+    conn := dbms.Connection{driver: &fake};
 
     context := dbms.newContext(&conn);
     users := dbms.keyedTable<User, i64>(context, "users", "id", schema: "shop");
@@ -189,11 +185,11 @@ main :: () {
     context.discardChanges();
 
     // A row that isn't there
-    fake.affected = 0;
+    fake.changed = 0;
     users.delete(4);
     assert(context.saveChanges().message == "delete in users (change 1 of 1): No row has the key 4");
     context.discardChanges();
-    fake.affected = 1;
+    fake.changed = 1;
 
     // Nothing to save sends nothing
     fake.sent.clear();

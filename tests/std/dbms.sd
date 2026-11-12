@@ -22,35 +22,42 @@ Post :: struct {
     missing: int = 42;
 }
 
-// The table of the fake database. Null is NULL
+// The table of the fake database. Null is NULL. A *Table is a dbms.Driver and a dbms.Rows, by its methods
 Table :: struct {
-    columns: []string;
-    cells:   []c.string;      // Row after row
-    lastSql: string;
+    names:      []string;
+    cells:      []c.string;      // Row after row
+    lastSql:    string;
     lastParams: [..]string;
 }
 
-fakeExecute :: (conn: *void, sql: c.string, params: []c.string, err: *string) -> *void {
-    table := conn as *Table;
-    table.lastSql = sql.toString().copy();
+execute :: method (table: *Table, sql: string, args: []any, err: *string) -> dbms.Rows {
+    params, failed := dbms.textParams(args);   // As a driver that binds them as text, e.g Postgres
+    if failed != "" {
+        *err = failed;
+        return null;
+    }
+    table.lastSql = sql.copy();
     table.lastParams.clear();
     for p in params {
         if p.isNull() { table.lastParams.add("NULL"); }
-        else         { table.lastParams.add(p.toString().copy()); }
+        else          { table.lastParams.add(p.toString().copy()); }
     }
+    dbms.freeTextParams(&params);
     if table.lastSql == "fail" {
         *err = "ERROR: it failed";
         return null;
     }
     return table;
 }
-fakeRowCount    :: (result: *void) -> i64 { t := result as *Table; return t.cells.count / t.columns.count; }
-fakeColumnCount :: (result: *void) -> i64 { return (result as *Table).columns.count; }
-fakeColumnName  :: (result: *void, column: i64) -> c.string { return c.string{(result as *Table).columns[column].data}; }
-fakeValue       :: (result: *void, row: i64, column: i64) -> c.string { t := result as *Table; return t.cells[row * t.columns.count + column]; }
-fakeAffected    :: (result: *void) -> i64 { return 3; }
-fakeFreeResult  :: (result: *void) {}
-fakeClose       :: (conn: *void) {}
+close      :: method (table: *Table) {}
+count      :: method (table: *Table) -> i64 { return table.cells.count / table.names.count; }
+columns    :: method (table: *Table) -> i64 { return table.names.count; }
+columnName :: method (table: *Table, column: i64) -> c.string { return c.string{table.names[column].data}; }
+value      :: method (table: *Table, row: i64, column: i64) -> c.string { return table.cells[row * table.names.count + column]; }
+text       :: method (table: *Table, row: i64, column: i64) -> string { return table.value(row, column).toString(); }
+integer    :: method (table: *Table, row: i64, column: i64, value: *i64) -> bool { return false; }
+affected   :: method (table: *Table) -> i64 { return 3; }
+free       :: method (table: *Table) {}
 
 main :: () {
     columns := ["id", "title", "likes", "rating", "status", "author_id", "body_text", "title_upper", "extra"];
@@ -59,20 +66,8 @@ main :: () {
     for v in ["2", "Draft", "0", "-1", "0", "", "", "IGNORED", "y"] { cells.add(c.string{v.data}); }
     cells[14] = c.string{}; // author_id of row 2 is NULL
 
-    table := Table{columns: columns, cells: cells.elements()};
-
-    driver: dbms.Driver;
-    driver.name        = "fake";
-    driver.execute     = fakeExecute;
-    driver.rowCount    = fakeRowCount;
-    driver.columnCount = fakeColumnCount;
-    driver.columnName  = fakeColumnName;
-    driver.value       = fakeValue;
-    driver.affected    = fakeAffected;
-    driver.freeResult  = fakeFreeResult;
-    driver.close       = fakeClose;
-
-    conn := dbms.Connection{driver: &driver, handle: &table};
+    table := Table{names: columns, cells: cells.elements()};
+    conn := dbms.Connection{driver: &table};
 
     posts, err := conn.query<Post>("SELECT * FROM posts");
     assert(err == null);

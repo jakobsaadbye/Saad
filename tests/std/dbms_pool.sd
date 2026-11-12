@@ -17,12 +17,20 @@ Stats :: struct {
 }
 
 stats: Stats;
-driver: dbms.Driver;
 
-fakeClose :: (conn: *void) {
+// A connection of the fake database: a dbms.Driver, by its methods, that only counts closes
+FakeConnection :: struct {
+    number: int;
+}
+execute :: method (conn: *FakeConnection, sql: string, args: []any, err: *string) -> dbms.Rows {
+    *err = "the fake database runs no SQL";
+    return null;
+}
+close :: method (conn: *FakeConnection) {
     stats.mutex.lock();
     stats.closed += 1;
     stats.mutex.unlock();
+    mem.delete(conn, heapAllocator());
 }
 
 fakeConnect :: (connectionString: string) -> dbms.Connection, error {
@@ -34,8 +42,9 @@ fakeConnect :: (connectionString: string) -> dbms.Connection, error {
         return conn, dbms.databaseError("the database isn't there");
     }
     stats.made += 1;
-    conn.driver = &driver;
-    conn.handle = &stats;
+    fake := new(FakeConnection, heapAllocator());
+    fake.number = stats.made;
+    conn.driver = fake;
     return conn, null;
 }
 
@@ -57,8 +66,6 @@ work :: (rounds: *int) {
 }
 
 main :: () {
-    driver.name  = "fake";
-    driver.close = fakeClose;
     pool = dbms.newPool(fakeConnect, "fake", 2);
 
     rounds := 50;

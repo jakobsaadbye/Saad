@@ -1,0 +1,25 @@
+// A method of an interface without parameters or a result, e.g 'close :: method ();'
+
+use fmt;
+
+Closer :: interface {
+    close :: method ();
+    reset :: method * ();
+}
+
+File :: struct {
+    closed: bool;
+    resets: int;
+}
+
+close :: method (f: *File) { f.closed = true; }
+reset :: method (f: *File) { f.resets += 1; }
+
+main :: () {
+    f: File;
+    c: Closer = &f;
+    c.reset();
+    c.close();
+    assert(f.closed && f.resets == 1);
+    print("interface method without parameters ok");
+}
