@@ -91,6 +91,18 @@ traceThrow :: (function: *u8, file: *u8, line: i64) {
     thrownError = err;
 }
 
+// Adds a function that returns an error as a value to its trace, e.g 'return 0, errors.make("empty");' where it is made, or
+// 'return 0, err;' where it is passed on, like a function that it is thrown through
+traceReturn :: (err: error, function: *u8, file: *u8, line: i64) {
+    if err == null { return; }
+    frame := TraceFrame{c.string{function}, c.string{file}, line};
+    if err.trace.count > 0 {
+        last := err.trace[err.trace.count - 1];
+        if last.line == line && last.file == frame.file && last.function == frame.function { return; } // e.g a stored error returned again
+    }
+    err.trace.add(frame);
+}
+
 // For a division by zero
 panicDivisionByZero :: () {
     panic("Division by zero");

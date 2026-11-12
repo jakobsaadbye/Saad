@@ -173,9 +173,14 @@ handlePost :: (req: Request) -> Response {
 
   ```
   NotFound: no one is called cy
+      at find (main.sd:6)
       at age (main.sd:11)
       at main (main.sd:37)
   ```
+
+  The trace starts where the error was made: the function that returns it as a value, e.g `find` with
+  `return 0, errors.make(...)`, or the one that throws it. Then each function that returns it on, e.g `return 0, err;`,
+  and each function it is thrown through.
 
   and its causes after it, each with `caused by`, e.g `caused by QueryError: the query failed: ...`.
 
@@ -202,7 +207,7 @@ handlePost :: (req: Request) -> Response {
 | `err.message` | What went wrong |
 | `err.kind` | An `ErrorKind`, for a catch to tell errors apart: `err.is(NotFound)`. Two kinds are the same when their names are |
 | `err.cause` | The error it was made because of, or null. `is` and `as` look at the causes too |
-| `err.trace` | Where it was made or thrown, and every function it was thrown through: `function`, `file` and `line` |
+| `err.trace` | Where it was made (returned or thrown), and every function it was returned or thrown through: `function`, `file` and `line` |
 | `err.type` | The error type of its own it was made as, e.g `QueryError`, or null. `err as *QueryError` gives it back |
 
 * The prelude has the type, `err.is` and `newError(message, kind, cause)`, as the compiler throws and
@@ -220,6 +225,11 @@ handlePost :: (req: Request) -> Response {
   checks `thrownError` too when `eax` isn't 0. There is no stack unwinding of the system: the code of the function
   does it, so it works the same on Windows and Linux.
 * A call whose error isn't taken (`AST_FLAG_THROWS_ON_ERROR`) throws the error when it isn't null.
+* A `return` of an `error` that isn't null adds the function and the line to its trace (`traceReturn`, from
+  `emit_trace_of_returned_error()` in `ir_lower.c`), so the trace has where it was made, e.g in a function that returns
+  `errors.make(...)`, and each function that returns it on. A null error costs a compare. The functions of the prelude and
+  of the namespace `errors`, which make errors for their caller, e.g `errors.make` and `new(Error)`, add no frame. The same
+  frame isn't added twice in a row, e.g for an error that is kept and returned again.
 * `throw` takes an `error`, or a pointer to a struct that embeds `Error` (`is_embedding_error_type()`), which is
   converted to the `*Error` in it (`AstThrow.error_type`).
 * `errors.typed<T>` sets `type` to the descriptor of `T`, `value` to the whole error and the kind to the name of `T`.
