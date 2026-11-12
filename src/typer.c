@@ -5148,6 +5148,58 @@ bool check_switch_arm(Typer *typer, AstSwitchArm *arm) {
     return true;
 }
 
+// A switch that handles every value of an enum, without an else, gets one that throws a Panic, e.g '9 isn't a value of
+// Status'. An enum always holds one of its values (checked casts, and the first value as the default of an enum without 0),
+// so it only runs for memory written by hand, e.g with mem.copy or by C. Without it, no case would run
+static bool add_enum_switch_else(Typer *typer, AstSwitch *sw, AstIdentifier *subject, AstIf *first, AstBlock *lowered, AstBlock *scope_before) {
+    Parser *parser = typer->parser;
+    if (((TypeEnum *)subject->type)->node->is_flags) return true; // Any combination of flags is a value, and a case is one of them
+    AstFile *errors_file = parser->errors_file;
+    AstIdentifier *panic = errors_file ? find_identifier_in_scope(errors_file->scope, "panicEnumSwitch") : NULL;
+    if (panic == NULL) return true; // e.g a file of the prelude below errors.sd
+
+    Ast *at = (Ast *)sw->subject;
+    AstExpr *value = (AstExpr *)make_resolved_identifier_literal(typer, subject, at);
+    AstExpr *boxed = (AstExpr *)generate_cast_to_any(typer, value);
+
+    AstFunctionCall *call = ast_allocate(parser, sizeof(AstFunctionCall));
+    call->head.head       = *at;
+    call->head.head.kind  = AST_FUNCTION_CALL;
+    call->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    call->expression      = (AstExpr *)make_resolved_identifier_literal(typer, panic, at);
+    call->arguments       = da_init(1, sizeof(AstArgument *));
+    call->paren_start_token.start = at->end;
+    call->paren_start_token.end   = at->end;
+    AstArgument *argument = generate_argument_from_expr(typer, boxed);
+    da_append(&call->arguments, argument);
+
+    AstExprStmt *stmt = ast_allocate(parser, sizeof(AstExprStmt));
+    stmt->head.head       = *at;
+    stmt->head.head.kind  = AST_EXPR_STMT;
+    stmt->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    stmt->expr            = (AstExpr *)call;
+
+    AstBlock *block = ast_allocate(parser, sizeof(AstBlock));
+    block->head       = *at;
+    block->head.kind  = AST_BLOCK;
+    block->head.flags = AST_FLAG_COMPILER_GENERATED;
+    block->kind       = BLOCK_IMPERATIVE;
+    block->parent     = lowered;
+    block->statements = da_init(1, sizeof(Ast *));
+    block->identifiers = da_init(1, sizeof(AstIdentifier *));
+    block->enclosing_function = lowered->enclosing_function;
+    da_append(&block->statements, stmt);
+
+    typer->current_scope = lowered;
+    bool ok = check_block(typer, block);
+    typer->current_scope = scope_before;
+    if (!ok) return false;
+
+    if (first) first->else_block = block;
+    else       da_append(&lowered->statements, block);
+    return true;
+}
+
 bool check_switch(Typer *typer, AstSwitch *sw) {
     Parser *parser = typer->parser;
 
@@ -5319,6 +5371,7 @@ bool check_switch(Typer *typer, AstSwitch *sw) {
             report_error_ast(parser, LABEL_HINT, NULL, "Add a case for %s, or an else", missing_count == 1 ? "it" : "them");
             return false;
         }
+        if (!add_enum_switch_else(typer, sw, subject, first, lowered, scope_before)) return false;
     }
     da_free(&seen);
     return true;

@@ -169,6 +169,22 @@ panicEnumCast :: (value: i64, name: *u8) {
     panic(message);
 }
 
+// For a switch on an enum that holds none of its values, e.g memory written by hand. The compiler gives a switch that handles
+// every value of an enum an else that calls this
+panicEnumSwitch :: (value: any) {
+    number: i64 = 0;
+    bytes := value.data as *u8;
+    for i in 0..value.type.size { number = number | ((bytes[i] as i64) << (i * 8)); }
+    buffer: [200]u8;
+    sprintf(buffer.data, "%lld isn't a value of %.*s", number, value.type.name.len as i32, value.type.name.data);
+    text := c.string{buffer.data}.toString();
+    message: string;
+    message.data = resizeMemory(heapAllocator(), null, 0, text.len) as *u8;
+    message.len  = text.len;
+    for i in 0..text.len { message.data[i] = text.data[i]; }
+    panic(message);
+}
+
 // For an error that nothing caught: main ends with it
 reportUncaught :: () {
     err := thrownError;

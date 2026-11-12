@@ -26,6 +26,21 @@ print("% of %", s, Status.count);                 // .open of 3. Status.names an
   For an enum flags, a number is any combination of its flags, e.g `5 as Options` for the first and the third. The check
   is one compare for values that follow each other, e.g 0, 1, 2, and a compare per value otherwise.
   `saad build --unchecked` leaves it out, like the bounds checks (`emit_enum_value_check()` in `ir_lower.c`).
+* **The first value is the default of an enum without 0.** A variable, a struct member, an element of a fixed array, a
+  global, `new(T)` and a member that JSON doesn't give start with zero, which isn't a value of e.g
+  `Status :: enum { ok = 200, notFound = 404 }`. Such an enum starts with its first value instead, so order its values
+  with the default first. An enum that has 0 starts with it as before, and an enum flags with no flags. It costs nothing
+  for those, and a store of the value otherwise (`enum_default_value()` in `ir_lower.c`).
+
+  ```odin
+  Reply :: struct { status: Status; body: string; }
+  r: Reply;                                        // r.status is .ok
+  ```
+
+* **A switch that handles every value** throws a `Panic` when the enum holds none of them, e.g
+  `9 isn't a value of Status`, instead of running no case. Only memory written by hand can make such a value. The
+  compiler gives the switch an `else` that calls `panicEnumSwitch` of the prelude (`add_enum_switch_else()` in
+  `typer.c`). An `else` of the program's own takes such a value as before, and a switch on an enum flags has none.
 
 ## Flags
 
