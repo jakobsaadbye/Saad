@@ -1,0 +1,9 @@
+// expect-error: Type UserId has no method 'hash'
+// expect-error: UserId is a newtype of i64, and a newtype has methods of its own
+
+UserId :: newtype i64;
+
+main :: () {
+    names: Map<UserId, string>;
+    names.set(1 as UserId, "ada");
+}
