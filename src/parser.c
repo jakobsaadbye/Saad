@@ -1144,7 +1144,8 @@ bool starts_function_defn(Parser *parser) {
 }
 
 bool starts_function_defn_at(Parser *parser, int cursor) {
-    if (peek_token(parser, cursor).type == TOKEN_METHOD) {
+    bool is_method = peek_token(parser, cursor).type == TOKEN_METHOD;
+    if (is_method) {
         cursor += 1;
         if (peek_token(parser, cursor).type == '*') cursor += 1; // method *
     }
@@ -1178,6 +1179,10 @@ bool starts_function_defn_at(Parser *parser, int cursor) {
             if (peek_token(parser, cursor).type == TOKEN_RIGHT_ARROW || peek_token(parser, cursor).type == '{') {
                 return true;
             }
+
+            // A method of an interface without parameters or a result, e.g 'close :: method ();'. After 'method', the ()
+            // can't be an expression in parentheses
+            if (is_method && peek_token(parser, cursor).type == ';') return true;
 
             return false;
         }
