@@ -4,6 +4,7 @@
 div :: (a: int, b: int) -> int { return a / b; }
 rem :: (a: int, b: int) -> int { return a % b; }
 
+@noOverflowCheck   // Narrow types wrap around, which these test
 main :: () {
     // Narrow types wrap around
     a: u8 = 200;

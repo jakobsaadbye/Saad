@@ -26,7 +26,7 @@ main :: () {
 
     // time: now, and how long something took
     start := time.now();
-    total := 0;
+    total: i64 = 0;   // The sum, 499999500000, doesn't fit in an int
     for i in 0..1000000 { total += i; }
     print("Counting took % ms", time.now().sub(start) / time.Millisecond);
 

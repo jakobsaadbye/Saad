@@ -1,3 +1,6 @@
+// Integer arithmetic in a function marked @noOverflowCheck wraps around. Without it, it throws a Panic, see
+// tests/integer_overflow_checks.sd
+@noOverflowCheck
 main :: () {
     a : u8  = 255 + 1;
     b : u16 = 65535 + 1;

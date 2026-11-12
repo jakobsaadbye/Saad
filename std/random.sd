@@ -131,6 +131,7 @@ shuffle :: <T>(elements: []T) {
 // The methods of a generator
 //
 
+@noOverflowCheck   // xorshift*: the multiplication wraps around on purpose
 bits :: method (r: *Random) -> u64 {
     x := r.state;
     x ^= x >> 12;

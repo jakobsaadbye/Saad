@@ -1,0 +1,42 @@
+// Integer arithmetic whose result doesn't fit its type throws a Panic that names it. A function marked @noOverflowCheck
+// wraps around instead, e.g a hash. --unchecked leaves the checks out. See tests/integer_overflow.sd for wrapping
+
+use fmt;
+
+addI32 :: (a: i32, b: i32) -> string { m := ""; try { c := a + b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
+subU8  :: (a: u8, b: u8) -> string   { m := ""; try { c := a - b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
+mulI64 :: (a: i64, b: i64) -> string { m := ""; try { c := a * b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
+mulU64 :: (a: u64, b: u64) -> string { m := ""; try { c := a * b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
+addI64 :: (a: i64, b: i64) -> string { m := ""; try { c := a + b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
+negI32 :: (a: i32) -> string         { m := ""; try { c := -a; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
+divI32 :: (a: i32, b: i32) -> string { m := ""; try { c := a / b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
+addTo  :: (a: i32) -> string         { m := ""; try { x := a; x += 1; if x == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
+
+@noOverflowCheck
+fnv :: (text: string) -> u64 {
+    h: u64 = 14695981039346656037;
+    for c in text { h = (h ^ c as u64) * 1099511628211; }
+    return h;
+}
+
+main :: () {
+    assert(addI32(2147483647, 1) == "2147483647 + 1 doesn't fit in i32");
+    assert(subU8(3, 5) == "3 - 5 doesn't fit in u8");
+    assert(mulI64(3037000500, 3037000500) == "3037000500 * 3037000500 doesn't fit in i64");
+    assert(mulU64(4294967296, 4294967296) == "4294967296 * 4294967296 doesn't fit in u64");
+    assert(mulI64(-1, -9223372036854775807 - 1) == "-1 * -9223372036854775808 doesn't fit in i64");
+    assert(addI64(9223372036854775807, 1) == "9223372036854775807 + 1 doesn't fit in i64");
+    assert(negI32(-2147483647 - 1) == "-(-2147483648) doesn't fit in i32");
+    assert(divI32(-2147483647 - 1, -1) == "-2147483648 / -1 doesn't fit in i32");
+    assert(addTo(2147483647) == "2147483647 + 1 doesn't fit in i32");   // Also +=
+
+    // What fits doesn't throw
+    assert(addI32(2147483646, 1) == "" && mulI64(3037000499, 3037000499) == "" && subU8(5, 3) == "");
+    assert(mulI64(0, 9223372036854775807) == "" && mulI64(-1, 5) == "");
+    n: i32 = -2147483647 - 1;
+    d: i32 = -1;
+    assert(n % d == 0);   // The remainder of the smallest value by -1 is 0, not a trap
+
+    assert(fnv("abc") == 16654208175385433931);   // FNV-1a, which wraps around
+    print("integer overflow checks ok");
+}

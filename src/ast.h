@@ -462,6 +462,7 @@ typedef struct AstFunctionDefn {
     AstStruct       *self_struct;     // The struct the method is declared inside. Set if the method has an implicit 'self'
     bool             self_is_mutable; // Declared as 'method *'. Otherwise 'self' is read-only
 
+    bool             no_overflow_check; // @noOverflowCheck: its integer arithmetic wraps around instead of throwing a Panic on overflow
     AstStruct       *static_struct;   // The struct a function constant is declared inside e.g 'make :: (capacity := 2) -> List<T>' in List :: struct <T> {...}
 } AstFunctionDefn;
 

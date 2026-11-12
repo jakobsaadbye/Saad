@@ -492,7 +492,7 @@ assignInteger :: (v: Value, data: *void, type: *TypePrimitive, path: string) -> 
     }
 
     value := magnitude;
-    if negative { value = 0 - magnitude; }
+    if negative && magnitude != 0 { value = ~magnitude + 1; }   // The bits of the negative number, in two's complement
     writeBits(data, type.head.size, value);
     return "";
 }

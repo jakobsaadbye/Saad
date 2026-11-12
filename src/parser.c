@@ -1197,7 +1197,7 @@ bool starts_function_defn_at(Parser *parser, int cursor) {
 
 // The attributes of the language e.g @private and @deprecated("use add instead"). Any other attribute is the value of a struct
 // marked with @attribute e.g @json.Field(name: "id")
-static const char *known_attributes[] = { "private", "deprecated", "attribute", "embed", "threadLocal" };
+static const char *known_attributes[] = { "private", "deprecated", "attribute", "embed", "threadLocal", "noOverflowCheck" };
 
 // Parses the attributes in front of a declaration and the declaration, and gives the attributes to the declared identifier
 Ast *parse_attributed_declaration(Parser *parser) {
@@ -1208,6 +1208,7 @@ Ast *parse_attributed_declaration(Parser *parser) {
     bool  is_attribute = false;
     bool  is_embed = false;
     bool  is_thread_local = false;
+    bool  no_overflow_check = false;
     char *deprecated_message = NULL;
     Token first_builtin = {0};
     DynamicArray custom = da_init(1, sizeof(AstStructLiteral *));
@@ -1263,6 +1264,13 @@ Ast *parse_attributed_declaration(Parser *parser) {
         }
         if (strcmp(name, "embed") == 0) {
             is_embed = true;
+        }
+        if (strcmp(name, "noOverflowCheck") == 0) {
+            if (no_overflow_check) {
+                report_error_range(parser, at.start, name_token.end, "The attribute '@noOverflowCheck' is given more than once");
+                return NULL;
+            }
+            no_overflow_check = true;
         }
         if (strcmp(name, "threadLocal") == 0) {
             if (is_thread_local) {
@@ -1350,6 +1358,18 @@ Ast *parse_attributed_declaration(Parser *parser) {
         report_error_token(parser, LABEL_ERROR, first, "@embed is for struct members, e.g @embed table: dbms.Table<User>;");
         return NULL;
     }
+    // The integer arithmetic of the function wraps around instead of throwing a Panic on overflow, e.g of a hash
+    if (no_overflow_check) {
+        bool is_function = stmt->kind == AST_DECLARATION && (stmt->flags & AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN) && count == 1;
+        AstDeclaration *decl = is_function ? (AstDeclaration *)stmt : NULL;
+        AstExpr *value = decl && decl->values.count == 1 ? ((AstExpr **)decl->values.items)[0] : NULL;
+        if (!value || value->head.kind != AST_FUNCTION_DEFN) {
+            report_error_token(parser, LABEL_ERROR, first, "@noOverflowCheck is for functions and methods, whose integer arithmetic then wraps around");
+            report_error_ast(parser, LABEL_HINT, NULL, "e.g @noOverflowCheck hash :: (value: u64) -> u64 { ... }");
+            return NULL;
+        }
+        ((AstFunctionDefn *)value)->no_overflow_check = true;
+    }
     if (is_thread_local) {
         bool is_global = stmt->kind == AST_DECLARATION && !(((AstDeclaration *)stmt)->flags & DECLARATION_CONSTANT);
         if (!is_global) {
@@ -1370,7 +1390,7 @@ Ast *parse_attributed_declaration(Parser *parser) {
     if (custom.count > 0) {
         AstStructLiteral *value = ((AstStructLiteral **)custom.items)[0];
         report_error_ast(parser, LABEL_ERROR, (Ast *)value, "Unknown attribute '@%s'", type_to_str(value->explicit_type));
-        report_error_ast(parser, LABEL_HINT, NULL, "The attributes of the language are @private, @deprecated(\"message\"), @attribute, @embed and @threadLocal");
+        report_error_ast(parser, LABEL_HINT, NULL, "The attributes of the language are @private, @deprecated(\"message\"), @attribute, @embed, @threadLocal and @noOverflowCheck");
         report_error_ast(parser, LABEL_NOTE, NULL, "The values of structs marked with @attribute can only be given to struct members, functions and methods");
         return NULL;
     }

@@ -343,6 +343,7 @@ List :: struct <T> {
 //
 
 // Mixes the bits of a number, so that numbers that are close get very different hashes
+@noOverflowCheck   // The multiplications wrap around on purpose, as in every hash
 hashU64 :: (value: u64) -> u64 {
     x := value;
     x = x ^ (x >> 33);
@@ -354,6 +355,7 @@ hashU64 :: (value: u64) -> u64 {
 }
 
 // Combines two hashes into one e.g for a struct with two members
+@noOverflowCheck
 hashCombine :: (a: u64, b: u64) -> u64 {
     return hashU64(a ^ (b + 2654435769 + (a << 6) + (a >> 2)));
 }
@@ -384,7 +386,8 @@ hash :: method (x: f64) -> u64 {
     return hashU64(bits);
 }
 
-// FNV-1a
+// FNV-1a. The multiplications wrap around on purpose
+@noOverflowCheck
 hash :: method (s: string) -> u64 {
     h: u64 = 1469598103934665603;
     for c in s {
