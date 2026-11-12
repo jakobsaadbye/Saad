@@ -5941,6 +5941,52 @@ static bool rewrite_enum_from(Typer *typer, AstFunctionCall *call) {
     return true;
 }
 
+// The number of places of values in a format, e.g 2 of "% has % moons". \% is a % of the text, not a place
+static int format_places(AstLiteral *format) {
+    char *text = format->as.value.string.data;
+    int   len  = format->as.value.string.length;
+    int places = 0;
+    for (int i = 0; i < len; i++) {
+        if (text[i] == '\\' && i + 1 < len && text[i + 1] == '%') { i += 1; continue; }
+        if (text[i] == '%') places += 1;
+    }
+    return places;
+}
+
+// A function with a parameter 'format: string' followed by '...any', e.g print, sprint, StringBuilder.add or errors.make, puts
+// its arguments in the places of the format, each %. When the format is written in the program and values are given, the
+// number of places must be the number of values: a value without a place isn't written, and a place without a value is
+// written as a %, which is a mistake when there are values. Without values, the text is as it is written, e.g
+// print("100%"). Spread values, e.g print(format, ...values), aren't counted
+static bool check_format_arguments(Typer *typer, AstFunctionCall *call, AstFunctionDefn *func_defn) {
+    if (!func_defn->is_variadic || func_defn->variadic_parameter_index < 1) return true;
+    int variadic = func_defn->variadic_parameter_index;
+    AstIdentifier *format_param = ((AstIdentifier **)func_defn->parameters.items)[variadic - 1];
+    if (strcmp(format_param->name, "format") != 0 || format_param->type == NULL || format_param->type->kind != TYPE_STRING) return true;
+
+    AstExpr *format = NULL;
+    int values = 0;
+    for (int i = 0; i < call->arguments.count; i++) {
+        AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
+        if (arg->param_index == variadic - 1 && !arg->is_vararg) format = arg->value;
+        if (!arg->is_vararg) continue;
+        AstExpr *value = arg->value;
+        if (value->head.kind == AST_CAST && (value->head.flags & AST_FLAG_COMPILER_GENERATED)) value = ((AstCast *)value)->expr;
+        if ((arg->value->head.flags & AST_FLAG_EXPR_IS_SPREADED) || (value->head.flags & AST_FLAG_EXPR_IS_SPREADED)) return true;
+        values += 1;
+    }
+    if (format == NULL || values == 0) return true;
+    if (format->head.kind != AST_LITERAL || ((AstLiteral *)format)->kind != LITERAL_STRING) return true;
+
+    int places = format_places((AstLiteral *)format);
+    if (places == values) return true;
+    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)format, "The format has %d %s for values, but %d %s given",
+        places, places == 1 ? "place" : "places", values, values == 1 ? "value is" : "values are");
+    if (places < values) report_error_ast(typer->parser, LABEL_HINT, NULL, "Each %% is the place of the next value. A value without a place isn't written");
+    else                 report_error_ast(typer->parser, LABEL_HINT, NULL, "Each %% is the place of the next value. Write \\%% for a %% of the text");
+    return false;
+}
+
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     if (typer->enclosing_function == NULL) {
         if (typer->checking_member_default) {
@@ -6500,6 +6546,8 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         }
     }
     
+
+    if (!check_format_arguments(typer, call, func_defn)) return NULL;
 
     // A read-only self cannot be passed where a pointer is wanted, as it could be used to change self
     for (int i = call->is_method_call ? 1 : 0; i < call->arguments.count; i++) {

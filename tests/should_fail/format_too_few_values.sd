@@ -1,0 +1,8 @@
+// expect-error: The format has 2 places for values, but 1 value is given
+// expect-error: Write \% for a % of the text
+
+use fmt;
+
+main :: () {
+    print("% has % moons", "Mars");
+}

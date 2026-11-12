@@ -50,11 +50,11 @@ main :: () {
     }
     print("----------- Passing arguments to an any variadic parameter -----------");
     {
-        myPrint2("Hello %s", "World", "Hellope", 3.14);
+        myPrint2("Hello % % %", "World", "Hellope", 3.14);
     }
     print("----------- Passing arguments to an any variadic parameter into another variadic parameter -----------");
     {
-        myPrint3("Hello %s", "World", "Hellope", 3.14);
+        myPrint3("Hello % % %", "World", "Hellope", 3.14);
     }
     print("---------------- Passing variadic arguments to C function ----------------");
     {
