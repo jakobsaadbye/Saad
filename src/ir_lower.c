@@ -3163,6 +3163,40 @@ static void emit_trace_frame(Lowerer *L, int line) {
     emit_errors_call(L, "traceThrow", 3, args);
 }
 
+// If the type is error, a *Error of std/prelude/errors.sd
+static bool is_error_pointer(Lowerer *L, Type *type) {
+    if (type == NULL || type->kind != TYPE_POINTER) return false;
+    Type *to = ((TypePointer *)type)->pointer_to;
+    if (to == NULL || to->kind != TYPE_STRUCT) return false;
+    TypeStruct *error_struct = (TypeStruct *)to;
+    return error_struct->node && error_struct->node->head.file == L->parser->errors_file && strcmp(to->name, "Error") == 0;
+}
+
+// An error that the function returns as a value gets the function and the line in its trace (traceReturn of errors.sd): where
+// it was made, e.g 'return 0, errors.make("empty text");', and each function that passes it on, e.g 'return 0, err;'. A
+// caller that throws it adds its own frame after them. The functions that make errors, of the prelude and the namespace
+// errors, are left out, as their caller made it
+static void emit_trace_of_returned_error(Lowerer *L, int err, int line) {
+    AstFile *file = L->ast_func ? L->ast_func->head.head.file : NULL;
+    if (file == NULL || is_runtime_file(L, file)) return;
+    if (file->ns && strcmp(file->ns->name, "errors") == 0) return;
+    // The prelude, e.g allocateNew of new(Error) in collections.sd
+    const char *runtime = L->parser->runtime_file_path;
+    const char *slash   = runtime ? strrchr(runtime, '/') : NULL;
+    const char *back    = runtime ? strrchr(runtime, '\\') : NULL;
+    if (back > slash) slash = back;
+    if (slash && file->absolute_path && strncmp(file->absolute_path, runtime, slash - runtime + 1) == 0) return;
+    const char *function = L->ast_func->identifier && L->ast_func->identifier->name ? L->ast_func->identifier->name : "lambda";
+    IrBlock *has_error = create_block(L, "returned.error");
+    IrBlock *done      = create_block(L, "returned.error.traced");
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_PTR, err, emit_const(L, IR_PTR, 0)), has_error, done);
+    set_block(L, has_error);
+    int args[4] = { err, emit_shared_c_text(L, function), emit_shared_c_text(L, file->absolute_path), emit_const(L, IR_I64, line) };
+    emit_errors_call(L, "traceReturn", 4, args);
+    terminate_jmp(L, done);
+    set_block(L, done);
+}
+
 static bool is_main_function(Lowerer *L) {
     AstFunctionDefn *f = L->ast_func;
     return f && f->identifier && strcmp(f->identifier->name, "main") == 0 && f->head.head.file && f->head.head.file->ns == NULL && !f->is_method;
@@ -3433,6 +3467,11 @@ static void lower_return(Lowerer *L, AstReturn *ret) {
         Type *ret_type = da_get_deref(func_defn->return_types, i);
         int out_ptr = emit_load(L, IR_PTR, addr_slot(local_slot(L, ret_param), 0));
         store_expr(L, addr_vreg(out_ptr, 0), ret_type, value, false);
+
+        // Where an error that is returned was made, unless it is null
+        if (is_error_pointer(L, ret_type) && !(value->head.kind == AST_LITERAL && ((AstLiteral *)value)->kind == LITERAL_NULL)) {
+            emit_trace_of_returned_error(L, emit_load(L, IR_PTR, addr_vreg(out_ptr, 0)), ret->head.start.line);
+        }
     }
 
     // The values are taken before the deferred statements run

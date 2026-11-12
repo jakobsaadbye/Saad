@@ -1,0 +1,68 @@
+// The trace of an error that is returned as a value: where it was made, each function that passes it on, and then each
+// function it is thrown through
+
+import errors;
+use fmt;
+
+parse :: (text: string) -> (int, error) {
+    if text.len == 0 {
+        return 0, errors.make("empty text");             // line 9: where it is made
+    }
+    return text.len as int, null;
+}
+
+parseAll :: (a: string, b: string) -> (int, error) {
+    x, err := parse(a);
+    if err != null { return 0, err; }                    // line 16: passed on
+    y := parse(b);
+    return x + y, null;
+}
+
+total :: () -> int {
+    return parseAll("", "b");                            // line 22: thrown, as the error isn't taken
+}
+
+made :: () -> error {
+    return errors.make("made");                          // line 26
+}
+
+stored: error;
+
+again :: () -> error {
+    return stored;                                       // line 32: the same error, returned more than once
+}
+
+functions :: (err: error) -> string {
+    names := "";
+    for frame, i in err.trace {
+        if i > 0 { names = sprint("%,", names); }
+        names = sprint("%%:%", names, frame.function.toString(), frame.line);
+    }
+    return names;
+}
+
+main :: () {
+    try {
+        total();
+        assert(false);
+    } catch (e) {
+        assert(functions(e) == "parse:9,parseAll:16,total:22,main:46");
+    }
+
+    // An error that is only returned, not thrown
+    _, err := parseAll("", "b");
+    assert(functions(err) == "parse:9,parseAll:16");
+    assert(functions(made()) == "made:26");
+
+    // One that isn't an error has no trace
+    n, none := parse("abc");
+    assert(n == 3 && none == null);
+
+    // The same error returned twice from the same place gets the frame once
+    stored = errors.make("stored");
+    first := again();
+    second := again();
+    assert(first == stored && second == stored);
+    assert(functions(stored) == "again:32");
+    print("error trace ok");
+}

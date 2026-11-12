@@ -86,7 +86,8 @@ main :: () {
     b, none := find("ada");
     assert(b == 36 && none == null);
 
-    // Not taken: thrown, through the defers, to the catch, with a frame for each function it left
+    // Not taken: thrown, through the defers, to the catch, with a frame for where it was made (find, which returns it) and
+    // each function it left
     assert(age("ada") == 37);
     caught := false;
     try {
@@ -94,8 +95,9 @@ main :: () {
         assert(false);                     // Not reached
     } catch (e) {
         caught = true;
-        assert(e.is(NotFound) && e.trace.count == 2);
-        assert(e.trace[0].function.toString() == "age" && e.trace[1].function.toString() == "main");
+        assert(e.is(NotFound) && e.trace.count == 3);
+        assert(e.trace[0].function.toString() == "find" && e.trace[0].line == 37);
+        assert(e.trace[1].function.toString() == "age" && e.trace[2].function.toString() == "main");
     }
     assert(caught && log.count == 2 && log[1] == "left age(bo)");
 
@@ -262,7 +264,7 @@ main :: () {
         age3, found3 := lookup("bad");
         assert(false);
     } catch (e) {
-        assert(e.message == "lookup failed" && e.trace.count == 1);
+        assert(e.message == "lookup failed" && e.trace.count == 2 && e.trace[0].function.toString() == "lookup");
     }
     age4, found4, err4 := lookup("bad");     // All taken: a value
     assert(!found4 && err4.is(NotFound));
