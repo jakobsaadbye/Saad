@@ -120,6 +120,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_CASE:                  return "case";
         case TOKEN_UNION:                 return "union";
         case TOKEN_INTERFACE:             return "interface";
+        case TOKEN_NEWTYPE:               return "newtype";
         case TOKEN_FAT_ARROW:             return "=>";
         case TOKEN_END:                   return "END";
     }
@@ -524,6 +525,9 @@ KeywordMatch match_keyword(Lexer *lexer) {
         if (strcmp(text, "sizeof") == 0) token = TOKEN_SIZEOF;
         if (strcmp(text, "import") == 0) token = TOKEN_IMPORT;
         if (strcmp(text, "extern") == 0) token = TOKEN_EXTERN;
+    }
+    if (keyword_len == 7) {
+        if (strcmp(text, "newtype") == 0) token = TOKEN_NEWTYPE;
     }
     if (keyword_len == 8) {
         if (strcmp(text, "continue") == 0) token = TOKEN_CONTINUE;

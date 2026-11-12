@@ -1,0 +1,10 @@
+// expect-error: Type mismatch. Wanted type Meters, got type f64
+
+Meters :: newtype f64;
+
+walk :: (distance: Meters) {}
+
+main :: () {
+    raw: f64 = 2.5;
+    walk(raw);   // A cast says it is meant: walk(raw as Meters)
+}

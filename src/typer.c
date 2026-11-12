@@ -117,6 +117,8 @@ bool check_switch_arm(Typer *typer, AstSwitchArm *arm);
 bool check_switch(Typer *typer, AstSwitch *sw);
 bool check_struct_defn(Typer *typer, AstStruct *ast_struct);
 bool import_declarations(Parser *parser, AstImport *import, AstFile *to_file);
+Type *make_newtype(Typer *typer, Type *base, AstIdentifier *ident);
+static char *qualified_declaration_name(AstIdentifier *ident);
 void add_used_namespace(Typer *typer, AstFile *file, Namespace *ns);
 TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instance);
 Type *copy_type(Typer *typer, Type *type);
@@ -1356,6 +1358,14 @@ bool struct_is_comparable(TypeStruct *struct_type, AstIdentifier **bad_member) {
 // Returns the struct that holds the methods of a type. Primitive types and enums don't have members, so they get a struct without
 // members just to hold their methods e.g 'hash :: method (x: int) -> u64'. Returns NULL for types that cannot have methods
 TypeStruct *method_holder_of(Typer *typer, Type *type) {
+    // A newtype has methods of its own, not those of the type it is made of. A newtype of a struct has them on its struct
+    if (type->newtype && type->kind != TYPE_STRUCT) {
+        Type *declared = type->newtype->type ? type->newtype->type : type; // The one that the declaration made, which keeps them
+        if (declared->newtype_methods == NULL) {
+            declared->newtype_methods = generate_empty_struct_type(typer->parser, type->newtype->name);
+        }
+        return declared->newtype_methods;
+    }
     switch (type->kind) {
     case TYPE_STRUCT: return (TypeStruct *)type;
     case TYPE_STRING: {
@@ -3057,6 +3067,7 @@ AstLiteral *make_resolved_identifier_literal(Typer *typer, AstIdentifier *ident,
 
 // The name a type is told apart by: the namespace is a part of the name of structs and enums e.g "raylib.Color"
 char *type_identity(Type *type) {
+    if (type->newtype) return qualified_declaration_name(type->newtype);
     switch (type->kind) {
     case TYPE_STRUCT: return ((TypeStruct *)type)->qualified_name ? ((TypeStruct *)type)->qualified_name : type->name;
     case TYPE_ENUM:   return ((TypeEnum *)type)->qualified_name   ? ((TypeEnum *)type)->qualified_name   : type->name;
@@ -3109,6 +3120,74 @@ bool check_declaration_of(Typer *typer, AstIdentifier *ident) {
     return ok;
 }
 
+// The name of a declaration with its namespace, e.g physics.Meters, which tells types of different namespaces apart
+static char *qualified_declaration_name(AstIdentifier *ident) {
+    AstFile *file = ident->head.file;
+    if (!file || !file->ns) return ident->name;
+    StringBuilder sb = sb_init(32);
+    sb_append(&sb, "%s.%s", file->ns->name, ident->name);
+    return sb_to_string(&sb);
+}
+
+// A newtype e.g 'Meters :: newtype f64;'. It is a copy of the type it is made of, so it has its size and kind, and the
+// backend sees an f64, but its identity is the name that declares it: a Meters is only equal to a Meters. A newtype of a
+// struct has the members of the struct, but none of its methods or constants: it gets methods of its own
+Type *make_newtype(Typer *typer, Type *base, AstIdentifier *ident) {
+    Parser *parser = typer->parser;
+    size_t size = 0;
+    switch (base->kind) {
+    case TYPE_BOOL:
+    case TYPE_INTEGER:
+    case TYPE_FLOAT:   size = sizeof(TypePrimitive); break;
+    case TYPE_STRING:  size = sizeof(TypeString);    break;
+    case TYPE_POINTER: size = sizeof(TypePointer);   break;
+    case TYPE_ARRAY:   size = sizeof(TypeArray);     break;
+    case TYPE_ENUM:    size = sizeof(TypeEnum);      break;
+    case TYPE_STRUCT:  size = sizeof(TypeStruct);    break;
+    default:
+        report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "A newtype can't be made of %s", type_to_str(base));
+        report_error_ast(parser, LABEL_HINT, NULL, "A newtype is made of a number, a bool, a string, a pointer, an array, an enum or a struct, e.g %s :: newtype f64;", ident->name);
+        return NULL;
+    }
+    if (base->kind == TYPE_STRUCT && (((TypeStruct *)base)->node->is_interface || ((TypeStruct *)base)->node->is_union)) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)ident, "A newtype can't be made of the %s %s", ((TypeStruct *)base)->node->is_interface ? "interface" : "union", type_to_str(base));
+        return NULL;
+    }
+
+    Type *type = type_alloc(&parser->type_table, size);
+    memcpy(type, base, size);
+    type->head            = ident->head;
+    type->head.kind       = AST_TYPE;
+    type->newtype         = ident;
+    type->newtype_methods = NULL;
+    type->newtype_base    = base;
+
+    if (base->kind == TYPE_STRUCT) {
+        // Its own struct, with the members of the base, and methods and constants of its own
+        TypeStruct *struct_type = (TypeStruct *)type;
+        AstStruct  *node        = ast_allocate(parser, sizeof(AstStruct));
+        memcpy(node, struct_type->node, sizeof(AstStruct));
+        node->identifier     = ident;
+        node->methods        = make_empty_struct_scope(parser, node);
+        node->static_members = make_empty_struct_scope(parser, node);
+        node->static_members->parent = struct_type->node->static_members ? struct_type->node->static_members->parent : NULL;
+        node->inside_methods = da_init(1, sizeof(AstDeclaration *));
+        node->generic_struct = NULL;
+        struct_type->node           = node;
+        struct_type->identifier     = ident;
+        struct_type->head.name      = ident->name;
+        struct_type->qualified_name = qualified_declaration_name(ident);
+    }
+    if (base->kind == TYPE_ENUM) {
+        TypeEnum *enum_type = (TypeEnum *)type;
+        enum_type->identifier     = ident;
+        enum_type->head.name      = ident->name;
+        enum_type->qualified_name = qualified_declaration_name(ident);
+        enum_type->method_holder  = NULL;
+    }
+    return type;
+}
+
 // Type aliases e.g Byte :: u8; or IntList :: List<int>; An alias is the same type as the type it names
 bool check_type_alias(Typer *typer, AstDeclaration *decl) {
     AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[0];
@@ -3122,6 +3201,11 @@ bool check_type_alias(Typer *typer, AstDeclaration *decl) {
     Type *type = resolve_type(typer, decl->type);
     decl->head.flags &= ~AST_FLAG_IS_BEING_CHECKED;
     if (!type) return false;
+
+    if (decl->flags & DECLARATION_NEWTYPE) {
+        type = make_newtype(typer, type, ident);
+        if (!type) return false;
+    }
 
     decl->type   = type;
     ident->type  = type;
@@ -3582,6 +3666,19 @@ bool types_are_equal(Type *lhs, Type *rhs) {
     if (is_optional_type(lhs) && !is_optional_type(rhs)) {
         if (is_null_type(rhs)) return true;
         return types_are_equal(optional_inner_type(lhs), rhs);
+    }
+
+    // A newtype is only equal to itself. An untyped number is one, e.g 'distance: Meters = 5;', and null is a pointer one
+    if (lhs->newtype != rhs->newtype) {
+        Type *newtype = lhs->newtype ? lhs : rhs;
+        Type *other   = lhs->newtype ? rhs : lhs;
+        if (other->newtype) return false;
+        if (is_null_type(other) && newtype->kind == TYPE_POINTER) return true;
+        if (is_primitive_type(other->kind) && is_primitive_type(newtype->kind)) {
+            PrimitiveKind kind = ((TypePrimitive *)other)->kind;
+            if (kind == PRIMITIVE_UNTYPED_INT || kind == PRIMITIVE_UNTYPED_FLOAT) return can_cast_implicitly(other, newtype);
+        }
+        return false;
     }
 
     if (is_primitive_type(lhs->kind) && is_primitive_type(rhs->kind)) {
@@ -8275,6 +8372,27 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
         valid_lhs = true;
     }
 
+    // The methods of a newtype that isn't a struct, e.g m.toFeet() with 'toFeet :: method (m: Meters)'. A newtype of a string
+    // has the members of a string, but not its methods
+    Type *newtype_value = type_lhs->kind == TYPE_POINTER ? ((TypePointer *)type_lhs)->pointer_to : type_lhs;
+    if (newtype_value->newtype && newtype_value->kind != TYPE_STRUCT && is_literal_identifier(ma->right)) {
+        char *name = ((AstLiteral *)ma->right)->as.value.identifier.name;
+        TypeStruct *holder = method_holder_of(typer, newtype_value);
+        AstIdentifier *method = holder ? get_struct_method(holder->node, name) : NULL;
+        if (method) {
+            index_identifier_use((Ast *)ma->right, method);
+            ma->struct_type   = holder;
+            ma->access_kind   = MEMBER_ACCESS_STRUCT_MEMBER;
+            ma->struct_member = method;
+            return method->type;
+        }
+        if (struct_type && get_struct_method(struct_type->node, name)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->right), "%s has no method '%s'. It is a newtype of string, and has the members of a string but not its methods", type_to_str(newtype_value), name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Cast it to use the method of string, e.g (x as string).%s()", name);
+            return NULL;
+        }
+    }
+
     if (!valid_lhs) {
         // Methods on primitive types and enums e.g x.hash() with 'hash :: method (x: int) -> u64'
         Type *value_type = type_lhs->kind == TYPE_POINTER ? ((TypePointer *)type_lhs)->pointer_to : type_lhs;
@@ -8290,6 +8408,12 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
             }
 
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->right), "Type %s has no method '%s'", type_to_str(type_lhs), name);
+            Type *newtype = value_type->newtype ? value_type : NULL;
+            if (newtype && newtype->newtype_base && method_holder_of(typer, newtype->newtype_base) && get_struct_method(method_holder_of(typer, newtype->newtype_base)->node, name)) {
+                char *base = type_to_str(newtype->newtype_base);
+                report_error_ast(typer->parser, LABEL_HINT, NULL, "%s is a newtype of %s, and a newtype has methods of its own. Give it one that uses the one of %s, e.g %s :: method (x: %s) -> ... { return (x as %s).%s(); }",
+                    type_to_str(newtype), base, base, name, type_to_str(newtype), base, name);
+            }
             return NULL;
         }
 
@@ -8939,6 +9063,14 @@ static Type *check_optional_default(Typer *typer, AstBinary *binary, Type *ctx_t
     return inner;
 }
 
+// A number written in the program, e.g 2, 2.5 or -4.0
+static bool is_number_literal(AstExpr *expr) {
+    if (expr->head.kind == AST_UNARY && ((AstUnary *)expr)->operator == OP_UNARY_MINUS) return is_number_literal(((AstUnary *)expr)->expr);
+    if (expr->head.kind != AST_LITERAL) return false;
+    LiteralKind kind = ((AstLiteral *)expr)->kind;
+    return kind == LITERAL_INTEGER || kind == LITERAL_FLOAT;
+}
+
 Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
 
     Type *ti_lhs = NULL;
@@ -9032,6 +9164,33 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         }
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)binary, "Cannot compare a %s with a %s", text_bold(type_to_str(ti_lhs)), text_bold(type_to_str(ti_rhs)));
         return NULL;
+    }
+
+    // A newtype only goes with itself, e.g Meters + Meters, or an untyped number, e.g distance * 2. The amount of a shift is any integer
+    bool is_shift = binary->operator == TOKEN_BITWISE_SHIFT_LEFT || binary->operator == TOKEN_BITWISE_SHIFT_RIGHT;
+    if (ti_lhs->newtype != ti_rhs->newtype && !(is_shift && rhs == TYPE_INTEGER && !ti_rhs->newtype)) {
+        // A number written next to it is a number of the newtype, e.g distance == -4.0
+        AstExpr *other_side = ti_lhs->newtype ? binary->right : binary->left;
+        Type    *newtype    = ti_lhs->newtype ? ti_lhs : ti_rhs;
+        if (is_number_literal(other_side) && is_primitive_type(newtype->kind)) {
+            Type *typed = check_expression(typer, other_side, newtype);
+            if (!typed) return NULL;
+            if (other_side == binary->right) ti_rhs = typed; else ti_lhs = typed;
+            lhs = ti_lhs->kind;
+            rhs = ti_rhs->kind;
+        }
+    }
+    if (ti_lhs->newtype != ti_rhs->newtype && !(is_shift && rhs == TYPE_INTEGER && !ti_rhs->newtype)) {
+        Type *other = ti_lhs->newtype ? ti_rhs : ti_lhs;
+        bool untyped = is_primitive_type(other->kind) && !other->newtype &&
+                       (((TypePrimitive *)other)->kind == PRIMITIVE_UNTYPED_INT || ((TypePrimitive *)other)->kind == PRIMITIVE_UNTYPED_FLOAT);
+        bool null_pointer = is_null_type(other) && (ti_lhs->newtype ? ti_lhs : ti_rhs)->kind == TYPE_POINTER;
+        if (!untyped && !null_pointer) {
+            Type *newtype = ti_lhs->newtype ? ti_lhs : ti_rhs;
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)binary, "Cannot use a %s with a %s", text_bold(type_to_str(ti_lhs)), text_bold(type_to_str(ti_rhs)));
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "%s is a newtype, which only goes with itself. Cast the other side if it is meant, e.g x as %s", type_to_str(newtype), type_to_str(newtype));
+            return NULL;
+        }
     }
 
     if (lhs == TYPE_STRUCT && rhs == TYPE_STRUCT) {
@@ -9267,6 +9426,14 @@ bool can_cast_implicitly(Type *from, Type *to) {
 }
 
 bool can_cast_explicitly(Type *from, Type *to) {
+    // A newtype and the type it is made of, e.g m as f64 and 2.5 as Meters, or two newtypes of the same type
+    if (from->newtype || to->newtype) {
+        Type *from_base = from->newtype ? from->newtype_base : from;
+        Type *to_base   = to->newtype   ? to->newtype_base   : to;
+        if (types_are_equal(to_base, from_base)) return true;
+        return can_cast_explicitly(from_base, to_base);
+    }
+
     if (from->kind == TYPE_INTEGER && to->kind == TYPE_INTEGER) return true;
     if (from->kind == TYPE_INTEGER && to->kind == TYPE_FLOAT) return true;
     if (from->kind == TYPE_INTEGER && to->kind == TYPE_BOOL) return true;
