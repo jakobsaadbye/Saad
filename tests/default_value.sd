@@ -1,0 +1,66 @@
+// default: the value a variable of the type wanted where it is written starts with
+
+use fmt;
+import errors;
+
+Status :: enum { ok = 200, notFound = 404 }   // No 0, so it starts with .ok
+Options :: enumflags { verbose, quiet }
+
+Post :: struct {
+    title:  string;
+    views:  int = 1;
+    status: Status;
+}
+
+findPost :: (id: int) -> (Post, error) {
+    if id < 0 { return default, errors.make("no post %", id); }
+    return Post{title: "hi"}, null;
+}
+
+firstOf :: <T>(xs: []T) -> (T, error) {
+    if xs.count == 0 { return default, errors.make("empty"); }
+    return xs[0], null;
+}
+
+describe :: (s: Status, p: Post) -> string { return sprint("% %", s, p.views); }
+
+globalStatus: Status = default;
+globalPost: Post = default;
+
+main :: () {
+    // A return with an error
+    p, err := findPost(-1);
+    assert(err != null && p.title == "" && p.views == 1 && p.status == .ok);
+
+    // Assignments, and == and !=
+    s: Status = .notFound;
+    assert(s != default);
+    s = default;
+    assert(s == .ok && s == default);
+    o: Options = .verbose;
+    o = default;
+    assert(o.isEmpty());
+
+    // Numbers, strings, pointers and optionals
+    n: int = 5;
+    n = default;
+    f: f64 = default;
+    t: string = default;
+    ptr: *Post = default;
+    maybe: ?Status = default;
+    assert(n == 0 && f == 0.0 && t == "" && ptr == null && ptr == default && maybe == null);
+
+    // Arguments, generics and globals
+    assert(describe(default, default) == ".ok 1");
+    empty: []int;
+    first, none := firstOf(empty);
+    assert(first == 0 && none != null);
+    post, missing := firstOf<Post>([]);
+    assert(post.views == 1 && missing != null);
+    assert(globalStatus == .ok && globalPost.views == 1);
+
+    // In a struct literal
+    q := Post{title: "x", status: default};
+    assert(q.status == .ok);
+    print("default ok");
+}

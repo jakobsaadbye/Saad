@@ -1,0 +1,11 @@
+// 'enum flags' is the old way to write 'enumflags', which still works, with a warning
+
+use fmt;
+
+Options :: enum flags { verbose, color }
+
+main :: () {
+    o := Options.verbose | .color;
+    assert(o.has(.color) && (o as int) == 3);
+    print("old enum flags ok");
+}

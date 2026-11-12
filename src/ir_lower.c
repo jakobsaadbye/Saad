@@ -810,6 +810,9 @@ static void write_constant(Lowerer *L, IrGlobal *global, int offset, AstExpr *ex
         }
         return;
     }
+    case AST_DEFAULT_VALUE:
+        write_default_constants(L, global, offset, type);
+        return;
     case AST_FUNCTION_DEFN: {
         AstFunctionDefn *func_defn = (AstFunctionDefn *) expr;
         IrReloc reloc = { offset, function_global(L, func_defn) }; // Also queues the function for lowering
@@ -2826,6 +2829,14 @@ static Value lower_expr(Lowerer *L, AstExpr *expr) {
     }
     case AST_SEMICOLON_EXPR:
         return value_none();
+    case AST_DEFAULT_VALUE: {
+        // The value a variable of the type starts with (emit_default_init): zero, or the defaults of members and enums
+        Type *type = expr->type;
+        Value place = temp_place(L, type, "default");
+        emit_default_init(L, place.addr, type);
+        if (type_is_aggregate(type)) return place;
+        return value_scalar(emit_load(L, ir_type_of(type), place.addr), type);
+    }
     case AST_SWITCH: {
         // A switch expression: the cases store their value in a slot, which is the value of the switch
         AstSwitch *sw = (AstSwitch *) expr;

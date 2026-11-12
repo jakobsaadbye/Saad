@@ -8,7 +8,7 @@ import mem;
 Status :: enum { ok = 200, created = 201, notFound = 404 }
 Level  :: enum { low = 10, high = 50 }
 Color  :: enum { red, green }              // Has 0, so it starts with it as before
-Options :: enum flags { verbose, quiet }   // 0 is no flags
+Options :: enumflags { verbose, quiet }   // 0 is no flags
 
 Inner :: struct {
     level: Level;
