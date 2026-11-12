@@ -1,0 +1,8 @@
+// expect-error: The format has 1 place for values, but 2 values are given
+// expect-error: A value without a place isn't written
+
+import errors;
+
+main :: () {
+    err := errors.make("can't open %", "a.txt", 3);   // Any function with 'format: string, args: ...any'
+}

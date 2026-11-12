@@ -74,6 +74,8 @@ static void hint_error_embed(Typer *typer, Type *wanted, Type *given);
 static AstExpr *tree_string(Typer *typer, char *text, Ast *at);
 static Type *error_type(Typer *typer);
 static bool is_null_type(Type *type);
+static bool is_void_pointer_to_typed(Type *wanted, Type *given);
+bool value_fits(Type *wanted, Type *given);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
 Type *check_enum_values(Typer *typer, AstEnum *ast_enum);
@@ -3283,7 +3285,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
             bool untyped_fits = is_untyped_type(value->type) && value->type->kind == TYPE_INTEGER && (decl->type->kind == TYPE_INTEGER || decl->type->kind == TYPE_FLOAT);
             if (untyped_fits && !leads_to_integer_overflow(typer, decl->type, value)) return false;
 
-            if (!untyped_fits && !types_are_equal(decl->type, value->type)) {
+            if (!untyped_fits && !value_fits(decl->type, value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", ident->name, type_to_str(decl->type), type_to_str(value->type));
                 explain_interface_mismatch(typer, decl->type, value->type, value);
                 hint_optional_unwrap(typer, decl->type, value->type);
@@ -3628,17 +3630,51 @@ static bool is_null_type(Type *type) {
     return type->kind == TYPE_POINTER && ((TypePointer *)type)->pointer_to->kind == TYPE_VOID;
 }
 
+// A hint for a number given where a smaller one, or one of the other sign, is wanted, e.g an i64 where an int is wanted
+static void hint_narrowing(Typer *typer, Type *wanted, Type *given) {
+    if (is_void_pointer_to_typed(wanted, given)) {
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "A *void can point to anything, so it isn't converted by itself. Write 'p as %s' to say what the memory holds", type_to_str(wanted));
+        return;
+    }
+    if (!wanted || !given || wanted->newtype || given->newtype) return;
+    bool numbers = (wanted->kind == TYPE_INTEGER || wanted->kind == TYPE_FLOAT) && (given->kind == TYPE_INTEGER || given->kind == TYPE_FLOAT);
+    if (!numbers || is_untyped_type(given)) return;
+    const char *wanted_name = type_to_str(wanted);
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "A value of type %s doesn't always fit in %s, so it isn't converted by itself. Write 'x as %s' when it fits, or use %s",
+        type_to_str(given), wanted_name, wanted_name, type_to_str(given));
+}
+
 // A hint for a ?T given where a T is wanted
 static void hint_optional_unwrap(Typer *typer, Type *wanted, Type *given) {
+    hint_narrowing(typer, wanted, given);
     if (wanted && given && is_optional_type(given) && !is_optional_type(wanted)) {
         report_error_ast(typer->parser, LABEL_HINT, NULL, "It may be empty. Use its value with x ?? fallback, x.valueOr(fallback), or x.value() after checking x.hasValue()");
     }
 }
 
-// The type given fits the type wanted, or the other way around, as arguments and returns may narrow e.g i64 to i32.
-// But a ?T never goes where a T is wanted, as it may be empty
+// The type given fits the type wanted, or the other way around, for an argument or a return value. Not for numbers,
+// which only widen, e.g an i32 where an i64 is wanted: an i64 where an i32 is wanted needs 'as', as it may not fit.
+// And a ?T never goes where a T is wanted, as it may be empty
+// A *void where a pointer to a type is wanted, e.g 'post: *Post = memory;'. It takes 'as', which says what the memory
+// holds: 'memory as *Post'. A *T where a *void is wanted, and null, are fine
+static bool is_void_pointer_to_typed(Type *wanted, Type *given) {
+    if (!wanted || !given || wanted->kind != TYPE_POINTER || given->kind != TYPE_POINTER) return false;
+    if (given == (Type *)type_defn_null_ptr) return false;   // null itself, whose type is a *void too
+    Type *to   = ((TypePointer *)wanted)->pointer_to;
+    Type *from = ((TypePointer *)given)->pointer_to;
+    return from->kind == TYPE_VOID && to->kind != TYPE_VOID;
+}
+
+// The value given can go where the wanted type is, e.g into a variable, a member or a parameter
+bool value_fits(Type *wanted, Type *given) {
+    if (is_void_pointer_to_typed(wanted, given)) return false;
+    return types_are_equal(wanted, given);
+}
+
 bool types_fit_either_way(Type *wanted, Type *given) {
+    if (is_void_pointer_to_typed(wanted, given)) return false;
     if (types_are_equal(wanted, given)) return true;
+    if (is_primitive_type(wanted->kind) && is_primitive_type(given->kind) && !wanted->newtype && !given->newtype) return false;
     if (is_optional_type(given) && !is_optional_type(wanted)) return false;
     // Nor a *Inner where a *Outer is wanted, as not every Inner is in an Outer
     if (wanted->kind == TYPE_POINTER && given->kind == TYPE_POINTER) {
@@ -3882,7 +3918,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     // An untyped number, e.g a constant, becomes the number type of the place. It is checked to fit below
     bool untyped_fits = is_untyped_type(expr_type) && expr_type->kind == TYPE_INTEGER && (lhs_type->kind == TYPE_INTEGER || lhs_type->kind == TYPE_FLOAT);
 
-    if (!untyped_fits && !types_are_equal(lhs_type, expr_type)) {
+    if (!untyped_fits && !value_fits(lhs_type, expr_type)) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Assignment type mismatch. Wanted type %s. Got type %s", type_to_str(lhs_type), type_to_str(expr_type));
         explain_interface_mismatch(typer, lhs_type, expr_type, assign->expr);
         hint_optional_unwrap(typer, lhs_type, expr_type);
@@ -4500,6 +4536,73 @@ bool check_expr_stmt(Typer *typer, AstExprStmt *expr_stmt) {
     return true;
 }
 
+// The variable of the function that a place is in, e.g x of x, x.pos, or x.cells[2] when cells is a fixed array: memory of
+// the function, which is gone when it returns. Null when the place is reached through a pointer, a slice or a list, which
+// point somewhere else, or is a global
+static AstIdentifier *local_of_place(Typer *typer, AstExpr *place) {
+    switch (place->head.kind) {
+    case AST_LITERAL: {
+        AstLiteral *literal = (AstLiteral *)place;
+        if (literal->kind != LITERAL_IDENTIFIER) return NULL;
+        AstIdentifier *ident = literal->as.value.identifier.resolved_identifier;
+        if (!ident) ident = lookup_from_scope(typer->parser, typer->current_scope, literal->as.value.identifier.name);
+        if (!ident || (ident->flags & (IDENTIFIER_IS_GLOBAL | IDENTIFIER_IS_CONSTANT))) return NULL;
+        if (!ident->scope || !typer->enclosing_function || ident->scope->enclosing_function != typer->enclosing_function) return NULL;
+        return ident;
+    }
+    case AST_MEMBER_ACCESS: {
+        AstMemberAccess *ma = (AstMemberAccess *)place;
+        if (ma->access_kind != MEMBER_ACCESS_STRUCT_MEMBER || !ma->left->type || ma->left->type->kind != TYPE_STRUCT) return NULL;
+        return local_of_place(typer, ma->left);   // A member of a struct value, not through a pointer
+    }
+    case AST_ARRAY_ACCESS: {
+        AstArrayAccess *aa = (AstArrayAccess *)place;
+        Type *left = aa->left->type;
+        if (!left || left->kind != TYPE_ARRAY || ((TypeArray *)left)->array_kind != ARRAY_FIXED) return NULL;
+        return local_of_place(typer, aa->left);   // An element of a fixed array, which is in the variable
+    }
+    default:
+        return NULL;
+    }
+}
+
+// A value that is returned must not point into the variables of the function, which are gone when it returns: &x of a
+// variable x, also inside a struct or an array literal, and a fixed array of the function given as a slice
+static bool check_not_dangling(Typer *typer, AstExpr *value, Type *wanted) {
+    if (value->head.kind == AST_UNARY && ((AstUnary *)value)->operator == OP_ADDRESS_OF) {
+        AstIdentifier *local = local_of_place(typer, ((AstUnary *)value)->expr);
+        if (!local) return true;
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "This returns the address of '%s', a variable of the function, which is gone when it returns", local->name);
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Return the value itself, or make it with new, e.g p := new(%s)", local->type ? type_to_str(local->type) : "T");
+        return false;
+    }
+    if (value->head.kind == AST_STRUCT_LITERAL) {
+        AstStructLiteral *lit = (AstStructLiteral *)value;
+        for (int i = 0; i < lit->initializers.count; i++) {
+            AstStructInitializer *init = ((AstStructInitializer **)lit->initializers.items)[i];
+            if (!check_not_dangling(typer, init->value, NULL)) return false;
+        }
+        return true;
+    }
+    if (value->head.kind == AST_ARRAY_LITERAL) {
+        AstArrayLiteral *lit = (AstArrayLiteral *)value;
+        for (int i = 0; i < lit->expressions.count; i++) {
+            if (!check_not_dangling(typer, ((AstExpr **)lit->expressions.items)[i], NULL)) return false;
+        }
+        return true;
+    }
+    // A fixed array of the function where a slice is wanted: the slice would point into it
+    if (wanted && wanted->kind == TYPE_ARRAY && ((TypeArray *)wanted)->array_kind == ARRAY_SLICE &&
+        value->type && value->type->kind == TYPE_ARRAY && ((TypeArray *)value->type)->array_kind == ARRAY_FIXED) {
+        AstIdentifier *local = local_of_place(typer, value);
+        if (!local) return true;
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "This returns a slice of '%s', a fixed array of the function, which is gone when it returns", local->name);
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Return a list, e.g [..]%s, or a struct with the array as a member", type_to_str(((TypeArray *)value->type)->elem_type));
+        return false;
+    }
+    return true;
+}
+
 bool check_return(Typer *typer, AstReturn *ast_return) {
     AstFunctionDefn *ef = typer->enclosing_function;
     if (ef == NULL) {
@@ -4551,6 +4654,7 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
         typer->wants_all_results = ast_return->values.count < ef->return_types.count; // return f() of the results of f
         Type *ok = check_expression(typer, return_value, wanted_type);
         if (!ok) return false;
+        if (!check_not_dangling(typer, return_value, wanted_type)) return false;
 
         if (wanted_type && !types_are_equal(wanted_type, return_value->type)) {
             AstExpr *slice = collection_as_slice(typer, return_value, wanted_type);
@@ -4614,6 +4718,7 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
             }
 
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(failing_return_value), "Return type mismatch. Wanted type %s, got type %s", text_bold(type_to_str((Type *)func_return_types)), text_bold(type_to_str((Type *)returning_tuple)));
+            hint_narrowing(typer, wanted, given);
             if (wanted->kind != TYPE_VOID) {
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_return_types), "Here is the return types of function '%s'", ef->identifier->name);
             }
@@ -5904,6 +6009,52 @@ static bool rewrite_enum_from(Typer *typer, AstFunctionCall *call) {
     return true;
 }
 
+// The number of places of values in a format, e.g 2 of "% has % moons". \% is a % of the text, not a place
+static int format_places(AstLiteral *format) {
+    char *text = format->as.value.string.data;
+    int   len  = format->as.value.string.length;
+    int places = 0;
+    for (int i = 0; i < len; i++) {
+        if (text[i] == '\\' && i + 1 < len && text[i + 1] == '%') { i += 1; continue; }
+        if (text[i] == '%') places += 1;
+    }
+    return places;
+}
+
+// A function with a parameter 'format: string' followed by '...any', e.g print, sprint, StringBuilder.add or errors.make, puts
+// its arguments in the places of the format, each %. When the format is written in the program and values are given, the
+// number of places must be the number of values: a value without a place isn't written, and a place without a value is
+// written as a %, which is a mistake when there are values. Without values, the text is as it is written, e.g
+// print("100%"). Spread values, e.g print(format, ...values), aren't counted
+static bool check_format_arguments(Typer *typer, AstFunctionCall *call, AstFunctionDefn *func_defn) {
+    if (!func_defn->is_variadic || func_defn->variadic_parameter_index < 1) return true;
+    int variadic = func_defn->variadic_parameter_index;
+    AstIdentifier *format_param = ((AstIdentifier **)func_defn->parameters.items)[variadic - 1];
+    if (strcmp(format_param->name, "format") != 0 || format_param->type == NULL || format_param->type->kind != TYPE_STRING) return true;
+
+    AstExpr *format = NULL;
+    int values = 0;
+    for (int i = 0; i < call->arguments.count; i++) {
+        AstArgument *arg = ((AstArgument **)call->arguments.items)[i];
+        if (arg->param_index == variadic - 1 && !arg->is_vararg) format = arg->value;
+        if (!arg->is_vararg) continue;
+        AstExpr *value = arg->value;
+        if (value->head.kind == AST_CAST && (value->head.flags & AST_FLAG_COMPILER_GENERATED)) value = ((AstCast *)value)->expr;
+        if ((arg->value->head.flags & AST_FLAG_EXPR_IS_SPREADED) || (value->head.flags & AST_FLAG_EXPR_IS_SPREADED)) return true;
+        values += 1;
+    }
+    if (format == NULL || values == 0) return true;
+    if (format->head.kind != AST_LITERAL || ((AstLiteral *)format)->kind != LITERAL_STRING) return true;
+
+    int places = format_places((AstLiteral *)format);
+    if (places == values) return true;
+    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)format, "The format has %d %s for values, but %d %s given",
+        places, places == 1 ? "place" : "places", values, values == 1 ? "value is" : "values are");
+    if (places < values) report_error_ast(typer->parser, LABEL_HINT, NULL, "Each %% is the place of the next value. A value without a place isn't written");
+    else                 report_error_ast(typer->parser, LABEL_HINT, NULL, "Each %% is the place of the next value. Write \\%% for a %% of the text");
+    return false;
+}
+
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     if (typer->enclosing_function == NULL) {
         if (typer->checking_member_default) {
@@ -6463,6 +6614,8 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         }
     }
     
+
+    if (!check_format_arguments(typer, call, func_defn)) return NULL;
 
     // A read-only self cannot be passed where a pointer is wanted, as it could be used to change self
     for (int i = call->is_method_call ? 1 : 0; i < call->arguments.count; i++) {
@@ -7082,9 +7235,9 @@ static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *fu
 
         if (resolved_type->kind == TYPE_ARRAY && ((TypeArray *)resolved_type)->array_kind == ARRAY_FIXED) {
             TypeArray *array_type = (TypeArray *) resolved_type;
-            array_type->array_kind = ARRAY_SLICE;
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)resolved_type, "Use of fixed size array as return type. Passing a fixed size array is always done by slice (data + count)");
-            report_error_ast(typer->parser, LABEL_HINT, (Ast *)array_type, "Make the return type a slice type: %s", type_to_str((Type *)array_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)resolved_type, "A function can't return a fixed size array, e.g %s", type_to_str(resolved_type));
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Return a list, e.g [..]%s, or a struct with the array as a member. A slice of an array of the function would point to memory that is gone when it returns",
+                type_to_str(array_type->elem_type));
             return NULL;
         }
     }
@@ -9096,8 +9249,9 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
             }
 
             if (!untyped_number_fits(typer, member_type, init->value)) return NULL;
-            if (!types_are_equal(member_type, init->value->type)) {
+            if (!value_fits(member_type, init->value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", member->name, type_to_str(member_type), type_to_str(init->value->type));
+                hint_narrowing(typer, member_type, init->value->type);
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
                 return NULL;
             }
@@ -9126,8 +9280,9 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
             }
 
             if (!untyped_number_fits(typer, member_type, init->value)) return NULL;
-            if (!types_are_equal(member_type, init->value->type)) {
+            if (!value_fits(member_type, init->value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->name, type_to_str(member_type), type_to_str(init->value->type));
+                hint_narrowing(typer, member_type, init->value->type);
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(member), "Here is the member '%s' in %s", member->name, struct_defn->identifier->name);
                 return NULL;
             }
@@ -9541,8 +9696,18 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
 }
 
 bool can_cast_implicitly(Type *from, Type *to) {
-    // Can we cast without truncation?
-    if (from->kind == TYPE_INTEGER && to->kind == TYPE_INTEGER) return from->size <= to->size;
+    // Only when every value fits: a signed integer into a signed one at least as big, an unsigned one into an unsigned one
+    // at least as big, or into a signed one that is bigger. Anything else, e.g i64 to i32, u64 to i64 or i32 to u64, is
+    // written with 'as'. An untyped number fits when its value does, which is checked where it is used
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_INTEGER) {
+        PrimitiveKind from_kind = ((TypePrimitive *)from)->kind;
+        if (from_kind == PRIMITIVE_UNTYPED_INT) return true;
+        bool from_signed = is_signed_integer(from);
+        bool to_signed   = is_signed_integer(to);
+        if (from_signed == to_signed) return from->size <= to->size;
+        if (!from_signed && to_signed) return from->size < to->size;
+        return false;
+    }
     if (from->kind == TYPE_FLOAT   && to->kind == TYPE_FLOAT)   return from->size <= to->size;
 
     // Allow untyped integers to cast to floats

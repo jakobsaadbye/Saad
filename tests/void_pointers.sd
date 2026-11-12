@@ -1,0 +1,25 @@
+// A *T converts to a *void by itself, and null to any pointer. A *void to a *T is written with 'as', which says what the
+// memory holds. See tests/should_fail/void_pointer_*.sd
+
+use fmt;
+import mem;
+
+Post :: struct { views: int; }
+
+takesAny :: (memory: *void) -> *void { return memory; }
+
+main :: () {
+    post := Post{views: 3};
+    memory: *void = &post;                 // *Post to *void
+    back := takesAny(&post) as *Post;      // *void to *Post, written
+    assert(back.views == 3);
+
+    p: *Post = null;                       // null is any pointer
+    assert(p == null && memory != null && memory == &post);   // Comparing them is fine
+
+    raw := mem.allocate(sizeof(Post)) as *Post;
+    raw.views = 7;
+    assert(raw.views == 7);
+    mem.free(raw, sizeof(Post));
+    print("void pointers ok");
+}

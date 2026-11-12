@@ -7,7 +7,7 @@ pair :: () -> int, string { return 7, "seven"; }
 
 parse :: (text: string) -> int, error {
     if text == "" { return 0, errors.make("empty"); }
-    return text.len, null;
+    return text.len as int, null;
 }
 
 Point :: struct { x: int; y: int; }

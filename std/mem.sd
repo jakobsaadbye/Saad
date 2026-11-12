@@ -44,7 +44,7 @@ setAllocator :: (allocator: Allocator) -> Allocator {
 
 // Zeroed memory of the size, from the allocator (null is the allocator of the thread), aligned to 'align' bytes. Free
 // it with mem.free, its size and the same allocator
-allocate :: (size: int, allocator: Allocator = null, align := 8) -> *void {
+allocate :: (size: i64, allocator: Allocator = null, align := 8) -> *void {
     if size <= 0 { size = 1; }
     memory := resizeMemory(allocator, null, 0, size, align);
     if memory == null { panic("Out of memory"); }
@@ -54,7 +54,7 @@ allocate :: (size: int, allocator: Allocator = null, align := 8) -> *void {
 
 // The memory with another size, keeping what fits of it, like realloc: the size it has, and the size it gets. A null
 // memory is new memory, and a size of 0 frees it
-resize :: (memory: *void, oldSize: int, newSize: int, allocator: Allocator = null, align := 8) -> *void {
+resize :: (memory: *void, oldSize: i64, newSize: i64, allocator: Allocator = null, align := 8) -> *void {
     result := resizeMemory(allocator, memory, oldSize, newSize, align);
     if result == null && newSize > 0 { panic("Out of memory"); }
     return result;
@@ -62,7 +62,7 @@ resize :: (memory: *void, oldSize: int, newSize: int, allocator: Allocator = nul
 
 // Gives back memory of allocate or resize, with its size, to the allocator it came from (null is the allocator of the
 // thread)
-free :: (memory: *void, size: int, allocator: Allocator = null, align := 8) {
+free :: (memory: *void, size: i64, allocator: Allocator = null, align := 8) {
     freeMemory(memory, size, allocator, align);
 }
 
@@ -74,17 +74,17 @@ delete :: <T>(memory: *T, allocator: Allocator = null) {
 }
 
 // Copies count bytes, like memcpy. The two may not overlap
-copy :: (to: *void, from: *void, count: int) {
+copy :: (to: *void, from: *void, count: i64) {
     if count > 0 { c.memcpy(to, from, count); }
 }
 
 // Sets count bytes to the value, like memset
-set :: (to: *void, value: u8, count: int) {
+set :: (to: *void, value: u8, count: i64) {
     if count > 0 { c.memset(to, value as int, count); }
 }
 
 // If the count bytes are the same, like memcmp(a, b, count) == 0
-equal :: (a: *void, b: *void, count: int) -> bool {
+equal :: (a: *void, b: *void, count: i64) -> bool {
     return count <= 0 || c.memcmp(a, b, count) == 0;
 }
 

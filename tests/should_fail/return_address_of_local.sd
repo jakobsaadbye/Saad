@@ -1,0 +1,11 @@
+// expect-error: This returns the address of 'x', a variable of the function, which is gone when it returns
+// expect-error: Return the value itself, or make it with new
+
+counter :: () -> *int {
+    x := 0;
+    return &x;
+}
+
+main :: () {
+    c := counter();
+}

@@ -651,7 +651,7 @@ parseNodes :: method (p: *TemplateParser, nodes: *[..]*TemplateNode, ends: []str
         contentStart := start + 2;
         if trimBefore { contentStart += 1; }
         end := p.findClose(contentStart, close);
-        if end < 0 { p.fail(fmt.sprint("{% has no %", p.source.slice(start, start + 2), close)); }
+        if end < 0 { p.fail(fmt.sprint("% has no %", p.source.slice(start, start + 2), close)); }
         contentEnd := end;
         if contentEnd > contentStart && p.source[contentEnd - 1] == '-' {
             contentEnd -= 1;
@@ -779,7 +779,7 @@ parseTag :: method (p: *TemplateParser, tag: string, nodes: *[..]*TemplateNode) 
         name := p.word();
         node.names.add(name);
         p.expectEndAfterName();
-        if p.parseNodes(&node.body, ["endblock"]) != "endblock" { p.fail(fmt.sprint("{% block % %} has no {% endblock %}", name)); }
+        if p.parseNodes(&node.body, ["endblock"]) != "endblock" { p.fail(fmt.sprint("{\% block % \%} has no {\% endblock \%}", name)); }
         p.expectEndAfterName();
         p.template.blocks.set(name, node);
         nodes.add(node);
@@ -802,7 +802,7 @@ parseTag :: method (p: *TemplateParser, tag: string, nodes: *[..]*TemplateNode) 
         }
         p.next += 1;
         p.expectEnd();
-        if p.parseNodes(&macro.body, ["endmacro"]) != "endmacro" { p.fail(fmt.sprint("{% macro % %} has no {% endmacro %}", macro.name)); }
+        if p.parseNodes(&macro.body, ["endmacro"]) != "endmacro" { p.fail(fmt.sprint("{\% macro % \%} has no {\% endmacro \%}", macro.name)); }
         p.expectEndAfterName();
         node := p.newNode(.macro);
         node.macro = macro;
@@ -810,7 +810,7 @@ parseTag :: method (p: *TemplateParser, tag: string, nodes: *[..]*TemplateNode) 
         nodes.add(node);
         return;
     }
-    p.fail(fmt.sprint("Unknown tag {% % %}", tag));
+    p.fail(fmt.sprint("Unknown tag {\% % \%}", tag));
 }
 
 @private
@@ -1158,7 +1158,7 @@ parse :: (name: string, source: string) -> *Template {
     template.name = name;
     p.template = template;
     end := p.parseNodes(&template.nodes, ["endif", "endfor", "endblock", "endmacro", "else", "elif", "elseif"]);
-    if end != "" { p.fail(fmt.sprint("{% % %} without its start", end)); }
+    if end != "" { p.fail(fmt.sprint("{\% % \%} without its start", end)); }
     p.tokens.free();
     return template;
 }

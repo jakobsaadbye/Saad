@@ -1,0 +1,9 @@
+// expect-error: Type mismatch. Wanted type int, got type i64
+// expect-error: Write 'x as int' when it fits
+
+takes :: (n: int) {}
+
+main :: () {
+    big: i64 = 5000000000;
+    takes(big);   // Would be 705032704
+}

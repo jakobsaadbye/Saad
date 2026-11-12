@@ -3,8 +3,8 @@ namespace c;
 // <string.h>
 
 extern "C" {
-    memset  :: (dest: *void, value: int, size: int) -> *void;
-    memcpy  :: (dest: *void, src: *void, size: int) -> *void;
+    memset  :: (dest: *void, value: int, size: i64) -> *void;   // size_t: 64 bits
+    memcpy  :: (dest: *void, src: *void, size: i64) -> *void;
     memcmp  :: (a: *void, b: *void, size: i64) -> int;
-    strlen  :: (str: c.string) -> int;
+    strlen  :: (str: c.string) -> i64;
 }

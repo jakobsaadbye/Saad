@@ -1,0 +1,10 @@
+// expect-error: Return type mismatch
+// expect-error: Write 'x as i32' when it fits
+
+length :: (s: string) -> i32 {
+    return s.len;   // An i64
+}
+
+main :: () {
+    n := length("abc");
+}

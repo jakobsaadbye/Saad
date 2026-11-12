@@ -1,0 +1,13 @@
+// expect-error: This returns the address of 'grid', a variable of the function
+
+Grid :: struct { cells: [4]int; }
+Cursor :: struct { at: *int; }
+
+start :: () -> Cursor {
+    grid: Grid;
+    return Cursor{at: &grid.cells[0]};   // An element of a fixed array in the variable
+}
+
+main :: () {
+    c := start();
+}

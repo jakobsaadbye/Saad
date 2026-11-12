@@ -3,9 +3,9 @@ namespace c;
 // <stdlib.h>
 
 extern "C" {
-    malloc  :: (size: int) -> *void;
-    calloc  :: (num: int, size: int) -> *void;
-    realloc :: (buffer: *void, new_size: int) -> *void;
+    malloc  :: (size: i64) -> *void;                       // size_t: 64 bits
+    calloc  :: (num: i64, size: i64) -> *void;
+    realloc :: (buffer: *void, new_size: i64) -> *void;
     free    :: (ptr: *void);
     exit    :: (code: int);
     getenv  :: (name: c.string) -> c.string;

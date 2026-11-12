@@ -1,0 +1,22 @@
+// A function with 'format: string, args: ...any' puts the values in the places of the format, each %. When values are
+// given to a format written in the program, the number of places is checked when compiling. See
+// tests/should_fail/format_*.sd
+
+use fmt;
+
+log :: (format: string, args: ...any) -> string {   // A function of the program is checked the same way
+    return sprint(format, ...args);
+}
+
+main :: () {
+    assert(sprint("% has % moons", "Mars", 2) == "Mars has 2 moons");
+    assert(sprint("100%") == "100%");                        // Without values, the text is as written
+    assert(sprint("100\% of %", "it") == "100% of it");      // \% is a % of the text
+    assert(log("% and %", 1, 2) == "1 and 2");
+
+    values: []any = ["a", "b"];
+    assert(sprint("% %", ...values) == "a b");                // Spread values aren't counted
+    format := "% %";
+    assert(sprint(format, 1, 2) == "1 2");                    // Nor a format that isn't written in the call
+    print("format places ok");
+}
