@@ -465,7 +465,7 @@ acceptAll :: method (loop: *Loop) {
             }
             return;
         }
-        conn, err := server.listener.tryAccept();
+        conn, _ := server.listener.tryAccept();   // The error is left: a null conn says it failed, and it is tried again
         if conn == null { return; }   // None waits, or it failed, e.g no more files: tried again at the next event
         conn.setNoDelay();
         c := new(Connection, mem.heap());

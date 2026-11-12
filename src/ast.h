@@ -257,6 +257,7 @@ typedef struct AstIdentifier {
     AstIdentifier *imported_from;      // IDENTIFIER_IS_IMPORTED_NAME: the declaration it is a copy of
     char          *deprecated_message; // IDENTIFIER_IS_DEPRECATED
     DynamicArray   attributes;         // of *AstStructLiteral. The values of the custom attributes of a struct member e.g @json.Field(name: "id")
+    bool           is_read;            // Its value is used somewhere, not only given one. A variable that isn't is warned about
 } AstIdentifier;
 
 typedef enum DeclarationFlags {

@@ -15,6 +15,22 @@ instead of a value that is silently wrong.
 | A switch on an enum or a union that doesn't handle every value | An error that names them |
 | A newtype where its type is wanted, or the other way, e.g a `Meters` where an `f64` is wanted | An error (see `docs/newtypes.md`) |
 
+## Warnings
+
+A variable of a function whose value is never used is a warning, e.g a value that was computed for nothing, or a typo
+in a name that is used instead. Giving it a value, e.g `x = 5;`, isn't using it. An `error` that is taken and never
+looked at gets a warning of its own, as it is a failure that goes unnoticed:
+
+```odin
+value, err := load();      // warning: The error 'err' is never looked at, so a failure goes unnoticed
+                           // hint: Check it, e.g 'if err != null { ... }', or don't take it, so it is thrown: 'v := f();'
+_, err := load();          // _ takes a value that isn't used
+```
+
+Parameters aren't warned about, as a function often has to take one it doesn't use, e.g of an interface. A write
+through a variable, e.g `p.x = 5` or `xs[i] = 1`, uses it. `warn_unused_locals()` in `typer.c`; `tests/warnings/` has
+the cases, which `tools/linux/runtests.sh` checks.
+
 ## When the program runs
 
 These throw a `Panic`, which names the place, and which a web server turns into a 500 (see `docs/errors.md`):

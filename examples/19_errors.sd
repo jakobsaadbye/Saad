@@ -35,7 +35,7 @@ checkAdult :: (name: string) -> error {
 
 main :: () {
     // Taken: a value
-    age, err := ageOf("cy");
+    _, err := ageOf("cy");   // _ for a value that isn't used
     if err != null { print("Oops: %", err.message); }
 
     // Thrown, and caught
@@ -72,7 +72,7 @@ main :: () {
     // Mistakes in the program, e.g dividing by zero or a null pointer, are thrown as a Panic
     try {
         zero := 0;
-        n := 10 / zero;
+        print("%", 10 / zero);
     } catch (e) {
         assert(e.is(Panic));
         print("Caught a panic: %", e.message);

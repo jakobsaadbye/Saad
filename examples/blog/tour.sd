@@ -55,7 +55,7 @@ main :: () {
 
     // The posts need the ids of their authors, so they come after the authors are saved
     engine   := newPost(&db, ada,   "Notes on the Analytical Engine", "analytical-engine", "It weaves algebraic patterns.");
-    bernoulli := newPost(&db, ada,  "Computing Bernoulli numbers",    "bernoulli",         "Step by step, with the engine.");
+    _         := newPost(&db, ada,  "Computing Bernoulli numbers",    "bernoulli",         "Step by step, with the engine.");
     compilers := newPost(&db, grace, "Why we need compilers",          "compilers",         "People should write in words.");
     moth      := newPost(&db, grace, "The first actual bug",           "first-bug",         "It was a moth.");
     engine.status    = .published;
