@@ -1,0 +1,26 @@
+// Addresses that may be returned: of what a pointer, a slice or a list points to, of a global, and of memory from new.
+// Not of a variable of the function, see tests/should_fail/return_*.sd
+
+use fmt;
+
+Point :: struct { x: int; y: int; }
+
+total: int;
+
+yOf      :: (p: *Point) -> *int { return &p.y; }          // Through a pointer
+firstOf  :: (xs: []int) -> *int { return &xs[0]; }         // An element of a slice
+inList   :: (xs: *[..]int) -> *int { return &xs.data[1]; }
+global   :: () -> *int { return &total; }
+made     :: () -> *Point { p := new(Point); p.x = 4; return p; }
+Digits   :: struct { d: [3]int; }
+digits   :: () -> Digits { x: Digits; x.d[2] = 3; return x; }   // A struct with the array is copied
+
+main :: () {
+    p := Point{1, 2};
+    assert(*yOf(&p) == 2);
+    xs: [..]int = [5, 6];
+    assert(*firstOf(xs) == 5 && *inList(&xs) == 6);
+    *global() = 9;
+    assert(total == 9 && made().x == 4 && digits().d[2] == 3);
+    print("return addresses ok");
+}

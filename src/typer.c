@@ -4536,6 +4536,73 @@ bool check_expr_stmt(Typer *typer, AstExprStmt *expr_stmt) {
     return true;
 }
 
+// The variable of the function that a place is in, e.g x of x, x.pos, or x.cells[2] when cells is a fixed array: memory of
+// the function, which is gone when it returns. Null when the place is reached through a pointer, a slice or a list, which
+// point somewhere else, or is a global
+static AstIdentifier *local_of_place(Typer *typer, AstExpr *place) {
+    switch (place->head.kind) {
+    case AST_LITERAL: {
+        AstLiteral *literal = (AstLiteral *)place;
+        if (literal->kind != LITERAL_IDENTIFIER) return NULL;
+        AstIdentifier *ident = literal->as.value.identifier.resolved_identifier;
+        if (!ident) ident = lookup_from_scope(typer->parser, typer->current_scope, literal->as.value.identifier.name);
+        if (!ident || (ident->flags & (IDENTIFIER_IS_GLOBAL | IDENTIFIER_IS_CONSTANT))) return NULL;
+        if (!ident->scope || !typer->enclosing_function || ident->scope->enclosing_function != typer->enclosing_function) return NULL;
+        return ident;
+    }
+    case AST_MEMBER_ACCESS: {
+        AstMemberAccess *ma = (AstMemberAccess *)place;
+        if (ma->access_kind != MEMBER_ACCESS_STRUCT_MEMBER || !ma->left->type || ma->left->type->kind != TYPE_STRUCT) return NULL;
+        return local_of_place(typer, ma->left);   // A member of a struct value, not through a pointer
+    }
+    case AST_ARRAY_ACCESS: {
+        AstArrayAccess *aa = (AstArrayAccess *)place;
+        Type *left = aa->left->type;
+        if (!left || left->kind != TYPE_ARRAY || ((TypeArray *)left)->array_kind != ARRAY_FIXED) return NULL;
+        return local_of_place(typer, aa->left);   // An element of a fixed array, which is in the variable
+    }
+    default:
+        return NULL;
+    }
+}
+
+// A value that is returned must not point into the variables of the function, which are gone when it returns: &x of a
+// variable x, also inside a struct or an array literal, and a fixed array of the function given as a slice
+static bool check_not_dangling(Typer *typer, AstExpr *value, Type *wanted) {
+    if (value->head.kind == AST_UNARY && ((AstUnary *)value)->operator == OP_ADDRESS_OF) {
+        AstIdentifier *local = local_of_place(typer, ((AstUnary *)value)->expr);
+        if (!local) return true;
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "This returns the address of '%s', a variable of the function, which is gone when it returns", local->name);
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Return the value itself, or make it with new, e.g p := new(%s)", local->type ? type_to_str(local->type) : "T");
+        return false;
+    }
+    if (value->head.kind == AST_STRUCT_LITERAL) {
+        AstStructLiteral *lit = (AstStructLiteral *)value;
+        for (int i = 0; i < lit->initializers.count; i++) {
+            AstStructInitializer *init = ((AstStructInitializer **)lit->initializers.items)[i];
+            if (!check_not_dangling(typer, init->value, NULL)) return false;
+        }
+        return true;
+    }
+    if (value->head.kind == AST_ARRAY_LITERAL) {
+        AstArrayLiteral *lit = (AstArrayLiteral *)value;
+        for (int i = 0; i < lit->expressions.count; i++) {
+            if (!check_not_dangling(typer, ((AstExpr **)lit->expressions.items)[i], NULL)) return false;
+        }
+        return true;
+    }
+    // A fixed array of the function where a slice is wanted: the slice would point into it
+    if (wanted && wanted->kind == TYPE_ARRAY && ((TypeArray *)wanted)->array_kind == ARRAY_SLICE &&
+        value->type && value->type->kind == TYPE_ARRAY && ((TypeArray *)value->type)->array_kind == ARRAY_FIXED) {
+        AstIdentifier *local = local_of_place(typer, value);
+        if (!local) return true;
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "This returns a slice of '%s', a fixed array of the function, which is gone when it returns", local->name);
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Return a list, e.g [..]%s, or a struct with the array as a member", type_to_str(((TypeArray *)value->type)->elem_type));
+        return false;
+    }
+    return true;
+}
+
 bool check_return(Typer *typer, AstReturn *ast_return) {
     AstFunctionDefn *ef = typer->enclosing_function;
     if (ef == NULL) {
@@ -4587,6 +4654,7 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
         typer->wants_all_results = ast_return->values.count < ef->return_types.count; // return f() of the results of f
         Type *ok = check_expression(typer, return_value, wanted_type);
         if (!ok) return false;
+        if (!check_not_dangling(typer, return_value, wanted_type)) return false;
 
         if (wanted_type && !types_are_equal(wanted_type, return_value->type)) {
             AstExpr *slice = collection_as_slice(typer, return_value, wanted_type);
@@ -7167,9 +7235,9 @@ static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *fu
 
         if (resolved_type->kind == TYPE_ARRAY && ((TypeArray *)resolved_type)->array_kind == ARRAY_FIXED) {
             TypeArray *array_type = (TypeArray *) resolved_type;
-            array_type->array_kind = ARRAY_SLICE;
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)resolved_type, "Use of fixed size array as return type. Passing a fixed size array is always done by slice (data + count)");
-            report_error_ast(typer->parser, LABEL_HINT, (Ast *)array_type, "Make the return type a slice type: %s", type_to_str((Type *)array_type));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)resolved_type, "A function can't return a fixed size array, e.g %s", type_to_str(resolved_type));
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Return a list, e.g [..]%s, or a struct with the array as a member. A slice of an array of the function would point to memory that is gone when it returns",
+                type_to_str(array_type->elem_type));
             return NULL;
         }
     }

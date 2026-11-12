@@ -1,0 +1,11 @@
+// expect-error: This returns a slice of 'digits', a fixed array of the function, which is gone when it returns
+// expect-error: Return a list, e.g [..]int, or a struct with the array as a member
+
+firstDigits :: () -> []int {
+    digits: [3]int = [1, 2, 3];
+    return digits;
+}
+
+main :: () {
+    d := firstDigits();
+}
