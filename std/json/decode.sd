@@ -48,10 +48,11 @@ decodeInto :: <T>(text: string, value: *T, options := Options{}) -> error {
 // The kind of the errors of decode, decodeInto and parse
 DecodeError :: ErrorKind{"json.DecodeError"};
 
-// Reads a parsed value into a value whose type is only known when the program runs, at data, e.g a parameter of a
-// function of attributedFunctions(). 'path' names it in the error, e.g "authorId"
-assignAt :: (v: Value, data: *void, type: *Type, path := "", options := Options{}) -> error {
-    failed := assign(v, data, type, path, &options);
+// Reads a parsed value into a place whose type is only known when the program runs, e.g the argument of a parameter of a
+// function of attributedFunctions(), which a reflect.Call gives as an any: json.assignAt(value, call.argument(1)). 'path'
+// names it in the error, e.g "authorId"
+assignAt :: (v: Value, place: any, path := "", options := Options{}) -> error {
+    failed := assign(v, place.data, place.type, path, &options);
     if failed != "" { return errors.make(failed, kind: DecodeError); }
     return null;
 }

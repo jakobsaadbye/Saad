@@ -121,7 +121,12 @@ err := call.error();               // the error the function gave as a result, o
     `The parameter count of describe is a i32, which can't be given a string`. A parameter that isn't set is zero.
   * `setFrom(index, data)` copies the value at `data` without a check, for a value whose type the program knows only as
     the type of the parameter, e.g the session of `web`. `argument(index)` is an `any` of the place of an argument, to
-    read a value into, e.g `json.assignAt(value, call.argument(i).data, ...)`.
+    read a value into, e.g `json.assignAt(value, call.argument(i))`, and `result(index)` one of a result, e.g
+    `json.encodeAt(call.result(0))`.
+* `anyAt(data, type)` of the prelude makes an `any` of the value at `data`, which has the type, e.g of a member found by
+  reflection. It is the one place where a `*void` and a `*Type` are put together: the functions of the standard library
+  that work on a value whose type is only known when the program runs take an `any`, e.g `json.encodeAt(value: any)`,
+  `json.assignAt(v, place: any)` and `StringBuilder.addInteger(value: any)`, so the pointer and its type can't disagree.
   * What it costs (`tools/bench/call_bench.sd`, `--llvm`, on Linux): a call with three arguments set by index takes about
     20 ns more than writing the blocks by hand, by name about 30 ns, and a new `Call` from an arena about 50 ns more. A
     value of the type of the parameter is copied, and its type compared by pointer: nothing is boxed or allocated.

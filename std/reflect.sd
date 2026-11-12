@@ -77,7 +77,7 @@ Call :: struct {
     // The argument of the parameter at the index, where it is in the block of the arguments, e.g to read a value into it
     argument :: method (index: int) -> any {
         p := &self.function.parameters[index];
-        return makeAny((&self.arguments[p.offset]) as *void, p.type);
+        return anyAt((&self.arguments[p.offset]) as *void, p.type);
     }
 
     // Calls the function with the arguments. Throws what the function throws
@@ -88,7 +88,7 @@ Call :: struct {
     // The result at the index, where it is in the block of the results
     result :: method (index: int) -> any {
         r := &self.function.results[index];
-        return makeAny((&self.results[r.offset]) as *void, r.type);
+        return anyAt((&self.results[r.offset]) as *void, r.type);
     }
 
     // The error that the function gave as a result, or null when it gave none or has no error result
@@ -112,7 +112,7 @@ newCall :: method (f: *AttributedFunction, allocator: Allocator = null) -> Call 
 }
 
 // If the type is error, a *Error
-isError :: (type: *Type) -> bool {
+@private isError :: (type: *Type) -> bool {
     probe: error;
     boxed: any = probe;
     return type == boxed.type;
@@ -129,7 +129,7 @@ makeAny :: (data: *void, type: *Type) -> any {
 
 // Copies a value of the size. Most arguments are a word or two, e.g an int, a pointer or a string, which are copied without
 // a call of memcpy
-copyValue :: (to: *void, from: *void, size: int) {
+@private copyValue :: (to: *void, from: *void, size: int) {
     if size == 8 {
         *(to as *i64) = *(from as *i64);
     } else if size == 16 {
@@ -143,7 +143,7 @@ copyValue :: (to: *void, from: *void, size: int) {
 }
 
 // Stores the value at the place, which has the type. False if the value can't be given to the type
-assignValue :: (place: *void, type: *Type, value: any) -> bool {
+@private assignValue :: (place: *void, type: *Type, value: any) -> bool {
     if value.type == type {
         copyValue(place, value.data, type.size);
         return true;
@@ -174,7 +174,7 @@ assignValue :: (place: *void, type: *Type, value: any) -> bool {
 }
 
 // The integer at data. False for a u64 that doesn't fit in an i64
-readInteger :: (data: *void, type: *TypePrimitive) -> i64, bool {
+@private readInteger :: (data: *void, type: *TypePrimitive) -> i64, bool {
     switch type.kind {
         case .u8   { return (*(data as *u8)) as i64, true; }
         case .u16  { return (*(data as *u16)) as i64, true; }
@@ -193,7 +193,7 @@ readInteger :: (data: *void, type: *TypePrimitive) -> i64, bool {
 }
 
 // Stores the integer at the place, which has the type. False if it doesn't fit
-writeInteger :: (place: *void, type: *TypePrimitive, value: i64) -> bool {
+@private writeInteger :: (place: *void, type: *TypePrimitive, value: i64) -> bool {
     switch type.kind {
         case .u8 {
             if value < 0 || value > 255 { return false; }

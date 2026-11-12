@@ -258,7 +258,7 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
         case .int {
             prim := arg.type as *TypePrimitive;
             if inside && prim.kind == .char { sb.addQuotedChar(*(arg.data as *u8)); }
-            else                            { sb.addInteger(arg.data, prim); }
+            else                            { sb.addInteger(arg); }
         }
         case .float {
             if arg.type.size == 4 { sb.addFloat32(*(arg.data as *f32)); }
@@ -334,7 +334,10 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
     }
 }
 
-addInteger :: method (sb: *StringBuilder, data: *void, type: *TypePrimitive) {
+// Writes an integer of any size, e.g of an any whose type is an int, a u8 or an i64
+addInteger :: method (sb: *StringBuilder, value: any) {
+    data := value.data;
+    type := value.type as *TypePrimitive;
     switch type.kind {
         case .char { sb.addChar(*(data as *u8)); }
         case .u8   { sb.addUInt64((*(data as *u8)) as u64); }

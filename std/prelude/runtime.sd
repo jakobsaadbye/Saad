@@ -124,6 +124,17 @@ Any :: struct {
     type: *Type;
 }
 
+// An any of the value at data, which has the type, e.g of a member found by reflection: (&bytes[member.offset], member.type).
+// The program says what the memory holds, so it is the one place where a *void and a *Type are put together. Everything
+// that gets the any knows the type of the value from it
+anyAt :: (data: *void, type: *Type) -> any {
+    value: any;
+    raw := (&value) as *Any;
+    raw.data = data;
+    raw.type = type;
+    return value;
+}
+
 //////////////////////////////////
 // Builtin functions that are filled out by the compiler
 //////////////////////////////////
