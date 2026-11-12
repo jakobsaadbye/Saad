@@ -20,13 +20,24 @@
 ```odin
 import fmt;
 
-Planet :: struct { name: string; moons: int; }
+Planet :: struct {
+    name:  string;
+    moons: int;
+
+    describe :: method () {
+        if self.moons == 0 {
+            fmt.print("% has no moons", self.name);
+        } else {
+            fmt.print("% has % moons", self.name, self.moons);
+        }
+    }
+}
 
 main :: () {
     planets := [Planet{"Mars", 2}, Planet{"Jupiter", 95}, Planet{"Venus", 0}];
 
-    for p in planets.filter(p => p.moons > 0) {
-        fmt.print("% has % moons", p.name, p.moons);
+    for planet in planets {
+        planet.describe();
     }
 }
 ```
@@ -35,6 +46,7 @@ main :: () {
 $ saad run planets.sd
 Mars has 2 moons
 Jupiter has 95 moons
+Venus has no moons
 ```
 
 The compiler is written in C and makes programs on its own, with no assembler or linker to install: its own x64 backend,
