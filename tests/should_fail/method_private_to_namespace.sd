@@ -1,0 +1,12 @@
+// expect-error: 'addStruct' is private to the namespace 'fmt'
+// A @private method can be called in its namespace, e.g by fmt's own printing, but not from another
+
+import fmt;
+
+Point :: struct { x: int; }
+
+main :: () {
+    sb := fmt.newStringBuilder(16);
+    boxed: any = Point{1};
+    sb.addStruct(boxed.data, boxed.type as *TypeStruct);
+}
