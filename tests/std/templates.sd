@@ -41,7 +41,7 @@ shout :: (call: *html.Call, value: html.Value) -> html.Value {
 
 // Uses the context of the render, e.g the language of a request
 greet :: (call: *html.Call) -> html.Value {
-    lang := *(call.context as *string);
+    lang := call.context as string;   // An any of what was given to render
     if lang == "de" { return html.Value{text: "Hallo"}; }
     return html.Value{text: "Hej"};
 }
@@ -54,7 +54,7 @@ ageOf :: (call: *html.Call, value: html.Value) -> html.Value {
 
 check :: (templates: *html.Templates, name: string, page: Page, expected: string) {
     lang := page.lang;
-    rendered, err := templates.render(name, page, &lang);
+    rendered, err := templates.render(name, page, lang);
     if err != null { fmt.print("% failed: %\n", name, err.message); }
     assert(err == null);
     if rendered != expected { fmt.print("% gave:\n[%]\nnot:\n[%]\n", name, rendered, expected); }

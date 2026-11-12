@@ -8025,9 +8025,10 @@ Type *throw_error_result(Typer *typer, AstFunctionCall *call, TypeTuple *tuple) 
 }
 
 // 'default': the value a variable of the wanted type starts with, e.g 0, null, an empty string, the first value of an enum
-// without 0, or a struct with the default values of its members. The type comes from where it is written
+// without 0, a struct with the default values of its members, or an any that holds nothing (its type is null). The type
+// comes from where it is written
 static Type *check_default_value(Typer *typer, AstExpr *expr, Type *ctx_type) {
-    if (ctx_type == NULL || ctx_type->kind == TYPE_VOID || ctx_type->kind == TYPE_ANY || is_untyped_type(ctx_type) || ctx_type->kind == TYPE_VARIADIC) {
+    if (ctx_type == NULL || ctx_type->kind == TYPE_VOID || is_untyped_type(ctx_type) || ctx_type->kind == TYPE_VARIADIC) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "'default' needs a type from where it is written");
         report_error_ast(typer->parser, LABEL_HINT, NULL, "e.g 'x: Status = default;', 'return default, err;' or 'f(default)'");
         return NULL;

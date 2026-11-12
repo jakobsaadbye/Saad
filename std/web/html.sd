@@ -35,9 +35,9 @@ namespace web.html;
 //   loop.index0, loop.first, loop.last and loop.length, {% set x = value %}, {% include "name" %},
 //   {% extends "name" %} with {% block name %}{% endblock %}, {% macro name(a, b='x') %}{% endmacro %} called like a
 //   function, {{ name(1, b='y') }}, and {# comments #}. {%- and -%} remove the white space before or after a tag
-// * Filters and functions of the program get a *html.Call: its arguments, and the context given to render, e.g the
-//   language of the request. Built in: range(start, stop), and the filters safe, escape, length, default, upper,
-//   lower, trim, join
+// * Filters and functions of the program get a *html.Call: its arguments, and the context given to render as an any,
+//   e.g the language of the request: 'render("page.html", page, lang)' and 'lang := call.context as string'. Built in:
+//   range(start, stop), and the filters safe, escape, length, default, upper, lower, trim, join
 //
 // The templates are read from the folder once, and kept. With templates.cache = false they are read for each render,
 // e.g while the pages are being written.
@@ -70,7 +70,7 @@ ValueList :: struct {
 // What a filter or a function of the program is called with
 Call :: struct {
     args:      []Value;     // The arguments, e.g of {{ value | f(1, 2) }} or {{ f(1, 2) }}
-    context:   *void;       // What was given to render, e.g the request
+    context:   any;         // What was given to render, e.g the language of the request. Its type is null when none was
     templates: *Templates;
 }
 
@@ -134,7 +134,7 @@ setGlobal :: method (t: *Templates, name: string, value: Value) {
 
 // The template, with the data (a struct, whose members are the names of the template) and a context for the filters
 // and functions of the program
-render :: method (t: *Templates, name: string, data: any, context: *void = null) -> string, error {
+render :: method (t: *Templates, name: string, data: any, context: any = default) -> string, error {
     r: TemplateRenderer;
     r.templates = t;
     r.data = data;
@@ -152,7 +152,7 @@ render :: method (t: *Templates, name: string, data: any, context: *void = null)
 }
 
 // Answers with the page of the template. A template that fails is a 500, with the error written to stderr
-respond :: method (t: *Templates, w: *http.ResponseWriter, name: string, data: any, context: *void = null, status := 200) {
+respond :: method (t: *Templates, w: *http.ResponseWriter, name: string, data: any, context: any = default, status := 200) {
     html, err := t.render(name, data, context);
     if err != null {
         io.writeError(fmt.sprint("web: %\n", err.message));
@@ -1184,7 +1184,7 @@ Loop :: struct {
 TemplateRenderer :: struct {
     templates: *Templates;
     data:      any;
-    context:   *void;
+    context:   any;
     out:       fmt.StringBuilder;
     variables: [..]TemplateVariable;     // Of for, set and macros, the last are the innermost
     barrier:   i64;              // The variables before it aren't seen, e.g in a macro

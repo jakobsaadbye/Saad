@@ -373,12 +373,12 @@ dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
     if values.count == 0 {
         w.write("null");
     } else if values.count == 1 {
-        w.write(json.encodeAt(values[0].data, values[0].type, app.jsonOptions));
+        w.write(json.encodeAt(values[0], app.jsonOptions));
     } else {
         w.write("[");
         for v, i in values {
             if i > 0 { w.write(","); }
-            w.write(json.encodeAt(v.data, v.type, app.jsonOptions));
+            w.write(json.encodeAt(v, app.jsonOptions));
         }
         w.write("]");
     }
@@ -485,7 +485,7 @@ readArguments :: (app: *App, e: *Endpoint, r: *http.Request, call: *reflect.Call
     for i in 1..f.parameters.count {
         p := f.parameters[i];
         name := e.names[i];
-        place := call.argument(i).data;   // Where its argument is, read into from the text or the JSON
+        argument := call.argument(i);   // Where its argument is, read into from the text or the JSON
         value: json.Value;
         given := false;
         text, inPath := pathValue(r, p.name);
@@ -495,7 +495,7 @@ readArguments :: (app: *App, e: *Endpoint, r: *http.Request, call: *reflect.Call
             // A text is as it is, also for a ?string. Other types are JSON, e.g 2, true or [1, 2]
             given = true;
             if p.type.kind == .string {
-                *(place as *string) = text;
+                call.setAt(i, text);
                 continue;
             }
             if isText(p.type) { text = json.encode(text); }
@@ -508,13 +508,13 @@ readArguments :: (app: *App, e: *Endpoint, r: *http.Request, call: *reflect.Call
         }
         if !given {
             if p.defaultValue != null {
-                mem.copy(place, p.defaultValue, p.type.size);
+                call.setFrom(i, p.defaultValue);   // A constant of the type of the parameter
                 continue;
             }
             if p.type.flags.has(.isOptional) { continue; }
             return errors.make("The parameter % is missing", name, kind: MissingParameter);
         }
-        err := json.assignAt(value, place, p.type, name, app.jsonOptions);
+        err := json.assignAt(value, argument, name, app.jsonOptions);
         if err != null { return errors.make(err.message, kind: InvalidParameter); }
     }
     return null;

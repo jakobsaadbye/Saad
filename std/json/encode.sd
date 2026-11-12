@@ -43,10 +43,12 @@ encode :: <T>(value: T, options := Options{}) -> string {
     return w.sb.toString();
 }
 
-// A value whose type is only known when the program runs, e.g a result of a function of attributedFunctions(), at data
-encodeAt :: (data: *void, type: *Type, options := Options{}) -> string {
+// A value whose type is only known when the program runs, e.g a result of a function of attributedFunctions(), which a
+// reflect.Call gives as an any: json.encodeAt(call.result(0)). For a value of the program, use encode, which keeps the type
+// of a collection
+encodeAt :: (value: any, options := Options{}) -> string {
     w := newWriter(options);
-    w.writeAny(data, type);
+    w.writeAny(value.data, value.type);
     return w.sb.toString();
 }
 

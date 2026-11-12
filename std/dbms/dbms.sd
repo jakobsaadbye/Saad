@@ -278,7 +278,7 @@ paramText :: (arg: any) -> c.string, bool {
         case .int {
             prim := arg.type as *TypePrimitive;
             if prim.kind == .char { sb.addChar(*(arg.data as *u8)); }
-            else                  { sb.addInteger(arg.data, prim); }
+            else                  { sb.addInteger(arg); }
         }
         case .float {
             buf: [64]u8;
