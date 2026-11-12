@@ -158,7 +158,6 @@ bool  is_optional_type(Type *type);     // typer.c
 Type *optional_inner_type(Type *type);
 
 char *type_to_str(Type *type) {
-    if (type->newtype) return type->newtype->name; // e.g Meters of 'Meters :: newtype f64;'
     switch (type->kind) {
     case TYPE_INVALID:
     case TYPE_VOID:

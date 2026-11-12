@@ -1,9 +1,0 @@
-// expect-error: Name has no method 'hash'. It is a newtype of string
-// expect-error: (x as string).hash()
-
-Name :: newtype string;
-
-main :: () {
-    n: Name = "ada";
-    h := n.hash();
-}

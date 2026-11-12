@@ -216,12 +216,6 @@ static char *detail_of(AstIdentifier *ident, const char *kind) {
     AstFunctionDefn *func = function_of(ident);
     if (func && (strcmp(kind, "function") == 0 || strcmp(kind, "method") == 0)) return signature_of(func);
     if (strcmp(kind, "struct") == 0 || strcmp(kind, "union") == 0 || strcmp(kind, "interface") == 0 || strcmp(kind, "enum") == 0) return strdup(kind);
-    // The declaration of a newtype, e.g 'newtype f64' for Meters, so a hover reads 'Meters :: newtype f64'
-    if (ident->type && ident->type->newtype == ident && ident->type->newtype_base) {
-        StringBuilder sb = sb_init(32);
-        sb_append(&sb, "newtype %s", type_to_str(ident->type->newtype_base));
-        return sb_to_string(&sb);
-    }
     if (ident->type && ident->type->kind != TYPE_NAME) return type_to_str(ident->type);
     return strdup("");
 }

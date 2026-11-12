@@ -1,9 +1,0 @@
-// expect-error: A newtype can't be declared inside a struct
-
-Box :: struct {
-    Meters :: newtype f64;
-    value: int;
-}
-
-main :: () {
-}

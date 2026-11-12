@@ -267,7 +267,6 @@ typedef enum DeclarationFlags {
     DECLARATION_IS_FUNCTION_PARAMETER = 1 << 6,
     DECLARATION_IS_COMPILER_GENERATED = 1 << 7,
     DECLARATION_TYPE_ALIAS            = 1 << 8, // e.g Byte :: u8; The aliased type is in 'type'. Also has DECLARATION_CONSTANT
-    DECLARATION_NEWTYPE               = 1 << 9, // e.g Meters :: newtype f64; A new type made of 'type'. Also has DECLARATION_TYPE_ALIAS
 } DeclarationFlags;
 
 typedef struct AstDeclaration {
@@ -791,12 +790,6 @@ typedef struct Type {
     TypeFlags flags;
     int       size; // Size in bytes
     char     *name; // A name to a struct or enum
-
-    // A newtype e.g 'Meters :: newtype f64;' is a copy of the type it is made of, so the backend sees an f64, with the name
-    // that declares it as its identity: it is only equal to itself. See check_type_alias()
-    struct AstIdentifier *newtype;
-    struct TypeStruct    *newtype_methods; // The methods of a newtype that isn't a struct, e.g toFeet :: method (m: Meters)
-    struct Type          *newtype_base;    // The type it is made of, e.g f64. A value is cast between the two, e.g m as f64
 } Type;
 
 typedef enum PrimitiveKind {
