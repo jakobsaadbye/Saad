@@ -121,6 +121,8 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_UNION:                 return "union";
         case TOKEN_INTERFACE:             return "interface";
         case TOKEN_NEWTYPE:               return "newtype";
+        case TOKEN_ENUMFLAGS:             return "enumflags";
+        case TOKEN_DEFAULT:               return "default";
         case TOKEN_FAT_ARROW:             return "=>";
         case TOKEN_END:                   return "END";
     }
@@ -528,6 +530,7 @@ KeywordMatch match_keyword(Lexer *lexer) {
     }
     if (keyword_len == 7) {
         if (strcmp(text, "newtype") == 0) token = TOKEN_NEWTYPE;
+        if (strcmp(text, "default") == 0) token = TOKEN_DEFAULT;
     }
     if (keyword_len == 8) {
         if (strcmp(text, "continue") == 0) token = TOKEN_CONTINUE;
@@ -535,6 +538,7 @@ KeywordMatch match_keyword(Lexer *lexer) {
     if (keyword_len == 9) {
         if (strcmp(text, "namespace") == 0) token = TOKEN_NAMESPACE;
         if (strcmp(text, "interface") == 0) token = TOKEN_INTERFACE;
+        if (strcmp(text, "enumflags") == 0) token = TOKEN_ENUMFLAGS;
     }
 
     if (token == TOKEN_NONE) {

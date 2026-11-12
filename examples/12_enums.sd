@@ -18,7 +18,7 @@ Status :: enum {
 }
 
 // An enum flags is a set of options that can be combined
-Style :: enum flags {
+Style :: enumflags {
     bold,
     italic,
     underline,

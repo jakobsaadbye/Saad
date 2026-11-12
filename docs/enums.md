@@ -23,13 +23,13 @@ print("% of %", s, Status.count);                 // .open of 3. Status.names an
   t := Status.from(n) ?? .open;     // .open when it isn't
   ```
 
-  For an enum flags, a number is any combination of its flags, e.g `5 as Options` for the first and the third. The check
+  For an enumflags, a number is any combination of its flags, e.g `5 as Options` for the first and the third. The check
   is one compare for values that follow each other, e.g 0, 1, 2, and a compare per value otherwise.
   `saad build --unchecked` leaves it out, like the bounds checks (`emit_enum_value_check()` in `ir_lower.c`).
 * **The first value is the default of an enum without 0.** A variable, a struct member, an element of a fixed array, a
   global, `new(T)` and a member that JSON doesn't give start with zero, which isn't a value of e.g
   `Status :: enum { ok = 200, notFound = 404 }`. Such an enum starts with its first value instead, so order its values
-  with the default first. An enum that has 0 starts with it as before, and an enum flags with no flags. It costs nothing
+  with the default first. An enum that has 0 starts with it as before, and an enumflags with no flags. It costs nothing
   for those, and a store of the value otherwise (`enum_default_value()` in `ir_lower.c`).
 
   ```odin
@@ -40,14 +40,15 @@ print("% of %", s, Status.count);                 // .open of 3. Status.names an
 * **A switch that handles every value** throws a `Panic` when the enum holds none of them, e.g
   `9 isn't a value of Status`, instead of running no case. Only memory written by hand can make such a value. The
   compiler gives the switch an `else` that calls `panicEnumSwitch` of the prelude (`add_enum_switch_else()` in
-  `typer.c`). An `else` of the program's own takes such a value as before, and a switch on an enum flags has none.
+  `typer.c`). An `else` of the program's own takes such a value as before, and a switch on an enumflags has none.
 
 ## Flags
 
-An `enum flags` is a set of options in one value, instead of an `int` whose bits are only known by comment:
+An `enumflags` is a set of options in one value, instead of an `int` whose bits are only known by comment. It used to be
+written `enum flags`, which still works with a warning:
 
 ```odin
-Options :: enum flags { verbose, color, quiet }   // 1, 2, 4
+Options :: enumflags { verbose, color, quiet }    // 1, 2, 4
 
 o := Options.verbose | .color;
 o |= .quiet;                                       // set
@@ -65,16 +66,39 @@ print("%", o);                                     // .color | .quiet
 
 * The values are the bits 1, 2, 4, 8, ... A value can be given, e.g `none = 0` or `all = 7`, and the next value is
   the next bit that no value before has.
-* `|`, `&`, `^` and `~` work on two flags of the same enum flags, and give flags of it. On a plain enum they are an
+* `|`, `&`, `^` and `~` work on two flags of the same enumflags, and give flags of it. On a plain enum they are an
   error. `|=`, `&=` and `^=` set, clear and toggle.
 * `fmt` writes the flags that are set, e.g `.verbose | .quiet`, a value with a name of its own by its name, e.g
   `.all`, and no flags as `0`. `json` writes them as a list of names, e.g `["verbose", "quiet"]`, and reads such a list
   (or a single name, or the number).
 * The methods are functions of the prelude (`flagsHas`, ... in `std/prelude/runtime.sd`) that the compiler calls for
   `o.has(x)`, ...; an enum can declare a method of the same name instead.
-* The runtime's own `Type.flags` is an enum flags: `type.flags.has(.isOptional)`.
+* The runtime's own `Type.flags` is an enumflags: `type.flags.has(.isOptional)`.
 
 ## Precedence
 
 `|`, `^` and `&` bind tighter than the comparisons, like in Rust and Go and unlike C: `x & 1 == 0` is `(x & 1) == 0`,
 and `o == .verbose | .color` compares `o` with both flags.
+
+## default
+
+`default` is the value a variable of a type starts with, e.g `0`, `null`, an empty string, the first value of an enum without
+0, an optional that is empty, or a struct with the default values of its members. Its type comes from where it is written,
+like `.red` and `null`:
+
+```odin
+findPost :: (id: PostId) -> (Post, error) {
+    if id < 0 { return default, errors.make("no post %", id); }   // instead of Post{}
+    ...
+}
+
+status = default;                  // .ok of Status :: enum { ok = 200, notFound = 404 }
+if status == default { ... }       // == and != take the type of the other side
+takes(default, default);           // the types of the parameters
+first :: <T>(xs: []T) -> (T, error) { if xs.count == 0 { return default, errors.make("empty"); } ... }
+```
+
+* Without a type from where it is written, e.g `x := default;`, it is an error with a hint.
+* It is known when compiling, so a global can start with it, e.g `status: Status = default;`.
+* It is lowered like a variable declared without a value (`emit_default_init()` in `ir_lower.c`), so it is the same value.
+

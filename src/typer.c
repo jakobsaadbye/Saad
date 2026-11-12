@@ -4158,6 +4158,7 @@ bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
 // True if the expression is known when compiling, so that it can be stored in the value of an attribute
 bool is_constant_value(AstExpr *expr) {
     switch (expr->head.kind) {
+    case AST_DEFAULT_VALUE: return true;   // Known from its type, e.g the first value of an enum without 0
     case AST_LITERAL: {
         AstLiteral *lit = (AstLiteral *)expr;
         if (lit->kind != LITERAL_IDENTIFIER) return true;
@@ -8023,10 +8024,33 @@ Type *throw_error_result(Typer *typer, AstFunctionCall *call, TypeTuple *tuple) 
     return (Type *)rest;
 }
 
+// 'default': the value a variable of the wanted type starts with, e.g 0, null, an empty string, the first value of an enum
+// without 0, or a struct with the default values of its members. The type comes from where it is written
+static Type *check_default_value(Typer *typer, AstExpr *expr, Type *ctx_type) {
+    if (ctx_type == NULL || ctx_type->kind == TYPE_VOID || ctx_type->kind == TYPE_ANY || is_untyped_type(ctx_type) || ctx_type->kind == TYPE_VARIADIC) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "'default' needs a type from where it is written");
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "e.g 'x: Status = default;', 'return default, err;' or 'f(default)'");
+        return NULL;
+    }
+    if (ctx_type->kind == TYPE_TUPLE) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)expr, "'default' is one value, and %s is several", type_to_str(ctx_type));
+        return NULL;
+    }
+    return ctx_type;
+}
+
 Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     Type *result = NULL;
     bool wants_all_results = typer->wants_all_results; // Only for this expression, not the ones in it
     typer->wants_all_results = false;
+
+    // default has the type that is wanted, also an optional, whose default is empty
+    if (expr->head.kind == AST_DEFAULT_VALUE) {
+        result = check_default_value(typer, expr, ctx_type);
+        if (!result) return NULL;
+        expr->type = result;
+        return result;
+    }
 
     // Where a ?T is wanted, a T is wanted too, e.g the struct literal in 'p: ?Point = {1, 2}'
     if (ctx_type && is_optional_type(ctx_type)) ctx_type = optional_inner_type(ctx_type);
@@ -9193,6 +9217,21 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         }
     }
 
+    // x == default and x != default: the other side gives default its type
+    bool left_default  = binary->left->head.kind == AST_DEFAULT_VALUE;
+    bool right_default = binary->right->head.kind == AST_DEFAULT_VALUE;
+    if (!checked_both_sides && (left_default != right_default) && (binary->operator == TOKEN_DOUBLE_EQUAL || binary->operator == TOKEN_NOT_EQUAL)) {
+        AstExpr *other = left_default ? binary->right : binary->left;
+        Type *other_type = check_expression(typer, other, NULL);
+        if (!other_type) return NULL;
+        if (is_untyped_type(other_type)) other_type = solidify_untyped_expr(other, other_type);
+        Type *default_type = check_expression(typer, left_default ? binary->left : binary->right, other_type);
+        if (!default_type) return NULL;
+        ti_lhs = left_default ? default_type : other_type;
+        ti_rhs = left_default ? other_type : default_type;
+        checked_both_sides = true;
+    }
+
     bool is_flags_operator = binary->operator == '|' || binary->operator == '&' || binary->operator == '^';
     if (is_comparison_operator(binary->operator) || is_flags_operator) {
         // If one of the two sides contains an enum literal then use the other side to provide a potential enum
@@ -9330,7 +9369,7 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         TypeEnum *flags = (TypeEnum *)(lhs == TYPE_ENUM ? ti_lhs : ti_rhs);
         if (!flags->node->is_flags) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)binary, "The operator '%c' is for the values of an enum flags, which %s isn't", binary->operator, text_bold(type_to_str((Type *)flags)));
-            report_error_ast(typer->parser, LABEL_HINT, NULL, "Declare it as '%s :: enum flags { ... }' to combine its values", flags->identifier ? flags->identifier->name : "Name");
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Declare it as '%s :: enumflags { ... }' to combine its values", flags->identifier ? flags->identifier->name : "Name");
             return NULL;
         }
         if (lhs != TYPE_ENUM || rhs != TYPE_ENUM || !types_are_equal(ti_lhs, ti_rhs)) {

@@ -1,0 +1,6 @@
+// expect-error: 'default' needs a type from where it is written
+// expect-error: e.g 'x: Status = default;'
+
+main :: () {
+    x := default;
+}

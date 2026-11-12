@@ -1404,7 +1404,7 @@ Ast *parse_statement(Parser *parser) {
         matched_a_statement = true;
     }
 
-    else if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && peek_token(parser, 2).type == TOKEN_ENUM) {
+    else if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && (peek_token(parser, 2).type == TOKEN_ENUM || peek_token(parser, 2).type == TOKEN_ENUMFLAGS)) {
         stmt = (Ast *)(parse_enum_defn(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
@@ -2706,6 +2706,23 @@ TypeEnum *parse_anonymous_enum_type(Parser *parser) {
     return type_enum;
 }
 
+// 'enumflags { ... }' declares an enum whose values are flags. 'enum flags { ... }' is the old way to write it, which still
+// works, with a warning. The 'enum' or 'enumflags' token is eaten
+static bool parse_enum_flags_marker(Parser *parser, Token enum_token, AstEnum *ast_enum) {
+    if (enum_token.type == TOKEN_ENUMFLAGS) {
+        ast_enum->is_flags = true;
+        return true;
+    }
+    Token flags = peek_next_token(parser);
+    if (flags.type == TOKEN_LITERAL_IDENTIFIER && strcmp(flags.as_value.value.identifier.name, "flags") == 0 && peek_token(parser, 1).type == '{') {
+        eat_token(parser);
+        ast_enum->is_flags = true;
+        report_error_token(parser, LABEL_WARNING, enum_token, "'enum flags' is now written 'enumflags'");
+        report_error_ast(parser, LABEL_HINT, NULL, "e.g Options :: enumflags { verbose, quiet }");
+    }
+    return true;
+}
+
 AstEnum *parse_enum_defn(Parser *parser) {
     Token ident_token = peek_next_token(parser);
     expect(parser, ident_token, TOKEN_LITERAL_IDENTIFIER);
@@ -2730,17 +2747,11 @@ AstEnum *parse_enum_defn(Parser *parser) {
     eat_token(parser);
 
     Token enum_token = peek_next_token(parser);
-    expect(parser, enum_token, TOKEN_ENUM);
+    if (enum_token.type != TOKEN_ENUMFLAGS) expect(parser, enum_token, TOKEN_ENUM);
     eat_token(parser);
 
     AstEnum *ast_enum = (AstEnum *)(ast_allocate(parser, sizeof(AstEnum)));
-
-    // enum flags { ... }
-    Token flags = peek_next_token(parser);
-    if (flags.type == TOKEN_LITERAL_IDENTIFIER && strcmp(flags.as_value.value.identifier.name, "flags") == 0 && peek_token(parser, 1).type == '{') {
-        eat_token(parser);
-        ast_enum->is_flags = true;
-    }
+    if (!parse_enum_flags_marker(parser, enum_token, ast_enum)) return NULL;
 
     bool ok = parse_enumerators(parser, ast_enum);
     if (!ok) return NULL;
@@ -5176,6 +5187,17 @@ AstExpr *parse_leaf(Parser *parser) {
         eval->identifier      = make_identifier_from_token(parser, ident, NULL);
 
         return (AstExpr *)(eval);
+    }
+
+    // default: the value a variable of the type that is wanted here starts with, e.g 'return default, err;'
+    if (t.type == TOKEN_DEFAULT) {
+        eat_token(parser);
+        AstExpr *value = ast_allocate(parser, sizeof(AstExpr));
+        value->head.kind  = AST_DEFAULT_VALUE;
+        value->head.file  = parser->current_file;
+        value->head.start = t.start;
+        value->head.end   = t.end;
+        return value;
     }
 
     if (t.type == TOKEN_TYPEOF) {

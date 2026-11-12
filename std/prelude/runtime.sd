@@ -61,7 +61,7 @@ Type :: struct {
 };
 
 // What else a Type is, in Type.flags
-TypeFlags :: enum flags {
+TypeFlags :: enumflags {
     isUnion,     // A union, a TypeStruct whose first member is the tag
     isOptional,  // A ?T, which is a struct with the members item: T and present: bool
     isFlags,     // An enum flags, a TypeEnum whose values are combined, e.g 3 is the first two values

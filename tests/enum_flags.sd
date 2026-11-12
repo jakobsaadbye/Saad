@@ -2,10 +2,10 @@
 import json;
 use fmt;
 
-Options :: enum flags { verbose, color, quiet }
+Options :: enumflags { verbose, color, quiet }
 
 // Explicit values are kept, and the next value is the next bit after them
-Access :: enum flags {
+Access :: enumflags {
     none  = 0,
     read,
     write,

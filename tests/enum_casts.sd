@@ -5,7 +5,7 @@ use fmt;
 
 Color :: enum { red, green, blue }
 Status :: enum { ok = 200, created = 201, notFound = 404 }   // Values that don't follow each other
-Options :: enum flags { verbose, color, quiet }              // 1, 2 and 4
+Options :: enumflags { verbose, color, quiet }              // 1, 2 and 4
 
 // The message of the Panic of casting the number to the enum, or empty when it is a value
 castColor   :: (n: i64) -> string { message := ""; try { c := n as Color; } catch (e) { message = e.message; } return message; }

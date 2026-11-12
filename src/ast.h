@@ -67,6 +67,7 @@ typedef enum AstKind {
     AST_TYPE,
     AST_RANGE_EXPR,
     AST_SEMICOLON_EXPR,
+    AST_DEFAULT_VALUE, // 'default': the value a variable of the type wanted where it is written starts with
     AST_BINARY,
     AST_UNARY,
     AST_CAST,

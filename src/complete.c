@@ -590,7 +590,7 @@ static void add_attributes(AstFile *file, AstBlock *scope, int offset) {
 }
 
 static const char *keywords[] = {
-    "if", "else", "for", "while", "in", "switch", "case", "return", "defer", "try", "catch", "throw", "break", "continue", "struct", "union", "interface", "enum", "newtype",
+    "if", "else", "for", "while", "in", "switch", "case", "return", "defer", "try", "catch", "throw", "break", "continue", "struct", "union", "interface", "enum", "enumflags", "newtype", "default",
     "method", "import", "use", "namespace", "extern", "as", "new", "assert", "typeof", "sizeof", "true", "false", "null",
     "int", "uint", "float", "bool", "string", "any", "void", "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "f32", "f64",
 };

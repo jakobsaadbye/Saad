@@ -110,6 +110,8 @@ typedef enum TokenType {
     TOKEN_THROW        = 242,
     TOKEN_INTERFACE    = 243,
     TOKEN_NEWTYPE      = 244,
+    TOKEN_ENUMFLAGS    = 245,
+    TOKEN_DEFAULT      = 246,
 
     TOKEN_STRUCT  = 180,
     TOKEN_ENUM    = 181,

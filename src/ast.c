@@ -46,6 +46,7 @@ const char *ast_to_str(Ast *ast) {
     case AST_EXPR_STMT:          return "AST_EXPR_STMT";
     case AST_RANGE_EXPR:         return "AST_RANGE_EXPR";
     case AST_SEMICOLON_EXPR:     return "AST_SEMICOLON_EXPR";
+    case AST_DEFAULT_VALUE:      return "AST_DEFAULT_VALUE";
     case AST_BINARY:             return "AST_BINARY";
     case AST_UNARY:              return "AST_UNARY";
     case AST_CAST:               return "AST_CAST";
