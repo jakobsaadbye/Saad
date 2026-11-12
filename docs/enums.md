@@ -12,6 +12,20 @@ print("% of %", s, Status.count);                 // .open of 3. Status.names an
 * A value without its enum, e.g `.open`, takes the enum that is wanted where it is written: the other side of `==`,
   the type of a variable or a parameter, a `case`, a `return`.
 * An enum value is cast to a number with `as`, e.g `s as int`. Arithmetic on enums is an error.
+* **An enum always holds one of its values.** A number is cast to an enum with `as`, e.g `n as Status`, which throws a
+  `Panic` when the number isn't one of its values, e.g `7 isn't a value of Status`. A number written in the program is
+  checked when it is compiled, so `7 as Status` is an error. For a number that might not be one, e.g read from a file,
+  `Status.from(n)` gives a `?Status`: the value, or empty, e.g `Status.from(n) ?? .open`. `json` and `dbms` check the
+  values they read too, so the only way around it is memory written by hand, e.g with `mem.copy` or from C.
+
+  ```odin
+  s := n as Status;                 // a Panic when n isn't 0, 1 or 2
+  t := Status.from(n) ?? .open;     // .open when it isn't
+  ```
+
+  For an enum flags, a number is any combination of its flags, e.g `5 as Options` for the first and the third. The check
+  is one compare for values that follow each other, e.g 0, 1, 2, and a compare per value otherwise.
+  `saad build --unchecked` leaves it out, like the bounds checks (`emit_enum_value_check()` in `ir_lower.c`).
 
 ## Flags
 

@@ -129,6 +129,21 @@ flagNames :: method (type: *TypeEnum, value: i64) -> ([..]string, bool) {
     return names, rest == 0;
 }
 
+// The value of the enum E with the number, or empty when it has none, e.g Color.from(n), which the compiler makes a call of
+// this. For an enum flags, any combination of its flags. A cast, e.g n as Color, throws a Panic instead
+enumFromNumber :: <E>(number: i64) -> ?E {
+    probe: E;
+    boxed: any = probe;
+    info := boxed.type as *TypeEnum;
+    flags: i64 = 0;
+    for v in info.values {
+        if v.value == number { return number as E; }
+        flags = flags | v.value;
+    }
+    if info.head.flags.has(.isFlags) && (number & ~flags) == 0 { return number as E; }
+    return null;
+}
+
 //
 // List
 //

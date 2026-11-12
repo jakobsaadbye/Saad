@@ -33,7 +33,7 @@ typedef struct Command {
     { "--debug",     "Add debug information, for LLDB or GDB" }, \
     { "--llvm",      LLVM_DESCRIPTION }, \
     { "-O0 .. -O3",  "How much LLVM optimizes: -O2, or -O0 with --debug" }, \
-    { "--unchecked", "Leave out the bounds checks of indexes and the null checks of pointers" }, \
+    { "--unchecked", "Leave out the bounds checks of indexes, the null checks of pointers and the checks of enum casts" }, \
     { "--check-memory", "Find uses of the memory of arenas that were cleared or freed, at a cost of speed and memory" }, \
     { "--os <os>",   "The OS of #if: windows or linux" }, \
     { "--elf",       "Write build/out.o for Linux (tools/linux)" }, \

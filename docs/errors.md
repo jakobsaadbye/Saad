@@ -193,7 +193,8 @@ handlePost :: (req: Request) -> Response {
     null pointer throws where it uses `self`, e.g `self is null`
     Taking an address, e.g `&p[i]` or `&p.x`, only computes it, so it doesn't throw for a null `p`; a read on the way
     does, e.g `p.next` of `&p.next.value`
-  * `saad build --unchecked` leaves the bounds checks and the null checks out
+  * a number cast to an enum that isn't one of its values, e.g `7 isn't a value of Status` (see `docs/enums.md`)
+  * `saad build --unchecked` leaves the bounds checks, the null checks and the checks of enum casts out
   * an `assert` whose condition is false, with the place of the assert first in the trace
   * `mem.allocate` and `mem.resize` when there is no memory left
   * `panic("message")`

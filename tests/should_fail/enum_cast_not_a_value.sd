@@ -1,0 +1,8 @@
+// expect-error: 7 isn't a value of Color
+// expect-error: Here are its values
+
+Color :: enum { red, green, blue }
+
+main :: () {
+    c := 7 as Color;   // A number that might not be one: Color.from(n)
+}

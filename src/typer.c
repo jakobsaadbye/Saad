@@ -5812,6 +5812,44 @@ bool rewrite_slice_method_call(Typer *typer, AstFunctionCall *call) {
     return true;
 }
 
+// Rewrites E.from(n) of an enum E, e.g Color.from(n), as enumFromNumber<E>(n) of std/prelude/collections.sd, which gives a ?E:
+// the value, or empty when the number isn't one. False after an error
+static bool rewrite_enum_from(Typer *typer, AstFunctionCall *call) {
+    AstMemberAccess *ma = (AstMemberAccess *)call->expression;
+    if (!is_literal_identifier(ma->right) || strcmp(((AstLiteral *)ma->right)->as.value.identifier.name, "from") != 0) return true;
+
+    // The enum by its name, e.g Color, or with its namespace, e.g game.Color
+    AstIdentifier *named = NULL;
+    if (is_literal_identifier(ma->left)) {
+        AstLiteral *left = (AstLiteral *)ma->left;
+        named = left->as.value.identifier.resolved_identifier ? left->as.value.identifier.resolved_identifier : lookup_from_scope(typer->parser, typer->current_scope, left->as.value.identifier.name);
+    } else if (ma->left->head.kind == AST_MEMBER_ACCESS) {
+        bool failed = false;
+        named = resolve_qualified_name(typer, ma->left, &failed);
+        if (failed) return false;
+    }
+    if (named == NULL || !(named->flags & (IDENTIFIER_IS_NAME_OF_ENUM | IDENTIFIER_IS_TYPE_ALIAS))) return true;
+    if (!check_declaration_of(typer, named)) return false;
+    Type *enum_type = named->type;
+    if (enum_type == NULL || enum_type->kind != TYPE_ENUM) return true;
+
+    AstFile *collections = typer->parser->collections_file;
+    AstIdentifier *function = collections ? find_identifier_in_scope(collections->scope, "enumFromNumber") : NULL;
+    if (function == NULL) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)call, "Compiler Error: enumFromNumber of the prelude wasn't found");
+        return false;
+    }
+    if (call->arguments.count != 1) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)call, "%s.from takes one number, e.g %s.from(n)", type_to_str(enum_type), type_to_str(enum_type));
+        return false;
+    }
+    index_identifier_use((Ast *)ma->left, named);
+    call->expression = (AstExpr *)make_resolved_identifier_literal(typer, function, (Ast *)ma);
+    call->type_args  = da_init(1, sizeof(Type *));
+    da_append(&call->type_args, enum_type);
+    return true;
+}
+
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     if (typer->enclosing_function == NULL) {
         if (typer->checking_member_default) {
@@ -5839,6 +5877,9 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
         if (failed) return NULL;
         if (qualified) call->expression = (AstExpr *)make_resolved_identifier_literal(typer, qualified, (Ast *)call->expression);
     }
+
+    // Color.from(n): the value of the enum with the number, or empty. It is the call enumFromNumber<Color>(n) of the prelude
+    if (call->expression->head.kind == AST_MEMBER_ACCESS && !rewrite_enum_from(typer, call)) return NULL;
 
     if (call->expression->head.kind == AST_MEMBER_ACCESS) {
         if (!rewrite_slice_method_call(typer, call)) return NULL;
@@ -9497,6 +9538,29 @@ bool can_cast_explicitly(Type *from, Type *to) {
     return false;
 }
 
+// An integer written in the program, e.g 7 or -1
+static bool is_integer_literal_value(AstExpr *expr) {
+    if (expr->head.kind == AST_UNARY && ((AstUnary *)expr)->operator == OP_UNARY_MINUS) return is_integer_literal_value(((AstUnary *)expr)->expr);
+    return expr->head.kind == AST_LITERAL && ((AstLiteral *)expr)->kind == LITERAL_INTEGER;
+}
+
+static long long integer_literal_value(AstExpr *expr) {
+    if (expr->head.kind == AST_UNARY) return -integer_literal_value(((AstUnary *)expr)->expr);
+    return ((AstLiteral *)expr)->as.value.integer;
+}
+
+// If the number is a value of the enum: one of its values, or for an enum flags, a combination of its flags
+static bool is_enum_value(TypeEnum *type, long long value) {
+    AstEnum *node = type->node;
+    long long flags = 0;
+    for (int i = 0; i < node->enumerators.count; i++) {
+        AstEnumerator *e = ((AstEnumerator **)node->enumerators.items)[i];
+        if (e->value == value) return true;
+        flags |= e->value;
+    }
+    return node->is_flags && (value & ~flags) == 0;
+}
+
 Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
 
     Type *wanted_type = NULL;
@@ -9569,6 +9633,17 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
             report_error_ast(typer->parser, LABEL_NOTE, NULL, "Booleans can not be casted directly to floats. Cast to an integer first, e.g. `(value as int) as %s`", type_to_str(wanted_type));
         }
         return NULL;
+    }
+
+    // A number written in the program as an enum, e.g 9 as Color, is checked here. Other numbers are checked when the program
+    // runs (emit_enum_value_check)
+    if (wanted_type->kind == TYPE_ENUM && expr_type->kind != TYPE_ENUM && is_integer_literal_value(cast->expr)) {
+        long long value = integer_literal_value(cast->expr);
+        if (!is_enum_value((TypeEnum *)wanted_type, value)) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "%lld isn't a value of %s", value, type_to_str(wanted_type));
+            report_error_ast(typer->parser, LABEL_NOTE, (Ast *)((TypeEnum *)wanted_type)->node, "Here are its values");
+            return NULL;
+        }
     }
 
     // An untyped number is folded and gets a type it fits in, e.g (68719476736 / 4096) as u64 is 16777216 before it is converted
