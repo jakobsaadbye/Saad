@@ -23,13 +23,13 @@ import fmt;
 Planet :: struct {
     name:  string;
     moons: int;
+}
 
-    describe :: method () {
-        if self.moons == 0 {
-            fmt.print("% has no moons", self.name);
-        } else {
-            fmt.print("% has % moons", self.name, self.moons);
-        }
+describe :: method (planet: Planet) {
+    if planet.moons == 0 {
+        fmt.print("% has no moons", planet.name);
+    } else {
+        fmt.print("% has % moons", planet.name, planet.moons);
     }
 }
 
