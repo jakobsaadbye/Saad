@@ -1,7 +1,7 @@
 # Changelog
 
 The changes of the language and the language server are in the
-[changelog of Saad](https://github.com/jakobsaadbye/Saad#changelog).
+[changelog of Saad](https://github.com/jakobsaadbye/Saad/blob/main/CHANGELOG.md).
 
 ## 0.4.1
 
