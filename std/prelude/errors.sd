@@ -157,6 +157,18 @@ panicIndexOutOfBounds :: (index: i64, count: i64) {
     panic(message);
 }
 
+// For a number cast to an enum that isn't one of its values, e.g 7 as Color
+panicEnumCast :: (value: i64, name: *u8) {
+    buffer: [160]u8;
+    sprintf(buffer.data, "%lld isn't a value of %s", value, name);
+    text := c.string{buffer.data}.toString();
+    message: string;
+    message.data = resizeMemory(heapAllocator(), null, 0, text.len) as *u8;
+    message.len  = text.len;
+    for i in 0..text.len { message.data[i] = text.data[i]; }
+    panic(message);
+}
+
 // For an error that nothing caught: main ends with it
 reportUncaught :: () {
     err := thrownError;

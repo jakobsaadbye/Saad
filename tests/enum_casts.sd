@@ -1,0 +1,45 @@
+// A number cast to an enum is checked, so an enum always holds one of its values: a Panic when the program runs, or an
+// error when the number is written in the program. E.from(n) gives the value, or empty, without a Panic
+
+use fmt;
+
+Color :: enum { red, green, blue }
+Status :: enum { ok = 200, created = 201, notFound = 404 }   // Values that don't follow each other
+Options :: enum flags { verbose, color, quiet }              // 1, 2 and 4
+
+// The message of the Panic of casting the number to the enum, or empty when it is a value
+castColor   :: (n: i64) -> string { message := ""; try { c := n as Color; } catch (e) { message = e.message; } return message; }
+castStatus  :: (n: i64) -> string { message := ""; try { s := n as Status; } catch (e) { message = e.message; } return message; }
+castOptions :: (n: i64) -> string { message := ""; try { o := n as Options; } catch (e) { message = e.message; } return message; }
+castFromU64 :: (n: u64) -> string { message := ""; try { c := n as Color; } catch (e) { message = e.message; } return message; }
+
+main :: () {
+    // Values of the enum
+    one := 1;
+    assert(one as Color == .green);
+    code := 404;
+    assert(code as Status == .notFound);
+    both := 5;
+    assert(both as Options == .verbose | .quiet);
+    none := 0;
+    assert((none as Options).isEmpty());
+
+    // Numbers that aren't
+    assert(castColor(2) == "" && castStatus(201) == "" && castOptions(7) == "");
+    assert(castColor(3) == "3 isn't a value of Color");
+    assert(castColor(-1) == "-1 isn't a value of Color");
+    assert(castStatus(202) == "202 isn't a value of Status");
+    assert(castOptions(8) == "8 isn't a value of Options");
+    assert(castFromU64(4294967296) == "4294967296 isn't a value of Color");   // Checked before it is made an i32
+
+    // from gives an optional
+    assert(Color.from(2) == Color.blue && Color.from(7) == null);
+    assert(Status.from(code) == Status.notFound && Status.from(500) == null);
+    assert(Options.from(6) == Options.color | Options.quiet && Options.from(9) == null);
+    c := Color.from(one) ?? .red;
+    assert(c == .green);
+
+    // Numbers written in the program are checked when it is compiled, see tests/should_fail/enum_cast_not_a_value.sd
+    assert(2 as Color == .blue && 201 as Status == .created);
+    print("enum casts ok");
+}

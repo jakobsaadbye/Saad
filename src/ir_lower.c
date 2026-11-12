@@ -2023,6 +2023,62 @@ static int error_as(Lowerer *L, AstExpr *expr, Type *to, int *found) {
     return value;
 }
 
+static int compare_i64(const void *a, const void *b) {
+    int64_t x = *(const int64_t *) a, y = *(const int64_t *) b;
+    return (x > y) - (x < y);
+}
+
+// Throws a Panic when the number (an i64) isn't a value of the enum. A plain enum has a value of each enumerator: its values
+// are in a range when they follow each other, which is one compare, or else each is compared. An enum flags has any
+// combination of its flags, so the number has no other bits
+static void emit_enum_value_check(Lowerer *L, int value, TypeEnum *type, Ast *at) {
+    AstEnum *node = type->node;
+    IrBlock *valid   = create_block(L, "enum.value");
+    IrBlock *invalid = create_block(L, "enum.not.a.value");
+
+    int      count  = node->enumerators.count;
+    int64_t *values = malloc(sizeof(int64_t) * (count > 0 ? count : 1));
+    int64_t  flags  = 0;
+    for (int i = 0; i < count; i++) {
+        AstEnumerator *e = ((AstEnumerator **) node->enumerators.items)[i];
+        values[i] = e->value;
+        flags    |= e->value;
+    }
+
+    if (count == 0) {
+        terminate_jmp(L, invalid);
+    } else if (node->is_flags) {
+        int others = emit_binop(L, IR_AND, IR_I64, value, emit_const(L, IR_I64, ~flags));
+        terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_EQ, IR_I64, others, emit_const(L, IR_I64, 0)), valid, invalid);
+    } else {
+        qsort(values, count, sizeof(int64_t), compare_i64);
+        int distinct = 1;
+        for (int i = 1; i < count; i++) if (values[i] != values[i - 1]) distinct++;
+        int64_t low = values[0], high = values[count - 1];
+        if ((int64_t) distinct == high - low + 1) {
+            // e.g 0..3: value - low < 4, compared unsigned so a value below low is outside too
+            int offset = emit_binop(L, IR_SUB, IR_I64, value, emit_const(L, IR_I64, low));
+            terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_ULT, IR_I64, offset, emit_const(L, IR_I64, high - low + 1)), valid, invalid);
+        } else {
+            for (int i = 0; i < count; i++) {
+                if (i > 0 && values[i] == values[i - 1]) continue;
+                IrBlock *next = create_block(L, "enum.next.value");
+                terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_EQ, IR_I64, value, emit_const(L, IR_I64, values[i])), valid, next);
+                set_block(L, next);
+            }
+            terminate_jmp(L, invalid);
+        }
+    }
+    free(values);
+
+    set_block(L, invalid);
+    int args[2] = { value, emit_c_text(L, type_to_str((Type *) type)) };
+    emit_errors_call(L, "panicEnumCast", 2, args);
+    emit_trace_frame(L, at->start.line);
+    emit_unwind(L);
+    set_block(L, valid);
+}
+
 static Value lower_cast(Lowerer *L, AstCast *cast) {
     Type *from = cast->expr->type;
     Type *to   = cast->cast_to;
@@ -2104,6 +2160,14 @@ static Value lower_cast(Lowerer *L, AstCast *cast) {
 
     if (type_is_aggregate(from) || type_is_aggregate(to)) {
         lower_fail(L, (Ast *) cast, "Not implemented in the IR backend yet: cast from %s to %s", type_to_str(from), type_to_str(to));
+    }
+
+    // A number as an enum, e.g n as Color: a Panic when it isn't one of its values, so an enum always holds one of them
+    if (to->kind == TYPE_ENUM && from->kind != TYPE_ENUM && bounds_checks) {
+        Type *i64_type = primitive_type(PRIMITIVE_I64);
+        int value = lower_scalar_as(L, cast->expr, i64_type);
+        emit_enum_value_check(L, value, (TypeEnum *) to, (Ast *) cast);
+        return value_scalar(convert_scalar(L, value, i64_type, to), to);
     }
 
     return value_scalar(lower_scalar_as(L, cast->expr, to), to);
