@@ -18,6 +18,7 @@ MS int         ms_PQntuples(const PGresult *r) { return PQntuples(r); }
 MS int         ms_PQnfields(const PGresult *r) { return PQnfields(r); }
 MS char       *ms_PQfname(const PGresult *r, int i) { return PQfname(r, i); }
 MS char       *ms_PQgetvalue(const PGresult *r, int row, int col) { return PQgetvalue(r, row, col); }
+MS int         ms_PQgetlength(const PGresult *r, int row, int col) { return PQgetlength(r, row, col); }
 MS int         ms_PQgetisnull(const PGresult *r, int row, int col) { return PQgetisnull(r, row, col); }
 MS char       *ms_PQcmdTuples(PGresult *r) { return PQcmdTuples(r); }
 MS void        ms_PQclear(PGresult *r) { PQclear(r); }

@@ -32,42 +32,34 @@ connect :: (connectionString: string) -> dbms.Connection, error {
         return conn, dbms.databaseError(err);
     }
 
-    conn.driver = driver();
-    conn.handle = handle;
+    conn.driver = handle;   // A *PGconn is a dbms.Driver, by its methods below
     return conn, null;
 }
 
-// The driver for dbms.Connection
-driver :: () -> *dbms.Driver {
-    if theDriver == null {
-        d := new(dbms.Driver);
-        d.name        = "postgres";
-        d.execute     = execute;
-        d.rowCount    = rowCount;
-        d.columnCount = columnCount;
-        d.columnName  = columnName;
-        d.value       = value;
-        d.affected    = affected;
-        d.freeResult  = freeResult;
-        d.close       = close;
-        theDriver = d;
-    }
-    return theDriver;
-}
-
-@private theDriver: *dbms.Driver = null;
+// The connection and the result of libpq. Only libpq knows what is in them, so they are only used through pointers. A
+// *PGconn is a dbms.Driver, and a *PGresult a dbms.Rows, by their methods
+PGconn   :: struct {}
+PGresult :: struct {}
 
 @private ConnectionOk    :: 0;
 @private ResultCommandOk :: 1;
 @private ResultTuplesOk  :: 2;
 
-@private
-execute :: (conn: *void, sql: c.string, params: []c.string, err: *string) -> *void {
+// Runs the SQL with the arguments as text parameters
+execute :: method (conn: *PGconn, sql: string, args: []any, err: *string) -> dbms.Rows {
+    params, failed := dbms.textParams(args);
+    if failed != "" {
+        *err = failed;
+        return null;
+    }
     values: *c.string = null;
     if params.count > 0 {
         values = params.data;
     }
-    result := PQexecParams(conn, sql, params.count as int, null, values, null, null, 0);
+    query := sql.toCString();
+    result := PQexecParams(conn, query, params.count as int, null, values, null, null, 0);
+    query.free();
+    dbms.freeTextParams(&params);
     if result == null {
         *err = message(PQerrorMessage(conn));
         return null;
@@ -81,22 +73,31 @@ execute :: (conn: *void, sql: c.string, params: []c.string, err: *string) -> *vo
     return result;
 }
 
-@private rowCount    :: (result: *void) -> i64 { return PQntuples(result) as i64; }
-@private columnCount :: (result: *void) -> i64 { return PQnfields(result) as i64; }
-@private columnName  :: (result: *void, column: i64) -> c.string { return PQfname(result, column as int); }
-@private freeResult  :: (result: *void) { PQclear(result); }
-@private close       :: (conn: *void) { PQfinish(conn); }
+close :: method (conn: *PGconn) { PQfinish(conn); }
 
-@private
-value :: (result: *void, row: i64, column: i64) -> c.string {
+count      :: method (result: *PGresult) -> i64 { return PQntuples(result) as i64; }
+columns    :: method (result: *PGresult) -> i64 { return PQnfields(result) as i64; }
+columnName :: method (result: *PGresult, column: i64) -> c.string { return PQfname(result, column as int); }
+free       :: method (result: *PGresult) { PQclear(result); }
+
+value :: method (result: *PGresult, row: i64, column: i64) -> c.string {
     if PQgetisnull(result, row as int, column as int) != 0 {
         return c.string{};   // NULL
     }
     return PQgetvalue(result, row as int, column as int);
 }
 
-@private
-affected :: (result: *void) -> i64 {
+text :: method (result: *PGresult, row: i64, column: i64) -> string {
+    t: string;
+    t.data = PQgetvalue(result, row as int, column as int).data;
+    t.len  = PQgetlength(result, row as int, column as int) as i64;
+    return t;
+}
+
+// libpq gives every value as text
+integer :: method (result: *PGresult, row: i64, column: i64, value: *i64) -> bool { return false; }
+
+affected :: method (result: *PGresult) -> i64 {
     text := PQcmdTuples(result).toString();
     n: i64 = 0;
     for i in 0..text.len {
@@ -123,18 +124,19 @@ message :: (text: c.string) -> string {
 }
 
 extern "libpq.dll" {
-    PQconnectdb          :: (conninfo: c.string) -> *void;
-    PQstatus             :: (conn: *void) -> int;
-    PQerrorMessage       :: (conn: *void) -> c.string;
-    PQfinish             :: (conn: *void);
-    PQexecParams         :: (conn: *void, command: c.string, nParams: int, paramTypes: *u32, paramValues: *c.string, paramLengths: *int, paramFormats: *int, resultFormat: int) -> *void;
-    PQresultStatus       :: (result: *void) -> int;
-    PQresultErrorMessage :: (result: *void) -> c.string;
-    PQntuples            :: (result: *void) -> int;
-    PQnfields            :: (result: *void) -> int;
-    PQfname              :: (result: *void, column: int) -> c.string;
-    PQgetvalue           :: (result: *void, row: int, column: int) -> c.string;
-    PQgetisnull          :: (result: *void, row: int, column: int) -> int;
-    PQcmdTuples          :: (result: *void) -> c.string;
-    PQclear              :: (result: *void);
+    PQconnectdb          :: (conninfo: c.string) -> *PGconn;
+    PQstatus             :: (conn: *PGconn) -> int;
+    PQerrorMessage       :: (conn: *PGconn) -> c.string;
+    PQfinish             :: (conn: *PGconn);
+    PQexecParams         :: (conn: *PGconn, command: c.string, nParams: int, paramTypes: *u32, paramValues: *c.string, paramLengths: *int, paramFormats: *int, resultFormat: int) -> *PGresult;
+    PQresultStatus       :: (result: *PGresult) -> int;
+    PQresultErrorMessage :: (result: *PGresult) -> c.string;
+    PQntuples            :: (result: *PGresult) -> int;
+    PQnfields            :: (result: *PGresult) -> int;
+    PQfname              :: (result: *PGresult, column: int) -> c.string;
+    PQgetvalue           :: (result: *PGresult, row: int, column: int) -> c.string;
+    PQgetlength          :: (result: *PGresult, row: int, column: int) -> int;
+    PQgetisnull          :: (result: *PGresult, row: int, column: int) -> int;
+    PQcmdTuples          :: (result: *PGresult) -> c.string;
+    PQclear              :: (result: *PGresult);
 }

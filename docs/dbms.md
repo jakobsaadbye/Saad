@@ -221,30 +221,38 @@ starts.
 
 ## Drivers
 
-`dbms` talks to a database through a `dbms.Driver`, a struct of functions. The values are text, as the database
-writes them, which is what libpq gives and what SQLite can give too.
+`dbms` talks to a database through two interfaces (see `docs/interfaces.md`): a `dbms.Driver` is a connection of the
+database's own, and the `dbms.Rows` it gives are the rows of a statement. Any type with their methods is one, also of
+another library. The values are text, as the database writes them, which is what libpq gives and what SQLite can give too.
 
 ```odin
-Driver :: struct {
-    name: string;
-    execute:     (conn: *void, sql: c.string, params: []c.string, err: *string) -> *void;  // a result, or null and err
-    rowCount:    (result: *void) -> i64;
-    columnCount: (result: *void) -> i64;
-    columnName:  (result: *void, column: i64) -> c.string;
-    value:       (result: *void, row: i64, column: i64) -> c.string;  // c.string{} (isNull) is NULL
-    affected:    (result: *void) -> i64;
-    freeResult:  (result: *void);
-    close:       (conn: *void);
-    executeArgs: (conn: *void, sql: string, args: []any, err: *string) -> *void;  // optional, see below
+Driver :: interface {
+    execute :: method (sql: string, args: []any, err: *string) -> Rows;   // the rows, or null and err
+    close   :: method ();
+}
+
+Rows :: interface {
+    count      :: method () -> i64;
+    columns    :: method () -> i64;
+    columnName :: method (column: i64) -> c.string;
+    value      :: method (row: i64, column: i64) -> c.string;   // c.string{} (isNull) is NULL
+    text       :: method (row: i64, column: i64) -> string;     // the text of a value that isn't NULL, with its length
+    integer    :: method (row: i64, column: i64, value: *i64) -> bool;   // false: dbms reads the text instead
+    affected   :: method () -> i64;
+    free       :: method ();
 }
 ```
 
-`executeArgs` is optional: a driver that binds values by their type, e.g SQLite, sets it, and `dbms` gives it the
-arguments as they are instead of making them into texts for `execute`. `dbms.paramText(arg)` makes the text of a value
-it doesn't bind itself.
-
-A driver gives back a `dbms.Connection{driver: ..., handle: ...}` from its own `connect`. `tests/std/dbms.sd` has a
-complete driver of 20 lines.
+* A driver binds the arguments its own way. One that sends them as text, e.g Postgres, makes them with
+  `dbms.textParams(args)` and gives them back with `dbms.freeTextParams`. SQLite binds them by their type, and
+  `dbms.paramText(arg)` makes the text of a value it doesn't bind itself.
+* `integer` gives a value without its text, for a database that has its type, e.g SQLite. Postgres gives false.
+* A driver gives back a `dbms.Connection{driver: ...}` from its own `connect`, with a pointer to its connection as the
+  driver, e.g `conn.driver = pgconn` of a `*PGconn`. The driver is null when the connection is closed, and
+  `conn.driver as *Database` gives the driver's own back, e.g for `sqlite.lastInsertId`.
+* The connections and results of libpq are opaque types, `PGconn :: struct {}` and `PGresult :: struct {}`, whose
+  methods call libpq: only libpq knows what is in them, and they are only used through pointers.
+* `tests/std/dbms.sd` has a complete driver of about 30 lines, a struct of the test with the methods of both.
 
 ## Keeping it apart
 
