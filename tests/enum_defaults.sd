@@ -1,0 +1,80 @@
+// An enum without the value 0 starts with its first value, so it always holds one of its values. A switch that handles every
+// value throws a Panic when it holds none of them, which only memory written by hand can make
+
+use fmt;
+import json;
+import mem;
+
+Status :: enum { ok = 200, created = 201, notFound = 404 }
+Level  :: enum { low = 10, high = 50 }
+Color  :: enum { red, green }              // Has 0, so it starts with it as before
+Options :: enum flags { verbose, quiet }   // 0 is no flags
+
+Inner :: struct {
+    level: Level;
+}
+
+Reply :: struct {
+    status: Status;
+    inner:  Inner;
+    levels: [2]Level;
+    color:  Color;
+    code:   int = 7;
+}
+
+global: Status;
+globalReply: Reply;
+Constant :: Reply{status: .notFound};
+
+describe :: (s: Status) -> string {
+    return switch s {
+        case .ok       => "ok";
+        case .created  => "created";
+        case .notFound => "not found";
+    };
+}
+
+main :: () {
+    s: Status;
+    assert(s == .ok && describe(s) == "ok");
+    o: Options;
+    assert(o.isEmpty());
+
+    r: Reply;
+    assert(r.status == .ok && r.inner.level == .low && r.levels[1] == .low && r.color == .red && r.code == 7);
+    l := Reply{code: 1};
+    assert(l.status == .ok && l.inner.level == .low && l.code == 1);
+    list: [3]Status;
+    assert(list[2] == .ok);
+    p := new(Reply);
+    assert(p.status == .ok && p.inner.level == .low);
+
+    // Globals and constants
+    assert(global == .ok && globalReply.inner.level == .low);
+    assert(Constant.status == .notFound && Constant.inner.level == .low && Constant.code == 7);
+
+    // JSON writes the value, which it reads back
+    text := json.encode(r);
+    assert(text == "{\"status\":\"ok\",\"inner\":{\"level\":\"low\"},\"levels\":[\"low\",\"low\"],\"color\":\"red\",\"code\":7}");
+    back := json.decode<Reply>(text);
+    assert(back.status == .ok);
+    missing := json.decode<Reply>("{}");
+    assert(missing.status == .ok && missing.inner.level == .low);
+
+    // A value that isn't one, written by hand: the switch throws instead of running no case
+    raw: i32 = 9;
+    mem.copy(&s, &raw, 4);
+    message := "";
+    try { describe(s); } catch (e) { message = e.message; }
+    assert(message == "9 isn't a value of Status");
+    message = "";
+    try {
+        switch s {
+            case .ok { }
+            case .created { }
+            case .notFound { }
+        }
+    } catch (e) { message = e.message; }
+    assert(message == "9 isn't a value of Status");
+    print("enum defaults ok");
+}

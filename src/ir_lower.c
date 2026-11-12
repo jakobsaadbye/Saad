@@ -683,6 +683,7 @@ static void write_int_bytes(uint8_t *dst, int64_t value, int size) {
 }
 
 // Writes the constant expression 'expr', interpreted as type 'type', into a global's data
+static void write_default_constants(Lowerer *L, IrGlobal *global, int offset, Type *type);
 static void write_constant(Lowerer *L, IrGlobal *global, int offset, AstExpr *expr, Type *type) {
     Type *storage = enum_backing_type(type);
 
@@ -780,6 +781,23 @@ static void write_constant(Lowerer *L, IrGlobal *global, int offset, AstExpr *ex
         for (int i = 0; i < lit->initializers.count; i++) {
             AstStructInitializer *init = da_get_deref(lit->initializers, i);
             write_constant(L, global, offset + init->member->member_offset, init->value, init->member->type);
+        }
+        // The members that aren't given get their default value, e.g 'code: int = 7;', or of their type, e.g the first value
+        // of an enum without 0
+        if (storage->kind == TYPE_STRUCT && !((TypeStruct *) storage)->node->is_union) {
+            DynamicArray members = ((TypeStruct *) storage)->node->members->identifiers;
+            for (int m = 0; m < members.count; m++) {
+                AstIdentifier *member = da_get_deref(members, m);
+                if (member->flags & IDENTIFIER_IS_CONSTANT) continue;
+                bool given = false;
+                for (int i = 0; i < lit->initializers.count; i++) {
+                    if (((AstStructInitializer *) da_get_deref(lit->initializers, i))->member == member) given = true;
+                }
+                if (given) continue;
+                AstExpr *fallback = member_default_value(member);
+                if (fallback) write_constant(L, global, offset + member->member_offset, fallback, member->type);
+                else          write_default_constants(L, global, offset + member->member_offset, member->type);
+            }
         }
         return;
     }
@@ -918,8 +936,25 @@ static int64_t fixed_array_count(TypeArray *array) {
 
 static void store_expr(Lowerer *L, IrAddr dst, Type *dst_type, AstExpr *expr, bool dst_is_fresh);
 
-// Returns true if zeroed memory is not the default value of the type, because it has struct members with default values e.g 'age: int = 30;'
+// The value an enum starts with when 0 isn't one of its values, e.g .ok of 'Status :: enum { ok = 200, notFound = 404 }':
+// its first value, so an enum always holds one of its values. False for an enum that has 0, and an enum flags, whose 0 is
+// no flags
+static bool enum_default_value(Type *type, int64_t *value) {
+    if (type->kind != TYPE_ENUM) return false;
+    AstEnum *node = ((TypeEnum *) type)->node;
+    if (node == NULL || node->is_flags || node->enumerators.count == 0) return false;
+    for (int i = 0; i < node->enumerators.count; i++) {
+        if (((AstEnumerator **) node->enumerators.items)[i]->value == 0) return false;
+    }
+    *value = ((AstEnumerator **) node->enumerators.items)[0]->value;
+    return true;
+}
+
+// Returns true if zeroed memory is not the default value of the type, because it has struct members with default values
+// e.g 'age: int = 30;', or is an enum without the value 0 (enum_default_value)
 static bool has_default_values(Type *type) {
+    int64_t unused;
+    if (enum_default_value(type, &unused)) return true;
     if (type->kind == TYPE_STRUCT) {
         DynamicArray members = ((TypeStruct *) type)->node->members->identifiers;
         for (int i = 0; i < members.count; i++) {
@@ -937,6 +972,12 @@ static bool has_default_values(Type *type) {
 
 // Writes the default values of the struct members in 'type' into zeroed memory
 static void emit_default_values(Lowerer *L, IrAddr addr, Type *type) {
+    int64_t first;
+    if (enum_default_value(type, &first)) {
+        IrType ir_type = ir_type_of(type);
+        emit_store(L, ir_type, addr, emit_const(L, ir_type, first));
+        return;
+    }
     if (type->kind == TYPE_STRUCT) {
         DynamicArray members = ((TypeStruct *) type)->node->members->identifiers;
         for (int i = 0; i < members.count; i++) {
@@ -1338,6 +1379,11 @@ static bool is_fixed_array(Type *type);
 
 // Writes the default values of the struct members in 'type' into the data of a global
 static void write_default_constants(Lowerer *L, IrGlobal *global, int offset, Type *type) {
+    int64_t first;
+    if (enum_default_value(type, &first)) {
+        write_int_bytes(&global->data[offset], first, type->size);
+        return;
+    }
     if (type->kind == TYPE_STRUCT && !((TypeStruct *) type)->node->is_union) {
         DynamicArray members = ((TypeStruct *) type)->node->members->identifiers;
         for (int i = 0; i < members.count; i++) {
@@ -2239,19 +2285,8 @@ static int attribute_value_global(Lowerer *L, AstStructLiteral *value) {
     Type *type = value->head.type;
     IrGlobal *global = ir_global_data(L->module, "attribute", NULL, type->size > 0 ? type->size : 1, type_alignment(type), true);
 
-    // The default of a member that isn't given. Not both, as a pointer, e.g of a string, is a relocation, and the first
-    // one written at an offset would win
-    DynamicArray members = ((TypeStruct *) type)->node->members->identifiers;
-    for (int i = 0; i < members.count; i++) {
-        AstIdentifier *member = da_get_deref(members, i);
-        bool given = false;
-        for (int k = 0; k < value->initializers.count; k++) {
-            AstStructInitializer *init = da_get_deref(value->initializers, k);
-            if (init->member == member) given = true;
-        }
-        AstExpr *fallback = member_default_value(member);
-        if (fallback && !given) write_constant(L, global, member->member_offset, fallback, member->type);
-    }
+    // write_constant writes the given members, and the default of each member that isn't given. Not both, as a pointer, e.g
+    // of a string, is a relocation, and the first one written at an offset would win
     write_constant(L, global, 0, (AstExpr *) value, type);
     return global->index;
 }
