@@ -48,6 +48,9 @@ typedef struct Typer {
     DynamicArray slice_methods; // of *AstFunctionDefn. The generic methods on []T, see register_slice_method()
 
     DynamicArray anonymous_types; // of *Type. One anonymous struct or enum for each set of members e.g struct { age: int; }, so that the same members are the same type
+
+    DynamicArray function_locals;       // of *AstIdentifier. The variables declared in the functions being checked, see warn_unused_locals()
+    bool         plain_assignment_target; // Set while checking the place of 'x = value', which gives x a value without using it
 } Typer;
 
 #define GENERIC_DEPTH_LIMIT 64
@@ -3246,6 +3249,16 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
         return check_type_alias(typer, decl);
     }
 
+    // A variable of a function, which is warned about when its value is never used. See warn_unused_locals()
+    if (typer->enclosing_function && !(decl->flags & (DECLARATION_CONSTANT | DECLARATION_IS_FUNCTION_PARAMETER | DECLARATION_IS_COMPILER_GENERATED | DECLARATION_IS_STRUCT_MEMBER)) &&
+        !(decl->head.flags & AST_FLAG_COMPILER_GENERATED)) {
+        if (typer->function_locals.capacity == 0) typer->function_locals = da_init(64, sizeof(AstIdentifier *));
+        for (int i = 0; i < decl->idents.count; i++) {
+            AstIdentifier *ident = ((AstIdentifier **)decl->idents.items)[i];
+            da_append(&typer->function_locals, ident);
+        }
+    }
+
     typer->inside_declaration = decl;
 
     if (decl->flags & DECLARATION_TYPED) {
@@ -3823,7 +3836,10 @@ bool types_are_equal(Type *lhs, Type *rhs) {
 
 bool check_assignment(Typer *typer, AstAssignment *assign) {
     typer->checking_place = true;
+    // Only 'x = value' gives x a value without using it. 'x.member = value' and 'x[i] = value' use x, e.g a pointer
+    typer->plain_assignment_target = assign->op == ASSIGN_EQUAL && is_literal_identifier(assign->lhs);
     Type *lhs_type  = check_expression(typer, assign->lhs, NULL);
+    typer->plain_assignment_target = false;
     if (!lhs_type) return false;
 
     if (assign->lhs->replacement && assign->lhs->replacement->head.kind == AST_OPTIONAL_CHAIN) {
@@ -6055,6 +6071,26 @@ static bool check_format_arguments(Typer *typer, AstFunctionCall *call, AstFunct
     return false;
 }
 
+// Warns about the variables of the function whose value is never used, declared since 'start' in typer->function_locals. A
+// variable that is only given values, e.g 'x = 5;', isn't used either. An error that is taken and never looked at gets a
+// warning of its own, as it is a failure that goes unnoticed. '_' and the variables of a generic are warned about once
+static void warn_unused_locals(Typer *typer, AstFunctionDefn *func, int start) {
+    if (typer->indexing_unused_generics) return;
+    if (func->generic_function && func->generic_function->instances.count > 0 && ((AstFunctionDefn **)func->generic_function->instances.items)[0] != func) return;
+    for (int i = start; i < typer->function_locals.count; i++) {
+        AstIdentifier *ident = ((AstIdentifier **)typer->function_locals.items)[i];
+        if (ident->is_read || !ident->name || ident->name[0] == '_' || ident->name[0] == '$') continue;
+        if (ident->head.flags & AST_FLAG_COMPILER_GENERATED) continue;
+        if (ident->type && is_error_type(typer, ident->type)) {
+            report_error_ast(typer->parser, LABEL_WARNING, (Ast *)ident, "The error '%s' is never looked at, so a failure goes unnoticed", ident->name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Check it, e.g 'if %s != null { ... }', or don't take it, so it is thrown: 'v := f();'", ident->name);
+        } else {
+            report_error_ast(typer->parser, LABEL_WARNING, (Ast *)ident, "'%s' is declared but its value is never used", ident->name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Remove it, or name it _ when a value must be taken, e.g '_, err := f();'");
+        }
+    }
+}
+
 Type *check_function_call(Typer *typer, AstFunctionCall *call) {
     if (typer->enclosing_function == NULL) {
         if (typer->checking_member_default) {
@@ -7198,7 +7234,9 @@ static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *fu
 
     for (int i = 0; i < func_defn->parameters.count; i++) {
         AstIdentifier *param = ((AstIdentifier **)func_defn->parameters.items)[i];
+        int locals_before = typer->function_locals.count;
         bool ok = check_declaration(typer, param->decl);
+        if (typer->function_locals.count > locals_before) typer->function_locals.count = locals_before;   // A parameter isn't warned about
         if (!ok) return NULL;
 
         if (param->type->kind == TYPE_ARRAY && ((TypeArray *)param->type)->array_kind == ARRAY_FIXED) {
@@ -7297,7 +7335,10 @@ static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *fu
     func_defn->head.type = (Type *) func_type;
 
     // Check the body
+    int locals_start = typer->function_locals.count;
     bool ok = check_block(typer, func_defn->body);
+    if (ok) warn_unused_locals(typer, func_defn, locals_start);
+    if (typer->function_locals.count > locals_start) typer->function_locals.count = locals_start;
     if (!ok) return NULL;
 
     // Close function scope
@@ -10113,6 +10154,8 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             return NULL;
         }
         index_identifier_use((Ast *)literal, ident);
+        // Its value is used, unless it is the place of 'x = value', which only gives it one
+        if (!(typer->current_place && typer->plain_assignment_target)) ident->is_read = true;
 
         if (ident->type->kind == TYPE_FUNCTION && is_generic_function(((TypeFunction *)ident->type)->node) && !typer->checking_callee) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Generic function '%s' can only be called, not used as a value", ident->name);

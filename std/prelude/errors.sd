@@ -185,6 +185,25 @@ panicEnumSwitch :: (value: any) {
     panic(message);
 }
 
+// For integer arithmetic whose result doesn't fit its type, e.g '2147483647 + 1 doesn't fit in i32'. The values are given in
+// 64 bits, and unsigned says how to read them. A function marked @noOverflowCheck wraps around instead
+panicOverflow :: (a: i64, b: i64, op: i64, unary: bool, unsigned: bool, type: *u8) {
+    buffer: [200]u8;
+    if unary {
+        sprintf(buffer.data, "-(%lld) doesn't fit in %s", a, type);
+    } else if unsigned {
+        sprintf(buffer.data, "%llu %c %llu doesn't fit in %s", a, op as i32, b, type);
+    } else {
+        sprintf(buffer.data, "%lld %c %lld doesn't fit in %s", a, op as i32, b, type);
+    }
+    text := c.string{buffer.data}.toString();
+    message: string;
+    message.data = resizeMemory(heapAllocator(), null, 0, text.len) as *u8;
+    message.len  = text.len;
+    for i in 0..text.len { message.data[i] = text.data[i]; }
+    panic(message);
+}
+
 // For an error that nothing caught: main ends with it
 reportUncaught :: () {
     err := thrownError;

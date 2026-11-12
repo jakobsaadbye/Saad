@@ -202,6 +202,7 @@ rotr :: (x: u32, n: u32) -> u32 {
 
 // One block of 64 bytes into the state
 @private
+@noOverflowCheck   // SHA-256 adds modulo 2^32
 compress :: (state: *u32, block: *u8) {
     w: [64]u32;
     for i in 0..16 {

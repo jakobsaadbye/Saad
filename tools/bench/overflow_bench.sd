@@ -1,0 +1,56 @@
+// What the overflow checks of integer arithmetic cost. Run it with and without --unchecked, which leaves them out:
+//
+//     saad run tools/bench/overflow_bench.sd --llvm
+//     saad run tools/bench/overflow_bench.sd --llvm --unchecked
+//
+// 1. Arithmetic in a loop: + - * of i64 and i32
+// 2. Sorting a list of 1M numbers, whose index arithmetic is checked
+// 3. Encoding a list of structs as JSON
+
+import json;
+import time;
+import fmt;
+
+Point :: struct {
+    x: i64;
+    y: i32;
+    name: string;
+}
+
+arithmetic :: (count: i64) -> i64 {
+    total: i64 = 0;
+    small: i32 = 0;
+    for i in 0..count {
+        total = total + (i * 3 - (i >> 1)) % 1000;
+        small = (small + (i % 7) as i32) % 100000;
+    }
+    return total + small as i64;
+}
+
+main :: () {
+    {
+        watch := time.startStopwatch();
+        result := arithmetic(200000000);
+        fmt.print("arithmetic: % ms (%)", watch.milliseconds() as i64, result);
+    }
+    {
+        numbers: [..]i64;
+        seed: u64 = 7;
+        for i in 0..1000000 {
+            seed = seed ^ (seed << 13);
+            seed = seed ^ (seed >> 7);
+            seed = seed ^ (seed << 17);
+            numbers.add((seed % 1000000) as i64);
+        }
+        watch := time.startStopwatch();
+        numbers.elements().sort();
+        fmt.print("sort 1M: % ms (%)", watch.milliseconds() as i64, numbers[500000]);
+    }
+    {
+        points: [..]Point;
+        for i in 0..200000 { points.add(Point{i, (i % 1000) as i32, "point"}); }
+        watch := time.startStopwatch();
+        text := json.encode(points);
+        fmt.print("json 200k: % ms (% bytes)", watch.milliseconds() as i64, text.len);
+    }
+}

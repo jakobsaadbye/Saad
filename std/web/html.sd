@@ -318,7 +318,7 @@ elementAt :: (elements: *u8, elemType: *Type, index: i64) -> Value {
 memberValue :: (value: Value, name: string) -> Value {
     switch v in value {
         case .data {
-            elements, count, _, isList := elementsOf(v);
+            _, count, _, isList := elementsOf(v);
             if isList {
                 if name == "length" || name == "count" { return Value{integer: count}; }
                 return .none;

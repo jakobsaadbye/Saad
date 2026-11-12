@@ -1671,6 +1671,107 @@ static IrAddr array_access_addr(Lowerer *L, AstArrayAccess *aa) {
 // Operators
 //////////////////////////////////////////////////////////////////////////////////////////
 
+// If the integer arithmetic of the function being lowered is checked for overflow: unless built with --unchecked, or the
+// function is marked @noOverflowCheck, e.g a hash that wraps around on purpose, or it is a file of the runtime
+static bool overflow_checks_on(Lowerer *L) {
+    if (!bounds_checks || !L->ast_func) return false;
+    AstFunctionDefn *f = L->ast_func;
+    if (f->no_overflow_check || (f->generic_function && f->generic_function->no_overflow_check)) return false;
+    AstFile *file = f->head.head.file;
+    return file != NULL && !is_runtime_file(L, file);
+}
+
+// The smallest and the biggest value of an integer type of fewer than 64 bits
+static void integer_range(Type *type, int64_t *low, int64_t *high) {
+    int bits = type->size * 8;
+    if (type_is_signed(type)) { *low = -((int64_t)1 << (bits - 1)); *high = ((int64_t)1 << (bits - 1)) - 1; }
+    else                      { *low = 0;                          *high = ((int64_t)1 << bits) - 1; }
+}
+
+// Throws a Panic that says which operation didn't fit, e.g '2147483647 + 1 doesn't fit in i32', when 'fits' (an i8) is 0
+static void emit_overflow_branch(Lowerer *L, int fits, int op, Type *type, int a64, int b64, bool unary, Ast *site) {
+    IrBlock *overflow = create_block(L, "integer.overflow");
+    IrBlock *go_on    = create_block(L, "integer.fits");
+    terminate_br(L, fits, go_on, overflow);
+    set_block(L, overflow);
+    int args[6] = {
+        a64, b64 == IR_NO_VREG ? emit_const(L, IR_I64, 0) : b64,
+        emit_const(L, IR_I64, op), emit_const(L, IR_I8, unary ? 1 : 0),
+        emit_const(L, IR_I8, type_is_signed(type) ? 0 : 1), emit_c_text(L, type_to_str(type)),
+    };
+    emit_errors_call(L, "panicOverflow", 6, args);
+    emit_trace_frame(L, site ? site->start.line : L->line);
+    emit_unwind(L);
+    set_block(L, go_on);
+}
+
+// a op b of + - * with a check that the result fits the type
+static int emit_checked_arithmetic(Lowerer *L, int op, Type *type, int a, int b, Ast *site) {
+    IrType ir_type   = ir_type_of(type);
+    bool   is_signed = type_is_signed(type);
+    IrOp   ir_op     = op == '+' ? IR_ADD : op == '-' ? IR_SUB : IR_MUL;
+    Type  *i64_type  = primitive_type(PRIMITIVE_I64);
+
+    if (type->size < 8) {
+        // In 64 bits, where it can't overflow, and then in the range of the type
+        int wide_a = convert_scalar(L, a, type, i64_type);
+        int wide_b = convert_scalar(L, b, type, i64_type);
+        int wide   = emit_binop(L, ir_op, IR_I64, wide_a, wide_b);
+        int64_t low, high;
+        integer_range(type, &low, &high);
+        int above = emit_cmp(L, IR_ICMP, IR_CMP_SGE, IR_I64, wide, emit_const(L, IR_I64, low));
+        int below = emit_cmp(L, IR_ICMP, IR_CMP_SLE, IR_I64, wide, emit_const(L, IR_I64, high));
+        emit_overflow_branch(L, emit_binop(L, IR_AND, IR_I8, above, below), op, type, wide_a, wide_b, false, site);
+        return convert_scalar(L, wide, i64_type, type);
+    }
+
+    int result = emit_binop(L, ir_op, ir_type, a, b);
+    int fits;
+    if (op == '+' || op == '-') {
+        if (is_signed) {
+            // Signs: a + b overflows when both have a sign the result doesn't, a - b when a and b differ and a and the result do
+            int x = emit_binop(L, IR_XOR, IR_I64, a, result);
+            int y = op == '+' ? emit_binop(L, IR_XOR, IR_I64, b, result) : emit_binop(L, IR_XOR, IR_I64, a, b);
+            int both = emit_binop(L, IR_AND, IR_I64, x, y);
+            fits = emit_cmp(L, IR_ICMP, IR_CMP_SGE, IR_I64, both, emit_const(L, IR_I64, 0));
+        } else if (op == '+') {
+            fits = emit_cmp(L, IR_ICMP, IR_CMP_UGE, IR_I64, result, a);
+        } else {
+            fits = emit_cmp(L, IR_ICMP, IR_CMP_UGE, IR_I64, a, b);
+        }
+        emit_overflow_branch(L, fits, op, type, a, b, false, site);
+        return result;
+    }
+
+    // a * b: fits when a is 0, or result / a is b. For a signed -1, when b isn't the smallest value, as that division traps
+    IrBlock *divide = create_block(L, "multiply.check");
+    IrBlock *done   = create_block(L, "multiply.fits");
+    int fits_slot = ir_new_slot(L->func, 1, 1, "multiply fits");
+    emit_store(L, IR_I8, addr_slot(fits_slot, 0), emit_const(L, IR_I8, 1));
+    terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_EQ, IR_I64, a, emit_const(L, IR_I64, 0)), done, divide);
+    set_block(L, divide);
+    if (is_signed) {
+        IrBlock *minus_one = create_block(L, "multiply.minus.one");
+        IrBlock *other     = create_block(L, "multiply.other");
+        terminate_br(L, emit_cmp(L, IR_ICMP, IR_CMP_EQ, IR_I64, a, emit_const(L, IR_I64, -1)), minus_one, other);
+        set_block(L, minus_one);
+        emit_store(L, IR_I8, addr_slot(fits_slot, 0), emit_cmp(L, IR_ICMP, IR_CMP_NE, IR_I64, b, emit_const(L, IR_I64, INT64_MIN)));
+        terminate_jmp(L, done);
+        set_block(L, other);
+        int back = emit_binop(L, IR_SDIV, IR_I64, result, a);
+        emit_store(L, IR_I8, addr_slot(fits_slot, 0), emit_cmp(L, IR_ICMP, IR_CMP_EQ, IR_I64, back, b));
+        terminate_jmp(L, done);
+    } else {
+        int back = emit_binop(L, IR_UDIV, IR_I64, result, a);
+        emit_store(L, IR_I8, addr_slot(fits_slot, 0), emit_cmp(L, IR_ICMP, IR_CMP_EQ, IR_I64, back, b));
+        terminate_jmp(L, done);
+    }
+    set_block(L, done);
+    fits = emit_load(L, IR_I8, addr_slot(fits_slot, 0));
+    emit_overflow_branch(L, fits, op, type, a, b, false, site);
+    return result;
+}
+
 static int emit_arithmetic(Lowerer *L, int op, Type *type, int a, int b, Ast *site) {
     IrType ir_type = ir_type_of(type);
     if (ir_type_is_float(ir_type)) {
@@ -1688,6 +1789,12 @@ static int emit_arithmetic(Lowerer *L, int op, Type *type, int a, int b, Ast *si
 
     bool is_signed = type_is_signed(type);
 
+    // + - * of integers throw a Panic when the result doesn't fit the type
+    // A constant without a type, e.g -9223372036854775807 - 1, is checked when its value is fitted to a type
+    if ((op == '+' || op == '-' || op == '*') && type->kind == TYPE_INTEGER && !type_is_untyped_int(type) && overflow_checks_on(L)) {
+        return emit_checked_arithmetic(L, op, type, a, b, site);
+    }
+
     // A division by zero throws a Panic
     if (op == '/' || op == '%') {
         IrBlock *zero  = create_block(L, "division.by.zero");
@@ -1698,6 +1805,22 @@ static int emit_arithmetic(Lowerer *L, int op, Type *type, int a, int b, Ast *si
         emit_trace_frame(L, site ? site->start.line : L->line);
         emit_unwind(L);
         set_block(L, go_on);
+
+        // The smallest value divided by -1 doesn't fit, and the processor traps on it, for % too. x % -1 is 0, which x % 1 gives
+        if (is_signed && type->kind == TYPE_INTEGER) {
+            int64_t low = INT64_MIN, high;
+            if (type->size < 8) integer_range(type, &low, &high);
+            int minus_one = emit_cmp(L, IR_ICMP, IR_CMP_EQ, ir_type, b, emit_const(L, ir_type, -1));
+            if (op == '%') {
+                b = emit_binop(L, IR_ADD, ir_type, b, emit_binop(L, IR_MUL, ir_type, convert_scalar(L, minus_one, primitive_type(PRIMITIVE_BOOL), type), emit_const(L, ir_type, 2)));
+            } else {
+                int smallest = emit_cmp(L, IR_ICMP, IR_CMP_EQ, ir_type, a, emit_const(L, ir_type, low));
+                int traps    = emit_binop(L, IR_AND, IR_I8, minus_one, smallest);
+                int fits     = emit_cmp(L, IR_ICMP, IR_CMP_EQ, IR_I8, traps, emit_const(L, IR_I8, 0));
+                Type *i64_type = primitive_type(PRIMITIVE_I64);
+                emit_overflow_branch(L, fits, op, type, convert_scalar(L, a, type, i64_type), convert_scalar(L, b, type, i64_type), false, site);
+            }
+        }
     }
 
     switch (op) {
@@ -1969,6 +2092,14 @@ static Value lower_unary(Lowerer *L, AstUnary *unary) {
     case OP_UNARY_MINUS: {
         int value = lower_scalar_as(L, unary->expr, type);
         IrType ir_type = ir_type_of(type);
+        // -x of the smallest signed value doesn't fit. A number written in the program, e.g -2147483648, is the number
+        bool literal = unary->expr->head.kind == AST_LITERAL && ((AstLiteral *) unary->expr)->kind == LITERAL_INTEGER;
+        if (type->kind == TYPE_INTEGER && type_is_signed(type) && !literal && !type_is_untyped_int(type) && overflow_checks_on(L)) {
+            int64_t low = INT64_MIN, high;
+            if (type->size < 8) integer_range(type, &low, &high);
+            int fits = emit_cmp(L, IR_ICMP, IR_CMP_NE, ir_type, value, emit_const(L, ir_type, low));
+            emit_overflow_branch(L, fits, '-', type, convert_scalar(L, value, type, primitive_type(PRIMITIVE_I64)), IR_NO_VREG, true, (Ast *) unary);
+        }
         return value_scalar(emit_unop(L, ir_type_is_float(ir_type) ? IR_FNEG : IR_NEG, ir_type, value), type);
     }
     case OP_NOT: {

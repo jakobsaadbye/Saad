@@ -1,0 +1,26 @@
+// The warnings of variables whose value is never used. tools/linux/runtests.sh checks that each line with 'warn:' gets
+// its warning, and that no other line does
+
+import errors;
+
+fails :: () -> (int, error) { return 1, null; }
+
+Point :: struct { x: int; }
+
+main :: () {
+    unused := 3;                       // warn: 'unused' is declared but its value is never used
+    given := 1;                        // warn: 'given' is declared but its value is never used
+    given = 2;                         // Giving a value isn't using it
+    value, err := fails();             // warn: The error 'err' is never looked at
+    assert(value == 1);
+
+    // Used, so no warning
+    counter := 0;
+    counter += 1;                      // Reads it
+    p: *Point = new(Point);
+    p.x = 5;                           // Writes through it, so it is used
+    _, checked := fails();             // _ takes a value that isn't used
+    if checked != null { }
+    f := (n: int) -> int { return n; };   // A parameter isn't warned about
+    assert(f(counter) == 1);
+}

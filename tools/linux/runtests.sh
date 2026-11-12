@@ -122,6 +122,29 @@ if command -v python3 > /dev/null; then
         failed=$((failed + 1))
     fi
 
+    # The warnings of tests/warnings/*.sd: each line with 'warn: <text>' gets a warning with the text, and no other line does
+    printf "%-56s " "warnings (tests/warnings)"
+    warnings_failed=""
+    for f in tests/warnings/*.sd; do
+        output=$(./bin/saad check "$f" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+        got=$(echo "$output" | grep -oE '^[^ ]+:[0-9]+:[0-9]+ warning: .*' | sed -E 's/^[^:]+:([0-9]+):[0-9]+ warning: (.*)$/\1|\2/' | sort)
+        while IFS= read -r line; do
+            n=${line%%:*}; text=${line#*warn: }
+            echo "$got" | grep -q "^$n|$text" || warnings_failed="$warnings_failed $f:$n"
+        done < <(grep -n "// warn: " "$f" | sed -E 's/^([0-9]+):.*\/\/ warn: (.*)$/\1:warn: \2/')
+        expected=$(grep -c "// warn: " "$f")
+        count=$(echo "$got" | grep -c '|' )
+        [ "$count" = "$expected" ] || warnings_failed="$warnings_failed $f(got $count warnings, wanted $expected)"
+    done
+    if [ -z "$warnings_failed" ]; then
+        echo "${GREEN}OK${RESET}"
+        passed=$((passed + 1))
+    else
+        echo "${RED}FAILED${RESET}"
+        echo "    $warnings_failed"
+        failed=$((failed + 1))
+    fi
+
     # After a mistake, the compiler reports it and goes on, so the index has the rest of the program
     printf "%-56s " "error recovery (check_recovery.py)"
     if output=$(python3 "$HERE/check_recovery.py" 2>&1); then

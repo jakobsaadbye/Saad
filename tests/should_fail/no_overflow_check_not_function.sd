@@ -1,0 +1,7 @@
+// expect-error: @noOverflowCheck is for functions and methods
+
+@noOverflowCheck
+total := 0;
+
+main :: () {
+}

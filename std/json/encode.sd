@@ -123,6 +123,7 @@ writeString :: method (w: *Writer, s: string) {
 // is below n when (b - n) borrows into its top bit while b's own top bit is clear, and it is c when x ^ c has a zero
 // byte there. These are exact for whether any byte of the word matches, so a word that has none is skipped whole
 @private
+@noOverflowCheck   // The subtractions of the bytes of a word borrow on purpose
 plainUntil :: (s: string, at: int) -> int {
     i := at;
     while i + 8 <= s.len {
