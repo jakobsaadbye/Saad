@@ -1,0 +1,10 @@
+// expect-error: Type mismatch. Trying to assign
+// expect-error: Write 'p as *Post' to say what the memory holds
+
+Post :: struct { title: string; }
+Holder :: struct { post: *Post; }
+
+main :: () {
+    memory: *void = null;
+    h := Holder{post: memory};
+}

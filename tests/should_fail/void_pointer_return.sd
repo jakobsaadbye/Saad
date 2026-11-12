@@ -1,0 +1,12 @@
+// expect-error: Return type mismatch
+// expect-error: Write 'p as *Post' to say what the memory holds
+
+Post :: struct { title: string; }
+
+first :: (memory: *void) -> *Post {
+    return memory;
+}
+
+main :: () {
+    p := first(null);
+}

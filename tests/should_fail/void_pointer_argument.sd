@@ -1,0 +1,11 @@
+// expect-error: Type mismatch. Wanted type *Post, got type *void
+// expect-error: Write 'p as *Post' to say what the memory holds
+
+Post :: struct { title: string; }
+
+show :: (post: *Post) {}
+
+main :: () {
+    memory: *void = null;
+    show(memory);   // show(memory as *Post) says what the memory holds
+}

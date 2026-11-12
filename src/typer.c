@@ -74,6 +74,8 @@ static void hint_error_embed(Typer *typer, Type *wanted, Type *given);
 static AstExpr *tree_string(Typer *typer, char *text, Ast *at);
 static Type *error_type(Typer *typer);
 static bool is_null_type(Type *type);
+static bool is_void_pointer_to_typed(Type *wanted, Type *given);
+bool value_fits(Type *wanted, Type *given);
 Type *check_typeof(Typer *typer, AstTypeof *ast_typeof);
 Type *check_enum_defn(Typer *typer, AstEnum *ast_enum);
 Type *check_enum_values(Typer *typer, AstEnum *ast_enum);
@@ -3283,7 +3285,7 @@ bool check_declaration(Typer *typer, AstDeclaration *decl) {
             bool untyped_fits = is_untyped_type(value->type) && value->type->kind == TYPE_INTEGER && (decl->type->kind == TYPE_INTEGER || decl->type->kind == TYPE_FLOAT);
             if (untyped_fits && !leads_to_integer_overflow(typer, decl->type, value)) return false;
 
-            if (!untyped_fits && !types_are_equal(decl->type, value->type)) {
+            if (!untyped_fits && !value_fits(decl->type, value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(value), "Type mismatch. '%s' is said to be of type %s, but expression is of type %s. ", ident->name, type_to_str(decl->type), type_to_str(value->type));
                 explain_interface_mismatch(typer, decl->type, value->type, value);
                 hint_optional_unwrap(typer, decl->type, value->type);
@@ -3630,6 +3632,10 @@ static bool is_null_type(Type *type) {
 
 // A hint for a number given where a smaller one, or one of the other sign, is wanted, e.g an i64 where an int is wanted
 static void hint_narrowing(Typer *typer, Type *wanted, Type *given) {
+    if (is_void_pointer_to_typed(wanted, given)) {
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "A *void can point to anything, so it isn't converted by itself. Write 'p as %s' to say what the memory holds", type_to_str(wanted));
+        return;
+    }
     if (!wanted || !given || wanted->newtype || given->newtype) return;
     bool numbers = (wanted->kind == TYPE_INTEGER || wanted->kind == TYPE_FLOAT) && (given->kind == TYPE_INTEGER || given->kind == TYPE_FLOAT);
     if (!numbers || is_untyped_type(given)) return;
@@ -3649,7 +3655,24 @@ static void hint_optional_unwrap(Typer *typer, Type *wanted, Type *given) {
 // The type given fits the type wanted, or the other way around, for an argument or a return value. Not for numbers,
 // which only widen, e.g an i32 where an i64 is wanted: an i64 where an i32 is wanted needs 'as', as it may not fit.
 // And a ?T never goes where a T is wanted, as it may be empty
+// A *void where a pointer to a type is wanted, e.g 'post: *Post = memory;'. It takes 'as', which says what the memory
+// holds: 'memory as *Post'. A *T where a *void is wanted, and null, are fine
+static bool is_void_pointer_to_typed(Type *wanted, Type *given) {
+    if (!wanted || !given || wanted->kind != TYPE_POINTER || given->kind != TYPE_POINTER) return false;
+    if (given == (Type *)type_defn_null_ptr) return false;   // null itself, whose type is a *void too
+    Type *to   = ((TypePointer *)wanted)->pointer_to;
+    Type *from = ((TypePointer *)given)->pointer_to;
+    return from->kind == TYPE_VOID && to->kind != TYPE_VOID;
+}
+
+// The value given can go where the wanted type is, e.g into a variable, a member or a parameter
+bool value_fits(Type *wanted, Type *given) {
+    if (is_void_pointer_to_typed(wanted, given)) return false;
+    return types_are_equal(wanted, given);
+}
+
 bool types_fit_either_way(Type *wanted, Type *given) {
+    if (is_void_pointer_to_typed(wanted, given)) return false;
     if (types_are_equal(wanted, given)) return true;
     if (is_primitive_type(wanted->kind) && is_primitive_type(given->kind) && !wanted->newtype && !given->newtype) return false;
     if (is_optional_type(given) && !is_optional_type(wanted)) return false;
@@ -3895,7 +3918,7 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     // An untyped number, e.g a constant, becomes the number type of the place. It is checked to fit below
     bool untyped_fits = is_untyped_type(expr_type) && expr_type->kind == TYPE_INTEGER && (lhs_type->kind == TYPE_INTEGER || lhs_type->kind == TYPE_FLOAT);
 
-    if (!untyped_fits && !types_are_equal(lhs_type, expr_type)) {
+    if (!untyped_fits && !value_fits(lhs_type, expr_type)) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign->expr), "Assignment type mismatch. Wanted type %s. Got type %s", type_to_str(lhs_type), type_to_str(expr_type));
         explain_interface_mismatch(typer, lhs_type, expr_type, assign->expr);
         hint_optional_unwrap(typer, lhs_type, expr_type);
@@ -9110,8 +9133,9 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
             }
 
             if (!untyped_number_fits(typer, member_type, init->value)) return NULL;
-            if (!types_are_equal(member_type, init->value->type)) {
+            if (!value_fits(member_type, init->value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign member '%s' of type '%s' to value of type '%s'", member->name, type_to_str(member_type), type_to_str(init->value->type));
+                hint_narrowing(typer, member_type, init->value->type);
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(struct_defn->node), "Here is the definition of '%s'", struct_defn->identifier->name);
                 return NULL;
             }
@@ -9140,8 +9164,9 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *literal, Type *ctx_ty
             }
 
             if (!untyped_number_fits(typer, member_type, init->value)) return NULL;
-            if (!types_are_equal(member_type, init->value->type)) {
+            if (!value_fits(member_type, init->value->type)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(init->value), "Type mismatch. Trying to assign to member '%s' of type '%s' to value of type '%s'", member->name, type_to_str(member_type), type_to_str(init->value->type));
+                hint_narrowing(typer, member_type, init->value->type);
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(member), "Here is the member '%s' in %s", member->name, struct_defn->identifier->name);
                 return NULL;
             }
