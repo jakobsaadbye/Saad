@@ -1,0 +1,9 @@
+// expect-error: Type mismatch. Wanted type u64, got type i32
+// expect-error: doesn't always fit in u64
+
+takes :: (n: u64) {}
+
+main :: () {
+    n: i32 = -1;
+    takes(n);   // Would be 18446744073709551615
+}

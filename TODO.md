@@ -75,7 +75,7 @@ Future development
   [x] map / filter / reduce / find / some / every on slices, arrays and lists
   [] Hashing pointers and enums without writing a hash method
   [] Map.remove in O(1) while keeping the order (tombstones)
-  [] Decide on implicit narrowing of arguments and return values (i64 to i32 is allowed today)
+  [x] No implicit narrowing: a number converts by itself only when every value fits (docs/numbers.md)
 
 * Errors (see docs/errors.md)
   [x] try / catch, e.g for the errors that the functions of dbms give as their last value

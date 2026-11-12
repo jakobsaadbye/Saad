@@ -1,0 +1,8 @@
+// expect-error: Assignment type mismatch. Wanted type i64. Got type u64
+// expect-error: doesn't always fit in i64
+
+main :: () {
+    big: u64 = 18446744073709551615;
+    n: i64 = 0;
+    n = big;   // Would be -1
+}

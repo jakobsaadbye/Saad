@@ -3628,17 +3628,30 @@ static bool is_null_type(Type *type) {
     return type->kind == TYPE_POINTER && ((TypePointer *)type)->pointer_to->kind == TYPE_VOID;
 }
 
+// A hint for a number given where a smaller one, or one of the other sign, is wanted, e.g an i64 where an int is wanted
+static void hint_narrowing(Typer *typer, Type *wanted, Type *given) {
+    if (!wanted || !given || wanted->newtype || given->newtype) return;
+    bool numbers = (wanted->kind == TYPE_INTEGER || wanted->kind == TYPE_FLOAT) && (given->kind == TYPE_INTEGER || given->kind == TYPE_FLOAT);
+    if (!numbers || is_untyped_type(given)) return;
+    const char *wanted_name = type_to_str(wanted);
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "A value of type %s doesn't always fit in %s, so it isn't converted by itself. Write 'x as %s' when it fits, or use %s",
+        type_to_str(given), wanted_name, wanted_name, type_to_str(given));
+}
+
 // A hint for a ?T given where a T is wanted
 static void hint_optional_unwrap(Typer *typer, Type *wanted, Type *given) {
+    hint_narrowing(typer, wanted, given);
     if (wanted && given && is_optional_type(given) && !is_optional_type(wanted)) {
         report_error_ast(typer->parser, LABEL_HINT, NULL, "It may be empty. Use its value with x ?? fallback, x.valueOr(fallback), or x.value() after checking x.hasValue()");
     }
 }
 
-// The type given fits the type wanted, or the other way around, as arguments and returns may narrow e.g i64 to i32.
-// But a ?T never goes where a T is wanted, as it may be empty
+// The type given fits the type wanted, or the other way around, for an argument or a return value. Not for numbers,
+// which only widen, e.g an i32 where an i64 is wanted: an i64 where an i32 is wanted needs 'as', as it may not fit.
+// And a ?T never goes where a T is wanted, as it may be empty
 bool types_fit_either_way(Type *wanted, Type *given) {
     if (types_are_equal(wanted, given)) return true;
+    if (is_primitive_type(wanted->kind) && is_primitive_type(given->kind) && !wanted->newtype && !given->newtype) return false;
     if (is_optional_type(given) && !is_optional_type(wanted)) return false;
     // Nor a *Inner where a *Outer is wanted, as not every Inner is in an Outer
     if (wanted->kind == TYPE_POINTER && given->kind == TYPE_POINTER) {
@@ -4614,6 +4627,7 @@ bool check_return(Typer *typer, AstReturn *ast_return) {
             }
 
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(failing_return_value), "Return type mismatch. Wanted type %s, got type %s", text_bold(type_to_str((Type *)func_return_types)), text_bold(type_to_str((Type *)returning_tuple)));
+            hint_narrowing(typer, wanted, given);
             if (wanted->kind != TYPE_VOID) {
                 report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_return_types), "Here is the return types of function '%s'", ef->identifier->name);
             }
@@ -9541,8 +9555,18 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
 }
 
 bool can_cast_implicitly(Type *from, Type *to) {
-    // Can we cast without truncation?
-    if (from->kind == TYPE_INTEGER && to->kind == TYPE_INTEGER) return from->size <= to->size;
+    // Only when every value fits: a signed integer into a signed one at least as big, an unsigned one into an unsigned one
+    // at least as big, or into a signed one that is bigger. Anything else, e.g i64 to i32, u64 to i64 or i32 to u64, is
+    // written with 'as'. An untyped number fits when its value does, which is checked where it is used
+    if (from->kind == TYPE_INTEGER && to->kind == TYPE_INTEGER) {
+        PrimitiveKind from_kind = ((TypePrimitive *)from)->kind;
+        if (from_kind == PRIMITIVE_UNTYPED_INT) return true;
+        bool from_signed = is_signed_integer(from);
+        bool to_signed   = is_signed_integer(to);
+        if (from_signed == to_signed) return from->size <= to->size;
+        if (!from_signed && to_signed) return from->size < to->size;
+        return false;
+    }
     if (from->kind == TYPE_FLOAT   && to->kind == TYPE_FLOAT)   return from->size <= to->size;
 
     // Allow untyped integers to cast to floats

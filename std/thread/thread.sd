@@ -272,10 +272,10 @@ broadcast :: method (condition: *Condition) {
 WaitGroup :: struct {
     mutex: Mutex;
     zero:  Condition;   // Woken when the count is 0
-    count: int;
+    count: i64;
 }
 
-add :: method (group: *WaitGroup, count := 1) {
+add :: method (group: *WaitGroup, count: i64 = 1) {
     group.mutex.lock();
     group.count += count;
     if group.count <= 0 { group.zero.broadcast(); }

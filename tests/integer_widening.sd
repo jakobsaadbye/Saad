@@ -1,0 +1,31 @@
+// A number converts by itself only when every value of its type fits: to a bigger type of the same sign, or from unsigned to
+// a bigger signed type. Anything else is written with 'as'. See tests/should_fail/narrowing_*.sd
+
+use fmt;
+
+wide   :: (n: i64) -> i64 { return n; }
+wideU  :: (n: u64) -> u64 { return n; }
+small  :: (n: i32) -> i64 { return n; }      // A return widens too
+toWide :: (n: u32) -> i64 { return n; }      // u32 fits in i64
+
+main :: () {
+    a: i8 = -5;
+    b: u8 = 250;
+    c: i32 = -70000;
+    d: u32 = 4000000000;
+    assert(wide(a) == -5 && wide(b) == 250 && wide(c) == -70000 && wide(d) == 4000000000);
+    assert(wideU(b) == 250 && wideU(d) == 4000000000);
+    assert(small(c) == -70000 && toWide(d) == 4000000000);
+
+    // Narrowing is written, and it is what it says
+    big: i64 = 5000000000;
+    assert(big as i32 == 705032704);
+    n := "abc".len as int;
+    assert(n == 3);
+
+    // Untyped numbers fit where their value does
+    e: u8 = 200;
+    f: i16 = -300;
+    assert(e == 200 && f == -300);
+    print("integer widening ok");
+}

@@ -85,7 +85,7 @@ Result :: struct {
     columnCount: int;
     rows:    int;
     names:   [..]u8;          // The names of the columns, each with a 0 after it
-    nameAt:  [..]int;
+    nameAt:  [..]i64;
     bytes:   [..]u8;          // The texts of the values, each with a 0 after it
     cells:   [..]Cell;        // Each value, row by row
     changes: i64;

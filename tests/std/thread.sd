@@ -86,7 +86,7 @@ main :: () {
     threads: [..]thread.Thread;
     shared.group.add(jobs.count);
     for i in 0..jobs.count {
-        jobs[i] = Job{id: i, shared: &shared};
+        jobs[i] = Job{id: i as int, shared: &shared};
         t := thread.spawn(work, &jobs[i]);
         threads.add(t);
     }

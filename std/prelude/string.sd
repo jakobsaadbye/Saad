@@ -9,7 +9,7 @@ toCString :: method (s: string) -> c.string {
     return c.string{cstr};
 }
 
-slice :: method (s: string, from: int, to := -1) -> string {
+slice :: method (s: string, from: i64, to: i64 = -1) -> string {
     result: string;
 
     if to == -1 {
