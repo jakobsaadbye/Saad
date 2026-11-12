@@ -101,4 +101,28 @@ for f in attributedFunctions() {     // []AttributedFunction: name, namespaceNam
   is a constant, and `f.invoke(arguments, results)` calls it with the arguments in a block of
   `f.argumentsSize` bytes, laid out like a struct of its parameters, and stores its results in a block of
   `f.resultsSize` bytes. It throws what the function throws. The compiler makes an `invoke` for each function on the
-  list. `web` calls its endpoints like this.
+  list.
+* `reflect.Call` (`std/reflect.sd`) does that with values of any type, which are checked against the parameters, so a
+  program doesn't write to offsets in the blocks. `web` calls its endpoints like this:
+
+```odin
+import reflect;
+
+call := f.newCall();               // the blocks, from the allocator of the thread, or f.newCall(&arena)
+call.set("name", "ada");           // by the name of the parameter
+call.setAt(1, 7);                  // or its index. A number is converted when it fits, e.g 7 to an i32
+call.invoke();                     // throws what the function throws
+text := call.result(0);            // an any that points into the block of the results
+err := call.error();               // the error the function gave as a result, or null
+```
+
+  * `set` and `setAt` take a value of the type of the parameter, a number that fits a number parameter (also an int
+    for a float), or a `T` for a `?T`. Anything else throws a `reflect.WrongArgument`, e.g
+    `The parameter count of describe is a i32, which can't be given a string`. A parameter that isn't set is zero.
+  * `setFrom(index, data)` copies the value at `data` without a check, for a value whose type the program knows only as
+    the type of the parameter, e.g the session of `web`. `argument(index)` is an `any` of the place of an argument, to
+    read a value into, e.g `json.assignAt(value, call.argument(i).data, ...)`.
+  * What it costs (`tools/bench/call_bench.sd`, `--llvm`, on Linux): a call with three arguments set by index takes about
+    20 ns more than writing the blocks by hand, by name about 30 ns, and a new `Call` from an arena about 50 ns more. A
+    value of the type of the parameter is copied, and its type compared by pointer: nothing is boxed or allocated.
+    For a request of a web server, which takes microseconds, that is too small to measure.

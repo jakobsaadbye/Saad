@@ -1,0 +1,103 @@
+// reflect.Call: a function of attributedFunctions() called with values of any type, which are checked against its parameters
+
+import reflect;
+import fmt;
+
+@attribute
+Callable :: struct {}
+
+Point :: struct { x: int; y: int; }
+
+@Callable
+describe :: (name: string, count: i32, point: Point, scale: f64, label: ?string) -> string, int {
+    tag := label ?? "none";
+    return fmt.sprint("% % % % %", name, count, point.y, scale, tag), point.x + point.y;
+}
+
+@Callable
+fails :: (n: int) -> int {
+    if n < 0 { throw errors.make("negative"); }
+    return n * 2;
+}
+
+@Callable
+check :: (n: int) -> (int, error) {
+    if n == 0 { return 0, errors.make("zero"); }
+    return n, null;
+}
+
+find :: (name: string) -> *AttributedFunction {
+    functions := attributedFunctions();
+    for i in 0..functions.count {
+        if functions[i].name == name { return &functions[i]; }
+    }
+    return null;
+}
+
+main :: () {
+    {
+        f := find("describe");
+        call := f.newCall();
+        assert(call.indexOf("point") == 2 && call.indexOf("nope") == -1);
+        call.set("name", "ada");
+        call.setAt(1, 7);                 // an int literal, converted to the i32
+        call.set("point", Point{1, 2});
+        call.set("scale", 2);             // an int, converted to the f64
+        call.set("label", "x");           // a string, given to the ?string
+        call.invoke();
+        text := call.result(0);
+        assert(text.type.name == "string" && *(text.data as *string) == "ada 7 2 2.000000 x");
+        assert(*(call.result(1).data as *int) == 3);
+        assert(call.error() == null);
+
+        // A parameter that isn't set is its zero value, e.g an empty optional
+        other := f.newCall();
+        other.set("name", "bo");
+        other.invoke();
+        assert(*(other.result(0).data as *string) == "bo 0 0 0.000000 none");
+    }
+    {
+        // Wrong arguments throw a WrongArgument
+        f := find("describe");
+        call := f.newCall();
+        wrong := 0;
+        try { call.set("count", "seven"); } catch (e) { if e.is(reflect.WrongArgument) { wrong += 1; } }
+        try { call.set("nope", 1); }        catch (e) { if e.is(reflect.WrongArgument) { wrong += 1; } }
+        try { call.setAt(9, 1); }           catch (e) { if e.is(reflect.WrongArgument) { wrong += 1; } }
+        big: i64 = 5000000000;
+        try { call.set("count", big); }     catch (e) { if e.is(reflect.WrongArgument) { wrong += 1; } }
+        assert(wrong == 4);
+    }
+    {
+        // What the function throws, and an error it gives as a result
+        f := find("fails");
+        call := f.newCall();
+        call.setAt(0, 21);
+        call.invoke();
+        assert(*(call.result(0).data as *int) == 42);
+        call.setAt(0, -1);
+        caught := false;
+        try { call.invoke(); } catch (e) { caught = e.message == "negative"; }
+        assert(caught);
+
+        g := find("check");
+        given := g.newCall();
+        given.setAt(0, 0);
+        given.invoke();
+        assert(given.error() != null && given.error().message == "zero");
+        given.setAt(0, 5);
+        given.invoke();
+        assert(given.error() == null && *(given.result(0).data as *int) == 5);
+    }
+    {
+        // setFrom and argument(): the blocks, for a value whose type the program knows
+        f := find("fails");
+        call := f.newCall();
+        n := 4;
+        call.setFrom(0, &n);
+        assert(*(call.argument(0).data as *int) == 4 && call.argument(0).type.name == "int");
+        call.invoke();
+        assert(*(call.result(0).data as *int) == 8);
+    }
+    fmt.print("reflect.Call ok");
+}

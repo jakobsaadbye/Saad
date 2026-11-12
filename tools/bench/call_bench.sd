@@ -1,0 +1,88 @@
+// What reflect.Call costs next to f.invoke() with the blocks written by hand, for a function like a web endpoint: a
+// session pointer, an int and a string. Run it with
+//
+//     saad run tools/bench/call_bench.sd --llvm
+//
+// 1. invoke() with the arguments stored at their offsets, as std/web did before reflect.Call
+// 2. reflect.Call, with the arguments set by index
+// 3. reflect.Call, with the arguments set by name
+// 4. 2, and a new Call for each call, from an arena that is cleared, as a web request does
+
+import reflect;
+import allocators;
+import time;
+import fmt;
+
+@attribute
+Bench :: struct {}
+
+Session :: struct { calls: int; }
+Point :: struct { x: int; y: int; }
+
+@Bench
+endpoint :: (session: *Session, id: int, name: string) -> (Point, error) {
+    session.calls += 1;
+    return Point{id, name.len as int}, null;
+}
+
+Calls :: 10000000;
+
+main :: () {
+    f := &attributedFunctions()[0];
+    session: Session;
+    sessionPointer := &session;
+    name := "ada";
+
+    {
+        arguments := mem.allocate(f.argumentsSize as i64 + 8) as *u8;
+        results   := mem.allocate(f.resultsSize as i64 + 8) as *u8;
+        watch := time.startStopwatch();
+        for i in 0..Calls {
+            *((&arguments[f.parameters[0].offset]) as **Session) = sessionPointer;
+            *((&arguments[f.parameters[1].offset]) as *int) = i as int;
+            *((&arguments[f.parameters[2].offset]) as *string) = name;
+            f.invoke(arguments, results);
+        }
+        report("invoke with the blocks by hand", watch.seconds());
+    }
+    {
+        call := f.newCall();
+        watch := time.startStopwatch();
+        for i in 0..Calls {
+            call.setFrom(0, &sessionPointer);
+            call.setAt(1, i as int);
+            call.setAt(2, name);
+            call.invoke();
+        }
+        report("reflect.Call, set by index", watch.seconds());
+    }
+    {
+        call := f.newCall();
+        watch := time.startStopwatch();
+        for i in 0..Calls {
+            call.setFrom(0, &sessionPointer);
+            call.set("id", i as int);
+            call.set("name", name);
+            call.invoke();
+        }
+        report("reflect.Call, set by name", watch.seconds());
+    }
+    {
+        arena: allocators.Arena;
+        watch := time.startStopwatch();
+        for i in 0..Calls {
+            call := f.newCall(&arena);
+            call.setFrom(0, &sessionPointer);
+            call.setAt(1, i as int);
+            call.setAt(2, name);
+            call.invoke();
+            arena.clear();
+        }
+        report("reflect.Call, a new one from an arena each time", watch.seconds());
+    }
+    assert(session.calls == Calls * 4);
+}
+
+report :: (what: string, seconds: f64) {
+    fmt.print("%: % ns a call", what, seconds * 1000000000.0 / Calls as f64);
+}
