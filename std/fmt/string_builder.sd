@@ -354,6 +354,7 @@ addInteger :: method (sb: *StringBuilder, value: any) {
     }
 }
 
+@private
 addArray :: method (sb: *StringBuilder, data: *void, type: *TypeArray) {
     // A fixed array is stored in the value, a slice points to its elements
     elements := data as *u8;
@@ -438,6 +439,7 @@ addTypeName :: method (sb: *StringBuilder, type: *Type) {
 
 // Like a literal of the union: Shape{circle: Circle{radius: 2.000000}}, or Shape.empty for a variant without a value.
 // The variant without a value of a generic union is .none, as Option<int>.none can't be written
+@private
 addUnion :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
     variant := type.variantOf(data);
     if variant == null || variant.type.kind == .void {
@@ -461,6 +463,7 @@ addUnion :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
 }
 
 // Like a literal of the struct: Point{x: 1, y: 2}
+@private
 addStruct :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
     sb.addTypeName(&type.head);
     sb.addChar('{');
