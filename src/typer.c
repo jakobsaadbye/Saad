@@ -1134,7 +1134,12 @@ Type *check_generic_function_defn(Typer *typer, AstFunctionDefn *generic) {
         AstIdentifier *param = ((AstIdentifier **)generic->type_params.items)[i];
 
         AstIdentifier *existing = lookup_from_scope(parser, generic->body->parent, param->name);
-        if (existing && (existing->flags & (IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_NAME_OF_ENUM))) {
+        // Only a type of its own file or namespace: a type of the program named like a type parameter of the standard
+        // library, e.g a struct V and the V of Map<K, V>, is another name in another place
+        AstFile *own = generic->head.head.file;
+        AstFile *of_existing = existing ? existing->head.file : NULL;
+        bool nearby = of_existing == own || (own && of_existing && own->ns && own->ns == of_existing->ns);
+        if (existing && nearby && (existing->flags & (IDENTIFIER_IS_NAME_OF_STRUCT | IDENTIFIER_IS_NAME_OF_ENUM))) {
             report_error_ast(parser, LABEL_ERROR, (Ast *)param, "Type parameter '%s' shadows the type '%s'", param->name, existing->name);
             report_error_ast(parser, LABEL_NOTE, (Ast *)existing, "Here is the declaration of '%s'", existing->name);
             return NULL;
@@ -9639,6 +9644,10 @@ static Type *check_operator_call(Typer *typer, AstExpr *expr, int token, AstExpr
         return NULL;
     }
 
+    // For an editor: the operator goes to its declaration, e.g the + between a and b
+    if (count == 2) index_operator_use(expr->head.file, operands[0]->head.end, operands[1]->head.start, token == TOKEN_NOT_EQUAL ? "!=" : declarable_operator_name(token), op->identifier);
+    else            index_operator_use(expr->head.file, expr->head.start, operands[0]->head.start, "-", op->identifier);
+
     AstExpr *call = make_operator_call(typer, (Ast *)expr, op, operands, count, token == TOKEN_NOT_EQUAL);
     Type *type = check_expression(typer, call, NULL);
     if (!type) return NULL;
@@ -9682,6 +9691,10 @@ static bool check_operator_assignment(Typer *typer, AstAssignment *assign, Type 
     current->head.head.flags  = AST_FLAG_COMPILER_GENERATED | AST_FLAG_IS_TYPE_CHECKED;
     current->head.type        = lhs_type;
     current->head.replacement = NULL;
+
+    char spelled[4];
+    snprintf(spelled, sizeof(spelled), "%s=", declarable_operator_name(token));
+    index_operator_use(assign->head.file, assign->lhs->head.end, assign->expr->head.start, spelled, op->identifier);
 
     AstExpr *operands[2] = {(AstExpr *)current, assign->expr};
     AstExpr *call = make_operator_call(typer, (Ast *)assign, op, operands, 2, false);

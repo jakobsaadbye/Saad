@@ -238,5 +238,13 @@ the end of the file, so a block that is being written still has a scope.
 
 The server colors the names of a file by what they are, from the index: every declaration and reference of the file is
 a token, of the type of its symbol (`namespace`, `type`, `struct`, `enum`, `enumMember`, `function`, `method`,
-`property`, `variable`, `parameter` and `typeParameter`). A declaration has the modifier `declaration`, and a constant
+`property`, `variable`, `parameter`, `typeParameter` and `operator`). A declaration has the modifier `declaration`, and a constant
 or an enum value `readonly`. Keywords, strings, numbers and comments are left to the grammar of the editor.
+
+An operator of the program (see `docs/operators.md`), e.g the `+` of `a + b` of two `Vec2`, is a token `operator` with
+the modifier `overloaded`, and goes to its declaration, like C# does: go to definition on the `+` opens
+`operator + :: (a: Vec2, b: Vec2) -> Vec2`, find references lists its uses, and hover shows its signature. The `+` of
+numbers is the language's, and has no token. The VS Code extension maps `operator.overloaded` to the scope
+`entity.name.function.operator.saad` (`semanticTokenScopes` in `package.json`), so a theme colors it like a function, apart
+from the operators of the language. `index_operator_use()` in `index.c` records the use, at the operator between the
+operands, when `check_operator_call()` picks the operator.

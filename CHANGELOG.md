@@ -2,6 +2,15 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.22.1 - 14. Nov 2026
+
+* Language server: an operator of the program, e.g the `+` of `a + b` of two `Vec2`, is colored apart from the operators of
+  the language (a semantic token `operator` with the modifier `overloaded`, which VS Code colors like a function), and go
+  to definition on it opens its declaration, like C#. Find references and hover work on it too, and the outline lists it
+* A type of the program named like a type parameter of the standard library, e.g a struct `V` and the `V` of
+  `Map<K, V>`, was an error inside the prelude ("Type parameter 'V' shadows the type 'V'"). Only a type of the generic's
+  own file or namespace is shadowed
+
 ## Update v0.22.0 - 14. Nov 2026
 
 * Operators of your own: `operator + :: (a: Vec2, b: Vec2) -> Vec2 { ... }` declares `+` for two `Vec2`, and `a + b` calls

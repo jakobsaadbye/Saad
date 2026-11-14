@@ -651,6 +651,7 @@ symbolKind :: (kind: string) -> int {
         case "field"         => 8;
         case "enum"          => 10;
         case "function"      => 12;
+        case "operator"      => 25;
         case "constant"      => 14;
         case "enumMember"
         case "variant"       => 22;
@@ -946,8 +947,8 @@ signatureHelp :: (m: rpc.Message) {
 // Semantic tokens: the names of a file by what they are, from the index. The editor colors the rest with its grammar
 //
 
-TokenTypes     :: ["namespace", "type", "struct", "enum", "enumMember", "function", "method", "property", "variable", "parameter", "typeParameter"];
-TokenModifiers :: ["declaration", "readonly"];
+TokenTypes     :: ["namespace", "type", "struct", "enum", "enumMember", "function", "method", "property", "variable", "parameter", "typeParameter", "operator"];
+TokenModifiers :: ["declaration", "readonly", "overloaded"];
 
 // The index of the token type of a kind of symbol in TokenTypes
 tokenType :: (kind: string) -> int {
@@ -965,6 +966,7 @@ tokenType :: (kind: string) -> int {
         case "field"         => 7;
         case "parameter"     => 9;
         case "typeParameter" => 10;
+        case "operator"      => 11;
         else                 => 8;  // variable, global and constant
     };
 }
@@ -1347,6 +1349,9 @@ tokenOf :: (r: project.Range, sym: *project.Symbol, declaration: int) -> Token {
     t.modifiers = declaration;
     if sym.kind == "constant" || sym.kind == "enumMember" {
         t.modifiers += 2;  // readonly
+    }
+    if sym.kind == "operator" {
+        t.modifiers += 4;  // overloaded: an operator of the program, e.g the + of a + b of two Vec2, which VS Code colors like a function
     }
     return t;
 }
