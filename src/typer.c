@@ -4329,12 +4329,10 @@ void push_enclosing_loop(Typer *typer, TokenType loop_type, AstFor *for_loop, As
     typer->enclosing_loop = loop;
 }
 
+// Back to the loop around it, or to none after the outermost loop, so that 'break' after a loop isn't taken as inside it
 EnclosingLoop *pop_enclosing_loop(Typer *typer) {
-    if (typer->enclosing_loop && typer->enclosing_loop->parent) {
-        typer->enclosing_loop = typer->enclosing_loop->parent;
-        return typer->enclosing_loop;
-    }
-    return NULL;
+    if (typer->enclosing_loop) typer->enclosing_loop = typer->enclosing_loop->parent;
+    return typer->enclosing_loop;
 }
 
 AstExpr *generate_member_of_identifier(Typer *typer, char *ident_name, char *member_name, Ast *at) {
@@ -4614,7 +4612,20 @@ static AstIdentifier *local_of_place(Typer *typer, AstExpr *place) {
 
 // A value that is returned must not point into the variables of the function, which are gone when it returns: &x of a
 // variable x, also inside a struct or an array literal, and a fixed array of the function given as a slice
+// A literal whose address can be taken, e.g &Point{1, 2}. null and names aren't
+static bool is_addressable_literal(AstExpr *expr) {
+    if (expr->head.kind == AST_STRUCT_LITERAL || expr->head.kind == AST_ARRAY_LITERAL || expr->head.kind == AST_ENUM_LITERAL) return true;
+    if (expr->head.kind != AST_LITERAL) return false;
+    LiteralKind kind = ((AstLiteral *)expr)->kind;
+    return kind != LITERAL_IDENTIFIER && kind != LITERAL_NULL;
+}
+
 static bool check_not_dangling(Typer *typer, AstExpr *value, Type *wanted) {
+    if (value->head.kind == AST_UNARY && ((AstUnary *)value)->operator == OP_ADDRESS_OF && is_addressable_literal(((AstUnary *)value)->expr)) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)value, "This returns the address of a literal, which is a hidden variable of the function, gone when it returns");
+        report_error_ast(typer->parser, LABEL_HINT, NULL, "Return the value itself, or make it with new, e.g p := new(%s)", value->type ? type_to_str(((TypePointer *)value->type)->pointer_to) : "T");
+        return false;
+    }
     if (value->head.kind == AST_UNARY && ((AstUnary *)value)->operator == OP_ADDRESS_OF) {
         AstIdentifier *local = local_of_place(typer, ((AstUnary *)value)->expr);
         if (!local) return true;
@@ -10088,7 +10099,13 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
 
 Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     typer->checking_place = unary->operator == OP_ADDRESS_OF; // &xs[i] is the address of the element in the collection
-    Type *expr_type = check_expression(typer, unary->expr, ctx_type);
+
+    // &{1, 2} where a *Point is wanted: the literal is a Point
+    Type *inner_ctx = ctx_type;
+    if (unary->operator == OP_ADDRESS_OF) {
+        inner_ctx = ctx_type && ctx_type->kind == TYPE_POINTER ? ((TypePointer *)ctx_type)->pointer_to : NULL;
+    }
+    Type *expr_type = check_expression(typer, unary->expr, inner_ctx);
     if (!expr_type) return NULL;
 
     TypeKind type_kind = expr_type->kind;
@@ -10153,6 +10170,18 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
         else if (unary->head.head.flags & AST_FLAG_COMPILER_GENERATED) {
             // e.g the receiver of make_map().set(k, v). The value is put in a temporary, and its address is passed
             lvalue = true;
+        }
+        else if (is_addressable_literal(unary->expr)) {
+            // &Point{1, 2}, &[1, 2, 3] or &5: the literal is put in a hidden variable of the function, whose address it is
+            if (is_untyped_type(expr_type)) expr_type = solidify_untyped_expr(unary->expr, expr_type);
+            lvalue = true;
+
+            // In a loop it is the same variable each time around, e.g each of 'for i in 0..3 { ps.add(&P{i}); }' points to the last P
+            if (typer->enclosing_loop && !(unary->head.head.flags & AST_FLAG_WARNED)) {
+                unary->head.head.flags |= AST_FLAG_WARNED;
+                report_error_ast(typer->parser, LABEL_WARNING, (Ast *)unary, "In a loop, the address of a literal is the same each time around, as the literal is one hidden variable of the function");
+                report_error_ast(typer->parser, LABEL_HINT, NULL, "To get a new one each time, make it with new, e.g p := new(%s); *p = ...;", type_to_str(expr_type));
+            }
         }
 
         if (!(unary->head.head.flags & AST_FLAG_COMPILER_GENERATED)) {

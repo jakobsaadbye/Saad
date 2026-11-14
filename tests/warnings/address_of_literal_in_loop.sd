@@ -1,0 +1,16 @@
+// The address of a literal in a loop is the same each time around. tools/linux/runtests.sh checks the 'warn:' lines
+
+P :: struct {
+    x: int;
+}
+
+length :: (p: *P) -> int { return p.x; }
+
+main :: () {
+    ps: [..]*P;
+    for i in 0..3 {
+        ps.add(&P{i});                 // warn: In a loop, the address of a literal is the same each time around
+    }
+    once := &P{1};
+    assert(length(once) == 1 && ps.count == 3);
+}

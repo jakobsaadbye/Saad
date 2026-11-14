@@ -16,7 +16,6 @@ What is still open, checked against the compiler on 14. Nov 2026. What is done i
   - [ ] Structs declared inside a struct, e.g `Outer :: struct { Inner :: struct { ... } }`
   - [ ] Anonymous structs and function types as members of generic structs
   - [ ] Default values of members that call functions or are collection literals, e.g `xs: [..]int = [1, 2];`
-  - [ ] The address of a struct literal, e.g `p := &Point{1, 2};`, with the literal as a hidden local
 - Enums
   - [ ] Backing integer types, e.g `Small :: enum u8 { a, b }`
   - [ ] Enums as keys of a `Map` without writing a `hash` method (pointers already work)

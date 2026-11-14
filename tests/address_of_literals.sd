@@ -1,0 +1,67 @@
+// The address of a literal, e.g &Point{1, 2}. The literal is a hidden variable of the function, there until it returns
+import fmt;
+
+Point :: struct {
+    x: int;
+    y: int;
+}
+
+Color :: enum { red, green }
+
+Node :: struct {
+    value: int;
+    next:  *Node;
+}
+
+length :: (p: *Point) -> int { return p.x + p.y; }
+grow :: (p: *Point) { p.x += 10; }
+
+main :: () {
+    p := &Point{1, 2};
+    assert(p.x == 1 && p.y == 2);
+    p.x = 5;
+    assert(p.x == 5);
+
+    // Where a pointer is wanted, the type of the literal comes from it
+    q: *Point = &{3, 4};
+    assert(q.y == 4);
+    assert(length(&Point{2, 3}) == 5);
+    assert(length(&{x: 1, y: 1}) == 2);
+
+    // Changed through the pointer
+    r := &Point{0, 0};
+    grow(r);
+    grow(r);
+    assert(r.x == 20);
+
+    // Numbers, strings, bools, enums and arrays
+    n := &5;
+    assert(*n == 5 && typeof(n) == "*int");
+    f: *f32 = &2.5;
+    assert(*f == 2.5);
+    s := &"text";
+    assert((*s).len == 4);
+    b := &true;
+    assert(*b);
+    c: *Color = &.green;
+    assert(*c == .green);
+    xs := &[1, 2, 3];
+    assert((*xs)[2] == 3);
+
+    // Each literal is a variable of its own
+    a1 := &Point{1, 1};
+    a2 := &Point{2, 2};
+    assert(a1 != a2 && a1.x == 1 && a2.x == 2);
+
+    // A small linked list, all on the stack
+    list := &Node{1, &Node{2, &Node{3, null}}};
+    total := 0;
+    at := list;
+    while at != null {
+        total += at.value;
+        at = at.next;
+    }
+    assert(total == 6);
+
+    fmt.print("% %\n", *p, list.next.value);
+}

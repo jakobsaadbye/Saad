@@ -134,6 +134,7 @@ typedef enum AstFlags {
     AST_FLAG_TREE_VALUE_OF_RESULTS                 = 1 << 11, // A call in an expression tree that gives a value and an error, which is its value, e.g a.posts().count()
     AST_FLAG_THROWS_ON_ERROR                       = 1 << 12, // A call that gives an error which isn't taken, e.g 'text := os.readFile(p);'. The error is thrown
     AST_FLAG_OPERAND_CHECKED                       = 1 << 13, // An operand of an operator of its own, which was checked before the call that replaces the operator. It isn't checked again
+    AST_FLAG_WARNED                                = 1 << 14, // A warning was given about it, so that an expression that is checked again doesn't warn twice
 } AstFlags;
 
 typedef struct Ast {

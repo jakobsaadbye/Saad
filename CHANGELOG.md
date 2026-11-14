@@ -2,6 +2,15 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.23.0 - 14. Nov 2026
+
+* The address of a literal: `p := &Point{1, 2};`, `length(&Point{2, 3})`, `q: *Point = &{3, 4};` (the type comes from the
+  pointer that is wanted), and `&5`, `&"text"`, `&true`, `&.green` and `&[1, 2, 3]`. The literal is a hidden variable of the
+  function, there until it returns, so returning its address is an error, and taking it in a loop, where it is the same
+  variable each time around, is a warning that points to `new`. See `docs/safety.md`
+* `break` and `continue` after the first loop of a function, outside of any loop, were taken as inside it. They are an
+  error now
+
 ## Update v0.22.3 - 14. Nov 2026
 
 * A global optional that starts with a value, e.g `count: ?int = 5;`, started empty: the value was written over the
