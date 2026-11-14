@@ -8,6 +8,8 @@ What changed in each version of Saad: the language, the compiler, the standard l
   pointer that is wanted), and `&5`, `&"text"`, `&true`, `&.green` and `&[1, 2, 3]`. The literal is a hidden variable of the
   function, there until it returns, so returning its address is an error, and taking it in a loop, where it is the same
   variable each time around, is a warning that points to `new`. See `docs/safety.md`
+* `break` and `continue` after the first loop of a function, outside of any loop, were taken as inside it. They are an
+  error now
 
 ## Update v0.22.3 - 14. Nov 2026
 

@@ -4329,12 +4329,10 @@ void push_enclosing_loop(Typer *typer, TokenType loop_type, AstFor *for_loop, As
     typer->enclosing_loop = loop;
 }
 
+// Back to the loop around it, or to none after the outermost loop, so that 'break' after a loop isn't taken as inside it
 EnclosingLoop *pop_enclosing_loop(Typer *typer) {
-    if (typer->enclosing_loop && typer->enclosing_loop->parent) {
-        typer->enclosing_loop = typer->enclosing_loop->parent;
-        return typer->enclosing_loop;
-    }
-    return NULL;
+    if (typer->enclosing_loop) typer->enclosing_loop = typer->enclosing_loop->parent;
+    return typer->enclosing_loop;
 }
 
 AstExpr *generate_member_of_identifier(Typer *typer, char *ident_name, char *member_name, Ast *at) {

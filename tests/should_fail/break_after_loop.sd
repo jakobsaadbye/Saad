@@ -1,0 +1,7 @@
+// expect-error: break is only allowed inside for-loops or while-loops
+
+main :: () {
+    for i in 0..2 {
+    }
+    break;
+}
