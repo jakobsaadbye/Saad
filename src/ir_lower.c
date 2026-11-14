@@ -684,7 +684,19 @@ static void write_int_bytes(uint8_t *dst, int64_t value, int size) {
 
 // Writes the constant expression 'expr', interpreted as type 'type', into a global's data
 static void write_default_constants(Lowerer *L, IrGlobal *global, int offset, Type *type);
+bool is_optional_type(Type *type);
+Type *optional_inner_type(Type *type);
+int   optional_present_offset(Type *type);
+
 static void write_constant(Lowerer *L, IrGlobal *global, int offset, AstExpr *expr, Type *type) {
+    // A T for a ?T, e.g 'count: ?int = 5;': the value and present = true. null leaves it empty, all zeros
+    if (is_optional_type(type) && expr->type && !is_optional_type(expr->type)) {
+        if (is_null_type(expr->type)) return;
+        write_constant(L, global, offset, expr, optional_inner_type(type));
+        global->data[offset + optional_present_offset(type)] = 1;
+        return;
+    }
+
     Type *storage = enum_backing_type(type);
 
     switch (expr->head.kind) {

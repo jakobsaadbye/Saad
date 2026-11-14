@@ -4,8 +4,6 @@ What is still open, checked against the compiler on 14. Nov 2026. What is done i
 
 ## Bugs
 
-- A global optional with a value starts empty: `count: ?int = 5;` at the top of a file compiles, but `count.value()`
-  fails. It should start with the value, or be an error until it can
 - `as` binds tighter than `*` and `&`: `*(p as *i8) as i64` is read as `*((p as *i8) as i64)`. The casts should bind
   looser than the unary operators
 - `value()` of an empty optional stops at an assert in collections.sd, without a message of its own. A message needs a

@@ -1,0 +1,38 @@
+// Global optionals that start with a value, or empty
+Point :: struct {
+    x: int;
+    y: int;
+}
+
+count: ?int = 5;
+ratio: ?f64 = 0.5;
+name: ?string = "ada";
+origin: ?Point = Point{1, 2};
+none: ?int = null;
+unset: ?int;
+flag: ?bool = false;
+Limit :: 9;
+limit: ?int = Limit;
+@threadLocal perThread: ?int = 3;
+
+Settings :: struct {
+    retries: ?int = 2;
+}
+settings: Settings;
+
+main :: () {
+    assert(count.hasValue() && count.value() == 5);
+    assert(ratio.value() == 0.5);
+    assert(name.value() == "ada");
+    assert(origin.value().y == 2);
+    assert(!none.hasValue() && !unset.hasValue());
+    assert(flag.hasValue() && !flag.value());
+    assert(limit.value() == 9);
+    assert(perThread.value() == 3);
+    assert(settings.retries.value() == 2);
+
+    count = null;
+    assert(!count.hasValue());
+    count = 7;
+    assert(count.value() == 7);
+}
