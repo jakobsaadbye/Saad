@@ -2,6 +2,12 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.22.3 - 14. Nov 2026
+
+* A global optional that starts with a value, e.g `count: ?int = 5;`, started empty: the value was written over the
+  memory of the optional instead of into its value, without setting it present. `write_constant()` in `ir_lower.c` now
+  writes a `T` for a `?T` like `wrap_in_optional()` does when the program runs
+
 ## Update v0.22.2 - 14. Nov 2026
 
 * Structs and enums declared in a function or a block are types of their own. Two functions with a struct `P` each got
