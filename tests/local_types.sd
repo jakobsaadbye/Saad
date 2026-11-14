@@ -1,0 +1,77 @@
+// Structs and enums declared in a function or a block. Each is a type of its own, also when another type has its name
+import fmt;
+import json;
+
+first :: () -> string {
+    P :: struct {
+        x: int;
+        describe :: method () -> string { return fmt.sprint("x=%", self.x); }
+    }
+    return P{1}.describe();
+}
+
+second :: () -> string {
+    P :: struct {
+        name: string;
+        count: int;
+        describe :: method () -> string { return fmt.sprint("% %", self.name, self.count); }
+    }
+    return P{"b", 2}.describe();
+}
+
+// A generic function gets a type of its own for each instance
+wrapped :: <T>(value: T) -> string {
+    Wrapper :: struct { inner: T; }
+    return fmt.sprint("%", Wrapper{value});
+}
+
+Point :: struct {
+    x: int;
+    y: int;
+}
+
+main :: () {
+    // A struct and an enum of the function, which use each other
+    Side :: enum { left, right }
+    Hit :: struct {
+        side: Side;
+        at:   int;
+        next: *Hit;
+    }
+    a := Hit{.left, 1, null};
+    b := Hit{.right, 2, &a};
+    assert(b.next.side == .left && b.next.at == 1);
+    assert(typeof(b) == "Hit");
+    assert(fmt.sprint("%", Side.right) == ".right");
+
+    // In collections, with methods declared outside of it, and through reflection
+    hits: [..]Hit;
+    hits.add(a);
+    hits.add(b);
+    assert(hits.count == 2 && hits[1].side == .right);
+    total :: method (h: Hit) -> int { return h.at * 10; }
+    assert(hits[1].total() == 20);
+    Row :: struct { id: int; label: string; }
+    assert(json.encode(Row{7, "seven"}) == "{\"id\":7,\"label\":\"seven\"}");
+
+    // Two functions with a struct P each, which are different types
+    assert(first() == "x=1");
+    assert(second() == "b 2");
+    assert(wrapped(5) == "Wrapper{inner: 5}");
+    assert(wrapped("five") == "Wrapper{inner: \"five\"}");
+
+    // A local generic struct
+    Box :: struct <T> { value: T; }
+    i: Box<int> = {3};
+    s: Box<string> = {"three"};
+    assert(i.value == 3 && s.value == "three");
+
+    // A block has its own types. A Point in it hides the Point of the file only there
+    {
+        Point :: struct { label: string; }
+        p := Point{"inner"};
+        assert(fmt.sprint("%", p) == "Point{label: \"inner\"}");
+    }
+    q := Point{1, 2};
+    assert(fmt.sprint("%", q) == "Point{x: 1, y: 2}");
+}
