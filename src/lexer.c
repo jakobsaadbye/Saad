@@ -123,6 +123,7 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_NEWTYPE:               return "newtype";
         case TOKEN_ENUMFLAGS:             return "enumflags";
         case TOKEN_DEFAULT:               return "default";
+        case TOKEN_OPERATOR:              return "operator";
         case TOKEN_FAT_ARROW:             return "=>";
         case TOKEN_END:                   return "END";
     }
@@ -534,6 +535,7 @@ KeywordMatch match_keyword(Lexer *lexer) {
     }
     if (keyword_len == 8) {
         if (strcmp(text, "continue") == 0) token = TOKEN_CONTINUE;
+        if (strcmp(text, "operator") == 0) token = TOKEN_OPERATOR;
     }
     if (keyword_len == 9) {
         if (strcmp(text, "namespace") == 0) token = TOKEN_NAMESPACE;

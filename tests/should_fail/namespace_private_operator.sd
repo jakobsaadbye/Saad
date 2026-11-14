@@ -1,0 +1,8 @@
+// expect-error: There is no operator + for a shapes.Vec2 and a shapes.Vec2
+
+import shapes;
+
+main :: () {
+    a := shapes.Vec2{1, 2};
+    b := a + a;
+}

@@ -1,0 +1,10 @@
+// expect-error: An operator is a function, not a method
+
+Vec :: struct {
+    x: f32;
+    y: f32;
+}
+
+operator + :: method (a: Vec, b: Vec) -> Vec { return a; }
+
+main :: () {}

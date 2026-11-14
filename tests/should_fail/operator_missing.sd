@@ -1,0 +1,11 @@
+// expect-error: There is no operator + for a Vec and a Vec
+
+Vec :: struct {
+    x: f32;
+    y: f32;
+}
+
+main :: () {
+    a: Vec;
+    b := a + a;
+}

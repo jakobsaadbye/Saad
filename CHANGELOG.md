@@ -2,6 +2,19 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.22.0 - 14. Nov 2026
+
+* Operators of your own: `operator + :: (a: Vec2, b: Vec2) -> Vec2 { ... }` declares `+` for two `Vec2`, and `a + b` calls
+  it. `+ - * / %`, `-v`, `< <= > >=` and `==` (with `!=` its opposite) can be declared for structs, enums and newtypes, and
+  `+=` and the other compound assignments use them. The operator is picked by the exact types of the operands, and a number
+  written in the program fits a parameter of a number type, e.g `v * 2`. See `docs/operators.md`
+* `raylib`: the functions of raymath, in `std/vendor/raymath.sd` (`Vector2Add`, `MatrixMultiply`, `QuaternionSlerp`, ...,
+  all 143 of raymath 2.0 of raylib 5.5, which `raylib.dll` has), and operators and methods for `Vector2`, `Vector3`,
+  `Vector4`, `Quaternion` and `Matrix` that call them, e.g `position += speed * dt` and `v.length()`. `Quaternion` is a
+  newtype of `Vector4`, as `q1 * q2` is a rotation
+* `tools/linux/check_raymath.sh` runs `tests/raylib/` on Linux, with `raymath.h` (now in `packages/raylib/include`) compiled
+  with the calling convention of Windows
+
 ## Update v0.21.0 - 10. Nov 2026
 
 * `net.http`: a worker answers all the requests of a round of events first and writes their responses after them. A

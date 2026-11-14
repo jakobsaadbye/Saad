@@ -1,5 +1,5 @@
 // The error inside the body of max is reported together with the instance and where it was instantiated
-// expect-error: Binary operation between two structs
+// expect-error: There is no operator > for a Point and a Point
 // expect-error: note: ... in max<Point>, instantiated here
 
 Point :: struct { x: int; y: int; }

@@ -131,7 +131,7 @@
         },
         {
           "name": "keyword.declaration.saad",
-          "match": "\\b(struct|union|interface|enumflags|enum|newtype|default|method|extern|namespace|import|use|as)\\b"
+          "match": "\\b(struct|union|interface|enumflags|enum|newtype|default|operator|method|extern|namespace|import|use|as)\\b"
         },
         {
           "name": "keyword.other.saad",

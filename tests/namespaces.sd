@@ -29,6 +29,8 @@ main :: () {
         p := geometry.Vec2{1, 2};
         q: geometry.Vec2 = geometry.add(p, p);
         assert(q.y == 4);
+        assert((p + p).y == 4);                     // The operator + of geometry
+        assert(geometry.doubled(p).x == 2);         // which has a private operator * of its own
         assert(geometry.Shape.circle != geometry.Shape.square);
         b: geometry.Box<int> = {5};
         assert(b.value == 5);

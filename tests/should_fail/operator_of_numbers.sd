@@ -1,0 +1,10 @@
+// expect-error: operator + (int, int) doesn't take a struct, an enum or a newtype
+
+Vec :: struct {
+    x: f32;
+    y: f32;
+}
+
+operator + :: (a: int, b: int) -> int { return a; }
+
+main :: () {}

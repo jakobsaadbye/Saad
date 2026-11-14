@@ -1,0 +1,9 @@
+// expect-error: An operator is declared at the top of a file, not inside a struct
+
+Vec :: struct {
+    x: f32;
+
+    operator + :: (a: Vec, b: Vec) -> Vec { return a; }
+}
+
+main :: () {}

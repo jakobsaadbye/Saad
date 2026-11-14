@@ -62,8 +62,8 @@ Vector4 :: struct {
     w: float;                // Vector w component
 }
 
-// Quaternion, 4 components (Vector4 alias)
-// Quaternion :: Vector4;
+// Quaternion, 4 components. A newtype of Vector4, as it has operators of its own, e.g q1 * q2 rotates
+Quaternion :: newtype Vector4;
 
 // Matrix, 4x4 components, column major, OpenGL style, right-handed
 Matrix :: struct {
@@ -222,7 +222,7 @@ Material :: struct {
 // Transform, vertex transformation data
 Transform :: struct {
     translation: Vector3;    // Translation
-    rotation: Vector4;       // Rotation
+    rotation: Quaternion;    // Rotation
     scale: Vector3;          // Scale
 }
 
@@ -1506,3 +1506,93 @@ AttachAudioMixedProcessor :: (processor: *void); // Attach audio stream processo
 DetachAudioMixedProcessor :: (processor: *void); // Detach audio stream processor from the entire audio pipeline
 
 }
+
+//----------------------------------------------------------------------------------
+// Operators and methods of the math types, which call the functions of raymath (raymath.sd), e.g a + b is Vector2Add(a, b)
+// and v.length() is Vector2Length(v). Like the C++ operators of raymath.h, == is Vector2Equals, which is true for values that
+// are almost equal. See docs/operators.md
+//----------------------------------------------------------------------------------
+
+// Vector2
+operator +  :: (a: Vector2, b: Vector2) -> Vector2   { return Vector2Add(a, b); }
+operator -  :: (a: Vector2, b: Vector2) -> Vector2   { return Vector2Subtract(a, b); }
+operator -  :: (v: Vector2) -> Vector2               { return Vector2Negate(v); }
+operator *  :: (v: Vector2, scale: float) -> Vector2 { return Vector2Scale(v, scale); }
+operator *  :: (scale: float, v: Vector2) -> Vector2 { return Vector2Scale(v, scale); }
+operator *  :: (a: Vector2, b: Vector2) -> Vector2   { return Vector2Multiply(a, b); }  // Component by component
+operator /  :: (v: Vector2, scale: float) -> Vector2 { return Vector2Scale(v, 1 / scale); }
+operator /  :: (a: Vector2, b: Vector2) -> Vector2   { return Vector2Divide(a, b); }    // Component by component
+operator == :: (a: Vector2, b: Vector2) -> bool      { return Vector2Equals(a, b) != 0; }
+operator *  :: (v: Vector2, mat: Matrix) -> Vector2  { return Vector2Transform(v, mat); }
+
+length    :: method (v: Vector2) -> float                               { return Vector2Length(v); }
+lengthSqr :: method (v: Vector2) -> float                               { return Vector2LengthSqr(v); }
+normalize :: method (v: Vector2) -> Vector2                             { return Vector2Normalize(v); }
+dot       :: method (v: Vector2, other: Vector2) -> float               { return Vector2DotProduct(v, other); }
+distance  :: method (v: Vector2, other: Vector2) -> float               { return Vector2Distance(v, other); }
+lerp      :: method (v: Vector2, to: Vector2, amount: float) -> Vector2 { return Vector2Lerp(v, to, amount); }
+rotate    :: method (v: Vector2, angle: float) -> Vector2               { return Vector2Rotate(v, angle); }  // The angle in radians
+
+// Vector3
+operator +  :: (a: Vector3, b: Vector3) -> Vector3   { return Vector3Add(a, b); }
+operator -  :: (a: Vector3, b: Vector3) -> Vector3   { return Vector3Subtract(a, b); }
+operator -  :: (v: Vector3) -> Vector3               { return Vector3Negate(v); }
+operator *  :: (v: Vector3, scale: float) -> Vector3 { return Vector3Scale(v, scale); }
+operator *  :: (scale: float, v: Vector3) -> Vector3 { return Vector3Scale(v, scale); }
+operator *  :: (a: Vector3, b: Vector3) -> Vector3   { return Vector3Multiply(a, b); }  // Component by component
+operator /  :: (v: Vector3, scale: float) -> Vector3 { return Vector3Scale(v, 1 / scale); }
+operator /  :: (a: Vector3, b: Vector3) -> Vector3   { return Vector3Divide(a, b); }    // Component by component
+operator == :: (a: Vector3, b: Vector3) -> bool      { return Vector3Equals(a, b) != 0; }
+operator *  :: (v: Vector3, mat: Matrix) -> Vector3  { return Vector3Transform(v, mat); }
+
+length    :: method (v: Vector3) -> float                               { return Vector3Length(v); }
+lengthSqr :: method (v: Vector3) -> float                               { return Vector3LengthSqr(v); }
+normalize :: method (v: Vector3) -> Vector3                             { return Vector3Normalize(v); }
+dot       :: method (v: Vector3, other: Vector3) -> float               { return Vector3DotProduct(v, other); }
+distance  :: method (v: Vector3, other: Vector3) -> float               { return Vector3Distance(v, other); }
+lerp      :: method (v: Vector3, to: Vector3, amount: float) -> Vector3 { return Vector3Lerp(v, to, amount); }
+cross     :: method (v: Vector3, other: Vector3) -> Vector3             { return Vector3CrossProduct(v, other); }
+
+// Vector4
+operator +  :: (a: Vector4, b: Vector4) -> Vector4   { return Vector4Add(a, b); }
+operator -  :: (a: Vector4, b: Vector4) -> Vector4   { return Vector4Subtract(a, b); }
+operator -  :: (v: Vector4) -> Vector4               { return Vector4Negate(v); }
+operator *  :: (v: Vector4, scale: float) -> Vector4 { return Vector4Scale(v, scale); }
+operator *  :: (scale: float, v: Vector4) -> Vector4 { return Vector4Scale(v, scale); }
+operator *  :: (a: Vector4, b: Vector4) -> Vector4   { return Vector4Multiply(a, b); }  // Component by component
+operator /  :: (v: Vector4, scale: float) -> Vector4 { return Vector4Scale(v, 1 / scale); }
+operator /  :: (a: Vector4, b: Vector4) -> Vector4   { return Vector4Divide(a, b); }    // Component by component
+operator == :: (a: Vector4, b: Vector4) -> bool      { return Vector4Equals(a, b) != 0; }
+
+length    :: method (v: Vector4) -> float                               { return Vector4Length(v); }
+lengthSqr :: method (v: Vector4) -> float                               { return Vector4LengthSqr(v); }
+normalize :: method (v: Vector4) -> Vector4                             { return Vector4Normalize(v); }
+dot       :: method (v: Vector4, other: Vector4) -> float               { return Vector4DotProduct(v, other); }
+distance  :: method (v: Vector4, other: Vector4) -> float               { return Vector4Distance(v, other); }
+lerp      :: method (v: Vector4, to: Vector4, amount: float) -> Vector4 { return Vector4Lerp(v, to, amount); }
+
+// Quaternion. q1 * q2 is the rotation q2 followed by q1, and q * v rotates the vector
+operator +  :: (a: Quaternion, b: Quaternion) -> Quaternion { return QuaternionAdd(a, b); }
+operator -  :: (a: Quaternion, b: Quaternion) -> Quaternion { return QuaternionSubtract(a, b); }
+operator +  :: (q: Quaternion, value: float) -> Quaternion  { return QuaternionAddValue(q, value); }
+operator -  :: (q: Quaternion, value: float) -> Quaternion  { return QuaternionSubtractValue(q, value); }
+operator *  :: (a: Quaternion, b: Quaternion) -> Quaternion { return QuaternionMultiply(a, b); }
+operator *  :: (q: Quaternion, scale: float) -> Quaternion  { return QuaternionScale(q, scale); }
+operator *  :: (q: Quaternion, mat: Matrix) -> Quaternion   { return QuaternionTransform(q, mat); }
+operator *  :: (q: Quaternion, v: Vector3) -> Vector3       { return Vector3RotateByQuaternion(v, q); }
+operator /  :: (a: Quaternion, b: Quaternion) -> Quaternion { return QuaternionDivide(a, b); }
+operator == :: (a: Quaternion, b: Quaternion) -> bool       { return QuaternionEquals(a, b) != 0; }
+
+length    :: method (q: Quaternion) -> float                                     { return QuaternionLength(q); }
+normalize :: method (q: Quaternion) -> Quaternion                                { return QuaternionNormalize(q); }
+invert    :: method (q: Quaternion) -> Quaternion                                { return QuaternionInvert(q); }
+slerp     :: method (q: Quaternion, to: Quaternion, amount: float) -> Quaternion { return QuaternionSlerp(q, to, amount); }
+toMatrix  :: method (q: Quaternion) -> Matrix                                    { return QuaternionToMatrix(q); }
+
+// Matrix. a * b is MatrixMultiply(a, b)
+operator +  :: (a: Matrix, b: Matrix) -> Matrix { return MatrixAdd(a, b); }
+operator -  :: (a: Matrix, b: Matrix) -> Matrix { return MatrixSubtract(a, b); }
+operator *  :: (a: Matrix, b: Matrix) -> Matrix { return MatrixMultiply(a, b); }
+
+transpose :: method (mat: Matrix) -> Matrix { return MatrixTranspose(mat); }
+invert    :: method (mat: Matrix) -> Matrix { return MatrixInvert(mat); }
