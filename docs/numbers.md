@@ -63,3 +63,15 @@ m += 1;                     // Panic: 2147483647 + 1 doesn't fit in i32
   a loop of arithmetic, which LLVM simplifies, and about 16% on sorting and on encoding JSON. With the x64 backend, 60% on
   the loop of arithmetic, and 10 to 20% on sorting and JSON.
 
+## The precedence of as
+
+`as` binds looser than the unary operators `* & - ! ~` and tighter than the binary ones, and casts are read from left to
+right:
+
+```odin
+*p as i64           // (*p) as i64: the value at p, as an i64
+*(p as *i8) as i64  // the byte at p, as an i64
+-a as f64           // (-a) as f64
+3 * a as i64        // 3 * (a as i64)
+2.5 as int as f64   // (2.5 as int) as f64, which is 2.0
+```
