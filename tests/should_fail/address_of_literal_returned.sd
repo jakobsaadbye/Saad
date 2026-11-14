@@ -1,0 +1,11 @@
+// expect-error: This returns the address of a literal
+
+Point :: struct {
+    x: int;
+}
+
+origin :: () -> *Point {
+    return &Point{0};
+}
+
+main :: () {}

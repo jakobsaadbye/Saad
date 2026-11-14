@@ -1,0 +1,5 @@
+// expect-error: Expression is not an addressable value
+
+main :: () {
+    p := &null;
+}

@@ -69,6 +69,11 @@ start   :: () -> Cursor { grid: Grid; return Cursor{at: &grid.cells[0]}; }   // 
 digits  :: () -> []int { d: [3]int = [1, 2, 3]; return d; }      // error: a slice of a fixed array of the function
 ```
 
+A literal whose address is taken, e.g `&Point{1, 2}`, is a hidden variable of the function, so it can't be returned either:
+`return &Point{0, 0};` is an error, and so is `return W{&Point{0, 0}}`. In a loop it is the same variable each time
+around, so `for i in 0..3 { ps.add(&P{i}); }` gives three pointers to one `P`, which is a warning. `new(P)` makes one
+that lasts.
+
 The address of what a pointer, a slice or a list points to may be returned, e.g `&p.y` of a `p: *Point` or `&xs[0]` of
 a `[]int`, and so may the address of a global or of memory from `new`. `check_not_dangling()` in `typer.c` looks at
 `&x`, `&x.member` and `&x.array[i]` of a variable, in the value and in the struct and array literals it is made of. An
