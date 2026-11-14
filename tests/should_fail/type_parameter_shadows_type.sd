@@ -1,0 +1,11 @@
+// expect-error: Type parameter 'Point' shadows the type 'Point'
+
+Point :: struct {
+    x: int;
+}
+
+first :: <Point>(xs: []Point) -> Point {
+    return xs[0];
+}
+
+main :: () {}

@@ -40,6 +40,12 @@ function: `a + b` of two `Vec2` is a call of `operator + (Vec2, Vec2)`.
 * **Visible:** like a method: an operator of a namespace that the program uses is there without importing more. `@private`
   keeps it to its namespace, or its file if it has none. It can't be called by a name.
 
+## In an editor
+
+The language server colors an operator of the program differently from the operators of the language (like a function, in
+VS Code), and go to definition on it opens its declaration, e.g from the `+` of `position + velocity` to
+`operator + :: (a: Vector2, b: Vector2) -> Vector2`. Find references lists where it is used. See `docs/lsp.md`.
+
 ## raylib
 
 `std/vendor/raylib.sd` has the operators of the math types, which call the functions of raymath (`std/vendor/raymath.sd`, in

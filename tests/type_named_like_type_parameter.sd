@@ -1,0 +1,23 @@
+// Types of the program named like the type parameters of the prelude, e.g the V of Map<K, V> and the T of List<T>. They are
+// other names in another place, so the generic structs and functions of the prelude still work, with these as type arguments
+V :: struct { x: int; }
+K :: struct { name: string; }
+T :: struct { y: int; }
+
+hash :: method (k: K) -> u64 { return k.name.hash(); }
+
+main :: () {
+    m: Map<string, V>;
+    m.set("a", V{3});
+    assert(m.get("a", V{0}).x == 3);
+
+    xs: [..]T;
+    xs.add(T{1});
+    xs.add(T{2});
+    assert(xs.contains(T{2}));
+    assert(xs.count == 2 && xs[1].y == 2);
+
+    ks: Map<K, V>;
+    ks.set(K{"b"}, V{2});
+    assert(ks.get(K{"b"}, V{0}).x == 2);
+}

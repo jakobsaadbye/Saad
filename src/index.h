@@ -41,6 +41,7 @@ typedef struct Index {
 extern Index program_index;
 
 void index_identifier_use(Ast *site, AstIdentifier *ident);
+void index_operator_use(AstFile *file, Pos from, Pos to, const char *spelled, AstIdentifier *op);
 bool is_std_file(AstFile *file);
 void index_type_name_use(Ast *site, AstIdentifier *ident);
 void index_name_use(Ast *site, Pos start, Pos end, AstIdentifier *ident);

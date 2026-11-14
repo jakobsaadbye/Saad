@@ -137,6 +137,14 @@ def main():
     # Nothing at a keyword
     m = client.request("textDocument/definition", {"textDocument": doc, "position": position_of(text, 43, "return")})
     check(m["result"] is None, f"no definition for a keyword: {m['result']}")
+    # An operator of the program goes to its declaration, like C#: the + of 'c + c' to 'operator + :: (a: Circle, b: Circle)'
+    m = client.request("textDocument/definition", {"textDocument": doc, "position": position_of(text, 95, "+")})
+    loc = m["result"]
+    check(loc and loc["range"]["start"] == {"line": 89, "character": 0}, f"definition of the + of two Circles: {loc}")
+    m = client.request("textDocument/references", {"textDocument": doc, "position": position_of(text, 95, "+"), "context": {"includeDeclaration": False}})
+    check([r["range"]["start"] for r in m["result"]] == [{"line": 94, "character": 13}], f"the uses of operator +: {m['result']}")
+    m = client.request("textDocument/definition", {"textDocument": doc, "position": position_of(text, 91, "+")})
+    check(m["result"] is None, f"the + of two f32 is the language's: {m['result']}")
 
     print("references")
     m = client.request("textDocument/references", {"textDocument": doc, "position": position_of(text, 32, "total"), "context": {"includeDeclaration": True}})
@@ -297,6 +305,12 @@ def main():
     check(token(60, "swapped") == "function", f"swapped is a function: {token(60, 'swapped')}")
     check(token(54, "open") == "enumMember", f"open is an enum member: {token(54, 'open')}")
     check(token(38, "c") == "parameter", f"c is a parameter: {token(38, 'c')}")
+    modifiers = caps["semanticTokensProvider"]["legend"]["tokenModifiers"]
+    p = position_of(text, 95, "+")
+    t = tokens.get((p["line"], p["character"]))
+    check(t and legend[t[1]] == "operator" and t[2] & (1 << modifiers.index("overloaded")), f"the + of two Circles is an overloaded operator: {t}")
+    p = position_of(text, 91, "+")
+    check(tokens.get((p["line"], p["character"])) is None, f"the + of two f32 is left to the grammar")
     # The diagnostics of the changes above, until the ones of the text as it is again
     client.diagnostics_until(uri, lambda d: d == [], tries=40)
 
@@ -335,7 +349,7 @@ def main():
     m = client.request("textDocument/rename", {"textDocument": doc, "position": position_of(text, 51, "radius"), "newName": "r"})
     edits = m["result"]["changes"].get(uri, []) if m.get("result") else []
     lines = sorted(e["range"]["start"]["line"] + 1 for e in edits)
-    check(lines == [16, 19, 19, 39, 51, 71], f"the edits of renaming radius: {lines}")
+    check(lines == [16, 19, 19, 39, 51, 71, 91, 91], f"the edits of renaming radius: {lines}")
     check(all(e["newText"] == "r" for e in edits), "the new name")
     m = client.request("textDocument/rename", {"textDocument": doc, "position": position_of(text, 70, "print"), "newName": "show"})
     check("standard library" in m.get("error", {}).get("message", ""), f"a name of the standard library is renamed there: {m}")

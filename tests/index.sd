@@ -85,3 +85,12 @@ parsedCount :: () -> int {
 parsed :: (text: string) -> (int, error) {
     return text.len as int, null;
 }
+
+// An operator of its own. An editor goes from the + of a use to here, and colors it
+operator + :: (a: Circle, b: Circle) -> Circle {
+    return Circle{a.radius + b.radius};
+}
+
+doubled :: (c: Circle) -> Circle {
+    return c + c;
+}

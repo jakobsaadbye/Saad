@@ -222,7 +222,23 @@
           "when": "resourceLangId == saad"
         }
       ]
-    }
+    },
+    "semanticTokenModifiers": [
+      {
+        "id": "overloaded",
+        "description": "An operator that the program declares, e.g the + of a + b of two Vec2"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "saad",
+        "scopes": {
+          "operator.overloaded": [
+            "entity.name.function.operator.saad"
+          ]
+        }
+      }
+    ]
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

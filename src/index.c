@@ -131,6 +131,7 @@ static const char *kind_of(AstIdentifier *ident) {
 
     AstFunctionDefn *func = (flags & IDENTIFIER_IS_CONSTANT) || (flags & IDENTIFIER_IS_STRUCT_METHOD) ? function_of(ident) : NULL;
     if (flags & IDENTIFIER_IS_STRUCT_METHOD) return "method";
+    if (func && func->operator_token) return "operator";  // e.g operator + :: (a: Vec2, b: Vec2) -> Vec2
     if (func) return func->is_method ? "method" : "function";
 
     if (flags & IDENTIFIER_IS_TYPE_ALIAS) return ident->decl ? "typeAlias" : "typeParameter";
@@ -214,7 +215,7 @@ static char *signature_of(AstFunctionDefn *func) {
 
 static char *detail_of(AstIdentifier *ident, const char *kind) {
     AstFunctionDefn *func = function_of(ident);
-    if (func && (strcmp(kind, "function") == 0 || strcmp(kind, "method") == 0)) return signature_of(func);
+    if (func && (strcmp(kind, "function") == 0 || strcmp(kind, "method") == 0 || strcmp(kind, "operator") == 0)) return signature_of(func);
     if (strcmp(kind, "struct") == 0 || strcmp(kind, "union") == 0 || strcmp(kind, "interface") == 0 || strcmp(kind, "enum") == 0) return strdup(kind);
     // The declaration of a newtype, e.g 'newtype f64' for Meters, so a hover reads 'Meters :: newtype f64'
     if (ident->type && ident->type->newtype == ident && ident->type->newtype_base) {
@@ -349,6 +350,27 @@ void index_name_use(Ast *site, Pos start, Pos end, AstIdentifier *ident) {
     add_reference(site->file, start, end, index_identifier(ident), ident->name);
 }
 
+// An operator of the program that is used, e.g the + of 'a + b' of two Vec2, which goes to 'operator + :: (a: Vec2, b: Vec2)'. The
+// operator is the first 'spelled' in the text from 'from' to 'to', e.g between the end of a and the start of b
+void index_operator_use(AstFile *file, Pos from, Pos to, const char *spelled, AstIdentifier *op) {
+    if (!program_index.enabled || file == NULL || file->text == NULL || op == NULL || from.line <= 0) return;
+    int length = (int)strlen(spelled);
+    Pos at = from;
+    while (at.input_idx + length <= to.input_idx && file->text[at.input_idx]) {
+        const char *text = file->text + at.input_idx;
+        if (text[0] == '/' && text[1] == '/') return; // A comment, e.g between the operands on two lines
+        if (strncmp(text, spelled, length) == 0) {
+            Pos end = at;
+            end.input_idx += length;
+            end.col       += length;
+            add_reference(file, at, end, index_identifier(op), spelled);
+            return;
+        }
+        if (text[0] == '\n') { at.line += 1; at.col = 1; } else { at.col += 1; }
+        at.input_idx += 1;
+    }
+}
+
 void index_identifier_use(Ast *site, AstIdentifier *ident) {
     if (site == NULL) return;
     index_name_use(site, site->start, site->end, ident);
@@ -475,6 +497,19 @@ void index_declarations(DynamicArray files) {
     for (int f = 0; f < files.count; f++) {
         AstFile *file = ((AstFile **)files.items)[f];
         if (file->ns) index_namespace(file->ns);
+
+        // The operators, which are in no scope, see parse_operator_declaration()
+        for (int i = 0; i < file->statements.count; i++) {
+            Ast *stmt = ((Ast **)file->statements.items)[i];
+            if (stmt->kind != AST_DECLARATION) continue;
+            AstDeclaration *decl = (AstDeclaration *)stmt;
+            if (decl->values.count != 1 || decl->idents.count != 1) continue;
+            AstExpr *value = ((AstExpr **)decl->values.items)[0];
+            if (value->head.kind != AST_FUNCTION_DEFN || !((AstFunctionDefn *)value)->operator_token) continue;
+            AstIdentifier *op = ((AstIdentifier **)decl->idents.items)[0];
+            index_identifier(op);
+            index_parameters(op);
+        }
         DynamicArray idents = file->scope->identifiers;
         for (int i = 0; i < idents.count; i++) {
             AstIdentifier *ident = ((AstIdentifier **)idents.items)[i];
