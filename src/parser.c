@@ -4862,14 +4862,14 @@ int get_operator_precedence(OperatorType op) {
             return 10;
         case OP_POWER:
             return 11;
+        case OP_AS:
+            return 12; // Looser than the unary operators: *p as i64 is (*p) as i64, and tighter than the binary: a * b as f64 is a * (b as f64)
         case OP_NOT:
         case OP_BITWISE_NOT:
-            return 12;
         case OP_UNARY_MINUS:
         case OP_ADDRESS_OF:
         case OP_POINTER_DEREFERENCE:
         case OP_SPREAD:
-        case OP_AS:
             return 13;
         case OP_DOT:
         case OP_OPTIONAL_DOT:
@@ -4907,8 +4907,8 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
     while (true) {
         Token next = peek_next_token(parser);
 
-        // As-cast is parsed from rigth to left
-        if (next.type == TOKEN_AS) {
+        // x as T, from left to right: a as A as B is (a as A) as B. Not inside the operand of a unary operator, e.g *p as i64
+        if (next.type == TOKEN_AS && get_operator_precedence((OperatorType) TOKEN_AS) > min_prec) {
             eat_token(parser);
             
             Type *type = parse_type(parser);
@@ -4923,9 +4923,8 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
             as_cast->cast_to         = type;
             as_cast->is_as_cast      = true;
 
-            next = peek_next_token(parser);
-
             left = (AstExpr *)as_cast;
+            continue; // Another cast or an operator may follow
         }
 
         // Type arguments of a call e.g max<f64>(a, b) or rows.map<string>(f). It is a call when the '<...>' can be a list of
