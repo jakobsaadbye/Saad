@@ -1,0 +1,15 @@
+// raylib imported without 'use': its operators are there, and an == of other structs, which looks at the operators == of
+// raylib before raylib.sd is checked, finds the functions of raymath.sd that they call
+import raylib;
+
+Pair :: struct {
+    a: int;
+    b: int;
+}
+
+main :: () {
+    assert(Pair{1, 2} == Pair{1, 2});
+    v := raylib.Vector2Zero() + raylib.Vector2One();
+    assert(v == raylib.Vector2{1, 1});
+    assert(raylib.Vector2{3, 4}.length() == 5);
+}

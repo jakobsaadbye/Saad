@@ -1,0 +1,10 @@
+// expect-error: operator < compares, so it gives a bool, not a Vec
+
+Vec :: struct {
+    x: f32;
+    y: f32;
+}
+
+operator < :: (a: Vec, b: Vec) -> Vec { return a; }
+
+main :: () {}

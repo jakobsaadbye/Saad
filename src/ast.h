@@ -133,6 +133,7 @@ typedef enum AstFlags {
     AST_FLAG_HAS_ERRORS                            = 1 << 10, // Type checking it failed. It isn't checked again, see check_declaration_of()
     AST_FLAG_TREE_VALUE_OF_RESULTS                 = 1 << 11, // A call in an expression tree that gives a value and an error, which is its value, e.g a.posts().count()
     AST_FLAG_THROWS_ON_ERROR                       = 1 << 12, // A call that gives an error which isn't taken, e.g 'text := os.readFile(p);'. The error is thrown
+    AST_FLAG_OPERAND_CHECKED                       = 1 << 13, // An operand of an operator of its own, which was checked before the call that replaces the operator. It isn't checked again
 } AstFlags;
 
 typedef struct Ast {
@@ -301,6 +302,8 @@ typedef struct AstAssignment {
     AstExpr  *lhs;
     AssignOp  op;
     AstExpr  *expr;
+    AstExpr  *operator_call;                  // a += b with an operator + of the program: the call operator +(a, b), stored at a
+    struct AstOptionalValue *operator_place;  // Its first operand, the value at the place a, which is evaluated once
 } AstAssignment;
 
 typedef enum DirectiveKind {
@@ -462,6 +465,7 @@ typedef struct AstFunctionDefn {
     AstStruct       *self_struct;     // The struct the method is declared inside. Set if the method has an implicit 'self'
     bool             self_is_mutable; // Declared as 'method *'. Otherwise 'self' is read-only
 
+    int              operator_token;    // An operator of its own e.g 'operator + :: (a: Vector2, b: Vector2) -> Vector2', the token of '+'. See docs/operators.md
     bool             no_overflow_check; // @noOverflowCheck: its integer arithmetic wraps around instead of throwing a Panic on overflow
     AstStruct       *static_struct;   // The struct a function constant is declared inside e.g 'make :: (capacity := 2) -> List<T>' in List :: struct <T> {...}
 } AstFunctionDefn;

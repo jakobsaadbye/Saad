@@ -34,7 +34,8 @@ std/
   web/          namespace web: endpoints, functions that are called at the url of their name with JSON
     html.sd         namespace web.html: templates of HTML pages
   vendor/       Bindings for libraries the standard library doesn't own
-    raylib.sd       namespace raylib
+    raylib.sd       namespace raylib, with operators for its math types (docs/operators.md)
+    raymath.sd      namespace raylib: the functions of raymath, e.g Vector2Add and MatrixMultiply
   base64.sd     namespace base64: encode and decode, also for urls
   jwt.sd        namespace jwt: JSON Web Tokens signed with HS256, made and verified
   bytes.sd      namespace bytes: Buffer, bytes written at the end and read from the front

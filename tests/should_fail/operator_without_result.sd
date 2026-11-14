@@ -1,0 +1,10 @@
+// expect-error: operator + must give a value
+
+Vec :: struct {
+    x: f32;
+    y: f32;
+}
+
+operator + :: (a: Vec, b: Vec) { }
+
+main :: () {}

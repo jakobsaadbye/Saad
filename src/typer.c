@@ -181,6 +181,12 @@ Type *resolve_anonymous_type(Typer *typer, Type *type);
 AstExpr *member_default_value(AstIdentifier *member);
 bool desugar_key_value_for(Typer *typer, AstFor *ast_for);
 bool check_declaration_of(Typer *typer, AstIdentifier *ident);
+static bool may_have_operators(Type *type);
+static int compound_assignment_operator(AssignOp op);
+static void report_missing_operator(Typer *typer, Ast *at, int token, Type **operands, int count);
+static bool check_operator_assignment(Typer *typer, AstAssignment *assign, Type *lhs_type, Type *expr_type, bool *handled);
+static bool check_operator_signature(Typer *typer, AstFunctionDefn *op);
+static char *operator_symbol_name(AstFunctionDefn *op);
 AstIdentifier *get_struct_method(AstStruct *struct_defn, char *name);
 
 AstCast *generate_cast_to_any(Typer *typer, AstExpr *expr);
@@ -3110,7 +3116,9 @@ bool check_declaration_of(Typer *typer, AstIdentifier *ident) {
 
     // A declaration at the top of a file is not inside the function that uses it, e.g a global variable
     AstBlock *file_scope = ident->head.file ? ident->head.file->scope : NULL;
-    if (file_scope && find_identifier_in_scope(file_scope, ident->name) == ident) {
+    bool is_operator = ident->decl->values.count == 1 && ((AstExpr **)ident->decl->values.items)[0]->head.kind == AST_FUNCTION_DEFN &&
+                       ((AstFunctionDefn **)ident->decl->values.items)[0]->operator_token != 0; // Not in a scope, see parse_operator_declaration()
+    if (file_scope && (is_operator || find_identifier_in_scope(file_scope, ident->name) == ident)) {
         typer->current_scope      = file_scope;
         typer->enclosing_function = NULL;
     }
@@ -3902,6 +3910,19 @@ bool check_assignment(Typer *typer, AstAssignment *assign) {
     if (lhs_is_constant) {
         report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(assign), "Cannot assign new value to constant");
         return false;
+    }
+
+    // a += b with an operator + of the program, e.g of a Vector2
+    if (assign->op != ASSIGN_EQUAL) {
+        bool handled = false;
+        bool ok = check_operator_assignment(typer, assign, lhs_type, expr_type, &handled);
+        if (handled) return ok;
+        int token = compound_assignment_operator(assign->op);
+        Type *types[2] = {lhs_type, expr_type};
+        if (token && ((lhs_type->kind == TYPE_STRUCT && may_have_operators(lhs_type)) || (expr_type->kind == TYPE_STRUCT && may_have_operators(expr_type)))) {
+            report_missing_operator(typer, (Ast *)assign, token, types, 2);
+            return false;
+        }
     }
 
     // options |= .verbose, options &= ~.verbose and options ^= .verbose of an enum flags
@@ -7328,6 +7349,7 @@ static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *fu
 
 
     if (!check_no_private_types_in_signature(typer, func_defn)) return NULL;
+    if (func_defn->operator_token && !check_operator_signature(typer, func_defn)) return NULL;
 
     // Mark the function as fully typed, when we have typechecked the function signature
     // @Note: We mark it typechecked here so that if the function recurses on itself, then the recursive call knows that it shouldn't typecheck the function definition again
@@ -7378,6 +7400,8 @@ static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *fu
             append_mangled_name(&sb, func_defn->generic_function->method_struct->identifier->name);
             sb_append(&sb, ".%s", func_defn->identifier->name);
             func_defn->symbol_name = sb_to_string(&sb);
+        } else if (func_defn->operator_token) {
+            func_defn->symbol_name = operator_symbol_name(func_defn);
         } else if (func_defn->static_struct) {
             // A function declared inside a struct e.g Vec.make, or List$int.make in an instance of a generic struct
             StringBuilder sb = sb_init(32);
@@ -8251,6 +8275,7 @@ Type *check_expression(Typer *typer, AstExpr *expr, Type *ctx_type) {
     if (ctx_type && is_optional_type(ctx_type)) ctx_type = optional_inner_type(ctx_type);
 
     if (expr->head.kind == AST_OPTIONAL_VALUE || expr->head.kind == AST_OPTIONAL_CHAIN) return expr->type; // Made checked by check_optional_chain()
+    if (expr->head.flags & AST_FLAG_OPERAND_CHECKED) return expr->type; // An operand of an operator of the program, checked before its call was made
 
     // Only array and member accesses care about being used as a place. Everything below them is checked as a value, unless they say otherwise
     typer->current_place  = typer->checking_place;
@@ -9386,6 +9411,374 @@ static bool is_number_literal(AstExpr *expr) {
     return kind == LITERAL_INTEGER || kind == LITERAL_FLOAT;
 }
 
+//
+// Operators of the program's own, e.g 'operator + :: (a: Vector2, b: Vector2) -> Vector2'. a + b of two Vector2 is a call of it,
+// which is the replacement of the binary, so the backends see a call. An operator is found by the types of its operands, which
+// must be its parameters, except a number written in the program, e.g the 2 of v * 2 for a parameter of a float. See docs/operators.md
+//
+
+const char *declarable_operator_name(int token);
+
+// A struct, an enum or a newtype can have operators of its own
+static bool may_have_operators(Type *type) {
+    if (type == NULL) return false;
+    if (type->newtype) return true;
+    if (type->kind == TYPE_ENUM) return true;
+    return type->kind == TYPE_STRUCT && !is_optional_type(type);
+}
+
+// The operands of an operator are its parameters exactly, e.g an f32 isn't an f64 and a Meters isn't an f64
+static bool operand_type_is(Type *param, Type *arg) {
+    return types_are_equal(param, arg) && types_are_identical(param, arg);
+}
+
+// How well a value of the type 'arg' goes to a parameter of an operator: 2 when it is the type, 1 for a number written in the
+// program that becomes a number of the parameter, 0 when it doesn't go
+static int operand_match(Type *param, Type *arg) {
+    if (is_untyped_type(arg) && (arg->kind == TYPE_INTEGER || arg->kind == TYPE_FLOAT)) {
+        if (param->kind == TYPE_FLOAT) return 1;
+        if (param->kind == TYPE_INTEGER && arg->kind == TYPE_INTEGER) return 1;
+        return 0;
+    }
+    return operand_type_is(param, arg) ? 2 : 0;
+}
+
+// The types of the parameters of the operator are known once its declaration is checked. False if it has errors
+static bool operator_is_checked(Typer *typer, AstFunctionDefn *op) {
+    if (op->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) return true;
+    if (op->head.head.flags & AST_FLAG_HAS_ERRORS) return false;
+
+    // Its file first, like a namespace that is used, so that the file and the other files of its namespace are ready, e.g the
+    // raymath.sd of the functions that the operators of raylib.sd call
+    AstFile *file = op->head.head.file;
+    if (file && file->check_state == 0) {
+        Typer saved_state = *typer;
+        check_file(typer, file);
+        typer_restore_state(typer, saved_state);
+        typer->enclosing_function_stack = saved_state.enclosing_function_stack;
+        if (op->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) return true;
+        if (op->head.head.flags & AST_FLAG_HAS_ERRORS) return false;
+    }
+    if (!check_declaration_of(typer, op->identifier)) return false;
+    return (op->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) != 0;
+}
+
+// The name of a type without its namespace and type arguments, e.g Vector2 of raylib.Vector2 and Box of Box<int>
+static bool same_base_name(const char *a, const char *b) {
+    const char *dot_a = strrchr(a, '.'), *dot_b = strrchr(b, '.');
+    if (dot_a && !strchr(dot_a, '<')) a = dot_a + 1;
+    if (dot_b && !strchr(dot_b, '<')) b = dot_b + 1;
+    size_t length_a = strcspn(a, "<"), length_b = strcspn(b, "<");
+    return length_a == length_b && strncmp(a, b, length_a) == 0;
+}
+
+// Before an operator is checked, whether it may fit the operands, by the names of the types of its parameters as they are
+// written. An operator that can't fit isn't checked, e.g an operator == of raylib for an == of two structs of the prelude, which
+// is checked before raylib is
+static bool operator_may_fit(Typer *typer, AstFunctionDefn *op, Type **operands, int count) {
+    if (op->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) return true;
+
+    // The prelude is checked first, and uses no operator of a namespace, which would be checked inside of it
+    AstFile *prelude = typer->parser->collections_file;
+    if (prelude && prelude->check_state != 2 && op->head.head.file && op->head.head.file->ns) return false;
+    for (int i = 0; i < count; i++) {
+        Type *param = (((AstIdentifier **)op->parameters.items)[i])->type;
+        if (param == NULL) return true;
+        if (param->kind != TYPE_NAME) {
+            if (may_have_operators(operands[i])) return false; // e.g an f32 isn't a Vector2
+            continue;
+        }
+        if (!may_have_operators(operands[i])) continue; // e.g a number for a newtype of a number
+        Type *operand = operands[i];
+        const char *name = operand->newtype ? operand->newtype->name : operand->name;
+        if (name && same_base_name(param->name, name)) continue;
+
+        // Another name for the type, which can't be told without checking it
+        AstFile *file = op->head.head.file;
+        AstIdentifier *named = file && file->scope && !strchr(param->name, '.') ? find_identifier_in_scope(file->scope, param->name) : NULL;
+        bool is_alias = named && (named->flags & IDENTIFIER_IS_TYPE_ALIAS) && !(named->decl && (named->decl->flags & DECLARATION_NEWTYPE));
+        if (named == NULL || is_alias) continue;
+        return false;
+    }
+    return true;
+}
+
+static bool operator_is_visible(Typer *typer, AstFunctionDefn *op) {
+    if (!(op->identifier->flags & IDENTIFIER_IS_PRIVATE)) return true;
+    AstFile *from = typer->current_file;
+    AstFile *decl = op->identifier->head.file;
+    return decl == from || (decl && from && decl->ns && decl->ns == from->ns);
+}
+
+// The operator for the operands, or NULL. 'other' is set to a second operator that fits as well, which makes it ambiguous
+static AstFunctionDefn *find_operator(Typer *typer, int token, Type **operands, int count, AstFunctionDefn **other) {
+    AstFunctionDefn *best = NULL;
+    int best_score = 0;
+    *other = NULL;
+    for (int i = 0; i < typer->parser->operators.count; i++) {
+        AstFunctionDefn *op = ((AstFunctionDefn **)typer->parser->operators.items)[i];
+        if (op->operator_token != token || op->parameters.count != count) continue;
+        if (!operator_is_visible(typer, op) || !operator_may_fit(typer, op, operands, count) || !operator_is_checked(typer, op)) continue;
+
+        int score = 0;
+        for (int j = 0; j < count; j++) {
+            AstIdentifier *param = ((AstIdentifier **)op->parameters.items)[j];
+            int match = operand_match(param->type, operands[j]);
+            if (match == 0) { score = 0; break; }
+            score += match;
+        }
+        if (score == 0) continue;
+        if (score > best_score) {
+            best = op;
+            best_score = score;
+            *other = NULL;
+        } else if (score == best_score) {
+            *other = op;
+        }
+    }
+    return best;
+}
+
+// The text of the parameters of an operator, e.g (Vector2, float)
+static char *operator_parameters_text(AstFunctionDefn *op) {
+    StringBuilder sb = sb_init(32);
+    sb_append(&sb, "(");
+    for (int i = 0; i < op->parameters.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)op->parameters.items)[i];
+        sb_append(&sb, "%s%s", i > 0 ? ", " : "", param->type ? type_to_str(param->type) : "?");
+    }
+    sb_append(&sb, ")");
+    return sb_to_string(&sb);
+}
+
+static void report_ambiguous_operator(Typer *typer, Ast *at, AstFunctionDefn *a, AstFunctionDefn *b) {
+    report_error_ast(typer->parser, LABEL_ERROR, at, "Two operators %s fit here, %s and %s", declarable_operator_name(a->operator_token),
+        operator_parameters_text(a), operator_parameters_text(b));
+    report_error_ast(typer->parser, LABEL_NOTE, (Ast *)a->identifier, "Here is %s %s", a->identifier->name, operator_parameters_text(a));
+    report_error_ast(typer->parser, LABEL_NOTE, (Ast *)b->identifier, "Here is %s %s", b->identifier->name, operator_parameters_text(b));
+    report_error_ast(typer->parser, LABEL_HINT, NULL, "A number written in the program fits a parameter of any number type. Give it a type, e.g 2 as f32");
+}
+
+// The type of an operand as a parameter, e.g f32 for the 2.5 of v * 2.5
+static char *operand_type_text(Type *type) {
+    if (is_untyped_type(type) && type->kind == TYPE_FLOAT)   return "f32";
+    if (is_untyped_type(type) && type->kind == TYPE_INTEGER) return "int";
+    return type_to_str(type);
+}
+
+// No operator of the program for the operands. Says which ones there are for their types, and how to declare one
+static void report_missing_operator(Typer *typer, Ast *at, int token, Type **operands, int count) {
+    const char *name = declarable_operator_name(token);
+    if (count == 1) report_error_ast(typer->parser, LABEL_ERROR, at, "%s has no operator %s", text_bold(type_to_str(operands[0])), name);
+    else            report_error_ast(typer->parser, LABEL_ERROR, at, "There is no operator %s for a %s and a %s", name, text_bold(type_to_str(operands[0])), text_bold(is_untyped_type(operands[1]) ? "number" : type_to_str(operands[1])));
+
+    int listed = 0;
+    for (int i = 0; i < typer->parser->operators.count && listed < 4; i++) {
+        AstFunctionDefn *op = ((AstFunctionDefn **)typer->parser->operators.items)[i];
+        if (op->operator_token != token || !(op->head.head.flags & AST_FLAG_IS_TYPE_CHECKED) || !operator_is_visible(typer, op)) continue;
+        bool related = false;
+        for (int j = 0; j < op->parameters.count; j++) {
+            Type *param = (((AstIdentifier **)op->parameters.items)[j])->type;
+            for (int k = 0; k < count; k++) if (may_have_operators(operands[k]) && operand_type_is(param, operands[k])) related = true;
+        }
+        if (!related) continue;
+        report_error_ast(typer->parser, LABEL_NOTE, (Ast *)op->identifier, "There is %s %s", op->identifier->name, operator_parameters_text(op));
+        listed += 1;
+    }
+
+    char *a = operand_type_text(operands[0]);
+    if (count == 1) report_error_ast(typer->parser, LABEL_HINT, NULL, "Declare it, e.g operator %s :: (v: %s) -> %s { ... }", name, a, a);
+    else            report_error_ast(typer->parser, LABEL_HINT, NULL, "Declare it, e.g operator %s :: (a: %s, b: %s) -> %s { ... }", name, a, operand_type_text(operands[1]),
+                                     token == '<' || token == '>' || token == TOKEN_LESS_EQUAL || token == TOKEN_GREATER_EQUAL || token == TOKEN_DOUBLE_EQUAL ? "bool" : a);
+}
+
+// Makes the call of the operator with the operands, which were checked already. 'negate' makes it !op(a, b), for a != b
+static AstExpr *make_operator_call(Typer *typer, Ast *at, AstFunctionDefn *op, AstExpr **operands, int count, bool negate) {
+    Parser *parser = typer->parser;
+    AstFunctionCall *call = ast_allocate(parser, sizeof(AstFunctionCall));
+    call->head.head       = *at;
+    call->head.head.kind  = AST_FUNCTION_CALL;
+    call->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    call->expression      = (AstExpr *)make_resolved_identifier_literal(typer, op->identifier, at);
+    call->arguments       = da_init(count, sizeof(AstArgument *));
+    call->type_args       = da_init(1, sizeof(Type *));
+    call->paren_start_token.start = at->start;
+    call->paren_start_token.end   = at->start;
+    for (int i = 0; i < count; i++) {
+        // A number written in the program is checked again, as a number of the parameter
+        if (operands[i]->type && !is_untyped_type(operands[i]->type)) operands[i]->head.flags |= AST_FLAG_OPERAND_CHECKED;
+        AstArgument *argument = generate_argument_from_expr(typer, operands[i]);
+        da_append(&call->arguments, argument);
+    }
+    if (!negate) return (AstExpr *)call;
+
+    AstUnary *not        = ast_allocate(parser, sizeof(AstUnary));
+    not->head.head       = *at;
+    not->head.head.kind  = AST_UNARY;
+    not->head.head.flags = AST_FLAG_COMPILER_GENERATED;
+    not->operator        = OP_NOT;
+    not->expr            = (AstExpr *)call;
+    return (AstExpr *)not;
+}
+
+// a op b, or -a, with an operator of the program: the call of the operator is the replacement of the expression. Returns its
+// type, or NULL with 'handled' false when there is no such operator
+static Type *check_operator_call(Typer *typer, AstExpr *expr, int token, AstExpr **operands, Type **types, int count, bool *handled) {
+    *handled = false;
+    bool any = false;
+    for (int i = 0; i < count; i++) if (may_have_operators(types[i])) any = true;
+    int lookup = token == TOKEN_NOT_EQUAL ? TOKEN_DOUBLE_EQUAL : token;
+    if (!any || declarable_operator_name(lookup) == NULL) return NULL;
+
+    AstFunctionDefn *other = NULL;
+    AstFunctionDefn *op = find_operator(typer, lookup, types, count, &other);
+    if (op == NULL) return NULL;
+    *handled = true;
+    if (other) {
+        report_ambiguous_operator(typer, (Ast *)expr, op, other);
+        return NULL;
+    }
+
+    AstExpr *call = make_operator_call(typer, (Ast *)expr, op, operands, count, token == TOKEN_NOT_EQUAL);
+    Type *type = check_expression(typer, call, NULL);
+    if (!type) return NULL;
+    expr->replacement = call;
+    return type;
+}
+
+// The operator of a compound assignment, e.g + of +=, or 0
+static int compound_assignment_operator(AssignOp op) {
+    switch (op) {
+    case ASSIGN_PLUS_EQUAL:   return '+';
+    case ASSIGN_MINUS_EQUAL:  return '-';
+    case ASSIGN_TIMES_EQUAL:  return '*';
+    case ASSIGN_DIVIDE_EQUAL: return '/';
+    case ASSIGN_MODULO_EQUAL: return '%';
+    default: return 0;
+    }
+}
+
+// a += b with an operator + of the program is a = a + b, where a is evaluated once: the first operand of the call is the
+// value at the place, which the backend sets when it lowers the assignment. False with 'handled' false when there is no operator
+static bool check_operator_assignment(Typer *typer, AstAssignment *assign, Type *lhs_type, Type *expr_type, bool *handled) {
+    *handled = false;
+    int token = compound_assignment_operator(assign->op);
+    if (token == 0) return false;
+
+    Type *types[2] = {lhs_type, expr_type};
+    if (!may_have_operators(lhs_type) && !may_have_operators(expr_type)) return false;
+    AstFunctionDefn *other = NULL;
+    AstFunctionDefn *op = find_operator(typer, token, types, 2, &other);
+    if (op == NULL) return false;
+    *handled = true;
+    if (other) {
+        report_ambiguous_operator(typer, (Ast *)assign, op, other);
+        return false;
+    }
+
+    AstOptionalValue *current = ast_allocate(typer->parser, sizeof(AstOptionalValue));
+    current->head.head        = assign->lhs->head;
+    current->head.head.kind   = AST_OPTIONAL_VALUE;
+    current->head.head.flags  = AST_FLAG_COMPILER_GENERATED | AST_FLAG_IS_TYPE_CHECKED;
+    current->head.type        = lhs_type;
+    current->head.replacement = NULL;
+
+    AstExpr *operands[2] = {(AstExpr *)current, assign->expr};
+    AstExpr *call = make_operator_call(typer, (Ast *)assign, op, operands, 2, false);
+    Type *type = check_expression(typer, call, NULL);
+    if (!type) return false;
+    if (!types_are_equal(type, lhs_type)) {
+        report_error_ast(typer->parser, LABEL_ERROR, (Ast *)assign, "%s %s gives a %s, which can't be assigned to a %s", op->identifier->name,
+            operator_parameters_text(op), text_bold(type_to_str(type)), text_bold(type_to_str(lhs_type)));
+        return false;
+    }
+    assign->operator_call  = call;
+    assign->operator_place = current;
+    return true;
+}
+
+// Checks what an operator declares, once its signature is checked: what it takes, gives, and that it is the only one for its operands
+static bool check_operator_signature(Typer *typer, AstFunctionDefn *op) {
+    Parser *parser = typer->parser;
+    const char *name = declarable_operator_name(op->operator_token);
+    int count = op->parameters.count;
+    bool comparison = op->operator_token == '<' || op->operator_token == '>' || op->operator_token == TOKEN_LESS_EQUAL ||
+                      op->operator_token == TOKEN_GREATER_EQUAL || op->operator_token == TOKEN_DOUBLE_EQUAL;
+
+    if (count != 2 && !(count == 1 && op->operator_token == '-')) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)op->identifier, "%s takes two parameters, the left and the right operand, not %d", op->identifier->name, count);
+        if (op->operator_token == '-') report_error_ast(parser, LABEL_HINT, NULL, "Or one, for -v: operator - :: (v: Vector2) -> Vector2");
+        return false;
+    }
+    if (op->has_default_parameters || op->is_variadic) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)op->identifier, "The parameters of an operator can't have default values or be variadic");
+        return false;
+    }
+    bool has_own_type = false;
+    for (int i = 0; i < count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)op->parameters.items)[i];
+        if (may_have_operators(param->type)) has_own_type = true;
+    }
+    if (!has_own_type) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)op->identifier, "%s %s doesn't take a struct, an enum or a newtype", op->identifier->name, operator_parameters_text(op));
+        report_error_ast(parser, LABEL_NOTE, NULL, "The operators of numbers, strings and pointers are those of the language. An operator of its own is for a type of the program, e.g operator %s :: (a: Vector2, b: Vector2) -> Vector2", name);
+        return false;
+    }
+    Type *result = op->return_types.count == 1 ? ((Type **)op->return_types.items)[0] : NULL;
+    if (result == NULL || result->kind == TYPE_VOID) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)op->identifier, "%s must give a value, e.g operator %s :: (a: Vector2, b: Vector2) -> %s", op->identifier->name, name, comparison ? "bool" : "Vector2");
+        return false;
+    }
+    if (comparison && result->kind != TYPE_BOOL) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)op->identifier, "%s compares, so it gives a bool, not a %s", op->identifier->name, type_to_str(result));
+        return false;
+    }
+
+    // Only one operator for the same operands
+    for (int i = 0; i < parser->operators.count; i++) {
+        AstFunctionDefn *other = ((AstFunctionDefn **)parser->operators.items)[i];
+        if (other == op || other->operator_token != op->operator_token || other->parameters.count != count) continue;
+        if (!(other->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) continue; // It compares itself with this one when it is checked
+        bool same = true;
+        for (int j = 0; j < count; j++) {
+            Type *a = (((AstIdentifier **)op->parameters.items)[j])->type;
+            Type *b = (((AstIdentifier **)other->parameters.items)[j])->type;
+            if (!operand_type_is(a, b)) same = false;
+        }
+        if (same) {
+            report_error_ast(parser, LABEL_ERROR, (Ast *)op->identifier, "Redeclaration of %s %s", op->identifier->name, operator_parameters_text(op));
+            report_error_ast(parser, LABEL_NOTE, (Ast *)other->identifier, "Here is the previous declaration");
+            return false;
+        }
+    }
+    return true;
+}
+
+// The symbol of an operator, e.g operator_add$Vector2$Vector2. The backend makes it unique if two end up the same
+static char *operator_symbol_name(AstFunctionDefn *op) {
+    const char *word = "op";
+    switch (op->operator_token) {
+    case '+': word = "add"; break;
+    case '-': word = op->parameters.count == 1 ? "neg" : "sub"; break;
+    case '*': word = "mul"; break;
+    case '/': word = "div"; break;
+    case '%': word = "mod"; break;
+    case '<': word = "lt"; break;
+    case '>': word = "gt"; break;
+    case TOKEN_LESS_EQUAL:    word = "le"; break;
+    case TOKEN_GREATER_EQUAL: word = "ge"; break;
+    case TOKEN_DOUBLE_EQUAL:  word = "eq"; break;
+    }
+    StringBuilder sb = sb_init(32);
+    sb_append(&sb, "operator_%s", word);
+    for (int i = 0; i < op->parameters.count; i++) {
+        AstIdentifier *param = ((AstIdentifier **)op->parameters.items)[i];
+        sb_append(&sb, "$");
+        append_mangled_name(&sb, type_to_str(param->type));
+    }
+    return sb_to_string(&sb);
+}
+
 Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
 
     Type *ti_lhs = NULL;
@@ -9468,6 +9861,22 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
 
     if (!ti_lhs || !ti_rhs) return NULL;
 
+    // An operator of the program's own, e.g a + b of two Vector2
+    {
+        AstExpr *operands[2] = {binary->left, binary->right};
+        Type    *types[2]    = {ti_lhs, ti_rhs};
+        bool handled = false;
+        Type *type = check_operator_call(typer, (AstExpr *)binary, binary->operator, operands, types, 2, &handled);
+        if (handled) return type;
+
+        // A struct only has the operators the program declares for it, and == and != member by member
+        bool equality = binary->operator == TOKEN_DOUBLE_EQUAL || binary->operator == TOKEN_NOT_EQUAL;
+        bool has_struct = (ti_lhs->kind == TYPE_STRUCT && may_have_operators(ti_lhs)) || (ti_rhs->kind == TYPE_STRUCT && may_have_operators(ti_rhs));
+        if (has_struct && !equality && declarable_operator_name(binary->operator)) {
+            report_missing_operator(typer, (Ast *)binary, binary->operator, types, 2);
+            return NULL;
+        }
+    }
 
     TypeKind lhs = ti_lhs->kind;
     TypeKind rhs = ti_rhs->kind;
@@ -9665,6 +10074,17 @@ Type *check_unary(Typer *typer, AstUnary *unary, Type *ctx_type) {
     } 
 
     if (unary->operator == OP_UNARY_MINUS) {
+        // -v with an operator - of the program, e.g of a Vector2
+        AstExpr *operands[1] = {unary->expr};
+        Type    *types[1]    = {expr_type};
+        bool handled = false;
+        Type *type = check_operator_call(typer, (AstExpr *)unary, '-', operands, types, 1, &handled);
+        if (handled) return type;
+        if (expr_type->kind == TYPE_STRUCT && may_have_operators(expr_type)) {
+            report_missing_operator(typer, (Ast *)unary, '-', types, 1);
+            return NULL;
+        }
+
         if (type_kind != TYPE_INTEGER && type_kind != TYPE_FLOAT && type_kind != TYPE_ENUM) { // Maybe give a warning when applying unary minus to an enum??? Seems kinda strange
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(unary->expr), "Type mismatch. Operator '-' is not applicative on expression of type '%s'\n", type_to_str(expr_type));
             return NULL;

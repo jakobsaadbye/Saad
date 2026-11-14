@@ -3119,6 +3119,14 @@ static void lower_assignment(Lowerer *L, AstAssignment *assign) {
     Type *type = assign->lhs->type;
     Value lhs = lower_place(L, assign->lhs);
 
+    // a += b with an operator + of the program: a = operator +(a, b), whose first operand is the value at the place
+    if (assign->operator_call) {
+        assign->operator_place->lowered = &lhs;
+        store_expr(L, lhs.addr, type, assign->operator_call, false);
+        assign->operator_place->lowered = NULL;
+        return;
+    }
+
     if (assign->op == ASSIGN_EQUAL) {
         // Not 'fresh': the right hand side may read the destination (e.g `a = A{x = a.y}`)
         store_expr(L, lhs.addr, type, assign->expr, false);

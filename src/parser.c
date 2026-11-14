@@ -101,6 +101,7 @@ Parser parser_init(Lexer *lexer) {
     parser.namespaces    = da_init(16, sizeof(Namespace *));
     parser.thread_locals = da_init(4, sizeof(AstIdentifier *));
     parser.attributed_functions = da_init(4, sizeof(AstIdentifier *));
+    parser.operators            = da_init(4, sizeof(AstFunctionDefn *));
 
     return parser;
 }
@@ -232,7 +233,7 @@ static ParserState save_parser_state(Parser *parser) {
 static bool starts_top_level_declaration(Parser *parser, int lookahead) {
     Token token = peek_token(parser, lookahead);
     if (token.start.col != 1) return false;
-    if (token.type == TOKEN_IMPORT || token.type == TOKEN_USE || token.type == TOKEN_EXTERN || token.type == '@') return true;
+    if (token.type == TOKEN_IMPORT || token.type == TOKEN_USE || token.type == TOKEN_EXTERN || token.type == '@' || token.type == TOKEN_OPERATOR) return true;
     if (token.type != TOKEN_LITERAL_IDENTIFIER) return false;
     Token after = peek_token(parser, lookahead + 1);
     return after.type == TOKEN_DOUBLE_COLON || after.type == ':' || after.type == TOKEN_COLON_EQUAL;
@@ -1431,6 +1432,12 @@ Ast *parse_statement(Parser *parser) {
 
     else if (token.type == TOKEN_LITERAL_IDENTIFIER && peek_token(parser, 1).type == TOKEN_DOUBLE_COLON && (peek_token(parser, 2).type == TOKEN_ENUM || peek_token(parser, 2).type == TOKEN_ENUMFLAGS)) {
         stmt = (Ast *)(parse_enum_defn(parser));
+        statement_ends_with_semicolon = false;
+        matched_a_statement = true;
+    }
+
+    else if (token.type == TOKEN_OPERATOR) {
+        stmt = (Ast *)(parse_declaration(parser));
         statement_ends_with_semicolon = false;
         matched_a_statement = true;
     }
@@ -4424,6 +4431,108 @@ bool parse_expression_list(Parser *parser, DynamicArray *exprs) {
     return true;
 }
 
+// The name of an operator that a program can declare, e.g "+" of 'operator + :: (a: Vector2, b: Vector2) -> Vector2', or NULL
+const char *declarable_operator_name(int token) {
+    switch (token) {
+    case '+': return "+";
+    case '-': return "-";
+    case '*': return "*";
+    case '/': return "/";
+    case '%': return "%";
+    case '<': return "<";
+    case '>': return ">";
+    case TOKEN_LESS_EQUAL:    return "<=";
+    case TOKEN_GREATER_EQUAL: return ">=";
+    case TOKEN_DOUBLE_EQUAL:  return "==";
+    default: return NULL;
+    }
+}
+
+// An operator of its own e.g 'operator + :: (a: Vector2, b: Vector2) -> Vector2 { ... }'. It is a function, named "operator +",
+// which isn't in a scope: a + b of two Vector2 is a call of it, see check_operator_call() in typer.c and docs/operators.md
+static AstDeclaration *parse_operator_declaration(Parser *parser, AstDeclaration *decl) {
+    Token keyword = peek_next_token(parser);
+    eat_token(parser);
+
+    Token op = peek_next_token(parser);
+    const char *name = declarable_operator_name(op.type);
+    if (op.type == TOKEN_NOT_EQUAL) {
+        report_error_token(parser, LABEL_ERROR, op, "'!=' is the opposite of '==', so it can't be declared on its own");
+        report_error_ast(parser, LABEL_HINT, NULL, "Declare 'operator ==', which a != b uses too");
+        return NULL;
+    }
+    if (name == NULL) {
+        report_error_token(parser, LABEL_ERROR, op, "Expected an operator that can be declared after 'operator', one of + - * / %% < <= > >= ==");
+        report_error_ast(parser, LABEL_HINT, NULL, "e.g operator + :: (a: Vector2, b: Vector2) -> Vector2 { ... }");
+        return NULL;
+    }
+    eat_token(parser);
+
+    if (parser->enclosing_function || parser->inside_extern_block || (parser->current_scope && parser->current_scope->belongs_to_struct)) {
+        report_error_range(parser, keyword.start, op.end, "An operator is declared at the top of a file, not inside a %s",
+            parser->enclosing_function ? "function" : parser->inside_extern_block ? "extern block" : "struct");
+        report_error_ast(parser, LABEL_HINT, NULL, "e.g operator %s :: (a: Vector2, b: Vector2) -> Vector2 { ... } after the struct", name);
+        return NULL;
+    }
+
+    Token colons = peek_next_token(parser);
+    if (colons.type != TOKEN_DOUBLE_COLON) {
+        report_error_token(parser, LABEL_ERROR, colons, "Expected '::' after 'operator %s'", name);
+        report_error_ast(parser, LABEL_HINT, NULL, "e.g operator %s :: (a: Vector2, b: Vector2) -> Vector2 { ... }", name);
+        return NULL;
+    }
+    eat_token(parser);
+
+    Token start = peek_next_token(parser);
+    if (start.type == TOKEN_METHOD) {
+        report_error_token(parser, LABEL_ERROR, start, "An operator is a function, not a method");
+        report_error_ast(parser, LABEL_HINT, NULL, "e.g operator %s :: (a: Vector2, b: Vector2) -> Vector2 { ... }", name);
+        return NULL;
+    }
+    if (start.type != '(' && start.type != '<') {
+        report_error_token(parser, LABEL_ERROR, start, "Expected the parameters of the operator, e.g operator %s :: (a: Vector2, b: Vector2) -> Vector2 { ... }", name);
+        return NULL;
+    }
+    AstFunctionDefn *func_defn = parse_function_defn(parser);
+    if (func_defn == NULL) return NULL;
+    if (func_defn->type_params.count > 0) {
+        report_error_range(parser, keyword.start, op.end, "An operator can't be generic yet");
+        report_error_ast(parser, LABEL_HINT, NULL, "Declare it for each type, e.g operator %s :: (a: Vec2, b: Vec2) -> Vec2", name);
+        return NULL;
+    }
+
+    StringBuilder sb = sb_init(16);
+    sb_append(&sb, "operator %s", name);
+
+    AstIdentifier *ident = (AstIdentifier *) ast_allocate(parser, sizeof(AstIdentifier));
+    ident->head.kind  = AST_IDENTIFIER;
+    ident->head.file  = parser->current_file;
+    ident->head.start = keyword.start;
+    ident->head.end   = op.end;
+    ident->name       = sb_to_string(&sb);
+    ident->scope      = parser->current_scope;
+    ident->decl       = decl;
+    ident->type       = func_defn->identifier->type;
+    ident->flags     |= func_defn->identifier->flags | IDENTIFIER_IS_CONSTANT | IDENTIFIER_IS_CONSTANT_FUNCTION_DEFN;
+    da_append(&decl->idents, ident);
+    AstExpr *value = (AstExpr *)func_defn;
+    da_append(&decl->values, value);
+
+    decl->flags      |= DECLARATION_CONSTANT;
+    decl->head.flags |= AST_FLAG_DECL_IS_CONSTANT_FUNCTION_DEFN;
+    decl->head.start  = keyword.start;
+    decl->head.end    = func_defn->head.head.end;
+
+    func_defn->identifier      = ident;
+    func_defn->is_lambda       = false;
+    func_defn->operator_token  = op.type;
+    func_defn->head.head.start = keyword.start;
+
+    // Not added to a scope: it has no name to be used by, and there may be many operators +. It is found by the types of its operands
+    da_append(&parser->operators, func_defn);
+    return decl;
+}
+
 AstDeclaration *parse_declaration(Parser *parser) {
     AstDeclaration *decl = (AstDeclaration *) ast_allocate(parser, sizeof(AstDeclaration));
     decl->head.kind = AST_DECLARATION;
@@ -4432,6 +4541,8 @@ AstDeclaration *parse_declaration(Parser *parser) {
     decl->idents = da_init(2, sizeof(AstIdentifier *));
     decl->values = da_init(2, sizeof(AstExpr *));
     decl->first_token_index = parser->current_token_index; // Instances of generic structs parse their constants again from here
+
+    if (peek_next_token(parser).type == TOKEN_OPERATOR) return parse_operator_declaration(parser, decl);
 
     // Parse the identifiers
     Token next = {0};

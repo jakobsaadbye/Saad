@@ -1,0 +1,11 @@
+// expect-error: Redeclaration of operator + (Vec, Vec)
+
+Vec :: struct {
+    x: f32;
+    y: f32;
+}
+
+operator + :: (a: Vec, b: Vec) -> Vec { return a; }
+operator + :: (x: Vec, y: Vec) -> Vec { return x; }
+
+main :: () {}

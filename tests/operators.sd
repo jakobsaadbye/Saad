@@ -1,0 +1,131 @@
+// Operators of the program's own, e.g a + b of two Vec2. See docs/operators.md
+import fmt;
+
+Vec2 :: struct {
+    x: f32;
+    y: f32;
+}
+
+operator + :: (a: Vec2, b: Vec2) -> Vec2 { return Vec2{a.x + b.x, a.y + b.y}; }
+operator - :: (a: Vec2, b: Vec2) -> Vec2 { return Vec2{a.x - b.x, a.y - b.y}; }
+operator - :: (v: Vec2) -> Vec2          { return Vec2{-v.x, -v.y}; }
+operator * :: (v: Vec2, s: f32) -> Vec2  { return Vec2{v.x * s, v.y * s}; }
+operator * :: (s: f32, v: Vec2) -> Vec2  { return v * s; }
+operator * :: (a: Vec2, b: Vec2) -> f32  { return a.x * b.x + a.y * b.y; }    // The dot product
+operator / :: (v: Vec2, s: f32) -> Vec2  { return Vec2{v.x / s, v.y / s}; }
+
+// Compared by length
+operator < :: (a: Vec2, b: Vec2) -> bool { return a * a < b * b; }
+
+// Equal when they are close
+operator == :: (a: Vec2, b: Vec2) -> bool {
+    d := a - b;
+    return d * d < 0.0001;
+}
+
+Money :: newtype i64;
+
+operator * :: (m: Money, percent: f64) -> Money { return ((m as f64) * percent / 100) as Money; }
+
+Rank :: enum { low, mid, high }
+
+operator + :: (r: Rank, steps: int) -> Rank {
+    n := r as int + steps;
+    if n > 2 { n = 2; }
+    return n as Rank;
+}
+
+Grid :: struct {
+    cells: [4]Vec2;
+}
+
+// A generic function uses the operators of its type arguments
+sum :: <T>(xs: []T, zero: T) -> T {
+    total := zero;
+    for x in xs { total += x; }
+    return total;
+}
+
+biggest :: <T>(a: T, b: T) -> T {
+    if a < b { return b; }
+    return a;
+}
+
+calls := 0;
+
+index :: () -> int {
+    calls += 1;
+    return 1;
+}
+
+main :: () {
+    a := Vec2{1, 2};
+    b := Vec2{3, 4};
+
+    c := a + b;
+    assert(c.x == 4 && c.y == 6);
+    assert((b - a).x == 2);
+    assert((-a).y == -2);
+    assert((a * 2).y == 4);           // A number written in the program is an f32
+    assert((2 * a).x == 2);
+    assert(a * b == 11);              // The dot product
+    assert((b / 2).x == 1.5);
+    assert(a + b * 2 == Vec2{7, 10}); // * before +, like numbers
+    assert(a < b && !(b < a));
+
+    // == of its own, and != is its opposite
+    assert(Vec2{1, 1} == Vec2{1.000001, 1});
+    assert(Vec2{1, 1} != Vec2{2, 1});
+
+    // Compound assignments use the operators
+    p := a;
+    p += b;
+    p -= Vec2{1, 1};
+    p *= 2;
+    p /= 2;
+    assert(p == Vec2{3, 5});
+
+    // The place is evaluated once
+    grid: Grid;
+    grid.cells[index()] += Vec2{1, 1};
+    grid.cells[index()] *= 3;
+    assert(calls == 2);
+    assert(grid.cells[1] == Vec2{3, 3});
+
+    // In a list, through a pointer
+    xs: [..]Vec2;
+    xs.add(a);
+    xs[0] += b;
+    assert(xs[0] == c);
+    ptr := &xs[0];
+    *ptr = *ptr * 2;
+    assert(xs[0].x == 8);
+
+    price: Money = 200;
+    assert(price * 15 == 30);
+    assert(Rank.low + 1 == .mid);
+    assert(Rank.mid + 5 == .high);
+
+    // Generics
+    vs: [3]Vec2 = [a, b, c];
+    assert(sum(vs, Vec2{0, 0}) == Vec2{8, 12});
+    assert(biggest(a, b) == b && biggest(3, 2) == 3);
+
+    // Declared after they are used
+    assert((Celsius{20} + Celsius{5}).degrees == 25);
+    assert(-later(2) == later(-2));
+
+    fmt.print("% %\n", c, a + b);
+}
+
+Celsius :: struct {
+    degrees: f64;
+}
+
+operator + :: (a: Celsius, b: Celsius) -> Celsius { return Celsius{a.degrees + b.degrees}; }
+
+Later :: newtype int;
+
+later :: (n: int) -> Later { return n as Later; }
+
+operator - :: (v: Later) -> Later { return (0 - v as int) as Later; }

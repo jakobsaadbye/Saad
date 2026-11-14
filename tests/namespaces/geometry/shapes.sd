@@ -30,3 +30,12 @@ twiceInternal :: (x: int) -> int { return x * 2; }
 
 @deprecated("use add")
 plus :: (a: Vec2, b: Vec2) -> Vec2 { return add(a, b); }
+
+// An operator of the namespace, which is used without importing anything more than the namespace of its type
+operator + :: (a: Vec2, b: Vec2) -> Vec2 { return add(a, b); }
+
+// A private one is only for the namespace
+@private
+operator * :: (v: Vec2, s: f64) -> Vec2 { return Vec2{v.x * s, v.y * s}; }
+
+doubled :: (v: Vec2) -> Vec2 { return v * 2; }

@@ -1,0 +1,10 @@
+// expect-error: '!=' is the opposite of '==', so it can't be declared on its own
+
+Vec :: struct {
+    x: f32;
+    y: f32;
+}
+
+operator != :: (a: Vec, b: Vec) -> bool { return true; }
+
+main :: () {}

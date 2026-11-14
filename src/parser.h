@@ -48,6 +48,7 @@ typedef struct Parser {
 
     DynamicArray namespaces; // of *Namespace. All the namespaces found in the project and the standard library
     DynamicArray thread_locals; // of *AstIdentifier. The global variables with @threadLocal, laid out in the block of each thread
+    DynamicArray operators;            // of *AstFunctionDefn. The operators of the program, e.g operator + :: (a: Vector2, b: Vector2) -> Vector2
     DynamicArray attributed_functions; // of *AstIdentifier. The functions with attribute values, e.g @Route("/posts"). See attributedFunctions()
     char *builtin_string_file_path;
 

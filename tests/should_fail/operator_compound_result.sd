@@ -1,0 +1,13 @@
+// expect-error: operator * (Vec, Vec) gives a f32, which can't be assigned to a Vec
+
+Vec :: struct {
+    x: f32;
+    y: f32;
+}
+
+operator * :: (a: Vec, b: Vec) -> f32 { return 1; }
+
+main :: () {
+    a: Vec;
+    a *= a;
+}

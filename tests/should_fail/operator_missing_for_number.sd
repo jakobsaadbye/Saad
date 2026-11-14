@@ -1,0 +1,13 @@
+// expect-error: There is no operator * for a Vec and a number
+
+Vec :: struct {
+    x: f32;
+    y: f32;
+}
+
+operator * :: (a: Vec, b: Vec) -> Vec { return a; }
+
+main :: () {
+    a: Vec;
+    b := a * 2;
+}

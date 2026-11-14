@@ -1,0 +1,215 @@
+namespace raylib;
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+//
+//   raymath v2.0 - Math functions to work with Vector2, Vector3, Matrix and Quaternions
+//
+//   Bindings of raymath.h of raylib v5.5. raylib.dll is built with the functions of raymath, so they are
+//   declared here like the rest of raylib, in the same namespace: import raylib; and raylib.Vector2Add(a, b).
+//   The types Vector2, Vector3, Vector4, Quaternion and Matrix are declared in raylib.sd, and so are the
+//   operators and methods that make them shorter to use, e.g a + b and v.length().
+//
+//   CONVENTIONS:
+//     - Matrix structure is defined as row-major (memory layout) but parameters naming AND all
+//       math operations performed by the library consider the structure as it was column-major
+//       It is like transposed versions of the matrices are used for all the maths
+//     - Functions are always self-contained, no function use another raymath function inside,
+//       required code is directly re-implemented inside
+//     - Functions input parameters are always received by value (2 unavoidable exceptions)
+//     - Functions use always a "result" variable for return (except C++ operators)
+//     - Functions are always defined inline
+//     - Angles are always in radians (DEG2RAD/RAD2DEG macros provided for convenience)
+//     - No compound literals used to make sure libray is compatible with C++
+//
+//   LICENSE: zlib/libpng
+//
+//   Copyright (c) 2015-2024 Ramon Santamaria (@raysan5)
+//
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+Epsilon :: 0.000001;
+
+// NOTE: Helper types to be used instead of array return types for *ToFloat functions
+float3 :: struct {
+    v: [3]float;
+}
+
+float16 :: struct {
+    v: [16]float;
+}
+
+extern "raylib.dll" {
+
+//----------------------------------------------------------------------------------
+// Module Functions Definition - Utils math
+//----------------------------------------------------------------------------------
+
+Clamp                          :: (value: float, min: float, max: float) -> float; // Clamp float value
+Lerp                           :: (start: float, end: float, amount: float) -> float; // Calculate linear interpolation between two floats
+Normalize                      :: (value: float, start: float, end: float) -> float; // Normalize input value within input range
+Remap                          :: (value: float, inputStart: float, inputEnd: float, outputStart: float, outputEnd: float) -> float; // Remap input value within input range to output range
+Wrap                           :: (value: float, min: float, max: float) -> float; // Wrap input value from min to max
+FloatEquals                    :: (x: float, y: float) -> int; // Check whether two given floats are almost equal
+
+//----------------------------------------------------------------------------------
+// Module Functions Definition - Vector2 math
+//----------------------------------------------------------------------------------
+
+Vector2Zero                    :: () -> Vector2; // Vector with components value 0.0f
+Vector2One                     :: () -> Vector2; // Vector with components value 1.0f
+Vector2Add                     :: (v1: Vector2, v2: Vector2) -> Vector2; // Add two vectors (v1 + v2)
+Vector2AddValue                :: (v: Vector2, add: float) -> Vector2; // Add vector and float value
+Vector2Subtract                :: (v1: Vector2, v2: Vector2) -> Vector2; // Subtract two vectors (v1 - v2)
+Vector2SubtractValue           :: (v: Vector2, sub: float) -> Vector2; // Subtract vector by float value
+Vector2Length                  :: (v: Vector2) -> float; // Calculate vector length
+Vector2LengthSqr               :: (v: Vector2) -> float; // Calculate vector square length
+Vector2DotProduct              :: (v1: Vector2, v2: Vector2) -> float; // Calculate two vectors dot product
+Vector2Distance                :: (v1: Vector2, v2: Vector2) -> float; // Calculate distance between two vectors
+Vector2DistanceSqr             :: (v1: Vector2, v2: Vector2) -> float; // Calculate square distance between two vectors
+Vector2Angle                   :: (v1: Vector2, v2: Vector2) -> float; // NOTE: Angle is calculated from origin point (0, 0)
+Vector2LineAngle               :: (start: Vector2, end: Vector2) -> float; // Current implementation should be aligned with glm::angle
+Vector2Scale                   :: (v: Vector2, scale: float) -> Vector2; // Scale vector (multiply by value)
+Vector2Multiply                :: (v1: Vector2, v2: Vector2) -> Vector2; // Multiply vector by vector
+Vector2Negate                  :: (v: Vector2) -> Vector2; // Negate vector
+Vector2Divide                  :: (v1: Vector2, v2: Vector2) -> Vector2; // Divide vector by vector
+Vector2Normalize               :: (v: Vector2) -> Vector2; // Normalize provided vector
+Vector2Transform               :: (v: Vector2, mat: Matrix) -> Vector2; // Transforms a Vector2 by a given Matrix
+Vector2Lerp                    :: (v1: Vector2, v2: Vector2, amount: float) -> Vector2; // Calculate linear interpolation between two vectors
+Vector2Reflect                 :: (v: Vector2, normal: Vector2) -> Vector2; // Calculate reflected vector to normal
+Vector2Min                     :: (v1: Vector2, v2: Vector2) -> Vector2; // Get min value for each pair of components
+Vector2Max                     :: (v1: Vector2, v2: Vector2) -> Vector2; // Get max value for each pair of components
+Vector2Rotate                  :: (v: Vector2, angle: float) -> Vector2; // Rotate vector by angle
+Vector2MoveTowards             :: (v: Vector2, target: Vector2, maxDistance: float) -> Vector2; // Move Vector towards target
+Vector2Invert                  :: (v: Vector2) -> Vector2; // Invert the given vector
+Vector2Clamp                   :: (v: Vector2, min: Vector2, max: Vector2) -> Vector2; // min and max values specified by the given vectors
+Vector2ClampValue              :: (v: Vector2, min: float, max: float) -> Vector2; // Clamp the magnitude of the vector between two min and max values
+Vector2Equals                  :: (p: Vector2, q: Vector2) -> int; // Check whether two given vectors are almost equal
+Vector2Refract                 :: (v: Vector2, n: Vector2, r: float) -> Vector2; // to the refractive index of the medium on the other side of the surface
+
+//----------------------------------------------------------------------------------
+// Module Functions Definition - Vector3 math
+//----------------------------------------------------------------------------------
+
+Vector3Zero                    :: () -> Vector3; // Vector with components value 0.0f
+Vector3One                     :: () -> Vector3; // Vector with components value 1.0f
+Vector3Add                     :: (v1: Vector3, v2: Vector3) -> Vector3; // Add two vectors
+Vector3AddValue                :: (v: Vector3, add: float) -> Vector3; // Add vector and float value
+Vector3Subtract                :: (v1: Vector3, v2: Vector3) -> Vector3; // Subtract two vectors
+Vector3SubtractValue           :: (v: Vector3, sub: float) -> Vector3; // Subtract vector by float value
+Vector3Scale                   :: (v: Vector3, scalar: float) -> Vector3; // Multiply vector by scalar
+Vector3Multiply                :: (v1: Vector3, v2: Vector3) -> Vector3; // Multiply vector by vector
+Vector3CrossProduct            :: (v1: Vector3, v2: Vector3) -> Vector3; // Calculate two vectors cross product
+Vector3Perpendicular           :: (v: Vector3) -> Vector3; // Calculate one vector perpendicular vector
+Vector3Length                  :: (v: Vector3) -> float; // Calculate vector length
+Vector3LengthSqr               :: (v: Vector3) -> float; // Calculate vector square length
+Vector3DotProduct              :: (v1: Vector3, v2: Vector3) -> float; // Calculate two vectors dot product
+Vector3Distance                :: (v1: Vector3, v2: Vector3) -> float; // Calculate distance between two vectors
+Vector3DistanceSqr             :: (v1: Vector3, v2: Vector3) -> float; // Calculate square distance between two vectors
+Vector3Angle                   :: (v1: Vector3, v2: Vector3) -> float; // Calculate angle between two vectors
+Vector3Negate                  :: (v: Vector3) -> Vector3; // Negate provided vector (invert direction)
+Vector3Divide                  :: (v1: Vector3, v2: Vector3) -> Vector3; // Divide vector by vector
+Vector3Normalize               :: (v: Vector3) -> Vector3; // Normalize provided vector
+Vector3Project                 :: (v1: Vector3, v2: Vector3) -> Vector3; // Calculate the projection of the vector v1 on to v2
+Vector3Reject                  :: (v1: Vector3, v2: Vector3) -> Vector3; // Calculate the rejection of the vector v1 on to v2
+Vector3OrthoNormalize          :: (v1: *Vector3, v2: *Vector3); // Gram-Schmidt function implementation
+Vector3Transform               :: (v: Vector3, mat: Matrix) -> Vector3; // Transforms a Vector3 by a given Matrix
+Vector3RotateByQuaternion      :: (v: Vector3, q: Quaternion) -> Vector3; // Transform a vector by quaternion rotation
+Vector3RotateByAxisAngle       :: (v: Vector3, axis: Vector3, angle: float) -> Vector3; // Rotates a vector around an axis
+Vector3MoveTowards             :: (v: Vector3, target: Vector3, maxDistance: float) -> Vector3; // Move Vector towards target
+Vector3Lerp                    :: (v1: Vector3, v2: Vector3, amount: float) -> Vector3; // Calculate linear interpolation between two vectors
+Vector3CubicHermite            :: (v1: Vector3, tangent1: Vector3, v2: Vector3, tangent2: Vector3, amount: float) -> Vector3; // as described in the GLTF 2.0 specification: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#interpolation-cubic
+Vector3Reflect                 :: (v: Vector3, normal: Vector3) -> Vector3; // Calculate reflected vector to normal
+Vector3Min                     :: (v1: Vector3, v2: Vector3) -> Vector3; // Get min value for each pair of components
+Vector3Max                     :: (v1: Vector3, v2: Vector3) -> Vector3; // Get max value for each pair of components
+Vector3Barycenter              :: (p: Vector3, a: Vector3, b: Vector3, c: Vector3) -> Vector3; // NOTE: Assumes P is on the plane of the triangle
+Vector3Unproject               :: (source: Vector3, projection: Matrix, view: Matrix) -> Vector3; // NOTE: We are avoiding calling other raymath functions despite available
+Vector3ToFloatV                :: (v: Vector3) -> float3; // Get Vector3 as float array
+Vector3Invert                  :: (v: Vector3) -> Vector3; // Invert the given vector
+Vector3Clamp                   :: (v: Vector3, min: Vector3, max: Vector3) -> Vector3; // min and max values specified by the given vectors
+Vector3ClampValue              :: (v: Vector3, min: float, max: float) -> Vector3; // Clamp the magnitude of the vector between two values
+Vector3Equals                  :: (p: Vector3, q: Vector3) -> int; // Check whether two given vectors are almost equal
+Vector3Refract                 :: (v: Vector3, n: Vector3, r: float) -> Vector3; // to the refractive index of the medium on the other side of the surface
+
+//----------------------------------------------------------------------------------
+// Module Functions Definition - Vector4 math
+//----------------------------------------------------------------------------------
+
+Vector4Zero                    :: () -> Vector4;
+Vector4One                     :: () -> Vector4;
+Vector4Add                     :: (v1: Vector4, v2: Vector4) -> Vector4;
+Vector4AddValue                :: (v: Vector4, add: float) -> Vector4;
+Vector4Subtract                :: (v1: Vector4, v2: Vector4) -> Vector4;
+Vector4SubtractValue           :: (v: Vector4, add: float) -> Vector4;
+Vector4Length                  :: (v: Vector4) -> float;
+Vector4LengthSqr               :: (v: Vector4) -> float;
+Vector4DotProduct              :: (v1: Vector4, v2: Vector4) -> float;
+Vector4Distance                :: (v1: Vector4, v2: Vector4) -> float; // Calculate distance between two vectors
+Vector4DistanceSqr             :: (v1: Vector4, v2: Vector4) -> float; // Calculate square distance between two vectors
+Vector4Scale                   :: (v: Vector4, scale: float) -> Vector4;
+Vector4Multiply                :: (v1: Vector4, v2: Vector4) -> Vector4; // Multiply vector by vector
+Vector4Negate                  :: (v: Vector4) -> Vector4; // Negate vector
+Vector4Divide                  :: (v1: Vector4, v2: Vector4) -> Vector4; // Divide vector by vector
+Vector4Normalize               :: (v: Vector4) -> Vector4; // Normalize provided vector
+Vector4Min                     :: (v1: Vector4, v2: Vector4) -> Vector4; // Get min value for each pair of components
+Vector4Max                     :: (v1: Vector4, v2: Vector4) -> Vector4; // Get max value for each pair of components
+Vector4Lerp                    :: (v1: Vector4, v2: Vector4, amount: float) -> Vector4; // Calculate linear interpolation between two vectors
+Vector4MoveTowards             :: (v: Vector4, target: Vector4, maxDistance: float) -> Vector4; // Move Vector towards target
+Vector4Invert                  :: (v: Vector4) -> Vector4; // Invert the given vector
+Vector4Equals                  :: (p: Vector4, q: Vector4) -> int; // Check whether two given vectors are almost equal
+
+//----------------------------------------------------------------------------------
+// Module Functions Definition - Matrix math
+//----------------------------------------------------------------------------------
+
+MatrixDeterminant              :: (mat: Matrix) -> float; // Compute matrix determinant
+MatrixTrace                    :: (mat: Matrix) -> float; // Get the trace of the matrix (sum of the values along the diagonal)
+MatrixTranspose                :: (mat: Matrix) -> Matrix; // Transposes provided matrix
+MatrixInvert                   :: (mat: Matrix) -> Matrix; // Invert provided matrix
+MatrixIdentity                 :: () -> Matrix; // Get identity matrix
+MatrixAdd                      :: (left: Matrix, right: Matrix) -> Matrix; // Add two matrices
+MatrixSubtract                 :: (left: Matrix, right: Matrix) -> Matrix; // Subtract two matrices (left - right)
+MatrixMultiply                 :: (left: Matrix, right: Matrix) -> Matrix; // NOTE: When multiplying matrices... the order matters!
+MatrixTranslate                :: (x: float, y: float, z: float) -> Matrix; // Get translation matrix
+MatrixRotate                   :: (axis: Vector3, angle: float) -> Matrix; // NOTE: Angle should be provided in radians
+MatrixRotateX                  :: (angle: float) -> Matrix; // NOTE: Angle must be provided in radians
+MatrixRotateY                  :: (angle: float) -> Matrix; // NOTE: Angle must be provided in radians
+MatrixRotateZ                  :: (angle: float) -> Matrix; // NOTE: Angle must be provided in radians
+MatrixRotateXYZ                :: (angle: Vector3) -> Matrix; // NOTE: Angle must be provided in radians
+MatrixRotateZYX                :: (angle: Vector3) -> Matrix; // NOTE: Angle must be provided in radians
+MatrixScale                    :: (x: float, y: float, z: float) -> Matrix; // Get scaling matrix
+MatrixFrustum                  :: (left: f64, right: f64, bottom: f64, top: f64, nearPlane: f64, farPlane: f64) -> Matrix; // Get perspective projection matrix
+MatrixPerspective              :: (fovY: f64, aspect: f64, nearPlane: f64, farPlane: f64) -> Matrix; // NOTE: Fovy angle must be provided in radians
+MatrixOrtho                    :: (left: f64, right: f64, bottom: f64, top: f64, nearPlane: f64, farPlane: f64) -> Matrix; // Get orthographic projection matrix
+MatrixLookAt                   :: (eye: Vector3, target: Vector3, up: Vector3) -> Matrix; // Get camera look-at matrix (view matrix)
+MatrixToFloatV                 :: (mat: Matrix) -> float16; // Get float array of matrix data
+MatrixDecompose                :: (mat: Matrix, translation: *Vector3, rotation: *Quaternion, scale: *Vector3); // Decompose a transformation matrix into its rotational, translational and scaling components
+
+//----------------------------------------------------------------------------------
+// Module Functions Definition - Quaternion math
+//----------------------------------------------------------------------------------
+
+QuaternionAdd                  :: (q1: Quaternion, q2: Quaternion) -> Quaternion; // Add two quaternions
+QuaternionAddValue             :: (q: Quaternion, add: float) -> Quaternion; // Add quaternion and float value
+QuaternionSubtract             :: (q1: Quaternion, q2: Quaternion) -> Quaternion; // Subtract two quaternions
+QuaternionSubtractValue        :: (q: Quaternion, sub: float) -> Quaternion; // Subtract quaternion and float value
+QuaternionIdentity             :: () -> Quaternion; // Get identity quaternion
+QuaternionLength               :: (q: Quaternion) -> float; // Computes the length of a quaternion
+QuaternionNormalize            :: (q: Quaternion) -> Quaternion; // Normalize provided quaternion
+QuaternionInvert               :: (q: Quaternion) -> Quaternion; // Invert provided quaternion
+QuaternionMultiply             :: (q1: Quaternion, q2: Quaternion) -> Quaternion; // Calculate two quaternion multiplication
+QuaternionScale                :: (q: Quaternion, mul: float) -> Quaternion; // Scale quaternion by float value
+QuaternionDivide               :: (q1: Quaternion, q2: Quaternion) -> Quaternion; // Divide two quaternions
+QuaternionLerp                 :: (q1: Quaternion, q2: Quaternion, amount: float) -> Quaternion; // Calculate linear interpolation between two quaternions
+QuaternionNlerp                :: (q1: Quaternion, q2: Quaternion, amount: float) -> Quaternion; // Calculate slerp-optimized interpolation between two quaternions
+QuaternionSlerp                :: (q1: Quaternion, q2: Quaternion, amount: float) -> Quaternion; // Calculates spherical linear interpolation between two quaternions
+QuaternionCubicHermiteSpline   :: (q1: Quaternion, outTangent1: Quaternion, q2: Quaternion, inTangent2: Quaternion, t: float) -> Quaternion; // as described in the GLTF 2.0 specification: https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#interpolation-cubic
+QuaternionFromVector3ToVector3 :: (from: Vector3, to: Vector3) -> Quaternion; // Calculate quaternion based on the rotation from one vector to another
+QuaternionFromMatrix           :: (mat: Matrix) -> Quaternion; // Get a quaternion for a given rotation matrix
+QuaternionToMatrix             :: (q: Quaternion) -> Matrix; // Get a matrix for a given quaternion
+QuaternionFromAxisAngle        :: (axis: Vector3, angle: float) -> Quaternion; // NOTE: Angle must be provided in radians
+QuaternionToAxisAngle          :: (q: Quaternion, outAxis: *Vector3, outAngle: *float); // Get the rotation angle and axis for a given quaternion
+QuaternionFromEuler            :: (pitch: float, yaw: float, roll: float) -> Quaternion; // NOTE: Rotation order is ZYX
+QuaternionToEuler              :: (q: Quaternion) -> Vector3; // NOTE: Angles are returned in a Vector3 struct in radians
+QuaternionTransform            :: (q: Quaternion, mat: Matrix) -> Quaternion; // Transform a quaternion given a transformation matrix
+QuaternionEquals               :: (p: Quaternion, q: Quaternion) -> int; // Check whether two given quaternions are almost equal
+}

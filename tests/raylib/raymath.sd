@@ -1,0 +1,77 @@
+// The functions of raymath (std/vendor/raymath.sd) and the operators and methods of raylib.sd, run with raymath.h compiled
+// for Linux by tools/linux/check_raymath.sh
+import raylib;
+use raylib;
+
+near :: (a: float, b: float) -> bool { return FloatEquals(a, b) == 1; }
+
+main :: () {
+    // The functions, which take and give structs of 8, 12, 16 and 64 bytes, and pointers
+    a := Vector2{1, 2};
+    b := Vector2Add(a, Vector2One());
+    assert(b.x == 2 && b.y == 3);
+    assert(near(Vector2Length(Vector2{3, 4}), 5));
+    assert(near(Vector2DotProduct(a, b), 8));
+    c := Vector3CrossProduct(Vector3{1, 0, 0}, Vector3{0, 1, 0});
+    assert(c.x == 0 && c.y == 0 && c.z == 1);
+    assert(near(Vector3Normalize(Vector3{0, 0, 9}).z, 1));
+    v4 := Vector4Lerp(Vector4{0, 0, 0, 0}, Vector4{2, 4, 6, 8}, 0.5);
+    assert(v4.x == 1 && v4.w == 4);
+    m := MatrixMultiply(MatrixIdentity(), MatrixTranslate(1, 2, 3));
+    assert(m.m12 == 1 && m.m13 == 2 && m.m14 == 3 && m.m0 == 1);
+    p := Vector3Transform(Vector3{1, 1, 1}, m);
+    assert(p.x == 2 && p.y == 3 && p.z == 4);
+    assert(MatrixPerspective(1.0, 1.5, 0.1, 100).m11 == -1);
+    q := QuaternionFromAxisAngle(Vector3{0, 0, 1}, Pi / 2);
+    r := Vector3RotateByQuaternion(Vector3{1, 0, 0}, q);
+    assert(near(r.x, 0) && near(r.y, 1));
+    axis: Vector3;
+    angle: float;
+    QuaternionToAxisAngle(QuaternionMultiply(q, q), &axis, &angle);
+    assert(near(angle, Pi) && near(axis.z, 1));
+    t, s: Vector3;
+    rotation: Quaternion;
+    MatrixDecompose(MatrixScale(2, 3, 4), &t, &rotation, &s);
+    assert(near(s.x, 2) && near(s.y, 3) && near(s.z, 4));
+    assert(MatrixToFloatV(m).v[12] == 1);
+    assert(near(Remap(5, 0, 10, 0, 100), 50) && Clamp(5, 0, 1) == 1);
+    assert(near(Wrap(370, 0, 360), 10));
+    assert(Vector2Equals(Vector2{1, 1}, Vector2{1, 1}) == 1);
+
+    // The operators
+    assert(a + b == Vector2{3, 5});
+    assert(b - a == Vector2{1, 1});
+    assert(-a == Vector2{-1, -2});
+    assert(a * 2 == Vector2{2, 4} && 2 * a == a * 2);
+    assert(a * b == Vector2{2, 6});
+    assert(b / 2 == Vector2{1, 1.5});
+    assert(a != b);
+    assert(Vector2{1, 1} == Vector2{1.0000001, 1});     // == is almost equal, like Vector2Equals
+
+    position := Vector3{0, 0, 0};
+    velocity := Vector3{1, 2, 3};
+    position += velocity * 0.5;
+    position -= Vector3{0.5, 0, 0};
+    position *= 2;
+    assert(position == Vector3{0, 2, 3});
+    assert(Vector3{1, 1, 1} * m == Vector3{2, 3, 4});
+
+    turn := q * q;                                       // Two turns of 90 degrees
+    assert(near((turn * Vector3{1, 0, 0}).x, -1));
+    assert(q * Vector3{1, 0, 0} == r);
+    assert(QuaternionIdentity() * q == q);
+
+    moved := MatrixTranslate(1, 0, 0) * MatrixTranslate(0, 2, 0);
+    assert(moved.m12 == 1 && moved.m13 == 2);
+    assert((m + m).m12 == 2 && (m - m).m12 == 0);
+
+    // The methods
+    assert(near(Vector2{3, 4}.length(), 5) && near(Vector2{3, 4}.lengthSqr(), 25));
+    assert(near(Vector2{0, 5}.normalize().y, 1));
+    assert(near(a.dot(b), 8) && near(Vector2{0, 0}.distance(Vector2{3, 4}), 5));
+    assert(a.lerp(b, 0.5) == Vector2{1.5, 2.5});
+    assert(Vector2{1, 0}.rotate(Pi / 2) == Vector2{0, 1});
+    assert(Vector3{1, 0, 0}.cross(Vector3{0, 1, 0}) == Vector3{0, 0, 1});
+    assert(near(q.length(), 1) && q.invert() * q == QuaternionIdentity());
+    assert(m.invert().m12 == -1 && m.transpose().m3 == 1);
+}

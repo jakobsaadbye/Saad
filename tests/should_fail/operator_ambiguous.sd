@@ -1,0 +1,14 @@
+// expect-error: Two operators * fit here, (Vec, f32) and (Vec, f64)
+
+Vec :: struct {
+    x: f32;
+    y: f32;
+}
+
+operator * :: (a: Vec, s: f32) -> Vec { return a; }
+operator * :: (a: Vec, s: f64) -> Vec { return a; }
+
+main :: () {
+    a: Vec;
+    a = a * 2;
+}
