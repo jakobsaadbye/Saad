@@ -2588,7 +2588,7 @@ static int type_info_global(Lowerer *L, Type *type) {
     if (type_is_untyped_int(type))   type = primitive_type(PRIMITIVE_INT);
     if (type_is_untyped_float(type)) type = primitive_type(PRIMITIVE_FLOAT);
 
-    char *key = type_to_str(type);
+    char *key = type_identity(type); // Tells apart types with the same name, e.g a struct P of two functions
     for (int i = 0; i < L->type_infos.count; i++) {
         if (strcmp(L->type_infos.items[i].key, key) == 0) return L->type_infos.items[i].global;
     }
@@ -2611,7 +2611,7 @@ static int type_info_global(Lowerer *L, Type *type) {
     ir_array_push(L->type_infos, entry);
 
     // The head, a Type :: struct { name: string; kind: TypeKind; size: int; flags: int; }
-    write_string_field(L, global, runtime_offset(L, "Type", "name"), key);
+    write_string_field(L, global, runtime_offset(L, "Type", "name"), type_to_str(type)); // As it is written, e.g P of a local P
     write_int_bytes(&global->data[runtime_offset(L, "Type", "kind")], type->kind - TYPE_VOID, 4);
     write_int_bytes(&global->data[runtime_offset(L, "Type", "size")], type->size, 4);
 

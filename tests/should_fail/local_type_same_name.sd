@@ -1,0 +1,15 @@
+// expect-error: Wanted type Point, got type Point
+// expect-error: These are two types named Point
+
+Point :: struct {
+    x: int;
+}
+
+take :: (p: Point) {}
+
+main :: () {
+    Point :: struct {
+        x: int;
+    }
+    take(Point{1});
+}

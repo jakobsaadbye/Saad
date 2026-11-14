@@ -2,6 +2,15 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.22.2 - 14. Nov 2026
+
+* Structs and enums declared in a function or a block are types of their own. Two functions with a struct `P` each got
+  the same type information, so one printed with the members of the other, a local `P` that hid a `P` of the file made
+  the program crash, and a struct of a generic function was one type for every instance. Each local type now has an
+  identity of its own (`local_identity` of the type, e.g `P#3`), which the type information is made by, and keeps its
+  name, e.g in `typeof` and `print`. A mismatch of two types with the same name says where each is declared
+* `TODO.md` lists only what is still open
+
 ## Update v0.22.1 - 14. Nov 2026
 
 * Language server: an operator of the program, e.g the `+` of `a + b` of two `Vec2`, is colored apart from the operators of

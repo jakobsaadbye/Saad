@@ -1,0 +1,10 @@
+// expect-error: Unknown type 'Inner'
+
+main :: () {
+    {
+        Inner :: struct {
+            x: int;
+        }
+    }
+    i: Inner;
+}

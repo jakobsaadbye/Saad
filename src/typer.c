@@ -914,7 +914,7 @@ TypeStruct *instantiate_generic_struct(Typer *typer, TypeGenericInstance *instan
 
     // The key tells instances apart, with the namespaces of the types e.g "List<raylib.Color>"
     StringBuilder key_sb = sb_init(32);
-    sb_append(&key_sb, "%s<", generic_type->qualified_name ? generic_type->qualified_name : generic_type->head.name);
+    sb_append(&key_sb, "%s<", type_identity((Type *)generic_type)); // e.g raylib.Pair, or Box#3 of a generic struct of a function
     for (int i = 0; i < type_args.count; i++) {
         sb_append(&key_sb, "%s", type_identity(((Type **)type_args.items)[i]));
         if (i + 1 < type_args.count) sb_append(&key_sb, ", ");
@@ -3085,8 +3085,12 @@ AstLiteral *make_resolved_identifier_literal(Typer *typer, AstIdentifier *ident,
 char *type_identity(Type *type) {
     if (type->newtype) return qualified_declaration_name(type->newtype);
     switch (type->kind) {
-    case TYPE_STRUCT: return ((TypeStruct *)type)->qualified_name ? ((TypeStruct *)type)->qualified_name : type->name;
-    case TYPE_ENUM:   return ((TypeEnum *)type)->qualified_name   ? ((TypeEnum *)type)->qualified_name   : type->name;
+    case TYPE_STRUCT:
+        if (((TypeStruct *)type)->local_identity) return ((TypeStruct *)type)->local_identity;
+        return ((TypeStruct *)type)->qualified_name ? ((TypeStruct *)type)->qualified_name : type->name;
+    case TYPE_ENUM:
+        if (((TypeEnum *)type)->local_identity) return ((TypeEnum *)type)->local_identity;
+        return ((TypeEnum *)type)->qualified_name   ? ((TypeEnum *)type)->qualified_name   : type->name;
     case TYPE_POINTER: {
         StringBuilder sb = sb_init(32);
         sb_append(&sb, "*%s", type_identity(((TypePointer *)type)->pointer_to));
@@ -8551,7 +8555,25 @@ const char *interface_mismatch(Typer *typer, TypeStruct *interface, Type *given,
 
 // After a type mismatch: why the given type isn't the interface that is wanted, as a hint. For a value that isn't a
 // pointer, the hint says to pass its address, e.g &c
+// The declaration of a struct or an enum, for a note
+static AstIdentifier *declaring_identifier(Type *type) {
+    if (type->kind == TYPE_STRUCT) return ((TypeStruct *)type)->identifier;
+    if (type->kind == TYPE_ENUM)   return ((TypeEnum *)type)->identifier;
+    return NULL;
+}
+
+// "Wanted type Point, got type Point" of two types with the same name, e.g a Point of a function and the Point of the file
+static void explain_same_names(Typer *typer, Type *wanted, Type *given) {
+    if (wanted == NULL || given == NULL || wanted->kind != given->kind) return;
+    if (strcmp(type_to_str(wanted), type_to_str(given)) != 0 || strcmp(type_identity(wanted), type_identity(given)) == 0) return;
+    AstIdentifier *a = declaring_identifier(wanted), *b = declaring_identifier(given);
+    if (a == NULL || b == NULL) return;
+    report_error_ast(typer->parser, LABEL_NOTE, (Ast *)a, "These are two types named %s. The one that is wanted is declared here", type_to_str(wanted));
+    report_error_ast(typer->parser, LABEL_NOTE, (Ast *)b, "and the one that is given here");
+}
+
 void explain_interface_mismatch(Typer *typer, Type *wanted, Type *given, AstExpr *expr) {
+    explain_same_names(typer, wanted, given);
     if (!is_interface_type(wanted) || given == NULL || is_interface_type(given)) return;
     char why[512];
     if (!interface_mismatch(typer, (TypeStruct *) wanted, given, why, sizeof(why))) return;
@@ -9951,7 +9973,7 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Binary operation between two structs is not yet supported! Only == and != are");
             return NULL;
         }
-        if (strcmp(ti_lhs->name, ti_rhs->name) != 0) {
+        if (strcmp(type_identity(ti_lhs), type_identity(ti_rhs)) != 0) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(binary), "Cannot compare a %s with a %s", text_bold(type_to_str(ti_lhs)), text_bold(type_to_str(ti_rhs)));
             return NULL;
         }
@@ -10047,7 +10069,7 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
         }
 
         if (lhs == TYPE_ENUM    && rhs == TYPE_ENUM) {
-            if (strcmp(ti_lhs->name, ti_rhs->name) == 0) {
+            if (strcmp(type_identity(ti_lhs), type_identity(ti_rhs)) == 0) {
                 return primitive_type(PRIMITIVE_BOOL);
             }
         }
@@ -10218,7 +10240,7 @@ bool can_cast_explicitly(Type *from, Type *to) {
 
     if (from->kind == TYPE_ENUM    && to->kind == TYPE_INTEGER) return true;
     if (from->kind == TYPE_ENUM    && to->kind == TYPE_ENUM) {
-        return strcmp(from->name, to->name) == 0;
+        return strcmp(type_identity(from), type_identity(to)) == 0;
     }
 
     if (from->kind == TYPE_BOOL    && to->kind == TYPE_INTEGER) return true;

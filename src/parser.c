@@ -115,6 +115,19 @@ char *qualified_name(Parser *parser, const char *name) {
     return sb_to_string(&sb);
 }
 
+// A struct or an enum declared in a function is a type of its own, also when another one has its name, e.g a P in two
+// functions, or the W of a generic function, whose body is parsed again for each instance. Its name stays the name that is
+// shown, e.g in typeof and errors, and this is what tells it apart, e.g "P#3"
+char *local_identity_of(Parser *parser, const char *name) {
+    if (parser->enclosing_function == NULL) return NULL;
+    static int count = 0;
+    count += 1;
+    StringBuilder sb = sb_init(32);
+    char *qualified = qualified_name(parser, name);
+    sb_append(&sb, "%s#%d", qualified ? qualified : name, count);
+    return sb_to_string(&sb);
+}
+
 Namespace *find_namespace(Parser *parser, const char *name) {
     for (int i = 0; i < parser->namespaces.count; i++) {
         Namespace *ns = ((Namespace **)parser->namespaces.items)[i];
@@ -2645,6 +2658,7 @@ TypeEnum *make_enum_type(Parser *parser, AstEnum *ast_enum, AstIdentifier *ident
     type_enum->values = generate_identifier(parser, "values", (Type *) generate_slice_of(parser, (Type *) type_enum), IDENTIFIER_IS_CONSTANT);
     type_enum->values->decl = (AstDeclaration *) ast_enum;
     type_enum->qualified_name = ast_enum->is_anonymous ? NULL : qualified_name(parser, ident->name);
+    type_enum->local_identity = ast_enum->is_anonymous ? NULL : local_identity_of(parser, ident->name);
 
     return type_enum;
 }
@@ -2925,6 +2939,7 @@ AstStruct *parse_struct_defn(Parser *parser) {
     type_struct->identifier      = ident;
     type_struct->node            = struct_defn;
     type_struct->qualified_name  = qualified_name(parser, ident->name);
+    type_struct->local_identity  = local_identity_of(parser, ident->name);
 
     // type_add_user_defined(&parser->type_table, (Type *)(type_struct));
 

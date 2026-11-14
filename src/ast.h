@@ -894,6 +894,7 @@ typedef struct TypeEnum {
     AstIdentifier *names;
     AstIdentifier *values;
     char          *qualified_name; // The name with the namespace e.g "raylib.KeyboardKey"
+    char          *local_identity; // Declared in a function: what tells it apart from other types with its name, see local_identity_of()
 } TypeEnum;
 
 typedef struct TypeEnumValue {
@@ -909,6 +910,7 @@ typedef struct TypeStruct {
     AstIdentifier *identifier;
     unsigned int   alignment;
     char          *qualified_name; // The name with the namespace e.g "raylib.Color". Structs with the same qualified name are the same type
+    char          *local_identity; // Declared in a function: what tells it apart from other types with its name, see local_identity_of()
 } TypeStruct;
 
 typedef struct TypeFunction {
