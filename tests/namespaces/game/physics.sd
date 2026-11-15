@@ -15,3 +15,8 @@ moved :: (b: Body, by: Vec2) -> Body {
 drawnName :: (b: Body) -> string {
     return render.name(b);
 }
+
+// Constants for the sizes of arrays outside the namespace, also one made of another, e.g [game.physics.Cells]int
+MaxBodies :: 8;
+Rows      :: 3;
+Cells     :: MaxBodies * Rows;

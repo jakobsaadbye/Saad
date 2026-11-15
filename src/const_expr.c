@@ -208,11 +208,12 @@ AstExpr *simplify_expression(ConstEvaluator *ce, AstBlock *scope, AstExpr *expr)
             AstLiteral *lit = (AstLiteral *)(expr);
 
             if (lit->kind == LITERAL_IDENTIFIER) {
-                AstIdentifier *ident = lookup_from_scope(ce->parser, scope, lit->as.value.identifier.name);
-                if (ident->flags & IDENTIFIER_IS_CONSTANT) {
-                    if (ident->value) {
-                        return simplify_expression(ce, scope, ident->value);
-                    }
+                // The identifier the typer resolved it to, e.g a constant of another namespace, or else by its name here
+                AstIdentifier *ident = lit->as.value.identifier.resolved_identifier;
+                if (!ident) ident = lookup_from_scope(ce->parser, scope, lit->as.value.identifier.name);
+                if (ident && (ident->flags & IDENTIFIER_IS_CONSTANT) && ident->value) {
+                    // The value is evaluated where the constant is declared, e.g 'Half :: Size / 2' of a namespace
+                    return simplify_expression(ce, ident->scope ? ident->scope : scope, ident->value);
                 }
             }
 
@@ -246,6 +247,9 @@ AstExpr *simplify_expression(ConstEvaluator *ce, AstBlock *scope, AstExpr *expr)
         }
         case AST_MEMBER_ACCESS: {
             AstMemberAccess *ma = (AstMemberAccess *)(expr);
+
+            // A constant of a namespace, e.g [game.MaxCars]f32. The typer made it the identifier of the constant
+            if (ma->head.replacement) return simplify_expression(ce, scope, ma->head.replacement);
 
             if (ma->access_kind == MEMBER_ACCESS_ENUM_MEMBER) {
                 if (ma->enum_member->head.kind == AST_IDENTIFIER) {

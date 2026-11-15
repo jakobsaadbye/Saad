@@ -2,6 +2,14 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.23.6 - 15. Nov 2026
+
+* A constant of a namespace is a constant again where one is needed, e.g `cars: [game.MaxCars]Car` or `[Cells]f32` of a
+  `use`d namespace. The constant evaluator didn't follow the qualified name to the constant, so the size of the array was
+  an error ("must be an integer constant"), and an array of size 0 before v0.23.5. The value of a constant is evaluated in
+  the scope it is declared in, so `Cells :: MaxBodies * Rows` of a namespace works from another one, where a name of it
+  that isn't seen there could make the compiler crash
+
 ## Update v0.23.5 - 15. Nov 2026
 
 * A struct that holds a fixed array of a struct declared further down, e.g `Traffic :: struct { cars: [8]Car; }` before
