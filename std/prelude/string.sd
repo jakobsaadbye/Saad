@@ -178,6 +178,48 @@ split :: method (s: string, sep: string) -> [..]string {
     return result;
 }
 
+// The whole number a text is, e.g "42", "-7" or "+3", or nothing when it isn't one, e.g "", "4x", "1.5" or a number
+// too big for an i64. _ may group the digits, e.g "1_000_000". No spaces around it
+toInt :: method (s: string) -> ?i64 {
+    i: i64 = 0;
+    negative := false;
+    if s.len > 0 && (s[0] == '-' || s[0] == '+') {
+        negative = s[0] == '-';
+        i = 1;
+    }
+    if i >= s.len { return null; }
+
+    // Counted down from 0, as the smallest i64 has no positive of the same size
+    value: i64 = 0;
+    digits := 0;
+    while i < s.len {
+        c := s[i];
+        i += 1;
+        if c == '_' && digits > 0 { continue; }
+        if !c.isDigit() { return null; }
+        digit := (c as u8 - '0') as i64;
+        if value < (-9223372036854775807 - 1 + digit) / 10 { return null; }
+        value = value * 10 - digit;
+        digits += 1;
+    }
+    if digits == 0 { return null; }
+    if negative { return value; }
+    if value == -9223372036854775807 - 1 { return null; }
+    return -value;
+}
+
+// The number a text is, e.g "3.25", "-1e3", "7" or "inf", or nothing when it isn't one, e.g "", "1.5x" or " 2". As C's
+// strtod reads it
+toFloat :: method (s: string) -> ?f64 {
+    if s.len == 0 || s[0].isSpace() { return null; }
+    text := s.toCString();
+    defer text.free();
+    end: c.string;
+    value := strtod(text, &end);
+    if end.data != &text.data[s.len] { return null; }
+    return value;
+}
+
 reverse :: method (s: string) -> string {
     result := s.copy();
 

@@ -1,0 +1,76 @@
+// collections.PriorityQueue: values come back smallest first, by the operator < of their type
+import collections;
+import random;
+import allocators;
+use fmt;
+
+Task :: struct {
+    priority: int;
+    name:     string;
+}
+
+operator < :: (a: Task, b: Task) -> bool { return a.priority < b.priority; }
+
+// The biggest first: an operator < that is the other way around, on a newtype
+Score :: newtype int;
+operator < :: (a: Score, b: Score) -> bool { return a as int > b as int; }
+
+main :: () {
+    // Numbers, in any order, come back sorted
+    numbers: collections.PriorityQueue<int>;
+    for n in [5, 3, 9, 1, 7, 3, 0, 8] { numbers.push(n); }
+    assert(numbers.count() == 8 && numbers.peek() == 0);
+    previous := -1;
+    while !numbers.isEmpty() {
+        n := numbers.pop();
+        assert(n >= previous);
+        previous = n;
+    }
+    assert(numbers.tryPop() == null);
+
+    // Many random floats, against a sorted copy
+    rng := random.newRandom(3);
+    floats: collections.PriorityQueue<f64>;
+    all: [..]f64;
+    for 0..1000 {
+        f := rng.uniform(-100, 100);
+        floats.push(f);
+        all.add(f);
+    }
+    all.sort();
+    for f in all { assert(floats.pop() == f); }
+
+    // Pushing and popping in turns
+    mixed: collections.PriorityQueue<int>;
+    mixed.push(4); mixed.push(2);
+    assert(mixed.pop() == 2);
+    mixed.push(1); mixed.push(3);
+    assert(mixed.pop() == 1 && mixed.pop() == 3 && mixed.pop() == 4 && mixed.isEmpty());
+
+    // Structs by their own operator <
+    tasks: collections.PriorityQueue<Task>;
+    tasks.push(Task{3, "sweep"});
+    tasks.push(Task{1, "wake up"});
+    tasks.push(Task{2, "coffee"});
+    count := 0;
+    for _ in tasks { count += 1; }            // In the order of the heap
+    assert(count == 3);
+    assert(tasks.pop().name == "wake up" && tasks.pop().name == "coffee" && tasks.pop().name == "sweep");
+
+    // The biggest first
+    scores: collections.PriorityQueue<Score>;
+    for s in [10, 40, 20] { scores.push(s as Score); }
+    assert(scores.pop() as int == 40);
+
+    // In an arena
+    arena: allocators.Arena;
+    inArena: collections.PriorityQueue<int>;
+    inArena.items.allocator = &arena;
+    for i in 0..100 { inArena.push(100 - i); }
+    assert(inArena.pop() == 1);
+    arena.free();
+
+    tasks.free();
+    floats.free();
+    print("ok");
+}

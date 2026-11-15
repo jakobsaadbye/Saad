@@ -1,0 +1,103 @@
+namespace collections;
+
+// A queue that gives its values back smallest first: a binary heap in a list. "Smallest" is by the operator < of the
+// type, so a struct orders itself by declaring one, e.g a node of a path search by its cost:
+//
+//     Node :: struct { cost: f32; cell: int; }
+//     operator < :: (a: Node, b: Node) -> bool { return a.cost < b.cost; }
+//
+//     open: collections.PriorityQueue<Node>;
+//     open.push(Node{4.5, 12});
+//     open.push(Node{1.0, 7});
+//     next := open.pop();              // Node{1.0, 7}
+//     while !open.isEmpty() { ... }
+//     open.free();
+//
+// push and pop take O(log n), peek O(1). Values that are equal come back in no particular order. For the biggest first,
+// give the type an operator < that is the other way around. Its list keeps the allocator it got its first memory from,
+// e.g queue.items.allocator = &arena
+PriorityQueue :: struct <T> {
+    items: [..]T;           // The heap: every value is no bigger than the two below it, at 2i + 1 and 2i + 2
+
+    push :: method * (value: T) {
+        self.items.add(value);
+        self.siftUp(self.items.count - 1);
+    }
+
+    // Takes the smallest value out. The queue must not be empty
+    pop :: method * () -> T {
+        assert(self.items.count > 0);
+        smallest := self.items[0];
+        last := self.items.removeLast();
+        if self.items.count > 0 {
+            self.items[0] = last;
+            self.siftDown(0);
+        }
+        return smallest;
+    }
+
+    // The smallest value, or nothing when the queue is empty
+    tryPop :: method * () -> ?T {
+        if self.items.count == 0 { return null; }
+        return self.pop();
+    }
+
+    // The smallest value, without taking it out. The queue must not be empty
+    peek :: method () -> T {
+        assert(self.items.count > 0);
+        return self.items[0];
+    }
+
+    count :: method () -> i64 {
+        return self.items.count;
+    }
+
+    isEmpty :: method () -> bool {
+        return self.items.count == 0;
+    }
+
+    reserve :: method * (capacity: i64) {
+        self.items.reserve(capacity);
+    }
+
+    // Empty, and keeps its memory for more
+    clear :: method * () {
+        self.items.clear();
+    }
+
+    free :: method * () {
+        self.items.free();
+    }
+
+    // The values, in the order of the heap, not sorted. For 'for x in queue'
+    elements :: method () -> []T {
+        return self.items;
+    }
+
+    @private
+    siftUp :: method * (index: i64) {
+        i := index;
+        while i > 0 {
+            parent := (i - 1) / 2;
+            if !(self.items[i] < self.items[parent]) { return; }
+            self.items.swap(i, parent);
+            i = parent;
+        }
+    }
+
+    @private
+    siftDown :: method * (index: i64) {
+        i := index;
+        count := self.items.count;
+        for {
+            left := 2 * i + 1;
+            if left >= count { return; }
+            smaller := left;
+            right := left + 1;
+            if right < count && self.items[right] < self.items[left] { smaller = right; }
+            if !(self.items[smaller] < self.items[i]) { return; }
+            self.items.swap(i, smaller);
+            i = smaller;
+        }
+    }
+}
