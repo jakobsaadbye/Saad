@@ -1,0 +1,50 @@
+// A struct that holds a fixed array of a struct declared further down is sized by it. The size of the array was taken
+// before the elements had one, so 'Traffic' had a size of 0, its cars were written over other memory, and a short
+// lambda on its cars, e.g countWhere, stopped the compiler
+
+Traffic :: struct {
+    cars:  [8]Car;
+    grid:  [2][3]Car;       // An array of arrays
+    lanes: Lane;
+}
+
+Garage :: union {
+    empty;
+    full: struct { cars: [4]Car; };
+}
+
+activeCount :: method (traffic: *Traffic) -> int {
+    return traffic.cars.countWhere(car => car.isActive);
+}
+
+Car :: struct {
+    isActive: bool;
+    speed:    f32;
+}
+
+Lane :: struct {
+    speeds: [6]f32;
+}
+
+main :: () {
+    assert(sizeof(Car) == 8);
+    assert(sizeof(Traffic) == 8 * 8 + 6 * 8 + 6 * 4);
+
+    // Each car is its own memory, and starts zeroed
+    traffic: Traffic;
+    assert(traffic.activeCount() == 0);
+    traffic.cars[2].isActive = true;
+    traffic.cars[7].speed = 3.5;
+    traffic.grid[1][2].speed = 9;
+    traffic.lanes.speeds[5] = 1;
+    assert(traffic.activeCount() == 1);
+    assert(traffic.cars[7].speed == 3.5 && traffic.grid[1][2].speed == 9 && traffic.lanes.speeds[5] == 1);
+    assert(traffic.grid[0][0].speed == 0);
+
+    garage := Garage{full: {}};
+    switch v in &garage {
+        case .full  { v.cars[3].speed = 2; assert(v.cars[3].speed == 2 && v.cars.count == 4); }
+        case .empty { assert(false); }
+    }
+    assert(sizeof(Garage) >= 4 * sizeof(Car));
+}

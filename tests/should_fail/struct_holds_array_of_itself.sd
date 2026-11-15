@@ -1,0 +1,10 @@
+// expect-error: Illegal recursive definition of type 'Node'. It holds an array of itself
+
+Node :: struct {
+    value:    int;
+    children: [4]Node;
+}
+
+main :: () {
+    n: Node;
+}

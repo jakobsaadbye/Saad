@@ -2493,7 +2493,7 @@ Type *resolve_type(Typer *typer, Type *type) {
             if (!cap_type) return NULL;
 
             AstExpr *const_expr = simplify_expression(typer->const_evaluator, typer->current_scope, array->capacity_expr);
-            if (const_expr->head.kind != AST_LITERAL && ((AstLiteral *)(const_expr))->kind != LITERAL_INTEGER) {
+            if (const_expr->head.kind != AST_LITERAL || ((AstLiteral *)(const_expr))->kind != LITERAL_INTEGER) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(array->capacity_expr), "Size of the array must be an integer constant");
                 return NULL;
             }
@@ -2553,6 +2553,19 @@ Type *resolve_type(Typer *typer, Type *type) {
         // A struct whose members have an error. That is reported, so its uses fail without another error
         TypeStruct *struct_type = (TypeStruct *)type;
         if (struct_type->node && (struct_type->node->head.flags & AST_FLAG_HAS_ERRORS) && errors_reported()) return NULL;
+
+        // A struct declared further down that got here by its type instead of its name, e.g the parameter of a short lambda
+        // given to a generic, 'cars.countWhere(car => car.isActive)' before 'Car :: struct {...}'. It is checked now, like
+        // a struct named further down is
+        AstStruct *node = struct_type->node;
+        if (node && !(node->head.flags & AST_FLAG_IS_TYPE_CHECKED) && typer->struct_check_depth == 0) {
+            Typer saved_state = *typer;
+            bool ok = check_struct_defn(typer, node);
+            typer_restore_state(typer, saved_state);
+            typer->inside_declaration = saved_state.inside_declaration;
+            if (!ok) return NULL;
+            if (type->flags & TYPE_IS_FULLY_SIZED) return type;
+        }
         XXX;
     }
 
@@ -4078,6 +4091,14 @@ bool check_struct_defn(Typer *typer, AstStruct *ast_struct) {
     return ok;
 }
 
+// Works out the size of a fixed array, also of the arrays in it, from the size of its elements
+static void resize_fixed_array(Type *type) {
+    if (type->kind != TYPE_ARRAY || ((TypeArray *)type)->array_kind != ARRAY_FIXED) return;
+    TypeArray *array = (TypeArray *) type;
+    resize_fixed_array(array->elem_type);
+    array->head.size = array->capacity * array->elem_type->size;
+}
+
 bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
     if (ast_struct->head.flags & AST_FLAG_IS_TYPE_CHECKED) {
         return true;
@@ -4134,9 +4155,21 @@ bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
             if (!ok) return false;
         }
 
-        if (member->type->kind == TYPE_STRUCT) {
-            if ( !(member->type->flags & TYPE_IS_FULLY_SIZED) && member->type != (Type *) struct_type) {
-                AstStruct *non_checked_struct = ((TypeStruct *)member->type)->node;
+        // A fixed array is sized by its elements, e.g 'cars: [8]Car' needs Car to be sized, also when Car is declared
+        // further down. Its size was taken from the elements when it was resolved, so it is worked out again after
+        Type *sized_by = member->type;
+        while (sized_by->kind == TYPE_ARRAY && ((TypeArray *)sized_by)->array_kind == ARRAY_FIXED) {
+            sized_by = ((TypeArray *)sized_by)->elem_type;
+        }
+        if (sized_by == (Type *) struct_type && sized_by != member->type) {
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *) member->decl, "Illegal recursive definition of type '%s'. It holds an array of itself", struct_type->node->identifier->name);
+            report_error_ast(typer->parser, LABEL_HINT, NULL, "Did you mean a list or a slice, e.g [..]%s?", struct_type->node->identifier->name);
+            return false;
+        }
+
+        if (sized_by->kind == TYPE_STRUCT) {
+            if ( !(sized_by->flags & TYPE_IS_FULLY_SIZED) && sized_by != (Type *) struct_type) {
+                AstStruct *non_checked_struct = ((TypeStruct *)sized_by)->node;
 
                 // Check for cyclic sizing dependency
                 for (int i = 0; i < typer->struct_wait_list.count; i++) {
@@ -4163,6 +4196,7 @@ bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
                 // Pop ourselves from the waiting list
                 da_remove(&typer->struct_wait_list, typer->struct_wait_list.count - 1);
             }
+            if (sized_by != member->type) resize_fixed_array(member->type);
         }
 
     }

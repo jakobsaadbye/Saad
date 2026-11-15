@@ -308,8 +308,8 @@ main :: () {
     }
 
     // Math for bouncing the ball with the bar at a certain angle
-    ANGLE_MIN := degreeToRadians(15.0);
-    ANGLE_MAX := degreeToRadians(165.0);
+    AngleMin :: 15.0;
+    AngleMax :: 165.0;
 
     //
     // Main game-loop
@@ -402,7 +402,7 @@ main :: () {
             if t < 0 { t = 0; }
             if t > 1.0 { t = 1.0; }
 
-            theta := lerp(ANGLE_MIN, ANGLE_MAX, t);
+            theta := toRadians(lerp(AngleMin, AngleMax, t));
 
             directionVector := Vector2{
                 x: - xx cos(xx theta),
@@ -723,12 +723,4 @@ bounceBall :: (ball: *Ball, b: Rectangle) {
         ball.velY = -ball.velY;
         ball.y    += overlap.y;
     }
-}
-
-degreeToRadians :: (deg: f32) -> f32 {
-    return deg * (Pi / 180.0);
-}
-
-lerp :: (a: f32, b: f32, t: f32) -> f32 {
-    return a + (b - a) * t;
 }

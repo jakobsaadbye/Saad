@@ -237,12 +237,26 @@ AstExpr *simplify_expression(ConstEvaluator *ce, AstBlock *scope, AstExpr *expr)
         }
         case AST_ENUM_LITERAL: {
             AstEnumLiteral *lit = (AstEnumLiteral *)(expr);
+            if (lit->enum_member->head.kind == AST_IDENTIFIER) {
+                AstIdentifier *member = (AstIdentifier *) lit->enum_member; // .count, .names or .values
+                if (strcmp(member->name, "count") == 0) return make_literal_integer(ce, ((AstEnum *) member->decl)->enumerators.count);
+                return expr;
+            }
             return make_literal_integer(ce, lit->enum_member->value); // @Note - Potential loss of enum information
         }
         case AST_MEMBER_ACCESS: {
             AstMemberAccess *ma = (AstMemberAccess *)(expr);
 
             if (ma->access_kind == MEMBER_ACCESS_ENUM_MEMBER) {
+                if (ma->enum_member->head.kind == AST_IDENTIFIER) {
+                    // A static member of the enum: count, names or values. Only count is a constant, e.g [Color.count]int
+                    AstIdentifier *member = (AstIdentifier *) ma->enum_member;
+                    if (strcmp(member->name, "count") == 0) {
+                        AstEnum *ast_enum = (AstEnum *) member->decl;
+                        return make_literal_integer(ce, ast_enum->enumerators.count);
+                    }
+                    return expr;
+                }
                 return make_literal_integer(ce, ma->enum_member->value); // @Note - Potential loss of enum information
             }
 

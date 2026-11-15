@@ -76,6 +76,7 @@ fmt.print("% is 100\% done", name);                // \% is a %, and %% two valu
 text := fmt.sprint("Score: %", score);              // like print, but returns the text
 text.free();
 joined := fmt.join(["a", "b", "c"], ", ");          // "a, b, c"
+fmt.print("% s", fmt.fixed(12.345, 1));            // 12.3 s: a float with 1 decimal, rounded
 ```
 
 ### StringBuilder
@@ -88,6 +89,7 @@ sb.addString(name);
 sb.addChar(',');
 sb.addRepeated(' ', 4);             // e.g indentation
 sb.addValue(person);                // a value like fmt.print writes it
+sb.addFixed(3.14159, 2);            // 3.14
 sb.addQuoted(name);                 // "Ada", with escapes. addQuotedChar('a') is 'a'
 
 for n in numbers { sb.add("%, ", n); }
@@ -704,7 +706,10 @@ parameters, e.g `call := f.newCall(); call.set("id", 7); call.invoke(); value :=
 
 ## math, mem, c
 
-* `math`: the functions of C's `math.h` (`sin`, `sqrt`, `pow`, ...).
+* `math`: the functions of C's `math.h` (`sin`, `sqrt`, `pow`, ...), and some of its own: `Pi` and `Tau`, `min(a, b)`,
+  `max(a, b)` and `clamp(value, low, high)` for any type that can be compared with `<`, and for `f32` `lerp(a, b, t)`,
+  `inverseLerp(a, b, value)`, `moveTowards(current, target, maxDelta)`, `sign(x)`, `toRadians(degrees)` and
+  `toDegrees(radians)`.
 * `mem`: memory, so the standard library and programs don't call C for it. All of it goes through an
   `Allocator`, an interface any type can be (see `docs/allocators.md`). `mem.allocate(size, allocator, align)` gives zeroed memory,
   `mem.resize(p, oldSize, newSize, allocator)` is like `realloc`, `mem.free(p, size, allocator)` frees it,
@@ -759,5 +764,5 @@ c.string{p}.toString();             // a pointer of C, made into one
 
 * `strings` with `contains`, `trim`, `replace`, `join` and a `parseInt`/`parseFloat`.
 * `os.listDir`, and a `path` namespace (`join`, `extension`, `directory`).
-* `math` functions of its own: `Pi`, `clamp`, `lerp`, `min`/`max`, vectors.
+* `math` vectors of its own, apart from raylib's.
 * `hash` (e.g fnv1a, crc32), `base64` (e.g fnv1a, crc32) and `threads` (a portable layer over `os.windows`).

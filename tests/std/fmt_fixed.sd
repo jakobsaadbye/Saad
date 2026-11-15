@@ -1,0 +1,36 @@
+// fmt.fixed and StringBuilder.addFixed: a float with a fixed number of decimals, rounded
+
+import fmt;
+
+text :: (value: f64, decimals: int) -> string {
+    sb: fmt.StringBuilder;
+    sb.addFixed(value, decimals);
+    return sb.toString();
+}
+
+main :: () {
+    assert(text(3.14159, 2) == "3.14");
+    assert(text(2.718, 2) == "2.72");
+    assert(text(1.05, 2) == "1.05");
+    assert(text(1.005, 3) == "1.005");
+    assert(text(12.0, 1) == "12.0");
+    assert(text(0.0, 3) == "0.000");
+    assert(text(9.96, 1) == "10.0");
+    assert(text(-4.25, 1) == "-4.3");
+    assert(text(-0.01, 1) == "0.0");      // No minus sign on a value that rounds to zero
+    assert(text(7.6, 0) == "8");
+    assert(text(123456.5, 0) == "123457");
+    assert(text(0.5, -3) == "1");         // Fewer than 0 decimals is 0
+
+    // In print and sprint, without memory of its own
+    time: f32 = 12.345;
+    line := fmt.sprint("Crossed in % s", fmt.fixed(time, 1));
+    assert(line == "Crossed in 12.3 s");
+    line.free();
+
+    // Inside a struct it is written like any other struct
+    Lap :: struct { time: fmt.Fixed; }
+    lap := fmt.sprint("%", Lap{fmt.fixed(1.25, 1)});
+    assert(lap.startsWith("Lap{time: "));
+    lap.free();
+}
