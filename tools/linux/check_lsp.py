@@ -215,6 +215,11 @@ def main():
         return m["result"]
     labels = [item["label"] for item in complete_at("    b := status == .|")]
     check(labels == ["open", "closed"], f"the values of Status after '==': {labels}")
+    items = complete_at("    s := Status.|")
+    labels = [item["label"] for item in items]
+    check(labels == ["open", "closed", "count", "names", "values", "from"], f"the values and the members of the enum Status: {labels}")
+    detail = {item["label"]: item.get("detail") for item in items}
+    check(detail.get("from") == "(n: int) -> ?Status" and detail.get("values") == "[]Status", f"what the members of Status are: {detail}")
     labels = [item["label"] for item in complete_at("    t := size(.|);")]
     check(labels == ["circle", "square", "empty"], f"the variants of Shape for an argument: {labels}")
     items = complete_at("    p2 := Pair<int>{first: 1, |};")

@@ -40,6 +40,7 @@ These throw a `Panic`, which names the place, and which a web server turns into 
 * a number cast to an enum that isn't one of its values, and a switch on an enum that holds none of them
 * integer arithmetic whose result doesn't fit its type, e.g `2147483647 + 1 doesn't fit in i32` (see `docs/numbers.md`)
 * a division by zero, and an `assert` that fails
+* `value()` of an empty optional, e.g `value() of an empty optional. Check hasValue() first, or use valueOr() or ??`
 * with `--check-memory`, memory of an arena that was cleared or freed
 
 `saad build --unchecked` leaves the checks of indexes, null pointers, enum casts and integer overflow out.

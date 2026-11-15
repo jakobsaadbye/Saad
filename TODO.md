@@ -4,9 +4,6 @@ What is still open, checked against the compiler on 14. Nov 2026. What is done i
 
 ## Bugs
 
-- `value()` of an empty optional stops at an assert in collections.sd, without a message of its own. A message needs a
-  string literal there, which makes collections.sd import the string prelude while it is parsed, and that breaks the
-  names it uses (e.g free)
 
 ## Language
 

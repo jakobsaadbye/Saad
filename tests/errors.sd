@@ -112,6 +112,15 @@ main :: () {
     taken := save(false);                  // Taken: a value
     assert(taken.message == "can't save 42");
 
+    // value() of an empty optional is a Panic, which says what to do instead
+    try {
+        empty: ?int;
+        n := empty.value();
+        assert(n == 0 && false);
+    } catch (e) {
+        assert(e.is(Panic) && e.message == "value() of an empty optional. Check hasValue() first, or use valueOr() or ??");
+    }
+
     // A division by zero is a Panic
     try {
         divide(1, 0);

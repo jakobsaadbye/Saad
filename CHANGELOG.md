@@ -2,6 +2,14 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.23.2 - 15. Nov 2026
+
+* `value()` of an empty optional throws a `Panic` with a message of its own, "value() of an empty optional. Check
+  hasValue() first, or use valueOr() or ??", instead of "Assertion failed", with the place of the call in its trace.
+  `panicEmptyOptional()` of `std/prelude/errors.sd` makes the message, so `collections.sd` needs no string of its own
+* Language server: after the name of an enum, e.g `Status.`, completion offers its values and what every enum has:
+  `count`, `names`, `values` and `from(n)`, with their types
+
 ## Update v0.23.1 - 14. Nov 2026
 
 * `as` binds looser than the unary operators: `*p as i64` is `(*p) as i64` and `*(p as *i8) as i64` is the byte at `p`

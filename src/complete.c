@@ -483,6 +483,17 @@ static void add_static_members(AstIdentifier *type_name) {
             snprintf(value, sizeof(value), "%d", etor->value);
             add_item(etor->name, "enumMember", value, NULL);
         }
+
+        // What every enum has, see get_static_enum_member() and rewrite_enum_from() in typer.c
+        char *name = type_to_str(type);
+        char detail[160];
+        add_item("count", "constant", "i64", "The number of values");
+        snprintf(detail, sizeof(detail), "[]string");
+        add_item("names", "constant", detail, "The names of the values, in the order they are declared");
+        snprintf(detail, sizeof(detail), "[]%s", name);
+        add_item("values", "constant", detail, "The values, in the order they are declared");
+        snprintf(detail, sizeof(detail), "(n: int) -> ?%s", name);
+        add_item("from", "function", detail, "The value with the number, or empty when no value has it, e.g E.from(n) ?? .first");
         return;
     }
     if (type->kind == TYPE_STRUCT) {

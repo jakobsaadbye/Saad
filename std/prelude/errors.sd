@@ -108,6 +108,11 @@ panicDivisionByZero :: () {
     panic("Division by zero");
 }
 
+// For value() of an optional that is empty, see Optional in collections.sd. The trace has the place of the call
+panicEmptyOptional :: () {
+    panic("value() of an empty optional. Check hasValue() first, or use valueOr() or ??");
+}
+
 // For an assert whose condition is false. The trace has the place of the assert
 panicAssertion :: () {
     panic("Assertion failed");
