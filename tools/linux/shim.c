@@ -151,6 +151,15 @@ F1(ceil) F1(floor) F1(fabs) F1(round) F1(trunc) F1(rint) F1(nearbyint)
 F1(sin) F1(cos) F1(tan) F1(asin) F1(acos) F1(atan) F1(sinh) F1(cosh) F1(tanh) F1(sqrt) F1(exp) F1(log) F1(log10)
 MS double ms_atan2(double y, double x) { return atan2(y, x); } MS float ms_atan2f(float y, float x) { return atan2f(y, x); }
 MS double ms_pow(double x, double y) { return pow(x, y); }     MS float ms_powf(float x, float y) { return powf(x, y); }
+F1(asinh) F1(acosh) F1(atanh) F1(cbrt) F1(exp2) F1(expm1) F1(log2) F1(log1p) F1(logb) F1(erf) F1(erfc) F1(tgamma) F1(lgamma)
+#define F2(name) MS double ms_##name(double x, double y) { return name(x, y); } MS float ms_##name##f(float x, float y) { return name##f(x, y); }
+F2(fmod) F2(remainder) F2(fmin) F2(fmax) F2(fdim) F2(copysign) F2(nextafter)
+MS double ms_hypot(double x, double y) { return hypot(x, y); }
+MS double ms_fma(double x, double y, double z) { return fma(x, y, z); } MS float ms_fmaf(float x, float y, float z) { return fmaf(x, y, z); }
+MS double ms_ldexp(double x, int e) { return ldexp(x, e); }   MS double ms_frexp(double x, int *e) { return frexp(x, e); }
+MS double ms_modf(double x, double *i) { return modf(x, i); } MS float ms_modff(float x, float *i) { return modff(x, i); }
+MS double ms_scalbn(double x, int e) { return scalbn(x, e); } MS float ms_scalbnf(float x, int e) { return scalbnf(x, e); }
+MS int ms_ilogb(double x) { return ilogb(x); }                MS int ms_ilogbf(float x) { return ilogbf(x); }
 MS long ms_lround(double x) { return lround(x); }
 MS long long ms_llround(double x) { return llround(x); }
 

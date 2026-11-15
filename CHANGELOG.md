@@ -16,6 +16,13 @@ What changed in each version of Saad: the language, the compiler, the standard l
   was an array of size 0. The size of an array that isn't an integer constant is an error, where it was taken as 0
 * `math` has helpers of its own: `Pi`, `Tau`, `min`, `max` and `clamp` for any type that can be compared with `<`, and
   `lerp`, `inverseLerp`, `moveTowards`, `sign`, `toRadians` and `toDegrees`. examples/breakout uses them instead of its own
+* A program on Windows that called one of the C99 functions of `math`, e.g `fabsf`, `roundf`, `trunc`, `cbrt` or `hypot`,
+  didn't start, without a message: they were bound to `msvcrt.dll`, which is older than C99 and doesn't have them, and
+  Windows doesn't start a program that imports a function its DLL doesn't have. They come from `ucrtbase.dll` now, the
+  Universal C runtime of Windows 10 and later. `fabsf`, `hypotf`, `ldexpf`, `frexpf`, `isnan`, `isinf`, `isfinite`,
+  `isnormal` and `signbit` are macros or inline functions in Windows' headers and in no DLL, so they are written in
+  Saad. `math.abs` of an `f64` was bound to C's `abs` of an `int`, and gave back what it was given. The Linux shim has the
+  rest of the functions of `math`
 * `fmt.fixed(value, decimals)` prints a float with that many decimals, rounded, e.g `fmt.print("% s", fmt.fixed(12.345, 1))`
   prints `12.3 s`, without memory of its own. `StringBuilder.addFixed(value, decimals)` adds one
 * `raylib`: `ConfigFlags` is an `enumflags`, e.g `SetConfigFlags(.msaa4xHint | .windowResizable)`, which `SetConfigFlags`,
