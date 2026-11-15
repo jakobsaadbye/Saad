@@ -1,4 +1,6 @@
-// The helpers of Saad's own in std/math.sd: Pi, min, max, clamp, lerp, inverseLerp, moveTowards, sign and the angles
+// The helpers of Saad's own in std/math.sd: Pi, min, max, clamp, lerp, inverseLerp, moveTowards, sign and the angles,
+// and the functions of math.h that are written in Saad, as Windows has them only as macros: fabsf, abs, the
+// classifications, hypotf, ldexpf and frexpf
 
 import math;
 
@@ -28,4 +30,27 @@ main :: () {
 
     assert(near(math.toRadians(180), math.Pi as f32));
     assert(near(math.toDegrees(math.Tau as f32), 360));
+
+    // Written in Saad
+    assert(math.fabsf(-2.5) == 2.5 && math.fabsf(3) == 3);
+    negativeZero: f32 = -0.0;
+    assert(math.signbit(math.fabsf(negativeZero)) == 0);
+    assert(math.abs(-2.5) == 2.5 && math.abs(4.0) == 4.0);
+
+    zero := 0.0;
+    nan := zero / zero;
+    infinity := 1.0 / zero;
+    assert(math.isnan(nan) != 0 && math.isnan(1.0) == 0);
+    assert(math.isinf(infinity) != 0 && math.isinf(-infinity) != 0 && math.isinf(nan) == 0 && math.isinf(5.0) == 0);
+    assert(math.isfinite(5.0) != 0 && math.isfinite(infinity) == 0 && math.isfinite(nan) == 0);
+    assert(math.isnormal(1.0) != 0 && math.isnormal(0.0) == 0 && math.isnormal(infinity) == 0);
+    assert(math.signbit(-1.0) != 0 && math.signbit(1.0) == 0 && math.signbit(-0.0) != 0);
+
+    assert(near(math.hypotf(3, 4), 5));
+    assert(math.ldexpf(1.5, 3) == 12);
+    exponent: i32 = 0;
+    assert(math.frexpf(12, &exponent) == 0.75 && exponent == 4);
+
+    // C99, from ucrtbase.dll on Windows
+    assert(math.roundf(2.5) == 3 && math.trunc(-2.7) == -2 && near(math.cbrt(27.0) as f32, 3));
 }

@@ -3,194 +3,186 @@ namespace math;
 //////////////////////////////////////////////////////////////////////////////////////
 //  C math.h functions
 //////////////////////////////////////////////////////////////////////////////////////
+
+// The functions of C89. On Windows they are in msvcrt.dll, the C runtime that programs are linked with
 extern "C" {
-
-    //////////////////////////////////////////////////////////////////////////////////////
-    //  Basic / Rounding
-    //////////////////////////////////////////////////////////////////////////////////////
-    abs   :: (value: f64) -> f64;
     fabs  :: (value: f64) -> f64;
-    fabsf :: (value: f32) -> f32;
-
-    round  :: (value: f64) -> f64;
-    roundf :: (value: f32) -> f32;
-    lround :: (value: f64) -> i64;
-    llround :: (value: f64) -> i64;
 
     floor  :: (value: f64) -> f64;
     floorf :: (value: f32) -> f32;
+    ceil   :: (value: f64) -> f64;
+    ceilf  :: (value: f32) -> f32;
 
-    ceil  :: (value: f64) -> f64;
-    ceilf :: (value: f32) -> f32;
-
-    trunc  :: (value: f64) -> f64;
-    truncf :: (value: f32) -> f32;
-
-    rint  :: (value: f64) -> f64;
-    rintf :: (value: f32) -> f32;
-
-    nearbyint  :: (value: f64) -> f64;
-    nearbyintf :: (value: f32) -> f32;
-
-    //////////////////////////////////////////////////////////////////////////////////////
-    //  Trigonometry
-    //////////////////////////////////////////////////////////////////////////////////////
-    sin  :: (angle: f64) -> f64;
-    sinf :: (angle: f32) -> f32;
-
-    cos  :: (angle: f64) -> f64;
-    cosf :: (angle: f32) -> f32;
-
-    tan  :: (angle: f64) -> f64;
-    tanf :: (angle: f32) -> f32;
-
-    asin  :: (value: f64) -> f64;
-    asinf :: (value: f32) -> f32;
-
-    acos  :: (value: f64) -> f64;
-    acosf :: (value: f32) -> f32;
-
-    atan  :: (value: f64) -> f64;
-    atanf :: (value: f32) -> f32;
-
+    // Trigonometry, in radians
+    sin    :: (angle: f64) -> f64;
+    sinf   :: (angle: f32) -> f32;
+    cos    :: (angle: f64) -> f64;
+    cosf   :: (angle: f32) -> f32;
+    tan    :: (angle: f64) -> f64;
+    tanf   :: (angle: f32) -> f32;
+    asin   :: (value: f64) -> f64;
+    asinf  :: (value: f32) -> f32;
+    acos   :: (value: f64) -> f64;
+    acosf  :: (value: f32) -> f32;
+    atan   :: (value: f64) -> f64;
+    atanf  :: (value: f32) -> f32;
     atan2  :: (y: f64, x: f64) -> f64;
     atan2f :: (y: f32, x: f32) -> f32;
 
-    //////////////////////////////////////////////////////////////////////////////////////
-    //  Hyperbolic
-    //////////////////////////////////////////////////////////////////////////////////////
+    // Hyperbolic
     sinh  :: (value: f64) -> f64;
     sinhf :: (value: f32) -> f32;
-
     cosh  :: (value: f64) -> f64;
     coshf :: (value: f32) -> f32;
-
     tanh  :: (value: f64) -> f64;
     tanhf :: (value: f32) -> f32;
 
-    asinh  :: (value: f64) -> f64;
-    asinhf :: (value: f32) -> f32;
-
-    acosh  :: (value: f64) -> f64;
-    acoshf :: (value: f32) -> f32;
-
-    atanh  :: (value: f64) -> f64;
-    atanhf :: (value: f32) -> f32;
-
-    //////////////////////////////////////////////////////////////////////////////////////
-    //  Exponential & Logarithm
-    //////////////////////////////////////////////////////////////////////////////////////
-    sqrt  :: (value: f64) -> f64;
-    sqrtf :: (value: f32) -> f32;
-
-    cbrt  :: (value: f64) -> f64;
-    cbrtf :: (value: f32) -> f32;
-
-    exp   :: (value: f64) -> f64;
-    expf  :: (value: f32) -> f32;
-
-    exp2  :: (value: f64) -> f64;
-    exp2f :: (value: f32) -> f32;
-
-    expm1  :: (value: f64) -> f64;
-    expm1f :: (value: f32) -> f32;
-
-    log   :: (value: f64) -> f64;
-    logf  :: (value: f32) -> f32;
-
-    log2  :: (value: f64) -> f64;
-    log2f :: (value: f32) -> f32;
-
+    // Powers, exponentials and logarithms
+    sqrt   :: (value: f64) -> f64;
+    sqrtf  :: (value: f32) -> f32;
+    pow    :: (base: f64, exp: f64) -> f64;
+    powf   :: (base: f32, exp: f32) -> f32;
+    exp    :: (value: f64) -> f64;
+    expf   :: (value: f32) -> f32;
+    log    :: (value: f64) -> f64;
+    logf   :: (value: f32) -> f32;
     log10  :: (value: f64) -> f64;
     log10f :: (value: f32) -> f32;
 
+    // Taking floats apart
+    fmod   :: (x: f64, y: f64) -> f64;
+    fmodf  :: (x: f32, y: f32) -> f32;
+    modf   :: (value: f64, iptr: *f64) -> f64;     // Integer and fractional parts
+    modff  :: (value: f32, iptr: *f32) -> f32;
+    frexp  :: (value: f64, exp: *i32) -> f64;      // Significand and exponent
+    ldexp  :: (value: f64, exp: i32) -> f64;       // value * 2^exp
+}
+
+// The functions of C99. msvcrt.dll is older than C99 and doesn't have them, so on Windows they come from ucrtbase.dll, the
+// Universal C runtime that is part of Windows since Windows 10. A function that a DLL doesn't have stops a program before
+// it starts, without a message. On Linux the name of the DLL doesn't matter
+extern "ucrtbase.dll" {
+    // Rounding
+    round      :: (value: f64) -> f64;
+    roundf     :: (value: f32) -> f32;
+    lround     :: (value: f64) -> i64;
+    llround    :: (value: f64) -> i64;
+    trunc      :: (value: f64) -> f64;
+    truncf     :: (value: f32) -> f32;
+    rint       :: (value: f64) -> f64;
+    rintf      :: (value: f32) -> f32;
+    nearbyint  :: (value: f64) -> f64;
+    nearbyintf :: (value: f32) -> f32;
+
+    // Inverse hyperbolic
+    asinh  :: (value: f64) -> f64;
+    asinhf :: (value: f32) -> f32;
+    acosh  :: (value: f64) -> f64;
+    acoshf :: (value: f32) -> f32;
+    atanh  :: (value: f64) -> f64;
+    atanhf :: (value: f32) -> f32;
+
+    // Powers, exponentials and logarithms
+    cbrt   :: (value: f64) -> f64;
+    cbrtf  :: (value: f32) -> f32;
+    hypot  :: (x: f64, y: f64) -> f64;
+    exp2   :: (value: f64) -> f64;
+    exp2f  :: (value: f32) -> f32;
+    expm1  :: (value: f64) -> f64;
+    expm1f :: (value: f32) -> f32;
+    log2   :: (value: f64) -> f64;
+    log2f  :: (value: f32) -> f32;
     log1p  :: (value: f64) -> f64;
     log1pf :: (value: f32) -> f32;
 
-    //////////////////////////////////////////////////////////////////////////////////////
-    //  Power
-    //////////////////////////////////////////////////////////////////////////////////////
-    pow  :: (base: f64, exp: f64) -> f64;
-    powf :: (base: f32, exp: f32) -> f32;
-
-    hypot  :: (x: f64, y: f64) -> f64;
-    hypotf :: (x: f32, y: f32) -> f32;
-
-    //////////////////////////////////////////////////////////////////////////////////////
-    //  Floating-point manipulation
-    //////////////////////////////////////////////////////////////////////////////////////
-    fmod  :: (x: f64, y: f64) -> f64;
-    fmodf :: (x: f32, y: f32) -> f32;
-
+    // Floating-point manipulation
     remainder  :: (x: f64, y: f64) -> f64;
     remainderf :: (x: f32, y: f32) -> f32;
-
-    fmin  :: (x: f64, y: f64) -> f64;
-    fminf :: (x: f32, y: f32) -> f32;
-
-    fmax  :: (x: f64, y: f64) -> f64;
-    fmaxf :: (x: f32, y: f32) -> f32;
-
-    fdim  :: (x: f64, y: f64) -> f64;
-    fdimf :: (x: f32, y: f32) -> f32;
-
-    fma  :: (x: f64, y: f64, z: f64) -> f64;
-    fmaf :: (x: f32, y: f32, z: f32) -> f32;
-
-    // Decompose floating-point number into significand and exponent
-    frexp  :: (value: f64, exp: *i32) -> f64;
-    frexpf :: (value: f32, exp: *i32) -> f32;
-
-    // Multiply by power of 2
-    ldexp  :: (value: f64, exp: i32) -> f64;
-    ldexpf :: (value: f32, exp: i32) -> f32;
-
-    // Decompose into integer and fractional parts
-    modf  :: (value: f64, iptr: *f64) -> f64;
-    modff :: (value: f32, iptr: *f32) -> f32;
-
-    // Scale by FLT_RADIX power
-    scalbn  :: (value: f64, exp: i32) -> f64;
-    scalbnf :: (value: f32, exp: i32) -> f32;
-
-    // Extract exponent
-    ilogb  :: (value: f64) -> i32;
-    ilogbf :: (value: f32) -> i32;
-
-    logb  :: (value: f64) -> f64;
-    logbf :: (value: f32) -> f32;
-
-    // Copy sign from one value to another
-    copysign  :: (x: f64, y: f64) -> f64;
-    copysignf :: (x: f32, y: f32) -> f32;
-
-    // Next representable value
-    nextafter  :: (x: f64, y: f64) -> f64;
+    fmin       :: (x: f64, y: f64) -> f64;
+    fminf      :: (x: f32, y: f32) -> f32;
+    fmax       :: (x: f64, y: f64) -> f64;
+    fmaxf      :: (x: f32, y: f32) -> f32;
+    fdim       :: (x: f64, y: f64) -> f64;
+    fdimf      :: (x: f32, y: f32) -> f32;
+    fma        :: (x: f64, y: f64, z: f64) -> f64;
+    fmaf       :: (x: f32, y: f32, z: f32) -> f32;
+    scalbn     :: (value: f64, exp: i32) -> f64;     // Scale by FLT_RADIX power
+    scalbnf    :: (value: f32, exp: i32) -> f32;
+    ilogb      :: (value: f64) -> i32;               // The exponent
+    ilogbf     :: (value: f32) -> i32;
+    logb       :: (value: f64) -> f64;
+    logbf      :: (value: f32) -> f32;
+    copysign   :: (x: f64, y: f64) -> f64;           // The size of x with the sign of y
+    copysignf  :: (x: f32, y: f32) -> f32;
+    nextafter  :: (x: f64, y: f64) -> f64;           // The next float after x towards y
     nextafterf :: (x: f32, y: f32) -> f32;
 
-    //////////////////////////////////////////////////////////////////////////////////////
-    //  Classification (return i32: non-zero = true)
-    //////////////////////////////////////////////////////////////////////////////////////
-    isnan    :: (value: f64) -> i32;
-    isinf    :: (value: f64) -> i32;
-    isfinite :: (value: f64) -> i32;
-    isnormal :: (value: f64) -> i32;
-    signbit  :: (value: f64) -> i32;
-
-    //////////////////////////////////////////////////////////////////////////////////////
-    //  Error & Gamma
-    //////////////////////////////////////////////////////////////////////////////////////
-    erf   :: (value: f64) -> f64;
-    erff  :: (value: f32) -> f32;
-
-    erfc  :: (value: f64) -> f64;
-    erfcf :: (value: f32) -> f32;
-
+    // Error and gamma
+    erf     :: (value: f64) -> f64;
+    erff    :: (value: f32) -> f32;
+    erfc    :: (value: f64) -> f64;
+    erfcf   :: (value: f32) -> f32;
     tgamma  :: (value: f64) -> f64;
     tgammaf :: (value: f32) -> f32;
-
     lgamma  :: (value: f64) -> f64;
     lgammaf :: (value: f32) -> f32;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////
+//  The functions of math.h that are macros or inline functions on Windows, and in no DLL
+//////////////////////////////////////////////////////////////////////////////////////
+
+// The absolute value. C's abs is of an int, which this was bound to, so it gave back what it was given
+abs :: (value: f64) -> f64 {
+    return fabs(value);
+}
+
+fabsf :: (value: f32) -> f32 {
+    bits := *(&value as *u32) & 0x7fffffff;    // Without the sign bit, also for -0.0 and NaN
+    return *(&bits as *f32);
+}
+
+hypotf :: (x: f32, y: f32) -> f32 {
+    return hypot(x, y) as f32;
+}
+
+ldexpf :: (value: f32, exp: i32) -> f32 {
+    return ldexp(value, exp) as f32;
+}
+
+frexpf :: (value: f32, exp: *i32) -> f32 {
+    return frexp(value, exp) as f32;
+}
+
+// Classification: non-zero is true, like C. Read from the bits of the f64: the sign, 11 bits of exponent and 52 of fraction
+@private
+exponentBits :: (value: f64) -> u64 {
+    return (*(&value as *u64) >> 52) & 0x7ff;
+}
+
+isnan :: (value: f64) -> i32 {
+    if value != value { return 1; }    // Only NaN isn't equal to itself
+    return 0;
+}
+
+isinf :: (value: f64) -> i32 {
+    if exponentBits(value) == 0x7ff && (*(&value as *u64) & 0xfffffffffffff) == 0 { return 1; }
+    return 0;
+}
+
+isfinite :: (value: f64) -> i32 {
+    if exponentBits(value) != 0x7ff { return 1; }
+    return 0;
+}
+
+isnormal :: (value: f64) -> i32 {
+    exponent := exponentBits(value);
+    if exponent != 0 && exponent != 0x7ff { return 1; }
+    return 0;
+}
+
+signbit :: (value: f64) -> i32 {
+    return (*(&value as *u64) >> 63) as i32;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////
