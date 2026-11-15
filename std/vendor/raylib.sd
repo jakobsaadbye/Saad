@@ -851,7 +851,7 @@ BeginMode2D       :: (camera: Camera2D); // Begin 2D mode with custom camera (2D
 EndMode2D         :: () -> void; // Ends 2D mode with custom camera
 BeginMode3D       :: (camera: Camera3D); // Begin 3D mode with custom camera (3D)
 EndMode3D         :: () -> void; // Ends 3D mode and returns to default 2D orthographic mode
-BeginTextureMode  :: (target: Texture); // Begin drawing to render texture
+BeginTextureMode  :: (target: RenderTexture); // Begin drawing to render texture
 EndTextureMode    :: () -> void; // Ends drawing to render texture
 BeginShaderMode   :: (shader: Shader); // Begin custom shader drawing
 EndShaderMode     :: () -> void; // End custom shader drawing (use default shader)
