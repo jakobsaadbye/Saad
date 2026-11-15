@@ -11,6 +11,16 @@ import math.sqrt;
 
 main :: () {
     {
+        // A constant of a namespace is a constant, e.g the size of an array, also when it is made of other constants of
+        // its namespace. It was an error that the size isn't a constant, and an array of size 0 before that
+        bodies: [game.physics.MaxBodies]int;
+        cells:  [game.physics.Cells]f32;
+        rows:   [Rows]int;                  // Through 'use game.physics'
+        assert(bodies.count == 8 && cells.count == 24 && rows.count == 3);
+        cells[23] = 1.5;
+        assert(cells[23] == 1.5);
+    }
+    {
         // 'use' brings in every public declaration
         a := Vec2{3, 4};
         assert(a.length2() == 25);
