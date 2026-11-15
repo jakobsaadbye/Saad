@@ -6021,6 +6021,9 @@ bool rewrite_slice_method_call(Typer *typer, AstFunctionCall *call) {
         return true;
     }
 
+    // For an editor: the name goes to the method on slices, e.g the 'filter' of xs.filter(f) to filter :: method <T>(xs: []T, ...)
+    index_identifier_use((Ast *)ma->right, method->identifier);
+
     call->expression = (AstExpr *)make_resolved_identifier_literal(typer, method->identifier, (Ast *)ma->right);
     call->is_slice_method_call = true;
     AstArgument *receiver = generate_argument_from_expr(typer, ma->left);

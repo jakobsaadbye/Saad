@@ -2,6 +2,13 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.23.4 - 15. Nov 2026
+
+* Language server: the methods on slices, e.g `filter`, `map` and `sort`, go to their declaration in
+  `std/prelude/slices.sd`, have a hover and are colored, where a call of one had nothing. Completion after a call of one,
+  e.g `xs.filter(f).`, offers the members of what it gives (a `List`), and a list, or another collection, is offered the
+  methods on slices too
+
 ## Update v0.23.3 - 15. Nov 2026
 
 * A statement without its `;` is kept when it clearly ends there, i.e the next token is on a later line or is the `}`

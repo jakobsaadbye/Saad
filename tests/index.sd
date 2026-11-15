@@ -94,3 +94,8 @@ operator + :: (a: Circle, b: Circle) -> Circle {
 doubled :: (c: Circle) -> Circle {
     return c + c;
 }
+
+// Methods on slices, which a list has too. An editor goes from filter to its declaration in std/prelude/slices.sd
+evens :: (xs: []int) -> int {
+    return xs.filter(x => x % 2 == 0).count as int;
+}

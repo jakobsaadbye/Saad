@@ -264,6 +264,48 @@ static Type *named_type(AstIdentifier *name) {
     return name->type;
 }
 
+// The type of the elements of a slice, a fixed array or a collection (a struct with elements()), e.g the int of List<int>,
+// for the methods on slices, which they all have. NULL for other types
+static Type *element_type_of(Typer *typer, Type *type) {
+    type = value_type_of(type);
+    if (type == NULL) return NULL;
+    if (type->kind == TYPE_ARRAY) return ((TypeArray *)type)->elem_type;
+    if (type->kind != TYPE_STRUCT || is_optional_type(type)) return NULL;
+    AstStruct *node = ((TypeStruct *)type)->node;
+    bool is_collection = get_struct_method(node, "elements") || (node->generic_struct && get_struct_method(node->generic_struct, "elements"));
+    if (!is_collection) return NULL;
+    AstIdentifier *elements = get_struct_method(node, "elements");
+    if (elements && elements->type && elements->type->kind == TYPE_FUNCTION) {
+        Segment call = { .call = true };
+        Type *slice = after_call_or_index(typer, elements->type, &call);
+        if (slice && slice->kind == TYPE_ARRAY) return ((TypeArray *)slice)->elem_type;
+    }
+    // An instance whose elements() isn't made yet, e.g List<T>: its elements are where 'data' points
+    AstIdentifier *data = get_struct_member(node, "data");
+    if (data && data->type && data->type->kind == TYPE_POINTER) return ((TypePointer *)data->type)->pointer_to;
+    return NULL;
+}
+
+// What the call of a method on slices gives, e.g the List<int> of xs.filter(f) of a []int. Its type parameters are the type
+// of the elements: the one of the elements is, and another one, e.g the U of map, can't be known from the text, but it
+// doesn't change the names that can follow, e.g the methods of the List that map gives
+static Type *slice_method_result(Typer *typer, Type *receiver, Segment *segment) {
+    if (!segment->call) return NULL;
+    Type *element = element_type_of(typer, receiver);
+    if (element == NULL) return NULL;
+    AstFunctionDefn *method = find_slice_method(typer, segment->name);
+    if (method == NULL || method->return_types.count == 0) return NULL;
+    DynamicArray type_args = da_init(method->type_params.count > 0 ? method->type_params.count : 1, sizeof(Type *));
+    for (int i = 0; i < method->type_params.count; i++) da_append(&type_args, element);
+    AstFunctionDefn *instance = instantiate_generic_function(typer, method, type_args, (Ast *)method);
+    if (instance == NULL || instance->return_types.count == 0) return NULL;
+    Type *result = ((Type **)instance->return_types.items)[0];
+    if (result == NULL || result->kind == TYPE_VOID || result->kind == TYPE_NAME) return NULL;
+    Segment index_only = *segment;
+    index_only.call = false;
+    return after_call_or_index(typer, result, &index_only);
+}
+
 // Follows the chain to what it is. 'skip_last' leaves out the last segment, e.g for the function of a call
 static bool resolve_chain(Typer *typer, AstBlock *scope, Segment *segments, int count, Target *target) {
     typer->current_scope = scope;
@@ -325,6 +367,14 @@ static bool resolve_chain(Typer *typer, AstBlock *scope, Segment *segments, int 
         }
         if (segment->optional && is_optional_type(target->type)) target->type = optional_inner_type(target->type);
         AstIdentifier *member = member_of(typer, target->type, segment->name);
+        if (!member) {
+            // A method on slices, e.g the filter of xs.filter(f).
+            Type *result = slice_method_result(typer, target->type, segment);
+            if (result) {
+                target->type = result;
+                continue;
+            }
+        }
         if (!member || !member->type) return false;
         target->type = after_call_or_index(typer, member->type, segment);
         if (!target->type) return false;
@@ -454,6 +504,14 @@ static void add_members(Typer *typer, Type *type) {
         add_scope_identifiers(node->methods, &seen);
         if (node->generic_struct) add_scope_identifiers(node->generic_struct->methods, &seen); // The ones that aren't made yet
         add_embedded_members((TypeStruct *)type, &seen, 0);
+
+        // A collection, e.g a List, has the methods on slices too, e.g xs.filter(f)
+        if (element_type_of(typer, type)) {
+            for (int i = 0; i < typer->slice_methods.count; i++) {
+                AstFunctionDefn *method = ((AstFunctionDefn **)typer->slice_methods.items)[i];
+                if (method->identifier && !already_added(&seen, method->identifier->name)) add_identifier(method->identifier);
+            }
+        }
     }
     if (type->kind == TYPE_ARRAY) {
         if (!already_added(&seen, "count")) add_item("count", "field", "i64", "The number of elements");

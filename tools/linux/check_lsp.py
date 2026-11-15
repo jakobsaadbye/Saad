@@ -242,6 +242,19 @@ def main():
         got = signature_at(line_text)
         check(got == wanted, f"the signature at {line_text!r}: {got}, wanted {wanted}")
 
+    print("methods on slices")
+    client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 32}, "contentChanges": [{"text": text}]})
+    client.diagnostics_until(uri, lambda d: d == [], tries=40)
+    m = client.request("textDocument/definition", {"textDocument": doc, "position": position_of(text, 100, "filter")})
+    loc = m["result"]
+    check(loc and loc["uri"].endswith("/std/prelude/slices.sd"), f"definition of the filter of a slice: {loc}")
+    m = client.request("textDocument/hover", {"textDocument": doc, "position": position_of(text, 100, "filter")})
+    check(m["result"] and "filter :: method <T>" in m["result"]["contents"]["value"], f"hover of filter: {m['result']}")
+    labels = [i["label"] for i in complete_at("    nums: [..]int; k := nums.|")]
+    check("filter" in labels and "map" in labels and "add" in labels, f"a list has the methods on slices: {labels}")
+    labels = [i["label"] for i in complete_at("    nums: [..]int; k := nums.filter(v => v > 1).map(v => v * 2).|")]
+    check("count" in labels and "filter" in labels, f"the members of what filter and map give, a List: {labels}")
+
     print("completion of named arguments")
     items = complete_at("    c.grow(b|);")
     named = [(i["label"], i.get("insertText")) for i in items if i["kind"] == 6 and i.get("insertText", "").endswith(": ")]
