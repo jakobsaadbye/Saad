@@ -137,6 +137,27 @@ indexOf :: method (s: string, str: string, fromIndex := 0) -> int {
     return -1;
 }
 
+// The last index at which str is found in s, or -1 if it isn't there, e.g "step_2".lastIndexOf("_") is 4
+lastIndexOf :: method (s: string, str: string) -> int {
+    if str.len == 0 || str.len > s.len {
+        return -1;
+    }
+
+    i := s.len - str.len;
+    while i >= 0 {
+        match := true;
+        for c, j in str {
+            if s[i + j] != c {
+                match = false;
+                break;
+            }
+        }
+        if match { return i as int; }
+        i -= 1;
+    }
+    return -1;
+}
+
 split :: method (s: string, sep: string) -> [..]string {
     result: [..]string;
 

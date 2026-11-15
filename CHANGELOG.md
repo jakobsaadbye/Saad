@@ -2,6 +2,10 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.23.7 - 15. Nov 2026
+
+* `string.lastIndexOf(str)`: the last index at which a string is found, or -1, e.g `"step_2".lastIndexOf("_")` is 4
+
 ## Update v0.23.6 - 15. Nov 2026
 
 * A constant of a namespace is a constant again where one is needed, e.g `cars: [game.MaxCars]Car` or `[Cells]f32` of a

@@ -78,6 +78,19 @@ main :: () {
     }
 
     if true {
+        // lastIndexOf
+        text := "the quick brown fox jumps over the lazy dog";
+        assert(text.lastIndexOf("the") == 31);
+        assert(text.lastIndexOf("g") == text.len - 1);
+        assert(text.lastIndexOf("t") == 31);
+        assert(text.lastIndexOf("cat") == -1);
+        assert(text.lastIndexOf("") == -1);
+        assert("step_2".lastIndexOf("_") == 4);
+        assert("ab".lastIndexOf("abc") == -1);
+        assert("aaa".lastIndexOf("aa") == 1);
+    }
+
+    if true {
         // split
         text := "The quick brown fox jumps over the lazy dog";
 
