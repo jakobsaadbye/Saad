@@ -1,0 +1,20 @@
+// The number of values of an enum is a constant, so it can be the size of an array, e.g a texture for each kind of pickup
+
+Pickup :: enum { speedUp, slowDown, widen, shorten, fireball }
+
+Lane :: enum { left, right }
+
+main :: () {
+    textures: [Pickup.count]int = [10, 20, 30, 40, 50];
+    assert(textures.count == 5);
+    assert(textures[Pickup.fireball] == 50);
+
+    speeds: [Lane.count]f32;
+    assert(speeds.count == 2);
+
+    // In a constant, and in the size of an array in a struct
+    LaneCount :: Lane.count;
+    Road :: struct { cars: [Lane.count * 3]int; }
+    road: Road;
+    assert(LaneCount == 2 && road.cars.count == 6);
+}
