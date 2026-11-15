@@ -8,6 +8,8 @@ What changed in each version of Saad: the language, the compiler, the standard l
   `std/prelude/slices.sd`, have a hover and are colored, where a call of one had nothing. Completion after a call of one,
   e.g `xs.filter(f).`, offers the members of what it gives (a `List`), and a list, or another collection, is offered the
   methods on slices too
+* Completion and signature help after an array literal, e.g `[1, 2, 3].map(f).`, where the type of the literal comes from
+  its elements, like the compiler gives it
 
 ## Update v0.23.3 - 15. Nov 2026
 

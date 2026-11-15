@@ -39,6 +39,7 @@ typedef struct Segment {
     bool call;
     bool index;
     bool optional; // Reached with ?., so it is a member of the value inside an optional, e.g the b of a?.b
+    int  array_start, array_end; // An array literal that the chain starts with, e.g the [1, 2] of [1, 2].map(f): its '[' and after its ']'
 } Segment;
 
 // What a chain is: a namespace, a type by its name (e.g Shape. or Status.), or a value of a type
@@ -109,6 +110,22 @@ static int read_chain(const char *text, int end, Segment *segments) {
                 if (text[p] == open && --depth == 0) break;
             }
             if (p < 0) return -1;
+
+            // An array literal starts the chain, e.g [1, 2, 3].map(f): a '[...]' that isn't the index of something before it.
+            // The brackets after it are its index, e.g the [0] of [1, 2][0]
+            if (close == ']') {
+                int before = p;
+                while (before > 0 && (text[before - 1] == ' ' || text[before - 1] == '\t')) before--;
+                char c = before > 0 ? text[before - 1] : 0;
+                if (!is_name_char(c) && c != ')' && c != ']' && c != '"' && c != '\'' && c != '>') {
+                    segment.array_start = p;
+                    segment.array_end   = at;
+                    strcpy(segment.name, "[]");
+                    reversed[count++] = segment;
+                    for (int i = 0; i < count; i++) segments[i] = reversed[count - 1 - i];
+                    return count;
+                }
+            }
             if (close == ')') segment.call = true; else segment.index = true;
             at = p;
         }
@@ -129,6 +146,7 @@ static int read_chain(const char *text, int end, Segment *segments) {
         int name_end = at;
         while (at > 0 && is_name_char(text[at - 1])) at--;
         int length = name_end - at;
+
         if (length == 0 || length >= (int)sizeof(segment.name) || isdigit((unsigned char)text[at])) return -1;
         memcpy(segment.name, &text[at], length);
         reversed[count++] = segment;
@@ -306,11 +324,51 @@ static Type *slice_method_result(Typer *typer, Type *receiver, Segment *segment)
     return after_call_or_index(typer, result, &index_only);
 }
 
+static Type *literal_type_before(Typer *typer, const char *text, int end);
+
+// The type of an array literal from its '[' to after its ']', e.g a slice of int for [1, 2, 3], like the compiler gives
+// it: the type of its elements, and float when one of the numbers is a float. NULL when an element isn't a literal
+static Type *array_literal_type(Typer *typer, const char *text, int open, int end) {
+    if (text == NULL || text[open] != '[') return NULL;
+    Type *element = NULL;
+    int depth = 0, start = open + 1;
+    for (int p = open + 1; p < end; p++) {
+        char c = text[p];
+        if (c == '"') { for (p++; p < end && !(text[p] == '"' && text[p - 1] != '\\'); p++) {} continue; }
+        if (c == '\'') { for (p++; p < end && text[p] != '\''; p++) { if (text[p] == '\\') p++; } continue; }
+        if (c == '(' || c == '[' || c == '{') { depth++; continue; }
+        if ((c == ')' || c == '}' || (c == ']' && depth > 0))) { depth--; continue; }
+        if ((c == ',' && depth == 0) || (c == ']' && depth == 0)) {
+            int e = p;
+            while (e > start && (text[e - 1] == ' ' || text[e - 1] == '\t' || text[e - 1] == '\n')) e--;
+            if (e > start) {
+                Type *one = literal_type_before(typer, text, e);
+                if (one == NULL) return NULL;
+                if (element == NULL || (element->kind == TYPE_INTEGER && one->kind == TYPE_FLOAT)) element = one;
+            }
+            start = p + 1;
+            if (c == ']') break;
+        }
+    }
+    if (element == NULL) return NULL;
+    return (Type *)generate_slice_of(typer->parser, element);
+}
+
 // Follows the chain to what it is. 'skip_last' leaves out the last segment, e.g for the function of a call
 static bool resolve_chain(Typer *typer, AstBlock *scope, Segment *segments, int count, Target *target) {
     typer->current_scope = scope;
     typer->parser->current_scope = scope;
     int next = 0;
+
+    // An array literal, e.g [1, 2, 3] of [1, 2, 3].map(f)
+    if (segments[0].array_end > segments[0].array_start) {
+        Type *array = array_literal_type(typer, completing_file ? completing_file->text : NULL, segments[0].array_start, segments[0].array_end);
+        if (array == NULL) return false;
+        *target = (Target){ .type = after_call_or_index(typer, array, &segments[0]) }; // e.g [1, 2][0] is an int
+        if (!target->type) return false;
+        next = 1;
+        goto rest;
+    }
 
     // A namespace, which can have dots in its name, e.g game.physics
     AstIdentifier *first = lookup_visible(scope, segments[0].name);
@@ -339,6 +397,7 @@ static bool resolve_chain(Typer *typer, AstBlock *scope, Segment *segments, int 
         next = 1;
     }
 
+rest:
     for (int i = next; i < count; i++) {
         Segment *segment = &segments[i];
         if (target->ns) {

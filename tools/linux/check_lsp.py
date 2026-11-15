@@ -255,6 +255,14 @@ def main():
     labels = [i["label"] for i in complete_at("    nums: [..]int; k := nums.filter(v => v > 1).map(v => v * 2).|")]
     check("count" in labels and "filter" in labels, f"the members of what filter and map give, a List: {labels}")
 
+    # An array literal starts a chain too, e.g [1, 2, 3].map(f)
+    labels = [i["label"] for i in complete_at("    k := [1, 2, 3].|")]
+    check("map" in labels and "count" in labels, f"the members of an array literal: {labels}")
+    labels = [i["label"] for i in complete_at("    k := [1, 2, 3].map(v => v * 2).|")]
+    check("add" in labels and "filter" in labels, f"the members of the List that map of an array literal gives: {labels}")
+    labels = [i["label"] for i in complete_at('    k := ["a", "b"][0].|')]
+    check("len" in labels and "map" not in labels, f"an element of an array literal of strings is a string: {labels}")
+
     print("completion of named arguments")
     items = complete_at("    c.grow(b|);")
     named = [(i["label"], i.get("insertText")) for i in items if i["kind"] == 6 and i.get("insertText", "").endswith(": ")]
