@@ -2,6 +2,12 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.23.1 - 14. Nov 2026
+
+* `as` binds looser than the unary operators: `*p as i64` is `(*p) as i64` and `*(p as *i8) as i64` is the byte at `p`
+  as an `i64`, where it was `*((p as *i8) as i64)`. It still binds tighter than the binary operators, e.g `3 * a as i64`
+  is `3 * (a as i64)`, and casts can follow each other, e.g `2.5 as int as f64`. See `docs/numbers.md`
+
 ## Update v0.23.0 - 14. Nov 2026
 
 * The address of a literal: `p := &Point{1, 2};`, `length(&Point{2, 3})`, `q: *Point = &{3, 4};` (the type comes from the

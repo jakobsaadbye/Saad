@@ -1,0 +1,26 @@
+// 'as' binds looser than the unary operators and tighter than the binary ones: *p as i64 is (*p) as i64, -a as f64 is
+// (-a) as f64, and 3 * a as i64 is 3 * (a as i64). Casts follow each other from left to right
+main :: () {
+    x: i64 = 300;
+    p := &x;
+    y := *(p as *i8) as i64;
+    assert(y == 44);
+    a: i32 = 7;
+    b := -a as f64;
+    assert(b == -7.0);
+    c := 3 * a as i64;
+    assert(c == 21);
+    f := ~(0 as u8) as int;
+    assert(f == 255);
+    t := !(1 as bool);
+    assert(!t);
+    q := &x as *u8;
+    assert(*q == 44);
+    z := 2.5 as int as f64;
+    assert(z == 2.0);
+
+    // The cast is of the whole operand of a unary operator, e.g the byte at p
+    bytes: [2]u8 = [200, 1];
+    first := *(&bytes[0]) as i32 + 1;
+    assert(first == 201);
+}
