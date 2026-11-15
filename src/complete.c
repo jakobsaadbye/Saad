@@ -650,9 +650,56 @@ static int start_of_character(const char *text, int p) {
 }
 
 // The '(' of the call the offset is in, and which argument it is at. -1 if it isn't in one
+// Where the string that the offset is in starts, its '"', or -1 when the offset isn't in a string of its line. While a
+// string is being written, e.g 'print("% is |', the call is found from before it
+static int start_of_string_at(const char *text, int offset) {
+    int line = offset;
+    while (line > 0 && text[line - 1] != '\n') line--;
+    int open = -1;
+    for (int p = line; p < offset; p++) {
+        if (open < 0 && text[p] == '/' && text[p + 1] == '/') return -1; // A comment
+        if (open < 0 && text[p] == '\'') {                                // A character, e.g '"'
+            p++;
+            if (p < offset && text[p] == '\\') p++;
+            while (p < offset && text[p] != '\'') p++;
+            continue;
+        }
+        if (text[p] == '\\' && open >= 0) { p++; continue; }
+        if (text[p] == '"') open = open < 0 ? p : -1;
+    }
+    return open;
+}
+
+// If the '{' or '[' at p starts a literal, e.g 'Point{' or '[1, 2' of an argument, and not a block, e.g 'if x {', '() {' or '=> {'
+static bool starts_literal(const char *text, int p) {
+    if (text[p] == '[') return true;
+    int q = p;
+    while (q > 0 && (text[q - 1] == ' ' || text[q - 1] == '\t')) q--;
+    if (q == 0) return false;
+    char before = text[q - 1];
+    if (before == ')' || before == '\n' || before == ';' || before == '{' || before == '}') return false; // A body, e.g of a function
+    if (before == '>' && q > 1 && text[q - 2] == '=') return false;                                         // The body of a lambda
+    if (before == '(' || before == ',' || before == ':' || before == '=' || before == '>') return true;      // e.g f({1, 2}), Pair<int>{
+    if (!is_name_char(before)) return false;
+    // A name: a struct literal, e.g Point{, unless it is the condition of a statement, e.g 'if ok {' or 'for x in xs {'
+    int line = q - 1;
+    while (line > 0 && text[line - 1] != '\n') line--;
+    while (text[line] == ' ' || text[line] == '\t') line++;
+    const char *keywords[] = {"if ", "else", "for ", "while ", "switch ", "case ", "defer", "try", "catch"};
+    for (int k = 0; k < (int)(sizeof(keywords) / sizeof(keywords[0])); k++) {
+        if (strncmp(&text[line], keywords[k], strlen(keywords[k])) == 0) return false;
+    }
+    return true;
+}
+
+static int argument_start = -1; // Where the argument at the offset starts: after the '(' or the ',' before it
+
 static int open_paren_of_call(const char *text, int offset, int *argument) {
     int depth = 0;
     *argument = 0;
+    argument_start = -1;
+    int in_string = start_of_string_at(text, offset);
+    if (in_string >= 0) offset = in_string;
     for (int p = offset - 1; p >= 0; p--) {
         p = start_of_character(text, p);
         if (text[p] == '\'') continue;
@@ -663,20 +710,33 @@ static int open_paren_of_call(const char *text, int offset, int *argument) {
         }
         if (c == ')' || c == ']' || c == '}') depth++;
         else if (c == '[' || c == '{') {
-            if (depth == 0) return -1; // e.g in a block, not a call
+            if (depth == 0) {
+                // In a literal that is an argument, e.g 'f(1, Point{2, |': the argument is the literal, whose commas are its own
+                if (!starts_literal(text, p)) return -1; // e.g in a block, not a call
+                *argument = 0;
+                argument_start = -1;
+                continue;
+            }
             depth--;
         }
         else if (c == '(') {
-            if (depth == 0) return p;
+            if (depth == 0) {
+                if (argument_start < 0) argument_start = p + 1;
+                return p;
+            }
             depth--;
         }
-        else if (c == ',' && depth == 0) (*argument)++;
+        else if (c == ',' && depth == 0) {
+            if (argument_start < 0) argument_start = p + 1;
+            (*argument)++;
+        }
         else if (c == ';' && depth == 0) return -1;
     }
     return -1;
 }
 
-static void write_signature(AstIdentifier *ident, AstFunctionDefn *func, bool skip_receiver, int argument) {
+// 'by_name' when the argument names its parameter, e.g newline: of print, which is then the parameter, also after a variadic one
+static void write_signature(AstIdentifier *ident, AstFunctionDefn *func, bool skip_receiver, int argument, bool by_name) {
     StringBuilder label  = sb_init(128);
     StringBuilder params = sb_init(128);
     sb_append(&label, "%s(", ident->name);
@@ -708,7 +768,7 @@ static void write_signature(AstIdentifier *ident, AstFunctionDefn *func, bool sk
     int active = argument;
     for (int i = first; i < func->parameters.count; i++) {
         AstIdentifier *param = ((AstIdentifier **)func->parameters.items)[i];
-        if (param->type && param->type->kind == TYPE_VARIADIC && active > i - first) active = i - first;
+        if (!by_name && param->type && param->type->kind == TYPE_VARIADIC && active > i - first) active = i - first;
     }
     if (shown > 0 && active >= shown) active = shown - 1;
 
@@ -734,12 +794,28 @@ typedef struct Call {
     AstFunctionDefn *func;
     bool             on_value;
     int              argument;
+    char             named[64]; // The name of a named argument at the position, e.g 'by' of 'grow(by: |', or empty
 } Call;
 
 static bool call_at(Typer *typer, AstFile *file, AstBlock *scope, int offset, Call *call) {
     *call = (Call){0};
     int open = open_paren_of_call(file->text, offset, &call->argument);
     if (open < 0) return false;
+
+    // A named argument, e.g 'newline: |' of print("x", newline: true), is for the parameter with its name
+    call->named[0] = 0;
+    if (argument_start >= 0) {
+        int p = argument_start;
+        while (p < offset && (file->text[p] == ' ' || file->text[p] == '\t' || file->text[p] == '\n')) p++;
+        int name = p;
+        while (p < offset && is_name_char(file->text[p])) p++;
+        int length = p - name;
+        while (p < offset && file->text[p] == ' ') p++;
+        if (length > 0 && length < (int)sizeof(call->named) && p < offset && file->text[p] == ':' && file->text[p + 1] != ':') {
+            memcpy(call->named, &file->text[name], length);
+            call->named[length] = 0;
+        }
+    }
 
     int end = open;
     while (end > 0 && (file->text[end - 1] == ' ' || file->text[end - 1] == '\t')) end--;
@@ -785,7 +861,17 @@ static bool call_at(Typer *typer, AstFile *file, AstBlock *scope, int offset, Ca
 
 static void complete_signature(Typer *typer, AstFile *file, AstBlock *scope, int offset) {
     Call call;
-    if (call_at(typer, file, scope, offset, &call)) write_signature(call.ident, call.func, call.on_value, call.argument);
+    if (!call_at(typer, file, scope, offset, &call)) return;
+    int argument = call.argument;
+    bool by_name = false;
+    if (call.named[0]) {
+        int first = (call.on_value && call.func->is_method) ? 1 : 0;
+        for (int i = first; i < call.func->parameters.count; i++) {
+            AstIdentifier *param = ((AstIdentifier **)call.func->parameters.items)[i];
+            if (strcmp(param->name, call.named) == 0) { argument = i - first; by_name = true; }
+        }
+    }
+    write_signature(call.ident, call.func, call.on_value, argument, by_name);
 }
 
 // The type of the parameter that the argument at the offset is given to, or NULL

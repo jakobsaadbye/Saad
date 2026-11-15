@@ -2,6 +2,17 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.23.3 - 15. Nov 2026
+
+* A statement without its `;` is kept when it clearly ends there, i.e the next token is on a later line or is the `}`
+  of its block: the mistake is reported, and the statement is checked as if the `;` was there. The names in it stay in
+  the index, so go to definition, hover and colors still work on the line that is being written, which was skipped
+* Variables of a file with a statement that was skipped after a syntax error aren't warned about as unused, as the
+  skipped statement may be what used them
+* Signature help stays while an argument is being written that is a string, e.g `print("% is |`, a struct literal or
+  an array, where it was gone, and a named argument, e.g `newline: |` of `print`, marks its parameter, also after a
+  variadic one
+
 ## Update v0.23.2 - 15. Nov 2026
 
 * `value()` of an empty optional throws a `Panic` with a message of its own, "value() of an empty optional. Check
