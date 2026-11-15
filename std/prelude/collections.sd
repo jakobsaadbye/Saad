@@ -68,7 +68,7 @@ Optional :: struct <T> {
 
     // The value. The program stops with an error when there is none, so check hasValue() first, or use valueOr or ??
     value :: method () -> T {
-        assert(self.present); // value() of an empty optional. Check hasValue() first, or use valueOr or ??
+        if !self.present { panicEmptyOptional(); }
         return self.item;
     }
 
