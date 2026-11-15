@@ -1,0 +1,130 @@
+// A thrown error runs the active defers, innermost first, on its way to a catch or out of the function. Each throw
+// jumps to blocks that run them, shared by all the places that throw with the same defers active (unwind_block in
+// ir_lower.c). Before, each place got its own copy of them, and each call in a copy a copy of the defers below it, which
+// made the code of a function with many defers and calls explode (seconds to compile a small main)
+
+import errors;
+import fmt;
+
+log: [..]string;
+
+note :: (text: string) {
+    log.add(text);
+}
+
+// Throws when it is told to
+step :: (name: string, fails: bool) {
+    if fails { throw errors.make("% failed", name); }
+}
+
+taken :: () -> string {
+    result := fmt.join(log, " ");
+    log.clear();
+    return result;
+}
+
+// Many places that throw, with the same defers active: each runs them once, in order
+manyThrowSites :: (failAt: int) {
+    defer note("a");
+    defer note("b");
+    defer note("c");
+    for i in 0..10 {
+        step("step", i == failAt);
+    }
+    note("done");
+}
+
+// A deferred statement that throws: its error replaces the one being thrown, and the defers below it still run
+throwingDefer :: () {
+    defer note("outer");
+    defer step("defer", true);
+    defer note("inner");
+    step("body", true);
+}
+
+// A try with defers inside and outside of it: the catch runs after the defers inside, the ones outside at the end
+tryInside :: () {
+    defer note("function");
+    try {
+        defer note("in try");
+        step("in try", true);
+        note("never");
+    } catch (err) {
+        note(fmt.sprint("caught: %", err.message));
+    }
+    note("after try");
+}
+
+// Two blocks with a different defer each, at the same depth: a throw in each runs its own
+siblingBlocks :: (which: int) {
+    defer note("base");
+    if which == 0 {
+        defer note("first");
+        step("first", true);
+    } else {
+        defer note("second");
+        step("second", true);
+    }
+}
+
+// A throw in a loop runs the defers of the iteration, then those of the function
+inLoop :: () {
+    defer note("function");
+    for i in 0..3 {
+        defer note(fmt.sprint("iteration %", i));
+        step("loop", i == 1);
+    }
+}
+
+// Many defers and many calls: compiles quickly, and runs every defer once
+manyDefers :: (failAt: int) {
+    defer note("1");
+    defer note("2");
+    defer note("3");
+    defer note("4");
+    defer note("5");
+    defer note("6");
+    defer note("7");
+    defer note("8");
+    defer { note("9"); step("block", false); note("9b"); }
+    for i in 0..40 {
+        step("many", i == failAt);
+    }
+}
+
+main :: () {
+    manyThrowSites(-1);
+    assert(taken() == "done c b a");
+
+    for failAt in [0, 4, 9] {
+        try {
+            manyThrowSites(failAt);
+        } catch (err) {
+            assert(err.message == "step failed");
+        }
+        assert(taken() == "c b a");
+    }
+
+    try {
+        throwingDefer();
+    } catch (err) {
+        assert(err.message == "defer failed");
+    }
+    assert(taken() == "inner outer");
+
+    tryInside();
+    assert(taken() == "in try caught: in try failed after try function");
+
+    for which in [0, 1] {
+        try { siblingBlocks(which); } catch (err) { }
+    }
+    assert(taken() == "first base second base");
+
+    try { inLoop(); } catch (err) { assert(err.message == "loop failed"); }
+    assert(taken() == "iteration 0 iteration 1 function");
+
+    try { manyDefers(17); } catch (err) { assert(err.message == "many failed"); }
+    assert(taken() == "9 9b 8 7 6 5 4 3 2 1");
+    manyDefers(-1);
+    assert(taken() == "9 9b 8 7 6 5 4 3 2 1");
+}
