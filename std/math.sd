@@ -192,3 +192,64 @@ extern "C" {
     lgamma  :: (value: f64) -> f64;
     lgammaf :: (value: f32) -> f32;
 }
+
+//////////////////////////////////////////////////////////////////////////////////////
+//  Constants and helpers of Saad's own
+//////////////////////////////////////////////////////////////////////////////////////
+
+Pi  :: 3.14159265358979323846;
+Tau :: 2.0 * Pi;
+
+// The smaller of two values, for any type that can be compared with <, e.g math.min(3, 7) or math.min(a, b) of two f32
+min :: <T>(a: T, b: T) -> T {
+    if b < a { return b; }
+    return a;
+}
+
+// The bigger of two values, for any type that can be compared with <
+max :: <T>(a: T, b: T) -> T {
+    if a < b { return b; }
+    return a;
+}
+
+// The value, kept between low and high, e.g math.clamp(health, 0, 100)
+clamp :: <T>(value: T, low: T, high: T) -> T {
+    if value < low  { return low; }
+    if high < value { return high; }
+    return value;
+}
+
+// The value a fraction t of the way from a to b: a at 0, b at 1
+lerp :: (a: f32, b: f32, t: f32) -> f32 {
+    return a + (b - a) * t;
+}
+
+// Where value is between a and b, as a fraction: 0 at a, 1 at b. The opposite of lerp
+inverseLerp :: (a: f32, b: f32, value: f32) -> f32 {
+    if a == b { return 0; }
+    return (value - a) / (b - a);
+}
+
+// Moves current towards target by at most maxDelta, without going past it
+moveTowards :: (current: f32, target: f32, maxDelta: f32) -> f32 {
+    if fabsf(target - current) <= maxDelta { return target; }
+    if target > current { return current + maxDelta; }
+    return current - maxDelta;
+}
+
+// -1, 0 or 1, by the sign of the value
+sign :: (value: f32) -> f32 {
+    if value > 0 { return 1; }
+    if value < 0 { return -1; }
+    return 0;
+}
+
+// Degrees to radians, e.g math.toRadians(90.0) is Pi / 2
+toRadians :: (degrees: f32) -> f32 {
+    return degrees * (Pi / 180.0);
+}
+
+// Radians to degrees
+toDegrees :: (radians: f32) -> f32 {
+    return radians * (180.0 / Pi);
+}

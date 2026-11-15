@@ -207,6 +207,51 @@ addFloat64 :: method (sb: *StringBuilder, v: f64) {
     sb.addBytes(buf.data, strlen(c.string{buf.data}) as int);
 }
 
+// A float with a fixed number of decimals, rounded, e.g fmt.print("% s", fmt.fixed(12.345, 1)) prints 12.3 s. print and
+// sprint write it like addFixed does, so it needs no memory of its own
+Fixed :: struct {
+    value:    f64;
+    decimals: int;
+}
+
+fixed :: (value: f64, decimals: int) -> Fixed {
+    return Fixed{value, decimals};
+}
+
+// Adds a float with this many decimals (0 to 9), rounded half away from zero, e.g addFixed(2.718, 2) adds 2.72
+addFixed :: method (sb: *StringBuilder, value: f64, decimals: int) {
+    if value != value {      // NaN isn't equal to itself
+        sb.addString("nan");
+        return;
+    }
+    if decimals < 0 { decimals = 0; }
+    if decimals > 9 { decimals = 9; }
+
+    scale: u64 = 1;
+    for 0..decimals { scale *= 10; }
+
+    magnitude := value;
+    if value < 0 { magnitude = -value; }
+    if magnitude * (scale as f64) >= 9000000000000000000.0 {   // Too big for the digits to fit in a u64
+        sb.addFloat64(value);
+        return;
+    }
+
+    scaled := (magnitude * (scale as f64) + 0.5) as u64;
+    if value < 0 && scaled != 0 { sb.addChar('-'); }
+    sb.addUInt64(scaled / scale);
+    if decimals == 0 { return; }
+
+    sb.addChar('.');
+    fraction := scaled % scale;
+    digit := scale / 10;
+    while digit > 1 && fraction < digit {
+        sb.addChar('0');    // The zeros after the point, e.g the 0 of 1.05
+        digit /= 10;
+    }
+    sb.addUInt64(fraction);
+}
+
 addInt64 :: method (sb: *StringBuilder, v: i64) {
     if v < 0 {
         sb.addChar('-');
@@ -315,6 +360,10 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
                     value.data = data;
                     sb.addValueIn(value, inside);
                 }
+            }
+            else if arg.type.name == "fmt.Fixed" {
+                f := *(arg.data as *Fixed);
+                sb.addFixed(f.value, f.decimals);
             }
             else if arg.type.name == "time.Time" {
                 // As text, e.g 2026-11-02T10:15:00Z

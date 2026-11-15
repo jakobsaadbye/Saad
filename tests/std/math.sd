@@ -1,0 +1,31 @@
+// The helpers of Saad's own in std/math.sd: Pi, min, max, clamp, lerp, inverseLerp, moveTowards, sign and the angles
+
+import math;
+
+near :: (a: f32, b: f32) -> bool {
+    return math.fabsf(a - b) < 0.0001;
+}
+
+main :: () {
+    assert(math.min(3, 7) == 3 && math.max(3, 7) == 7);
+    assert(math.min(-2.5, 1.0) == -2.5 && math.max(-2.5, 1.0) == 1.0);
+    assert(math.min("pear", "apple") == "apple");
+
+    x: f32 = 12.5;
+    assert(math.clamp(x, 0, 10) == 10);
+    assert(math.clamp(-4, 0, 10) == 0);
+    assert(math.clamp(5, 0, 10) == 5);
+
+    assert(near(math.lerp(10, 20, 0.25), 12.5));
+    assert(near(math.inverseLerp(10, 20, 12.5), 0.25));
+    assert(math.inverseLerp(3, 3, 3) == 0);
+
+    assert(math.moveTowards(0, 10, 3) == 3);
+    assert(math.moveTowards(9, 10, 3) == 10);
+    assert(math.moveTowards(0, -10, 4) == -4);
+
+    assert(math.sign(-3) == -1 && math.sign(0) == 0 && math.sign(0.5) == 1);
+
+    assert(near(math.toRadians(180), math.Pi as f32));
+    assert(near(math.toDegrees(math.Tau as f32), 360));
+}

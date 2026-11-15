@@ -362,25 +362,25 @@ AutomationEventList :: struct {
 // Enumerators Definition
 //----------------------------------------------------------------------------------
 
-// System/Window config flags
-// ConfigFlags :: enum {
-//     VSYNC_HINT         = 0x00000040,   // Set to try enabling V-Sync on GPU
-//     FULLSCREEN_MODE    = 0x00000002,   // Set to run program in fullscreen
-//     WINDOW_RESIZABLE   = 0x00000004,   // Set to allow resizable window
-//     WINDOW_UNDECORATED = 0x00000008,   // Set to disable window decoration (frame and buttons)
-//     WINDOW_HIDDEN      = 0x00000080,   // Set to hide window
-//     WINDOW_MINIMIZED   = 0x00000200,   // Set to minimize window (iconify)
-//     WINDOW_MAXIMIZED   = 0x00000400,   // Set to maximize window (expanded to monitor)
-//     WINDOW_UNFOCUSED   = 0x00000800,   // Set to window non focused
-//     WINDOW_TOPMOST     = 0x00001000,   // Set to window always on top
-//     WINDOW_ALWAYS_RUN  = 0x00000100,   // Set to allow windows running while minimized
-//     WINDOW_TRANSPARENT = 0x00000010,   // Set to allow transparent framebuffer
-//     WINDOW_HIGHDPI     = 0x00002000,   // Set to support HighDPI
-//     WINDOW_MOUSE_PASSTHROUGH = 0x00004000, // Set to support mouse passthrough, only supported when FLAG_WINDOW_UNDECORATED
-//     BORDERLESS_WINDOWED_MODE = 0x00008000, // Set to run program in borderless windowed mode
-//     MSAA_4X_HINT       = 0x00000020,   // Set to try enabling MSAA 4X
-//     INTERLACED_HINT    = 0x00010000,   // Set to try enabling interlaced video format (for V3D)
-// }
+// System/Window config flags, e.g SetConfigFlags(.msaa4xHint | .windowResizable)
+ConfigFlags :: enumflags {
+    vsyncHint              = 0x00000040,   // Set to try enabling V-Sync on GPU
+    fullscreenMode         = 0x00000002,   // Set to run program in fullscreen
+    windowResizable        = 0x00000004,   // Set to allow resizable window
+    windowUndecorated      = 0x00000008,   // Set to disable window decoration (frame and buttons)
+    windowHidden           = 0x00000080,   // Set to hide window
+    windowMinimized        = 0x00000200,   // Set to minimize window (iconify)
+    windowMaximized        = 0x00000400,   // Set to maximize window (expanded to monitor)
+    windowUnfocused        = 0x00000800,   // Set to window non focused
+    windowTopmost          = 0x00001000,   // Set to window always on top
+    windowAlwaysRun        = 0x00000100,   // Set to allow windows running while minimized
+    windowTransparent      = 0x00000010,   // Set to allow transparent framebuffer
+    windowHighdpi          = 0x00002000,   // Set to support HighDPI
+    windowMousePassthrough = 0x00004000,   // Set to support mouse passthrough, only supported when FLAG_WINDOW_UNDECORATED
+    borderlessWindowedMode = 0x00008000,   // Set to run program in borderless windowed mode
+    msaa4xHint             = 0x00000020,   // Set to try enabling MSAA 4X
+    interlacedHint         = 0x00010000,   // Set to try enabling interlaced video format (for V3D)
+}
 
 // Trace log level
 TraceLogLevel :: enum {
@@ -795,9 +795,9 @@ IsWindowMinimized        :: () -> bool; // Check if window is currently minimize
 IsWindowMaximized        :: () -> bool; // Check if window is currently maximized
 IsWindowFocused          :: () -> bool; // Check if window is currently focused
 IsWindowResized          :: () -> bool; // Check if window has been resized last frame
-IsWindowState            :: (flag: uint) -> bool; // Check if one specific window flag is enabled
-SetWindowState           :: (flags: uint); // Set window configuration state using flags
-ClearWindowState         :: (flags: uint); // Clear window configuration state flags
+IsWindowState            :: (flag: ConfigFlags) -> bool; // Check if one specific window flag is enabled
+SetWindowState           :: (flags: ConfigFlags); // Set window configuration state using flags
+ClearWindowState         :: (flags: ConfigFlags); // Clear window configuration state flags
 ToggleFullscreen         :: () -> void; // Toggle window state: fullscreen/windowed, resizes monitor to match window resolution
 ToggleBorderlessWindowed :: () -> void; // Toggle window state: borderless windowed, resizes window to match monitor resolution
 MaximizeWindow           :: () -> void; // Set window state: maximized, if resizable
@@ -907,7 +907,7 @@ UnloadRandomSequence :: (sequence: *int); // Unload random values sequence
 
 // Misc. functions
 TakeScreenshot :: (fileName: c.string); // Takes a screenshot of current screen (filename extension defines format)
-SetConfigFlags :: (flags: uint); // Setup init configuration flags (view FLAGS)
+SetConfigFlags :: (flags: ConfigFlags); // Setup init configuration flags (view FLAGS)
 OpenURL        :: (url: c.string); // Open URL with default system browser (if available)
 
 // Utils

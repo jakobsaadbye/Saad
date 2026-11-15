@@ -2,6 +2,25 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.23.5 - 15. Nov 2026
+
+* A struct that holds a fixed array of a struct declared further down, e.g `Traffic :: struct { cars: [8]Car; }` before
+  `Car :: struct {...}`, had a size of 0: the size of the array was taken from its elements before they had one, so the
+  cars were written over other memory. `check_struct_members()` now sizes the struct of the elements first, like it does
+  for a member that is the struct itself, and works the size of the array out again. A struct that holds an array of
+  itself is an error, as it has no size
+* A short lambda whose parameter is a struct declared further down, e.g `traffic.cars.countWhere(car => car.isActive)`,
+  stopped the compiler with "Not implemented" in `resolve_type()`. Such a struct is checked when it is reached, like a
+  struct that is named further down is
+* The number of values of an enum is a constant again, e.g `textures: [Pickup.count]Texture` (examples/breakout), which
+  was an array of size 0. The size of an array that isn't an integer constant is an error, where it was taken as 0
+* `math` has helpers of its own: `Pi`, `Tau`, `min`, `max` and `clamp` for any type that can be compared with `<`, and
+  `lerp`, `inverseLerp`, `moveTowards`, `sign`, `toRadians` and `toDegrees`. examples/breakout uses them instead of its own
+* `fmt.fixed(value, decimals)` prints a float with that many decimals, rounded, e.g `fmt.print("% s", fmt.fixed(12.345, 1))`
+  prints `12.3 s`, without memory of its own. `StringBuilder.addFixed(value, decimals)` adds one
+* `raylib`: `ConfigFlags` is an `enumflags`, e.g `SetConfigFlags(.msaa4xHint | .windowResizable)`, which `SetConfigFlags`,
+  `SetWindowState`, `ClearWindowState` and `IsWindowState` take, where they took a `uint`
+
 ## Update v0.23.4 - 15. Nov 2026
 
 * Language server: the methods on slices, e.g `filter`, `map` and `sort`, go to their declaration in
