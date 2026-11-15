@@ -2,6 +2,18 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.23.8 - 15. Nov 2026
+
+* `collections.PriorityQueue<T>`: a binary heap that gives its values back smallest first, by the operator `<` of their
+  type, e.g the open list of a path search. `push`, `pop`, `tryPop`, `peek`, `count`, `isEmpty`, `clear` and `free`
+  (`std/collections/priority_queue.sd`, see docs/standard_library.md)
+* `string.toInt()` and `string.toFloat()`: the number a text is, as a `?i64` or `?f64`, or empty when it isn't one, e.g
+  `args[1].toInt() ?? 4`. `toInt` takes a sign and `_` between digits, and is empty for a number too big for an `i64`
+* `list.removeWhere(f)`: removes the values of a list that a function is true for, in place and keeping the order of the
+  rest, e.g `effects.removeWhere(e => e.timeLeft <= 0)`, and gives how many it removed
+* raylib: `BeginTextureMode` takes a `RenderTexture`, as in raylib. It was declared with a `Texture`, which is smaller,
+  so drawing into a render texture didn't work
+
 ## Update v0.23.7 - 15. Nov 2026
 
 * `string.lastIndexOf(str)`: the last index at which a string is found, or -1, e.g `"step_2".lastIndexOf("_")` is 4

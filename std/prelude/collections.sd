@@ -212,6 +212,20 @@ List :: struct <T> {
     }
 
     // Removes the last value and returns it
+    // Removes the values that remove is true for, keeping the order of the others, and gives how many it removed.
+    // O(n), e.g xs.removeWhere(x => x < 0)
+    removeWhere :: method * (remove: (T) -> bool) -> i64 {
+        kept: i64 = 0;
+        for i in 0..self.count {
+            if remove(self.data[i]) { continue; }
+            self.data[kept] = self.data[i];
+            kept += 1;
+        }
+        removed := self.count - kept;
+        self.count = kept;
+        return removed;
+    }
+
     removeLast :: method * () -> T {
         assert(self.count > 0);
         self.count -= 1;

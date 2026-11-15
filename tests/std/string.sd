@@ -112,9 +112,12 @@ main :: () {
 
         assert(reversed == "god yzal eht revo spmuj xof nworb kciuq ehT");
     }
-    
-    
 
+    // toInt and toFloat: the number a text is, or nothing
+    assert("42".toInt() == 42 && "-7".toInt() == -7 && "+3".toInt() == 3 && "1_000".toInt() == 1000);
+    assert("".toInt() == null && "4x".toInt() == null && "1.5".toInt() == null && " 1".toInt() == null);
+    assert("9223372036854775807".toInt() == 9223372036854775807 && "9223372036854775808".toInt() == null);
+    assert("-9223372036854775808".toInt().hasValue());
+    assert("3.25".toFloat() == 3.25 && "-1e3".toFloat() == -1000.0 && "7".toFloat() == 7.0);
+    assert("".toFloat() == null && "1.5x".toFloat() == null && " 2".toFloat() == null);
 }
-
-

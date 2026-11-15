@@ -70,6 +70,7 @@ total := sum(xs);   // sum :: (values: []int) -> int
 | `insertAt(index, value)` | Inserts, moving the later values up |
 | `removeAt(index) -> T` | Removes and returns, keeping the order |
 | `swapRemoveAt(index) -> T` | Removes by moving the last value into the hole. O(1), changes the order |
+| `removeWhere(f) -> i64` | Removes the values that `f` is true for, keeping the order, and gives how many. O(n) |
 | `removeLast() -> T` | Removes and returns the last value |
 | `first() -> T`, `last() -> T` | Assert that the list is not empty |
 | `tryFirst() -> ?T`, `tryLast() -> ?T` | For lists that might be empty, e.g `xs.tryLast() ?? 0` |

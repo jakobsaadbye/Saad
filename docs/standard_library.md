@@ -15,6 +15,7 @@ std/
                     null pointer
   allocators/   namespace allocators: Arena (arena.sd) and Pool (pool.sd) (see docs/allocators.md)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
+  collections/  namespace collections: PriorityQueue<T> (priority_queue.sd), smallest first
   crypto/       namespace crypto: SHA-256 and HMAC-SHA256 (sha256.sd)
   errors/       namespace errors: errors.make, errors.typed and errors.wrap, which make errors (see docs/errors.md)
   dbms/         namespace dbms: run SQL and read rows into structs, dbms.Table<T> and dbms.KeyedTable<T, K> (see docs/dbms.md)
@@ -615,6 +616,26 @@ the default, is the heap. A function type can leave out the names of its paramet
 
 A type's own method of the same name wins, e.g `List` has its own `indexOf`, `contains` and `reverse`.
 
+## collections
+
+More collections than the `List` and `Map` of the prelude, for programs that ask for them with `import collections;`.
+
+```odin
+Node :: struct { cost: f32; cell: int; }
+operator < :: (a: Node, b: Node) -> bool { return a.cost < b.cost; }
+
+open: collections.PriorityQueue<Node>;   // A binary heap, by the operator < of its type
+open.push(Node{4.5, 12});
+open.push(Node{1.0, 7});
+next := open.pop();                     // Node{1.0, 7}: the smallest. tryPop() gives a ?Node
+open.peek(); open.count(); open.isEmpty(); open.clear(); open.free();
+```
+
+* `push` and `pop` are O(log n). For the biggest first, give the type (or a newtype of it) an `operator <` the other
+  way around.
+* `for x in queue` goes over the values in the order of the heap, not sorted. `queue.items.allocator = &arena` keeps
+  it in an arena.
+
 ## json
 
 ```odin
@@ -762,7 +783,7 @@ c.string{p}.toString();             // a pointer of C, made into one
 
 ## Ideas for later
 
-* `strings` with `contains`, `trim`, `replace`, `join` and a `parseInt`/`parseFloat`.
+* `strings` with `contains`, `trim`, `replace` and `join`. (Numbers are read with `text.toInt()` and `text.toFloat()`.)
 * `os.listDir`, and a `path` namespace (`join`, `extension`, `directory`).
 * `math` vectors of its own, apart from raylib's.
 * `hash` (e.g fnv1a, crc32), `base64` (e.g fnv1a, crc32) and `threads` (a portable layer over `os.windows`).
