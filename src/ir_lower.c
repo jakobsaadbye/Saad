@@ -53,6 +53,16 @@ typedef struct TryTarget {
     int      defer_count;
 } TryTarget;
 
+// A block that runs deferred statements while an error is thrown, and goes on to the catch of a try or out of the
+// function. Each throw jumps to the one for the defers that are active, so a deferred statement is lowered once on the
+// way out of a throw, however many calls can throw (see unwind_block)
+typedef struct UnwindBlock {
+    Ast    **defers;         // The defers that were active when it was made, innermost last
+    int      count;
+    IrBlock *catch_block;    // Of the try it goes to, or null for out of the function
+    IrBlock *block;
+} UnwindBlock;
+
 typedef struct PtrMapEntry {
     void *key;
     int   value;
@@ -82,6 +92,7 @@ typedef struct Lowerer {
     IrArray(LoopTargets) loops;
     IrArray(Ast *)   defers;          // The deferred statements of the blocks that are being lowered, innermost last
     IrArray(TryTarget) tries;         // The try blocks that are being lowered, innermost last
+    IrArray(UnwindBlock) unwinds;     // The blocks that run the defers of a throw, made so far in the function
     int              line;
 
     // Module state
@@ -3463,28 +3474,85 @@ static bool is_main_function(Lowerer *L) {
     return f && f->identifier && strcmp(f->identifier->name, "main") == 0 && f->head.head.file && f->head.head.file->ns == NULL && !f->is_method;
 }
 
-// Runs the defers above down_to while an error is thrown. The error is put aside meanwhile, so the calls of the defers
-// run as usual instead of seeing it and leaving
-static void emit_defers_while_throwing(Lowerer *L, int down_to) {
-    if (L->defers.count <= down_to) return;
-    int parked = ir_new_slot(L->func, 8, 8, "thrown error");
-    emit_store(L, IR_PTR, addr_slot(parked, 0), emit_load(L, IR_PTR, thrown_error_addr(L)));
-    emit_store(L, IR_PTR, thrown_error_addr(L), emit_const(L, IR_PTR, 0));
-    emit_defers(L, down_to);
-    if (!block_is_terminated(L)) emit_store(L, IR_PTR, thrown_error_addr(L), emit_load(L, IR_PTR, addr_slot(parked, 0)));
+// The block that runs the active defers above the base of the innermost try (or all of them) while an error is
+// thrown, and then goes to the catch of the try, or returns from the function.
+//
+// Each deferred statement is lowered once on this way out: a block runs the innermost defer, with the error put aside
+// so the calls in it run as usual, and jumps to the block of the defers below it. What a deferred statement throws goes
+// to that block too. Before, every place that can throw (every call of a Saad function) got its own copy of all the
+// active defers, and every call in those copies a copy of the ones below it: main of a game with six defers and a
+// hundred calls was 300000 lines of IR, and took the backends ten seconds.
+//
+// The blocks are kept for the function, by the exact defers that are active and the try they go to
+static IrBlock *unwind_block(Lowerer *L) {
+    TryTarget *target = L->tries.count > 0 ? &L->tries.items[L->tries.count - 1] : NULL;
+    IrBlock   *catch_block = target ? target->catch_block : NULL;
+    int        base  = target ? target->defer_count : 0;
+    int        count = L->defers.count;
+
+    for (int i = 0; i < L->unwinds.count; i++) {
+        UnwindBlock *u = &L->unwinds.items[i];
+        if (u->catch_block == catch_block && u->count == count && memcmp(u->defers, L->defers.items, sizeof(Ast *) * count) == 0) {
+            return u->block;
+        }
+    }
+
+    UnwindBlock made = { NULL, count, catch_block, create_block(L, "unwind") };
+    made.defers = malloc(sizeof(Ast *) * (count > 0 ? count : 1));
+    memcpy(made.defers, L->defers.items, sizeof(Ast *) * count);
+    ir_array_push(L->unwinds, made);
+
+    IrBlock *saved_block = L->block;
+    int      saved_line  = L->line;
+    set_block(L, made.block);
+
+    if (count <= base) {
+        // No defers left: on to the catch, or out of the function
+        if (target) {
+            terminate_jmp(L, catch_block);
+        } else {
+            if (is_main_function(L)) emit_errors_call(L, "reportUncaught", 0, NULL); // Ends the program
+            terminate_return(L, true);
+        }
+    } else {
+        // The innermost defer runs with only the ones below it active, and the error put aside. What it pushes itself
+        // goes on top of those, so the stack of defers is put back as it was afterwards
+        int parked = ir_new_slot(L->func, 8, 8, "thrown error");
+        emit_store(L, IR_PTR, addr_slot(parked, 0), emit_load(L, IR_PTR, thrown_error_addr(L)));
+        emit_store(L, IR_PTR, thrown_error_addr(L), emit_const(L, IR_PTR, 0));
+
+        Ast **kept = malloc(sizeof(Ast *) * count);
+        memcpy(kept, made.defers, sizeof(Ast *) * count);
+        L->defers.count = count - 1;
+        lower_statement(L, kept[count - 1]);
+        L->defers.count = 0;
+        for (int i = 0; i < count - 1; i++) ir_array_push(L->defers, kept[i]);
+
+        if (!block_is_terminated(L)) {
+            emit_store(L, IR_PTR, thrown_error_addr(L), emit_load(L, IR_PTR, addr_slot(parked, 0)));
+            IrBlock *below = unwind_block(L);      // The defers below it, made now or already there
+            terminate_jmp(L, below);
+        }
+
+        L->defers.count = 0;
+        for (int i = 0; i < count; i++) ir_array_push(L->defers, kept[i]);
+        free(kept);
+    }
+
+    set_block(L, saved_block);
+    L->line = saved_line;
+    return made.block;
+}
+
+static void clear_unwind_blocks(Lowerer *L) {
+    for (int i = 0; i < L->unwinds.count; i++) free(L->unwinds.items[i].defers);
+    L->unwinds.count = 0;
 }
 
 // Leaves for the catch of the innermost try, or returns from the function, running the defers on the way
 static void emit_unwind(Lowerer *L) {
-    if (L->tries.count > 0) {
-        TryTarget target = L->tries.items[L->tries.count - 1];
-        emit_defers_while_throwing(L, target.defer_count);
-        terminate_jmp(L, target.catch_block);
-        return;
-    }
-    emit_defers_while_throwing(L, 0);
-    if (is_main_function(L)) emit_errors_call(L, "reportUncaught", 0, NULL); // Ends the program
-    terminate_return(L, true);
+    if (block_is_terminated(L)) return;
+    terminate_jmp(L, unwind_block(L));
 }
 
 // After a call: if it threw, the error goes on from here. 'threw' is the flag the callee returned in eax (see
@@ -3903,6 +3971,7 @@ static void lower_thunk(Lowerer *L, PendingThunk *thunk) {
     L->loops.count = 0;
     L->defers.count = 0;
     L->tries.count = 0;
+    clear_unwind_blocks(L);
     L->thread_block_slot = -1;
     ptr_map_clear(&L->locals);
 
@@ -3957,6 +4026,7 @@ static void lower_function(Lowerer *L, AstFunctionDefn *func_defn) {
     L->loops.count = 0;
     L->defers.count = 0;
     L->tries.count = 0;
+    clear_unwind_blocks(L);
     L->thread_block_slot = -1;
     ptr_map_clear(&L->locals);
 

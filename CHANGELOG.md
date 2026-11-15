@@ -2,6 +2,17 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.23.9 - 15. Nov 2026
+
+* A function with defers and many calls compiles fast again. Every place that can throw, i.e every call of a Saad
+  function, got its own copy of all the active deferred statements, and every call in those copies a copy of the defers
+  below it, so the code grew with the calls times the defers, and again with each defer that calls something. main of
+  aov, with six defers, was 324000 lines of IR, and the build took ten seconds (1.4 s of IR, 8.8 s of x64 codegen). A
+  throw now jumps to blocks that run the defers, one each, which every throw with the same defers active shares
+  (`unwind_block()` in `ir_lower.c`): main is 2300 lines, and aov builds in 0.3 seconds. What runs, and in which order,
+  is as before. `tests/defer_unwind.sd` checks it, also for a deferred statement that throws, a try with defers inside
+  and outside of it, blocks next to each other and loops
+
 ## Update v0.23.8 - 15. Nov 2026
 
 * `collections.PriorityQueue<T>`: a binary heap that gives its values back smallest first, by the operator `<` of their
