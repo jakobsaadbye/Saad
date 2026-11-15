@@ -6117,6 +6117,9 @@ static bool check_format_arguments(Typer *typer, AstFunctionCall *call, AstFunct
 // warning of its own, as it is a failure that goes unnoticed. '_' and the variables of a generic are warned about once
 static void warn_unused_locals(Typer *typer, AstFunctionDefn *func, int start) {
     if (typer->indexing_unused_generics) return;
+    // A statement that was skipped after a syntax error may be what uses a variable, e.g the 'return s' of 's: Store;'
+    AstFile *file = func->head.head.file;
+    if (file && file->has_syntax_errors && typer->parser->skipped_statements > 0) return;
     if (func->generic_function && func->generic_function->instances.count > 0 && ((AstFunctionDefn **)func->generic_function->instances.items)[0] != func) return;
     for (int i = start; i < typer->function_locals.count; i++) {
         AstIdentifier *ident = ((AstIdentifier **)typer->function_locals.items)[i];

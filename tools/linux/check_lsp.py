@@ -225,6 +225,23 @@ def main():
     items = complete_at("    p2 := Pair<int>{first: 1, |};")
     check([(i["label"], i.get("insertText")) for i in items] == [("second", "second: ")], f"the field of a struct literal that isn't written: {items}")
 
+    print("signature help while an argument is written")
+    def signature_at(line_text, marker="|"):
+        before, after = line_text.split(marker)
+        changed = text.replace("    total += n;", "    total += n;\n" + before + after)
+        client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 31}, "contentChanges": [{"text": changed}]})
+        m = client.request("textDocument/signatureHelp", {"textDocument": doc, "position": {"line": 57, "character": len(before)}})
+        r = m["result"]
+        return (r["signatures"][0]["label"].split("(")[0], r["activeParameter"]) if r else None
+    # The signature stays while the argument is a string, a struct literal or an array that is being written, which an
+    # editor asks for at each key. A named argument is its parameter, also after a variadic one
+    for line_text, wanted in [('    fmt.print("% is |', ("print", 0)), ('    fmt.print("%|", 1);', ("print", 0)),
+                              ('    fmt.print("%", Pair<int>{first: 1, |', ("print", 1)), ('    fmt.print("%", [1, 2, |', ("print", 1)),
+                              ('    fmt.print("x", 1, 2, newline: |', ("print", 2)), ('    c.grow(by: c.radius * |', ("grow", 0)),
+                              ("    if total > 1 {|", None), ("    p4 := Pair<int>{1, |", None)]:
+        got = signature_at(line_text)
+        check(got == wanted, f"the signature at {line_text!r}: {got}, wanted {wanted}")
+
     print("completion of named arguments")
     items = complete_at("    c.grow(b|);")
     named = [(i["label"], i.get("insertText")) for i in items if i["kind"] == 6 and i.get("insertText", "").endswith(": ")]

@@ -39,13 +39,20 @@ CASES = [
      [(60, "swapped"), (70, "drawnName")]),
     ("a call without its ';'",
      "    c.grow(by: 1.0);", "    c.grow(by: 1.0)", 1,
-     [(53, "Shape"), (60, "swapped"), (70, "drawnName")], (52, ")")),
+     [(53, "Shape"), (60, "swapped"), (70, "drawnName"), (52, "grow"), (52, "c")], (52, ")")),
     ("an assignment without its ';'",
      "    total += n;", "    total += n", 1,
      [(59, "Pair"), (60, "swapped"), (65, "total")], (57, "n")),
     ("a declaration without its ';'",
      "    q := swapped(p);", "    q := swapped(p)", 1,
-     [(61, "geometry"), (70, "drawnName")], (60, ")")),
+     [(61, "geometry"), (70, "drawnName"), (60, "swapped"), (60, "p")], (60, ")")),
+    # The statement without its ';' is kept, so its names are still in the index, also at the top of a file
+    ("a return at the end of a function without its ';'",
+     "    return n;\n}", "    return n\n}", 1,
+     [(82, "n"), (90, "Circle"), (60, "swapped")]),
+    ("a global without its ';'",
+     "total := 0;", "total := 0", 1,
+     [(57, "total"), (60, "swapped"), (70, "drawnName")]),
 ]
 
 def main():

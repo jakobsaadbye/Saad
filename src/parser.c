@@ -85,6 +85,7 @@ void report_error_range(Parser *parser, Pos start, Pos end, const char *message,
 void report_error_ast(Parser *parser, const char* label, Ast *failing_ast, const char *message, ...);
 void report_error_token(Parser *parser, const char* label, Token failing_token, const char *message, ...);
 static void report_missing_semicolon(Parser *parser);
+static bool recovers_missing_semicolon(Parser *parser);
 AstBlock *parse_multi_assignment(Parser *parser, AstExpr *first);
 
 
@@ -1674,8 +1675,17 @@ Ast *parse_statement(Parser *parser) {
         }
         else {
             // e.g 'print(y)' on the line above the next statement
-            report_missing_semicolon(parser);
-            return NULL;
+            if (!recovers_missing_semicolon(parser)) {
+                report_missing_semicolon(parser);
+                return NULL;
+            }
+            AstExprStmt *expr_stmt = ast_allocate(parser, sizeof(AstExprStmt));
+            expr_stmt->head.head.kind  = AST_EXPR_STMT;
+            expr_stmt->head.head.file  = parser->current_file;
+            expr_stmt->head.head.start = lhs->head.start;
+            expr_stmt->head.head.end   = lhs->head.end;
+            expr_stmt->expr            = lhs;
+            return (Ast *)expr_stmt;
         }
     }
 
@@ -1691,6 +1701,7 @@ Ast *parse_statement(Parser *parser) {
     if (statement_ends_with_semicolon) {
         Token next = peek_next_token(parser);
         if (next.type != ';') {
+            if (recovers_missing_semicolon(parser)) return stmt;
             report_missing_semicolon(parser);
             return NULL;
         }
@@ -5515,6 +5526,19 @@ static void report_missing_semicolon(Parser *parser) {
 
 Token peek_next_token(Parser *parser) {
     return ((Token *)parser->lexer->tokens.items)[parser->current_token_index];
+}
+
+// A statement whose ';' is missing, but which clearly ends there: the next token is on a later line, or is the '}' of
+// the block. The mistake is reported, and the statement is kept as if the ';' was there, so the names in it are still
+// checked and in the index, e.g for an editor, where the line that is being written is the one without its ';'
+static bool recovers_missing_semicolon(Parser *parser) {
+    Token last = peek_token(parser, -1);
+    Token next = peek_next_token(parser);
+    if (next.type == TOKEN_END) return false;
+    if (next.type != '}' && next.start.line <= last.end.line) return false;
+    report_missing_semicolon(parser);
+    if (parser->current_file) parser->current_file->has_syntax_errors = true;
+    return true;
 }
 
 bool is_literal(Token token) {
