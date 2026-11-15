@@ -10535,6 +10535,13 @@ Type *check_literal(Typer *typer, AstLiteral *literal, Type *ctx_type) {
             ident = lookup_from_scope(typer->parser, typer->current_scope, ident_name);
         }
 
+        // collections.sd is below errors.sd in the prelude, so it doesn't import it, but calls its panics by name, e.g
+        // panicEmptyOptional() of value(). An instance of Optional<T> is checked where it is used, which sees them anyway
+        AstFile *errors_file = typer->parser->errors_file;
+        if (ident == NULL && errors_file && literal->head.head.file && literal->head.head.file == typer->parser->collections_file) {
+            ident = find_identifier_in_scope(errors_file->scope, ident_name);
+        }
+
         if (ident == NULL) {
             if (!is_poisoned_name(typer->parser, ident_name)) {
                 report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(literal), "Undeclared identifier '%s'", ident_name);
