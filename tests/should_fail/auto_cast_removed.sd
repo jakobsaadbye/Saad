@@ -1,0 +1,7 @@
+// expect-error: The auto-cast 'xx' is gone from the language
+// expect-error: Write the type with 'as'
+
+main :: () {
+    n: i64 = 5;
+    m: i32 = xx n;
+}

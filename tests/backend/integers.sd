@@ -62,14 +62,14 @@ main :: () {
     uwide: u64 = um;
     assert(uwide == 253);
     t: i64 = 4294967298;
-    tt: i32 = xx t;
+    tt: i32 = t as i32;
     assert(tt == 2);
 
     huge: u64 = 18446744073709551615;
-    hf: f64 = xx huge;
+    hf: f64 = huge as f64;
     assert(hf > 18446744073709000000.0);
     big_float: f64 = 16000000000000000000.0; // Untyped float literals are f32, so be explicit
-    back: u64 = xx big_float;
+    back: u64 = big_float as u64;
     assert(back == 16000000000000000000);
 
     // Bit operations on narrow values

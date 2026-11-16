@@ -135,7 +135,7 @@
         },
         {
           "name": "keyword.other.saad",
-          "match": "\\b(new|assert|typeof|sizeof|xx)\\b"
+          "match": "\\b(new|assert|typeof|sizeof)\\b"
         }
       ]
     },

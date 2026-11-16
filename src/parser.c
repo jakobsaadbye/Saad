@@ -20,7 +20,6 @@ AstEnum         *parse_enum_defn(Parser *parser);
 AstIf           *parse_if(Parser *parser);
 AstFor          *parse_for(Parser *parser);
 AstWhile        *parse_while(Parser *parser);
-AstCast         *parse_auto_cast(Parser *parser);
 AstAssert       *parse_assert(Parser *parser);
 AstExpr         *parse_new(Parser *parser);
 AstTypeof       *parse_typeof(Parser *parser);
@@ -3137,27 +3136,6 @@ AstAssignment *parse_assignment(Parser *parser, AstExpr *lhs, Token op_token) {
     return assign;
 }
 
-AstCast *parse_auto_cast(Parser *parser) {
-    Token next = peek_next_token(parser);
-    assert(next.type == TOKEN_XX);
-    eat_token(parser);
-
-    int precedence = get_operator_precedence((OperatorType) TOKEN_AS);
-    AstExpr *expr = parse_expression(parser, precedence);
-    if (!expr) return NULL;
-
-    AstCast *cast         = ast_allocate(parser, sizeof(AstCast));
-    cast->head.head.kind  = AST_CAST;
-    cast->head.head.file  = parser->current_file;
-    cast->head.head.start = next.start;
-    cast->head.head.end   = expr->head.end;
-    cast->expr            = expr;
-    cast->cast_to         = NULL;
-    cast->is_auto         = true;
-
-    return cast;
-}
-
 AstFor *parse_for(Parser *parser) {
     ForKind kind = 0;
     AstIdentifier *index = NULL;
@@ -4912,6 +4890,15 @@ AstExpr *parse_expression(Parser *parser, int min_prec) {
     AstExpr *left = parse_leaf(parser);
     if (!left) return NULL;
 
+    // 'xx n', the auto-cast that was in the language, followed by a value on the same line. The cast is written with as
+    Token after = peek_next_token(parser);
+    if (left->head.kind == AST_LITERAL && ((AstLiteral *)left)->kind == LITERAL_IDENTIFIER && strcmp(((AstLiteral *)left)->as.value.identifier.name, "xx") == 0 &&
+        (after.type == TOKEN_LITERAL_IDENTIFIER || after.type == TOKEN_LITERAL_INTEGER || after.type == TOKEN_LITERAL_FLOAT) && after.start.line == left->head.end.line) {
+        report_error_ast(parser, LABEL_ERROR, (Ast *)left, "The auto-cast 'xx' is gone from the language");
+        report_error_ast(parser, LABEL_HINT, NULL, "Write the type with 'as', e.g 'n as i32' instead of 'xx n'");
+        stop_parsing(parser);
+    }
+
     Token next = peek_next_token(parser);
     if (ends_expression(next)) return left;
 
@@ -5326,12 +5313,6 @@ AstExpr *parse_leaf(Parser *parser) {
         AstArrayLiteral *array_lit = parse_array_literal(parser);
         if (!array_lit) return NULL;
         return (AstExpr *)(array_lit);
-    }
-
-    if (t.type == TOKEN_XX)  {
-        AstCast *cast = parse_auto_cast(parser);
-        if (!cast) return NULL;
-        return (AstExpr *)(cast);
     }
 
     if (t.type == '.' && peek_token(parser, 1).type == TOKEN_LITERAL_IDENTIFIER) {

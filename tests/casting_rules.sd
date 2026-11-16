@@ -15,10 +15,10 @@ main :: () {
     x := Pi;
 
     // print("--- Integer -> X casts ---");
-    x1: int = xx 280;
-    x2: float = xx 5;
-    x3: bool = xx 1;
-    x4: HoldType = xx 2;
+    x1: int = 280 as int;
+    x2: float = 5 as float;
+    x3: bool = 1 as bool;
+    x4: HoldType = 2 as HoldType;
 
     assert(x1 == 280);
     assert(x2 == 5.0);
@@ -26,23 +26,23 @@ main :: () {
     assert(x4 == .jug);
 
     // print("--- Float -> X casts ---");
-    a1: f32 = xx 69.0;
-    a2: f64 = xx a1;   // up casting
-    a3: f32 = xx a2;   // down casting
-    a4: int = xx Pi;   // float32 -> int
-    a5: int = xx a2;   // float64 -> int
-    a6: bool = xx -0.1;
+    a1: f32 = 69.0 as f32;
+    a2: f64 = a1 as f64;   // up casting
+    a3: f32 = a2 as f32;   // down casting
+    a4: int = Pi as int;   // float32 -> int
+    a5: int = a2 as int;   // float64 -> int
+    a6: bool = -0.1 as bool;
     assert(a6);
 
     // print("--- Enum -> X casts ---");
-    b1 := (xx HoldType.crimp + 1);
+    b1 := (HoldType.crimp as int + 1);
     b2 := b1 as HoldType;
     // print("%", b1);
     // print("%", b2);
 
     // print("--- Boolean -> X casts ---");
-    c1: int = xx false;
-    c2: int = xx true;
+    c1: int = false as int;
+    c2: int = true as int;
     assert(c1 == 0);
     assert(c2 == 1);
 }

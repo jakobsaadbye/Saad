@@ -24,7 +24,7 @@ describe :: (p: Point, scale: int, name: string) -> int {
         squared := i * i;
         total += squared;     // stop in describe
     }
-    return total + xx name.len;
+    return total + name.len as int;
 }
 
 main :: () {

@@ -103,8 +103,8 @@ GameState :: struct {
 
 getRect :: method (brick: Brick) -> Rectangle {
     return {
-        xx brick.x,
-        xx brick.y,
+        brick.x as float,
+        brick.y as float,
         BrickWidth,
         BrickHeight,
     };
@@ -130,15 +130,15 @@ getRect :: method (bar: Bar) -> Rectangle {
 
 beginEmit :: method (pe: *ParticleEmitter) {
     for *p in pe.particles {
-        p.pos.x = xx GetRandomValue(xx (pe.pos.x - pe.radius), xx (pe.pos.x + pe.radius));
-        p.pos.y = xx GetRandomValue(xx (pe.pos.y - pe.radius), xx (pe.pos.y + pe.radius));
+        p.pos.x = GetRandomValue((pe.pos.x - pe.radius) as int, (pe.pos.x + pe.radius) as int) as float;
+        p.pos.y = GetRandomValue((pe.pos.y - pe.radius) as int, (pe.pos.y + pe.radius) as int) as float;
         
         spread := 200.0;
-        velX: int = GetRandomValue(xx (pe.vel.x - spread), xx (pe.vel.x + spread));
-        velY: int = GetRandomValue(xx (pe.vel.y - spread), xx (pe.vel.y + spread));
+        velX: int = GetRandomValue((pe.vel.x - spread) as int, (pe.vel.x + spread) as int);
+        velY: int = GetRandomValue((pe.vel.y - spread) as int, (pe.vel.y + spread) as int);
 
-        p.vel.x = xx velX;
-        p.vel.y = xx velY;
+        p.vel.x = velX as float;
+        p.vel.y = velY as float;
 
         p.size = GetRandomValue(6, 8);
         p.color = pe.color;
@@ -174,7 +174,7 @@ draw :: method (pe: *ParticleEmitter) {
 
     for *p in pe.particles {
         if p.lifetime > 0 {
-            DrawRectangle(xx p.pos.x, xx p.pos.y, p.size, p.size, p.color);
+            DrawRectangle(p.pos.x as int, p.pos.y as int, p.size, p.size, p.color);
         }
     }
 }
@@ -356,7 +356,7 @@ main :: () {
             bar.x = 0;
         }
         if bar.x > WindowWidth - bar.width {
-            bar.x = xx WindowWidth - bar.width;
+            bar.x = WindowWidth as float - bar.width;
         }
 
         if IsMouseButtonPressed(.left) {
@@ -405,11 +405,11 @@ main :: () {
             theta := toRadians(lerp(AngleMin, AngleMax, t));
 
             directionVector := Vector2{
-                x: - xx cos(xx theta),
-                y: - xx sin(xx theta),
+                x: -cos(theta as f64) as float,
+                y: -sin(theta as f64) as float,
             };
 
-            speed := sqrt(xx (ball.velX*ball.velX + ball.velY*ball.velY)) as f32;
+            speed := sqrt((ball.velX*ball.velX + ball.velY*ball.velY) as f64) as f32;
 
             ball.velX = directionVector.x * speed;
             ball.velY = directionVector.y * speed;
@@ -517,8 +517,8 @@ main :: () {
 
             texture := pickupTextures[pickup.type];
 
-            DrawRectangle(xx pickup.x, xx pickup.y, texture.width, texture.height, Color{50, 50, 50, 255});
-            DrawTexture(texture, xx pickup.x, xx pickup.y, Color{255, 255, 255, 255});
+            DrawRectangle(pickup.x as int, pickup.y as int, texture.width, texture.height, Color{50, 50, 50, 255});
+            DrawTexture(texture, pickup.x as int, pickup.y as int, Color{255, 255, 255, 255});
         }
         
         // Draw bricks
@@ -531,7 +531,7 @@ main :: () {
             borderColor := b.color; 
             borderColor.a = 170;
 
-            borderRect := Rectangle{xx b.x, xx b.y, BrickWidth, BrickHeight};
+            borderRect := Rectangle{b.x as float, b.y as float, BrickWidth, BrickHeight};
 
             DrawRectangle(b.x + BorderThickness, b.y + BorderThickness, BrickWidth - 2 * BorderThickness, BrickHeight - 2 * BorderThickness, b.color);
             DrawRectangleLinesEx(borderRect, BorderThickness, borderColor);
@@ -543,11 +543,11 @@ main :: () {
             if player.hasFireballPowerup {
                 ballColor = {255, 20, 20, 255};
             }
-            DrawRectangle(xx ball.x, xx ball.y, xx ball.size, xx ball.size, ballColor);
+            DrawRectangle(ball.x as int, ball.y as int, ball.size as int, ball.size as int, ballColor);
         }
         
         // Draw the bar
-        DrawRectangle(xx bar.x, xx bar.y, xx bar.width, xx bar.height, ColorWhite);
+        DrawRectangle(bar.x as int, bar.y as int, bar.width as int, bar.height as int, ColorWhite);
 
         // DrawFPS(WindowWidth - 100, 16);
 
@@ -583,13 +583,13 @@ main :: () {
 }
 
 spawnPickup :: (ps: *PickupSpawner, pos: Vector2) {
-    index := GetRandomValue(0, xx PickupType.count - 1);
+    index := GetRandomValue(0, PickupType.count as int - 1);
 
     pickup := Pickup{
         type: index as PickupType,
         x: pos.x,
         y: pos.y,
-        velY: xx GetRandomValue(80, 120),
+        velY: GetRandomValue(80, 120) as float,
         isShown: true,
     };
     
@@ -612,7 +612,7 @@ handleBrickCollision :: (game: *GameState, brick: *Brick) {
 
     // Play a particle effect
     pe := ParticleEmitter{
-        pos: {xx (brick.x + BrickWidth*0.5), xx (brick.y + BrickHeight*0.5)},
+        pos: {(brick.x + BrickWidth*0.5) as float, (brick.y + BrickHeight*0.5) as float},
         vel: {game.ball.velX * 0.3, game.ball.velY * 0.3},
         radius: 16,
         color: brick.color,
@@ -637,7 +637,7 @@ handleBrickCollision :: (game: *GameState, brick: *Brick) {
 
     r := GetRandomValue(0, 100);
     if r <= PickupSpawnChance {
-        spawnPickup(game.pickupSpawner, {xx brick.x, xx brick.y});
+        spawnPickup(game.pickupSpawner, {brick.x as float, brick.y as float});
     }
 }
 
@@ -690,7 +690,7 @@ updatePlayerEffects :: (player: *Player) {
 
     if player.hasFireballPowerup {
         
-        player.fireballPowerupDuration -= xx dtMilliseconds;
+        player.fireballPowerupDuration -= dtMilliseconds as int;
 
         if player.fireballPowerupDuration <= 0 {
             player.hasFireballPowerup = false;

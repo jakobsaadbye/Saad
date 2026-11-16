@@ -9872,26 +9872,7 @@ Type *check_binary(Typer *typer, AstBinary *binary, Type *ctx_type) {
 
     if ((int)binary->operator == OP_OPTIONAL_DEFAULT) return check_optional_default(typer, binary, ctx_type);
 
-    // Use the type info from the opposite side of an auto-cast to give it a context type
     bool checked_both_sides = false;
-    if (binary->left->head.kind == AST_CAST || binary->right->head.kind == AST_CAST) {
-        if (binary->left->head.kind == AST_CAST) {
-            AstCast *cast = (AstCast *)binary->left;
-            if (cast->is_auto && !ctx_type) {
-                ti_rhs = check_expression(typer, binary->right, NULL);
-                ti_lhs = check_expression(typer, binary->left, ti_rhs);
-                checked_both_sides = true;
-            }
-        }
-        else if (binary->right->head.kind == AST_CAST) {
-            AstCast *cast = (AstCast *)binary->right;
-            if (cast->is_auto && !ctx_type) {
-                ti_lhs = check_expression(typer, binary->left, NULL);
-                ti_rhs = check_expression(typer, binary->right, ti_lhs);
-                checked_both_sides = true;
-            }
-        }
-    }
 
     // x == default and x != default: the other side gives default its type
     bool left_default  = binary->left->head.kind == AST_DEFAULT_VALUE;
@@ -10385,26 +10366,18 @@ static bool is_enum_value(TypeEnum *type, long long value) {
 }
 
 Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
+    (void)ctx_type; // A cast says its type
 
-    Type *wanted_type = NULL;
-    if (cast->is_auto) {
-        if (ctx_type == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "Unable to infer what the auto-cast type should be from the context");
-            return NULL;
-        }
-        wanted_type = ctx_type;
-    } else {
-        cast->cast_to = resolve_type(typer, cast->cast_to);
-        if (!cast->cast_to) return NULL;
-        wanted_type = cast->cast_to;
-    }
+    cast->cast_to = resolve_type(typer, cast->cast_to);
+    if (!cast->cast_to) return NULL;
+    Type *wanted_type = cast->cast_to;
 
     Type *expr_type = check_expression(typer, cast->expr, NULL);
     if (!expr_type) return NULL;
 
     // An interface as a pointer to the type of its value, e.g s as *Circle. It throws a Panic when it is another type,
     // and with 'c, ok :=' it gives if it is that type instead
-    if (is_interface_type(expr_type) && !cast->is_auto && wanted_type->kind != TYPE_ANY) {
+    if (is_interface_type(expr_type) && wanted_type->kind != TYPE_ANY) {
         TypeStruct *interface = (TypeStruct *) expr_type;
         if (cast->is_type_test) return primitive_type(PRIMITIVE_BOOL);   // Made by check_interface_switch
         if (wanted_type->kind != TYPE_POINTER) {
@@ -10429,7 +10402,7 @@ Type *check_cast(Typer *typer, AstCast *cast, Type *ctx_type) {
     }
     // An error as the error type of its own that it was made as, e.g err as *QueryError. It looks at the causes too, like
     // err.is(QueryError). It throws a Panic when there is none, and with 'q, ok :=' it gives if there is one instead
-    if (is_error_type(typer, expr_type) && !cast->is_auto && wanted_type->kind == TYPE_POINTER && !is_error_type(typer, wanted_type) &&
+    if (is_error_type(typer, expr_type) && wanted_type->kind == TYPE_POINTER && !is_error_type(typer, wanted_type) &&
         ((TypePointer *)wanted_type)->pointer_to->kind == TYPE_STRUCT) {
         if (!is_embedding_error_type(typer, wanted_type)) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)cast, "An error is never a %s", text_bold(type_to_str(wanted_type)));

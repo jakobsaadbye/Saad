@@ -10,7 +10,7 @@ main :: () {
     assert(!(nan > 1.0));
     assert(!(nan <= 1.0));
     assert(!(nan >= 1.0));
-    nan_is_true: bool = xx nan;
+    nan_is_true: bool = nan as bool;
     assert(nan_is_true);
 
     nz := -0.0;
@@ -24,18 +24,18 @@ main :: () {
     f: f32 = 2.5;
     assert(f == 2.5);
     assert(d < f);
-    df: f64 = xx f;
+    df: f64 = f as f64;
     assert(df == 2.5);
 
     // Conversions
-    i: int = xx 3.99;
+    i: int = 3.99 as int;
     assert(i == 3);
-    j: int = xx -3.99;
+    j: int = -3.99 as int;
     assert(j == -3);
-    k: f32 = xx 7;
+    k: f32 = 7 as f32;
     assert(k == 7.0);
     u: u32 = 4000000000;
-    uf: f64 = xx u;
+    uf: f64 = u as f64;
     assert(uf == 4000000000.0);
 
     // Arithmetic

@@ -58,7 +58,6 @@ char *token_type_to_str(TokenType token_type) {
         case TOKEN_QUESTION_DOT:          return "?.";
         case TOKEN_TRIPLE_DOT:            return "...";
         case TOKEN_IN:                    return "in";
-        case TOKEN_XX:                    return "xx";
         case TOKEN_LOGICAL_OR:            return "||";
         case TOKEN_LOGICAL_AND:           return "&&";
         case TOKEN_LESS_EQUAL:            return "<=";
@@ -478,7 +477,6 @@ KeywordMatch match_keyword(Lexer *lexer) {
         if (strcmp(text, "in") == 0) token = TOKEN_IN;
         if (strcmp(text, "u8") == 0) token = TOKEN_TYPE_U8;
         if (strcmp(text, "i8") == 0) token = TOKEN_TYPE_I8;
-        if (strcmp(text, "xx") == 0) token = TOKEN_XX;
     }
     if (keyword_len == 3) {
         if (strcmp(text, "try") == 0) token = TOKEN_TRY;
