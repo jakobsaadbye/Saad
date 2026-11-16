@@ -17,7 +17,7 @@ Status :: enum {
     paymentRequired,
     forbidden,
     notFound,
-    methodNotAllowed = xx (xx Status.badRequest + 5),
+    methodNotAllowed = Status.badRequest as int + 5,
 }
 
 main :: () {

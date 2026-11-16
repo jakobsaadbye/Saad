@@ -712,7 +712,6 @@ typedef struct AstCast {
     AstExpr  head;
     AstExpr *expr;
     Type    *cast_to;     // Explicit type cast e.g "x as f64"
-    bool     is_auto;     // Whether its an auto-cast "xx 2 / 4.0"
     bool     is_as_cast;  // E.g `a := 5 as int`
     bool     with_ok;     // `c, ok := s as *Circle` of an interface: the pointer and if it is that type, instead of a Panic when it isn't
     bool     is_type_test; // If an interface is of the type, a bool. For the cases of a switch on an interface

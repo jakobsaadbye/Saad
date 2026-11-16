@@ -63,6 +63,13 @@ What changed in each version of Saad: the language, the compiler, the standard l
 * `raylib`: `ConfigFlags` is an `enumflags`, e.g `SetConfigFlags(.msaa4xHint | .windowResizable)`, which `SetConfigFlags`,
   `SetWindowState`, `ClearWindowState` and `IsWindowState` take, where they took a `uint`
 
+## Update v0.24.0 - 16. Nov 2026
+
+* The auto-cast `xx` is removed from the language. A cast says its type with `as`, e.g `n as i32` instead of `xx n`, so
+  what is converted to what can be read where it is written. `xx n` is an error that says so, and `xx` is a name like any
+  other. The tests, `examples/breakout` (which compiles again) and the keyword lists of the editor and of
+  `dbms.postgres.generate` don't have it anymore
+
 ## Update v0.23.4 - 15. Nov 2026
 
 * Language server: the methods on slices, e.g `filter`, `map` and `sort`, go to their declaration in

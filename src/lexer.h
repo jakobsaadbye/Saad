@@ -86,7 +86,6 @@ typedef enum TokenType {
     TOKEN_DOUBLE_DOT   = 153,
     TOKEN_TRIPLE_DOT   = 154,
     TOKEN_IN           = 155,
-    TOKEN_XX           = 156,
 
     TOKEN_ASSERT       = 161,
     TOKEN_IF           = 162,

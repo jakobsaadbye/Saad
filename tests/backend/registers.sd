@@ -10,7 +10,7 @@ sum8 :: (a: int, b: int, c: int, d: int, e: int, f: int, g: int, h: int) -> int 
 }
 
 mixed :: (a: f64, b: int, c: f32, d: i64, e: f64, f: u8) -> f64 {
-    return a + xx b + xx c + xx d + e + xx f;
+    return a + b as f64 + c as f64 + d as f64 + e + f as f64;
 }
 
 floatIdentity :: (x: f64) -> f64 {
