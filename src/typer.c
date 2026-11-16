@@ -2431,6 +2431,19 @@ Type *resolve_type(Typer *typer, Type *type) {
             }
         }
 
+        // An enum declared further down has no size before it is checked, so it is checked now. Otherwise a type made of
+        // it gets its size from the unchecked enum, e.g '[3]Kind' before 'Kind :: enum {...}' would have size 0
+        if (ident->type && ident->type->kind == TYPE_ENUM) {
+            AstEnum *node = ((TypeEnum *)ident->type)->node;
+            if (node && !(node->head.flags & AST_FLAG_IS_TYPE_CHECKED) && !node->is_being_checked) {
+                Typer saved_state = *typer;
+                Type *ok = check_enum_defn(typer, node);
+                typer_restore_state(typer, saved_state);
+                typer->inside_declaration = saved_state.inside_declaration;
+                if (!ok) return NULL;
+            }
+        }
+
         return ident->type;
     }
 
@@ -4147,20 +4160,21 @@ bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
             return false;
         }
 
-        // An enum declared further down has no size before it is checked
-        if (member->type->kind == TYPE_ENUM && ((TypeEnum *)member->type)->node && !(((TypeEnum *)member->type)->node->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
-            Typer current_state = *typer;
-            Type *ok = check_enum_defn(typer, ((TypeEnum *)member->type)->node);
-            typer_restore_state(typer, current_state);
-            if (!ok) return false;
-        }
-
         // A fixed array is sized by its elements, e.g 'cars: [8]Car' needs Car to be sized, also when Car is declared
         // further down. Its size was taken from the elements when it was resolved, so it is worked out again after
         Type *sized_by = member->type;
         while (sized_by->kind == TYPE_ARRAY && ((TypeArray *)sized_by)->array_kind == ARRAY_FIXED) {
             sized_by = ((TypeArray *)sized_by)->elem_type;
         }
+
+        // An enum declared further down has no size before it is checked, also as the elements of a fixed array e.g 'kinds: [3]Kind'
+        if (sized_by->kind == TYPE_ENUM && ((TypeEnum *)sized_by)->node && !(((TypeEnum *)sized_by)->node->head.flags & AST_FLAG_IS_TYPE_CHECKED)) {
+            Typer current_state = *typer;
+            Type *ok = check_enum_defn(typer, ((TypeEnum *)sized_by)->node);
+            typer_restore_state(typer, current_state);
+            if (!ok) return false;
+        }
+        if (sized_by->kind == TYPE_ENUM && sized_by != member->type) resize_fixed_array(member->type);
         if (sized_by == (Type *) struct_type && sized_by != member->type) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *) member->decl, "Illegal recursive definition of type '%s'. It holds an array of itself", struct_type->node->identifier->name);
             report_error_ast(typer->parser, LABEL_HINT, NULL, "Did you mean a list or a slice, e.g [..]%s?", struct_type->node->identifier->name);
@@ -6366,6 +6380,13 @@ Type *check_function_call(Typer *typer, AstFunctionCall *call) {
                 arg->is_vararg = true;
                 arg->vararg_index = arg_index;
             } else {
+                if (arg_index >= func_defn->parameters.count) {
+                    int skip   = call->is_method_call ? 1 : 0; // self is not written as an argument
+                    char *name = func_defn->identifier ? func_defn->identifier->name : "function";
+                    report_error_ast(typer->parser, LABEL_ERROR, (Ast *)arg, "Too many arguments to '%s': wanted %d, got %d", name, func_defn->parameters.count - skip, call->arguments.count - skip);
+                    if (func_defn->identifier) report_error_ast(typer->parser, LABEL_NOTE, (Ast *)(func_defn->identifier), "Here is the definition of '%s'", name);
+                    return NULL;
+                }
                 arg->param_index = arg_index;
             }
             continue;

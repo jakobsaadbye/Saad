@@ -2,6 +2,16 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.23.10 - 16. Nov 2026
+
+* A call with too many arguments, e.g `math.min(1, a, b)`, is an error, "Too many arguments to 'min': wanted 2, got 3".
+  It crashed the compiler, which read past the parameters of the function, and the build stopped with nothing printed
+  (`tests/should_fail/too_many_arguments.sd` and `too_many_arguments_method.sd`)
+* A fixed array of an enum declared further down, e.g `perks: [3]PerkKind` in a struct before `PerkKind :: enum {...}`,
+  has the right size. The array was sized before the enum, as 0 bytes, so the members after it overlapped it, and
+  copying the struct, also as an optional, lost the last values and the members after the array. An enum named before
+  it is declared is now checked when its name is resolved, like a struct is (`tests/enum_arrays_in_structs.sd`)
+
 ## Update v0.23.9 - 15. Nov 2026
 
 * A function with defers and many calls compiles fast again. Every place that can throw, i.e every call of a Saad

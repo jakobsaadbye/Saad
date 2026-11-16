@@ -1,0 +1,14 @@
+// expect-error: Too many arguments to 'grow': wanted 1, got 2
+
+Box :: struct {
+    size: int;
+}
+
+grow :: method (self: *Box, by: int) {
+    self.size += by;
+}
+
+main :: () {
+    box := Box{1};
+    box.grow(1, 2);
+}

@@ -1,0 +1,107 @@
+// A struct with a fixed array of an enum, e.g 'perks: [3]PerkKind', declared before the enum. The array used to be
+// sized before the enum was, as 0 bytes, so the members after it overlapped it and copies of the struct were cut short
+
+use fmt;
+
+PerkOffer :: struct {
+    isOpen:   bool;
+    perks:    [3]PerkKind;
+    timeLeft: f32;
+}
+
+Grid :: struct {
+    first: u8;
+    cells: [2][3]PerkKind;
+    last:  f64;
+}
+
+Player :: struct {
+    id:        int;
+    offer:     PerkOffer;
+    maybe:     ?PerkOffer;
+    grid:      Grid;
+    after:     int;
+}
+
+Game :: struct {
+    players: [..]Player;
+}
+
+makeOffer :: (seed: int) -> PerkOffer {
+    offer: PerkOffer;
+    offer.isOpen = true;
+    for i in 0..3 {
+        offer.perks[i] = ((seed + i * 4) % 12) as PerkKind;
+    }
+    offer.timeLeft = 7.5;
+    return offer;
+}
+
+checkOffer :: (offer: PerkOffer) {
+    assert(offer.isOpen);
+    assert(offer.perks[0] == .c);
+    assert(offer.perks[1] == .g);
+    assert(offer.perks[2] == .k);
+    assert(offer.timeLeft == 7.5);
+}
+
+main :: () {
+    assert(sizeof(PerkKind) == 4);
+    assert(sizeof([3]PerkKind) == 12);
+    assert(sizeof(PerkOffer) == 20);
+    assert(sizeof(Grid) == 40);
+
+    game: Game;
+    for i in 0..3 {
+        game.players.add(Player{id: i, after: 99});
+    }
+
+    for i in 0..game.players.count {
+        player := &game.players[i];
+
+        offer := makeOffer(2);
+        player.offer = offer;
+        player.maybe = offer;
+
+        grid: Grid;
+        grid.first = 7;
+        for r in 0..2 {
+            for c in 0..3 {
+                grid.cells[r][c] = (r * 3 + c) as PerkKind;
+            }
+        }
+        grid.last = 2.25;
+        player.grid = grid;
+    }
+
+    for i in 0..game.players.count {
+        player := game.players[i];
+        assert(player.id == i);
+        assert(player.after == 99);
+
+        checkOffer(player.offer);
+        assert(player.maybe != null);
+        checkOffer(player.maybe.value());
+
+        assert(player.grid.first == 7);
+        for r in 0..2 {
+            for c in 0..3 {
+                assert(player.grid.cells[r][c] == (r * 3 + c) as PerkKind);
+            }
+        }
+        assert(player.grid.last == 2.25);
+    }
+
+    // An optional assigned whole, through a pointer
+    {
+        player := &game.players[1];
+        maybe: ?PerkOffer = makeOffer(2);
+        player.maybe = maybe;
+        checkOffer(game.players[1].maybe.value());
+        assert(game.players[1].after == 99);
+    }
+
+    assert(sprint("%", game.players[0].offer.perks[2]) == ".k");
+}
+
+PerkKind :: enum { a, b, c, d, e, f, g, h, i, j, k, l }
