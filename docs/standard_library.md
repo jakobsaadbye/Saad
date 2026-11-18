@@ -150,6 +150,7 @@ os.makeDir("out");                          // also fine when it was there befor
 names, err := os.listDir("images");         // the names in a folder, sorted, without . and ..
 os.isDirectory("images");                   // a bool
 home, found := os.getEnv("HOME");
+os.setEnv("LANG", "C");                     // for this process and what it runs; "" removes it
 code := os.run("echo hi");                  // runs a shell command, returns its exit code
 text, code := os.output("git status");      // runs a shell command, returns what it wrote and its exit code
 args := os.args();                          // the command line, args[0] is the program
@@ -344,6 +345,12 @@ response = http.request("PUT", url, headers, body);
 * **Client:** `get`, `post` and `request`, a connection for each request, to `http://` and `https://` urls (TLS of
   `net`). The texts of a response are freed with `response.free()`. The server has no TLS: put it behind a proxy, e.g
   Caddy or nginx, for https.
+* **Proxies:** the client goes through the proxy of `http_proxy` for `http://` and of `https_proxy` for `https://`
+  (or their uppercase names), as curl does. https goes through a tunnel (`CONNECT`), and TLS checks the host's own
+  certificate through it; http sends the whole url to the proxy. A proxy url may be without `http://`, and its
+  `user:password@` is sent as `Proxy-Authorization: Basic`. The hosts of `no_proxy` (a comma list, e.g
+  `localhost, .internal.org, *`) go straight to the host, and a host matches its subdomains too
+  (`http.bypassesProxy(host, list)`). `http.useProxies = false` turns it off.
 
 What a site needs of a request (`forms.sd` and `files.sd`):
 
@@ -596,6 +603,7 @@ xs.reverse();
 xs.indexOf(3);                      // -1 when not found, compares with ==
 names.contains("anna");
 xs.swap(0, 1);
+rest := xs.slice(1);                // the elements from 1 on, without a copy; xs.slice(1, 3) is 1 and 2
 ```
 
 With a function, which can be a function literal or the name of a function:

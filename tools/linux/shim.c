@@ -80,6 +80,17 @@ MS int32_t ms_ftell(FILE *f) { return (int32_t) ftell(f); }
 MS int     ms_remove(const char *p) { return remove(p); }
 MS int     ms_rename(const char *a, const char *b) { return rename(a, b); }
 MS char   *ms_getenv(const char *n) { return getenv(n); }
+// _putenv("NAME=value") of Windows, where an empty value removes the variable
+MS int     ms__putenv(const char *a) {
+    const char *eq = strchr(a, '=');
+    if (!eq || eq == a) return -1;
+    char name[1024];
+    size_t n = (size_t) (eq - a);
+    if (n >= sizeof(name)) return -1;
+    memcpy(name, a, n);
+    name[n] = 0;
+    return eq[1] ? setenv(name, eq + 1, 1) : unsetenv(name);
+}
 MS double  ms_strtod(const char *s, char **e) { return strtod(s, e); }
 MS int     ms_system(const char *c) { fflush(stdout); return system(c); }
 MS int     ms_memcmp(const void *a, const void *b, int64_t n) { return memcmp(a, b, n); }

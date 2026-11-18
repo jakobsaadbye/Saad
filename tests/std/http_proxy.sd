@@ -1,0 +1,141 @@
+// net.http through a proxy: http_proxy sends a request to the proxy with its whole url, and its user and password in
+// Proxy-Authorization; no_proxy and useProxies = false go straight to the host. The proxy is a small one on a thread,
+// which forwards each request and remembers what it got. (https through a proxy, with CONNECT, is in
+// tools/linux/check_tls.sh, which has a certificate)
+
+import net;
+import net.http;
+import thread;
+import bytes;
+import base64;
+import fmt;
+import os;
+
+hello :: (w: *http.ResponseWriter, r: *http.Request) {
+    w.write(fmt.sprint("hello %", r.pathValue("name")));
+}
+
+run :: (server: *http.Server) {
+    server.serve();
+}
+
+// What the proxy got last, and how many requests
+Proxy :: struct {
+    listener: *net.Listener;
+    requests: int;
+    line:     string;       // The first line of the last request
+    auth:     string;       // Its Proxy-Authorization
+}
+
+// Reads a request until the end of its head, forwards it to the host of its url with the path alone, and sends back what
+// the host answers, until the host closes
+serveProxy :: (proxy: *Proxy) {
+    while true {
+        conn, err := proxy.listener.accept();
+        if err != null { return; }
+        buffer: bytes.Buffer;
+        while buffer.unread().indexOf("\r\n\r\n") < 0 {
+            n, readErr := conn.read(buffer.space(4096));
+            if readErr != null { break; }
+            buffer.wrote(n);
+        }
+        head := buffer.unread();
+        lineEnd := head.indexOf("\r\n");
+        proxy.line = head.slice(0, lineEnd).copy();
+        proxy.auth = "";
+        at := head.indexOf("Proxy-Authorization: ");
+        if at >= 0 {
+            rest := head.slice(at + 21);
+            proxy.auth = rest.slice(0, rest.indexOf("\r\n")).copy();
+        }
+
+        // GET http://host:port/path HTTP/1.1
+        first := head.slice(0, lineEnd);
+        url := first.slice(first.indexOf(" ") + 1, first.lastIndexOf(" "));
+        hostPort := url.slice(7);
+        path := hostPort.slice(hostPort.indexOf("/"));
+        hostPort = hostPort.slice(0, hostPort.indexOf("/"));
+        origin := net.dial(hostPort);
+        origin.write(fmt.sprint("GET % HTTP/1.1\r\nHost: %\r\nConnection: close\r\n\r\n", path, hostPort));
+        answer: bytes.Buffer;
+        while true {
+            n, readErr := origin.read(answer.space(4096));
+            if readErr != null { break; }
+            answer.wrote(n);
+        }
+        origin.close();
+        proxy.requests += 1;
+        conn.write(answer.unread());
+        conn.close();
+        buffer.free();
+        answer.free();
+    }
+}
+
+main :: () {
+    router: http.Router;
+    router.handle("GET /hello/{name}", hello);
+    server: http.Server;
+    server.router = &router;
+    server.workers = 2;
+    server.log = false;
+    assert(server.listen("127.0.0.1:0") == null);
+    origin := server.listener.addr.toString();
+    serving := thread.spawn(run, &server);
+
+    proxy: Proxy;
+    proxy.listener = net.listen("127.0.0.1:0");
+    proxying := thread.spawn(serveProxy, &proxy);
+    proxyAddress := proxy.listener.addr.toString();
+
+    // Only this test's proxy, whatever the environment of the test had
+    for name in ["http_proxy", "HTTP_PROXY", "no_proxy", "NO_PROXY"] { assert(os.setEnv(name, "")); }
+    _, set := os.getEnv("no_proxy");
+    assert(!set);
+
+    // Through the proxy: the whole url, and the user and password (with a space, written %20) as Basic
+    assert(os.setEnv("http_proxy", fmt.sprint("http://ada:open\%20sesame@%", proxyAddress)));
+    response := http.get(fmt.sprint("http://%/hello/proxy", origin));
+    assert(response.status == 200 && response.body == "hello proxy");
+    response.free();
+    assert(proxy.requests == 1);
+    assert(proxy.line == fmt.sprint("GET http://%/hello/proxy HTTP/1.1", origin));
+    assert(proxy.auth == fmt.sprint("Basic %", base64.encode("ada:open sesame")));
+
+    // A proxy without a scheme or a user is http, without Proxy-Authorization
+    assert(os.setEnv("http_proxy", proxyAddress));
+    response = http.get(fmt.sprint("http://%/hello/again", origin));
+    assert(response.body == "hello again" && proxy.requests == 2 && proxy.auth == "");
+    response.free();
+
+    // The hosts of no_proxy go straight to the host
+    assert(os.setEnv("no_proxy", "example.com, 127.0.0.1"));
+    response = http.get(fmt.sprint("http://%/hello/direct", origin));
+    assert(response.body == "hello direct" && proxy.requests == 2);
+    response.free();
+    assert(os.setEnv("no_proxy", ""));
+
+    // and so does everything with useProxies = false
+    http.useProxies = false;
+    response = http.get(fmt.sprint("http://%/hello/direct", origin));
+    assert(response.body == "hello direct" && proxy.requests == 2);
+    response.free();
+    http.useProxies = true;
+    assert(os.setEnv("http_proxy", ""));
+
+    // What no_proxy matches: a host and its subdomains, with a dot or *. only those, * all, and a port is left out
+    assert(http.bypassesProxy("example.com", "example.com"));
+    assert(http.bypassesProxy("api.example.com", "example.com"));
+    assert(!http.bypassesProxy("badexample.com", "example.com"));
+    assert(http.bypassesProxy("api.example.com", ".example.com"));
+    assert(http.bypassesProxy("api.example.com", "*.example.com"));
+    assert(http.bypassesProxy("API.Example.com", "other.org, example.com"));
+    assert(http.bypassesProxy("localhost", "localhost:8080"));
+    assert(http.bypassesProxy("anything", "*"));
+    assert(!http.bypassesProxy("anything", "a, b ,c"));
+    assert(!http.bypassesProxy("anything", ""));
+
+    server.shutdown();
+    serving.join();
+    fmt.print("http through a proxy: ok\n");
+}
