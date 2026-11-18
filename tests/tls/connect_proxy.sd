@@ -1,0 +1,68 @@
+// A proxy that opens tunnels (CONNECT), for tools/linux/check_tls.sh: https through a proxy, which only passes the
+// encrypted bytes on
+//
+//     connect_proxy 40001
+
+import net;
+import bytes;
+import thread;
+import fmt;
+import os;
+
+// The bytes of one way of a tunnel, until either side closes
+Pipe :: struct {
+    from: *net.Conn;
+    to:   *net.Conn;
+}
+
+pass :: (pipe: *Pipe) {
+    space: [16384]u8;
+    while true {
+        n, err := pipe.from.read(space);
+        if err != null { break; }
+        bytes: string;
+        bytes.data = &space[0];
+        bytes.len = n;
+        if pipe.to.write(bytes) != null { break; }
+    }
+    pipe.to.close();
+}
+
+tunnel :: (client: *net.Conn) {
+    buffer: bytes.Buffer;
+    while buffer.unread().indexOf("\r\n\r\n") < 0 {
+        n, err := client.read(buffer.space(4096));
+        if err != null { return; }
+        buffer.wrote(n);
+    }
+    // CONNECT host:port HTTP/1.1
+    head := buffer.unread();
+    first := head.slice(0, head.indexOf("\r\n"));
+    if !first.startsWith("CONNECT ") {
+        client.write("HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n");
+        client.close();
+        return;
+    }
+    target := first.slice(8, first.lastIndexOf(" "));
+    server, err := net.dial(target);
+    if err != null {
+        client.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n");
+        client.close();
+        return;
+    }
+    client.write("HTTP/1.1 200 Connection established\r\n\r\n");
+    back := Pipe{server, client};
+    returning := thread.spawn(pass, &back);
+    forth := Pipe{client, server};
+    pass(&forth);
+    returning.join();
+}
+
+main :: () {
+    listener := net.listen(fmt.sprint("127.0.0.1:%", os.args()[1]));
+    while true {
+        client, err := listener.accept();
+        if err != null { return; }
+        thread.spawn(tunnel, client);
+    }
+}

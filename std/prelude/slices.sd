@@ -35,6 +35,18 @@ reverse :: method <T>(elements: []T) {
     }
 }
 
+// The elements from `from` up to `to` (not with it), or to the end when to is -1, without a copy: like slice of a string,
+// e.g args.slice(1) for the arguments after the name of the program
+slice :: method <T>(elements: []T, from: i64, to: i64 = -1) -> []T {
+    end := to;
+    if end == -1 { end = elements.count; }
+    assert(from >= 0 && from <= end && end <= elements.count);
+    result: []T;
+    result.data = &elements.data[from];
+    result.count = end - from;
+    return result;
+}
+
 // The index of the first element that is == value, or -1
 indexOf :: method <T>(elements: []T, value: T) -> int {
     for element, i in elements {

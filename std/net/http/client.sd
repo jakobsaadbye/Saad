@@ -8,9 +8,18 @@ namespace net.http;
 //
 //     response = http.post("http://localhost:8080/posts", "application/json", text);
 //
-// http and https (TLS of net, with OpenSSL). Each request is a connection of its own
+// http and https (TLS of net, with OpenSSL). Each request is a connection of its own.
+//
+// A request goes through the proxy that the environment names, as curl and most tools do: https_proxy (or HTTPS_PROXY)
+// for an https url, http_proxy (or HTTP_PROXY) for an http url, but not for the hosts of no_proxy (or NO_PROXY), e.g
+// "localhost,.internal.example.com". The proxy is a url, with a user and password when it wants one, e.g
+// http://user:secret@proxy.example.com:3128. An https request goes through a tunnel the proxy opens (CONNECT), so it is
+// still encrypted all the way to the host; an http request is sent to the proxy with its whole url. useProxies = false
+// always connects straight to the host
 
 import net;
+import os;
+import base64;
 import bytes;
 import mem;
 import allocators;
@@ -79,6 +88,101 @@ parseUrl :: (url: string) -> Url, error {
     return result, null;
 }
 
+useProxies := true;        // False to connect straight to the host, whatever the environment says
+
+// The proxy a request to a url goes through, and the value of its Proxy-Authorization header (or ""), from the
+// environment. False when it goes straight to the host
+proxyFor :: (target: Url) -> Url, string, bool {
+    none: Url;
+    if !useProxies { return none, "", false; }
+    names: []string = ["http_proxy", "HTTP_PROXY"];
+    if target.tls { names = ["https_proxy", "HTTPS_PROXY"]; }
+    address := "";
+    for name in names {
+        value, found := os.getEnv(name);
+        if found && value.len > 0 {
+            address = value;
+            break;
+        }
+    }
+    if address.len == 0 { return none, "", false; }
+    for name in ["no_proxy", "NO_PROXY"] {
+        value, found := os.getEnv(name);
+        if found && bypassesProxy(target.host, value) { return none, "", false; }
+    }
+
+    // A proxy without a scheme is an http one, e.g proxy.example.com:3128
+    if address.indexOf("://") < 0 { address = fmt.sprint("http://%", address); }
+    // The user and password, before the host: http://user:secret@host:port
+    auth := "";
+    scheme := address.indexOf("://") + 3;
+    at := address.lastIndexOf("@");
+    if at > scheme {
+        arena: allocators.Arena;
+        defer arena.free();
+        auth = fmt.sprint("Basic %", base64.encode(decodeUrl(address.slice(scheme, at), &arena)));
+        address = fmt.sprint("%%", address.slice(0, scheme), address.slice(at + 1));
+    }
+    proxy, err := parseUrl(address);
+    if err != null { return none, "", false; }
+    return proxy, auth, true;
+}
+
+// If a host is one of no_proxy, which is a list of hosts split by commas: a host (and its subdomains), a domain that starts
+// with a dot or *. (only its subdomains, and itself), or * for all of them. A port after a host is left out
+bypassesProxy :: (host: string, noProxy: string) -> bool {
+    rest := noProxy;
+    while rest.len > 0 {
+        comma := rest.indexOf(",");
+        entry := rest;
+        if comma >= 0 {
+            entry = rest.slice(0, comma);
+            rest = rest.slice(comma + 1);
+        } else {
+            rest = "";
+        }
+        entry = trimSpaces(entry);
+        if entry == "*" { return true; }
+        colon := entry.lastIndexOf(":");
+        if colon > 0 && entry.indexOf(":") == colon { entry = entry.slice(0, colon); }    // Not of an IPv6 address
+        if entry.startsWith("*.") { entry = entry.slice(1); }
+        if entry.len == 0 { continue; }
+        if entry.startsWith(".") { entry = entry.slice(1); }
+        if equalFold(host, entry) { return true; }
+        // A subdomain: the host ends in .entry
+        if host.len > entry.len && host[host.len - entry.len - 1] == '.' && equalFold(host.slice(host.len - entry.len), entry) { return true; }
+    }
+    return false;
+}
+
+// Asks a proxy for a tunnel to the host of an https url, through which the request then goes, encrypted
+@private
+openTunnel :: (conn: *net.Conn, target: Url, auth: string) -> error {
+    out := fmt.newStringBuilder(256);
+    defer out.free();
+    out.add("CONNECT %:% HTTP/1.1\r\nHost: %:%\r\n", target.host, target.port, target.host, target.port);
+    if auth.len > 0 { out.add("Proxy-Authorization: %\r\n", auth); }
+    out.addString("\r\n");
+    err := conn.write(out.toString());
+    if err != null { return err; }
+
+    arena: allocators.Arena;
+    defer arena.free();
+    headers: [..]Header;
+    headers.allocator = &arena;
+    buffer: bytes.Buffer;
+    defer buffer.free();
+    limits: Limits;
+    first, status := readHead(conn, &buffer, &limits, &arena, &headers);
+    if status != 0 { return errors.make("the proxy didn't answer CONNECT %:%", target.host, target.port, kind: ProtocolError); }
+    // HTTP/1.1 200 Connection established
+    space := first.indexOf(" ");
+    if space < 0 || !first.startsWith("HTTP/1.") || !first.slice(space + 1).startsWith("2") {
+        return errors.make("the proxy refused a tunnel to %:%: %", target.host, target.port, first, kind: ProtocolError);
+    }
+    return null;
+}
+
 get :: (url: string) -> *Response, error {
     return request("GET", url);
 }
@@ -92,12 +196,19 @@ post :: (url: string, contentType: string, body: string) -> *Response, error {
 request :: (verb: string, url: string, headers: []Header = [], body := "") -> *Response, error {
     parts, err := parseUrl(url);
     if err != null { return null, err; }
+    proxy, auth, viaProxy := proxyFor(parts);
+    address := fmt.sprint("%:%", parts.host, parts.port);
+    if viaProxy { address = fmt.sprint("%:%", proxy.host, proxy.port); }
     conn: *net.Conn;
-    conn, err = net.dial(fmt.sprint("%:%", parts.host, parts.port));
+    conn, err = net.dial(address);
     if err != null { return null, err; }
     defer {
         conn.close();
         mem.delete(conn, mem.heap());
+    }
+    if viaProxy && parts.tls {
+        err = openTunnel(conn, parts, auth);
+        if err != null { return null, err; }
     }
     if parts.tls {
         err = conn.startTls(parts.host);
@@ -106,7 +217,10 @@ request :: (verb: string, url: string, headers: []Header = [], body := "") -> *R
 
     out := fmt.newStringBuilder(256 + body.len as int);
     defer out.free();
-    out.add("% % HTTP/1.1\r\n", verb, parts.path);
+    // To a proxy (without a tunnel) the whole url, else only the path
+    if viaProxy && !parts.tls { out.add("% http://%:%% HTTP/1.1\r\n", verb, parts.host, parts.port, parts.path); }
+    else                      { out.add("% % HTTP/1.1\r\n", verb, parts.path); }
+    if viaProxy && !parts.tls && auth.len > 0 { out.add("Proxy-Authorization: %\r\n", auth); }
     if parts.port == 80 && !parts.tls || parts.port == 443 && parts.tls { out.add("Host: %\r\n", parts.host); }
     else                { out.add("Host: %:%\r\n", parts.host, parts.port); }
     for h in headers { out.add("%: %\r\n", h.name, h.value); }

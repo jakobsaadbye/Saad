@@ -74,6 +74,17 @@ getEnv :: (name: string) -> string, bool {
     return value.toString(), true;
 }
 
+// Sets an environment variable of the program, which getEnv, and the programs it runs, then see. An empty value removes it.
+// False when it couldn't be set
+setEnv :: (name: string, value: string) -> bool {
+    assignment := fmt.sprint("%=%", name, value);
+    cAssignment := assignment.toCString();
+    code := _putenv(cAssignment);
+    cAssignment.free();
+    assignment.free();
+    return code == 0;
+}
+
 // The kinds of the errors of os, e.g err.is(os.NotFound)
 NotFound :: ErrorKind{"os.NotFound"}; // The file isn't there
 IOError  :: ErrorKind{"os.IOError"};  // The file is there, but couldn't be read or written, e.g without the right to

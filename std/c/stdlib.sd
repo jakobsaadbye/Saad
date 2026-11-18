@@ -9,6 +9,7 @@ extern "C" {
     free    :: (ptr: *void);
     exit    :: (code: int);
     getenv  :: (name: c.string) -> c.string;
+    _putenv :: (assignment: c.string) -> int;              // "NAME=value" sets it, "NAME=" removes it
     system  :: (command: c.string) -> int;
     strtod  :: (str: c.string, end: *c.string) -> f64;
 }
