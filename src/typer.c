@@ -8268,7 +8268,8 @@ Type *check_array_access(Typer *typer, AstArrayAccess *array_ac) {
         array->capacity        = 0;
         array->count           = 0;
 
-        array_ac->left->type = (Type *) array;
+        // The left keeps its own type when its type is what it reads: e.g the p[k] of p[k][j], a **T, is a *T of 8 bytes
+        if (array_ac->left->head.kind != AST_ARRAY_ACCESS) array_ac->left->type = (Type *) array;
         array_ac->head.head.flags |= AST_FLAG_IS_ARRAY_INDEX_INTO_POINTER;
 
         elem_type = ptr->pointer_to;
