@@ -1,7 +1,11 @@
 # Traits
 
-A design, not implemented yet. Traits would replace interfaces (`docs/interfaces.md`) as the way to say what a type
-can do. Two things are wanted of them:
+**Considered, not planned.** Interfaces (`docs/interfaces.md`) already give most of what traits would: static
+dispatch through constraints (`<S: Shape>`), dynamic dispatch through interface values, and methods for types of
+others. This design is kept for when a need shows up that interfaces can't meet well. See "When to look at it again"
+at the end.
+
+The design: traits would replace interfaces as the way to say what a type can do. Two things are wanted of them:
 
 * **A contract.** A type says which traits it implements, and the compiler checks it there: a missing method is an
   error at the implementation, not at a use far away.
@@ -191,3 +195,18 @@ What exists and what is new, for when it is implemented:
   type that implements the trait, like a generic method), the checks of a block, coherence, and the errors for names
   of methods that clash.
 * `trait`, `implements` and `Self` become keywords. No code of the repository uses them as names.
+
+## When to look at it again
+
+Traits would earn their place when one of these becomes a real need:
+
+* **Marker traits**, e.g what may be shared with or sent to another thread, or what can be copied with `memcpy`. An
+  interface without methods is every type, so only an opt-in can say it.
+* **Default methods**, when many types copy the same method bodies.
+* **Clashing protocols**, e.g a type that needs `hash` for a `Map` but has a method `hash` of its own that means
+  something else.
+* **Accidental conformance**, if library authors find types that are an interface by chance and shouldn't be.
+
+Smaller steps on interfaces come first: an optional `@implements(Shape)` on a struct that only checks the methods are
+there, and functions without `self` in interfaces that are used as constraints.
+

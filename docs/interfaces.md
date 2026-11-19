@@ -4,8 +4,7 @@ An interface is a set of methods. Any type that has them is one, without saying 
 interface is a pointer to the value and the methods of its type, so code can work with any of them, and a library can
 add its own types that work with the code of others.
 
-Traits are planned to replace them as the way to say what a type can do, with dispatch that is static by default: see
-`docs/traits.md`.
+`docs/traits.md` is a design of traits that was considered instead, and isn't planned.
 
 ```odin
 Shape :: interface {
