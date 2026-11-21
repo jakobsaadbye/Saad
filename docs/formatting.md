@@ -9,8 +9,21 @@ saad fmt --check .         # only list the files that aren't formatted, and fail
 saad fmt --stdout main.sd  # write the formatted file instead of changing it, e.g for an editor
 ```
 
-It formats the whole repository (500 files) in a fifth of a second, so an editor can format a file every time it is
-saved.
+It formats the whole repository (500 files) in a fifth of a second, and a file of 1500 lines in 7 ms, including the
+start of the process, so an editor can format a file every time it is saved.
+
+## In the editor
+
+The language server formats a document when the editor asks (`textDocument/formatting`): it runs
+`saad fmt --stdout` on the text the editor has, also when it isn't saved, and answers with one edit of the lines that
+change, so the cursor stays where it is. The VS Code extension turns on `editor.formatOnSave` for Saad, so a file is
+formatted every time it is saved, and Shift+Alt+F formats it any time. To turn it off:
+
+```json
+"[saad]": { "editor.formatOnSave": false }
+```
+
+Only the saved file is formatted. `saad fmt .` formats all of them, e.g once for a project that wasn't formatted.
 
 ## What it does
 

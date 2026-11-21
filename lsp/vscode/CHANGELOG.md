@@ -3,6 +3,11 @@
 The changes of the language and the language server are in the
 [changelog of Saad](https://github.com/jakobsaadbye/Saad/blob/main/CHANGELOG.md).
 
+## 0.5.0
+
+* Formatting with `saad fmt`: Format Document (Shift+Alt+F), and on every save, as the extension turns on
+  `editor.formatOnSave` for Saad. Turn it off with `"[saad]": { "editor.formatOnSave": false }` in the settings
+
 ## 0.4.1
 
 * Debugging on Linux links the program with tools/linux/link.sh, so programs that use libpq or OpenSSL can be debugged

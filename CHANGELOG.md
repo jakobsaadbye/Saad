@@ -11,6 +11,10 @@ What changed in each version of Saad: the language, the compiler, the standard l
   tokens, not on the AST, so it is fast (the whole repository in 0.2 seconds) and formats code with errors of names and
   types. As only the space between tokens changes, it can't change what a program does: the formatted text is lexed
   again, and a file whose tokens would change is left as it is. See docs/formatting.md (`src/format.c`)
+* The language server formats (`textDocument/formatting`): it runs `saad fmt --stdout` on the text the editor has, also
+  when it isn't saved, and gives one edit of the lines that change, so the cursor stays. The VS Code extension (0.5.0)
+  formats a Saad file every time it is saved, as it turns on `editor.formatOnSave` for Saad
+* The code of the repository is formatted with `saad fmt`, and `tools/linux/runtests.sh` fails when it isn't
 
 ## Update v0.23.10 - 16. Nov 2026
 
