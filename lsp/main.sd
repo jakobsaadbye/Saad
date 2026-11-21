@@ -18,6 +18,7 @@ import fmt;
 import os;
 import io;
 import time;
+import thread;
 
 Document :: struct {
     uri:     string;
@@ -54,18 +55,31 @@ main :: () {
     rpc.log(fmt.sprint("Started. The compiler is %", compiler));
 
     while true {
+        // While nothing waits to be read: check the program of a change (while typing, a change comes after the other,
+        // so it is checked once they stop), and wait for a check that runs on a thread, while looking for messages
+        if !io.hasInput() && (changedKey != "" || job != null || waiting.count > 0) {
+            if changedKey != "" {
+                key := changedKey;
+                changedKey = "";
+                refresh(key, changedPath);
+            }
+            if job != null && jobDone() {
+                finishJob();
+            }
+            if job == null {
+                startWaiting();
+            }
+            if job != null {
+                thread.sleep(2);
+            }
+            continue;
+        }
+
         message, ok := rpc.read();
         if !ok {
             break;
         }
         handle(message);
-
-        // While typing, a change comes after the other. The program is checked once they stop
-        if changedKey != "" && !io.hasInput() {
-            key := changedKey;
-            changedKey = "";
-            refresh(key, changedPath);
-        }
     }
     stop();  // The input ended
 }
@@ -121,7 +135,7 @@ initialize :: (m: rpc.Message) {
 
     capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\",\"@\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]},\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":%,\"tokenModifiers\":%},\"full\":true},\"renameProvider\":{\"prepareProvider\":true},\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\"]},\"documentFormattingProvider\":true}";
     capabilities = fmt.sprint(capabilities, json.encode(TokenTypes), json.encode(TokenModifiers));
-    rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.4.0\"}}", capabilities));
+    rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.4.1\"}}", capabilities));
 }
 
 // The editor asks the server to end after asking it to shut down. Otherwise the server ends with an error
@@ -240,12 +254,107 @@ findDocument :: (key: string) -> *Document {
 }
 
 // Checks the program of the file again, and the other programs that have it, and sends their diagnostics
+// A file that is known to be part of a program is checked on a thread, so the editor's requests are answered
+// meanwhile, e.g formatting the file when it is saved. A file seen for the first time is placed in its program first,
+// which checks it now
 refresh :: (key: string, path: string) {
+    known := false;
+    for p, i in projects {
+        if !p.retired && p.fileNumber(key) >= 0 {
+            known = true;
+            if !waiting.contains(i as int) {
+                waiting.add(i as int);
+            }
+        }
+    }
+    if known {
+        return;
+    }
     projectFor(key, path);
     for p, i in projects {
         if !p.retired && p.fileNumber(key) >= 0 {
             update(i);
         }
+    }
+}
+
+//
+// Checking on a thread
+//
+
+// A run of 'saad index' on a thread
+Job :: struct {
+    command: string;
+    output:  string;
+    code:    int;
+    done:    bool;
+    lock:    thread.Mutex;
+}
+
+job:       *Job = null;
+jobThread: thread.Thread;
+jobProject    := -1;
+jobGeneration := 0;
+jobWatch: time.Stopwatch;
+waiting:  [..]int;       // Projects to check on the thread
+
+runJob :: (j: *Job) {
+    text, code := os.output(j.command);
+    j.lock.lock();
+    j.output = text;
+    j.code   = code;
+    j.done   = true;
+    j.lock.unlock();
+}
+
+jobDone :: () -> bool {
+    job.lock.lock();
+    done := job.done;
+    job.lock.unlock();
+    return done;
+}
+
+// Starts checking the next project that waits and isn't up to date
+startWaiting :: () {
+    while waiting.count > 0 {
+        i := waiting[0];
+        waiting.removeAt(0);
+        p := projects.indexRef(i);
+        if p.generation == generation || p.retired {
+            continue;
+        }
+        j := new(Job, heapAllocator());
+        j.command     = p.indexCommand(compiler, overlayOptions());
+        jobProject    = i;
+        jobGeneration = generation;
+        jobWatch      = time.startStopwatch();
+        t, err := thread.spawn(runJob, j);
+        if err != null {
+            // Then it is checked now
+            rpc.log(fmt.sprint("A thread couldn't be started: %", err.message));
+            freeMemory(j, sizeof(Job), heapAllocator());
+            update(i);
+            continue;
+        }
+        job = j;
+        jobThread = t;
+        return;
+    }
+}
+
+// Waits for the check on the thread, and reads what it wrote
+finishJob :: () {
+    jobThread.join();
+    j := job;
+    job = null;
+    p := projects.indexRef(jobProject);
+    ok := p.readIndex(j.output, j.code, j.command);
+    p.generation = jobGeneration;  // A change while it ran makes it out of date again
+    texts.clear();
+    freeMemory(j, sizeof(Job), heapAllocator());
+    if ok {
+        rpc.log(fmt.sprint("Indexed % in % ms on a thread: % files, % symbols, % references, % diagnostics", p.root, jobWatch.milliseconds() as int, p.index.files.count, p.index.symbols.count, p.index.references.count, p.index.diagnostics.count));
+        publishDiagnostics(p);
     }
 }
 
@@ -378,6 +487,10 @@ projectOf :: (root: string) -> int {
 
 // Indexes the project again if a document changed since it was indexed, and sends its diagnostics
 update :: (i: int) {
+    // A check on a thread is finished first, as a request waits for an index that is up to date anyway
+    if job != null {
+        finishJob();
+    }
     p := projects.indexRef(i);
     if p.generation == generation {
         return;

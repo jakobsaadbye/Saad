@@ -27,7 +27,8 @@ editor ── LSP (JSON-RPC over stdin/stdout) ──> lsp/ (Saad)
 5. **Completion, signature help and semantic tokens** (done): `saad complete` and the index. See below.
 6. **Rename and code actions** (done): rename from the index, and a quick fix for the missing cases of a switch.
 7. **Formatting** (done): `textDocument/formatting` runs `saad fmt --stdout` on the text the editor has, and gives
-   one edit of the lines that change. VS Code formats on save (see `docs/formatting.md`).
+   one edit of the lines that change. VS Code formats on save (see `docs/formatting.md`). The checks after a change
+   or a save run `saad index` on a thread, so formatting on save doesn't wait for them.
 8. Later: go to the definition of a type, more code actions.
 
 ## saad check
