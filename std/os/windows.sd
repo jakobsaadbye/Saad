@@ -30,29 +30,29 @@ FindData :: struct {
 extern "kernel32.dll" {
     CreateThread :: (
         lpThreadAttributes: *void,  // NULL for default
-        dwStackSize:         u64,    // 0 for default
-        lpStartAddress:      (lpParam: *void) -> u32,
-        lpParameter:        *void,
-        dwCreationFlags:     u32,  // 0 to start immediately
-        lpThreadId:         *u32  // NULL if you don't need it
+        dwStackSize:    u64,         // 0 for default
+        lpStartAddress: (lpParam: *void) -> u32,
+        lpParameter: *void,
+        dwCreationFlags: u32,      // 0 to start immediately
+        lpThreadId: *u32          // NULL if you don't need it
     ) -> *void;
 
     CloseHandle :: (hObject: *void) -> bool;
 
-    InitializeCriticalSection   :: (lpCriticalSection: *CriticalSection);
-    EnterCriticalSection        :: (lpCriticalSection: *CriticalSection);
-    LeaveCriticalSection        :: (lpCriticalSection: *CriticalSection);
-    DeleteCriticalSection       :: (lpCriticalSection: *CriticalSection);
-    
+    InitializeCriticalSection :: (lpCriticalSection: *CriticalSection);
+    EnterCriticalSection      :: (lpCriticalSection: *CriticalSection);
+    LeaveCriticalSection      :: (lpCriticalSection: *CriticalSection);
+    DeleteCriticalSection     :: (lpCriticalSection: *CriticalSection);
+
     InitializeConditionVariable :: (conditionVariable: *ConditionVariable);
 
-    SleepConditionVariableCS    :: (
+    SleepConditionVariableCS :: (
         conditionVariable: *ConditionVariable,
         criticalSection:   *CriticalSection,
         dwMilliseconds:    u32
     ) -> bool;
 
-    WakeConditionVariable       :: (conditionVariable: *ConditionVariable);
+    WakeConditionVariable :: (conditionVariable: *ConditionVariable);
 
     //
     // Time
@@ -68,26 +68,26 @@ extern "kernel32.dll" {
     GetStdHandle :: (nStdHandle: u32) -> *void;  // StdInputHandle, StdOutputHandle or StdErrorHandle
 
     ReadFile :: (
-        hFile:                *void,
-        lpBuffer:             *void,
-        nNumberOfBytesToRead:  u32,
-        lpNumberOfBytesRead:  *u32,
-        lpOverlapped:         *void  // NULL
+        hFile:    *void,
+        lpBuffer: *void,
+        nNumberOfBytesToRead: u32,
+        lpNumberOfBytesRead: *u32,
+        lpOverlapped:        *void   // NULL
     ) -> bool;
 
     WriteFile :: (
-        hFile:                  *void,
-        lpBuffer:               *void,
-        nNumberOfBytesToWrite:   u32,
+        hFile:    *void,
+        lpBuffer: *void,
+        nNumberOfBytesToWrite: u32,
         lpNumberOfBytesWritten: *u32,
         lpOverlapped:           *void  // NULL
     ) -> bool;
 
     // How many bytes a pipe has that are not read yet, without waiting for any
     PeekNamedPipe :: (
-        hNamedPipe:             *void,
-        lpBuffer:               *void,  // NULL to only ask how many
-        nBufferSize:             u32,
+        hNamedPipe: *void,
+        lpBuffer:   *void,              // NULL to only ask how many
+        nBufferSize: u32,
         lpBytesRead:            *u32,
         lpTotalBytesAvail:      *u32,
         lpBytesLeftThisMessage: *u32

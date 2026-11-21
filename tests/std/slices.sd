@@ -2,7 +2,6 @@
 
 use fmt;
 
-
 Card :: struct {
     rank: int;
 }

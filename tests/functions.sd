@@ -1,12 +1,12 @@
 use fmt;
 
 Vector2 :: struct {
-	x: float;
+    x: float;
     y: float;
 }
 
 Rectangle :: struct {
-	x:      float;
+    x: float;
     y:      float;
     width:  float;
     height: float;

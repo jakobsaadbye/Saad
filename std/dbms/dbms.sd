@@ -612,7 +612,7 @@ i64Type :: () -> *TypePrimitive {
 @private
 writeBits :: (data: *void, size: int, bits: u64) {
     switch size {
-        case 1 { *(data as *u8)  = bits as u8; }
+        case 1 { *(data as *u8) = bits as u8; }
         case 2 { *(data as *u16) = bits as u16; }
         case 4 { *(data as *u32) = bits as u32; }
         else   { *(data as *u64) = bits; }

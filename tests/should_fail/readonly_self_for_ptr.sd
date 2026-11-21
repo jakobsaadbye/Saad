@@ -4,7 +4,7 @@ Grid :: struct {
     items: [4]int;
 
     clear :: method () {
-        for * item in self.items {
+        for *item in self.items {
             *item = 0;
         }
     }

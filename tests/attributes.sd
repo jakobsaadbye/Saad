@@ -6,7 +6,7 @@ ColumnKind :: enum { text, number }
 Column :: struct {
     name:     string;
     nullable: bool = false;
-    width:    int  = 10;
+    width:    int = 10;
     kind:     ColumnKind = .text;
 }
 

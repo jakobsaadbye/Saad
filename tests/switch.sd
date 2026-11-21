@@ -93,7 +93,7 @@ main :: () {
                 case 1 => "B";
                 else   => "?";
             };
-            else          => "C";
+            else => "C";
         };
         assert(letter == "B");
 
@@ -109,7 +109,7 @@ main :: () {
         // Strings
         result := "";
         switch "beta" {
-            case "alpha"         { result = "a"; }
+            case "alpha" { result = "a"; }
             case "beta"
             case "gamma" { result = "b or g"; }
         }

@@ -232,7 +232,7 @@ columnsOf :: (type: *TypeStruct, generated: [..]string, defaulted: [..]string, k
             column.generated = attribute.generated;
             column.defaulted = attribute.defaulted;
         }
-        if column.name == key           { column.key = true; }
+        if column.name == key { column.key = true; }
         if generated.contains(column.name) { column.generated = true; }
         if defaulted.contains(column.name) { column.defaulted = true; }
         columns.add(column);

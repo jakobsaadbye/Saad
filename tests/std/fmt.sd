@@ -44,7 +44,7 @@ printTest :: () {
     {
         fixed := [0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144];
         a: []int = fixed;
-    
+
         print("%", a);
     }
     print("\n------------ Print dynamic array --------------");
@@ -66,14 +66,14 @@ printTest :: () {
     print("\n------------ Print integer values --------------");
     {
         {
-            a: i8  = -1;
+            a: i8 = -1;
             b: i16 = -2;
             c: i32 = -3;
             d: i64 = -4;
             print("Signed = (% % % %)", a, b, c, d);
         }
         {
-            a: u8  = 1;
+            a: u8 = 1;
             b: u16 = 2;
             c: u32 = 3;
             d: u64 = 4;

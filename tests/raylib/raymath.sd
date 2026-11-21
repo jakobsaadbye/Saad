@@ -54,7 +54,7 @@ main :: () {
     position -= Vector3{0.5, 0, 0};
     position *= 2;
     assert(position == Vector3{0, 2, 3});
-    assert(Vector3{1, 1, 1} * m == Vector3{2, 3, 4});
+    assert(Vector3{1, 1, 1} *m == Vector3{2, 3, 4});
 
     turn := q * q;                                       // Two turns of 90 degrees
     assert(near((turn * Vector3{1, 0, 0}).x, -1));

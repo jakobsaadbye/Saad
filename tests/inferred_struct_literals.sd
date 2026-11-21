@@ -20,7 +20,7 @@ main :: () {
     ada = bo;
     written: struct { name: string; age: int; } = ada;
     assert(nameOf(ada) == "Bo" && written.age == 17);
-    people: [..]struct { name: string; age: int; };
+    people: [..] struct { name: string; age: int; };
     people.add(ada);
     people.add({name: "Cy", age: 50});
     assert(people.count == 2 && people[1].name == "Cy");

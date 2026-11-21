@@ -5,7 +5,7 @@ DogKind :: enum {
 }
 
 Dog :: struct {
-    kind : DogKind;
+    kind: DogKind;
 }
 
 Status :: enum {

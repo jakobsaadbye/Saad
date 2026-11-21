@@ -38,10 +38,10 @@ length :: method (list: *List<int>) -> int {
 main :: () {
     {
         // Instances are sized with their type arguments
-        assert(sizeof(Pair<u8, u8>)    == 2);
-        assert(sizeof(Pair<u8, i64>)   == 16);
-        assert(sizeof(Pair<i32, i32>)  == 8);
-        assert(sizeof(Node<i64>)       == 16);
+        assert(sizeof(Pair<u8, u8>) == 2);
+        assert(sizeof(Pair<u8, i64>) == 16);
+        assert(sizeof(Pair<i32, i32>) == 8);
+        assert(sizeof(Node<i64>) == 16);
         assert(sizeof(Pair<Vector3, bool>) == 16);
     }
     {

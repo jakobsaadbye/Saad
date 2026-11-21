@@ -6,13 +6,13 @@ Vec2 :: struct {
     y: f32;
 }
 
-operator + :: (a: Vec2, b: Vec2) -> Vec2 { return Vec2{a.x + b.x, a.y + b.y}; }
-operator - :: (a: Vec2, b: Vec2) -> Vec2 { return Vec2{a.x - b.x, a.y - b.y}; }
-operator - :: (v: Vec2) -> Vec2          { return Vec2{-v.x, -v.y}; }
-operator * :: (v: Vec2, s: f32) -> Vec2  { return Vec2{v.x * s, v.y * s}; }
-operator * :: (s: f32, v: Vec2) -> Vec2  { return v * s; }
-operator * :: (a: Vec2, b: Vec2) -> f32  { return a.x * b.x + a.y * b.y; }    // The dot product
-operator / :: (v: Vec2, s: f32) -> Vec2  { return Vec2{v.x / s, v.y / s}; }
+operator +:: (a: Vec2, b: Vec2) -> Vec2 { return Vec2{a.x + b.x, a.y + b.y}; }
+operator -:: (a: Vec2, b: Vec2) -> Vec2 { return Vec2{a.x - b.x, a.y - b.y}; }
+operator -:: (v: Vec2) -> Vec2 { return Vec2{-v.x, -v.y}; }
+operator *:: (v: Vec2, s: f32) -> Vec2 { return Vec2{v.x * s, v.y * s}; }
+operator *:: (s: f32, v: Vec2) -> Vec2 { return v * s; }
+operator *:: (a: Vec2, b: Vec2) -> f32 { return a.x * b.x + a.y * b.y; }      // The dot product
+operator / :: (v: Vec2, s: f32) -> Vec2 { return Vec2{v.x / s, v.y / s}; }
 
 // Compared by length
 operator < :: (a: Vec2, b: Vec2) -> bool { return a * a < b * b; }
@@ -25,11 +25,11 @@ operator == :: (a: Vec2, b: Vec2) -> bool {
 
 Money :: newtype i64;
 
-operator * :: (m: Money, percent: f64) -> Money { return ((m as f64) * percent / 100) as Money; }
+operator *:: (m: Money, percent: f64) -> Money { return ((m as f64) * percent / 100) as Money; }
 
 Rank :: enum { low, mid, high }
 
-operator + :: (r: Rank, steps: int) -> Rank {
+operator +:: (r: Rank, steps: int) -> Rank {
     n := r as int + steps;
     if n > 2 { n = 2; }
     return n as Rank;
@@ -112,7 +112,7 @@ main :: () {
     assert(biggest(a, b) == b && biggest(3, 2) == 3);
 
     // Declared after they are used
-    assert((Celsius{20} + Celsius{5}).degrees == 25);
+    assert((Celsius{20} +Celsius{5}).degrees == 25);
     assert(-later(2) == later(-2));
 
     fmt.print("% %\n", c, a + b);
@@ -122,10 +122,10 @@ Celsius :: struct {
     degrees: f64;
 }
 
-operator + :: (a: Celsius, b: Celsius) -> Celsius { return Celsius{a.degrees + b.degrees}; }
+operator +:: (a: Celsius, b: Celsius) -> Celsius { return Celsius{a.degrees + b.degrees}; }
 
 Later :: newtype int;
 
 later :: (n: int) -> Later { return n as Later; }
 
-operator - :: (v: Later) -> Later { return (0 - v as int) as Later; }
+operator -:: (v: Later) -> Later { return (0 - v as int) as Later; }

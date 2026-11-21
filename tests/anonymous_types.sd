@@ -58,7 +58,7 @@ main :: () {
         shape := Shape{.square, {2.0, 3.0}};
         assert(shape.kind == .square && shape.size.h == 3.0);
 
-        points: [..]struct { x: int; y: int; };
+        points: [..] struct { x: int; y: int; };
         points.add({1, 2});
         points.add(makePoint(5, 6));
         assert(points.count == 2 && points[1].y == 6);

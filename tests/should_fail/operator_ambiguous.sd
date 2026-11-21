@@ -5,8 +5,8 @@ Vec :: struct {
     y: f32;
 }
 
-operator * :: (a: Vec, s: f32) -> Vec { return a; }
-operator * :: (a: Vec, s: f64) -> Vec { return a; }
+operator *:: (a: Vec, s: f32) -> Vec { return a; }
+operator *:: (a: Vec, s: f64) -> Vec { return a; }
 
 main :: () {
     a: Vec;

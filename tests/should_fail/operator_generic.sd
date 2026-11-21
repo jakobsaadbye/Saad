@@ -5,6 +5,6 @@ Vec :: struct {
     y: f32;
 }
 
-operator + :: <T>(a: T, b: T) -> T { return a; }
+operator +:: <T>(a: T, b: T) -> T { return a; }
 
 main :: () {}

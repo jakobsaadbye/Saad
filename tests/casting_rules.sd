@@ -1,7 +1,7 @@
 use fmt;
 
-Pi      :: 3.1415929;
-Tau     :: Pi * 2;
+Pi  :: 3.1415929;
+Tau :: Pi * 2;
 PiHalf :: 1.570795;
 
 HoldType :: enum {
@@ -11,7 +11,6 @@ HoldType :: enum {
 }
 
 main :: () {
-
     x := Pi;
 
     // print("--- Integer -> X casts ---");
@@ -46,4 +45,3 @@ main :: () {
     assert(c1 == 0);
     assert(c2 == 1);
 }
-

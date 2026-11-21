@@ -5,7 +5,7 @@ use fmt;
 
 Player :: struct {
     name:   string = "nobody";
-    health: int    = 100;
+    health: int = 100;
     pos:    Point;
 }
 

@@ -56,7 +56,6 @@ styleName :: (name: string, style: NameStyle) -> string {
     return sb.toString();
 }
 
-
 // Adds the name in the style. A new word starts at an uppercase letter after a lowercase letter or digit (fooBar), at the last
 // uppercase letter of a run that is followed by a lowercase one (HTTPServer is HTTP and Server), and after '_' and '-'
 @private

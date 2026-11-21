@@ -10,9 +10,9 @@ import random;
 use fmt;
 
 Recipe :: struct {
-    title:    string;
-    minutes:  int;
-    tags:     [..]string;
+    title:   string;
+    minutes: int;
+    tags:    [..]string;
 }
 
 main :: () {

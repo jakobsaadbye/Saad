@@ -87,7 +87,7 @@ parsed :: (text: string) -> (int, error) {
 }
 
 // An operator of its own. An editor goes from the + of a use to here, and colors it
-operator + :: (a: Circle, b: Circle) -> Circle {
+operator +:: (a: Circle, b: Circle) -> Circle {
     return Circle{a.radius + b.radius};
 }
 

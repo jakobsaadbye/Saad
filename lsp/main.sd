@@ -6,6 +6,7 @@
 //   * the outline of a file (document symbols) and the symbols of the workspace
 //   * completion, signature help and semantic tokens
 //   * rename, and a quick fix for the missing cases of a switch
+//   * formatting with 'saad fmt', e.g when the editor saves a file
 //
 // Build it with 'saad build lsp/main.sd'. Usage: saad-lsp [--compiler path/to/saad]
 
@@ -71,25 +72,26 @@ main :: () {
 
 handle :: (m: rpc.Message) {
     switch m.name {
-        case "initialize"                { initialize(m); }
-        case "initialized"               { }
-        case "shutdown"                  { shuttingDown = true; rpc.respond(m.id, "null"); }
-        case "exit"                      { stop(); }
-        case "textDocument/didOpen"      { didOpen(m.params); }
-        case "textDocument/didChange"    { didChange(m.params); }
-        case "textDocument/didSave"      { didSave(m.params); }
-        case "textDocument/didClose"     { didClose(m.params); }
-        case "textDocument/definition"   { definition(m); }
-        case "textDocument/references"   { references(m); }
-        case "textDocument/hover"        { hover(m); }
+        case "initialize"              { initialize(m); }
+        case "initialized"             { }
+        case "shutdown"                { shuttingDown = true; rpc.respond(m.id, "null"); }
+        case "exit"                    { stop(); }
+        case "textDocument/didOpen"    { didOpen(m.params); }
+        case "textDocument/didChange"  { didChange(m.params); }
+        case "textDocument/didSave"    { didSave(m.params); }
+        case "textDocument/didClose"   { didClose(m.params); }
+        case "textDocument/definition" { definition(m); }
+        case "textDocument/references" { references(m); }
+        case "textDocument/hover"      { hover(m); }
         case "textDocument/documentSymbol" { documentSymbols(m); }
-        case "workspace/symbol"          { workspaceSymbols(m); }
-        case "textDocument/completion"   { completion(m); }
+        case "workspace/symbol"        { workspaceSymbols(m); }
+        case "textDocument/completion" { completion(m); }
         case "textDocument/signatureHelp" { signatureHelp(m); }
         case "textDocument/semanticTokens/full" { semanticTokens(m); }
         case "textDocument/prepareRename" { prepareRename(m); }
-        case "textDocument/rename"       { rename(m); }
-        case "textDocument/codeAction"   { codeActions(m); }
+        case "textDocument/rename"     { rename(m); }
+        case "textDocument/codeAction" { codeActions(m); }
+        case "textDocument/formatting" { formatting(m); }
         else {
             if rpc.isRequest(m) {
                 rpc.fail(m.id, rpc.MethodNotFound, fmt.sprint("% is not supported", m.name));
@@ -117,9 +119,9 @@ initialize :: (m: rpc.Message) {
     }
     rpc.log(fmt.sprint("The workspace is '%'. The compiler is %", workspaceRoot, compiler));
 
-    capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\",\"@\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]},\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":%,\"tokenModifiers\":%},\"full\":true},\"renameProvider\":{\"prepareProvider\":true},\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\"]}}";
+    capabilities := "{\"positionEncoding\":\"utf-16\",\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"definitionProvider\":true,\"referencesProvider\":true,\"hoverProvider\":true,\"documentSymbolProvider\":true,\"workspaceSymbolProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\",\"@\"]},\"signatureHelpProvider\":{\"triggerCharacters\":[\"(\",\",\"],\"retriggerCharacters\":[\",\"]},\"semanticTokensProvider\":{\"legend\":{\"tokenTypes\":%,\"tokenModifiers\":%},\"full\":true},\"renameProvider\":{\"prepareProvider\":true},\"codeActionProvider\":{\"codeActionKinds\":[\"quickfix\"]},\"documentFormattingProvider\":true}";
     capabilities = fmt.sprint(capabilities, json.encode(TokenTypes), json.encode(TokenModifiers));
-    rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.3.0\"}}", capabilities));
+    rpc.respond(m.id, fmt.sprint("{\"capabilities\":%,\"serverInfo\":{\"name\":\"saad-lsp\",\"version\":\"0.4.0\"}}", capabilities));
 }
 
 // The editor asks the server to end after asking it to shut down. Otherwise the server ends with an error
@@ -1116,9 +1118,9 @@ isName :: (text: string) -> bool {
 }
 
 Keywords :: ["if", "else", "for", "while", "in", "switch", "case", "return", "defer", "try", "catch", "throw", "break", "continue", "struct", "union", "interface", "enum", "enumflags", "newtype", "default", "operator",
-             "method", "import", "use", "namespace", "extern", "as", "new", "assert", "typeof", "sizeof", "true", "false",
-             "null", "self", "int", "uint", "float", "bool", "string", "any", "void", "u8", "u16", "u32", "u64", "i8", "i16",
-             "i32", "i64", "f32", "f64"];
+    "method", "import", "use", "namespace", "extern", "as", "new", "assert", "typeof", "sizeof", "true", "false",
+    "null", "self", "int", "uint", "float", "bool", "string", "any", "void", "u8", "u16", "u32", "u64", "i8", "i16",
+    "i32", "i64", "f32", "f64"];
 
 //
 // Code actions: the missing cases of a switch
@@ -1332,7 +1334,7 @@ semanticTokens :: (m: rpc.Message) {
         sb.add("%,%,%,%,%", t.line - lastLine, deltaStart, end - start, t.kind, t.modifiers);
         lastLine  = t.line;
         lastStart = start;
-        written  += 1;
+        written += 1;
     }
     rpc.respond(m.id, fmt.sprint("{\"data\":[%]}", sb.toString()));
 }
@@ -1367,4 +1369,76 @@ sortTokens :: (tokens: []Token) {
         }
         tokens[j + 1] = t;
     }
+}
+
+//
+// Formatting
+//
+
+// Formats a document with 'saad fmt', e.g when the editor saves it. The text the editor has is formatted, also when it
+// isn't saved. The edit replaces only the lines that change, so the cursor and the folds stay where they are
+formatting :: (m: rpc.Message) {
+    path := source.pathOf(m.params.get("textDocument").get("uri").asString());
+    doc := findDocument(source.keyOf(path));
+    if doc == null {
+        rpc.respond(m.id, "[]");
+        return;
+    }
+
+    overlayCount += 1;
+    file := fmt.sprint("%/saad-lsp-format-%-%.sd", overlayFolder, time.now().unix(), overlayCount);
+    if os.writeFile(file, doc.text.text) != null {
+        rpc.respond(m.id, "[]");
+        return;
+    }
+    formatted, code := os.output(fmt.sprint("\"%\" fmt --stdout \"%\"", compiler, file));
+    _ := os.removeFile(file);
+    if code != 0 {
+        // e.g a string that doesn't end. The diagnostics show it
+        rpc.log(fmt.sprint("% isn't formatted, as saad fmt failed", path));
+        rpc.respond(m.id, "[]");
+        return;
+    }
+    rpc.respond(m.id, formattingEdits(doc.text.text, formatted));
+}
+
+// The edit from one text to the other, as JSON: the lines between the lines that are the same at the start and at the end
+formattingEdits :: (before: string, after: string) -> string {
+    if before == after {
+        return "[]";
+    }
+    a := linesOf(before);
+    b := linesOf(after);
+    first := 0;
+    while first < a.count && first < b.count && a[first] == b[first] {
+        first += 1;
+    }
+    same := 0;
+    while same < a.count - first && same < b.count - first && a[a.count - 1 - same] == b[b.count - 1 - same] {
+        same += 1;
+    }
+
+    sb: fmt.StringBuilder;
+    for i in first..b.count - same {
+        sb.addString(b[i]);
+    }
+    text := sb.toString();
+    return fmt.sprint("[{\"range\":{\"start\":{\"line\":%,\"character\":0},\"end\":{\"line\":%,\"character\":0}},\"newText\":%}]",
+        first, a.count - same, json.encode(text));
+}
+
+// The lines of a text, each with its \n, but the last one has none when the text doesn't end with one
+linesOf :: (text: string) -> [..]string {
+    lines: [..]string;
+    start := 0;
+    for ch, i in text {
+        if ch == '\n' {
+            lines.add(text.slice(start as int, (i + 1) as int));
+            start = i + 1;
+        }
+    }
+    if start < text.len {
+        lines.add(text.slice(start as int));
+    }
+    return lines;
 }

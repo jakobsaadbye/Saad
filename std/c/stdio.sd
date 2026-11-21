@@ -11,19 +11,19 @@ extern "C" {
     sprintf :: (buffer: *u8, format: c.string, args: ...any) -> int;   // buffer is bytes to write into
     puts    :: (str: c.string) -> int;
 
-    fopen   :: (path: c.string, mode: c.string) -> *void;
-    fclose  :: (file: *void) -> int;
-    fread   :: (buffer: *void, size: i64, count: i64, file: *void) -> i64;
-    fwrite  :: (buffer: *void, size: i64, count: i64, file: *void) -> i64;
-    fflush  :: (file: *void) -> int;
-    fseek   :: (file: *void, offset: i32, origin: int) -> int;
-    ftell   :: (file: *void) -> i32;
+    fopen  :: (path: c.string, mode: c.string) -> *void;
+    fclose :: (file: *void) -> int;
+    fread  :: (buffer: *void, size: i64, count: i64, file: *void) -> i64;
+    fwrite :: (buffer: *void, size: i64, count: i64, file: *void) -> i64;
+    fflush :: (file: *void) -> int;
+    fseek  :: (file: *void, offset: i32, origin: int) -> int;
+    ftell  :: (file: *void) -> i32;
 
     // Runs a command and gives a FILE to read its output from (mode "rb"), or to write its input to (mode "wb").
     // _pclose waits for it to end and returns its exit code. These are the Windows names of popen and pclose
     _popen  :: (command: c.string, mode: c.string) -> *void;
     _pclose :: (file: *void) -> int;
 
-    remove  :: (path: c.string) -> int;
-    rename  :: (oldPath: c.string, newPath: c.string) -> int;
+    remove :: (path: c.string) -> int;
+    rename :: (oldPath: c.string, newPath: c.string) -> int;
 }

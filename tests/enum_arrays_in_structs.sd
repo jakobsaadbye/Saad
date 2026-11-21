@@ -16,11 +16,11 @@ Grid :: struct {
 }
 
 Player :: struct {
-    id:        int;
-    offer:     PerkOffer;
-    maybe:     ?PerkOffer;
-    grid:      Grid;
-    after:     int;
+    id:    int;
+    offer: PerkOffer;
+    maybe: ?PerkOffer;
+    grid:  Grid;
+    after: int;
 }
 
 Game :: struct {

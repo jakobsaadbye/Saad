@@ -32,6 +32,8 @@ Everything it does:
 * rename (F2): a name where it is declared and everywhere it is used. A name of the standard library is renamed from a
   file of it, where all of its uses are known
 * quick fix: the missing cases of a switch, for "The switch doesn't handle .closed of Status"
+* formatting with `saad fmt` (Shift+Alt+F), and on every save in VS Code, as the extension turns on
+  `editor.formatOnSave` for Saad (`"[saad]": { "editor.formatOnSave": false }` turns it off)
 
 The compiler does the work: the server runs `saad index` and answers from what it writes. See `docs/lsp.md`.
 

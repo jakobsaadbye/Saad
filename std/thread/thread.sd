@@ -70,8 +70,8 @@ import errors;
         pthread_join   :: (thread: u64, result: **void) -> i32;
         pthread_self   :: () -> u64;
 
-        pthread_mutex_lock    :: (mutex: *Mutex) -> i32;
-        pthread_mutex_unlock  :: (mutex: *Mutex) -> i32;
+        pthread_mutex_lock   :: (mutex: *Mutex) -> i32;
+        pthread_mutex_unlock :: (mutex: *Mutex) -> i32;
         pthread_cond_wait      :: (condition: *Condition, mutex: *Mutex) -> i32;
         pthread_cond_signal    :: (condition: *Condition) -> i32;
         pthread_cond_broadcast :: (condition: *Condition) -> i32;
@@ -125,7 +125,6 @@ start :: (function: ()) -> Thread, error {
 }
 
 @private startThread :: (start: *Start) -> Thread, error {
-
     t: Thread;
     #if OS == .windows {
         handle := CreateThread(null, 0, run, start, 0, null);

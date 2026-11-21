@@ -3,4 +3,4 @@ use fmt;
 main :: () {
     print(a);
     a := 5;
-}   
+}

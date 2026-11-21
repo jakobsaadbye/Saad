@@ -5,6 +5,6 @@ Vec :: struct {
     y: f32;
 }
 
-operator + :: method (a: Vec, b: Vec) -> Vec { return a; }
+operator +:: method (a: Vec, b: Vec) -> Vec { return a; }
 
 main :: () {}

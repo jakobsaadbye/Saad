@@ -217,9 +217,9 @@ valueOf :: (a: any) -> Value {
     if a.data == null || a.type == null { return .none; }
     type := a.type;
     switch type.kind {
-        case .bool   { return Value{boolean: *(a.data as *bool)}; }
-        case .int    { return Value{integer: readInteger(a.data, type as *TypePrimitive)}; }
-        case .float  {
+        case .bool  { return Value{boolean: *(a.data as *bool)}; }
+        case .int   { return Value{integer: readInteger(a.data, type as *TypePrimitive)}; }
+        case .float {
             if type.size == 4 { return Value{number: (*(a.data as *f32)) as f64}; }
             return Value{number: *(a.data as *f64)};
         }
@@ -265,15 +265,15 @@ valueOf :: (a: any) -> Value {
 readInteger :: (data: *void, type: *TypePrimitive) -> i64 {
     return switch type.kind {
         case .u8
-        case .char  => (*(data as *u8)) as i64;
-        case .u16   => (*(data as *u16)) as i64;
+        case .char => (*(data as *u8)) as i64;
+        case .u16  => (*(data as *u16)) as i64;
         case .u32
-        case .uint  => (*(data as *u32)) as i64;
-        case .u64   => (*(data as *u64)) as i64;
-        case .i8    => (*(data as *i8)) as i64;
-        case .i16   => (*(data as *i16)) as i64;
-        case .i64   => *(data as *i64);
-        else        => (*(data as *i32)) as i64;
+        case .uint => (*(data as *u32)) as i64;
+        case .u64  => (*(data as *u64)) as i64;
+        case .i8   => (*(data as *i8)) as i64;
+        case .i16  => (*(data as *i16)) as i64;
+        case .i64  => *(data as *i64);
+        else       => (*(data as *i32)) as i64;
     };
 }
 
@@ -427,9 +427,9 @@ escape :: (text: string) -> string {
 // The filters and functions that are built in
 //
 
-@private filterSafe   :: (call: *Call, value: Value) -> Value { return Value{html: textOf(value)}; }
-@private filterUpper  :: (call: *Call, value: Value) -> Value { return Value{text: textOf(value).toUpper()}; }
-@private filterLower  :: (call: *Call, value: Value) -> Value { return Value{text: textOf(value).toLower()}; }
+@private filterSafe  :: (call: *Call, value: Value) -> Value { return Value{html: textOf(value)}; }
+@private filterUpper :: (call: *Call, value: Value) -> Value { return Value{text: textOf(value).toUpper()}; }
+@private filterLower :: (call: *Call, value: Value) -> Value { return Value{text: textOf(value).toLower()}; }
 
 @private
 filterEscape :: (call: *Call, value: Value) -> Value {
@@ -611,8 +611,8 @@ TemplateParser :: struct {
     trimNext: bool;            // The tag before ended with -%}
 
     // The expression of a tag
-    tokens:   [..]TemplateToken;
-    next:     int;
+    tokens: [..]TemplateToken;
+    next:   int;
 }
 
 @private

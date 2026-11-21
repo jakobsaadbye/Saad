@@ -4,13 +4,13 @@
 use fmt;
 
 addI32 :: (a: i32, b: i32) -> string { m := ""; try { c := a + b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
-subU8  :: (a: u8, b: u8) -> string   { m := ""; try { c := a - b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
+subU8  :: (a: u8, b: u8) -> string { m := ""; try { c := a - b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
 mulI64 :: (a: i64, b: i64) -> string { m := ""; try { c := a * b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
 mulU64 :: (a: u64, b: u64) -> string { m := ""; try { c := a * b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
 addI64 :: (a: i64, b: i64) -> string { m := ""; try { c := a + b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
-negI32 :: (a: i32) -> string         { m := ""; try { c := -a; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
+negI32 :: (a: i32) -> string { m := ""; try { c := -a; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
 divI32 :: (a: i32, b: i32) -> string { m := ""; try { c := a / b; if c == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
-addTo  :: (a: i32) -> string         { m := ""; try { x := a; x += 1; if x == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
+addTo  :: (a: i32) -> string { m := ""; try { x := a; x += 1; if x == 0 { m = ""; } } catch (e) { m = e.message; } return m; }
 
 @noOverflowCheck
 fnv :: (text: string) -> u64 {

@@ -1,57 +1,57 @@
 use fmt;
 
 Vector2 :: struct {
-	x: float;
-	y: float;
+    x: float;
+    y: float;
 }
 
 Vector3 :: struct {
-	x: float;
-	y: float;
-	z: float;
+    x: float;
+    y: float;
+    z: float;
 }
 
 Vector4 :: struct {
-	x: float;
-	y: float;
-	z: float;
-	w: float;
+    x: float;
+    y: float;
+    z: float;
+    w: float;
 }
 
 EntityKind :: enum {
-	monster,
-	human,
+    monster,
+    human,
 }
 
 Entity :: struct {
-	kind:		 EntityKind;
-	position:    Vector3;
-	orientation: Vector3;
-	color: 		 Vector3;
+    kind: EntityKind;
+    position:    Vector3;
+    orientation: Vector3;
+    color: Vector3;
 }
 
 largeReturn :: () -> Vector4 {
-	r := Vector4{1, 4, 9, 11};
-	return r;
+    r := Vector4{1, 4, 9, 11};
+    return r;
 }
 
 smallReturn :: () -> Vector2 {
-	r := Vector2{420, 69};
-	return r;
+    r := Vector2{420, 69};
+    return r;
 }
 
 argsAndLargeReturnValue :: (x: float, y: float, z: float) -> Vector3 {
-	r := Vector3{x, y, z};
-	return r;
+    r := Vector3{x, y, z};
+    return r;
 }
 
 main :: () {
-	v1 := largeReturn();
-	print("%", v1);
+    v1 := largeReturn();
+    print("%", v1);
 
-	v2 := smallReturn();
-	print("%", v2);
+    v2 := smallReturn();
+    print("%", v2);
 
-	v3 := argsAndLargeReturnValue(27, 11, 98);
-	print("%", v3);
+    v3 := argsAndLargeReturnValue(27, 11, 98);
+    print("%", v3);
 }

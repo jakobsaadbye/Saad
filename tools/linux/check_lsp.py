@@ -456,8 +456,29 @@ def main():
     check("*T" in value, f"hover of a variable of type *T in KeyedTable.get: {value!r}")
     client.notify("textDocument/didClose", {"textDocument": {"uri": table_uri}})
 
+    print("formatting")
+    check(caps.get("documentFormattingProvider") is True, "capability documentFormattingProvider")
+    fmt_path = os.path.join(tempfile.mkdtemp(), "messy.sd")
+    messy = "main :: () {\n    x:=1;\n    y := 2;\n  if x>0 { y = 3; }\n}\n"
+    open(fmt_path, "w").write(messy)
+    fmt_uri = uri_of(fmt_path)
+    client.notify("textDocument/didOpen", {"textDocument": {"uri": fmt_uri, "languageId": "saad", "version": 1, "text": messy}})
+    m = client.request("textDocument/formatting", {"textDocument": {"uri": fmt_uri}, "options": {"tabSize": 4, "insertSpaces": True}})
+    edits = m.get("result") or []
+    lines = messy.split("\n")
+    formatted = messy
+    if len(edits) == 1:
+        start, end = edits[0]["range"]["start"]["line"], edits[0]["range"]["end"]["line"]
+        formatted = "".join(l + "\n" for l in lines[:start]) + edits[0]["newText"] + "\n".join(lines[end:])
+    check(formatted == "main :: () {\n    x := 1;\n    y := 2;\n    if x > 0 { y = 3; }\n}\n", f"the formatted text: {formatted!r}")
+    check(len(edits) == 1 and edits[0]["range"]["start"]["line"] == 1 and edits[0]["range"]["end"]["line"] == 4, f"only the lines that change are replaced: {edits}")
+    client.notify("textDocument/didChange", {"textDocument": {"uri": fmt_uri, "version": 2}, "contentChanges": [{"text": formatted}]})
+    m = client.request("textDocument/formatting", {"textDocument": {"uri": fmt_uri}, "options": {}})
+    check(m.get("result") == [], f"a formatted text needs no edits: {m}")
+    client.notify("textDocument/didClose", {"textDocument": {"uri": fmt_uri}})
+
     print("unknown request")
-    m = client.request("textDocument/formatting", {"textDocument": doc, "options": {}})
+    m = client.request("textDocument/foldingRange", {"textDocument": doc})
     check(m.get("error", {}).get("code") == -32601, f"an unknown request is an error: {m}")
 
     print("shutdown")

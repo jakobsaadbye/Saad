@@ -121,6 +121,7 @@ saad run main.sd          # compile and run, in the current folder
 saad run tool.sd -- a b   # arguments after -- are for the program (os.args())
 saad build main.sd        # compile to build\out.exe
 saad check main.sd        # only check for errors
+saad fmt .                # format the .sd files of this folder, see docs/formatting.md
 saad build help           # the options of build, e.g --debug and --llvm
 ```
 

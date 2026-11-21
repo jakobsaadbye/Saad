@@ -3,7 +3,7 @@
 Vec :: struct {
     x: f32;
 
-    operator + :: (a: Vec, b: Vec) -> Vec { return a; }
+    operator +:: (a: Vec, b: Vec) -> Vec { return a; }
 }
 
 main :: () {}

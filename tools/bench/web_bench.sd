@@ -32,12 +32,12 @@ hello :: (w: *http.ResponseWriter, r: *http.Request) {
 }
 
 Client :: struct {
-    address:  string;
-    request:  string;
-    until:    time.Time;
-    done:     int;
-    slowest:  i64;       // Nanoseconds
-    failed:   bool;
+    address: string;
+    request: string;
+    until:   time.Time;
+    done:    int;
+    slowest: i64;        // Nanoseconds
+    failed:  bool;
 }
 
 // Sends the request over one connection until the time is up

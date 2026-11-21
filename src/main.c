@@ -8,6 +8,7 @@ typedef enum CommandKind {
     COMMAND_CHECK,
     COMMAND_INDEX,
     COMMAND_COMPLETE,
+    COMMAND_FORMAT,
 } CommandKind;
 
 typedef struct CommandOption {
@@ -42,6 +43,9 @@ typedef struct Command {
 // Add new commands here
 static Command commands[] = {
     { "build", COMMAND_BUILD, "Compile the program to build/out.exe", false, { BUILD_OPTIONS } },
+    { "fmt",   COMMAND_FORMAT, "Format the .sd files of folders (. for this one) or files", false, {
+        { "--check",     "Only list the files that aren't formatted, and fail if there are any" },
+        { "--stdout",    "Write the formatted file instead of changing it" } } },
     { "run",   COMMAND_RUN,   "Compile the program and run it", false, {
         BUILD_OPTIONS,
         { "-- <args>",   "Arguments for the program, e.g -- a.txt" } } },
@@ -199,6 +203,14 @@ int main(int argc, char const *argv[]) {
         return 1;
     }
 
+    if (command->kind == COMMAND_FORMAT) {
+        if (argc >= 3 && is_help(argv[2])) {
+            print_command_usage(command);
+            return 0;
+        }
+        return format_command(argc, argv);
+    }
+
     if (argc < 3) {
         printf("Error: Missing the file of the program\n\n");
         print_command_usage(command);
@@ -229,6 +241,7 @@ int main(int argc, char const *argv[]) {
         case COMMAND_CHECK: config.run_program = false; config.check_only = true; break;
         case COMMAND_INDEX: config.run_program = false; config.check_only = true; config.json = true; break;
         case COMMAND_COMPLETE: config.run_program = false; config.check_only = true; config.json = true; break;
+        case COMMAND_FORMAT: break;
     }
 
     char *main_file_path_abs = get_absolute_path(main_file_path);

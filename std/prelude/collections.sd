@@ -374,14 +374,14 @@ hashCombine :: (a: u64, b: u64) -> u64 {
     return hashU64(a ^ (b + 2654435769 + (a << 6) + (a >> 2)));
 }
 
-hash :: method (x: u8)   -> u64 { return hashU64(x as u64); }
-hash :: method (x: u16)  -> u64 { return hashU64(x as u64); }
-hash :: method (x: u32)  -> u64 { return hashU64(x as u64); }
-hash :: method (x: u64)  -> u64 { return hashU64(x); }
-hash :: method (x: i8)   -> u64 { return hashU64(x as u64); }
-hash :: method (x: i16)  -> u64 { return hashU64(x as u64); }
-hash :: method (x: i32)  -> u64 { return hashU64(x as u64); }
-hash :: method (x: i64)  -> u64 { return hashU64(x as u64); }
+hash :: method (x: u8) -> u64 { return hashU64(x as u64); }
+hash :: method (x: u16) -> u64 { return hashU64(x as u64); }
+hash :: method (x: u32) -> u64 { return hashU64(x as u64); }
+hash :: method (x: u64) -> u64 { return hashU64(x); }
+hash :: method (x: i8) -> u64 { return hashU64(x as u64); }
+hash :: method (x: i16) -> u64 { return hashU64(x as u64); }
+hash :: method (x: i32) -> u64 { return hashU64(x as u64); }
+hash :: method (x: i64) -> u64 { return hashU64(x as u64); }
 
 hash :: method (x: bool) -> u64 {
     if x { return hashU64(1); }

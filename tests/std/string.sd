@@ -19,7 +19,7 @@ main :: () {
     if !skip {
         // Copying a string
         text := "The quick brown fox jumps over the lazy dog";
-        
+
         copy := text.copy();
 
         text[4] = 115; // 's'

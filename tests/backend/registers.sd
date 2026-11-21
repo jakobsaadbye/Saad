@@ -24,9 +24,9 @@ swapArgs :: (a: int, b: int, c: int, d: int) -> int {
 
 main :: () {
     // More live values than allocatable registers, all needed after a call
-    a := identity(1);  b := identity(2);  c := identity(3);  d := identity(4);
-    e := identity(5);  f := identity(6);  g := identity(7);  h := identity(8);
-    i := identity(9);  j := identity(10); k := identity(11); l := identity(12);
+    a := identity(1); b := identity(2); c := identity(3); d := identity(4);
+    e := identity(5); f := identity(6); g := identity(7); h := identity(8);
+    i := identity(9); j := identity(10); k := identity(11); l := identity(12);
     m := identity(13); n := identity(14); o := identity(15); p := identity(16);
     total := a + b + c + d + e + f + g + h + i + j + k + l + m + n + o + p;
     assert(total == 136);
