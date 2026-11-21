@@ -2,14 +2,14 @@ use fmt;
 use math;
 use raylib;
 
-BallSize           :: 20;
-BrickWidth         :: 100;
-BrickHeight        :: 30;
-BrickPadding       :: 12;
-BrickRows          :: 8;
-BrickCols          :: 8;
+BallSize     :: 20;
+BrickWidth   :: 100;
+BrickHeight  :: 30;
+BrickPadding :: 12;
+BrickRows    :: 8;
+BrickCols    :: 8;
 PickupSpawnChance :: 25; // in percentage
-PickupSize         :: 26;
+PickupSize   :: 26;
 
 InitialBarWidth     :: 100;
 InitialBallVelocity :: 400.0;
@@ -17,7 +17,6 @@ InitialBallVelocity :: 400.0;
 TopMargin    :: 80;
 WindowWidth  :: 1200;
 WindowHeight :: 800;
-
 
 Brick :: struct {
     x:     int;
@@ -91,14 +90,14 @@ ParticleEmitter :: struct {
 }
 
 GameState :: struct {
-    player:    *Player;
-    ball:      *Ball;
-    bar:       *Bar;
+    player: *Player;
+    ball:   *Ball;
+    bar:    *Bar;
     sounds:   []Sound;
     textures: []Texture;
     particleEmitters: []ParticleEmitter;
     liveEmitterCount: int;
-    pickupSpawner:   *PickupSpawner;
+    pickupSpawner: *PickupSpawner;
 }
 
 getRect :: method (brick: Brick) -> Rectangle {
@@ -132,7 +131,7 @@ beginEmit :: method (pe: *ParticleEmitter) {
     for *p in pe.particles {
         p.pos.x = GetRandomValue((pe.pos.x - pe.radius) as int, (pe.pos.x + pe.radius) as int) as float;
         p.pos.y = GetRandomValue((pe.pos.y - pe.radius) as int, (pe.pos.y + pe.radius) as int) as float;
-        
+
         spread := 200.0;
         velX: int = GetRandomValue((pe.vel.x - spread) as int, (pe.vel.x + spread) as int);
         velY: int = GetRandomValue((pe.vel.y - spread) as int, (pe.vel.y + spread) as int);
@@ -163,7 +162,7 @@ update :: method (pe: *ParticleEmitter) {
             p.lifetime = 0;
         }
 
-        p.color.a = (255.0 *  p.lifetime / pe.particleLifetime) as u8;
+        p.color.a = (255.0 * p.lifetime / pe.particleLifetime) as u8;
     }
 }
 
@@ -193,8 +192,7 @@ main :: () {
     heartTexture.width  = 24;
     heartTexture.height = 24;
 
-
-    pickupTextures : [PickupType.count]Texture = [
+    pickupTextures: [PickupType.count]Texture = [
         LoadTexture("data/textures/pickups/ball_speed_up.png"),
         LoadTexture("data/textures/pickups/ball_slow_down.png"),
         LoadTexture("data/textures/pickups/bar_widen.png"),
@@ -208,7 +206,6 @@ main :: () {
         texture.width  = PickupSize;
         texture.height = PickupSize;
     }
-
 
     //
     // Sounds
@@ -270,28 +267,27 @@ main :: () {
 
     deadZone := Rectangle{0, WindowHeight - (WindowHeight - (bar.y + bar.height)), WindowWidth, (WindowHeight - (bar.y + bar.height))};
 
-
     brickColors: [BrickRows]Color = [
-        {255,  55, 140, 255}, // vibrant pink/magenta
-        {255,  45,  45, 255}, // bright red
-        {255, 120,  20, 255}, // neon orange
-        {255, 210,   0, 255}, // vivid yellow-gold
-        { 40, 200,  40, 255}, // electric green
-        { 45,  70, 255, 255}, // strong blue
-        {160,  60, 255, 255}, // bright purple
-        {  0, 255, 220, 255 }, // bright aqua / teal-cyan
+        {255, 55, 140, 255},  // vibrant pink/magenta
+        {255, 45, 45, 255},   // bright red
+        {255, 120, 20, 255},  // neon orange
+        {255, 210, 0, 255},   // vivid yellow-gold
+        { 40, 200, 40, 255},  // electric green
+        { 45, 70, 255, 255},  // strong blue
+        {160, 60, 255, 255},  // bright purple
+        { 0, 255, 220, 255 },  // bright aqua / teal-cyan
     ];
 
     // Initiate the bricks
-    bricks: [BrickRows * BrickCols] Brick;
+    bricks: [BrickRows * BrickCols]Brick;
 
     brick_row_width := (BrickWidth + BrickPadding) * BrickCols - 1;
 
     for row in 0..BrickRows {
         for col in 0..BrickCols {
             index := row * BrickCols + col;
-            
-            x := (BrickWidth + BrickPadding)  * col + (WindowWidth / 2) - (brick_row_width / 2);
+
+            x := (BrickWidth + BrickPadding) * col + (WindowWidth / 2) - (brick_row_width / 2);
             y := (BrickHeight + BrickPadding) * row + TopMargin;
 
             color := brickColors[row];
@@ -315,7 +311,6 @@ main :: () {
     // Main game-loop
     //
     while !WindowShouldClose() {
-
         dt := GetFrameTime();
 
         //
@@ -327,14 +322,14 @@ main :: () {
         distanceForMaxVelocity := 100.0;
         maxVelocity            := 1000.0;
 
-        distanceBarMouse := mousePos.x - (bar.x + bar.width*0.5);
+        distanceBarMouse := mousePos.x - (bar.x + bar.width * 0.5);
 
         if distanceBarMouse >= distanceForMaxVelocity {
             bar.velX = maxVelocity;
-        } 
+        }
         else if distanceBarMouse <= -distanceForMaxVelocity {
             bar.velX = -maxVelocity;
-        } 
+        }
         else {
             // Interpolate the velocity
             direction := 1;
@@ -368,10 +363,10 @@ main :: () {
         //
 
         // Simulate the next ball position
-        nextBall  := ball;
+        nextBall := ball;
         nextBall.x = ball.x + ball.velX * dt;
         nextBall.y = ball.y + ball.velY * dt;
-        
+
         // Collisions ball and walls
         if nextBall.x < 0 || nextBall.x + nextBall.size > WindowWidth {
             ball.velX = -ball.velX;
@@ -388,7 +383,6 @@ main :: () {
         barRect      := bar.getRect();
 
         if !player.isHoldingBall && CheckCollisionRecs(nextBallRect, barRect) {
-
             // The outbound angle of the ball when hitting the bar, follows that of a half circle.
             // If the ball hits the far left of the bar, the out angle is 20 degree
             // If the ball hits the far right of the bar, the out angle is 160 degree
@@ -409,7 +403,7 @@ main :: () {
                 y: -sin(theta as f64) as float,
             };
 
-            speed := sqrt((ball.velX*ball.velX + ball.velY*ball.velY) as f64) as f32;
+            speed := sqrt((ball.velX * ball.velX + ball.velY * ball.velY) as f64) as f32;
 
             ball.velX = directionVector.x * speed;
             ball.velY = directionVector.y * speed;
@@ -450,7 +444,6 @@ main :: () {
                 }
             }
         }
-        
 
         // Collision ball and dead zone
         ballRect := ball.getRect();
@@ -511,8 +504,8 @@ main :: () {
         for i in 0..pickups.count {
             pickup := &pickups[i];
 
-            if !(pickup.isShown) { 
-                continue; 
+            if !(pickup.isShown) {
+                continue;
             }
 
             texture := pickupTextures[pickup.type];
@@ -520,7 +513,7 @@ main :: () {
             DrawRectangle(pickup.x as int, pickup.y as int, texture.width, texture.height, Color{50, 50, 50, 255});
             DrawTexture(texture, pickup.x as int, pickup.y as int, Color{255, 255, 255, 255});
         }
-        
+
         // Draw bricks
         for b in bricks {
             if b.dead {
@@ -528,7 +521,7 @@ main :: () {
             }
 
             BorderThickness :: 3;
-            borderColor := b.color; 
+            borderColor := b.color;
             borderColor.a = 170;
 
             borderRect := Rectangle{b.x as float, b.y as float, BrickWidth, BrickHeight};
@@ -545,7 +538,7 @@ main :: () {
             }
             DrawRectangle(ball.x as int, ball.y as int, ball.size as int, ball.size as int, ballColor);
         }
-        
+
         // Draw the bar
         DrawRectangle(bar.x as int, bar.y as int, bar.width as int, bar.height as int, ColorWhite);
 
@@ -566,7 +559,7 @@ main :: () {
         cText.free();
         scoreText.free();
 
-        // Draw the dead zone        
+        // Draw the dead zone
         // DrawRectangleRec(deadZone, {255, 0, 0, 30});
 
         EndDrawing();
@@ -592,13 +585,12 @@ spawnPickup :: (ps: *PickupSpawner, pos: Vector2) {
         velY: GetRandomValue(80, 120) as float,
         isShown: true,
     };
-    
+
     ps.pickups[ps.freeIndex] = pickup;
     ps.freeIndex += 1;
 }
 
 handleBrickCollision :: (game: *GameState, brick: *Brick) {
-
     doBounce := true;
     if game.player.hasFireballPowerup {
         doBounce = false;
@@ -612,7 +604,7 @@ handleBrickCollision :: (game: *GameState, brick: *Brick) {
 
     // Play a particle effect
     pe := ParticleEmitter{
-        pos: {(brick.x + BrickWidth*0.5) as float, (brick.y + BrickHeight*0.5) as float},
+        pos: {(brick.x + BrickWidth * 0.5) as float, (brick.y + BrickHeight * 0.5) as float},
         vel: {game.ball.velX * 0.3, game.ball.velY * 0.3},
         radius: 16,
         color: brick.color,
@@ -689,7 +681,6 @@ updatePlayerEffects :: (player: *Player) {
     dtMilliseconds := GetFrameTime() * 1000;
 
     if player.hasFireballPowerup {
-        
         player.fireballPowerupDuration -= dtMilliseconds as int;
 
         if player.fireballPowerupDuration <= 0 {
@@ -704,23 +695,23 @@ bounceBall :: (ball: *Ball, b: Rectangle) {
 
     // Figure out how much we overlap with the rectangle
     if ball.velX > 0 {
-        overlap.x = a.x + a.width - b.x; 
+        overlap.x = a.x + a.width - b.x;
     } else {
-        overlap.x = b.x + b.width - a.x; 
+        overlap.x = b.x + b.width - a.x;
     }
 
     if ball.velY > 0 {
-        overlap.y = a.y + a.height - b.y; 
+        overlap.y = a.y + a.height - b.y;
     } else {
-        overlap.y = b.y + b.height - a.y; 
+        overlap.y = b.y + b.height - a.y;
     }
 
     // Adjust direction and position of the ball to make it unstuck
     if overlap.x < overlap.y {
         ball.velX = -ball.velX;
-        ball.x    += overlap.x;
+        ball.x += overlap.x;
     } else {
         ball.velY = -ball.velY;
-        ball.y    += overlap.y;
+        ball.y += overlap.y;
     }
 }

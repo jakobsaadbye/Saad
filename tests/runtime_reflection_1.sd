@@ -31,7 +31,7 @@ main :: () {
     if true {
         x: any = 5 as u8;
         assert(x.type.kind == .int);
-        
+
         type := x.type as *TypePrimitive;
         print("TypePrimitive = %", *type);
     }

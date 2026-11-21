@@ -245,7 +245,7 @@ Server :: struct {
     log:          bool = true;   // Writes the errors of handlers to stderr
     reusePort:    bool;          // Other processes may listen at the port too, and the system shares the connections (Linux)
     maxConnections: int;         // Of each worker. When it has as many, it accepts no more until one closes. 0 is what the
-                                 // open files of the process allow
+    // open files of the process allow
 
     listener: *net.Listener;
     mutex:    thread.Mutex;
@@ -571,9 +571,9 @@ serveOne :: method (loop: *Loop, c: *Connection, working: *bytes.Buffer) {
     // What the handler allocates is in the arena of the request, unless it says otherwise, e.g mem.heap()
     previous := mem.setAllocator(r.allocator);
     try {
-        if server.handler != null      { server.handler(w, r); }
-        else if server.router != null  { server.router.serve(w, r); }
-        else                           { w.error(404, "Not Found"); }
+        if server.handler != null     { server.handler(w, r); }
+        else if server.router != null { server.router.serve(w, r); }
+        else                          { w.error(404, "Not Found"); }
     } catch (err) {
         if server.log {
             io.writeError(fmt.sprint("http: % % failed: %\n", r.method, r.target, err.message));

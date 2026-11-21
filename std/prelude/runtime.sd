@@ -6,7 +6,7 @@
 
 String :: struct {
     data: *char;
-    len:   i64;
+    len: i64;
 }
 
 // The compiler generates one constant descriptor for every type that is converted to an 'any'. The layouts of these structs are read by
@@ -67,21 +67,21 @@ TypeFlags :: enumflags {
     isFlags,     // An enum flags, a TypeEnum whose values are combined, e.g 3 is the first two values
 }
 
-TypePrimitive :: struct  {
+TypePrimitive :: struct {
     head: Type;
     kind: TypePrimitiveKind;
 };
 
 TypePointer :: struct {
-    head:       Type;
+    head: Type;
     pointerTo: *Type;
 }
 
 TypeArray :: struct {
-    head:      Type;
-    kind:      TypeArrayKind;
+    head:  Type;
+    kind:  TypeArrayKind;
     elemType: *Type;
-    count:     i64;   // The number of elements of a fixed array. A slice has its count in its value
+    count: i64;       // The number of elements of a fixed array. A slice has its count in its value
 }
 
 EnumValue :: struct {
@@ -90,9 +90,9 @@ EnumValue :: struct {
 }
 
 TypeEnum :: struct {
-    head:         Type;
+    head:   Type;
     backingType: *Type;
-    values:       []EnumValue;
+    values: []EnumValue;
 };
 
 StructMember :: struct {
@@ -144,11 +144,11 @@ anyAt :: (data: *void, type: *Type) -> any {
 //////////////////////////////////
 
 extern "C" {
-    runtime_compare_strings  :: (str1: *string, str2: *string) -> int;
+    runtime_compare_strings :: (str1: *string, str2: *string) -> int;
 }
 
 isPrimitive :: method (type: *Type) -> bool {
-    if type.kind == .bool  { return true; } 
+    if type.kind == .bool  { return true; }
     if type.kind == .int   { return true; }
     if type.kind == .float { return true; }
     return false;

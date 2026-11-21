@@ -184,8 +184,8 @@ makeAny :: (data: *void, type: *Type) -> any {
             value := *(data as *u64);
             return value as i64, value <= 9223372036854775807;
         }
-        case .i8   { return (*(data as *i8)) as i64, true; }
-        case .i16  { return (*(data as *i16)) as i64, true; }
+        case .i8  { return (*(data as *i8)) as i64, true; }
+        case .i16 { return (*(data as *i16)) as i64, true; }
         else {}
     }
     if type.head.size == 4 { return (*(data as *i32)) as i64, true; }

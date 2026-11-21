@@ -5,7 +5,7 @@ Vec :: struct {
     y: f32;
 }
 
-operator + :: (a: Vec, b: Vec) -> Vec { return a; }
-operator + :: (x: Vec, y: Vec) -> Vec { return x; }
+operator +:: (a: Vec, b: Vec) -> Vec { return a; }
+operator +:: (x: Vec, y: Vec) -> Vec { return x; }
 
 main :: () {}

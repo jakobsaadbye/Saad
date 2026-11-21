@@ -45,8 +45,8 @@ Pool :: struct {
             chunk.data     = resizeMemory(self.inner, null, 0, chunk.capacity) as *u8;
             if chunk.data == null { panic("Out of memory"); }
             c.memset(chunk.data, 0, chunk.capacity);
-            chunk.prev     = self.chunks;
-            self.chunks    = chunk;
+            chunk.prev  = self.chunks;
+            self.chunks = chunk;
         }
         block := &self.chunks.data[self.chunks.cursor];
         self.chunks.cursor += size as int;

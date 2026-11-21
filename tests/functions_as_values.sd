@@ -40,9 +40,7 @@ main :: () {
                 print("Click!");
             }
         };
-    
+
         btn.onClick();
     }
-
-
 }

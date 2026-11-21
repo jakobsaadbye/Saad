@@ -13,4 +13,4 @@ Vec2 :: struct {
 twiceInternal :: (x: int) -> int { return x * 2; }
 
 @private
-operator + :: (a: Vec2, b: Vec2) -> Vec2 { return Vec2{a.x + b.x, a.y + b.y}; }
+operator +:: (a: Vec2, b: Vec2) -> Vec2 { return Vec2{a.x + b.x, a.y + b.y}; }

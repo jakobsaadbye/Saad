@@ -409,7 +409,7 @@ parseF64 :: (text: string) -> f64 {
 
 @private
 hexDigit :: (ch: u8) -> int {
-    if ch >= '0' && ch <= '9'     { return (ch - '0') as int; }
+    if ch >= '0' && ch <= '9' { return (ch - '0') as int; }
     if ch >= 'a' && ch <= 'f' { return (ch - 'a') as int + 10; }
     if ch >= 'A' && ch <= 'F' { return (ch - 'A') as int + 10; }
     return -1;
@@ -495,7 +495,7 @@ parseString :: method (p: *Parser) -> string, bool {
         switch escape {
             case '"'
             case '\\'
-            case '/'  { sb.addChar(escape); }
+            case '/' { sb.addChar(escape); }
             case 'b' { sb.addChar('\x08'); }
             case 'f' { sb.addChar('\x0c'); }
             case 'n' { sb.addChar('\n'); }

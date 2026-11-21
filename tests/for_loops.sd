@@ -1,10 +1,9 @@
 use fmt;
 
 Node :: struct {
-    next : *Node;
-    data : int;
+    next: *Node;
+    data: int;
 }
-
 
 main :: () {
     // Continue in double for-loop
@@ -16,16 +15,16 @@ main :: () {
                 }
                 print("(%, %)", i, j);
             }
-    
+
             print("");
         }
     }
 
     // Break out of loop
     {
-        n0 : Node;
-        n1 : Node;
-        n2 : Node;
+        n0: Node;
+        n1: Node;
+        n2: Node;
 
         n0.next = &n1;
         n1.next = &n2;

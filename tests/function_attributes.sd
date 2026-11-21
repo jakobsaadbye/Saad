@@ -5,7 +5,7 @@ import fmt;
 @attribute
 Route :: struct {
     verb: string = "GET";
-    path:   string;
+    path: string;
 }
 
 @attribute

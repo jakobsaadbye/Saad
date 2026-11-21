@@ -6,10 +6,10 @@ Options :: enumflags { verbose, color, quiet }
 
 // Explicit values are kept, and the next value is the next bit after them
 Access :: enumflags {
-    none  = 0,
+    none = 0,
     read,
     write,
-    all   = 3,
+    all = 3,
     admin,
 }
 

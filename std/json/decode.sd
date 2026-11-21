@@ -310,7 +310,7 @@ assignUnion :: (v: Value, data: *void, type: *TypeStruct, path: string, options:
 // Sets the data, count and capacity of a List<T>
 @private
 setList :: (data: *void, type: *TypeStruct, elements: *u8, count: i64) {
-    *(findMember(type, "data").valueIn(data) as **u8)    = elements;
+    *(findMember(type, "data").valueIn(data) as **u8) = elements;
     *(findMember(type, "count").valueIn(data) as *i64)    = count;
     *(findMember(type, "capacity").valueIn(data) as *i64) = count;
 }
@@ -434,7 +434,7 @@ assignEnum :: (v: Value, data: *void, type: *TypeEnum, path: string, options: *O
 @private
 writeBits :: (data: *void, size: int, bits: u64) {
     switch size {
-        case 1 { *(data as *u8)  = bits as u8; }
+        case 1 { *(data as *u8) = bits as u8; }
         case 2 { *(data as *u16) = bits as u16; }
         case 4 { *(data as *u32) = bits as u32; }
         else   { *(data as *u64) = bits; }

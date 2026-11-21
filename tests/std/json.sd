@@ -31,15 +31,15 @@ Person :: struct {
 HttpStatus :: enum { ok, notFound, serverError }
 
 Response :: struct {
-    statusCode:  HttpStatus;
-    userID:      i64;
-    HTTPServer:  string;
-    plain_name:  bool;
+    statusCode: HttpStatus;
+    userID:     i64;
+    HTTPServer: string;
+    plain_name: bool;
 
     @json.Field(name: "Exact")
-    renamed:     int;
+    renamed: int;
 
-    maybe:       string;
+    maybe: string;
 }
 
 Shape :: union {

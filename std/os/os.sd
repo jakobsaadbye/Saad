@@ -113,7 +113,6 @@ fileError :: (what: string, path: string) -> error {
     return errors.make(message.toString(), kind: IOError);
 }
 
-
 // Everything that is left to read of a FILE
 @private
 readAll :: (file: *void) -> string {

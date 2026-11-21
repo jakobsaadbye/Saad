@@ -16,8 +16,8 @@ use c;
     }
 } else {
     extern "C" {
-        pthread_mutex_lock    :: (mutex: *void) -> i32;
-        pthread_mutex_unlock  :: (mutex: *void) -> i32;
+        pthread_mutex_lock   :: (mutex: *void) -> i32;
+        pthread_mutex_unlock :: (mutex: *void) -> i32;
         mmap     :: (address: *void, size: u64, protect: i32, flags: i32, fd: i32, offset: i64) -> *void;
         mprotect :: (address: *void, size: u64, protect: i32) -> i32;
         madvise  :: (address: *void, size: u64, advice: i32) -> i32;

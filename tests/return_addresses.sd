@@ -7,13 +7,13 @@ Point :: struct { x: int; y: int; }
 
 total: int;
 
-yOf      :: (p: *Point) -> *int { return &p.y; }          // Through a pointer
-firstOf  :: (xs: []int) -> *int { return &xs[0]; }         // An element of a slice
-inList   :: (xs: *[..]int) -> *int { return &xs.data[1]; }
-global   :: () -> *int { return &total; }
-made     :: () -> *Point { p := new(Point); p.x = 4; return p; }
-Digits   :: struct { d: [3]int; }
-digits   :: () -> Digits { x: Digits; x.d[2] = 3; return x; }   // A struct with the array is copied
+yOf     :: (p: *Point) -> *int { return &p.y; }           // Through a pointer
+firstOf :: (xs: []int) -> *int { return &xs[0]; }          // An element of a slice
+inList  :: (xs: *[..]int) -> *int { return &xs.data[1]; }
+global  :: () -> *int { return &total; }
+made    :: () -> *Point { p := new(Point); p.x = 4; return p; }
+Digits  :: struct { d: [3]int; }
+digits  :: () -> Digits { x: Digits; x.d[2] = 3; return x; }    // A struct with the array is copied
 
 main :: () {
     p := Point{1, 2};

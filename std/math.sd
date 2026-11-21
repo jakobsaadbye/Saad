@@ -6,7 +6,7 @@ namespace math;
 
 // The functions of C89. On Windows they are in msvcrt.dll, the C runtime that programs are linked with
 extern "C" {
-    fabs  :: (value: f64) -> f64;
+    fabs :: (value: f64) -> f64;
 
     floor  :: (value: f64) -> f64;
     floorf :: (value: f32) -> f32;
@@ -50,12 +50,12 @@ extern "C" {
     log10f :: (value: f32) -> f32;
 
     // Taking floats apart
-    fmod   :: (x: f64, y: f64) -> f64;
-    fmodf  :: (x: f32, y: f32) -> f32;
-    modf   :: (value: f64, iptr: *f64) -> f64;     // Integer and fractional parts
-    modff  :: (value: f32, iptr: *f32) -> f32;
-    frexp  :: (value: f64, exp: *i32) -> f64;      // Significand and exponent
-    ldexp  :: (value: f64, exp: i32) -> f64;       // value * 2^exp
+    fmod  :: (x: f64, y: f64) -> f64;
+    fmodf :: (x: f32, y: f32) -> f32;
+    modf  :: (value: f64, iptr: *f64) -> f64;      // Integer and fractional parts
+    modff :: (value: f32, iptr: *f32) -> f32;
+    frexp :: (value: f64, exp: *i32) -> f64;       // Significand and exponent
+    ldexp :: (value: f64, exp: i32) -> f64;        // value * 2^exp
 }
 
 // The functions of C99. msvcrt.dll is older than C99 and doesn't have them, so on Windows they come from ucrtbase.dll, the

@@ -16,5 +16,4 @@ toHex :: (c: Color) -> string {
 }
 
 main :: () {
-
 }

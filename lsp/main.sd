@@ -71,25 +71,25 @@ main :: () {
 
 handle :: (m: rpc.Message) {
     switch m.name {
-        case "initialize"                { initialize(m); }
-        case "initialized"               { }
-        case "shutdown"                  { shuttingDown = true; rpc.respond(m.id, "null"); }
-        case "exit"                      { stop(); }
-        case "textDocument/didOpen"      { didOpen(m.params); }
-        case "textDocument/didChange"    { didChange(m.params); }
-        case "textDocument/didSave"      { didSave(m.params); }
-        case "textDocument/didClose"     { didClose(m.params); }
-        case "textDocument/definition"   { definition(m); }
-        case "textDocument/references"   { references(m); }
-        case "textDocument/hover"        { hover(m); }
+        case "initialize"              { initialize(m); }
+        case "initialized"             { }
+        case "shutdown"                { shuttingDown = true; rpc.respond(m.id, "null"); }
+        case "exit"                    { stop(); }
+        case "textDocument/didOpen"    { didOpen(m.params); }
+        case "textDocument/didChange"  { didChange(m.params); }
+        case "textDocument/didSave"    { didSave(m.params); }
+        case "textDocument/didClose"   { didClose(m.params); }
+        case "textDocument/definition" { definition(m); }
+        case "textDocument/references" { references(m); }
+        case "textDocument/hover"      { hover(m); }
         case "textDocument/documentSymbol" { documentSymbols(m); }
-        case "workspace/symbol"          { workspaceSymbols(m); }
-        case "textDocument/completion"   { completion(m); }
+        case "workspace/symbol"        { workspaceSymbols(m); }
+        case "textDocument/completion" { completion(m); }
         case "textDocument/signatureHelp" { signatureHelp(m); }
         case "textDocument/semanticTokens/full" { semanticTokens(m); }
         case "textDocument/prepareRename" { prepareRename(m); }
-        case "textDocument/rename"       { rename(m); }
-        case "textDocument/codeAction"   { codeActions(m); }
+        case "textDocument/rename"     { rename(m); }
+        case "textDocument/codeAction" { codeActions(m); }
         else {
             if rpc.isRequest(m) {
                 rpc.fail(m.id, rpc.MethodNotFound, fmt.sprint("% is not supported", m.name));
@@ -1116,9 +1116,9 @@ isName :: (text: string) -> bool {
 }
 
 Keywords :: ["if", "else", "for", "while", "in", "switch", "case", "return", "defer", "try", "catch", "throw", "break", "continue", "struct", "union", "interface", "enum", "enumflags", "newtype", "default", "operator",
-             "method", "import", "use", "namespace", "extern", "as", "new", "assert", "typeof", "sizeof", "true", "false",
-             "null", "self", "int", "uint", "float", "bool", "string", "any", "void", "u8", "u16", "u32", "u64", "i8", "i16",
-             "i32", "i64", "f32", "f64"];
+    "method", "import", "use", "namespace", "extern", "as", "new", "assert", "typeof", "sizeof", "true", "false",
+    "null", "self", "int", "uint", "float", "bool", "string", "any", "void", "u8", "u16", "u32", "u64", "i8", "i16",
+    "i32", "i64", "f32", "f64"];
 
 //
 // Code actions: the missing cases of a switch
@@ -1332,7 +1332,7 @@ semanticTokens :: (m: rpc.Message) {
         sb.add("%,%,%,%,%", t.line - lastLine, deltaStart, end - start, t.kind, t.modifiers);
         lastLine  = t.line;
         lastStart = start;
-        written  += 1;
+        written += 1;
     }
     rpc.respond(m.id, fmt.sprint("{\"data\":[%]}", sb.toString()));
 }

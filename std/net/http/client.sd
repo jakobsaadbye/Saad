@@ -33,8 +33,8 @@ Response :: struct {
     headers:    [..]Header;
     body:       string;
 
-    arena:      allocators.Arena;     // The memory of the texts, freed by free()
-    allocator:  Allocator;
+    arena:     allocators.Arena;      // The memory of the texts, freed by free()
+    allocator: Allocator;
 }
 
 header :: method (response: *Response, name: string) -> string, bool {
@@ -222,7 +222,7 @@ request :: (verb: string, url: string, headers: []Header = [], body := "") -> *R
     else                      { out.add("% % HTTP/1.1\r\n", verb, parts.path); }
     if viaProxy && !parts.tls && auth.len > 0 { out.add("Proxy-Authorization: %\r\n", auth); }
     if parts.port == 80 && !parts.tls || parts.port == 443 && parts.tls { out.add("Host: %\r\n", parts.host); }
-    else                { out.add("Host: %:%\r\n", parts.host, parts.port); }
+    else { out.add("Host: %:%\r\n", parts.host, parts.port); }
     for h in headers { out.add("%: %\r\n", h.name, h.value); }
     if body.len > 0 || verb == "POST" || verb == "PUT" || verb == "PATCH" {
         out.add("Content-Length: %\r\n", body.len);

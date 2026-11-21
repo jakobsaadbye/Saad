@@ -16,7 +16,7 @@ Holder :: struct {
         for i in 0..self.items.count {
             self.items[i] *= 2;
         }
-        for * item in self.items {
+        for *item in self.items {
             *item += 1;
         }
     }

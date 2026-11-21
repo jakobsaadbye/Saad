@@ -96,8 +96,8 @@ writeString :: method (w: *Writer, s: string) {
             case '\n' { w.sb.addString("\\n"); }
             case '\r' { w.sb.addString("\\r"); }
             case '\t' { w.sb.addString("\\t"); }
-            case 8         { w.sb.addString("\\b"); }
-            case 12        { w.sb.addString("\\f"); }
+            case 8  { w.sb.addString("\\b"); }
+            case 12 { w.sb.addString("\\f"); }
             case 0..' ' {
                 // The other control characters
                 w.sb.addString("\\u00");

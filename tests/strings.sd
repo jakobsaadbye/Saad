@@ -1,8 +1,6 @@
 use fmt;
 
 main :: () {
-
-    
     if true {
         // Getting the length of a string
         text := "Now to him who is able to do immeasurably more than all we ask or imagine, according to his power that is at work within us.";
@@ -34,5 +32,4 @@ main :: () {
         assert(d < a);
         assert(c > a);
     }
-
 }

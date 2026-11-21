@@ -61,9 +61,9 @@ InsertPost  :: "INSERT INTO posts (user_id, body) VALUES (?, ?) RETURNING id, cr
 InsertLike  :: "INSERT INTO likes (user_id, post_id) SELECT ?, id FROM posts WHERE id = ? ON CONFLICT (user_id, post_id) DO NOTHING";
 PostExists  :: "SELECT count(*) FROM posts WHERE id = ?";
 
-started:  time.Time;
-key:      jwt.Key;
-dbPath:   string;
+started: time.Time;
+key:     jwt.Key;
+dbPath:  string;
 
 // Each worker thread has a connection of its own
 @threadLocal connection: dbms.Connection;

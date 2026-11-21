@@ -10,19 +10,19 @@ Vec2 :: struct {
 }
 
 Person :: struct {
-    name:  string = "anon";
-    age:   int    = 30;
-    tags   := 3;           // The type comes from the default value
+    name: string = "anon";
+    age:  int = 30;
+    tags := 3;             // The type comes from the default value
     pos:   Vec2;           // Gets the defaults of Vec2
     alive: bool = true;
     id:    int;            // No default, so it is zero
 }
 
 Unit :: struct {
-    hp:    int   = MaxHp;
+    hp:    int = MaxHp;
     color: Color = .green;
-    pos:   Vec2  = {5, 6};
-    speed: f32   = 1.5;
+    pos:   Vec2 = {5, 6};
+    speed: f32 = 1.5;
 }
 
 Box :: struct <T> {

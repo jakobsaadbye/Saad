@@ -147,7 +147,7 @@ if command -v python3 > /dev/null; then
 
     # saad fmt: tests/format/*.input formats into its .formatted, which stays as it is, and formatting all the code twice
     # gives what formatting it once gives
-    printf "%-56s " "saad fmt (tests/format)"
+    printf "%-56s " "saad fmt (tests/format, and the code is formatted)"
     fmt_failed=""
     for input in tests/format/*.input; do
         expected="${input%.input}.formatted"
@@ -166,6 +166,11 @@ if command -v python3 > /dev/null; then
     fi
     if [ -z "$fmt_failed" ] && ./bin/saad fmt --stdout tests/should_fail/unterminated_string.sd > /dev/null 2>&1; then
         fmt_failed="a file that doesn't lex was formatted"
+    fi
+    # The code of the repository is formatted (tests/should_fail has files that don't lex on purpose)
+    if [ -z "$fmt_failed" ]; then
+        unformatted=$(./bin/saad fmt --check std examples lsp tools tests/std tests/backend tests/db tests/*.sd 2>&1)
+        [ $? -eq 0 ] || fmt_failed="not formatted (saad fmt <file> formats it): $(echo "$unformatted" | head -3 | tr '\n' ' ')"
     fi
     if [ -z "$fmt_failed" ]; then
         echo "${GREEN}OK${RESET}"

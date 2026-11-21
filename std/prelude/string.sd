@@ -109,11 +109,9 @@ indexOf :: method (s: string, str: string, fromIndex := 0) -> int {
 
     for c1, i in src {
         if src[i] == str[0] {
-
             // Scan forward to match substrings
             match := true;
             for c2, j in str {
-
                 if i + j >= src.len {
                     // We wen't to the end of the soruce string
                     return -1;

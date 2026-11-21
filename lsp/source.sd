@@ -7,7 +7,6 @@ namespace source;
 
 import fmt;
 
-
 // A text and where its lines start
 Text :: struct {
     text:  string;

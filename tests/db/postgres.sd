@@ -65,11 +65,11 @@ main :: () {
     email: ?string = "ada@example.com";
     noEmail: ?string;
     count, e1 := conn.exec("INSERT INTO saad_users (name, email, age, score, active, role, nick_name) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-                           "Ada", email, 36, 9.5, true, Role.admin, "ada");
+        "Ada", email, 36, 9.5, true, Role.admin, "ada");
     assert(e1 == null);
     assert(count == 1);
     count2, e2 := conn.exec("INSERT INTO saad_users (name, email, age, score, active, role) VALUES ($1, $2, NULL, $3, $4, $5)",
-                           "Bob", noEmail, -1.25, false, Role.member);
+        "Bob", noEmail, -1.25, false, Role.member);
     assert(e2 == null && count2 == 1);
     count3, e3 := conn.exec("INSERT INTO saad_users (name) VALUES ('Cy'), ('Di')");
     assert(e3 == null && count3 == 2);

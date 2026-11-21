@@ -331,12 +331,12 @@ x509VerifyCertErrorString :: (code: i64) -> c.string {
     }
 }
 
-@private SslVerifyPeer        :: 1;
-@private SslCtrlSetHostname   :: 55;   // SSL_set_tlsext_host_name is SSL_ctrl with this
-@private SslErrorWantRead     :: 2;
-@private SslErrorWantWrite    :: 3;
-@private SslErrorSyscall      :: 5;
-@private SslErrorZeroReturn   :: 6;
+@private SslVerifyPeer      :: 1;
+@private SslCtrlSetHostname :: 55;     // SSL_set_tlsext_host_name is SSL_ctrl with this
+@private SslErrorWantRead   :: 2;
+@private SslErrorWantWrite  :: 3;
+@private SslErrorSyscall    :: 5;
+@private SslErrorZeroReturn :: 6;
 
 // Starts TLS on the connection, as a client of the host: the handshake, which checks the certificate of the server
 startTls :: method (conn: *Conn, host: string) -> error {

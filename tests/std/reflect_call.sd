@@ -62,10 +62,10 @@ main :: () {
         call := f.newCall();
         wrong := 0;
         try { call.set("count", "seven"); } catch (e) { if e.is(reflect.WrongArgument) { wrong += 1; } }
-        try { call.set("nope", 1); }        catch (e) { if e.is(reflect.WrongArgument) { wrong += 1; } }
-        try { call.setAt(9, 1); }           catch (e) { if e.is(reflect.WrongArgument) { wrong += 1; } }
+        try { call.set("nope", 1); } catch (e) { if e.is(reflect.WrongArgument) { wrong += 1; } }
+        try { call.setAt(9, 1); } catch (e) { if e.is(reflect.WrongArgument) { wrong += 1; } }
         big: i64 = 5000000000;
-        try { call.set("count", big); }     catch (e) { if e.is(reflect.WrongArgument) { wrong += 1; } }
+        try { call.set("count", big); } catch (e) { if e.is(reflect.WrongArgument) { wrong += 1; } }
         assert(wrong == 4);
     }
     {

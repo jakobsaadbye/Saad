@@ -4,9 +4,9 @@ helper :: () -> int {
     if true {
         return 1;
 
-    return 2;
-}
+        return 2;
+    }
 
-main :: () {
-    assert(helper() == 1);
-}
+    main :: () {
+        assert(helper() == 1);
+    }

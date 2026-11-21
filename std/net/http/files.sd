@@ -35,19 +35,19 @@ KnownType :: struct {
 
 @private
 ContentTypes :: [
-    KnownType{"html", "text/html; charset=utf-8"},  KnownType{"htm", "text/html; charset=utf-8"},
-    KnownType{"css", "text/css; charset=utf-8"},    KnownType{"js", "text/javascript; charset=utf-8"},
+    KnownType{"html", "text/html; charset=utf-8"}, KnownType{"htm", "text/html; charset=utf-8"},
+    KnownType{"css", "text/css; charset=utf-8"}, KnownType{"js", "text/javascript; charset=utf-8"},
     KnownType{"mjs", "text/javascript; charset=utf-8"}, KnownType{"json", "application/json"},
-    KnownType{"txt", "text/plain; charset=utf-8"},  KnownType{"xml", "application/xml"},
-    KnownType{"svg", "image/svg+xml"},              KnownType{"png", "image/png"},
-    KnownType{"jpg", "image/jpeg"},                 KnownType{"jpeg", "image/jpeg"},
-    KnownType{"gif", "image/gif"},                  KnownType{"webp", "image/webp"},
-    KnownType{"avif", "image/avif"},                KnownType{"ico", "image/x-icon"},
-    KnownType{"woff", "font/woff"},                 KnownType{"woff2", "font/woff2"},
-    KnownType{"ttf", "font/ttf"},                   KnownType{"otf", "font/otf"},
-    KnownType{"pdf", "application/pdf"},            KnownType{"wasm", "application/wasm"},
-    KnownType{"mp4", "video/mp4"},                  KnownType{"webm", "video/webm"},
-    KnownType{"mp3", "audio/mpeg"},                 KnownType{"zip", "application/zip"},
+    KnownType{"txt", "text/plain; charset=utf-8"}, KnownType{"xml", "application/xml"},
+    KnownType{"svg", "image/svg+xml"}, KnownType{"png", "image/png"},
+    KnownType{"jpg", "image/jpeg"}, KnownType{"jpeg", "image/jpeg"},
+    KnownType{"gif", "image/gif"}, KnownType{"webp", "image/webp"},
+    KnownType{"avif", "image/avif"}, KnownType{"ico", "image/x-icon"},
+    KnownType{"woff", "font/woff"}, KnownType{"woff2", "font/woff2"},
+    KnownType{"ttf", "font/ttf"}, KnownType{"otf", "font/otf"},
+    KnownType{"pdf", "application/pdf"}, KnownType{"wasm", "application/wasm"},
+    KnownType{"mp4", "video/mp4"}, KnownType{"webm", "video/webm"},
+    KnownType{"mp3", "audio/mpeg"}, KnownType{"zip", "application/zip"},
 ];
 
 // Answers with the file at the path, with its Content-Type. false when there is no such file, e.g a folder
