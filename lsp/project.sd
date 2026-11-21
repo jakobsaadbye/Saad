@@ -76,8 +76,18 @@ Project :: struct {
 // Runs 'saad index' on the main file. overlays are the --overlay options for the text the editor hasn't saved.
 // Returns false if the compiler couldn't be run or didn't write an index
 run :: method (p: *Project, compiler: string, overlays: string) -> bool {
-    command := fmt.sprint("\"%\" index \"%\"% %", compiler, p.root, p.options, overlays);
+    command := p.indexCommand(compiler, overlays);
     text, code := os.output(command);
+    return p.readIndex(text, code, command);
+}
+
+// The command that indexes the program
+indexCommand :: method (p: *Project, compiler: string, overlays: string) -> string {
+    return fmt.sprint("\"%\" index \"%\"% %", compiler, p.root, p.options, overlays);
+}
+
+// Reads what 'saad index' wrote. It frees the text
+readIndex :: method (p: *Project, text: string, code: int, command: string) -> bool {
     if text.len == 0 {
         rpc.log(fmt.sprint("Couldn't run the compiler (exit code %): %", code, command));
         return false;

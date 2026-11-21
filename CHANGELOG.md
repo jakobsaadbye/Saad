@@ -2,6 +2,13 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.24.2 - 21. Nov 2026
+
+* The language server checks a program on a thread after a change or a save, so it answers the editor meanwhile. Saving
+  a file in VS Code waited for the check that had started when typing stopped, before it could format the file: with a
+  check of 1.5 seconds, formatting on save took 1.6 seconds, and now 16 ms. Requests that need the index, e.g hover,
+  wait for the check as before
+
 ## Update v0.24.1 - 21. Nov 2026
 
 * `saad fmt` always lines up the members of a struct or union and the fields of a struct literal on lines of their own:
