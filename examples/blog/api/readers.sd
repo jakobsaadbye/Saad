@@ -26,7 +26,7 @@ register :: (session: *Session, name: string, email: string) -> Registration {
 me :: (session: *Session) -> Profile {
     id := loggedIn(session).id;
     profile := session.db.readers.where(r => r.id == id).select(r => Profile{
-        name: r.name, email: r.email,
+        name:  r.name, email: r.email,
         likes: r.likes().count(), bookmarks: r.bookmarks().count(), following: r.follows().count(),
     }).first();
     return *profile;

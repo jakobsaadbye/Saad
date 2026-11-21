@@ -8,8 +8,8 @@ Answer :: 42;   // The answer
 Small  :: 1;    // Lined up with the answer
 
 Point :: struct {
-    x: int;
-    y: int = -1;
+    x:     int;
+    y:     int = -1;
     label: string; // Lined up
     ok:    bool;   // with the label
     @embed base: Base;

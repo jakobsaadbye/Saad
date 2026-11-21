@@ -55,6 +55,10 @@ typedef struct FormatLine {
     bool          attribute_only;  // e.g @private
     bool          arm_only;        // case 1, without => or {, of an arm with more values
     bool          multiline;
+    bool          in_struct;       // Inside the { of a struct or a union
+    bool          in_braces;       // Inside another {, e.g of a block or a struct literal
+    bool          starts_with_attribute;
+    bool          aligned;         // Lined up as members or fields, which are lined up always
     SeparatorKind separator;
     TokenType     separator_token; // e.g = or +=. Only lines with the same one are lined up
     int           separator_at;    // Where the spaces that line it up go
@@ -68,6 +72,7 @@ typedef struct FormatBracket {
     TokenType type;
     int       open_indent;   // Of the line it is opened on
     int       inner_indent;  // Of the lines inside it
+    bool      is_struct;     // The { of the members of a struct or union
 } FormatBracket;
 
 typedef struct Formatter {
@@ -335,6 +340,7 @@ static void format_lines(Formatter *f) {
     const FormatElement *prev = NULL;      // On the line
     bool prev_unary = false;
     bool prev_keep  = false;
+    bool struct_pending = false;           // A struct or union keyword came, and its { not yet
     bool prev_compare = false;             // prev is a < or > that is a comparison
     const FormatElement *last_code = NULL; // The last token of the code before
     bool last_line_is_attribute = false;   // The line of last_code starts with @ or #
@@ -379,6 +385,11 @@ static void format_lines(Formatter *f) {
 
             line = format_new_line(f);
             line->indent = indent;
+            if (f->bracket_count > 0) {
+                FormatBracket *top = &f->brackets[f->bracket_count - 1];
+                line->in_struct = top->is_struct;
+                line->in_braces = top->type == '{' && !top->is_struct;
+            }
             prev = NULL;
             prev_unary = false;
             prev_keep  = false;
@@ -465,6 +476,7 @@ static void format_lines(Formatter *f) {
             first_is_identifier = e->type == TOKEN_LITERAL_IDENTIFIER;
             first_is_dereference = e->type == '*' || e->type == '(';
             in_attributes = e->type == '@';
+            line->starts_with_attribute = e->type == '@';
             first_is_arm = e->type == TOKEN_CASE || e->type == TOKEN_ELSE || e->type == TOKEN_IF;
             if (e->type == TOKEN_CASE) line->arm_only = true;
             line_starts_with_attribute = e->type == '@' || e->type == '#';
@@ -474,7 +486,9 @@ static void format_lines(Formatter *f) {
 
         // Brackets
         if (is_opener(e->type)) {
-            FormatBracket bracket = { .type = e->type, .open_indent = line->indent, .inner_indent = line->indent + 1 };
+            FormatBracket bracket = { .type = e->type, .open_indent = line->indent, .inner_indent = line->indent + 1,
+                                      .is_struct = e->type == '{' && struct_pending };
+            if (e->type == '{') struct_pending = false;
             format_push_bracket(f, bracket);
         } else if (is_closer(e->type) && f->bracket_count > 0) {
             f->bracket_count--;
@@ -485,6 +499,8 @@ static void format_lines(Formatter *f) {
         bool after_bracket = (e->type == '*' || e->type == '&') && prev && (prev->type == ']' || prev->type == TOKEN_METHOD);
         prev_keep  = after_bracket;
         prev_unary = !after_bracket && ((is_ambiguous_operator(e->type) && !binary) || e->type == '!' || e->type == '~' || e->type == '?');
+        if (e->type == TOKEN_STRUCT || e->type == TOKEN_UNION) struct_pending = true;
+        if (e->type == ';') struct_pending = false;
         prev_compare = cur_compare;
         prev = e;
         last_code = e;
@@ -510,14 +526,52 @@ static void format_insert_spaces(FormatLine *l, int at, int count) {
     }
 }
 
+// Members of a struct (name: Type;) and fields of a struct literal on lines of their own (name: value,) are lined up
+// always: the lines one after the other at the same indentation, which comment and attribute lines don't end
+static bool is_member_or_field(FormatLine *l) {
+    if (l->separator != SEPARATOR_DECLARATION || l->multiline || l->starts_with_attribute) return false;
+    if (l->in_struct) return true;
+    // In a block, name: Type; declares a variable. A field of a literal ends with a , or is the last one
+    return l->in_braces && l->length > 0 && l->text[l->comment_at >= 0 ? l->comment_at - 1 : l->length - 1] != ';';
+}
+
+static void format_align_members(Formatter *f) {
+    for (int i = 0; i < f->line_count; i++) {
+        FormatLine *first = &f->lines[i];
+        if (!is_member_or_field(first)) continue;
+        int end = i;
+        int widest = first->separator_at;
+        for (int j = i + 1; j < f->line_count; j++) {
+            FormatLine *l = &f->lines[j];
+            if (l->blank) break;
+            if (l->indent == first->indent && ((l->separator == SEPARATOR_NONE && (l->comment_only || l->attribute_only)) || l->starts_with_attribute)) continue;
+            if (!is_member_or_field(l) || l->indent != first->indent || l->in_struct != first->in_struct) break;
+            if (l->separator_at > widest) widest = l->separator_at;
+            end = j;
+        }
+        for (int k = i; k <= end; k++) {
+            FormatLine *l = &f->lines[k];
+            if (!is_member_or_field(l)) continue;
+            int pad = widest - l->separator_at;
+            format_insert_spaces(l, l->separator_at, pad);
+            if (l->comment_at >= l->separator_at) l->comment_at += pad;
+            l->separator_at = widest;
+            l->aligned = true;
+        }
+        i = end;
+    }
+}
+
 // Lines up what was lined up in the source. See the rules at the top
 static void format_align(Formatter *f) {
+    format_align_members(f);
+
     // Separators: the lines one after the other that had the same separator in the same column, at the same
     // indentation. Lines between them that don't line anything up don't end such a group: comment and attribute lines,
     // the value of an arm with more values, e.g case 1, and lines whose separator has one space before it
     for (int i = 0; i < f->line_count; i++) {
         FormatLine *first = &f->lines[i];
-        if (first->separator == SEPARATOR_NONE || first->multiline) continue;
+        if (first->separator == SEPARATOR_NONE || first->multiline || first->aligned) continue;
 
         int end = i;
         int widest = first->separator_at;

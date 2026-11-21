@@ -2,6 +2,12 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.24.1 - 21. Nov 2026
+
+* `saad fmt` always lines up the members of a struct or union and the fields of a struct literal on lines of their own:
+  the types (or values) start one space after the longest name, also when they weren't lined up before. Lines that
+  start with an attribute are left out, and comment lines don't end the group (`tests/format/members.input`)
+
 ## Update v0.24.0 - 21. Nov 2026
 
 * `saad fmt`: formats Saad code, so that all code looks alike. `saad fmt .` formats the `.sd` files of a folder and the

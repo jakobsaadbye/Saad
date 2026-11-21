@@ -12,7 +12,7 @@ first :: () -> string {
 
 second :: () -> string {
     P :: struct {
-        name: string;
+        name:  string;
         count: int;
         describe :: method () -> string { return fmt.sprint("% %", self.name, self.count); }
     }

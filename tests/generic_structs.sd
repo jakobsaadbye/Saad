@@ -3,7 +3,7 @@ use fmt;
 List :: struct <T> {
     elements: [..]T;
     capacity: int;
-    count: int;
+    count:    int;
 }
 
 Pair :: struct <A, B> {

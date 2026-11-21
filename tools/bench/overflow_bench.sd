@@ -12,8 +12,8 @@ import time;
 import fmt;
 
 Point :: struct {
-    x: i64;
-    y: i32;
+    x:    i64;
+    y:    i32;
     name: string;
 }
 

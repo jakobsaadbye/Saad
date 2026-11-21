@@ -6,7 +6,7 @@
 
 String :: struct {
     data: *char;
-    len: i64;
+    len:  i64;
 }
 
 // The compiler generates one constant descriptor for every type that is converted to an 'any'. The layouts of these structs are read by
@@ -73,15 +73,15 @@ TypePrimitive :: struct {
 };
 
 TypePointer :: struct {
-    head: Type;
+    head:      Type;
     pointerTo: *Type;
 }
 
 TypeArray :: struct {
-    head:  Type;
-    kind:  TypeArrayKind;
+    head:     Type;
+    kind:     TypeArrayKind;
     elemType: *Type;
-    count: i64;       // The number of elements of a fixed array. A slice has its count in its value
+    count:    i64;    // The number of elements of a fixed array. A slice has its count in its value
 }
 
 EnumValue :: struct {
@@ -90,9 +90,9 @@ EnumValue :: struct {
 }
 
 TypeEnum :: struct {
-    head:   Type;
+    head:        Type;
     backingType: *Type;
-    values: []EnumValue;
+    values:      []EnumValue;
 };
 
 StructMember :: struct {

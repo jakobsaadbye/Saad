@@ -7,14 +7,14 @@ import fmt;
 Color :: enum { red, green, blue }
 
 Point :: struct {
-    x: int;
-    y: f64;
+    x:    int;
+    y:    f64;
     next: *Point;
 }
 
 Shape :: union {
     circle: f64;
-    label: string;
+    label:  string;
     empty;
 }
 

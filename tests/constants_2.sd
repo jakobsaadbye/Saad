@@ -24,30 +24,30 @@ EntityKind :: enum {
 }
 
 AnimationFrame :: struct {
-    key: int;
+    key:   int;
     color: Color;
 }
 
 Entity :: struct {
-    kind: EntityKind;
-    name: string;
-    position: Vector3;
+    kind:            EntityKind;
+    name:            string;
+    position:        Vector3;
     animationFrames: [8]AnimationFrame;
-    dead: bool;
+    dead:            bool;
 }
 
 Monster :: struct {
     firstname: string;
-    lastname: string;
-    health: int;
+    lastname:  string;
+    health:    int;
 }
 
 main :: () {
     {
         Mike :: Monster{
             firstname: "Mike",
-            lastname: "Masowski",
-            health: 100,
+            lastname:  "Masowski",
+            health:    100,
         };
 
         print("%", Mike);
@@ -63,9 +63,9 @@ main :: () {
     }
     {
         Alex :: Entity{
-            kind: .monster,
-            name: "Alex the great",
-            position: {1, 2, 3},
+            kind:            .monster,
+            name:            "Alex the great",
+            position:        {1, 2, 3},
             animationFrames: [
                 { key: 1, color: {255, 0, 0, 0} },
                 { key: 2, color: {0, 255, 0, 0} },

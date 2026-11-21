@@ -13,8 +13,8 @@ Dog :: struct {
 
 main :: () {
     samoid: Dog = {
-        kind: .samoid,
-        legs: 4,
+        kind:   .samoid,
+        legs:   4,
         weight: 20.0,
         height: 0.5
     };

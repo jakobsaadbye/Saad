@@ -196,9 +196,9 @@ main :: () {
     //    be a struct of the program, like Stats, or an anonymous struct, like the ones above
     //
     stats := db.authors.orderBy(a => a.name).select(a => Stats{
-        name: a.name,
-        posts: a.posts().where(p => p.status == .published).count(),
-        views: a.posts().where(p => p.status == .published).sum(p => p.views),
+        name:     a.name,
+        posts:    a.posts().where(p => p.status == .published).count(),
+        views:    a.posts().where(p => p.status == .published).sum(p => p.views),
         mostRead: a.posts().orderByDescending(p => p.views).first().title,
     }).all();
     print("\nPublished posts per author:");
