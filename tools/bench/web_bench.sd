@@ -17,8 +17,8 @@ import fmt;
 import mem;
 
 Point :: struct {
-    x: int;
-    y: int;
+    x:     int;
+    y:     int;
     label: string;
 }
 

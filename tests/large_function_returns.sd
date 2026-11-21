@@ -24,10 +24,10 @@ EntityKind :: enum {
 }
 
 Entity :: struct {
-    kind: EntityKind;
+    kind:        EntityKind;
     position:    Vector3;
     orientation: Vector3;
-    color: Vector3;
+    color:       Vector3;
 }
 
 largeReturn :: () -> Vector4 {

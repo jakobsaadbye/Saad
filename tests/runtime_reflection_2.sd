@@ -22,7 +22,7 @@ functionWithAny :: (x: any) {
 }
 
 MyJsonData :: struct {
-    data: any;
+    data:          any;
     contentLength: int;
 }
 

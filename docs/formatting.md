@@ -68,7 +68,25 @@ scale :: method * (p: *Point, factor: int) {
   `>`, which can be a comparison or type arguments (`a < b`, `List<int>`), unless they are next to a value like `0` or
   after `)` or `]`, which makes them a comparison. And `{` after a name, which can start a block or a struct literal
   (`if ok {`, `Point{1, 2}`), and the spaces just inside `{}` (`{ return x; }`, `{1, 2}`).
-* **Columns that were lined up stay lined up.** Lines one after the other that had the same separator in the same
+* **The members of a struct, and the fields of a struct literal on lines of their own, are always lined up**: in the
+  lines one after the other at the same indentation, the types (or values) start in the same column, one space after
+  the longest name. Comment lines don't end such a group, and lines that start with an attribute, e.g
+  `@embed base: Base;`, are left as they are. Variables declared in a block, e.g `x: int;`, follow the next rule:
+
+  ```odin
+  User :: struct {
+      id:        i64;
+      name:      string;
+      createdAt: time.Time;
+  }
+
+  ada := User{
+      id:   1,
+      name: "Ada",
+  };
+  ```
+
+* **Other columns that were lined up stay lined up.** Lines one after the other that had the same separator in the same
   column are lined up with the longest of them, plus one space. Every other separator gets one space. The separators
   are the `:` of a declaration (lined up after it, at the type), `=`, `:=`, `+=` and the others, `::`, and the `=>` or
   `{` of the arms of a switch and of `if` and `else` on one line. Comment and attribute lines, the values of an arm with

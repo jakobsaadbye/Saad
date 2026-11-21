@@ -4,7 +4,7 @@ use fmt;
 
 List :: struct <T> {
     elements: [..]T;
-    count: int;
+    count:    int;
 
     push :: method * (value: T) {
         self.elements.add(value);

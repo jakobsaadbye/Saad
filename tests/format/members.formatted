@@ -1,0 +1,29 @@
+// The members of a struct and the fields of a struct literal on lines of their own are lined up always. Variables are not
+User :: struct {
+    id:        i64;
+    name:      string; // shown
+    // a comment
+    createdAt: time.Time;
+    @embed base: Base;
+
+    x:      int;
+    longer: int;
+    f :: method () {
+        local: int;
+        other: string;
+    }
+}
+
+main :: () {
+    u := User{
+        id:        1,
+        name:      "Ada",
+        createdAt: time.now()
+    };
+    p := {
+        x:  1,
+        yy: 2,
+    };
+    a: int;
+    bbb: int;
+}

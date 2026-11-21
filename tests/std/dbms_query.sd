@@ -130,7 +130,7 @@ main :: () {
     assert(sql14 == "SELECT t0.\"name\" AS \"name\", (SELECT count(*) FROM \"shop\".\"users\" AS t1 WHERE t1.\"team_id\" = t0.\"id\") AS \"members\" FROM \"shop\".\"teams\" AS t0");
     sql15, args15, _ := teams.where(t => t.members().where(u => u.role == .admin && u.name != t.name).exists()).select(t => {
         t.name,
-        ages: t.members().where(u => u.age ?? 0 >= minAge).sum(u => u.age ?? 0),
+        ages:   t.members().where(u => u.age ?? 0 >= minAge).sum(u => u.age ?? 0),
         oldest: t.members().orderByDescending(u => u.age ?? 0).first().name,
         t.group().title,
     }).toSql();

@@ -19,7 +19,7 @@ Post :: struct {
     @dbms.Column(name: "author_id") authorPointer: *i64;   // NULL is null
     @dbms.Column(name: "body_text") body: string;
     @dbms.Column(skip: true) title_upper: string;
-    missing: int = 42;
+    missing:  int = 42;
 }
 
 // The table of the fake database. Null is NULL. A *Table is a dbms.Driver and a dbms.Rows, by its methods

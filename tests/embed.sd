@@ -13,7 +13,7 @@ Ast :: struct {
 
 // The embedded member is not the first, so a *Binary as an *Ast has an offset
 Binary :: struct {
-    op: u8;
+    op:    u8;
     @embed head: Ast;
     left:  int;
     right: int;

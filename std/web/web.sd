@@ -98,8 +98,8 @@ App :: struct {
     // How results are written and parameters read, e.g json.SnakeCase, so createdAt is created_at
     jsonOptions: json.Options;
     // An error is {"error": message, "kind": kind}, or {"error": message} without
-    errorKinds: bool = true;
-    messages:   Map<string, string>;   // The message of the errors of a kind, by the name of the kind (setMessage)
+    errorKinds:  bool = true;
+    messages:    Map<string, string>;  // The message of the errors of a kind, by the name of the kind (setMessage)
 
     sessionType:   *TypeStruct;   // Of the session of the program
     sessionOffset: int;           // Where its web.Session is in it

@@ -58,10 +58,10 @@ main :: () {
     print("\n-------------------- Struct type ----------------");
     if true {
         x: any = Entity{
-            kind: .human,
+            kind:     .human,
             position: Vector3{3, 3, 3},
             rotation: Vector3{0, 0.5, 0},
-            dead: false,
+            dead:     false,
         };
 
         assert(x.type.kind == .struct);
@@ -78,10 +78,10 @@ main :: () {
         printStructType(x.type as *TypeStruct);
 
         x = Entity{
-            kind: .human,
+            kind:     .human,
             position: Vector3{3, 3, 3},
             rotation: Vector3{0, 0.5, 0},
-            dead: false,
+            dead:     false,
         };
         assert(x.type.kind == .struct);
         printStructType(x.type as *TypeStruct);

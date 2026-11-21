@@ -6,7 +6,7 @@ Vector2 :: struct {
 }
 
 Rectangle :: struct {
-    x: float;
+    x:      float;
     y:      float;
     width:  float;
     height: float;

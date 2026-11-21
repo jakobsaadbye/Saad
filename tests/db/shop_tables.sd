@@ -226,9 +226,9 @@ main :: () {
     // The rows that refer to a row in a query are a subquery, and a self reference has its own alias
     perUser, e30 := db.users.orderBy(u => u.name).select(u => {
         u.name,
-        orders: u.orders().count(),
-        items: u.orders().where(o => o.orderItems().exists()).count(),
-        referred: u.usersByReferredBy().count(),
+        orders:    u.orders().count(),
+        items:     u.orders().where(o => o.orderItems().exists()).count(),
+        referred:  u.usersByReferredBy().count(),
         firstItem: u.orders().orderBy(o => o.id).first().note,
     }).all();
     assert(e30 == null);

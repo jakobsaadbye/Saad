@@ -50,11 +50,11 @@ work :: (job: *Job) {
 
 // A queue of numbers that a producer fills and a consumer empties
 Queue :: struct {
-    mutex: thread.Mutex;
-    ready: thread.Condition;
-    items: [..]int;
+    mutex:  thread.Mutex;
+    ready:  thread.Condition;
+    items:  [..]int;
     closed: bool;
-    sum:   int;
+    sum:    int;
 }
 
 consume :: (queue: *Queue) {

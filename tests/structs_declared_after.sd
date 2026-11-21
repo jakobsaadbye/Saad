@@ -1,20 +1,20 @@
 use fmt;
 
 Movie :: struct {
-    title: string;
+    title:  string;
     rating: Rating;
 }
 
 Rating :: struct {
-    oneStars: int;
+    oneStars:  int;
     fiveStars: int;
 };
 
 main :: () {
     movie := Movie{
-        title: "Hungergames 3 - Mockingbird",
+        title:  "Hungergames 3 - Mockingbird",
         rating: {
-            oneStars: 10,
+            oneStars:  10,
             fiveStars: 50,
         }
     };

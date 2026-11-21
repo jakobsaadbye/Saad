@@ -117,11 +117,11 @@ run :: method (p: *Project, compiler: string, overlays: string) -> bool {
 //
 
 CompletionItem :: struct {
-    label:  string;
-    kind:   string;   // e.g "field", "method" or "keyword"
-    detail: string;
-    doc:    string;
-    insert: string;   // The text to write instead of the label, e.g "radius: " for a field of a struct literal
+    label:       string;
+    kind:        string; // e.g "field", "method" or "keyword"
+    detail:      string;
+    doc:         string;
+    insert:      string; // The text to write instead of the label, e.g "radius: " for a field of a struct literal
     needsImport: string;  // The namespace that must be imported, e.g "fmt" for the namespace fmt when it isn't imported
     parameters:  int;     // Of a function or method, without the receiver of a method
 }
@@ -134,10 +134,10 @@ Signature :: struct {
 }
 
 Completions :: struct {
-    version:   int;
-    items:     [..]CompletionItem;
-    signature: *Signature;  // null when the position isn't in a call
-    missingImport: string;  // The namespace before the '.' isn't imported, e.g "fmt" of 'fmt.pr'
+    version:       int;
+    items:         [..]CompletionItem;
+    signature:     *Signature; // null when the position isn't in a call
+    missingImport: string;     // The namespace before the '.' isn't imported, e.g "fmt" of 'fmt.pr'
 }
 
 // Asks the compiler what can be written at the position of the file. ok is false if it didn't answer

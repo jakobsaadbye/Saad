@@ -27,10 +27,10 @@ import errors;
 
 EntityGenerator :: struct {
     connectionString: string;               // e.g host=localhost dbname=shop user=postgres
-    folder:   string = "db";                // Where the files go
-    schema:   string = "public";            // The schema whose tables are written
-    entities: string = "entities";          // The namespace of the rows and enums, in the folder entity
-    database: string = "database";          // The namespace of database.sd: the tables, Database and open
+    folder:           string = "db";        // Where the files go
+    schema:           string = "public";    // The schema whose tables are written
+    entities:         string = "entities";  // The namespace of the rows and enums, in the folder entity
+    database:         string = "database";  // The namespace of database.sd: the tables, Database and open
 
     typeNames:     Map<string, string>;     // A name for the struct of a table or an enum, e.g people is Person
     relationNames: Map<string, string>;     // A name for a method of a relation, by table.method, e.g posts.author

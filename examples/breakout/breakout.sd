@@ -59,45 +59,45 @@ PickupType :: enum {
 }
 
 Pickup :: struct {
-    type: PickupType;
-    x: float;
-    y: float;
-    velY: float;
+    type:    PickupType;
+    x:       float;
+    y:       float;
+    velY:    float;
     isShown: bool;
 }
 
 PickupSpawner :: struct {
-    pickups: []Pickup;
+    pickups:   []Pickup;
     freeIndex: int;
 }
 
 Particle :: struct {
-    pos: Vector2;
-    vel: Vector2;
-    color: Color;
-    size: int;
+    pos:      Vector2;
+    vel:      Vector2;
+    color:    Color;
+    size:     int;
     lifetime: int;
 }
 
 ParticleEmitter :: struct {
-    particles: [25]Particle;
-    pos: Vector2;
-    vel: Vector2;
-    radius: float;
-    color: Color;
+    particles:        [25]Particle;
+    pos:              Vector2;
+    vel:              Vector2;
+    radius:           float;
+    color:            Color;
     particleLifetime: int;
-    isActive: bool;
+    isActive:         bool;
 }
 
 GameState :: struct {
-    player: *Player;
-    ball:   *Ball;
-    bar:    *Bar;
-    sounds:   []Sound;
-    textures: []Texture;
+    player:           *Player;
+    ball:             *Ball;
+    bar:              *Bar;
+    sounds:           []Sound;
+    textures:         []Texture;
     particleEmitters: []ParticleEmitter;
     liveEmitterCount: int;
-    pickupSpawner: *PickupSpawner;
+    pickupSpawner:    *PickupSpawner;
 }
 
 getRect :: method (brick: Brick) -> Rectangle {
@@ -221,26 +221,26 @@ main :: () {
     // Game state + variables
     //
     player := Player{
-        score: 0,
+        score:           0,
         bricksDestroyed: 0,
-        lives: 3,
-        isHoldingBall: true,
+        lives:           3,
+        isHoldingBall:   true,
     };
 
     ball := Ball{
-        x: 4,
-        y: 4,
+        x:    4,
+        y:    4,
         size: BallSize,
         velX: InitialBallVelocity,
         velY: InitialBallVelocity,
     };
 
     bar := Bar{
-        x: WindowWidth * 0.5 - InitialBarWidth * 0.5,
-        y: WindowHeight - 70,
-        width: InitialBarWidth,
+        x:      WindowWidth * 0.5 - InitialBarWidth * 0.5,
+        y:      WindowHeight - 70,
+        width:  InitialBarWidth,
         height: 15,
-        velX: 0,
+        velX:   0,
     };
 
     pickups: [16]Pickup;
@@ -250,8 +250,8 @@ main :: () {
 
     game := GameState{
         player: &player,
-        ball: &ball,
-        bar: &bar,
+        ball:   &ball,
+        bar:    &bar,
         sounds: [
             soundBallBounce1,
             soundBallBounce2,
@@ -260,9 +260,9 @@ main :: () {
             soundLostLife,
             soundLevelComplete,
         ],
-        textures: pickupTextures,
+        textures:         pickupTextures,
         particleEmitters: particleEmitters,
-        pickupSpawner: &pickupSpawner
+        pickupSpawner:    &pickupSpawner
     };
 
     deadZone := Rectangle{0, WindowHeight - (WindowHeight - (bar.y + bar.height)), WindowWidth, (WindowHeight - (bar.y + bar.height))};
@@ -293,10 +293,10 @@ main :: () {
             color := brickColors[row];
 
             brick := Brick{
-                x: x,
-                y: y,
+                x:     x,
+                y:     y,
                 color: color,
-                dead: false,
+                dead:  false,
             };
 
             bricks[index] = brick;
@@ -579,10 +579,10 @@ spawnPickup :: (ps: *PickupSpawner, pos: Vector2) {
     index := GetRandomValue(0, PickupType.count as int - 1);
 
     pickup := Pickup{
-        type: index as PickupType,
-        x: pos.x,
-        y: pos.y,
-        velY: GetRandomValue(80, 120) as float,
+        type:    index as PickupType,
+        x:       pos.x,
+        y:       pos.y,
+        velY:    GetRandomValue(80, 120) as float,
         isShown: true,
     };
 
@@ -604,12 +604,12 @@ handleBrickCollision :: (game: *GameState, brick: *Brick) {
 
     // Play a particle effect
     pe := ParticleEmitter{
-        pos: {(brick.x + BrickWidth * 0.5) as float, (brick.y + BrickHeight * 0.5) as float},
-        vel: {game.ball.velX * 0.3, game.ball.velY * 0.3},
-        radius: 16,
-        color: brick.color,
+        pos:              {(brick.x + BrickWidth * 0.5) as float, (brick.y + BrickHeight * 0.5) as float},
+        vel:              {game.ball.velX * 0.3, game.ball.velY * 0.3},
+        radius:           16,
+        color:            brick.color,
         particleLifetime: 500,
-        isActive: false,
+        isActive:         false,
     };
 
     next := game.liveEmitterCount;

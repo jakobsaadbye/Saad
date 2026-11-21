@@ -235,15 +235,15 @@ matchScore :: (route: *Route, segments: []string) -> int {
 //
 
 Server :: struct {
-    router:       *Router;       // Routes the requests. Or handler, for one handler of every request
-    handler:      Handler;
-    workers:      int;           // Threads, each with an event loop of its own connections. 0 is 2 for each processor, at least 4
-    readTimeout:  int = 30000;   // Milliseconds for the rest of a request that has started to come
-    writeTimeout: int = 30000;   // Milliseconds for a response that the client doesn't take
-    idleTimeout:  int = 60000;   // Milliseconds a kept alive connection may wait for its next request
-    limits:       Limits;
-    log:          bool = true;   // Writes the errors of handlers to stderr
-    reusePort:    bool;          // Other processes may listen at the port too, and the system shares the connections (Linux)
+    router:         *Router;     // Routes the requests. Or handler, for one handler of every request
+    handler:        Handler;
+    workers:        int;         // Threads, each with an event loop of its own connections. 0 is 2 for each processor, at least 4
+    readTimeout:    int = 30000; // Milliseconds for the rest of a request that has started to come
+    writeTimeout:   int = 30000; // Milliseconds for a response that the client doesn't take
+    idleTimeout:    int = 60000; // Milliseconds a kept alive connection may wait for its next request
+    limits:         Limits;
+    log:            bool = true; // Writes the errors of handlers to stderr
+    reusePort:      bool;        // Other processes may listen at the port too, and the system shares the connections (Linux)
     maxConnections: int;         // Of each worker. When it has as many, it accepts no more until one closes. 0 is what the
     // open files of the process allow
 

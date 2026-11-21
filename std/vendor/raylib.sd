@@ -67,8 +67,8 @@ Quaternion :: newtype Vector4;
 
 // Matrix, 4x4 components, column major, OpenGL style, right-handed
 Matrix :: struct {
-    m0, m4, m8, m12: float;  // Matrix first row (4 components)
-    m1, m5, m9, m13: float;  // Matrix second row (4 components)
+    m0, m4, m8, m12:  float; // Matrix first row (4 components)
+    m1, m5, m9, m13:  float; // Matrix second row (4 components)
     m2, m6, m10, m14: float; // Matrix third row (4 components)
     m3, m7, m11, m15: float; // Matrix fourth row (4 components)
 }
@@ -83,28 +83,28 @@ Color :: struct {
 
 // Rectangle, 4 components
 Rectangle :: struct {
-    x: float;                // Rectangle top-left corner position x
-    y: float;                // Rectangle top-left corner position y
-    width: float;            // Rectangle width
+    x:      float;           // Rectangle top-left corner position x
+    y:      float;           // Rectangle top-left corner position y
+    width:  float;           // Rectangle width
     height: float;           // Rectangle height
 }
 
 // Image, pixel data stored in CPU memory (RAM)
 Image :: struct {
-    data: *void;             // Image raw data
-    width: int;              // Image base width
-    height: int;             // Image base height
+    data:    *void;          // Image raw data
+    width:   int;            // Image base width
+    height:  int;            // Image base height
     mipmaps: int;            // Mipmap levels, 1 by default
-    format: int;             // Data format (PixelFormat type)
+    format:  int;            // Data format (PixelFormat type)
 }
 
 // Texture, tex data stored in GPU memory (VRAM)
 Texture :: struct {
-    id: uint;                // OpenGL texture id
-    width: int;              // Texture base width
-    height: int;             // Texture base height
+    id:      uint;           // OpenGL texture id
+    width:   int;            // Texture base width
+    height:  int;            // Texture base height
     mipmaps: int;            // Mipmap levels, 1 by default
-    format: int;             // Data format (PixelFormat type)
+    format:  int;            // Data format (PixelFormat type)
 }
 
 // Texture2D, same as Texture
@@ -115,9 +115,9 @@ Texture :: struct {
 
 // RenderTexture, fbo for texture rendering
 RenderTexture :: struct {
-    id: uint;                // OpenGL framebuffer object id
+    id:      uint;           // OpenGL framebuffer object id
     texture: Texture;        // Color buffer attachment texture
-    depth: Texture;          // Depth buffer attachment texture
+    depth:   Texture;        // Depth buffer attachment texture
 }
 
 // RenderTexture2D, same as RenderTexture
@@ -126,38 +126,38 @@ RenderTexture :: struct {
 // NPatchInfo, n-patch layout info
 NPatchInfo :: struct {
     source: Rectangle;       // Texture source rectangle
-    left: int;               // Left border offset
-    top: int;                // Top border offset
-    right: int;              // Right border offset
+    left:   int;             // Left border offset
+    top:    int;             // Top border offset
+    right:  int;             // Right border offset
     bottom: int;             // Bottom border offset
     layout: int;             // Layout of the n-patch: 3x3, 1x3 or 3x1
 }
 
 // GlyphInfo, font characters glyphs info
 GlyphInfo :: struct {
-    value: int;              // Character value (Unicode)
-    offsetX: int;            // Character offset X when drawing
-    offsetY: int;            // Character offset Y when drawing
+    value:    int;           // Character value (Unicode)
+    offsetX:  int;           // Character offset X when drawing
+    offsetY:  int;           // Character offset Y when drawing
     advanceX: int;           // Character advance position X
-    image: Image;            // Character image data
+    image:    Image;         // Character image data
 }
 
 // Font, font texture and GlyphInfo array data
 Font :: struct {
-    baseSize: int;           // Base size (default chars height)
-    glyphCount: int;         // Number of glyph characters
+    baseSize:     int;       // Base size (default chars height)
+    glyphCount:   int;       // Number of glyph characters
     glyphPadding: int;       // Padding around the glyph characters
-    texture: Texture;      // Texture atlas containing the glyphs
-    recs: *Rectangle;        // Rectangles in texture for the glyphs
-    glyphs: *GlyphInfo;      // Glyphs info data
+    texture:      Texture; // Texture atlas containing the glyphs
+    recs:         *Rectangle; // Rectangles in texture for the glyphs
+    glyphs:       *GlyphInfo; // Glyphs info data
 }
 
 // Camera, defines position/orientation in 3d space
 Camera3D :: struct {
-    position: Vector3;       // Camera position
-    target: Vector3;         // Camera target it looks-at
-    up: Vector3;             // Camera up vector (rotation over its axis)
-    fovy: float;             // Camera field-of-view aperture in Y (degrees) in perspective, used as near plane width in orthographic
+    position:   Vector3;     // Camera position
+    target:     Vector3;     // Camera target it looks-at
+    up:         Vector3;     // Camera up vector (rotation over its axis)
+    fovy:       float;       // Camera field-of-view aperture in Y (degrees) in perspective, used as near plane width in orthographic
     projection: CameraProjection;         // Camera projection: CAMERA_PERSPECTIVE or CAMERA_ORTHOGRAPHIC
 }
 
@@ -165,33 +165,33 @@ Camera3D :: struct {
 
 // Camera2D, defines position/orientation in 2d space
 Camera2D :: struct {
-    offset: Vector2;         // Camera offset (displacement from target)
-    target: Vector2;         // Camera target (rotation and zoom origin)
+    offset:   Vector2;       // Camera offset (displacement from target)
+    target:   Vector2;       // Camera target (rotation and zoom origin)
     rotation: float;         // Camera rotation in degrees
-    zoom: float;             // Camera zoom (scaling), should be 1.0f by default
+    zoom:     float;         // Camera zoom (scaling), should be 1.0f by default
 }
 
 // Mesh, vertex data and vao/vbo
 Mesh :: struct {
-    vertexCount: int;        // Number of vertices stored in arrays
+    vertexCount:   int;      // Number of vertices stored in arrays
     triangleCount: int;      // Number of triangles stored (indexed or not)
 
     // Vertex attributes data
-    vertices: *float;        // Vertex position (XYZ - 3 components per vertex) (shader-location = 0)
-    texcoords: *float;       // Vertex texture coordinates (UV - 2 components per vertex) (shader-location = 1)
+    vertices:   *float;      // Vertex position (XYZ - 3 components per vertex) (shader-location = 0)
+    texcoords:  *float;      // Vertex texture coordinates (UV - 2 components per vertex) (shader-location = 1)
     texcoords2: *float;      // Vertex texture second coordinates (UV - 2 components per vertex) (shader-location = 5)
-    normals: *float;         // Vertex normals (XYZ - 3 components per vertex) (shader-location = 2)
-    tangents: *float;        // Vertex tangents (XYZW - 4 components per vertex) (shader-location = 4)
-    colors: *u8;             // Vertex colors (RGBA - 4 components per vertex) (shader-location = 3)
-    indices: *u16;           // Vertex indices (in case vertex data comes indexed)
+    normals:    *float;      // Vertex normals (XYZ - 3 components per vertex) (shader-location = 2)
+    tangents:   *float;      // Vertex tangents (XYZW - 4 components per vertex) (shader-location = 4)
+    colors:     *u8;         // Vertex colors (RGBA - 4 components per vertex) (shader-location = 3)
+    indices:    *u16;        // Vertex indices (in case vertex data comes indexed)
 
     // Animation vertex data
     animVertices: *float;    // Animated vertex positions (after bones transformations)
-    animNormals: *float;     // Animated normals (after bones transformations)
-    boneIds: *u8;            // Vertex bone ids, max 255 bone ids, up to 4 bones influence by vertex (skinning) (shader-location = 6)
-    boneWeights: *float;     // Vertex bone weight, up to 4 bones influence by vertex (skinning) (shader-location = 7)
+    animNormals:  *float;    // Animated normals (after bones transformations)
+    boneIds:      *u8;       // Vertex bone ids, max 255 bone ids, up to 4 bones influence by vertex (skinning) (shader-location = 6)
+    boneWeights:  *float;    // Vertex bone weight, up to 4 bones influence by vertex (skinning) (shader-location = 7)
     boneMatrices: *Matrix;   // Bones animated transformation matrices
-    boneCount: int;          // Number of bones
+    boneCount:    int;       // Number of bones
 
     // OpenGL identifiers
     vaoId: uint;             // OpenGL Vertex Array Object id
@@ -200,34 +200,34 @@ Mesh :: struct {
 
 // Shader
 Shader :: struct {
-    id: uint;                // Shader program id
+    id:   uint;              // Shader program id
     locs: *int;              // Shader locations array (RL_MAX_SHADER_LOCATIONS)
 }
 
 // MaterialMap
 MaterialMap :: struct {
     texture: Texture;        // Material map texture
-    color: Color;            // Material map color
-    value: float;            // Material map value
+    color:   Color;          // Material map color
+    value:   float;          // Material map value
 }
 
 // Material, includes shader and maps
 Material :: struct {
     shader: Shader;          // Material shader
-    maps: *MaterialMap;      // Material maps array (MAX_MATERIAL_MAPS)
+    maps:   *MaterialMap;    // Material maps array (MAX_MATERIAL_MAPS)
     params: [4]float;        // Material generic parameters (if required)
 }
 
 // Transform, vertex transformation data
 Transform :: struct {
     translation: Vector3;    // Translation
-    rotation: Quaternion;    // Rotation
-    scale: Vector3;          // Scale
+    rotation:    Quaternion; // Rotation
+    scale:       Vector3;    // Scale
 }
 
 // Bone, skeletal animation bone
 BoneInfo :: struct {
-    name: [32]u8;            // Bone name
+    name:   [32]u8;          // Bone name
     parent: int;             // Bone parent
 }
 
@@ -235,39 +235,39 @@ BoneInfo :: struct {
 Model :: struct {
     transform: Matrix;       // Local transform matrix
 
-    meshCount: int;          // Number of meshes
-    materialCount: int;      // Number of materials
-    meshes: *Mesh;           // Meshes array
-    materials: *Material;    // Materials array
-    meshMaterial: *int;      // Mesh material number
+    meshCount:     int;       // Number of meshes
+    materialCount: int;       // Number of materials
+    meshes:        *Mesh;     // Meshes array
+    materials:     *Material; // Materials array
+    meshMaterial:  *int;      // Mesh material number
 
     // Animation data
     boneCount: int;          // Number of bones
-    bones: *BoneInfo;        // Bones information (skeleton)
-    bindPose: *Transform;    // Bones base transformation (pose)
+    bones:     *BoneInfo;    // Bones information (skeleton)
+    bindPose:  *Transform;   // Bones base transformation (pose)
 }
 
 // ModelAnimation
 ModelAnimation :: struct {
-    boneCount: int;          // Number of bones
+    boneCount:  int;         // Number of bones
     frameCount: int;         // Number of animation frames
-    bones: *BoneInfo;        // Bones information (skeleton)
+    bones:      *BoneInfo;   // Bones information (skeleton)
     framePoses: **Transform; // Poses array by frame
-    name: [32]u8;            // Animation name
+    name:       [32]u8;      // Animation name
 }
 
 // Ray, ray for raycasting
 Ray :: struct {
-    position: Vector3;       // Ray position (origin)
+    position:  Vector3;      // Ray position (origin)
     direction: Vector3;      // Ray direction (normalized)
 }
 
 // RayCollision, ray hit information
 RayCollision :: struct {
-    hit: bool;               // Did the ray hit something?
+    hit:      bool;          // Did the ray hit something?
     distance: float;         // Distance to the nearest hit
-    point: Vector3;          // Point of the nearest hit
-    normal: Vector3;         // Surface normal of hit
+    point:    Vector3;       // Point of the nearest hit
+    normal:   Vector3;       // Surface normal of hit
 }
 
 // BoundingBox
@@ -281,31 +281,31 @@ Wave :: struct {
     frameCount: uint;        // Total number of frames (considering channels)
     sampleRate: uint;        // Frequency (samples per second)
     sampleSize: uint;        // Bit depth (bits per sample): 8, 16, 32 (24 not supported)
-    channels: uint;          // Number of channels (1-mono, 2-stereo, ...)
-    data: *void;             // Buffer data pointer
+    channels:   uint;        // Number of channels (1-mono, 2-stereo, ...)
+    data:       *void;       // Buffer data pointer
 }
 
 // AudioStream, custom audio stream
 AudioStream :: struct {
-    buffer: *void;           // Pointer to internal data used by the audio system
+    buffer:    *void;        // Pointer to internal data used by the audio system
     processor: *void;        // Pointer to internal data processor, useful for audio effects
 
     sampleRate: uint;        // Frequency (samples per second)
     sampleSize: uint;        // Bit depth (bits per sample): 8, 16, 32 (24 not supported)
-    channels: uint;          // Number of channels (1-mono, 2-stereo, ...)
+    channels:   uint;        // Number of channels (1-mono, 2-stereo, ...)
 }
 
 // Sound
 Sound :: struct {
-    stream: AudioStream;     // Audio stream
+    stream:     AudioStream; // Audio stream
     frameCount: uint;        // Total number of frames (considering channels)
 }
 
 // Music, audio stream, anything longer than ~10 seconds should be streamed
 Music :: struct {
-    stream: AudioStream;     // Audio stream
+    stream:     AudioStream; // Audio stream
     frameCount: uint;        // Total number of frames (considering channels)
-    looping: bool;           // Music looping enable
+    looping:    bool;        // Music looping enable
 
     ctxType: int;            // Type of music context (audio filetype)
     ctxData: *void;          // Audio context data, depends on type
@@ -313,48 +313,48 @@ Music :: struct {
 
 // VrDeviceInfo, Head-Mounted-Display device parameters
 VrDeviceInfo :: struct {
-    hResolution: int;                // Horizontal resolution in pixels
-    vResolution: int;                // Vertical resolution in pixels
-    hScreenSize: float;              // Horizontal size in meters
-    vScreenSize: float;              // Vertical size in meters
-    eyeToScreenDistance: float;      // Distance between eye and display in meters
-    lensSeparationDistance: float;   // Lens separation distance in meters
-    interpupillaryDistance: float;   // IPD (distance between pupils) in meters
-    lensDistortionValues: [4]float;  // Lens distortion constant parameters
-    chromaAbCorrection: [4]float;    // Chromatic aberration correction parameters
+    hResolution:            int;      // Horizontal resolution in pixels
+    vResolution:            int;      // Vertical resolution in pixels
+    hScreenSize:            float;    // Horizontal size in meters
+    vScreenSize:            float;    // Vertical size in meters
+    eyeToScreenDistance:    float;    // Distance between eye and display in meters
+    lensSeparationDistance: float;    // Lens separation distance in meters
+    interpupillaryDistance: float;    // IPD (distance between pupils) in meters
+    lensDistortionValues:   [4]float; // Lens distortion constant parameters
+    chromaAbCorrection:     [4]float; // Chromatic aberration correction parameters
 }
 
 // VrStereoConfig, VR stereo rendering configuration for simulator
 VrStereoConfig :: struct {
-    projection: [2]Matrix;           // VR projection matrices (per eye)
-    viewOffset: [2]Matrix;           // VR view offset matrices (per eye)
-    leftLensCenter: [2]float;        // VR left lens center
-    rightLensCenter: [2]float;       // VR right lens center
-    leftScreenCenter: [2]float;      // VR left screen center
+    projection:        [2]Matrix;    // VR projection matrices (per eye)
+    viewOffset:        [2]Matrix;    // VR view offset matrices (per eye)
+    leftLensCenter:    [2]float;     // VR left lens center
+    rightLensCenter:   [2]float;     // VR right lens center
+    leftScreenCenter:  [2]float;     // VR left screen center
     rightScreenCenter: [2]float;     // VR right screen center
-    scale: [2]float;                 // VR distortion scale
-    scaleIn: [2]float;               // VR distortion scale in
+    scale:             [2]float;     // VR distortion scale
+    scaleIn:           [2]float;     // VR distortion scale in
 }
 
 // File path list
 FilePathList :: struct {
     capacity: uint;          // Filepaths max entries
-    count: uint;             // Filepaths entries count
-    paths: *c.string;        // Filepaths entries
+    count:    uint;          // Filepaths entries count
+    paths:    *c.string;     // Filepaths entries
 }
 
 // Automation event
 AutomationEvent :: struct {
-    frame: uint;             // Event frame
-    type: uint;              // Event type (AutomationEventType)
+    frame:  uint;            // Event frame
+    type:   uint;            // Event type (AutomationEventType)
     params: [4]int;          // Event parameters (if required)
 }
 
 // Automation event list
 AutomationEventList :: struct {
-    capacity: uint;           // Events max entries (MAX_AUTOMATION_EVENTS)
-    count: uint;              // Events entries count
-    events: *AutomationEvent; // Events entries
+    capacity: uint;             // Events max entries (MAX_AUTOMATION_EVENTS)
+    count:    uint;             // Events entries count
+    events:   *AutomationEvent; // Events entries
 }
 
 //----------------------------------------------------------------------------------

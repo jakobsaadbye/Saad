@@ -24,7 +24,7 @@ listPosts :: (session: *Session, category: ?string, tag: ?string, page := 1) -> 
         .offset(skip)
         .limit(10)
         .select(p => PostSummary{
-            slug: p.slug, title: p.title, author: p.author().name, category: p.category().name, views: p.views,
+            slug:  p.slug, title: p.title, author: p.author().name, category: p.category().name, views: p.views,
             likes: p.likes().count(), comments: p.comments().count(),
         })
         .all();
@@ -104,7 +104,7 @@ feed :: (session: *Session) -> [..]PostSummary {
         .where(p => p.status == .published && p.author().follows().where(f => f.readerId == readerId).exists())
         .orderByDescending(p => p.publishedAt)
         .select(p => PostSummary{
-            slug: p.slug, title: p.title, author: p.author().name, category: p.category().name, views: p.views,
+            slug:  p.slug, title: p.title, author: p.author().name, category: p.category().name, views: p.views,
             likes: p.likes().count(), comments: p.comments().count(),
         })
         .all();
