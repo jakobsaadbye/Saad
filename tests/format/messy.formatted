@@ -1,0 +1,71 @@
+// saad fmt formats this into messy.formatted. tools/linux/runtests.sh checks it
+
+import fmt;
+use fmt;
+
+@private Limit :: 10;
+Answer :: 42;   // The answer
+Small  :: 1;    // Lined up with the answer
+
+Point :: struct {
+    x: int;
+    y: int = -1;
+    label: string; // Lined up
+    ok:    bool;   // with the label
+    @embed base: Base;
+}
+
+Base :: struct { id: i64; }
+
+Shape :: union { circle: f64; empty; }
+
+scale :: method * (p: *Point, factor: int) {
+    p.x *= factor;
+    p.y = p.y * factor + -1;
+}
+
+sum :: <T>(xs: []T) -> T {
+    total: T;
+    for x in xs { total += x; }
+    return total;
+}
+
+main :: () {
+    p := Point{1, 2, "a", true, Base{7}};
+    q := Point { x: 1 };
+    xs: [..]int = [1, 2, 3];
+    ys := xs.filter(x => x % 2 == 0).map(x => x * 10);
+    if p.x > 0 && !p.ok || p.y <= -1 {
+        print("%", p);
+    }
+    else {
+        print("no");
+    }
+
+    m: Map<string, List<int>>;
+    value := m.tryGet("a") ?? [..]int{};
+    ptr := &p;
+    deref := *ptr;
+    n := -p.x + (xs[0] * 2) - xs[1];
+    kind := switch p.x {
+        case 1 => "one";
+        case 2, 3 => "few";
+        else => "many";
+    };
+    long := sum(xs) +
+        n *
+        2;
+    text := "a // not a comment";
+    lines := "first
+second";
+    names := ["a", "b"];
+    for i in 0..xs.count {
+        if i == 1 { continue; }
+    }
+    s: Shape = .circle(2.0);
+    switch s {
+        case .circle(r) { print("%", r); }
+        case .empty     { }
+    }
+    defer print("done");
+}

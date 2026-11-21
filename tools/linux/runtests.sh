@@ -145,6 +145,37 @@ if command -v python3 > /dev/null; then
         failed=$((failed + 1))
     fi
 
+    # saad fmt: tests/format/*.input formats into its .formatted, which stays as it is, and formatting all the code twice
+    # gives what formatting it once gives
+    printf "%-56s " "saad fmt (tests/format)"
+    fmt_failed=""
+    for input in tests/format/*.input; do
+        expected="${input%.input}.formatted"
+        if ! ./bin/saad fmt --stdout "$input" 2>&1 | cmp -s - "$expected"; then fmt_failed="$input isn't formatted into $expected"; break; fi
+        if ! ./bin/saad fmt --stdout "$expected" 2>&1 | cmp -s - "$expected"; then fmt_failed="$expected changes when it is formatted"; break; fi
+    done
+    if [ -z "$fmt_failed" ]; then
+        FMT_TMP="$(mktemp -d)"
+        for f in $(find std tests examples lsp -name '*.sd' -not -path '*/build/*'); do
+            if ./bin/saad fmt --stdout "$f" > "$FMT_TMP/once.sd" 2>/dev/null; then
+                ./bin/saad fmt --stdout "$FMT_TMP/once.sd" > "$FMT_TMP/twice.sd" 2>/dev/null
+                if ! cmp -s "$FMT_TMP/once.sd" "$FMT_TMP/twice.sd"; then fmt_failed="formatting $f again changes it"; break; fi
+            fi
+        done
+        rm -rf "$FMT_TMP"
+    fi
+    if [ -z "$fmt_failed" ] && ./bin/saad fmt --stdout tests/should_fail/unterminated_string.sd > /dev/null 2>&1; then
+        fmt_failed="a file that doesn't lex was formatted"
+    fi
+    if [ -z "$fmt_failed" ]; then
+        echo "${GREEN}OK${RESET}"
+        passed=$((passed + 1))
+    else
+        echo "${RED}FAILED${RESET}"
+        echo "    $fmt_failed"
+        failed=$((failed + 1))
+    fi
+
     # After a mistake, the compiler reports it and goes on, so the index has the rest of the program
     printf "%-56s " "error recovery (check_recovery.py)"
     if output=$(python3 "$HERE/check_recovery.py" 2>&1); then

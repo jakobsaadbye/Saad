@@ -797,6 +797,7 @@ void write_diagnostics_json(FILE *out, bool success) {
 
 #include "index.c"
 #include "complete.c"
+#include "format.c"
 
 bool compile_program(CompilerConfig *config, const char *main_path, bool output_to_console) {
     CompilerReport report = {

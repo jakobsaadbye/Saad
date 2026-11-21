@@ -2,6 +2,16 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.24.0 - 21. Nov 2026
+
+* `saad fmt`: formats Saad code, so that all code looks alike. `saad fmt .` formats the `.sd` files of a folder and the
+  folders in it, `saad fmt --check .` only lists the files that aren't formatted (and fails if there are any), and
+  `saad fmt --stdout file.sd` writes the formatted file, e.g for an editor. Lines stay where they are; it sets the
+  indentation (4 spaces), the spaces between tokens, blank lines, and keeps what was lined up lined up. It works on the
+  tokens, not on the AST, so it is fast (the whole repository in 0.2 seconds) and formats code with errors of names and
+  types. As only the space between tokens changes, it can't change what a program does: the formatted text is lexed
+  again, and a file whose tokens would change is left as it is. See docs/formatting.md (`src/format.c`)
+
 ## Update v0.23.10 - 16. Nov 2026
 
 * A call with too many arguments, e.g `math.min(1, a, b)`, is an error, "Too many arguments to 'min': wanted 2, got 3".
