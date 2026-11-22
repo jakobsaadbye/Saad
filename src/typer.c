@@ -36,6 +36,7 @@ typedef struct Typer {
     int  struct_check_depth;          // How many struct definitions are currently being checked inside each other
     bool indexing_unused_generics;    // Checking the generics that nothing instantiates, for the index. See index_unused_generics()
 
+    TypeStruct *any_method_holder; // Holds the methods declared on any e.g 'toInt :: method (value: any) -> i64, bool'
     TypeStruct *primitive_method_holders[PRIMITIVE_COUNT]; // Holds the methods declared on each primitive type e.g 'hash :: method (x: int) -> u64'. See method_holder_of()
 
     bool checking_place; // Set before checking an expression that is used as a place e.g the left side of an assignment, so that xs[i] uses indexRef()
@@ -67,6 +68,7 @@ Type *check_struct_literal(Typer *typer, AstStructLiteral *struct_literal, Type 
 Type *check_enum_literal(Typer *typer, AstEnumLiteral *enum_literal, Type *ctx_type);
 Type *check_member_access(Typer *typer, AstMemberAccess * ma);
 bool  is_optional_type(Type *type);
+bool  is_standard_collection(Type *type, const char *name);
 Type *optional_inner_type(Type *type);
 int   optional_present_offset(Type *type);
 Type *check_optional_chain(Typer *typer, AstExpr *whole, AstMemberAccess *ma);
@@ -536,6 +538,7 @@ bool is_prelude_identifier(Typer *typer, AstIdentifier *ident) {
     if (parser->runtime_file_path && strcmp(file->absolute_path, parser->runtime_file_path) == 0) return true;
     if (parser->builtin_string_file_path && strcmp(file->absolute_path, parser->builtin_string_file_path) == 0) return true;
     if (parser->slices_file_path && strcmp(file->absolute_path, parser->slices_file_path) == 0) return true;
+    if (parser->any_file_path && strcmp(file->absolute_path, parser->any_file_path) == 0) return true;
     return false;
 }
 
@@ -1408,6 +1411,12 @@ TypeStruct *method_holder_of(Typer *typer, Type *type) {
         }
         return enum_type->method_holder;
     }
+    case TYPE_ANY: {
+        if (typer->any_method_holder == NULL) {
+            typer->any_method_holder = generate_empty_struct_type(typer->parser, "any");
+        }
+        return typer->any_method_holder;
+    }
     default:
         return NULL;
     }
@@ -1506,6 +1515,13 @@ bool register_generic_method(Typer *typer, AstFunctionDefn *generic) {
         }
     }
 
+    // A method with type parameters of its own on any e.g 'to :: method <T>(v: any) -> T, bool'
+    if (receiver_type && receiver_type->kind == TYPE_ANY) {
+        TypeStruct *holder = method_holder_of(typer, receiver_type);
+        generic->method_struct = holder;
+        return register_method(typer, generic, holder);
+    }
+
     if (receiver_type == NULL || receiver_type->kind != TYPE_GENERIC_INSTANCE) {
         report_error_ast(parser, LABEL_ERROR, receiver_type ? (Ast *)receiver_type : (Ast *)receiver, "The receiver of a generic method must be a slice []T, a struct or a generic struct, with the type parameters of the method as its type arguments");
         report_error_ast(parser, LABEL_HINT, NULL, "e.g set :: method <K, V>(m: *Map<K, V>, key: K, value: V)");
@@ -1587,7 +1603,7 @@ bool register_method_early(Typer *typer, AstFile *file, AstDeclaration *decl) {
         if (receiver_type == NULL) continue;
 
         // Methods on primitive types e.g 'hash :: method (x: int) -> u64'
-        if (receiver_type->kind == TYPE_BOOL || receiver_type->kind == TYPE_INTEGER || receiver_type->kind == TYPE_FLOAT) {
+        if (receiver_type->kind == TYPE_BOOL || receiver_type->kind == TYPE_INTEGER || receiver_type->kind == TYPE_FLOAT || receiver_type->kind == TYPE_ANY) {
             TypeStruct *holder = method_holder_of(typer, receiver_type);
             if (holder == NULL) continue;
 
@@ -3654,11 +3670,16 @@ check_identifiers_vs_values:
 //
 
 bool is_optional_type(Type *type) {
+    return is_standard_collection(type, "Optional");
+}
+
+// An instance of the generic struct of the standard collections with the name, e.g List for a List<int>
+bool is_standard_collection(Type *type, const char *name) {
     if (type == NULL || type->kind != TYPE_STRUCT) return false;
     AstStruct *node = ((TypeStruct *)type)->node;
-    if (node == NULL || node->generic_struct == NULL || node->type_args.count != 1) return false;
+    if (node == NULL || node->generic_struct == NULL) return false;
     AstStruct *generic = node->generic_struct;
-    if (strcmp(generic->identifier->name, "Optional") != 0) return false;
+    if (strcmp(generic->identifier->name, name) != 0) return false;
 
     // Only the one of the standard collections, not a struct of a program that has the same name
     AstFile *file = generic->head.file;
@@ -7430,7 +7451,7 @@ static Type *check_function_signature_and_body(Typer *typer, AstFunctionDefn *fu
         Type *receiver_value_type = receiver_type->kind == TYPE_POINTER ? ((TypePointer *)receiver_type)->pointer_to : receiver_type;
         TypeStruct *receiver_struct = method_holder_of(typer, receiver_value_type);
         if (receiver_struct == NULL) {
-            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must be a struct, a string, a primitive type or an enum, or a pointer to one of those. Got type %s", text_bold(type_to_str(receiver_type)));
+            report_error_ast(typer->parser, LABEL_ERROR, (Ast *)receiver_type, "Receiver type must be a struct, a string, a primitive type, an enum or any, or a pointer to one of those. Got type %s", text_bold(type_to_str(receiver_type)));
             report_error_ast(typer->parser, LABEL_NOTE, NULL, "Methods on arrays and pointers to pointers are not supported yet");
             return NULL;
         }
@@ -8844,6 +8865,21 @@ Type *check_member_access(Typer *typer, AstMemberAccess *ma) {
             report_error_ast(typer->parser, LABEL_ERROR, (Ast *)(ma->right), "%s has no method '%s'. It is a newtype of string, and has the members of a string but not its methods", type_to_str(newtype_value), name);
             report_error_ast(typer->parser, LABEL_HINT, NULL, "Cast it to use the method of string, e.g (x as string).%s()", name);
             return NULL;
+        }
+    }
+
+    // The methods of any, e.g value.toInt() with 'toInt :: method (value: any) -> i64, bool'. Its members data and type come
+    // from the struct Any, and a method of the same name as one of them can't be declared
+    Type *any_value = type_lhs->kind == TYPE_POINTER ? ((TypePointer *)type_lhs)->pointer_to : type_lhs;
+    if (any_value->kind == TYPE_ANY && typer->any_method_holder && is_literal_identifier(ma->right)) {
+        char *name = ((AstLiteral *)ma->right)->as.value.identifier.name;
+        AstIdentifier *method = get_struct_method(typer->any_method_holder->node, name);
+        if (method) {
+            index_identifier_use((Ast *)ma->right, method);
+            ma->struct_type   = typer->any_method_holder;
+            ma->access_kind   = MEMBER_ACCESS_STRUCT_MEMBER;
+            ma->struct_member = method;
+            return method->type;
         }
     }
 

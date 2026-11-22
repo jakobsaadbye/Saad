@@ -696,6 +696,7 @@ static void write_int_bytes(uint8_t *dst, int64_t value, int size) {
 // Writes the constant expression 'expr', interpreted as type 'type', into a global's data
 static void write_default_constants(Lowerer *L, IrGlobal *global, int offset, Type *type);
 bool is_optional_type(Type *type);
+bool is_standard_collection(Type *type, const char *name);
 Type *optional_inner_type(Type *type);
 int   optional_present_offset(Type *type);
 
@@ -2618,12 +2619,10 @@ static int type_info_global(Lowerer *L, Type *type) {
 
     const char *layout = "Type";
     switch (type->kind) {
-    case TYPE_VOID: case TYPE_BOOL: case TYPE_INTEGER: case TYPE_FLOAT: layout = "TypePrimitive"; break;
     case TYPE_POINTER: layout = "TypePointer"; break;
     case TYPE_ARRAY:   layout = "TypeArray";   break;
     case TYPE_ENUM:    layout = "TypeEnum";    break;
     case TYPE_STRUCT:  layout = "TypeStruct";  break;
-    case TYPE_ANY:     layout = "TypeAny";     break;
     default: break;
     }
 
@@ -2638,9 +2637,14 @@ static int type_info_global(Lowerer *L, Type *type) {
     write_int_bytes(&global->data[runtime_offset(L, "Type", "kind")], type->kind - TYPE_VOID, 4);
     write_int_bytes(&global->data[runtime_offset(L, "Type", "size")], type->size, 4);
 
+    // What else the type is, a TypeFlags of runtime.sd: isUnion, isOptional, isFlags, isSigned, isChar, isList, isMap
+    int flags = 0;
     switch (type->kind) {
-    case TYPE_VOID: case TYPE_BOOL: case TYPE_INTEGER: case TYPE_FLOAT: {
-        write_int_bytes(&global->data[runtime_offset(L, "TypePrimitive", "kind")], ((TypePrimitive *) type)->kind - 1, 4);
+    case TYPE_INTEGER: {
+        PrimitiveKind kind = ((TypePrimitive *) type)->kind;
+        bool is_signed = kind == PRIMITIVE_INT || kind == PRIMITIVE_I8 || kind == PRIMITIVE_I16 || kind == PRIMITIVE_I32 || kind == PRIMITIVE_I64;
+        if (is_signed) flags |= 8;
+        if (kind == PRIMITIVE_CHAR) flags |= 16;
         break;
     }
     case TYPE_POINTER: {
@@ -2650,7 +2654,7 @@ static int type_info_global(Lowerer *L, Type *type) {
     }
     case TYPE_ARRAY: {
         TypeArray *array = (TypeArray *) type;
-        write_int_bytes(&global->data[runtime_offset(L, "TypeArray", "kind")], array->array_kind, 4);
+        write_int_bytes(&global->data[runtime_offset(L, "TypeArray", "arrayKind")], array->array_kind, 4);
         write_pointer_field(global, runtime_offset(L, "TypeArray", "elemType"), type_info_global(L, array->elem_type));
         int64_t count = array->array_kind == ARRAY_FIXED ? fixed_array_count(array) : 0;
         write_int_bytes(&global->data[runtime_offset(L, "TypeArray", "count")], count, 8);
@@ -2660,7 +2664,7 @@ static int type_info_global(Lowerer *L, Type *type) {
         TypeEnum *enum_type = (TypeEnum *) type;
         write_pointer_field(global, runtime_offset(L, "TypeEnum", "backingType"), type_info_global(L, enum_type->backing_type));
         if (enum_type->node && enum_type->node->is_flags) {
-            write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], 4, 4); // TypeFlags.isFlags in runtime.sd
+            flags |= 4;
         }
         int count = 0;
         int values = enum_values_global(L, enum_type, &count);
@@ -2686,17 +2690,16 @@ static int type_info_global(Lowerer *L, Type *type) {
             }
             write_slice_field(global, runtime_offset(L, "TypeStruct", "attributes"), attributes->index, attribute_count);
         }
-        if (struct_type->node->is_union) {
-            write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], 1, 4); // TypeFlags.isUnion in runtime.sd
-        }
-        if (is_optional_type(type)) {
-            write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], 2, 4); // TypeFlags.isOptional in runtime.sd
-        }
+        if (struct_type->node->is_union) flags |= 1;
+        if (is_optional_type(type))      flags |= 2;
+        if (is_standard_collection(type, "List")) flags |= 32;
+        if (is_standard_collection(type, "Map"))  flags |= 64;
         break;
     }
     default:
         break;
     }
+    write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], flags, 4);
 
     return global->index;
 }

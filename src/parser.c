@@ -672,6 +672,13 @@ AstFile *parse_file(Parser *parser, char *file_path) {
         prelude = ((AstImport **)file->imports.items)[file->imports.count - 1];
         prelude->is_prelude = true;
 
+        if (parser->any_file_path && strcmp(file_path, parser->any_file_path) != 0) {
+            ok = generate_and_add_import(parser, "any", parser->any_file_path);
+            if (!ok) return NULL;
+            prelude = ((AstImport **)file->imports.items)[file->imports.count - 1];
+            prelude->is_prelude = true;
+        }
+
         if (parser->expression_trees_file_path && strcmp(file_path, parser->expression_trees_file_path) == 0) {
             parser->expression_trees_file = file;
         }

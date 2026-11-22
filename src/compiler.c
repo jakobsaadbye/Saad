@@ -817,6 +817,7 @@ bool compile_program(CompilerConfig *config, const char *main_path, bool output_
     parser.builtin_string_file_path = join_path(prelude_path, "string.sd");
     parser.collections_file_path    = join_path(prelude_path, "collections.sd");
     parser.slices_file_path         = join_path(prelude_path, "slices.sd");
+    parser.any_file_path            = join_path(prelude_path, "any.sd");
     parser.expression_trees_file_path = join_path(prelude_path, "expression_trees.sd");
     parser.errors_file_path         = join_path(prelude_path, "errors.sd");
     parser.allocator_file_path      = join_path(prelude_path, "allocator.sd");
