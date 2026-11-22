@@ -77,7 +77,8 @@ diagnostics of `saad check`:
   `enumMember`, `field`, `variant`, `constant`, `global`, `variable`, `parameter`, `typeAlias` and `typeParameter`.
   `nameRange` is its name and `range` the whole declaration, e.g a function with its body. `detail` is its signature
   or type. `container` is the symbol it is in (the struct of a field or method, the enum of a value), or -1. `doc` is
-  the `//` lines right above it, when there are any.
+  the `//` lines right above it, when there are any. A field, variant or enum value without them has the `//` comment
+  at the end of its line instead, e.g `x: f32;   // Across, in pixels`.
 * A **reference** is a use of a symbol: go to definition is the symbol of the reference under the cursor, and find
   references is every reference of a symbol. A declaration is not a reference of itself.
 * By default the index has the program's files, and the symbols of the standard library that the program uses.

@@ -23,7 +23,7 @@ Circle :: struct {
 Status :: enum { open, closed }
 
 Pair :: struct <T> {
-    first:  T;
+    first:  T;          // The one on the left
     second: T;
 }
 

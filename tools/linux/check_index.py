@@ -43,5 +43,15 @@ for number, line in enumerate(lines(fid)):
         if name in KEYWORDS or name in NO_DECLARATION: continue
         if (number, m.start()) not in covered: problems.append(f"{target}:{number + 1}: '{name}' is not in the index")
 
+# A field or enum value has the doc of the lines above it, or else of the comment at the end of its line
+for s in d['symbols']:
+    if s['file'] != fid or s['kind'] not in ('field', 'variant', 'enumMember'): continue
+    number = s['nameRange']['start']['line']
+    above = number > 0 and lines(fid)[number - 1].strip().startswith('//')
+    code = re.sub(r'"(\\.|[^"\\])*"', lambda m: ' ' * len(m.group(0)), lines(fid)[number])
+    if above or '//' not in code: continue
+    trailing = code.split('//', 1)[1].lstrip('/').strip()
+    if s.get('doc') != trailing: problems.append(f"{target}:{number + 1}: the doc of {s['name']} is {s.get('doc')!r}, not {trailing!r}")
+
 for p in problems: print(p)
 sys.exit(1 if problems else 0)
