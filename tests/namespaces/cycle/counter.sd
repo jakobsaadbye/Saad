@@ -1,0 +1,25 @@
+namespace cycle_counter;
+
+// A namespace that imports one that imports it back (tests/namespace_cycles.sd)
+
+import cycle_user;
+
+Counter :: struct {
+    n: int;
+}
+
+@private
+bump :: method (c: *Counter) {
+    c.n += 1;
+}
+
+// Uses its own private method. When cycle_user calls it before this file got to it, it is checked then, and was taken
+// for a use from cycle_user: 'bump' is private to the namespace 'cycle_counter'
+count :: (c: *Counter) -> int {
+    c.bump();
+    return c.n;
+}
+
+twiceThroughTheOther :: () -> int {
+    return cycle_user.twice();
+}

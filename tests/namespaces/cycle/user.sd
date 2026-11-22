@@ -1,0 +1,9 @@
+namespace cycle_user;
+
+import cycle_counter;
+
+twice :: () -> int {
+    c: cycle_counter.Counter;
+    _ := cycle_counter.count(&c);
+    return cycle_counter.count(&c);
+}

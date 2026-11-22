@@ -7316,7 +7316,20 @@ Type *check_lambda_expression(Typer *typer, AstFunctionDefn *lambda, Type *ctx_t
 
 Type *check_function_defn(Typer *typer, AstFunctionDefn *func_defn) {
     if (func_defn->head.head.flags & AST_FLAG_HAS_ERRORS) return NULL;
+
+    // A function is checked in its own file, also when a call checks it before its file got to it, e.g a method of a
+    // namespace that the caller's namespace imports, and which imports it back. In the file of the caller, its uses of
+    // its own private names looked like uses from outside their namespace
+    AstFile *file_before        = typer->current_file;
+    AstFile *parser_file_before = typer->parser->current_file;
+    if (func_defn->head.head.file) {
+        typer->current_file         = func_defn->head.head.file;
+        typer->parser->current_file = func_defn->head.head.file;
+    }
     Type *type = check_function_signature_and_body(typer, func_defn);
+    typer->current_file         = file_before;
+    typer->parser->current_file = parser_file_before;
+
     if (type == NULL && !(func_defn->head.head.flags & AST_FLAG_IS_TYPE_CHECKED)) func_defn->head.head.flags |= AST_FLAG_HAS_ERRORS;
     return type;
 }
