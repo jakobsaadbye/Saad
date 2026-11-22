@@ -15,6 +15,7 @@ std/
                     null pointer
   allocators/   namespace allocators: Arena (arena.sd) and Pool (pool.sd) (see docs/allocators.md)
   c/            namespace c: bindings for the C runtime (stdio, stdlib, string)
+  cli/          namespace cli: the arguments of the command line, read into a struct (cli.parseArguments<T>)
   collections/  namespace collections: PriorityQueue<T> (priority_queue.sd), smallest first
   crypto/       namespace crypto: SHA-256 and HMAC-SHA256 (sha256.sd)
   errors/       namespace errors: errors.make, errors.typed and errors.wrap, which make errors (see docs/errors.md)
@@ -160,16 +161,19 @@ os.exit(1);
 `os.output` runs the command with cmd.exe and puts it in quotes first, so a command that starts with a quoted path
 works, e.g `os.output("\"C:/Program Files/tool.exe\" \"my file.txt\"")`.
 
-### The command line, into a struct
+`os.windows` has the bindings for the Windows API, e.g `CreateThread`, critical sections, condition variables,
+`Sleep`, `GetStdHandle`, `ReadFile` and `WriteFile`.
 
-`os.parseCliArguments<T>()` reads the arguments of the program into a struct, whose members are the options:
+## cli
+
+The command line, read into a struct. `cli.parseArguments<T>()` reads the arguments of the program into a struct, whose members are the options:
 
 ```odin
 Difficulty :: enum { easy, normal, expert }
 
-@os.CliOptions(about: "Runs games of bots, and says how they did")
+@cli.Options(about: "Runs games of bots, and says how they did")
 Options :: struct {
-    @os.CliArg(help: "The bots of each game", short: "b", min: 1, max: 8)
+    @cli.Arg(help: "The bots of each game", short: "b", min: 1, max: 8)
     botCount := 4;                       // --botCount 6, --botCount=6 or -b 6
     games := 3;
     seed: u64 = 1;
@@ -178,42 +182,42 @@ Options :: struct {
     look: f32 = 0.5;
     genome: ?string;                     // null when it isn't given
     tags: [..]string;                    // --tags a --tags b
-    @os.CliArg(positional: true, help: "Replays to watch")
+    @cli.Arg(positional: true, help: "Replays to watch")
     files: [..]string;                   // the values given without a name
     byDifficulty: [3]Stats;              // not an option: a fixed array isn't read from the command line
 }
 
-options, err := os.parseCliArguments<Options>();
+options, err := cli.parseArguments<Options>();
 if err != null {
     fmt.print("%", err.message);   // e.g --botCount is from 1 to 8, not 9. --help lists the options
     os.exit(2);
 }
 ```
 
-* The name of an option is the name of the member: `botCount` is `--botCount`. `@os.CliOptions(naming: .kebab)` names
+* The name of an option is the name of the member: `botCount` is `--botCount`. `@cli.Options(naming: .kebab)` names
   all the options of the struct in kebab case, `--bot-count`, and `.snake` in snake case, `--bot_count`. An option
-  can be named otherwise with `@os.CliArg(naming: .kebab)`, or with `@os.CliArg(name: "bots")`. A `_` at the end of a
+  can be named otherwise with `@cli.Arg(naming: .kebab)`, or with `@cli.Arg(name: "bots")`. A `_` at the end of a
   member, e.g `for_`, is left out. A member that isn't given keeps its default.
 * A member is an option when its type can be read from text: `bool`, the integers (checked against the size, e.g an
   `i8` is -128 to 127), `f32` and `f64`, `string`, an enum (its value names, without case, `_` or `-`), an optional of
   one of them, and a list `[..]T` or slice `[]T` of them, which gets a value for each time the option is given. Other
   members are left alone.
-* `@os.CliArg` on a member: `name` instead of the name of the member, `naming` instead of the naming of the struct, `short` (a letter, for `-b`), `help`, `required`,
+* `@cli.Arg` on a member: `name` instead of the name of the member, `naming` instead of the naming of the struct, `short` (a letter, for `-b`), `help`, `required`,
   `positional` (given without a name, in the order of the members; a list takes all that are left), `min` and `max`
   of a number, and `skip`.
-* `@os.CliOptions` on the struct: `about` (what the program does, at the top of the help), `name` (of the program in
+* `@cli.Options` on the struct: `about` (what the program does, at the top of the help), `name` (of the program in
   the help, instead of the name of the file it was started as) and `naming` (`.camel`, the default, `.kebab` or
   `.snake`).
 * `--help` or `-h` prints the help and ends the program. `--` ends the options: what comes after are values.
   `-5` is a value, not an option.
-* A mistake gives an error of the kind `os.CliError`, whose message says what is wrong, e.g `Unknown option '--bots'
+* A mistake gives an error of the kind `cli.UsageError`, whose message says what is wrong, e.g `Unknown option '--bots'
   (did you mean --botCount?)`, and that `--help` lists the options.
-* `os.cliArgGiven(&options, &options.seed)` says if an option was given on the command line, rather than having its
+* `cli.wasGiven(&options, &options.seed)` says if an option was given on the command line, rather than having its
   default, also when it was given the same value as the default. It is about the last arguments read into a struct of
   that type. A member `seed: ?u64` says it too, as it is null when it isn't given, but then it has no default.
-* A member that is set in code instead, e.g from the options, takes `@os.CliArg(skip: true)`.
-* `os.parseCliArgumentsFrom<T>(arguments)` reads given arguments, without the program, e.g for a test. `--help` gives an
-  error of the kind `os.CliHelp` there, whose message is the help. `os.cliHelpOf<T>()` gives the help.
+* A member that is set in code instead, e.g from the options, takes `@cli.Arg(skip: true)`.
+* `cli.parseArgumentsFrom<T>(arguments)` reads given arguments, without the program, e.g for a test. `--help` gives an
+  error of the kind `cli.HelpRequested` there, whose message is the help. `cli.helpOf<T>()` gives the help.
 
 The help of the struct above:
 
@@ -235,9 +239,6 @@ Options:
   <files>                           Replays to watch
   -h, --help                        Shows this help
 ```
-
-`os.windows` has the bindings for the Windows API, e.g `CreateThread`, critical sections, condition variables,
-`Sleep`, `GetStdHandle`, `ReadFile` and `WriteFile`.
 
 ## io
 

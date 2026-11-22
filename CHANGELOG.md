@@ -2,6 +2,13 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.25.1 - 22. Nov 2026
+
+* The parser of the command line is the namespace `cli`, with shorter names: `cli.parseArguments<Options>()`,
+  `@cli.Options`, `@cli.Arg`, `cli.Naming`, `cli.wasGiven(&options, &options.seed)`, `cli.parseArgumentsFrom<T>(...)`,
+  `cli.helpOf<T>()`, and the error kinds `cli.UsageError` and `cli.HelpRequested`. They were `os.parseCliArguments`,
+  `@os.CliOptions`, `@os.CliArg` and so on (`std/cli/cli.sd`)
+
 ## Update v0.25.0 - 22. Nov 2026
 
 * `os.parseCliArguments<T>()`: the arguments of the command line, read into a struct whose members are the options.

@@ -74,13 +74,13 @@ for member in (rowAny.type as *TypeStruct).members {
 ### On structs
 
 Attribute values on a struct are in `TypeStruct.attributes`, and `type.attribute(&value)` gets one of them, e.g what
-`os.parseCliArguments` says about the program:
+`cli.parseArguments` says about the program:
 
 ```odin
-@os.CliOptions(about: "Runs games of bots")
+@cli.Options(about: "Runs games of bots")
 Options :: struct { ... }
 
-about: os.CliOptions;
+about: cli.Options;
 if (boxed.type as *TypeStruct).attribute(&about) { ... about.about ... }
 ```
 
