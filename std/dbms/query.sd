@@ -26,6 +26,7 @@ namespace dbms;
 // A member of a struct literal without a name gets the name of the member it reads, so the rows above are
 // struct { title: string; email: string; }. The join is a LEFT JOIN: a post without an author gives the defaults
 import fmt;
+import time;
 
 // A query of the rows of a table. The methods that add to it give a new query, so a query can be the start of others
 Query :: struct <T> {
@@ -416,7 +417,7 @@ SqlWriter :: struct {
 
     writeMember :: method * (node: *ExprNode) {
         // The length of a text column, e.g u.name.len
-        if node.left.kind == .member && node.name == "len" {
+        if node.left.kind == .member && node.name == "len" && isText(node.left) {
             self.sb.addString("length(");
             self.writeMember(node.left);
             self.sb.addChar(')');
@@ -711,8 +712,13 @@ SqlWriter :: struct {
             self.fail(fmt.sprint("The function % can't be made into SQL. Call it outside the lambda, and use its value", node.name));
             return;
         }
+        // The methods of texts and times, by the type of what they are called on, so that a method of the same name of another
+        // type isn't taken for one
         arguments := node.args.count;
-        if node.name == "toLower" || node.name == "toUpper" {
+        text := isText(node.left);
+        isTime := partType(node.left) != null && partType(node.left).is<time.Time>();
+        if !text && !isTime { self.failCall(node); return; }
+        if text && (node.name == "toLower" || node.name == "toUpper") {
             if arguments != 0 { self.failCall(node); return; }
             if node.name == "toLower" { self.sb.addString("lower("); } else { self.sb.addString("upper("); }
             self.write(node.left);
@@ -721,7 +727,7 @@ SqlWriter :: struct {
         }
         if arguments != 1 { self.failCall(node); return; }
         // Times, e.g p.publishedAt.after(since)
-        if node.name == "after" || node.name == "before" || node.name == "equal" {
+        if isTime && (node.name == "after" || node.name == "before" || node.name == "equal") {
             self.sb.addChar('(');
             self.write(node.left);
             if node.name == "after"  { self.sb.addString(" > "); }
@@ -731,7 +737,7 @@ SqlWriter :: struct {
             self.sb.addChar(')');
             return;
         }
-        if node.name == "startsWith" || node.name == "endsWith" {
+        if text && (node.name == "startsWith" || node.name == "endsWith") {
             // left(x, length(s)) = s, so that % and _ in s are no wildcards
             if node.name == "startsWith" { self.sb.addString("(left("); } else { self.sb.addString("(right("); }
             self.write(node.left);
@@ -742,7 +748,7 @@ SqlWriter :: struct {
             self.sb.addChar(')');
             return;
         }
-        if node.name == "indexOf" {
+        if text && node.name == "indexOf" {
             self.sb.addString("(strpos(");
             self.write(node.left);
             self.sb.addString(", ");
@@ -754,6 +760,10 @@ SqlWriter :: struct {
     }
 
     failCall :: method * (node: *ExprNode) {
+        if partType(node.left) != null && !isText(node.left) && !partType(node.left).is<time.Time>() {
+            self.fail(fmt.sprint("The method % of a % can't be made into SQL. Only methods of texts and times can: startsWith(s), endsWith(s), indexOf(s), toLower(), toUpper(), and after(t), before(t) and equal(t)", node.name, partType(node.left).name));
+            return;
+        }
         self.fail(fmt.sprint("The method % can't be made into SQL. These can: startsWith(s), endsWith(s), indexOf(s), toLower(), toUpper(), and after(t), before(t) and equal(t) of times", node.name));
     }
 
@@ -813,4 +823,20 @@ relationNamed :: (table: TableInfo, name: string) -> (Relation, bool) {
     }
     none: Relation;
     return none, false;
+}
+
+// The type of a part of a tree, without an optional around it, e.g string of x.email of an email: ?string. Null when the
+// tree doesn't say
+@private
+partType :: (node: *ExprNode) -> *Type {
+    if node == null || node.type == null { return null; }
+    if node.type.isOptional() { return node.type.optionalType(); }
+    return node.type;
+}
+
+// If the part is a text, e.g u.name
+@private
+isText :: (node: *ExprNode) -> bool {
+    type := partType(node);
+    return type != null && type.kind == .string;
 }

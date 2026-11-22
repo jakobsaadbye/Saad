@@ -25,6 +25,9 @@ What changed in each version of Saad: the language, the compiler, the standard l
   * `type.is<T>()` and `value.is<T>()` check a type by its descriptor instead of its name, so a struct of a program named
     like `time.Time` isn't taken for one. The standard library and `attributeOf` check types like that, instead of
     comparing `type.name` with a string or `typeof`
+  * The nodes of an expression tree have the type of their part, `ExprNode.type`, e.g `int` of `x.age`. dbms makes SQL of
+    the methods of texts and times only when they are called on a text or a `time.Time`, so a method `after` of another
+    type is an error of the query instead of a `>` (docs/expression_trees.md)
 
 ## Update v0.25.1 - 22. Nov 2026
 
