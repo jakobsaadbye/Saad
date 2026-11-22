@@ -26,6 +26,7 @@
 #include <llvm-c/TargetMachine.h>
 #include <llvm-c/Transforms/PassBuilder.h>
 #include <llvm-c/DebugInfo.h>
+#include <llvm/Config/llvm-config.h>   // LLVM_VERSION_MAJOR
 
 typedef struct LlvmEmitter {
     IrModule        *module;
@@ -334,7 +335,12 @@ static void llvm_di_locals(LlvmEmitter *e, IrFunction *func, LLVMBasicBlockRef a
             variable = LLVMDIBuilderCreateAutoVariable(e->di, scope, local->name, strlen(local->name), file, line, type, true, LLVMDIFlagZero, 0);
         }
         LLVMMetadataRef location = LLVMDIBuilderCreateDebugLocation(e->context, line, 0, scope, NULL);
+#if LLVM_VERSION_MAJOR >= 19
+        // LLVM 19 declares variables with debug records instead of calls of llvm.dbg.declare, and 20 has only those
+        LLVMDIBuilderInsertDeclareRecordAtEnd(e->di, e->slots[local->slot], variable, expression, location, allocas);
+#else
         LLVMDIBuilderInsertDeclareAtEnd(e->di, e->slots[local->slot], variable, expression, location, allocas);
+#endif
     }
 }
 
