@@ -72,6 +72,10 @@ main :: () {
     assert(v.member("level").setIntText("+12") && o.level == 12 && !v.member("level").setIntText("256") && !v.member("level").setIntText("1x"));
     big: u64;
     assert(anyOf(&big).setIntText("18446744073709551615") && big == 18446744073709551615);
+    // as any boxes a copy of the value, and keeps the type of a collection
+    copy := o as any;
+    assert(copy.member("level").setInt(1) && o.level == 12);
+    assert((5 as any).type.name == "int" && (o.tags as any).type.isList());
     s := v.member("name").ref<string>();
     assert(s != null && *s == "hi" && v.member("name").ref<int>() == null);
 }

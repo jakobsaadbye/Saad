@@ -68,6 +68,9 @@ for *member in v.type.asStruct().members {
 | `variant()`, `setVariant(name)` | the variant of a union and its value, and a variant to set |
 | `zero()`, `isEmpty()` | |
 
+* `x as any` boxes a value where no `any` is wanted, e.g `(5 as any).type.name` or `(user as any).member("name")`. Like
+  an `x` given for an `any`, it is an `any` of a copy, so changing it doesn't change `x`: `anyOf(&x)` is one that does.
+  A collection keeps its type, e.g `List<int>`, where an `x` given for an `any` becomes a slice.
 * A method that gives an `any` gives an empty one when there is no such value, e.g `member` of a name the struct doesn't
   have, `element` out of range or `deref` of null. The methods of an empty `any` do nothing and give false or another
   empty one, so `v.member("a").member("b").setInt(1)` is safe, and false when a part is missing.
