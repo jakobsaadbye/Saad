@@ -10,6 +10,7 @@
 //
 // Build it with 'saad build lsp/main.sd'. Usage: saad-lsp [--compiler path/to/saad]
 
+import cli;
 import rpc;
 import source;
 import project;
@@ -44,13 +45,19 @@ shuttingDown  := false;
 changedKey    := "";      // A document that changed, and whose program is checked when no more messages are waiting
 changedPath   := "";
 
+@cli.Options(name: "saad-lsp", about: "The Saad language server, which editors talk to over stdin and stdout")
+Options :: struct {
+    @cli.Arg(help: "The saad compiler it runs")
+    compiler: ?string;
+}
+
 main :: () {
-    args := os.args();
-    for arg, i in args {
-        if arg == "--compiler" && i + 1 < args.count {
-            compiler = args[i + 1];
-        }
+    options, usage := cli.parseArguments<Options>();
+    if usage != null {
+        fmt.print("%", usage.message);
+        os.exit(2);
     }
+    compiler = options.compiler ?? compiler;
     setupOverlayFolder();
     rpc.log(fmt.sprint("Started. The compiler is %", compiler));
 

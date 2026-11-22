@@ -5,6 +5,7 @@
 //
 // It empties the blog first, so it can be run again
 
+import cli;
 import api;
 import web;
 import net.http;
@@ -32,10 +33,19 @@ serve :: (app: *web.App) {
     app.server.serve();
 }
 
+@cli.Options(about: "Starts the blog with the posts to start with, and calls its API")
+Options :: struct {
+    @cli.Arg(positional: true, help: "How to connect to Postgres, e.g the database of tools/linux/dbtests.sh")
+    connection := "host=localhost dbname=postgres user=postgres password=postgres";
+}
+
 main :: () {
-    connectionString := "host=localhost dbname=postgres user=postgres password=postgres";
-    args := os.args();
-    if args.count > 1 { connectionString = args[1]; }   // e.g the database of tools/linux/dbtests.sh
+    options, usage := cli.parseArguments<Options>();
+    if usage != null {
+        print("%", usage.message);
+        os.exit(2);
+    }
+    connectionString := options.connection;
 
     // An empty blog, with the posts to start with
     conn := postgres.connect(connectionString);

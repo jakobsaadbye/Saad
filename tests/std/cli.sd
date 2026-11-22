@@ -1,5 +1,8 @@
-// cli.parseArgumentsFrom: the options of the command line, read into a struct
+// cli.parseArguments: the options of the command line, read into a struct. The test starts itself again with the
+// arguments of each case (CLI_TEST says which struct), and the started one writes what it read as JSON, or the mistake
 import cli;
+import json;
+import os;
 use fmt;
 
 Difficulty :: enum { easy, normal, inTransit, expert }
@@ -44,29 +47,100 @@ Copy :: struct {
     for_: string;             // --for
 }
 
+// What the started test writes: the options and the members that were given
+Read :: struct<T> {
+    options: T;
+    given:   [..]string;
+}
+
+// The started test: reads its own arguments into a T, and writes them as JSON, or the mistake with exit code 3. --help
+// writes the help and ends with exit code 0
+child :: <T>(given: (options: *T) -> [..]string) {
+    options, err := cli.parseArguments<T>();
+    if err != null {
+        print("%", err.message);
+        os.exit(3);
+    }
+    print("%", json.encode(Read<T>{options: options, given: given(&options)}));
+    os.exit(0);
+}
+
+givenOptions :: (o: *Options) -> [..]string {
+    given: [..]string;
+    if cli.wasGiven(o, &o.botCount) { given.add("botCount"); }
+    if cli.wasGiven(o, &o.peaceful) { given.add("peaceful"); }
+    if cli.wasGiven(o, &o.output)   { given.add("output"); }
+    if cli.wasGiven(o, &o.tags)     { given.add("tags"); }
+    if cli.wasGiven(o, &o.cache)    { given.add("cache"); }
+    if cli.wasGiven(o, &o.stats)    { given.add("stats"); }
+    return given;
+}
+
+givenCamel :: (o: *Camel) -> [..]string {
+    given: [..]string;
+    if cli.wasGiven(o, &o.botCount)      { given.add("botCount"); }
+    if cli.wasGiven(o, &o.maxSpeed)      { given.add("maxSpeed"); }
+    if cli.wasGiven(o, &o.startLevel)    { given.add("startLevel"); }
+    if cli.wasGiven(o, &o.verboseOutput) { given.add("verboseOutput"); }
+    return given;
+}
+
+givenNone :: (o: *Copy) -> [..]string {
+    given: [..]string;
+    return given;
+}
+
+// Starts the test again with the arguments of a case, and gives what it read, or the message and exit code of a mistake
+run :: <T>(name: string, arguments: []string) -> (Read<T>, string, int) {
+    command := sprint("'%'", os.args()[0]);
+    for argument in arguments { command = sprint("% '%'", command, argument); }
+    os.setEnv("CLI_TEST", name);
+    text, code := os.output(command);
+    if text.endsWith("\n") { text = text.slice(0, text.len - 1); }
+    read: Read<T>;
+    if code == 0 && text.startsWith("{") {
+        decoded, err := json.decode<Read<T>>(text);
+        assert(err == null);
+        read = decoded;
+    }
+    return read, text, code;
+}
+
+has :: (given: [..]string, name: string) -> bool {
+    for g in given { if g == name { return true; } }
+    return false;
+}
+
 parse :: (arguments: []string) -> (Options, string) {
-    options, err := cli.parseArgumentsFrom<Options>(arguments);
-    if err != null { return options, err.message; }
-    return options, "";
+    read, text, code := run<Options>("Options", arguments);
+    if code != 0 { return read.options, text; }
+    return read.options, "";
 }
 
 main :: () {
+    which, started := os.getEnv("CLI_TEST");
+    if started && which == "Options" { child<Options>(givenOptions); }
+    if started && which == "Camel"   { child<Camel>(givenCamel); }
+    if started && which == "Copy"    { child<Copy>(givenNone); }
+
     // Every kind of value, with its name and = or the next argument, short options, flags and positional values
-    o, err := cli.parseArgumentsFrom<Options>(["-b", "6", "--games=5", "--peaceful", "--difficulty", "IN_TRANSIT", "--look", "0.25",
+    r, err, code := run<Options>("Options", ["-b", "6", "--games=5", "--peaceful", "--difficulty", "IN_TRANSIT", "--look", "0.25",
         "--genome", "g.txt", "--tags", "a", "--tags", "b", "x.rp", "-o", "out.txt", "y.rp",
         "--seed", "42", "--small", "-5"]);
-    assert(err == null);
+    if code != 0 { print("%", err); }
+    assert(code == 0);
+    o := r.options;
     assert(o.botCount == 6 && o.games == 5 && o.seed == 42 && o.small == -5 && o.peaceful && o.difficulty == .inTransit);
     assert(o.look == 0.25 && o.genome ?? "" == "g.txt" && o.output == "out.txt");
     assert(o.tags.count == 2 && o.tags[1] == "b" && o.files.count == 2 && o.files[0] == "x.rp" && o.files[1] == "y.rp");
-    o.tags.add("c");          // A list that was read is a list like any other
-    assert(o.tags.count == 3);
 
-    // What isn't given keeps its default
-    d, e1 := cli.parseArgumentsFrom<Options>(["--out", "x", "--peaceful=false", "--bot-count=2"]);
-    assert(e1 == null && d.games == 3 && d.seed == 1 && d.look == 0.5 && d.difficulty == .expert && d.genome == null && d.cache == 7);
+    // What isn't given keeps its default, and which options were given, also when given their default
+    rd, _, c1 := run<Options>("Options", ["--out", "x", "--peaceful=false", "--bot-count=2"]);
+    d := rd.options;
+    assert(c1 == 0 && d.games == 3 && d.seed == 1 && d.look == 0.5 && d.difficulty == .expert && d.genome == null && d.cache == 7);
     assert(!d.peaceful && d.botCount == 2 && d.files.count == 0);
-
+    assert(has(rd.given, "botCount") && has(rd.given, "peaceful") && has(rd.given, "output"));
+    assert(!has(rd.given, "tags") && !has(rd.given, "cache") && !has(rd.given, "stats"));
     // Mistakes say what is wrong
     _, m1 := parse(["--out", "x", "--bots", "2"]);
     assert(m1 == "Unknown option '--bots'. --help lists the options");
@@ -92,39 +166,35 @@ main :: () {
     assert(m11 == "--look is a number, not 'fast'. --help lists the options");
     _, m12 := parse(["--out", "x", "--stats", "1"]);
     assert(m12 == "Unknown option '--stats' (did you mean --tags?). --help lists the options");
-    _, eKind := cli.parseArgumentsFrom<Options>(["--nope"]);
-    assert(eKind.is(cli.UsageError));
+    _, _, eKind := run<Options>("Options", ["--nope"]);
+    assert(eKind == 3);
 
-    // If an option was given, also when it is given its default, rather than having it
-    g, e8 := cli.parseArgumentsFrom<Camel>(["--botCount", "4", "--v"]);
-    assert(e8 == null && cli.wasGiven(&g, &g.botCount) && cli.wasGiven(&g, &g.verboseOutput));
-    assert(!cli.wasGiven(&g, &g.maxSpeed) && !cli.wasGiven(&g, &g.startLevel));
-    // It is about the last arguments read into an Options without a mistake: those of d
-    assert(cli.wasGiven(&d, &d.botCount) && cli.wasGiven(&d, &d.peaceful) && cli.wasGiven(&d, &d.output));
-    assert(!cli.wasGiven(&d, &d.tags) && !cli.wasGiven(&d, &d.cache) && !cli.wasGiven(&d, &d.stats));
+    rg, _, c8 := run<Camel>("Camel", ["--botCount", "4", "--v"]);
+    assert(c8 == 0 && has(rg.given, "botCount") && has(rg.given, "verboseOutput"));
+    assert(!has(rg.given, "maxSpeed") && !has(rg.given, "startLevel"));
 
     // camelCase by default, and an option can be named otherwise
-    k, e6 := cli.parseArgumentsFrom<Camel>(["--botCount", "2", "--max-speed", "2.5", "--start_level", "3", "--v"]);
-    assert(e6 == null && k.botCount == 2 && k.maxSpeed == 2.5 && k.startLevel == 3 && k.verboseOutput);
-    _, e7 := cli.parseArgumentsFrom<Camel>(["--bot-count", "2"]);
-    assert(e7.message == "Unknown option '--bot-count' (did you mean --botCount?). --help lists the options");
+    rk, _, c6 := run<Camel>("Camel", ["--botCount", "2", "--max-speed", "2.5", "--start_level", "3", "--v"]);
+    k := rk.options;
+    assert(c6 == 0 && k.botCount == 2 && k.maxSpeed == 2.5 && k.startLevel == 3 && k.verboseOutput);
+    _, m13, _ := run<Camel>("Camel", ["--bot-count", "2"]);
+    assert(m13 == "Unknown option '--bot-count' (did you mean --botCount?). --help lists the options");
     camelHelp := cli.helpOf<Camel>("bots");
     assert(camelHelp.indexOf("--botCount <n>") >= 0 && camelHelp.indexOf("--max-speed <number>") >= 0 && camelHelp.indexOf("--start_level <n>") >= 0);
 
     // Positional values, in the order of the members, and -- before values that look like options
-    c, e2 := cli.parseArgumentsFrom<Copy>(["a.txt", "--for", "me", "b.txt"]);
-    assert(e2 == null && c.from == "a.txt" && c.to == "b.txt" && c.for_ == "me");
-    c2, e3 := cli.parseArgumentsFrom<Copy>(["--", "-x"]);
-    assert(e3 == null && c2.from == "-x" && c2.to == "");
+    rc, _, c2 := run<Copy>("Copy", ["a.txt", "--for", "me", "b.txt"]);
+    assert(c2 == 0 && rc.options.from == "a.txt" && rc.options.to == "b.txt" && rc.options.for_ == "me");
+    rc2, _, c3 := run<Copy>("Copy", ["--", "-x"]);
+    assert(c3 == 0 && rc2.options.from == "-x" && rc2.options.to == "");
     none: []string;
-    _, e4 := cli.parseArgumentsFrom<Copy>(none);
-    assert(e4.message == "<from> is needed. --help lists the options");
-    _, e5 := cli.parseArgumentsFrom<Copy>(["a", "b", "c"]);
-    assert(e5.message == "Didn't expect 'c'. --help lists the options");
+    _, m14, _ := run<Copy>("Copy", none);
+    assert(m14 == "<from> is needed. --help lists the options");
+    _, m15, _ := run<Copy>("Copy", ["a", "b", "c"]);
+    assert(m15 == "Didn't expect 'c'. --help lists the options");
 
-    // --help gives the help, made from the members and their attributes
-    _, help := cli.parseArgumentsFrom<Options>(["--help"], "race");
-    assert(help.is(cli.HelpRequested));
+    // --help writes the help, made from the members and their attributes, and ends the program
+    help := cli.helpOf<Options>("race");
     expected := "Runs games of bots, and says how they did
 
 Usage: race [options] [files...]
@@ -144,8 +214,10 @@ Options:
   <files>                           Replays to watch
   -h, --help                        Shows this help
 ";
-    if help.message != expected { print("%", help.message); }
-    assert(help.message == expected);
+    if help != expected { print("%", help); }
+    assert(help == expected);
+    _, written, c4 := run<Options>("Options", ["--help"]);
+    assert(c4 == 0 && written.startsWith("Runs games of bots") && written.indexOf("  -h, --help") >= 0);
     assert(cli.helpOf<Copy>("copy").startsWith("Usage: copy [options] <from> [to]\n"));
 
     print("cli ok");
