@@ -355,11 +355,11 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
                 if present { sb.addValueIn(value, inside); }
                 else       { sb.addString("null"); }
             }
-            else if arg.type.name == "fmt.Fixed" {
+            else if arg.is<Fixed>() {
                 f := *(arg.data as *Fixed);
                 sb.addFixed(f.value, f.decimals);
             }
-            else if arg.type.name == "time.Time" {
+            else if arg.is<time.Time>() {
                 // As text, e.g 2026-11-02T10:15:00Z
                 text := (*(arg.data as *time.Time)).toString();
                 sb.addString(text);

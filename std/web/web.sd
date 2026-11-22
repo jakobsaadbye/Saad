@@ -36,6 +36,7 @@ namespace web;
 
 import net.http;
 import json;
+import time;
 import fmt;
 import mem;
 import errors;
@@ -116,11 +117,10 @@ newApp :: <S>(prefix: string) -> *App, error {
     if app.prefix.endsWith("/") { app.prefix = app.prefix.slice(0, app.prefix.len - 1); }
 
     app.sessionType = typeInfo<S>().asStruct();
-    sessionBase := typeInfo<Session>();
-    if app.sessionType != sessionBase {
+    if !app.sessionType.is<Session>() {
         found := false;
         for member in app.sessionType.members {
-            if member.type == sessionBase {
+            if member.type.is<Session>() {
                 app.sessionOffset = member.offset as int;
                 found = true;
             }
@@ -404,7 +404,7 @@ jsonProblem :: (type: *Type, reading: bool, depth: int) -> string {
         case .struct {
             // What json reads and writes as a whole
             name := type.name;
-            if name == "time.Time" || name == "json.Value" { return ""; }
+            if type.is<time.Time>() || type.is<json.Value>() { return ""; }
             if type.isOptional() { return jsonProblem(type.optionalType(), reading, depth + 1); }
             if type.isList() { return jsonProblem(type.elementType(), reading, depth + 1); }
             if type.isMap() {
@@ -441,7 +441,7 @@ isText :: (type: *Type) -> bool {
 
 // If the type is error, a *Error
 isErrorType :: (type: *Type) -> bool {
-    return type == typeInfo<error>();
+    return type.is<error>();
 }
 
 // The parameters after the session: the members of the JSON object of the body for POST, or the query for GET, and the

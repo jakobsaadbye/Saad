@@ -22,6 +22,9 @@ What changed in each version of Saad: the language, the compiler, the standard l
   * They replace `TypeEnum.readValue`, `TypeStruct.optionalValue`, `setOptional`, `variantOf`, `setVariant`,
     `isPrimitive` and `reflect.makeAny`. fmt, json, web, html, dbms, sqlite, cli and reflect use them, instead of their
     own copies of reading integers, writing enums, the elements of lists and the layout of a Map
+  * `type.is<T>()` and `value.is<T>()` check a type by its descriptor instead of its name, so a struct of a program named
+    like `time.Time` isn't taken for one. The standard library and `attributeOf` check types like that, instead of
+    comparing `type.name` with a string or `typeof`
 
 ## Update v0.25.1 - 22. Nov 2026
 

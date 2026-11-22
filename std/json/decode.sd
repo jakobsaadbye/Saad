@@ -159,7 +159,7 @@ assign :: (v: Value, place: any, path: string, options: *Options) -> string {
             return assignElements(v, place, path, options);
         }
         case .struct {
-            if type.name == "time.Time" {
+            if type.is<time.Time>() {
                 // RFC 3339 text, e.g "2026-11-02T10:15:00Z"
                 if v.kind != .string { return mismatch(path, "a time as a string", v); }
                 t, ok := time.parse(v.text);
@@ -201,7 +201,7 @@ assignElements :: (v: Value, place: any, path: string, options: *Options) -> str
 assignStruct :: (v: Value, place: any, path: string, options: *Options) -> string {
     type := place.type.asStruct();
 
-    if type.name == typeof(Value) {
+    if type.is<Value>() {
         place.set(v.clone());
         return "";
     }

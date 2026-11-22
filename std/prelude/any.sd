@@ -26,14 +26,6 @@ anyOf :: <T>(pointer: *T) -> any {
     return p.deref();
 }
 
-// The type of T, e.g typeInfo<User>().asStruct().members
-typeInfo :: <T>() -> *Type {
-    // Through a pointer, which keeps the type of a collection, which would be a slice of its elements in an any
-    pointer: *T;
-    boxed: any = pointer;
-    return boxed.type.pointee();
-}
-
 // An any without a value, e.g of member("x") when there is no member x
 isEmpty :: method (v: any) -> bool {
     return v.type == null || v.data == null;
@@ -57,7 +49,7 @@ ref :: method <T>(v: any) -> *T {
 // If the value is a T
 is :: method <T>(v: any) -> bool {
     if v.isEmpty() { return false; }
-    return typeInfo<T>() == v.type;
+    return v.type.is<T>();
 }
 
 // Makes the value zero, e.g 0, false, an empty string or a struct of zeros

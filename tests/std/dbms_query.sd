@@ -70,7 +70,7 @@ main :: () {
     since := time.date(2026, 11, 2, 10, 15);
     sqlTime, argsTime, _ := users.where(u => u.createdAt.after(since) && (u.seenAt?.before(since) ?? true)).toSql();
     assert(sqlTime == "SELECT * FROM \"shop\".\"users\" WHERE (((\"created_at\" > $1) AND coalesce((\"seen_at\" < $2), $3)))");
-    assert(argsTime[0].type.name == "time.Time" && (*(argsTime[0].data as *time.Time)).toString() == "2026-11-02T10:15:00Z");
+    assert(argsTime[0].is<time.Time>() && (*(argsTime[0].data as *time.Time)).toString() == "2026-11-02T10:15:00Z");
 
     // Sorting and a part of the rows
     sql3, _, _ := users.orderBy(u => u.name.toLower()).orderByDescending(u => u.id).limit(10).offset(20).toSql();

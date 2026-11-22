@@ -182,7 +182,7 @@ wasGiven :: <T, M>(options: *T, member: *M) -> bool {
     // The member at the offset whose type is M (the first member of a struct member has the same offset)
     name := "";
     for m in type.members {
-        if m.offset == offset && m.type == typeInfo<M>() { name = m.name; }
+        if m.offset == offset && m.type.is<M>() { name = m.name; }
     }
     if name == "" { return false; }
 
