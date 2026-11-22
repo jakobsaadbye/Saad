@@ -1,0 +1,152 @@
+// os.parseCliArgumentsFrom: the options of the command line, read into a struct
+import os;
+use fmt;
+
+Difficulty :: enum { easy, normal, inTransit, expert }
+
+@os.CliOptions(about: "Runs games of bots, and says how they did", naming: .kebab)
+Options :: struct {
+    @os.CliArg(help: "The bots of each game", short: "b", min: 1, max: 8)
+    botCount := 4;
+    games := 3;
+    seed:     u64 = 1;
+    small:    i8;
+    peaceful: bool;
+    difficulty := Difficulty.expert;
+    look:   f32 = 0.5;
+    genome: ?string;
+    tags:   [..]string;
+    stats:  [3]int;           // Not an option, as a fixed array isn't read from the command line
+    @os.CliArg(skip: true)
+    cache := 7;
+    @os.CliArg(name: "out", short: "o", required: true)
+    output: string;
+    @os.CliArg(positional: true, help: "Replays to watch")
+    files:  [..]string;
+}
+
+// The names of the members, unless the struct or an option says otherwise
+Camel :: struct {
+    botCount := 4;
+    @os.CliArg(naming: .kebab)
+    maxSpeed := 1.0;
+    @os.CliArg(naming: .snake)
+    startLevel := 0;
+    @os.CliArg(name: "v")
+    verboseOutput: bool;
+}
+
+Copy :: struct {
+    @os.CliArg(positional: true, required: true)
+    from: string;
+    @os.CliArg(positional: true)
+    to:   string;
+    for_: string;             // --for
+}
+
+parse :: (arguments: []string) -> (Options, string) {
+    options, err := os.parseCliArgumentsFrom<Options>(arguments);
+    if err != null { return options, err.message; }
+    return options, "";
+}
+
+main :: () {
+    // Every kind of value, with its name and = or the next argument, short options, flags and positional values
+    o, err := os.parseCliArgumentsFrom<Options>(["-b", "6", "--games=5", "--peaceful", "--difficulty", "IN_TRANSIT", "--look", "0.25",
+        "--genome", "g.txt", "--tags", "a", "--tags", "b", "x.rp", "-o", "out.txt", "y.rp",
+        "--seed", "42", "--small", "-5"]);
+    assert(err == null);
+    assert(o.botCount == 6 && o.games == 5 && o.seed == 42 && o.small == -5 && o.peaceful && o.difficulty == .inTransit);
+    assert(o.look == 0.25 && o.genome ?? "" == "g.txt" && o.output == "out.txt");
+    assert(o.tags.count == 2 && o.tags[1] == "b" && o.files.count == 2 && o.files[0] == "x.rp" && o.files[1] == "y.rp");
+    o.tags.add("c");          // A list that was read is a list like any other
+    assert(o.tags.count == 3);
+
+    // What isn't given keeps its default
+    d, e1 := os.parseCliArgumentsFrom<Options>(["--out", "x", "--peaceful=false", "--bot-count=2"]);
+    assert(e1 == null && d.games == 3 && d.seed == 1 && d.look == 0.5 && d.difficulty == .expert && d.genome == null && d.cache == 7);
+    assert(!d.peaceful && d.botCount == 2 && d.files.count == 0);
+
+    // Mistakes say what is wrong
+    _, m1 := parse(["--out", "x", "--bots", "2"]);
+    assert(m1 == "Unknown option '--bots'. --help lists the options");
+    _, m2 := parse(["--out", "x", "--bot-cont", "2"]);
+    assert(m2 == "Unknown option '--bot-cont' (did you mean --bot-count?). --help lists the options");
+    _, m3 := parse(["--out", "x", "--games", "many"]);
+    assert(m3 == "--games is a whole number, not 'many'. --help lists the options");
+    _, m4 := parse(["--out", "x", "--difficulty", "hard"]);
+    assert(m4 == "--difficulty is one of easy, normal, inTransit, expert, not 'hard'. --help lists the options");
+    _, m5 := parse(["--out", "x", "--games"]);
+    assert(m5 == "--games needs a value, e.g --games <n>. --help lists the options");
+    _, m6 := parse(["--out", "x", "-b", "9"]);
+    assert(m6 == "--bot-count is from 1 to 8, not 9. --help lists the options");
+    _, m7 := parse(["--games", "1"]);
+    assert(m7 == "--out is needed. --help lists the options");
+    _, m8 := parse(["--out", "x", "--small", "200"]);
+    assert(m8 == "--small is from -128 to 127, not 200. --help lists the options");
+    _, m9 := parse(["--out", "x", "--seed", "-1"]);
+    assert(m9 == "--seed can't be negative, not -1. --help lists the options");
+    _, m10 := parse(["--out", "x", "--peaceful=maybe"]);
+    assert(m10 == "--peaceful is true or false, not 'maybe'. --help lists the options");
+    _, m11 := parse(["--out", "x", "--look", "fast"]);
+    assert(m11 == "--look is a number, not 'fast'. --help lists the options");
+    _, m12 := parse(["--out", "x", "--stats", "1"]);
+    assert(m12 == "Unknown option '--stats' (did you mean --tags?). --help lists the options");
+    _, eKind := os.parseCliArgumentsFrom<Options>(["--nope"]);
+    assert(eKind.is(os.CliError));
+
+    // If an option was given, also when it is given its default, rather than having it
+    g, e8 := os.parseCliArgumentsFrom<Camel>(["--botCount", "4", "--v"]);
+    assert(e8 == null && os.cliArgGiven(&g, &g.botCount) && os.cliArgGiven(&g, &g.verboseOutput));
+    assert(!os.cliArgGiven(&g, &g.maxSpeed) && !os.cliArgGiven(&g, &g.startLevel));
+    // It is about the last arguments read into an Options without a mistake: those of d
+    assert(os.cliArgGiven(&d, &d.botCount) && os.cliArgGiven(&d, &d.peaceful) && os.cliArgGiven(&d, &d.output));
+    assert(!os.cliArgGiven(&d, &d.tags) && !os.cliArgGiven(&d, &d.cache) && !os.cliArgGiven(&d, &d.stats));
+
+    // camelCase by default, and an option can be named otherwise
+    k, e6 := os.parseCliArgumentsFrom<Camel>(["--botCount", "2", "--max-speed", "2.5", "--start_level", "3", "--v"]);
+    assert(e6 == null && k.botCount == 2 && k.maxSpeed == 2.5 && k.startLevel == 3 && k.verboseOutput);
+    _, e7 := os.parseCliArgumentsFrom<Camel>(["--bot-count", "2"]);
+    assert(e7.message == "Unknown option '--bot-count' (did you mean --botCount?). --help lists the options");
+    camelHelp := os.cliHelpOf<Camel>("bots");
+    assert(camelHelp.indexOf("--botCount <n>") >= 0 && camelHelp.indexOf("--max-speed <number>") >= 0 && camelHelp.indexOf("--start_level <n>") >= 0);
+
+    // Positional values, in the order of the members, and -- before values that look like options
+    c, e2 := os.parseCliArgumentsFrom<Copy>(["a.txt", "--for", "me", "b.txt"]);
+    assert(e2 == null && c.from == "a.txt" && c.to == "b.txt" && c.for_ == "me");
+    c2, e3 := os.parseCliArgumentsFrom<Copy>(["--", "-x"]);
+    assert(e3 == null && c2.from == "-x" && c2.to == "");
+    none: []string;
+    _, e4 := os.parseCliArgumentsFrom<Copy>(none);
+    assert(e4.message == "<from> is needed. --help lists the options");
+    _, e5 := os.parseCliArgumentsFrom<Copy>(["a", "b", "c"]);
+    assert(e5.message == "Didn't expect 'c'. --help lists the options");
+
+    // --help gives the help, made from the members and their attributes
+    _, help := os.parseCliArgumentsFrom<Options>(["--help"], "race");
+    assert(help.is(os.CliHelp));
+    expected := "Runs games of bots, and says how they did
+
+Usage: race [options] [files...]
+
+Options:
+  -b, --bot-count <n>               The bots of each game (1 to 8, default 4)
+      --games <n>                   (default 3)
+      --seed <n>                    (default 1)
+      --small <n>                   (default 0)
+      --peaceful
+      --difficulty <easy|normal|inTransit|expert>
+                                    (default expert)
+      --look <number>               (default 0.5)
+      --genome <text>
+      --tags <text>                 (can be given more than once)
+  -o, --out <text>                  (needed)
+  <files>                           Replays to watch
+  -h, --help                        Shows this help
+";
+    if help.message != expected { print("%", help.message); }
+    assert(help.message == expected);
+    assert(os.cliHelpOf<Copy>("copy").startsWith("Usage: copy [options] <from> [to]\n"));
+
+    print("cli ok");
+}

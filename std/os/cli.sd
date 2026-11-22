@@ -1,0 +1,703 @@
+namespace os;
+
+// The arguments of the command line, read into a struct whose members are the options, e.g
+//
+//     @os.CliOptions(about: "Runs games of bots, and says how they did")
+//     Options :: struct {
+//         @os.CliArg(help: "The bots of each game", short: "b", min: 1, max: 8)
+//         botCount := 4;                      // --botCount 6, -b 6 or --botCount=6
+//         seed: u64 = 1;
+//         peaceful: bool;                     // --peaceful, a flag
+//         difficulty := Difficulty.expert;    // --difficulty easy, by the name of the value
+//         genome: ?string;                    // null when it isn't given
+//         @os.CliArg(positional: true)
+//         files: [..]string;                  // what is given without a name
+//     }
+//
+//     options, err := os.parseCliArguments<Options>();
+//     if err != null {
+//         fmt.print("%", err.message);
+//         os.exit(2);
+//     }
+//
+// The name of an option is the name of the member, e.g botCount is --botCount. @os.CliOptions(naming: .kebab) makes the
+// options of a struct --bot-count, and @os.CliArg(naming: ...) or (name: ...) changes the name of one. --help and -h
+// print the help, made from the members and their @os.CliArg, and end the program. See docs/standard_library.md
+
+import fmt;
+import errors;
+
+// How the names of the options are made from the names of the members
+CliNaming :: enum {
+    camel,  // As the member is named: botCount is --botCount
+    kebab,  // botCount is --bot-count
+    snake,  // botCount is --bot_count
+}
+
+// On the struct of the options: what the help says about the program, and how the options are named
+@attribute
+CliOptions :: struct {
+    name:   string;               // Of the program in the help. Without it, the name of the file it was started as
+    about:  string;               // What the program does, at the top of the help
+    naming: CliNaming = .camel;   // Of all the options, unless an option says otherwise
+}
+
+// On a member of the struct of the options
+@attribute
+CliArg :: struct {
+    name:       string;      // Of the option, instead of the name of the member, e.g "bots" for --bots
+    naming:     ?CliNaming;  // How the name of this option is made, instead of the naming of the struct
+    short:      string;  // A letter for a short option, e.g "b" for -b
+    help:       string;  // What it is, in the help
+    required:   bool;    // It must be given
+    positional: bool;    // Given without a name, in the order of the members. A list takes all that are left
+    min:        ?f64;    // The smallest value of a number
+    max:        ?f64;    // The largest value of a number
+    skip:       bool;    // Not an option, e.g a member the program fills in itself
+}
+
+CliError :: ErrorKind{"os.CliError"};  // The arguments don't fit the options, or the struct can't have them
+CliHelp  :: ErrorKind{"os.CliHelp"};   // --help or -h was given. The message is the help
+
+// The options of the command line the program was started with. --help prints the help and ends the program. A
+// mistake, e.g an unknown option or a number that isn't one, is an error of the kind CliError, whose message says what
+// is wrong and that --help lists the options
+parseCliArguments :: <T>() -> (T, error) {
+    all := args();
+    rest: [..]string;
+    for i in 1..all.count { rest.add(all[i]); }
+    program := "program";
+    if all.count > 0 { program = baseName(all[0]); }
+
+    options, err := parseCliArgumentsFrom<T>(rest.elements(), program);
+    if err != null && err.is(CliHelp) {
+        fmt.print("%", err.message);
+        exit(0);
+    }
+    return options, err;
+}
+
+// The options of arguments, without the name of the program, e.g for a test. --help gives an error of the kind
+// CliHelp, whose message is the help
+parseCliArgumentsFrom :: <T>(arguments: []string, program := "program") -> (T, error) {
+    result: T;
+    boxed: any = result;
+    if boxed.type.kind != .struct {
+        return result, errors.make("The options are a struct, not a %", boxed.type.name, kind: CliError);
+    }
+    type := boxed.type as *TypeStruct;
+    options, problem := cliOptionsOf(type);
+    if problem != "" { return result, errors.make("%", problem, kind: CliError); }
+    data := (&result) as *void;
+
+    positional := 0;    // The next positional option
+    onlyValues := false; // After --
+    i := 0;
+    while i < arguments.count {
+        text := arguments[i];
+        i += 1;
+
+        if !onlyValues && text == "--" {
+            onlyValues = true;
+            continue;
+        }
+        if !onlyValues && (text == "--help" || text == "-h") {
+            defaults: T;
+            return result, errors.make("%", cliHelp(type, options, program, (&defaults) as *void), kind: CliHelp);
+        }
+
+        isLong  := !onlyValues && text.startsWith("--");
+        isShort := !onlyValues && !isLong && text.len > 1 && text[0] == '-' && !isNumberText(text);
+        if !isLong && !isShort {
+            // A value without a name
+            while positional < options.count && !options[positional].arg.positional { positional += 1; }
+            if positional >= options.count {
+                return result, cliError("Didn't expect '%'", text);
+            }
+            option := options.indexRef(positional);
+            message := option.set(data, text);
+            if message != "" { return result, cliError("%", message); }
+            if !option.isList { positional += 1; }
+            continue;
+        }
+
+        // A name, and maybe its value after =, e.g --bots=6
+        name := text.slice(1);
+        if isLong { name = text.slice(2); }
+        value := "";
+        hasValue := false;
+        at := name.indexOf("=");
+        if at >= 0 {
+            value = name.slice(at + 1);
+            name = name.slice(0, at);
+            hasValue = true;
+        }
+
+        option := findCliOption(&options, name, isShort);
+        if option == null {
+            message := fmt.sprint("Unknown option '%'", text);
+            closest := closestCliOption(&options, name);
+            if closest != "" { message = fmt.sprint("% (did you mean --%?)", message, closest); }
+            return result, cliError("%", message);
+        }
+        if option.arg.positional && !hasValue && option.isFlag {
+            return result, cliError("% is given without its name", option.title());
+        }
+        if !hasValue {
+            if option.isFlag {
+                value = "true";
+            } else {
+                if i >= arguments.count {
+                    return result, cliError("% needs a value, e.g %", option.title(), option.example());
+                }
+                value = arguments[i];
+                i += 1;
+            }
+        }
+        message := option.set(data, value);
+        if message != "" { return result, cliError("%", message); }
+    }
+
+    for option in options {
+        if option.arg.required && !option.given {
+            return result, cliError("% is needed", option.title());
+        }
+    }
+    rememberGiven(type, &options);
+    return result, null;
+}
+
+// If an option was given on the command line, rather than having its default, e.g
+//
+//     options, err := os.parseCliArguments<Options>();
+//     if os.cliArgGiven(&options, &options.seed) { ... }
+//
+// It is about the last arguments that were read into a struct of the type T without a mistake
+cliArgGiven :: <T, M>(options: *T, member: *M) -> bool {
+    boxed: any = *options;
+    if boxed.type.kind != .struct { return false; }
+    type := boxed.type as *TypeStruct;
+    offset := (member as i64) - (options as i64);
+
+    // The member at the offset whose type is M (the first member of a struct member has the same offset). A list is a
+    // slice in an any, so else the one of the size of M
+    empty: M;
+    memberBoxed: any = empty;
+    name := "";
+    for m in type.members {
+        if m.offset == offset && m.type == memberBoxed.type { name = m.name; }
+    }
+    if name == "" {
+        for m in type.members {
+            if m.offset == offset && m.type.size == sizeof(M) { name = m.name; }
+        }
+    }
+    if name == "" { return false; }
+
+    for record in givenRecords {
+        if record.type == type { return record.members.contains(name); }
+    }
+    return false;
+}
+
+// The options that were given, by the struct of the options
+@private
+GivenRecord :: struct {
+    type:    *TypeStruct;
+    members: [..]string;
+}
+
+@private
+givenRecords: [..]GivenRecord;
+
+@private
+rememberGiven :: (type: *TypeStruct, options: *[..]CliOption) {
+    record := GivenRecord{type: type};
+    for option in *options {
+        if option.given { record.members.add(option.member.name); }
+    }
+    for i in 0..givenRecords.count {
+        if givenRecords[i].type == type {
+            givenRecords[i].members.free();
+            givenRecords[i] = record;
+            return;
+        }
+    }
+    givenRecords.add(record);
+}
+
+// The help of the options of T, as --help prints it
+cliHelpOf :: <T>(program := "program") -> string {
+    empty: T;
+    boxed: any = empty;
+    if boxed.type.kind != .struct { return ""; }
+    type := boxed.type as *TypeStruct;
+    options, _ := cliOptionsOf(type);
+    return cliHelp(type, options, program, (&empty) as *void);
+}
+
+//
+// How it works: an option for each member that can be read from text, found through reflection
+//
+
+@private
+CliOption :: struct {
+    member: *StructMember;
+    long:   string;    // Without --
+    short:  string;
+    arg:    CliArg;
+    value:  *Type;     // The type of a value: of the member, of an optional's value, or of a list's elements
+    isFlag: bool;      // A bool, which needs no value
+    isList: bool;      // Each value is added
+    given:  bool;
+
+    // Reads the text into the member
+    set :: method * (data: *void, text: string) -> string {
+        place := self.member.valueIn(data);
+        if self.isList {
+            place = addListElement(place, self.member.type, self.value.size);
+        } else if self.member.type.isOptional() {
+            item, _ := (self.member.type as *TypeStruct).setOptional(place, true);
+            place = item;
+        }
+        message := writeCliValue(text, place, self.value, self.title(), self.arg);
+        self.given = true;
+        return message;
+    }
+
+    // How it is written, e.g --bots or the name of a positional value
+    title :: method () -> string {
+        if self.arg.positional { return fmt.sprint("<%>", self.long); }
+        return fmt.sprint("--%", self.long);
+    }
+
+    example :: method () -> string {
+        return fmt.sprint("--% %", self.long, placeholderOf(self.value));
+    }
+}
+
+// The options of a struct, or what is wrong with it
+@private
+cliOptionsOf :: (type: *TypeStruct) -> ([..]CliOption, string) {
+    options: [..]CliOption;
+    lists := 0;
+    about: CliOptions;
+    type.attribute(&about);
+    for i in 0..type.members.count {
+        member := &type.members[i];
+        arg: CliArg;
+        hasArg := attributeOf(member, &arg);
+        if arg.skip || member.isHidden() { continue; }
+
+        option := CliOption{member: member, arg: arg};
+        option.long = optionName(member.name, arg.naming ?? about.naming);
+        if arg.name.len > 0 { option.long = arg.name; }
+        option.short = arg.short;
+
+        // What the value is
+        valueType := member.type;
+        if member.type.isOptional() {
+            valueType = (member.type as *TypeStruct).members[0].type;   // The item of the optional
+        } else if listElementType(member.type) != null {
+            valueType = listElementType(member.type);
+            option.isList = true;
+        }
+        if !canReadCliValue(valueType) {
+            if hasArg {
+                return options, fmt.sprint("The member % of % can't be an option, as a % isn't read from the command line", member.name, type.head.name, member.type.name);
+            }
+            continue;  // Not an option, e.g a table the program fills in
+        }
+        option.value  = valueType;
+        option.isFlag = valueType.kind == .bool && !option.isList;
+
+        if option.isList && arg.positional { lists += 1; }
+        for other in options {
+            if other.long == option.long {
+                return options, fmt.sprint("The members % and % of % are both the option --%", other.member.name, member.name, type.head.name, option.long);
+            }
+            if option.short.len > 0 && other.short == option.short {
+                return options, fmt.sprint("The members % and % of % are both the option -%", other.member.name, member.name, type.head.name, option.short);
+            }
+        }
+        options.add(option);
+    }
+    if lists > 1 {
+        return options, fmt.sprint("% has more than one positional list, which would each take all the values that are left", type.head.name);
+    }
+    return options, "";
+}
+
+@private
+findCliOption :: (options: *[..]CliOption, name: string, isShort: bool) -> *CliOption {
+    for i in 0..options.count {
+        option := options.indexRef(i);
+        if isShort {
+            if option.short == name { return option; }
+        } else if option.long == name || option.member.name == name {
+            return option;
+        }
+    }
+    return null;
+}
+
+// The name of the option that is closest to a name that isn't one, e.g bots for bost, or empty
+@private
+closestCliOption :: (options: *[..]CliOption, name: string) -> string {
+    best := "";
+    bestDistance := 3;
+    for option in *options {
+        distance := editDistance(name, option.long);
+        if distance < bestDistance {
+            best = option.long;
+            bestDistance = distance;
+        }
+    }
+    return best;
+}
+
+@private
+cliError :: (format: string, args: ...any) -> error {
+    message := fmt.sprint(format, ...args);
+    return errors.make("%. --help lists the options", message, kind: CliError);
+}
+
+@private
+canReadCliValue :: (type: *Type) -> bool {
+    switch type.kind {
+        case .bool
+        case .int
+        case .float
+        case .string
+        case .enum { return true; }
+        else { return false; }
+    }
+}
+
+// The type of the elements of a [..]T or []T, or null
+@private
+listElementType :: (type: *Type) -> *Type {
+    if type.kind == .array && (type as *TypeArray).kind == .slice {
+        return (type as *TypeArray).elemType;
+    }
+    if type.kind == .struct && type.name.startsWith("List<") {
+        data := &(type as *TypeStruct).members[0];
+        return (data.type as *TypePointer).pointerTo;
+    }
+    return null;
+}
+
+// Makes room for one more element at the end of a list or a slice, and gives where it goes
+@private
+addListElement :: (place: *void, type: *Type, size: int) -> *void {
+    // A slice is { data, count } and a List is { data, count, capacity, allocator }
+    bytes := place as *u8;
+    data  := place as **u8;
+    count := (&bytes[8]) as *i64;
+    memory := resizeMemory(heapAllocator(), *data, *count * size as i64, (*count + 1) * size as i64) as *u8;
+    *data = memory;
+    if type.kind == .struct {
+        *((&bytes[16]) as *i64) = *count + 1;                 // capacity
+        *((&bytes[24]) as *Allocator) = heapAllocator();      // where its memory is from
+    }
+    element := (&memory[*count * size as i64]) as *void;
+    *count += 1;
+    return element;
+}
+
+// Reads a text into a value of the type. Gives what is wrong, or empty
+@private
+writeCliValue :: (text: string, data: *void, type: *Type, title: string, arg: CliArg) -> string {
+    switch type.kind {
+        case .bool {
+            lower := text.toLower();
+            if lower == "true" || lower == "yes" || lower == "1" || lower == "on" { *(data as *bool) = true; return ""; }
+            if lower == "false" || lower == "no" || lower == "0" || lower == "off" { *(data as *bool) = false; return ""; }
+            return fmt.sprint("% is true or false, not '%'", title, text);
+        }
+        case .int {
+            parsed := text.toInt();
+            if !parsed.hasValue() { return fmt.sprint("% is a whole number, not '%'", title, text); }
+            n := parsed.value();
+            prim := type as *TypePrimitive;
+            signed := prim.kind == .int || prim.kind == .i8 || prim.kind == .i16 || prim.kind == .i32 || prim.kind == .i64;
+            bits := type.size * 8;
+            if signed && bits < 64 {
+                limit := (1 as i64) << (bits - 1);
+                if n < -limit || n >= limit { return fmt.sprint("% is from % to %, not %", title, -limit, limit - 1, n); }
+            }
+            if !signed {
+                if n < 0 { return fmt.sprint("% can't be negative, not %", title, n); }
+                if bits < 64 && n >= (1 as i64) << bits { return fmt.sprint("% is at most %, not %", title, ((1 as i64) << bits) - 1, n); }
+            }
+            message := checkCliRange(n as f64, title, arg, text);
+            if message != "" { return message; }
+            switch type.size {
+                case 1 { *(data as *u8) = n as u8; }
+                case 2 { *(data as *u16) = n as u16; }
+                case 4 { *(data as *u32) = n as u32; }
+                else   { *(data as *i64) = n; }
+            }
+            return "";
+        }
+        case .float {
+            parsed := text.toFloat();
+            if !parsed.hasValue() { return fmt.sprint("% is a number, not '%'", title, text); }
+            f := parsed.value();
+            message := checkCliRange(f, title, arg, text);
+            if message != "" { return message; }
+            if type.size == 4 { *(data as *f32) = f as f32; }
+            else              { *(data as *f64) = f; }
+            return "";
+        }
+        case .string {
+            *(data as *string) = text;
+            return "";
+        }
+        case .enum {
+            enumType := type as *TypeEnum;
+            wanted := normalName(text);
+            for v in enumType.values {
+                if normalName(v.name) == wanted {
+                    writeEnumBits(data, enumType.backingType.size, v.value);
+                    return "";
+                }
+            }
+            names: [..]string;
+            for v in enumType.values { names.add(v.name); }
+            return fmt.sprint("% is one of %, not '%'", title, fmt.join(names.elements(), ", "), text);
+        }
+        else {
+            return fmt.sprint("% can't be read from the command line", title);
+        }
+    }
+}
+
+@private
+checkCliRange :: (n: f64, title: string, arg: CliArg, text: string) -> string {
+    if arg.min.hasValue() && arg.max.hasValue() && (n < arg.min.value() || n > arg.max.value()) {
+        return fmt.sprint("% is from % to %, not %", title, numberText(arg.min.value()), numberText(arg.max.value()), text);
+    }
+    if arg.min.hasValue() && n < arg.min.value() { return fmt.sprint("% is at least %, not %", title, numberText(arg.min.value()), text); }
+    if arg.max.hasValue() && n > arg.max.value() { return fmt.sprint("% is at most %, not %", title, numberText(arg.max.value()), text); }
+    return "";
+}
+
+@private
+writeEnumBits :: (data: *void, size: int, value: i64) {
+    switch size {
+        case 1 { *(data as *u8) = value as u8; }
+        case 2 { *(data as *u16) = value as u16; }
+        case 4 { *(data as *u32) = value as u32; }
+        else   { *(data as *i64) = value; }
+    }
+}
+
+//
+// The help
+//
+
+@private
+cliHelp :: (type: *TypeStruct, options: [..]CliOption, program: string, defaults: *void) -> string {
+    about: CliOptions;
+    type.attribute(&about);
+    name := program;
+    if about.name.len > 0 { name = about.name; }
+
+    sb: fmt.StringBuilder;
+    if about.about.len > 0 { sb.add("%\n\n", about.about); }
+    sb.add("Usage: % [options]", name);
+    for option in options {
+        if !option.arg.positional { continue; }
+        if option.isList { sb.add(" [%...]", option.long); }
+        else if option.arg.required { sb.add(" <%>", option.long); }
+        else { sb.add(" [%]", option.long); }
+    }
+    sb.addString("\n\nOptions:\n");
+
+    lefts: [..]string;
+    rights: [..]string;
+    for option in options {
+        left := "";
+        if option.arg.positional {
+            left = fmt.sprint("<%>", option.long);
+        } else {
+            short := "    ";
+            if option.short.len > 0 { short = fmt.sprint("-%, ", option.short); }
+            left = fmt.sprint("%--%", short, option.long);
+            if !option.isFlag { left = fmt.sprint("% %", left, placeholderOf(option.value)); }
+        }
+
+        notes: [..]string;
+        if option.arg.required { notes.add("needed"); }
+        if option.arg.min.hasValue() && option.arg.max.hasValue() {
+            notes.add(fmt.sprint("% to %", numberText(option.arg.min.value()), numberText(option.arg.max.value())));
+        } else if option.arg.min.hasValue() {
+            notes.add(fmt.sprint("at least %", numberText(option.arg.min.value())));
+        } else if option.arg.max.hasValue() {
+            notes.add(fmt.sprint("at most %", numberText(option.arg.max.value())));
+        }
+        if option.isList && !option.arg.positional { notes.add("can be given more than once"); }
+        shown := defaultText(option, defaults);
+        if shown != "" { notes.add(fmt.sprint("default %", shown)); }
+
+        right := option.arg.help;
+        if notes.count > 0 {
+            joined := fmt.join(notes.elements(), ", ");
+            if right.len > 0 { right = fmt.sprint("% (%)", right, joined); }
+            else             { right = fmt.sprint("(%)", joined); }
+        }
+        lefts.add(left);
+        rights.add(right);
+    }
+    lefts.add("-h, --help");
+    rights.add("Shows this help");
+
+    width := 0;
+    for left in lefts {
+        if left.len > width { width = left.len as int; }
+    }
+    if width > 32 { width = 32; }
+    for left, i in lefts {
+        sb.add("  %", left);
+        if rights[i].len > 0 {
+            if left.len > width { sb.add("\n  "); sb.addRepeated(' ', width); }
+            else                { sb.addRepeated(' ', width - left.len as int); }
+            sb.add("  %", rights[i]);
+        }
+        sb.addChar('\n');
+    }
+    return sb.toString();
+}
+
+// The default of an option as text, or empty when it has none worth showing (false, 0 of a flag, an empty text)
+@private
+defaultText :: (option: CliOption, defaults: *void) -> string {
+    if option.isList || option.isFlag || option.member.type.isOptional() || option.arg.required { return ""; }
+    place := option.member.valueIn(defaults);
+    if option.value.kind == .enum {
+        enumType := option.value as *TypeEnum;
+        name, _ := enumType.nameOf(enumType.readValue(place));
+        return name;
+    }
+    if option.value.kind == .float {
+        if option.value.size == 4 { return numberText((*(place as *f32)) as f64); }
+        return numberText(*(place as *f64));
+    }
+    value: any;
+    value.type = option.member.type;
+    value.data = place;
+    text := fmt.sprint("%", value);
+    if text == "" || text == "\"\"" { return ""; }
+    return text;
+}
+
+@private
+placeholderOf :: (type: *Type) -> string {
+    switch type.kind {
+        case .int    { return "<n>"; }
+        case .float  { return "<number>"; }
+        case .string { return "<text>"; }
+        case .bool   { return "<true|false>"; }
+        case .enum {
+            names: [..]string;
+            for v in (type as *TypeEnum).values { names.add(v.name); }
+            return fmt.sprint("<%>", fmt.join(names.elements(), "|"));
+        }
+        else { return "<value>"; }
+    }
+}
+
+//
+// Names and numbers
+//
+
+// The name of the option of a member, e.g botCount is botCount, bot-count or bot_count. A _ at the end, of a member
+// named like a keyword, is left out: for_ is for
+@private
+optionName :: (name: string, naming: CliNaming) -> string {
+    end := name.len as int;
+    while end > 1 && name[end - 1] == '_' { end -= 1; }
+    if naming == .camel { return name.slice(0, end); }
+
+    separator: u8 = '-';
+    if naming == .snake { separator = '_'; }
+    sb: fmt.StringBuilder;
+    for i in 0..end {
+        c := name[i];
+        if c >= 'A' && c <= 'Z' {
+            if i > 0 && !(name[i - 1] >= 'A' && name[i - 1] <= 'Z') { sb.addChar(separator); }
+            sb.addChar(c + 32);
+        } else if c == '_' || c == '-' {
+            sb.addChar(separator);
+        } else {
+            sb.addChar(c);
+        }
+    }
+    return sb.toString();
+}
+
+// A name without case, - or _, so in_transit, inTransit and in-transit are the same
+@private
+normalName :: (name: string) -> string {
+    sb: fmt.StringBuilder;
+    for c in name {
+        if c == '_' || c == '-' { continue; }
+        if c >= 'A' && c <= 'Z' { sb.addChar(c + 32); } else { sb.addChar(c); }
+    }
+    return sb.toString();
+}
+
+// -5 and -0.5 are values, not options
+@private
+isNumberText :: (text: string) -> bool {
+    return text.len > 1 && text[0] == '-' && text[1] >= '0' && text[1] <= '9';
+}
+
+@private
+numberText :: (n: f64) -> string {
+    if n == (n as i64) as f64 { return fmt.sprint("%", n as i64); }
+    // Without the zeros at the end, e.g 0.5 instead of 0.500000
+    text := fmt.sprint("%", n);
+    end := text.len as int;
+    if text.indexOf(".") >= 0 {
+        while end > 0 && text[end - 1] == '0' { end -= 1; }
+    }
+    return text.slice(0, end);
+}
+
+// The name of a file without its folders and .exe, e.g race of C:/games/race.exe
+@private
+baseName :: (path: string) -> string {
+    start := 0;
+    for c, i in path {
+        if c == '/' || c == '\\' { start = (i + 1) as int; }
+    }
+    name := path.slice(start);
+    if name.endsWith(".exe") { name = name.slice(0, (name.len - 4) as int); }
+    return name;
+}
+
+// How many letters change from one to the other
+@private
+editDistance :: (a: string, b: string) -> int {
+    previous: [..]int;
+    current: [..]int;
+    for j in 0..b.len + 1 { previous.add(j as int); current.add(0); }
+    for i in 1..a.len + 1 {
+        current[0] = i as int;
+        for j in 1..b.len + 1 {
+            cost := 1;
+            if a[i - 1] == b[j - 1] { cost = 0; }
+            best := previous[j] + 1;
+            if current[j - 1] + 1 < best { best = current[j - 1] + 1; }
+            if previous[j - 1] + cost < best { best = previous[j - 1] + cost; }
+            current[j] = best;
+        }
+        for j in 0..b.len + 1 { previous[j] = current[j]; }
+    }
+    distance := previous[b.len];
+    previous.free();
+    current.free();
+    return distance;
+}

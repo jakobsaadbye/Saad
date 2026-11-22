@@ -1401,11 +1401,16 @@ Ast *parse_attributed_declaration(Parser *parser) {
         da_append(&parser->attributed_functions, idents[0]);
         custom.count = 0;
     }
+    // A struct takes the values of attribute structs too, e.g @os.CliOptions(about: "..."). They are in TypeStruct.attributes
+    if (custom.count > 0 && stmt->kind == AST_STRUCT && count == 1) {
+        idents[0]->attributes = custom;
+        custom.count = 0;
+    }
     if (custom.count > 0) {
         AstStructLiteral *value = ((AstStructLiteral **)custom.items)[0];
         report_error_ast(parser, LABEL_ERROR, (Ast *)value, "Unknown attribute '@%s'", type_to_str(value->explicit_type));
         report_error_ast(parser, LABEL_HINT, NULL, "The attributes of the language are @private, @deprecated(\"message\"), @attribute, @embed, @threadLocal and @noOverflowCheck");
-        report_error_ast(parser, LABEL_NOTE, NULL, "The values of structs marked with @attribute can only be given to struct members, functions and methods");
+        report_error_ast(parser, LABEL_NOTE, NULL, "The values of structs marked with @attribute can only be given to structs, struct members, functions and methods");
         return NULL;
     }
     if (is_attribute) {

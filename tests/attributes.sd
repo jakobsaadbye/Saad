@@ -30,7 +30,33 @@ membersOf :: (value: any) -> []StructMember {
     return (value.type as *TypeStruct).members;
 }
 
+// Attribute values on a struct, in TypeStruct.attributes
+@Column(name: "players")
+@Ignore
+Table :: struct {
+    id: int;
+}
+
+Box :: struct <T> {
+    value: T;
+}
+
 main :: () {
+    {
+        table: Table;
+        boxed: any = table;
+        type := boxed.type as *TypeStruct;
+        assert(type.attributes.count == 2);
+        column: Column;
+        assert(type.attribute(&column) && column.name == "players");
+        ignore: Ignore;
+        assert(type.attribute(&ignore));
+
+        box: Box<int>;
+        boxedBox: any = box;
+        assert((boxedBox.type as *TypeStruct).attributes.count == 0);
+    }
+
     members := membersOf(Row{});
     assert(members.count == 3);
 

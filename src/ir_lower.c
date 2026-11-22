@@ -2673,6 +2673,19 @@ static int type_info_global(Lowerer *L, Type *type) {
         int members = struct_members_global(L, struct_type, &count);
         write_slice_field(global, runtime_offset(L, "TypeStruct", "members"), members, count);
         write_int_bytes(&global->data[runtime_offset(L, "TypeStruct", "alignment")], struct_type->alignment, 4);
+        // The values of the attributes of the struct, e.g @os.CliOptions(about: "..."). An instance of a generic struct has
+        // those of the generic struct
+        AstIdentifier *declared = struct_type->node->generic_struct ? struct_type->node->generic_struct->identifier : struct_type->node->identifier;
+        int attribute_count = declared ? declared->attributes.count : 0;
+        if (attribute_count > 0 && declared->attributes.items != NULL) {
+            IrGlobal *attributes = ir_global_data(L->module, "attributes", NULL, attribute_count * 16, 8, true);
+            for (int j = 0; j < attribute_count; j++) {
+                AstStructLiteral *value = da_get_deref(declared->attributes, j);
+                write_pointer_field(attributes, j * 16,     attribute_value_global(L, value));
+                write_pointer_field(attributes, j * 16 + 8, type_info_global(L, value->head.type));
+            }
+            write_slice_field(global, runtime_offset(L, "TypeStruct", "attributes"), attributes->index, attribute_count);
+        }
         if (struct_type->node->is_union) {
             write_int_bytes(&global->data[runtime_offset(L, "Type", "flags")], 1, 4); // TypeFlags.isUnion in runtime.sd
         }
