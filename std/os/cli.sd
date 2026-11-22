@@ -5,7 +5,7 @@ namespace os;
 //     @os.CliOptions(about: "Runs games of bots, and says how they did")
 //     Options :: struct {
 //         @os.CliArg(help: "The bots of each game", short: "b", min: 1, max: 8)
-//         bots := 4;                          // --bots 6, -b 6 or --bots=6
+//         botCount := 4;                      // --botCount 6, -b 6 or --botCount=6
 //         seed: u64 = 1;
 //         peaceful: bool;                     // --peaceful, a flag
 //         difficulty := Difficulty.expert;    // --difficulty easy, by the name of the value
@@ -20,23 +20,33 @@ namespace os;
 //         os.exit(2);
 //     }
 //
-// The name of an option is the name of the member in kebab case, e.g botCount is --bot-count. --help and -h print the
-// help, made from the members and their @os.CliArg, and end the program. See docs/standard_library.md
+// The name of an option is the name of the member, e.g botCount is --botCount. @os.CliOptions(naming: .kebab) makes the
+// options of a struct --bot-count, and @os.CliArg(naming: ...) or (name: ...) changes the name of one. --help and -h
+// print the help, made from the members and their @os.CliArg, and end the program. See docs/standard_library.md
 
 import fmt;
 import errors;
 
-// On the struct of the options: what the help says about the program
+// How the names of the options are made from the names of the members
+CliNaming :: enum {
+    camel,  // As the member is named: botCount is --botCount
+    kebab,  // botCount is --bot-count
+    snake,  // botCount is --bot_count
+}
+
+// On the struct of the options: what the help says about the program, and how the options are named
 @attribute
 CliOptions :: struct {
-    name:  string;  // Of the program in the help. Without it, the name of the file it was started as
-    about: string;  // What the program does, at the top of the help
+    name:   string;               // Of the program in the help. Without it, the name of the file it was started as
+    about:  string;               // What the program does, at the top of the help
+    naming: CliNaming = .camel;   // Of all the options, unless an option says otherwise
 }
 
 // On a member of the struct of the options
 @attribute
 CliArg :: struct {
-    name:       string;  // Of the option, instead of the name of the member in kebab case, e.g "bots" for --bots
+    name:       string;      // Of the option, instead of the name of the member, e.g "bots" for --bots
+    naming:     ?CliNaming;  // How the name of this option is made, instead of the naming of the struct
     short:      string;  // A letter for a short option, e.g "b" for -b
     help:       string;  // What it is, in the help
     required:   bool;    // It must be given
@@ -211,6 +221,8 @@ CliOption :: struct {
 cliOptionsOf :: (type: *TypeStruct) -> ([..]CliOption, string) {
     options: [..]CliOption;
     lists := 0;
+    about: CliOptions;
+    type.attribute(&about);
     for i in 0..type.members.count {
         member := &type.members[i];
         arg: CliArg;
@@ -218,7 +230,7 @@ cliOptionsOf :: (type: *TypeStruct) -> ([..]CliOption, string) {
         if arg.skip || member.isHidden() { continue; }
 
         option := CliOption{member: member, arg: arg};
-        option.long = kebabCase(member.name);
+        option.long = optionName(member.name, arg.naming ?? about.naming);
         if arg.name.len > 0 { option.long = arg.name; }
         option.short = arg.short;
 
@@ -540,19 +552,24 @@ placeholderOf :: (type: *Type) -> string {
 // Names and numbers
 //
 
-// e.g botCount is bot-count, and for_ is for
+// The name of the option of a member, e.g botCount is botCount, bot-count or bot_count. A _ at the end, of a member
+// named like a keyword, is left out: for_ is for
 @private
-kebabCase :: (name: string) -> string {
-    sb: fmt.StringBuilder;
+optionName :: (name: string, naming: CliNaming) -> string {
     end := name.len as int;
     while end > 1 && name[end - 1] == '_' { end -= 1; }
+    if naming == .camel { return name.slice(0, end); }
+
+    separator: u8 = '-';
+    if naming == .snake { separator = '_'; }
+    sb: fmt.StringBuilder;
     for i in 0..end {
         c := name[i];
         if c >= 'A' && c <= 'Z' {
-            if i > 0 && !(name[i - 1] >= 'A' && name[i - 1] <= 'Z') { sb.addChar('-'); }
+            if i > 0 && !(name[i - 1] >= 'A' && name[i - 1] <= 'Z') { sb.addChar(separator); }
             sb.addChar(c + 32);
-        } else if c == '_' {
-            sb.addChar('-');
+        } else if c == '_' || c == '-' {
+            sb.addChar(separator);
         } else {
             sb.addChar(c);
         }

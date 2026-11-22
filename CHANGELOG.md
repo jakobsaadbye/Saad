@@ -5,12 +5,13 @@ What changed in each version of Saad: the language, the compiler, the standard l
 ## Update v0.25.0 - 22. Nov 2026
 
 * `os.parseCliArguments<T>()`: the arguments of the command line, read into a struct whose members are the options.
-  `botCount := 4;` is `--bot-count 6` (or `=6`), a `bool` is a flag, an enum is given by the name of its value, an
+  `botCount := 4;` is `--botCount 6` (or `=6`), a `bool` is a flag, an enum is given by the name of its value, an
   optional is null when it isn't given, a list gets a value each time, and other members are left alone.
-  `@os.CliArg` on a member gives its `help`, a `short` letter, another `name`, `required`, `positional`, `min` and
+  `@os.CliOptions(naming: .kebab)` names the options `--bot-count` (or `.snake`, `--bot_count`), and
+  `@os.CliArg` on a member gives its `help`, a `short` letter, another `name` or `naming`, `required`, `positional`, `min` and
   `max`, or `skip`; `@os.CliOptions` on the struct gives what the program is `about`. `--help` prints the help, made
-  from the struct. A mistake is an `os.CliError` that says what is wrong, e.g `--bot-count is from 1 to 8, not 9` or
-  `Unknown option '--bots' (did you mean --bot-count?)`. `os.parseCliArgumentsFrom<T>(arguments)` reads given
+  from the struct. A mistake is an `os.CliError` that says what is wrong, e.g `--botCount is from 1 to 8, not 9` or
+  `Unknown option '--bots' (did you mean --botCount?)`. `os.parseCliArgumentsFrom<T>(arguments)` reads given
   arguments, e.g in a test (`std/os/cli.sd`, `tests/std/cli.sd`, docs/standard_library.md)
 * Attribute values on structs, e.g `@os.CliOptions(about: "...") Options :: struct {...}`, in `TypeStruct.attributes`,
   and `type.attribute(&value)` gets one (docs/reflection.md, `tests/attributes.sd`)
