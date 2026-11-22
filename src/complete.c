@@ -505,7 +505,9 @@ static void add_identifier(AstIdentifier *ident) {
 
     const char *kind = (declared->flags & IDENTIFIER_IS_NAMESPACE) ? "namespace" : kind_of(declared);
     char *detail = (declared->flags & IDENTIFIER_IS_NAMESPACE) ? "namespace" : detail_of(declared, kind);
-    char *doc = declared->head.file ? doc_comment(declared->head.file, declared->head.start.line) : NULL;
+    char *doc = !declared->head.file ? NULL
+              : is_member_kind(kind) ? member_doc_comment(declared->head.file, declared->head.start.line)
+              : doc_comment(declared->head.file, declared->head.start.line);
     if (strcmp(kind, "function") == 0 || strcmp(kind, "method") == 0) {
         AstFunctionDefn *func = function_of(declared);
         if (func) item_parameters = func->parameters.count - (func->is_method && func->parameters.count > 0 ? 1 : 0);
@@ -1146,7 +1148,7 @@ static void add_literal_fields(Literal *literal, const char *text, int offset) {
         char insert[160];
         snprintf(insert, sizeof(insert), "%s: ", member->name);
         AstFile *declared_in = member->head.file;
-        char *doc = declared_in ? doc_comment(declared_in, member->head.start.line) : NULL;
+        char *doc = declared_in ? member_doc_comment(declared_in, member->head.start.line) : NULL;
         add_item_inserting(member->name, node->is_union ? "variant" : "field", member->type ? type_to_str(member->type) : "", doc, insert);
     }
 }

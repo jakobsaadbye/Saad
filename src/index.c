@@ -575,6 +575,46 @@ static char *doc_comment(AstFile *file, int line) {
     return sb_to_string(&sb);
 }
 
+// The '//' comment at the end of a line, e.g of a struct member, without the slashes. NULL if the line has none
+static char *trailing_comment(AstFile *file, int line) {
+    if (file->text == NULL || line < 1) return NULL;
+    char *text = file->text;
+    for (int l = 1; l < line && *text; text++) {
+        if (*text == '\n') l++;
+    }
+    char quote = 0;
+    for (char *c = text; *c && *c != '\n'; c++) {
+        if (quote) {
+            if (*c == '\\' && c[1]) c++;
+            else if (*c == quote) quote = 0;
+            continue;
+        }
+        if (*c == '"' || *c == '\'' || *c == '`') { quote = *c; continue; }
+        if (c[0] != '/' || c[1] != '/') continue;
+        c += 2;
+        while (*c == '/') c++;
+        while (*c == ' ' || *c == '\t') c++;
+        char *end = c;
+        while (*end && *end != '\n' && *end != '\r') end++;
+        while (end > c && (end[-1] == ' ' || end[-1] == '\t')) end--;
+        if (end == c) return NULL;
+        StringBuilder sb = sb_init(64);
+        sb_append(&sb, "%.*s", (int)(end - c), c);
+        return sb_to_string(&sb);
+    }
+    return NULL;
+}
+
+// The doc of a member of a struct, union or enum: the comment above it, or else the one at the end of its line
+static char *member_doc_comment(AstFile *file, int line) {
+    char *doc = doc_comment(file, line);
+    return doc ? doc : trailing_comment(file, line);
+}
+
+static bool is_member_kind(const char *kind) {
+    return strcmp(kind, "field") == 0 || strcmp(kind, "variant") == 0 || strcmp(kind, "enumMember") == 0;
+}
+
 static int file_id(DynamicArray *files, AstFile *file) {
     for (int i = 0; i < files->count; i++) {
         if (((AstFile **)files->items)[i] == file) return i;
@@ -651,7 +691,7 @@ void write_index_json(FILE *out, bool success) {
         json_write_string(&sb, s->detail ? s->detail : "");
         sb_append(&sb, ", \"container\": %d", s->container >= 0 ? new_id[s->container] : -1);
         bool can_have_doc = strcmp(s->kind, "variable") != 0 && strcmp(s->kind, "parameter") != 0;
-        char *doc = can_have_doc ? doc_comment(s->file, s->start.line) : NULL;
+        char *doc = !can_have_doc ? NULL : is_member_kind(s->kind) ? member_doc_comment(s->file, s->start.line) : doc_comment(s->file, s->start.line);
         if (doc) {
             sb_append(&sb, ", \"doc\": ");
             json_write_string(&sb, doc);
