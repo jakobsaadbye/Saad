@@ -319,7 +319,7 @@ writeAny :: method (w: *Writer, value: any) {
                 item, present := value.optional();
                 if present { w.writeAny(item); }
                 else       { w.sb.addString("null"); }
-            } else if value.type.name == "time.Time" {
+            } else if value.is<time.Time>() {
                 // As RFC 3339 text, e.g "2026-11-02T10:15:00Z"
                 text := (*(value.data as *time.Time)).toString();
                 w.writeString(text);
@@ -354,7 +354,7 @@ writeElements :: method (w: *Writer, value: any) {
 @private
 writeStruct :: method (w: *Writer, value: any) {
     type := value.type;
-    if type.name == typeof(Value) {
+    if type.is<Value>() {
         w.writeValue(*(value.data as *Value));
         return;
     }
@@ -519,7 +519,7 @@ isEmpty :: (value: any) -> bool {
     if type.kind == .string || type.isSequence() || type.isMap() {
         return value.count() == 0;
     }
-    if type.name == typeof(Value) {
+    if type.is<Value>() {
         return (*(value.data as *Value)).kind == .null;
     }
 

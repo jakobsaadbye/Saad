@@ -7022,11 +7022,28 @@ static void report_not_in_tree(Typer *typer, AstExpr *expr, const char *what) {
     report_error_ast(typer->parser, LABEL_NOTE, NULL, "An Expr can have members of the parameters (also with ?.), comparisons, && || !, arithmetic, ??, method calls, struct literals with names, and values");
 }
 
+static AstExpr *tree_node_of(Typer *typer, AstFunctionDefn *copy, AstExpr *b, AstExpr *a);
+
 // The calls that build the tree of an expression of the second parse 'b' of the lambda. 'a' is the same expression in the
-// checked lambda, or NULL, which gives the types that a part without the parameters wants e.g the enum of .admin
+// checked lambda, or NULL, which gives the types that a part without the parameters wants e.g the enum of .admin. A part
+// with the parameters gets the type it has in the checked lambda: exprTyped<int>(exprMember(..., "age")), so that the code
+// that reads the tree can ask what a part is, e.g if the receiver of a call of after() is a time.Time. A value has the
+// type of its any
 static AstExpr *tree_of(Typer *typer, AstFunctionDefn *copy, AstExpr *b, AstExpr *a) {
-    Ast *at = (Ast *)b;
     if (a && a->head.kind != b->head.kind) a = NULL;
+    AstExpr *node = tree_node_of(typer, copy, b, a);
+    if (node == NULL || a == NULL || a->type == NULL || !mentions_tree_parameter(copy, b)) return node;
+
+    Type *type = a->type;
+    if (type->kind == TYPE_TUPLE || type->kind == TYPE_VOID || type->kind == TYPE_FUNCTION || is_untyped_type(type)) return node;
+    AstExpr *typed = tree_call(typer, "exprTyped", &node, 1, (Ast *)b);
+    if (typed == NULL) return NULL;
+    da_append(&((AstFunctionCall *)typed)->type_args, type);
+    return typed;
+}
+
+static AstExpr *tree_node_of(Typer *typer, AstFunctionDefn *copy, AstExpr *b, AstExpr *a) {
+    Ast *at = (Ast *)b;
 
     if (!mentions_tree_parameter(copy, b)) {
         if (b->head.kind == AST_LITERAL && ((AstLiteral *)b)->kind == LITERAL_NULL) return tree_call(typer, "exprNull", NULL, 0, at);

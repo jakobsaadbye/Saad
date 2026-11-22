@@ -54,6 +54,10 @@ binary &&
 
   `a?.b` and `a?.m()` are the same nodes as `a.b` and `a.m()`: a reader like SQL gives NULL when `a` is. Anything
   else, e.g a cast, indexing or another lambda, is an error.
+* Every node has the `type` of its part in the lambda, e.g `int` of `x.age`, `?string` of `x.email`, `?bool` of
+  `x.email?.startsWith("a")` and `bool` of a comparison, and a `value` node the type of its value. A reader asks it what
+  a part is instead of going by names, e.g dbms makes SQL of `after(t)` only when it is called on a `time.Time`, and of
+  `startsWith(s)` only on a text: `node.left.type.is<time.Time>()`.
 * `null` is a `value` node whose `value.type` is null. An enum value like `.admin` is a value of the enum it is
   compared with.
 * The tree types are in `std/prelude/expression_trees.sd`: `Expr<F>{root, parameters}` and `ExprNode`. Every file imports it, like the rest of the prelude.
@@ -71,6 +75,7 @@ binary &&
   `tree_of()` turns it into calls of the builder functions in the prelude, e.g
   `exprBinary(">=", exprMember(exprParameter(0, "u"), "age"), exprValue(minAge))`. A part without the parameters is
   the argument of `exprValue(value: any)`, checked in the function around the lambda. The first parse gives the types
-  it needs, e.g the enum of `.admin`.
+  it needs, e.g the enum of `.admin`, and the type of each part with the parameters, which `exprTyped<T>(node)` puts on
+  its node.
 * The calls go in the struct literal `Expr<F>{root: ..., parameters: ["u"]}`, which is the `replacement` of the
   lambda: the backend lowers it instead of the function.

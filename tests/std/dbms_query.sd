@@ -42,6 +42,19 @@ Group :: struct {
     title: string;
 }
 
+// A type with methods named like the ones of times and texts, which aren't made into SQL as it is neither
+Version :: struct {
+    major: int;
+
+    after :: method (other: Version) -> bool { return self.major > other.major; }
+    startsWith :: method (prefix: string) -> bool { return false; }
+}
+
+Release :: struct {
+    id:      i64;
+    version: Version;
+}
+
 TeamSize :: struct {
     name: string;
     size: i64;
@@ -70,7 +83,7 @@ main :: () {
     since := time.date(2026, 11, 2, 10, 15);
     sqlTime, argsTime, _ := users.where(u => u.createdAt.after(since) && (u.seenAt?.before(since) ?? true)).toSql();
     assert(sqlTime == "SELECT * FROM \"shop\".\"users\" WHERE (((\"created_at\" > $1) AND coalesce((\"seen_at\" < $2), $3)))");
-    assert(argsTime[0].type.name == "time.Time" && (*(argsTime[0].data as *time.Time)).toString() == "2026-11-02T10:15:00Z");
+    assert(argsTime[0].is<time.Time>() && (*(argsTime[0].data as *time.Time)).toString() == "2026-11-02T10:15:00Z");
 
     // Sorting and a part of the rows
     sql3, _, _ := users.orderBy(u => u.name.toLower()).orderByDescending(u => u.id).limit(10).offset(20).toSql();
@@ -89,6 +102,12 @@ main :: () {
     // Mistakes are errors of the query
     _, _, err7 := users.where(u => u.name.reverse() == "x").toSql();
     assert(err7.message.startsWith("The method reverse can't be made into SQL"));
+    releases := dbms.keyedTable<Release, i64>(context, "releases", "id");
+    first := Version{major: 1};
+    _, _, errVersion := releases.where(r => r.version.after(first)).toSql();
+    assert(errVersion.message.startsWith("The method after of a Version can't be made into SQL"));
+    _, _, errVersion2 := releases.where(r => r.version.startsWith("1")).toSql();
+    assert(errVersion2.message.startsWith("The method startsWith of a Version can't be made into SQL"));
     _, _, err8 := users.select(u => u.name).where(n => n == "x").toSql();
     assert(err8.message == "where after select isn't supported. Put the where before the select");
 

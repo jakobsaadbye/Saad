@@ -26,6 +26,7 @@ ExprNode :: struct {
     args:  [..]*ExprNode;
     names: [..]string;
     value: any;
+    type:  *Type;   // What the part is, e.g int of x.age or time.Time of x.createdAt. A value has value.type
 }
 
 // A lambda given as the tree of what it does instead of as a function, e.g for a query to make SQL of. A parameter of
@@ -61,6 +62,7 @@ exprMember :: (left: *ExprNode, name: string) -> *ExprNode {
 exprValue :: (value: any) -> *ExprNode {
     node := exprNode(.value);
     node.value.type = value.type;
+    node.type       = value.type;
     if value.type != null && value.data != null {
         copy := resizeMemory(null, null, 0, value.type.size) as *u8;
         from := value.data as *u8;
@@ -69,6 +71,12 @@ exprValue :: (value: any) -> *ExprNode {
         }
         node.value.data = copy;
     }
+    return node;
+}
+
+// Gives the node the type T, which the part has in the lambda
+exprTyped :: <T>(node: *ExprNode) -> *ExprNode {
+    node.type = typeInfo<T>();
     return node;
 }
 

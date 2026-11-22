@@ -159,14 +159,28 @@ isHidden :: method (member: *StructMember) -> bool {
     return attributeOf(member, &hidden);
 }
 
+// The type of T, e.g typeInfo<User>().asStruct().members. Each type has one descriptor, so two are the same type when they
+// are the same pointer
+typeInfo :: <T>() -> *Type {
+    // Through a pointer, which keeps the type of a collection, which would be a slice of its elements in an any
+    pointer: *T;
+    boxed: any = pointer;
+    return boxed.type.pointee();
+}
+
+// If the type is T, e.g type.is<time.Time>(). It compares the descriptors, not the names, so a type of another namespace
+// with the same name isn't T
+is :: method <T>(type: *Type) -> bool {
+    return type == typeInfo<T>();
+}
+
 // Gets the value of the attribute of type T on the member, e.g
 //
 //     field: json.Field;
 //     if attributeOf(member, &field) { ... field.name ... }
 attributeOf :: <T>(member: *StructMember, value: *T) -> bool {
-    name := typeof(*value);
     for attribute in member.attributes {
-        if attribute.type.name == name {
+        if attribute.type == typeInfo<T>() {
             *value = *(attribute.data as *T);
             return true;
         }
@@ -226,9 +240,8 @@ attributedFunctions :: () -> []AttributedFunction {
 //     options: cli.Options;
 //     if type.attribute(&options) { ... options.about ... }
 attribute :: method <T>(type: *TypeStruct, value: *T) -> bool {
-    name := typeof(*value);
     for attribute in type.attributes {
-        if attribute.type.name == name {
+        if attribute.type == typeInfo<T>() {
             *value = *(attribute.data as *T);
             return true;
         }
@@ -237,9 +250,8 @@ attribute :: method <T>(type: *TypeStruct, value: *T) -> bool {
 }
 
 attribute :: method <T>(f: *AttributedFunction, value: *T) -> bool {
-    name := typeof(*value);
     for attribute in f.attributes {
-        if attribute.type.name == name {
+        if attribute.type == typeInfo<T>() {
             *value = *(attribute.data as *T);
             return true;
         }

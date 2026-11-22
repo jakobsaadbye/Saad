@@ -125,5 +125,11 @@ main :: () {
     assert(ownerRows(o => PetCount{o.name, o.pets().count()}) == "{name: o.name, pets: o.pets().count()}");
     assert(ownerRows(o => PetCount{pets: o.pets().count(), note: o.name}) == "{pets: o.pets().count(), note: o.name}");
 
+    // Each part with the parameter has the type it has in the lambda, and a value the type of its value
+    typed: Expr<(User) -> bool> = u => (u.email?.startsWith(prefix) ?? false) || u.age > minAge;
+    call := typed.root.left.left;   // u.email?.startsWith(prefix), a ?bool as it is called with ?.
+    assert(typed.root.type.is<bool>() && call.type.is<?bool>() && call.left.type.is<?string>() && call.left.left.type.is<User>());
+    assert(call.args[0].type.is<string>() && typed.root.right.left.type.is<int>());   // prefix, and u.age
+
     print("expression trees ok");
 }

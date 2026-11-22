@@ -78,8 +78,8 @@ main :: () {
     {
         label := members[1];
         assert(label.attributes.count == 2);
-        assert(label.attributes[0].type.name == typeof(Column));
-        assert(label.attributes[1].type.name == typeof(Ignore));
+        assert(label.attributes[0].is<Column>());
+        assert(label.attributes[1].is<Ignore>());
 
         column: Column;
         assert(attributeOf(&label, &column));

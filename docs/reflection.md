@@ -23,13 +23,15 @@ The questions a library asks about a type are methods of `Type`, so it doesn't l
 
 | | |
 | --- | --- |
+| `is<T>()` | the type is `T`, e.g `type.is<time.Time>()`. It compares descriptors, so a type of another namespace with the same name isn't `T`. `value.is<T>()` of an `any` is the same |
 | `isInteger()`, `isFloat()`, `isNumber()`, `isSigned()`, `isChar()` | the numbers. `integerRange()` is the smallest and the largest value, e.g -128 and 127 |
 | `isOptional()`, `isUnion()`, `isFlags()`, `isList()`, `isMap()`, `isSlice()` | from `flags`, which the compiler sets |
 | `isSequence()` | a fixed array, a slice or a List, which have elements |
 | `pointee()`, `elementType()`, `optionalType()`, `keyType()`, `valueType()` | the types inside, e.g `int` of `*int`, `[..]int`, `?int` and `Map<string, int>`. Null for other types |
 | `TypeStruct.variant(name)` | the variant of a union with the name |
 
-* `name` is the name of the type as `typeof` gives it, e.g `game.Vec2` or `List<int>`.
+* `name` is the name of the type as `typeof` gives it, e.g `game.Vec2` or `List<int>`. It is for messages: a type is
+  checked with `is<T>()`, as two types can have the same name.
 * A fixed array is stored in the `any`. A slice is `{data, count}`, so its count is in the value.
 * A collection like `List<T>` becomes a slice of its elements when converted to an `any`. Convert a pointer to it
   to keep its type, which `anyOf(&value)` and `typeInfo<T>()` do.

@@ -278,7 +278,7 @@ paramText :: (arg: any) -> c.string, bool {
         }
         case .struct {
             // A time as RFC 3339, e.g 2026-11-02T10:15:00.25+01:00
-            if arg.type.name == "time.Time" {
+            if arg.is<time.Time>() {
                 text := (*(arg.data as *time.Time)).toString();
                 result := text.toCString();
                 text.free();
@@ -475,7 +475,7 @@ readValue :: method (conn: *Connection, text: c.string, place: any, column: stri
         case .struct {
             // A timestamp or a date, e.g 2026-11-02 10:15:00.25+01, or 2026-11-02 for a date, which is midnight UTC.
             // A timestamp without a time zone is UTC
-            if type.name == "time.Time" {
+            if type.is<time.Time>() {
                 t, ok := time.parse(value);
                 if !ok { return fmt.sprint("%: '%' is not a time", column, value); }
                 place.set(t);

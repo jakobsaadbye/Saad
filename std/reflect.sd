@@ -108,7 +108,7 @@ newCall :: method (f: *AttributedFunction, allocator: Allocator = null) -> Call 
 
 // If the type is error, a *Error
 @private isError :: (type: *Type) -> bool {
-    return type == typeInfo<error>();
+    return type.is<error>();
 }
 
 // Copies a value of the size. Most arguments are a word or two, e.g an int, a pointer or a string, which are copied without
