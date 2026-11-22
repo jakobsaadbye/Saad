@@ -1,0 +1,10 @@
+// Namespaces that import each other: a function of one that the other calls before its own file was checked is checked
+// in its own file, so it can use the private names of its namespace (tests/namespaces/cycle/)
+
+import cycle_counter;
+
+main :: () {
+    assert(cycle_counter.twiceThroughTheOther() == 2);
+    c: cycle_counter.Counter;
+    assert(cycle_counter.count(&c) == 1);
+}
