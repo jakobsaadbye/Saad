@@ -57,12 +57,7 @@ Call :: struct {
             throw errors.make("% has % parameters, so there is no parameter %", f.name, f.parameters.count, index, kind: WrongArgument);
         }
         p := &f.parameters[index];
-        place := (&self.arguments[p.offset]) as *void;
-        if value.type == p.type {
-            copyValue(place, value.data, p.type.size);
-            return;
-        }
-        if !assignValue(place, p.type, value) {
+        if !self.argument(index).set(value) {
             throw errors.make("The parameter % of % is a %, which can't be given a %", p.name, f.name, p.type.name, value.type.name, kind: WrongArgument);
         }
     }
@@ -113,18 +108,7 @@ newCall :: method (f: *AttributedFunction, allocator: Allocator = null) -> Call 
 
 // If the type is error, a *Error
 @private isError :: (type: *Type) -> bool {
-    probe: error;
-    boxed: any = probe;
-    return type == boxed.type;
-}
-
-// An any of the value at data, of the type
-makeAny :: (data: *void, type: *Type) -> any {
-    value: any;
-    raw := (&value) as *Any;
-    raw.data = data;
-    raw.type = type;
-    return value;
+    return type == typeInfo<error>();
 }
 
 // Copies a value of the size. Most arguments are a word or two, e.g an int, a pointer or a string, which are copied without
@@ -140,99 +124,4 @@ makeAny :: (data: *void, type: *Type) -> any {
     } else {
         mem.copy(to, from, size);
     }
-}
-
-// Stores the value at the place, which has the type. False if the value can't be given to the type
-@private assignValue :: (place: *void, type: *Type, value: any) -> bool {
-    if value.type == type {
-        copyValue(place, value.data, type.size);
-        return true;
-    }
-    if type.kind == .int && value.type.kind == .int {
-        number, ok := readInteger(value.data, value.type as *TypePrimitive);
-        return ok && writeInteger(place, type as *TypePrimitive, number);
-    }
-    if type.kind == .float && (value.type.kind == .float || value.type.kind == .int) {
-        number: f64;
-        if value.type.kind == .float {
-            if value.type.size == 4 { number = (*(value.data as *f32)) as f64; } else { number = *(value.data as *f64); }
-        } else {
-            whole, ok := readInteger(value.data, value.type as *TypePrimitive);
-            if !ok { return false; }
-            number = whole as f64;
-        }
-        if type.size == 4 { *(place as *f32) = number as f32; } else { *(place as *f64) = number; }
-        return true;
-    }
-    if type.flags.has(.isOptional) {
-        optional := type as *TypeStruct;
-        item, itemType := optional.setOptional(place, true);
-        if assignValue(item, itemType, value) { return true; }
-        optional.setOptional(place, false);
-    }
-    return false;
-}
-
-// The integer at data. False for a u64 that doesn't fit in an i64
-@private readInteger :: (data: *void, type: *TypePrimitive) -> i64, bool {
-    switch type.kind {
-        case .u8   { return (*(data as *u8)) as i64, true; }
-        case .u16  { return (*(data as *u16)) as i64, true; }
-        case .u32
-        case .uint { return (*(data as *u32)) as i64, true; }
-        case .u64 {
-            value := *(data as *u64);
-            return value as i64, value <= 9223372036854775807;
-        }
-        case .i8  { return (*(data as *i8)) as i64, true; }
-        case .i16 { return (*(data as *i16)) as i64, true; }
-        else {}
-    }
-    if type.head.size == 4 { return (*(data as *i32)) as i64, true; }
-    return *(data as *i64), true;
-}
-
-// Stores the integer at the place, which has the type. False if it doesn't fit
-@private writeInteger :: (place: *void, type: *TypePrimitive, value: i64) -> bool {
-    switch type.kind {
-        case .u8 {
-            if value < 0 || value > 255 { return false; }
-            *(place as *u8) = value as u8;
-            return true;
-        }
-        case .u16 {
-            if value < 0 || value > 65535 { return false; }
-            *(place as *u16) = value as u16;
-            return true;
-        }
-        case .u32
-        case .uint {
-            if value < 0 || value > 4294967295 { return false; }
-            *(place as *u32) = value as u32;
-            return true;
-        }
-        case .u64 {
-            if value < 0 { return false; }
-            *(place as *u64) = value as u64;
-            return true;
-        }
-        case .i8 {
-            if value < -128 || value > 127 { return false; }
-            *(place as *i8) = value as i8;
-            return true;
-        }
-        case .i16 {
-            if value < -32768 || value > 32767 { return false; }
-            *(place as *i16) = value as i16;
-            return true;
-        }
-        else {}
-    }
-    if type.head.size == 4 {
-        if value < -2147483648 || value > 2147483647 { return false; }
-        *(place as *i32) = value as i32;
-        return true;
-    }
-    *(place as *i64) = value;
-    return true;
 }

@@ -1,0 +1,496 @@
+//////////////////////////////////
+// The methods of any: reading and changing a value through its type, without casting its data, e.g for json, a parser of
+// arguments or a template. An any is the address of a value and its type (Any in runtime.sd), so the methods that change
+// it change the value at that address:
+//
+//     options: Options;
+//     v := anyOf(&options);                      // options, as an any that changes it
+//     v.member("verbose").set(true);
+//     v.member("level").setInt(3);              // false when 3 doesn't fit the type of level
+//     v.member("files").add().set("main.sd");    // a new element of a slice or List
+//
+//     for i in 0..v.count() { e := v.element(i); ... }
+//
+//     v.member("ages").put("bob").setInt(31);       // a key of a Map
+//
+// The methods that give an any give an empty one (isEmpty) when there is no such value, e.g member of a name that the struct
+// doesn't have, element out of range, or deref of null. The methods of an empty any do nothing, and give false, 0 or
+// another empty any, so a chain like v.member("a").member("b").setInt(1) is safe and is false when a part is missing
+//////////////////////////////////
+
+use c;
+
+// The value that the pointer points to, as an any that changes it, e.g anyOf(&user).member("name")
+anyOf :: <T>(pointer: *T) -> any {
+    p: any = pointer;
+    return p.deref();
+}
+
+// The type of T, e.g typeInfo<User>().asStruct().members
+typeInfo :: <T>() -> *Type {
+    // Through a pointer, which keeps the type of a collection, which would be a slice of its elements in an any
+    pointer: *T;
+    boxed: any = pointer;
+    return boxed.type.pointee();
+}
+
+// An any without a value, e.g of member("x") when there is no member x
+isEmpty :: method (v: any) -> bool {
+    return v.type == null || v.data == null;
+}
+
+// The value as a T, when it is a T. false when it is of another type, e.g
+//
+//     name, ok := v.to<string>();
+to :: method <T>(v: any) -> T, bool {
+    zero: T;
+    if !v.is<T>() { return zero, false; }
+    return *(v.data as *T), true;
+}
+
+// The address of the value as a *T, or null when it isn't a T
+ref :: method <T>(v: any) -> *T {
+    if !v.is<T>() { return null; }
+    return v.data as *T;
+}
+
+// If the value is a T
+is :: method <T>(v: any) -> bool {
+    if v.isEmpty() { return false; }
+    return typeInfo<T>() == v.type;
+}
+
+// Makes the value zero, e.g 0, false, an empty string or a struct of zeros
+zero :: method (v: any) {
+    if v.isEmpty() { return; }
+    memset(v.data, 0, v.type.size as i64);
+}
+
+// Stores the value, which is of the same type, a number that fits, or the value of an optional, e.g v.set(5) for an u8,
+// an f64 or a ?int. false when it can't be stored, and then the value is as it was
+set :: method (v: any, value: any) -> bool {
+    if v.isEmpty() || value.isEmpty() { return false; }
+    if value.type == v.type {
+        memcpy(v.data, value.data, v.type.size as i64);
+        return true;
+    }
+    if v.type.isInteger() && value.type.isInteger() {
+        n, ok := value.toInt();
+        return ok && v.setInt(n);
+    }
+    if v.type.isFloat() && value.type.isNumber() {
+        f, _ := value.toFloat();
+        return v.setFloat(f);
+    }
+    if v.type.isOptional() {
+        item := v.setOptional();
+        if item.set(value) { return true; }
+        v.clearOptional();
+    }
+    return false;
+}
+
+//
+// Numbers and bools
+//
+
+// The value of an integer or an enum. false for other types, and for a u64 that doesn't fit in an i64
+toInt :: method (v: any) -> i64, bool {
+    if v.isEmpty() { return 0, false; }
+    type := v.type;
+    if type.kind == .enum { type = (type as *TypeEnum).backingType; }
+    if type.kind != .int { return 0, false; }
+    signed := type.isSigned();
+    switch type.size {
+        case 1 {
+            if signed { return (*(v.data as *i8)) as i64, true; }
+            return (*(v.data as *u8)) as i64, true;
+        }
+        case 2 {
+            if signed { return (*(v.data as *i16)) as i64, true; }
+            return (*(v.data as *u16)) as i64, true;
+        }
+        case 4 {
+            if signed { return (*(v.data as *i32)) as i64, true; }
+            return (*(v.data as *u32)) as i64, true;
+        }
+        else {
+            if signed { return *(v.data as *i64), true; }
+            n := *(v.data as *u64);
+            return n as i64, n <= 9223372036854775807;
+        }
+    }
+}
+
+// Stores the integer in an integer or an enum. false when it is of another type, or the number doesn't fit, e.g 300 in an
+// u8, and then the value is as it was. See Type.integerRange for the numbers that fit
+setInt :: method (v: any, n: i64) -> bool {
+    if v.isEmpty() { return false; }
+    type := v.type;
+    if type.kind == .enum { type = (type as *TypeEnum).backingType; }
+    if type.kind != .int { return false; }
+    low, high := type.integerRange();
+    if n < low || (n > 0 && n as u64 > high) { return false; }
+    switch type.size {
+        case 1 { *(v.data as *u8) = n as u8; }
+        case 2 { *(v.data as *u16) = n as u16; }
+        case 4 { *(v.data as *u32) = n as u32; }
+        else   { *(v.data as *i64) = n; }
+    }
+    return true;
+}
+
+// Stores the whole number written in the text, e.g "-12", "+7" or "18446744073709551615", in an integer or an enum. It
+// doesn't go through an f64, so big numbers keep their digits. false when the text isn't a whole number or the number
+// doesn't fit, and then the value is as it was
+setIntText :: method (v: any, text: string) -> bool {
+    negative := text.len > 0 && text[0] == '-';
+    start := 0;
+    if negative || (text.len > 0 && text[0] == '+') { start = 1; }
+    if start == text.len { return false; }
+
+    magnitude: u64 = 0;
+    for i in start..text.len {
+        ch := text[i];
+        if ch < '0' || ch > '9' { return false; }
+        digit := (ch - '0') as u64;
+        if magnitude > (18446744073709551615 - digit) / 10 { return false; }
+        magnitude = magnitude * 10 + digit;
+    }
+
+    if magnitude > 9223372036854775807 {
+        // A u64 over the biggest i64, or the smallest i64, which has no positive i64
+        if !negative && v.type.kind == .int && v.type.size == 8 && !v.type.isSigned() {
+            *(v.data as *u64) = magnitude;
+            return true;
+        }
+        if negative && magnitude == 9223372036854775808 { return v.setInt(-9223372036854775807 - 1); }
+        return false;
+    }
+    n := magnitude as i64;
+    if negative { n = -n; }
+    return v.setInt(n);
+}
+
+// The value of a float or an integer. false for other types
+toFloat :: method (v: any) -> f64, bool {
+    if v.isEmpty() { return 0.0, false; }
+    if v.type.kind == .float {
+        if v.type.size == 4 { return (*(v.data as *f32)) as f64, true; }
+        return *(v.data as *f64), true;
+    }
+    n, ok := v.toInt();
+    return n as f64, ok;
+}
+
+// Stores the number in a float. false for other types
+setFloat :: method (v: any, f: f64) -> bool {
+    if v.isEmpty() || v.type.kind != .float { return false; }
+    if v.type.size == 4 { *(v.data as *f32) = f as f32; }
+    else                { *(v.data as *f64) = f; }
+    return true;
+}
+
+//
+// Enums
+//
+
+// The name of the value of an enum, e.g "open" for Status.open. false when it has no name, e.g of an enum flags with two
+// flags set, or for other types
+enumName :: method (v: any) -> string, bool {
+    none: string;
+    if v.isEmpty() || v.type.kind != .enum { return none, false; }
+    n, _ := v.toInt();
+    return (v.type as *TypeEnum).nameOf(n);
+}
+
+// Makes the enum the value with the name, e.g "closed". false when it has no value with the name, or for other types
+setEnum :: method (v: any, name: string) -> bool {
+    if v.isEmpty() || v.type.kind != .enum { return false; }
+    n, found := (v.type as *TypeEnum).valueNamed(name);
+    return found && v.setInt(n);
+}
+
+// Sets the flag with the name in an enum flags, and keeps the others, e.g "verbose". false when it has no flag with the
+// name, or for other types
+addFlag :: method (v: any, name: string) -> bool {
+    if v.isEmpty() || !v.type.isFlags() { return false; }
+    flag, found := (v.type as *TypeEnum).valueNamed(name);
+    n, _ := v.toInt();
+    return found && v.setInt(n | flag);
+}
+
+//
+// Fixed arrays, slices, Lists and Maps
+//
+
+// The layouts of a slice and a List, in their memory
+@private
+RawSlice :: struct {
+    data:  *u8;
+    count: i64;
+}
+
+@private
+RawList :: struct {
+    data:      *u8;
+    count:     i64;
+    capacity:  i64;
+    allocator: Allocator;
+}
+
+// The number of elements of a fixed array, a slice or a List, of entries of a Map, or of bytes of a string. 0 for other types
+count :: method (v: any) -> i64 {
+    if v.isEmpty() { return 0; }
+    type := v.type;
+    if type.kind == .array {
+        array := type as *TypeArray;
+        if array.arrayKind == .fixed { return array.count; }
+        return (v.data as *RawSlice).count;
+    }
+    if type.kind == .string { return (*(v.data as *string)).len; }
+    if type.isList() { return (v.data as *RawList).count; }
+    if type.isMap() { return v.member("entries").count(); }
+    return 0;
+}
+
+// The element at the index of a fixed array, a slice or a List. Empty when the index is out of range, or for other types
+element :: method (v: any, index: i64) -> any {
+    none: any;
+    if v.isEmpty() || index < 0 || index >= v.count() { return none; }
+    elemType := v.type.elementType();
+    if elemType == null { return none; }
+    elements := v.data as *u8;
+    if v.type.isSlice() || v.type.isList() { elements = (v.data as *RawSlice).data; }
+    return anyAt(&elements[index * elemType.size as i64], elemType);
+}
+
+// Adds an element of zero to the end of a slice or a List, like List.add, and gives it to be set, e.g
+// v.add().setInt(5). Empty for other types.
+//
+// A List grows with its allocator. A slice doesn't own its memory, e.g it can be of a fixed array, so it gets a new block
+// of the allocator of the thread, and the old one is left as it is. To add many elements to a slice, resize it once
+add :: method (v: any) -> any {
+    none: any;
+    count := v.count() + 1;
+    if !v.resize(count) { return none; }
+    return v.element(count - 1);
+}
+
+// Makes a slice or a List have the count of elements. The new ones are zero. false for other types
+resize :: method (v: any, count: i64) -> bool {
+    if v.isEmpty() || count < 0 { return false; }
+    elemType := v.type.elementType();
+    if elemType == null { return false; }
+    size := elemType.size as i64;
+
+    if v.type.isList() {
+        list := v.data as *RawList;
+        if count > list.capacity {
+            capacity := list.capacity * 2;
+            if capacity < 4 { capacity = 4; }
+            if capacity < count { capacity = count; }
+            // The allocator of its first memory is kept, as List.reserve does
+            if list.allocator == null { list.allocator = currentAllocator(); }
+            list.data     = resizeMemory(list.allocator, list.data, list.capacity * size, capacity * size) as *u8;
+            list.capacity = capacity;
+        }
+        if count > list.count { memset(&list.data[list.count * size], 0, (count - list.count) * size); }
+        list.count = count;
+        return true;
+    }
+
+    if v.type.isSlice() {
+        slice := v.data as *RawSlice;
+        if count > slice.count {
+            memory := resizeMemory(null, null, 0, count * size) as *u8;
+            if slice.count > 0 { memcpy(memory, slice.data, slice.count * size); }
+            memset(&memory[slice.count * size], 0, (count - slice.count) * size);
+            slice.data = memory;
+        }
+        slice.count = count;
+        return true;
+    }
+    return false;
+}
+
+// The key and the value of the entry at the index of a Map, in the order they were added. Empty when the index is out of
+// range, or for other types
+entry :: method (v: any, index: i64) -> any, any {
+    none: any;
+    if v.isEmpty() || !v.type.isMap() { return none, none; }
+    e := v.member("entries").element(index);
+    return e.member("key"), e.member("value");
+}
+
+// The value of the key in a Map, added with a value of zero when it isn't there, to be set, like m[key] = ..., e.g
+// v.put("bob").setInt(31). The keys of the map are strings or integers, and the key is one too. Empty for other maps and
+// types
+put :: method (v: any, key: any) -> any {
+    none: any;
+    if v.isEmpty() || key.isEmpty() || !v.type.isMap() { return none; }
+    hash, hashed := mapKeyHash(v.type.keyType(), key);
+    if !hashed { return none; }
+
+    entries := v.member("entries");
+    slots   := v.member("slots").data as *RawList;   // A List<i64>: 0 is an empty slot, else the index of an entry + 1
+    if slots.count > 0 {
+        table := slots.data as *i64;
+        mask  := (slots.count - 1) as u64;
+        slot  := (hash & mask) as i64;
+        while table[slot] != 0 {
+            entry := entries.element(table[slot] - 1);
+            entryHash, _ := entry.member("hash").to<u64>();
+            if entryHash == hash && sameMapKey(entry.member("key"), key) { return entry.member("value"); }
+            slot = ((slot as u64 + 1) & mask) as i64;
+        }
+    }
+
+    // A new entry, made like Map.addEntry makes one, with the allocator of the map
+    count := v.member("count").ref<i64>();
+    allocator := v.member("allocator").data as *Allocator;
+    if *allocator == null { *allocator = currentAllocator(); }
+    (entries.data as *RawList).allocator = *allocator;
+    if (*count + 1) * 10 > slots.count * 7 {
+        capacity := slots.count * 2;
+        if capacity < 8 { capacity = 8; }
+        slots.allocator = *allocator;
+        slots.count = 0;
+        v.member("slots").resize(capacity);   // Of zeros
+        for i in 0..entries.count() { placeMapEntry(slots, entries, i); }
+    }
+    entry := entries.add();
+    entry.member("key").set(key);
+    entry.member("hash").set(hash);
+    *count += 1;
+    placeMapEntry(slots, entries, entries.count() - 1);
+    return entry.member("value");
+}
+
+// The hash of a key, as the hash method of the type of the keys gives it
+@private
+mapKeyHash :: (keyType: *Type, key: any) -> u64, bool {
+    if keyType.kind == .string && key.type.kind == .string { return hashString(*(key.data as *string)), true; }
+    if keyType.isInteger() && key.type.isInteger() {
+        n, ok := key.toInt();
+        return hashU64(n as u64), ok;
+    }
+    return 0, false;
+}
+
+@private
+sameMapKey :: (a: any, b: any) -> bool {
+    if a.type.kind == .string && b.type.kind == .string { return *(a.data as *string) == *(b.data as *string); }
+    x, xOk := a.toInt();
+    y, yOk := b.toInt();
+    return xOk && yOk && x == y;
+}
+
+@private
+placeMapEntry :: (slots: *RawList, entries: any, index: i64) {
+    table := slots.data as *i64;
+    mask  := (slots.count - 1) as u64;
+    hash, _ := entries.element(index).member("hash").to<u64>();
+    slot := (hash & mask) as i64;
+    while table[slot] != 0 {
+        slot = ((slot as u64 + 1) & mask) as i64;
+    }
+    table[slot] = index + 1;
+}
+
+//
+// Structs
+//
+
+// The member of a struct with the name. Empty when it has none, or for other types
+member :: method (v: any, name: string) -> any {
+    none: any;
+    if v.isEmpty() || v.type.kind != .struct { return none; }
+    m := (v.type as *TypeStruct).member(name);
+    if m == null { return none; }
+    return anyAt(m.valueIn(v.data), m.type);
+}
+
+// The member of a struct, of its members, e.g for m in type.members { v.memberAt(&m) }
+memberAt :: method (v: any, member: *StructMember) -> any {
+    none: any;
+    if v.isEmpty() || member == null { return none; }
+    return anyAt(member.valueIn(v.data), member.type);
+}
+
+//
+// Pointers
+//
+
+// The value that a pointer points to. Empty when it is null, a *void, or for other types
+deref :: method (v: any) -> any {
+    none: any;
+    if v.isEmpty() || v.type.kind != .pointer { return none; }
+    pointee := v.type.pointee();
+    address := *(v.data as **void);
+    if address == null || pointee.kind == .void { return none; }
+    return anyAt(address, pointee);
+}
+
+// Makes a pointer point to a new value of zero, of the allocator of the thread, and gives it to be set. Empty for other types
+allocate :: method (v: any) -> any {
+    none: any;
+    if v.isEmpty() || v.type.kind != .pointer { return none; }
+    pointee := v.type.pointee();
+    if pointee.kind == .void { return none; }
+    memory := resizeMemory(null, null, 0, pointee.size as i64);
+    memset(memory, 0, pointee.size as i64);
+    *(v.data as **void) = memory;
+    return anyAt(memory, pointee);
+}
+
+//
+// Optionals and unions
+//
+
+// The value of an optional (a ?T), and true, or false when it is empty or of another type
+optional :: method (v: any) -> any, bool {
+    none: any;
+    if v.isEmpty() || !v.type.isOptional() { return none, false; }
+    present, _ := v.member("present").to<bool>();
+    if !present { return none, false; }
+    return v.member("item"), true;
+}
+
+// Makes an optional hold a value of zero, and gives it to be set, e.g v.setOptional().setInt(5). Empty for other types
+setOptional :: method (v: any) -> any {
+    none: any;
+    if v.isEmpty() || !v.type.isOptional() { return none; }
+    v.zero();
+    *(v.member("present").data as *bool) = true;
+    return v.member("item");
+}
+
+// Makes an optional empty
+clearOptional :: method (v: any) {
+    if v.isEmpty() || !v.type.isOptional() { return; }
+    v.zero();
+}
+
+// The variant that a union holds, and its value. Null and empty for other types
+variant :: method (v: any) -> *StructMember, any {
+    none: any;
+    if v.isEmpty() || !v.type.isUnion() { return null, none; }
+    type := v.type as *TypeStruct;
+    tag := (*(v.data as *u32)) as i64;
+    if tag + 1 >= type.members.count { return null, none; }
+    m := &type.members[tag + 1];
+    return m, v.memberAt(m);
+}
+
+// Makes a union hold the variant with the name, with a value of zero, and gives the value to be set. Empty when it has no
+// variant with the name, or for other types
+setVariant :: method (v: any, name: string) -> any {
+    none: any;
+    if v.isEmpty() || !v.type.isUnion() { return none; }
+    m := (v.type as *TypeStruct).variant(name);
+    if m == null { return none; }
+    v.zero();
+    *(v.data as *u32) = (m.index - 1) as u32;
+    return v.memberAt(m);
+}

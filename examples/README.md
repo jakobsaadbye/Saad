@@ -45,7 +45,7 @@ saad run examples/01_hello.sd
 | [22_embedding.sd](22_embedding.sd) | `@embed` |
 | [23_namespaces.sd](23_namespaces.sd) | `namespace`, `import`, `use` and `@private` (with [geometry/](geometry/geometry.sd)) |
 | [24_attributes.sd](24_attributes.sd) | Attributes of your own |
-| [25_reflection.sd](25_reflection.sd) | `any`, `typeof` and types while the program runs |
+| [25_reflection.sd](25_reflection.sd) | `any`, types while the program runs, and changing a value by the names of its members |
 | [26_memory.sd](26_memory.sd) | `new`, `mem.delete` and arenas |
 | [27_compile_time_if.sd](27_compile_time_if.sd) | `#if` for one system or another |
 | [28_standard_library.sd](28_standard_library.sd) | `json`, `time`, `os` and `random` |

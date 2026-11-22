@@ -207,9 +207,7 @@ TableColumn :: struct {
 
 @private
 rowType :: <T>() -> *TypeStruct {
-    empty: T;
-    boxed: any = empty;
-    return boxed.type as *TypeStruct;
+    return typeInfo<T>().asStruct();
 }
 
 // The columns of the members of a row struct, without the skipped ones. The generated and defaulted columns and the key

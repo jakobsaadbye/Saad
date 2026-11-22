@@ -301,13 +301,13 @@ addAnyValue :: method (sb: *StringBuilder, value: any) {
 addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
     switch arg.type.kind {
         case .int {
-            prim := arg.type as *TypePrimitive;
-            if inside && prim.kind == .char { sb.addQuotedChar(*(arg.data as *u8)); }
-            else                            { sb.addInteger(arg); }
+            if inside && arg.type.isChar() { sb.addQuotedChar(*(arg.data as *u8)); }
+            else                           { sb.addInteger(arg); }
         }
         case .float {
-            if arg.type.size == 4 { sb.addFloat32(*(arg.data as *f32)); }
-            else                  { sb.addFloat64(*(arg.data as *f64)); }
+            f, _ := arg.toFloat();
+            if arg.type.size == 4 { sb.addFloat32(f as f32); }
+            else                  { sb.addFloat64(f); }
         }
         case .bool {
             if *(arg.data as *bool) { sb.addString("true"); }
@@ -318,9 +318,9 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
             else      { sb.addString(*(arg.data as *string)); }
         }
         case .enum {
-            enumType := arg.type as *TypeEnum;
-            value := enumType.readValue(arg.data);
-            if arg.type.flags.has(.isFlags) {
+            enumType := arg.type.asEnum();
+            value, _ := arg.toInt();
+            if enumType.isFlags() {
                 // The flags that are set, e.g .verbose | .color, or 0 when none is
                 names, ok := enumType.flagNames(value);
                 if !ok || names.count == 0 {
@@ -335,7 +335,7 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
                 names.free();
                 return;
             }
-            name, ok := enumType.nameOf(value);
+            name, ok := arg.enumName();
             sb.addChar('.');
             if ok { sb.addString(name); }
             else  { sb.addString("<invalid>"); }
@@ -346,20 +346,14 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
             sb.addBytes(buf.data, written);
         }
         case .array {
-            sb.addArray(arg.data, arg.type as *TypeArray);
+            sb.addElements(arg);
         }
         case .struct {
             if arg.type.isOptional() {
                 // The value, or null when it is empty
-                data, type, present := (arg.type as *TypeStruct).optionalValue(arg.data);
-                if !present {
-                    sb.addString("null");
-                } else {
-                    value: any;
-                    value.type = type;
-                    value.data = data;
-                    sb.addValueIn(value, inside);
-                }
+                value, present := arg.optional();
+                if present { sb.addValueIn(value, inside); }
+                else       { sb.addString("null"); }
             }
             else if arg.type.name == "fmt.Fixed" {
                 f := *(arg.data as *Fixed);
@@ -371,9 +365,9 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
                 sb.addString(text);
                 text.free();
             }
-            else if arg.type.isUnion()                { sb.addUnion(arg.data, arg.type as *TypeStruct); }
-            else if arg.type.name.startsWith("List<") { sb.addList(arg.data, arg.type as *TypeStruct); }
-            else                                      { sb.addStruct(arg.data, arg.type as *TypeStruct); }
+            else if arg.type.isUnion() { sb.addUnion(arg); }
+            else if arg.type.isList()  { sb.addElements(arg); }
+            else                       { sb.addStruct(arg); }
         }
         else {
             sb.addChar('<');
@@ -383,66 +377,30 @@ addValueIn :: method (sb: *StringBuilder, arg: any, inside: bool) {
     }
 }
 
-// Writes an integer of any size, e.g of an any whose type is an int, a u8 or an i64
+// Writes an integer of any size, e.g of an any whose type is an int, a u8 or an i64. A char is added as the character
 addInteger :: method (sb: *StringBuilder, value: any) {
-    data := value.data;
-    type := value.type as *TypePrimitive;
-    switch type.kind {
-        case .char { sb.addChar(*(data as *u8)); }
-        case .u8   { sb.addUInt64((*(data as *u8)) as u64); }
-        case .u16  { sb.addUInt64((*(data as *u16)) as u64); }
-        case .u32
-        case .uint { sb.addUInt64((*(data as *u32)) as u64); }
-        case .u64  { sb.addUInt64(*(data as *u64)); }
-        case .i8   { sb.addInt64((*(data as *i8)) as i64); }
-        case .i16  { sb.addInt64((*(data as *i16)) as i64); }
-        case .i32
-        case .int  { sb.addInt64((*(data as *i32)) as i64); }
-        case .i64  { sb.addInt64(*(data as *i64)); }
-        else       { sb.addString("UNHANDLED"); }
+    if value.type.isChar() {
+        sb.addChar(*(value.data as *u8));
+        return;
     }
+    if value.type.size == 8 && !value.type.isSigned() {
+        sb.addUInt64(*(value.data as *u64));
+        return;
+    }
+    n, ok := value.toInt();
+    if ok { sb.addInt64(n); }
+    else  { sb.addString("UNHANDLED"); }
 }
 
+// The elements of a fixed array, a slice or a List, e.g [1, 2]
 @private
-addArray :: method (sb: *StringBuilder, data: *void, type: *TypeArray) {
-    // A fixed array is stored in the value, a slice points to its elements
-    elements := data as *u8;
-    count    := type.count;
-    if type.kind != .fixed {
-        slice := *(data as *[]u8);
-        elements = slice.data;
-        count    = slice.count;
-    }
-
+addElements :: method (sb: *StringBuilder, value: any) {
     sb.addChar('[');
-    for i in 0..count {
+    for i in 0..value.count() {
         if i > 0 {
             sb.addString(", ");
         }
-        value: any;
-        value.type = type.elemType;
-        value.data = &elements[i * type.elemType.size];
-        sb.addValueIn(value, true);
-    }
-    sb.addChar(']');
-}
-
-// A List<T> as its elements, like a slice, e.g [1, 2]
-@private
-addList :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
-    // List starts with data: *T and count: i64, like a slice
-    elemType := (type.members[0].type as *TypePointer).pointerTo;
-    slice    := *(data as *[]u8);
-
-    sb.addChar('[');
-    for i in 0..slice.count {
-        if i > 0 {
-            sb.addString(", ");
-        }
-        value: any;
-        value.type = elemType;
-        value.data = &slice.data[i * elemType.size];
-        sb.addValueIn(value, true);
+        sb.addValueIn(value.element(i), true);
     }
     sb.addChar(']');
 }
@@ -489,48 +447,40 @@ addTypeName :: method (sb: *StringBuilder, type: *Type) {
 // Like a literal of the union: Shape{circle: Circle{radius: 2.000000}}, or Shape.empty for a variant without a value.
 // The variant without a value of a generic union is .none, as Option<int>.none can't be written
 @private
-addUnion :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
-    variant := type.variantOf(data);
+addUnion :: method (sb: *StringBuilder, value: any) {
+    variant, inner := value.variant();
     if variant == null || variant.type.kind == .void {
-        if type.head.name.indexOf("<") < 0 {
-            sb.addString(type.head.name);
+        if value.type.name.indexOf("<") < 0 {
+            sb.addString(value.type.name);
         }
         sb.addChar('.');
         if variant == null { sb.addString("<invalid>"); }
         else               { sb.addString(variant.name); }
         return;
     }
-    value: any;
-    value.type = variant.type;
-    value.data = variant.valueIn(data);
-    sb.addTypeName(&type.head);
+    sb.addTypeName(value.type);
     sb.addChar('{');
     sb.addString(variant.name);
     sb.addString(": ");
-    sb.addValueIn(value, true);
+    sb.addValueIn(inner, true);
     sb.addChar('}');
 }
 
 // Like a literal of the struct: Point{x: 1, y: 2}
 @private
-addStruct :: method (sb: *StringBuilder, data: *void, type: *TypeStruct) {
-    sb.addTypeName(&type.head);
+addStruct :: method (sb: *StringBuilder, value: any) {
+    sb.addTypeName(value.type);
     sb.addChar('{');
     first := true;
-    for i in 0..type.members.count {
-        member := type.members[i];
-        if type.members[i].isHidden() { continue; }   // e.g the link of a row of dbms
+    for *member in value.type.asStruct().members {
+        if member.isHidden() { continue; }   // e.g the link of a row of dbms
         if !first {
             sb.addString(", ");
         }
         first = false;
         sb.addString(member.name);
         sb.addString(": ");
-
-        value: any;
-        value.type = member.type;
-        value.data = member.valueIn(data);
-        sb.addValueIn(value, true);
+        sb.addValueIn(value.memberAt(member), true);
     }
     sb.addChar('}');
 }

@@ -11,6 +11,12 @@ String :: struct {
 
 // The compiler generates one constant descriptor for every type that is converted to an 'any'. The layouts of these structs are read by
 // the compiler (see type_info_global in ir_lower.c), so members can be added, but each name must stay
+//
+// A Type is what every type has. The kinds with more to them have a struct of their own that embeds the Type: TypePointer,
+// TypeArray, TypeEnum and TypeStruct, which type.asPointer(), asArray(), asEnum() and asStruct() give. They are a *Type
+// where one is wanted, and have its members, e.g structType.name. The other kinds are only a Type: bool, int, float,
+// string, void and any. An integer is told apart by its size and flags, e.g a u8 has size 1 and isn't isSigned, and a
+// char is a u8 that isChar
 
 TypeKind :: enum {
     void,
@@ -28,35 +34,10 @@ TypeKind :: enum {
     any,
 };
 
-TypePrimitiveKind :: enum {
-    uint, // alias for u32
-    u8,
-    u16,
-    u32,
-    u64,
-    int, // alias for i32
-    i8,
-    i16,
-    i32,
-    i64,
-    float, // alias for f32
-    f32,
-    f64,
-    char,
-    bool,
-    void,
-};
-
-TypeArrayKind :: enum {
-    fixed,
-    slice,
-    dynamic,
-}
-
 Type :: struct {
-    name:  string;
+    name:  string;      // As it is written, e.g int, *User or List<int>
     kind:  TypeKind;
-    size:  int;
+    size:  int;         // In bytes
     flags: TypeFlags;
 };
 
@@ -65,23 +46,28 @@ TypeFlags :: enumflags {
     isUnion,     // A union, a TypeStruct whose first member is the tag
     isOptional,  // A ?T, which is a struct with the members item: T and present: bool
     isFlags,     // An enum flags, a TypeEnum whose values are combined, e.g 3 is the first two values
+    isSigned,    // An integer that can be negative: i8, i16, i32 (int) or i64
+    isChar,      // A char, a u8 that is a character
+    isList,      // A List<T>, e.g [..]int: a TypeStruct of data, count, capacity and allocator
+    isMap,       // A Map<K, V>
 }
 
-TypePrimitive :: struct {
-    head: Type;
-    kind: TypePrimitiveKind;
-};
-
 TypePointer :: struct {
-    head:      Type;
-    pointerTo: *Type;
+    @embed base: Type;
+    pointerTo:   *Type;
+}
+
+TypeArrayKind :: enum {
+    fixed,
+    slice,
+    dynamic,
 }
 
 TypeArray :: struct {
-    head:     Type;
-    kind:     TypeArrayKind;
-    elemType: *Type;
-    count:    i64;    // The number of elements of a fixed array. A slice has its count in its value
+    @embed base: Type;
+    arrayKind:   TypeArrayKind;
+    elemType:    *Type;
+    count:       i64;    // The number of elements of a fixed array. A slice has its count in its value
 }
 
 EnumValue :: struct {
@@ -90,7 +76,7 @@ EnumValue :: struct {
 }
 
 TypeEnum :: struct {
-    head:        Type;
+    @embed base: Type;
     backingType: *Type;
     values:      []EnumValue;
 };
@@ -104,17 +90,13 @@ StructMember :: struct {
 }
 
 // A union is a struct with this flag. Its first member is the tag ($tag: u32), the index of the variant it holds. The other members
-// are the variants, which all start at the same offset. See variantOf()
+// are the variants, which all start at the same offset. See any.variant()
 TypeStruct :: struct {
-    head:       Type;
-    members:    []StructMember;
-    alignment:  int;
-    attributes: []any;  // The values of the attributes on the struct e.g @cli.Options(about: "...")
+    @embed base: Type;
+    members:     []StructMember;
+    alignment:   int;
+    attributes:  []any;  // The values of the attributes on the struct e.g @cli.Options(about: "...")
 };
-
-TypeAny :: struct {
-    head: Type;
-}
 
 //////////////////////////////////
 // Raw underlying types
@@ -148,12 +130,6 @@ extern "C" {
     runtime_compare_strings :: (str1: *string, str2: *string) -> int;
 }
 
-isPrimitive :: method (type: *Type) -> bool {
-    if type.kind == .bool  { return true; }
-    if type.kind == .int   { return true; }
-    if type.kind == .float { return true; }
-    return false;
-}
 // The name of an enum value, e.g "open" for Status.open. ok is false if no value of the enum has the value
 nameOf :: method (type: *TypeEnum, value: i64) -> string, bool {
     for v in type.values {
@@ -163,16 +139,6 @@ nameOf :: method (type: *TypeEnum, value: i64) -> string, bool {
     }
     none: string;
     return none, false;
-}
-
-// Reads the value of an enum stored at data, as an i64
-readValue :: method (type: *TypeEnum, data: *void) -> i64 {
-    return switch type.backingType.size {
-        case 1 => (*(data as *i8)) as i64;
-        case 2 => (*(data as *i16)) as i64;
-        case 8 => *(data as *i64);
-        else   => (*(data as *i32)) as i64;
-    };
 }
 
 // The address of the member inside a struct value that starts at data
@@ -281,14 +247,6 @@ attribute :: method <T>(f: *AttributedFunction, value: *T) -> bool {
     return false;
 }
 
-isUnion :: method (type: *Type) -> bool {
-    return type.flags.has(.isUnion);
-}
-
-isOptional :: method (type: *Type) -> bool {
-    return type.flags.has(.isOptional);
-}
-
 //
 // The methods of an enum flags, e.g options.has(.verbose). The compiler calls these for them, e.g flagsHas(options, .verbose)
 //
@@ -308,39 +266,124 @@ flagsWithout :: <F>(flags: F, flag: F) -> F { return flags & ~flag; }
 // If no flag is set
 flagsIsEmpty :: <F>(flags: F) -> bool { return flags as i64 == 0; }
 
-// The value inside the optional (a ?T) stored at data, and its type T. present is false when it is empty
-optionalValue :: method (type: *TypeStruct, data: *void) -> (*void, *Type, bool) {
-    item    := &type.members[0];
-    present := *(type.members[1].valueIn(data) as *bool);
-    return item.valueIn(data), item.type, present;
+//////////////////////////////////
+// Questions about types. The values of a type are read and changed with the methods of any, in any.sd
+//////////////////////////////////
+
+isInteger :: method (type: *Type) -> bool { return type.kind == .int; }
+isFloat   :: method (type: *Type) -> bool { return type.kind == .float; }
+isNumber  :: method (type: *Type) -> bool { return type.kind == .int || type.kind == .float; }
+isSigned  :: method (type: *Type) -> bool { return type.flags.has(.isSigned); }    // i8, i16, i32 (int) or i64
+isChar    :: method (type: *Type) -> bool { return type.flags.has(.isChar); }
+isUnion   :: method (type: *Type) -> bool { return type.flags.has(.isUnion); }
+isOptional :: method (type: *Type) -> bool { return type.flags.has(.isOptional); }
+isFlags   :: method (type: *Type) -> bool { return type.flags.has(.isFlags); }     // An enum flags
+isList    :: method (type: *Type) -> bool { return type.flags.has(.isList); }      // A List<T>, e.g [..]int
+isMap     :: method (type: *Type) -> bool { return type.flags.has(.isMap); }
+
+// A slice, e.g []int
+isSlice :: method (type: *Type) -> bool {
+    return type.kind == .array && (type as *TypeArray).arrayKind == .slice;
 }
 
-// Makes the optional at data empty, or present with a zero value. Gives where the value goes and its type
-setOptional :: method (type: *TypeStruct, data: *void, present: bool) -> (*void, *Type) {
-    bytes := data as *u8;
-    for i in 0..type.head.size {
-        bytes[i] = 0;
-    }
-    *(type.members[1].valueIn(data) as *bool) = present;
-    item := &type.members[0];
-    return item.valueIn(data), item.type;
+// A fixed array, a slice or a List: the values that have an elementType(), and that any.count() and any.element() read
+isSequence :: method (type: *Type) -> bool {
+    return type.elementType() != null;
 }
 
-// The variant that the union stored at data holds
-variantOf :: method (type: *TypeStruct, data: *void) -> *StructMember {
-    tag := (*(data as *u32)) as i64;
-    if tag + 1 >= type.members.count {
-        return null;
-    }
-    return &type.members[tag + 1];
+// The type as the struct of its kind, or null when it is of another kind
+asPointer :: method (type: *Type) -> *TypePointer {
+    if type.kind != .pointer { return null; }
+    return type as *TypePointer;
 }
 
-// Makes the union stored at data hold the variant, with a zeroed value. Returns where the value goes
-setVariant :: method (type: *TypeStruct, data: *void, variant: *StructMember) -> *void {
-    bytes := data as *u8;
-    for i in 0..type.head.size {
-        bytes[i] = 0;
+asArray :: method (type: *Type) -> *TypeArray {
+    if type.kind != .array { return null; }
+    return type as *TypeArray;
+}
+
+asEnum :: method (type: *Type) -> *TypeEnum {
+    if type.kind != .enum { return null; }
+    return type as *TypeEnum;
+}
+
+asStruct :: method (type: *Type) -> *TypeStruct {
+    if type.kind != .struct { return null; }
+    return type as *TypeStruct;
+}
+
+// The type that a pointer points to, e.g User for *User. Null for other types
+pointee :: method (type: *Type) -> *Type {
+    if type.kind != .pointer { return null; }
+    return (type as *TypePointer).pointerTo;
+}
+
+// The type of the elements of a fixed array, a slice or a List, e.g int for [..]int. Null for other types
+elementType :: method (type: *Type) -> *Type {
+    if type.kind == .array { return (type as *TypeArray).elemType; }
+    if type.isList() { return (type as *TypeStruct).members[0].type.pointee(); }
+    return null;
+}
+
+// The type of the value of an optional, e.g int for ?int. Null for other types
+optionalType :: method (type: *Type) -> *Type {
+    if !type.isOptional() { return null; }
+    return (type as *TypeStruct).members[0].type;
+}
+
+// The types of the keys and the values of a Map<K, V>. Null for other types
+keyType :: method (type: *Type) -> *Type {
+    entry := mapEntryType(type);
+    if entry == null { return null; }
+    return entry.members[0].type;
+}
+
+valueType :: method (type: *Type) -> *Type {
+    entry := mapEntryType(type);
+    if entry == null { return null; }
+    return entry.members[1].type;
+}
+
+// The Entry<K, V> of the entries of a map
+@private
+mapEntryType :: (type: *Type) -> *TypeStruct {
+    if !type.isMap() { return null; }
+    return (type as *TypeStruct).members[0].type.elementType().asStruct();
+}
+
+// The smallest and the largest value of an integer type, e.g -128 and 127 for an i8, and 0 and 255 for a u8
+integerRange :: method (type: *Type) -> (i64, u64) {
+    bits := type.size * 8;
+    if type.isSigned() {
+        if bits >= 64 { return -9223372036854775807 - 1, 9223372036854775807; }
+        limit := (1 as i64) << (bits - 1);
+        return -limit, (limit - 1) as u64;
     }
-    *(data as *u32) = (variant.index - 1) as u32;
-    return variant.valueIn(data);
+    if bits >= 64 { return 0, ~(0 as u64); }
+    return 0, (((1 as i64) << bits) - 1) as u64;
+}
+
+// The member of the struct with the name, or null
+member :: method (type: *TypeStruct, name: string) -> *StructMember {
+    for i in 0..type.members.count {
+        if type.members[i].name == name { return &type.members[i]; }
+    }
+    return null;
+}
+
+// The variant of the union with the name, or null
+variant :: method (type: *TypeStruct, name: string) -> *StructMember {
+    if !type.isUnion() { return null; }
+    for i in 1..type.members.count {
+        if type.members[i].name == name { return &type.members[i]; }
+    }
+    return null;
+}
+
+// The value of the enum with the name, e.g 1 for "closed" of Status :: enum { open; closed; }. false when it has none
+valueNamed :: method (type: *TypeEnum, name: string) -> i64, bool {
+    for v in type.values {
+        if v.name == name { return v.value, true; }
+    }
+    return 0, false;
 }

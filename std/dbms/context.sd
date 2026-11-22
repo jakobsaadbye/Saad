@@ -89,7 +89,7 @@ pendingChanges :: method (context: *Context) -> i64 {
 discardChanges :: method (context: *Context) {
     context.changes.clear();
     for *t in context.tracked {
-        mem.copy(t.snapshot, t.row, t.table.type.head.size);
+        mem.copy(t.snapshot, t.row, t.table.type.size);
     }
 }
 
@@ -174,7 +174,7 @@ saveChanges :: method (context: *Context) -> error {
         if change.kind == .create { context.trackRow(change.table, change.row); }
     }
     for *t in context.tracked {
-        mem.copy(t.snapshot, t.row, t.table.type.head.size);
+        mem.copy(t.snapshot, t.row, t.table.type.size);
     }
     stored.free();
     dirty.free();
@@ -190,7 +190,7 @@ record :: method (context: *Context, kind: ChangeKind, table: TableInfo, row: *v
 // Tracks a row of a table with a key, if the context tracks. The tables do, e.g get of a dbms.KeyedTable
 trackRow :: method (context: *Context, table: TableInfo, row: *void) {
     if !context.track || table.key.len == 0 { return; }
-    size := table.type.head.size;
+    size := table.type.size;
     for *t in context.tracked {
         if t.row == row {
             mem.copy(t.snapshot, row, size);
@@ -258,11 +258,11 @@ sameValue :: (type: *Type, a: *void, b: *void) -> bool {
         return *(a as *string) == *(b as *string);
     }
     if type.isOptional() {
-        valueA, inner, hasA := (type as *TypeStruct).optionalValue(a);
-        valueB, _, hasB := (type as *TypeStruct).optionalValue(b);
+        valueA, hasA := anyAt(a, type).optional();
+        valueB, hasB := anyAt(b, type).optional();
         if hasA != hasB { return false; }
         if !hasA { return true; }
-        return sameValue(inner, valueA, valueB);
+        return sameValue(valueA.type, valueA.data, valueB.data);
     }
     return mem.equal(a, b, type.size);
 }
@@ -418,7 +418,7 @@ isZero :: (type: *Type, value: *void) -> bool {
         return (*(value as *string)).len == 0;
     }
     if type.isOptional() {
-        _, _, has := (type as *TypeStruct).optionalValue(value);
+        _, has := anyAt(value, type).optional();
         return !has;
     }
     bytes := value as *u8;
@@ -439,11 +439,11 @@ readStored :: method (conn: *Connection, result: Rows, index: i64, row: *void, t
 
 @private
 readStoredRow :: method (conn: *Connection, result: Rows, index: i64, row: *void, type: *TypeStruct, stored: *[..]StoredRow) -> string {
-    size := type.head.size;
+    size := type.size;
     copy := resizeMemory(conn.allocator, null, 0, size as i64);
     mem.copy(copy, row, size);
     readColumns := conn.columnsOf(result, type);
-    err := conn.readRow(result, index, copy, type, readColumns);
+    err := conn.readRow(result, index, anyAt(copy, type), readColumns);
     readColumns.free();
     if err != "" { return err; }
     stored.add(StoredRow{row: row, copy: copy, size: size});

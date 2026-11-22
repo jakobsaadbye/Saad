@@ -124,8 +124,9 @@ main :: () {
 
         s: any = Shape{label: "x"};
         assert(s.type.isUnion());
-        variant := (s.type as *TypeStruct).variantOf(s.data);
-        assert(variant.name == "label");
+        variant, value := s.variant();
+        label, isText := value.to<string>();
+        assert(variant.name == "label" && isText && label == "x");
         assert(sizeof(Shape) == 24); // The tag, and the largest variant: a string
     }
     {

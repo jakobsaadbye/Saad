@@ -1,37 +1,81 @@
 // Lesson 25: Reflection
 //
-// A program can look at types while it runs. A value of type 'any' carries the value and its type. typeof(x)
-// gives the name of the type of x. print uses the same to show any value.
+// A program can look at types, and at values whose type it doesn't know, while it runs. A value of type 'any' is the
+// address of a value and its type: value.type says what it is, and the methods of any read and change the value
+// through its type. print and the json library are written like this. See docs/reflection.md for all of it.
 
 use fmt;
 
+Kind :: enum { dog, cat, bird }
+
 Pet :: struct {
     name: string;
-    age:  int;
+    age:  u8;
+    kind: Kind;
+    tags: [..]string;
+    chip: ?int;          // Empty until it is set
 }
 
+// 1. What is it? The type of an any can be asked about
 describe :: (value: any) {
-    switch value.type.kind {
-        case .int    { print("an int: %", value); }
-        case .string { print("a string: %", value); }
-        case .struct {
-            type := value.type as *TypeStruct;
-            print("a struct % with % members:", type.head.name, type.members.count);
-            for member in type.members {
-                print("    %: %", member.name, member.type.name);
-            }
-        }
-        else { print("something else: %", value); }
+    type := value.type;
+    if type.isInteger() {
+        low, high := type.integerRange();
+        print("% is of type %, from % to %", value, type.name, low, high);
+    } else if type.isSequence() {
+        print("% has % elements of %", value, value.count(), type.elementType().name);
+    } else if type.kind == .struct {
+        print("% is a struct with % members", type.name, type.asStruct().members.count);
+    } else {
+        print("% is of type %", value, type.name);
     }
+}
+
+// 2. The members of any struct, with their names and values
+printMembers :: (value: any) {
+    for *member in value.type.asStruct().members {
+        print("    %: % = %", member.name, member.type.name, value.memberAt(member));
+    }
+}
+
+// 3. Changing a value by the names of its members, e.g settings read from a file. It works for any struct, and says
+//    what is wrong with a line
+set :: (target: any, name: string, text: string) -> string {
+    place := target.member(name);
+    if place.isEmpty() { return sprint("% has no member %", target.type.name, name); }
+
+    if place.type.isOptional() { place = place.setOptional(); }  // ?int: the int inside
+    if place.type.isSequence() { place = place.add(); }          // a list: a new element at the end
+
+    ok := switch place.type.kind {
+        case .int    => place.setIntText(text);                // false when it doesn't fit, e.g 300 in a u8
+        case .enum   => place.setEnum(text);                   // by the name of the value
+        case .string => place.set(text);
+        else         => false;
+    };
+    if !ok { return sprint("'%' isn't a value of %.% (%)", text, target.type.name, name, place.type.name); }
+    return "";
 }
 
 main :: () {
     describe(42);
+    describe([1, 2, 3]);
+    describe(Pet{name: "Rex"});
     describe("hello");
-    describe(Pet{"Rex", 3});
-    describe(true);
 
-    x := 3.5;
-    print("x is a %", typeof(x));          // float
-    assert(typeof(Pet) == "Pet");
+    // anyOf(&pet) is an any that changes pet. 'pet as any' would be an any of a copy
+    pet: Pet;
+    target := anyOf(&pet);
+    settings := [["name", "Rex"], ["age", "4"], ["kind", "cat"], ["tags", "friendly"], ["tags", "old"], ["chip", "1234"],
+        ["age", "300"], ["kind", "fish"], ["color", "brown"]];
+    for line in settings {
+        problem := set(target, line[0], line[1]);
+        if problem != "" { print("Skipped: %", problem); }
+    }
+    print("%", pet);
+    printMembers(target);
+
+    // typeInfo<T>() is the type itself, without a value, and typeof(x) the name of the type of x
+    print("A Pet has % members, and a Kind % values", typeInfo<Pet>().asStruct().members.count, typeInfo<Kind>().asEnum().values.count);
+    assert(typeof(pet) == "Pet");
 }

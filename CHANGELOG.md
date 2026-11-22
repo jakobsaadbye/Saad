@@ -2,6 +2,27 @@
 
 What changed in each version of Saad: the language, the compiler, the standard library and the tools. The newest is first.
 
+## Update v0.26.0 - 22. Nov 2026
+
+* Reflection is easier to use, with fewer casts (docs/reflection.md):
+  * The descriptors `TypePointer`, `TypeArray`, `TypeEnum` and `TypeStruct` embed their `Type` (`@embed base: Type`), so
+    `structType.name` works and they are a `*Type` where one is wanted. `type.asStruct()`, `asEnum()`, `asArray()` and
+    `asPointer()` give them, or null for another kind. `TypePrimitive`, `TypePrimitiveKind` and `TypeAny` are gone: bool,
+    the numbers, string, void and any are a `Type`, and an integer is told apart by its size, `isSigned()` and `isChar()`.
+    `TypeArray.kind` is `arrayKind`
+  * Methods of `Type` for what libraries asked by hand: `isList()`, `isMap()`, `isSlice()`, `isSequence()`, `isInteger()`,
+    `isSigned()`, `isChar()`, `elementType()`, `pointee()`, `optionalType()`, `keyType()`, `valueType()`,
+    `integerRange()`, `member(name)`, `variant(name)` and `valueNamed(name)`. The compiler sets the new flags `isSigned`,
+    `isChar`, `isList` and `isMap`. `typeInfo<T>()` is the descriptor of a type
+  * Methods can be declared on `any`, and the prelude has methods that read and change a value through its type
+    (`std/prelude/any.sd`): `anyOf(&x)`, `to<T>()`, `ref<T>()`, `set(value)`, `toInt()`, `setInt(n)`, `setIntText(text)`,
+    `toFloat()`, `setFloat(f)`, `enumName()`, `setEnum(name)`, `addFlag(name)`, `count()`, `element(i)`, `add()`,
+    `resize(n)`, `entry(i)`, `put(key)`, `member(name)`, `memberAt(m)`, `deref()`, `allocate()`, `optional()`,
+    `setOptional()`, `clearOptional()`, `variant()`, `setVariant(name)` and `zero()` (`tests/reflection_values.sd`)
+  * They replace `TypeEnum.readValue`, `TypeStruct.optionalValue`, `setOptional`, `variantOf`, `setVariant`,
+    `isPrimitive` and `reflect.makeAny`. fmt, json, web, html, dbms, sqlite, cli and reflect use them, instead of their
+    own copies of reading integers, writing enums, the elements of lists and the layout of a Map
+
 ## Update v0.25.1 - 22. Nov 2026
 
 * The parser of the command line is the namespace `cli`, with shorter names: `cli.parseArguments<Options>()`,

@@ -134,13 +134,13 @@ flagNames :: method (type: *TypeEnum, value: i64) -> ([..]string, bool) {
 enumFromNumber :: <E>(number: i64) -> ?E {
     probe: E;
     boxed: any = probe;
-    info := boxed.type as *TypeEnum;
+    info := boxed.type.asEnum();
     flags: i64 = 0;
     for v in info.values {
         if v.value == number { return number as E; }
         flags = flags | v.value;
     }
-    if info.head.flags.has(.isFlags) && (number & ~flags) == 0 { return number as E; }
+    if info.isFlags() && (number & ~flags) == 0 { return number as E; }
     return null;
 }
 
@@ -400,9 +400,11 @@ hash :: method (x: f64) -> u64 {
     return hashU64(bits);
 }
 
+hash :: method (s: string) -> u64 { return hashString(s); }
+
 // FNV-1a. The multiplications wrap around on purpose
 @noOverflowCheck
-hash :: method (s: string) -> u64 {
+hashString :: (s: string) -> u64 {
     h: u64 = 1469598103934665603;
     for c in s {
         h = h ^ (c as u64);

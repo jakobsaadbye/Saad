@@ -32,8 +32,8 @@ main :: () {
         x: any = 5 as u8;
         assert(x.type.kind == .int);
 
-        type := x.type as *TypePrimitive;
-        print("TypePrimitive = %", *type);
+        assert(x.type.size == 1 && !x.type.isSigned());
+        print("Type = %", *x.type);
     }
     print("\n-------------------- Array type ----------------");
     if true {
@@ -89,7 +89,7 @@ main :: () {
 }
 
 printStructType :: (structType: *TypeStruct) {
-    print("% :: struct {", structType.head.name);
+    print("% :: struct {", structType.name);
     for member in structType.members {
         print("\t%: %;", member.name, member.type.name);
     }

@@ -3,7 +3,8 @@
 ```
 std/
   prelude/      Always there, without an import
-    runtime.sd      Types for reflection (Type, TypeStruct, ...), attributeOf and the runtime functions
+    runtime.sd      Types for reflection (Type, TypeStruct, ...) and their methods, attributeOf and the runtime functions
+    any.sd          The methods of any: reading and changing a value through its type, e.g v.member("x").setInt(1)
     allocator.sd    The Allocator interface, the heap, the allocator of the thread, and the memory of --check-memory
     thread_blocks.sd  The blocks of the @threadLocal globals of each thread
     collections.sd  List<T> ([..]T), Map<K, V>, Optional<T> and the collection interfaces (Iterable<T>, ...)

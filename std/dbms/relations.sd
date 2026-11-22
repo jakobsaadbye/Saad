@@ -41,10 +41,9 @@ related :: <T>(link: Link, table: string, column: string, value: any) -> (*T, er
     if !found { return null, databaseError(fmt.sprint("The table % isn't a table of the database", table), QueryError); }
 
     if value.type.isOptional() {
-        inner, innerType, present := (value.type as *TypeStruct).optionalValue(value.data);
+        inner, present := value.optional();
         if !present { return null, null; }
-        value.type = innerType;
-        value.data = inner;
+        value = inner;
     }
 
     // A tracked row with the key is the row
@@ -98,10 +97,10 @@ tableNamed :: method (context: *Context, name: string) -> (TableInfo, bool) {
 // Sets the link of a row to the context, if its struct has one
 @private
 linkRow :: (context: *Context, type: *TypeStruct, row: *void) {
-    for i in 0..type.members.count {
-        member := &type.members[i];
-        if member.type.name == "dbms.Link" {
-            (member.valueIn(row) as *Link).context = context;
+    for *member in type.members {
+        link := anyAt(row, type).memberAt(member).ref<Link>();
+        if link != null {
+            link.context = context;
             return;
         }
     }

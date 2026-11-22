@@ -36,10 +36,8 @@ Field :: struct {
 //   json.Value                  as it is
 encode :: <T>(value: T, options := Options{}) -> string {
     w := newWriter(options);
-    // A pointer keeps the type of a collection, which would be a slice of its elements in an any
-    boxed: any = &value;
-    pointer := boxed.type as *TypePointer;
-    w.writeAny(*(boxed.data as **void), pointer.pointerTo);
+    // Through a pointer, which keeps the type of a collection, which would be a slice of its elements in an any
+    w.writeAny(anyOf(&value));
     return w.sb.toString();
 }
 
@@ -48,7 +46,7 @@ encode :: <T>(value: T, options := Options{}) -> string {
 // of a collection
 encodeAt :: (value: any, options := Options{}) -> string {
     w := newWriter(options);
-    w.writeAny(value.data, value.type);
+    w.writeAny(value);
     return w.sb.toString();
 }
 
@@ -258,27 +256,32 @@ writeMemberName :: method (w: *Writer, name: string) {
 //
 
 @private
-writeAny :: method (w: *Writer, data: *void, type: *Type) {
-    switch type.kind {
+writeAny :: method (w: *Writer, value: any) {
+    switch value.type.kind {
         case .bool {
-            w.writeBool(*(data as *bool));
+            w.writeBool(*(value.data as *bool));
         }
         case .int {
-            writeInteger(&w.sb, data, type as *TypePrimitive);
+            // A char is written as its number
+            if value.type.size == 8 && !value.type.isSigned() { w.sb.addUInt64(*(value.data as *u64)); }
+            else {
+                n, _ := value.toInt();
+                w.sb.addInt64(n);
+            }
         }
         case .float {
-            if type.size == 4 { w.writeF32(*(data as *f32)); }
-            else              { w.writeF64(*(data as *f64)); }
+            f, _ := value.toFloat();
+            if value.type.size == 4 { w.writeF32(f as f32); }
+            else                    { w.writeF64(f); }
         }
         case .string {
-            w.writeString(*(data as *string));
+            w.writeString(*(value.data as *string));
         }
         case .enum {
-            enumType := type as *TypeEnum;
-            value := enumType.readValue(data);
-            if type.flags.has(.isFlags) && !w.options.enumsAsNumbers {
+            n, _ := value.toInt();
+            if value.type.isFlags() && !w.options.enumsAsNumbers {
                 // The names of the flags that are set, e.g ["verbose", "color"]
-                names, all := enumType.flagNames(value);
+                names, all := value.type.asEnum().flagNames(n);
                 if all {
                     w.sb.addChar('[');
                     for flag, i in names {
@@ -293,48 +296,42 @@ writeAny :: method (w: *Writer, data: *void, type: *Type) {
                 }
                 names.free();
             }
-            name, ok := enumType.nameOf(value);
+            name, ok := value.enumName();
             if ok && !w.options.enumsAsNumbers {
                 w.sb.addChar('"');
                 addStyledName(&w.sb, name, w.options.enumValues);
                 w.sb.addChar('"');
             } else {
-                w.sb.addInt64(value);
+                w.sb.addInt64(n);
             }
         }
         case .pointer {
-            pointee := (type as *TypePointer).pointerTo;
-            address := *(data as **void);
-            if address == null || pointee.kind == .void {
-                w.sb.addString("null");
-            } else {
-                w.writeAny(address, pointee);
-            }
+            pointee := value.deref();
+            if pointee.isEmpty() { w.sb.addString("null"); }
+            else                 { w.writeAny(pointee); }
         }
         case .array {
-            arrayType := type as *TypeArray;
-            elements, count := arrayElements(data, arrayType);
-            w.writeElements(elements, count, arrayType.elemType);
+            w.writeElements(value);
         }
         case .struct {
-            if type.isOptional() {
+            if value.type.isOptional() {
                 // The value, or null when it is empty
-                value, valueType, present := (type as *TypeStruct).optionalValue(data);
-                if present { w.writeAny(value, valueType); }
+                item, present := value.optional();
+                if present { w.writeAny(item); }
                 else       { w.sb.addString("null"); }
-            } else if type.name == "time.Time" {
+            } else if value.type.name == "time.Time" {
                 // As RFC 3339 text, e.g "2026-11-02T10:15:00Z"
-                text := (*(data as *time.Time)).toString();
+                text := (*(value.data as *time.Time)).toString();
                 w.writeString(text);
                 text.free();
             } else {
-                w.writeStruct(data, type as *TypeStruct);
+                w.writeStruct(value);
             }
         }
         case .any {
-            boxed := *(data as *any);
-            if boxed.type == null { w.sb.addString("null"); }
-            else                  { w.writeAny(boxed.data, boxed.type); }
+            boxed := *(value.data as *any);
+            if boxed.isEmpty() { w.sb.addString("null"); }
+            else               { w.writeAny(boxed); }
         }
         else {
             w.sb.addString("null");
@@ -342,51 +339,50 @@ writeAny :: method (w: *Writer, data: *void, type: *Type) {
     }
 }
 
+// A fixed array, a slice or a List
 @private
-writeElements :: method (w: *Writer, elements: *u8, count: i64, elemType: *Type) {
+writeElements :: method (w: *Writer, value: any) {
+    count := value.count();
     w.beginList('[', count);
     for i in 0..count {
         w.nextElement(i);
-        w.writeAny(&elements[i * elemType.size], elemType);
+        w.writeAny(value.element(i));
     }
     w.endList(']', count);
 }
 
 @private
-writeStruct :: method (w: *Writer, data: *void, type: *TypeStruct) {
-    name := type.head.name;
-
-    if name == typeof(Value) {
-        w.writeValue(*(data as *Value));
+writeStruct :: method (w: *Writer, value: any) {
+    type := value.type;
+    if type.name == typeof(Value) {
+        w.writeValue(*(value.data as *Value));
         return;
     }
-    if name.startsWith("List<") {
-        elements, count, elemType := listElements(data, type);
-        w.writeElements(elements, count, elemType);
+    if type.isList() {
+        w.writeElements(value);
         return;
     }
-    if name.startsWith("Map<") {
-        w.writeMap(data, type);
+    if type.isMap() {
+        w.writeMap(value);
         return;
     }
-    if type.head.isUnion() {
-        w.writeUnion(data, type);
+    if type.isUnion() {
+        w.writeUnion(value);
         return;
     }
 
     // The members that are written, with their keys, worked out once for the type
-    plan := planOf(type, w.options.names);
+    plan := planOf(type.asStruct(), w.options.names);
     w.beginList('{', plan.members.count);
     written := 0;
-    for i in 0..plan.members.count {
-        member := &plan.members[i];
-        value := (&((data as *u8)[member.offset])) as *void;
-        if (member.omitEmpty || w.options.omitEmpty) && isEmpty(value, member.type) { continue; }
+    for *planned in plan.members {
+        member := value.memberAt(planned.member);
+        if (planned.omitEmpty || w.options.omitEmpty) && isEmpty(member) { continue; }
 
         w.nextElement(written);
-        w.sb.addString(member.key);
+        w.sb.addString(planned.key);
         if w.options.indent > 0 { w.sb.addChar(' '); }
-        w.writeAny(value, member.type);
+        w.writeAny(member);
         written += 1;
     }
     w.endList('}', written);
@@ -404,8 +400,7 @@ Plan :: struct {
 
 @private
 PlanMember :: struct {
-    offset:    i64;
-    type:      *Type;
+    member:    *StructMember;
     key:       string;    // The quoted name and the colon
     omitEmpty: bool;
 }
@@ -435,7 +430,7 @@ planOf :: (type: *TypeStruct, names: NameStyle) -> *Plan {
             key.sb.addChar('"');
         }
         key.sb.addChar(':');
-        plan.members.add(PlanMember{offset: member.offset, type: member.type, key: key.sb.toString(), omitEmpty: field.omitEmpty});
+        plan.members.add(PlanMember{member: member, key: key.sb.toString(), omitEmpty: field.omitEmpty});
     }
     plans.allocator = heapAllocator();
     plans.add(plan);
@@ -445,8 +440,8 @@ planOf :: (type: *TypeStruct, names: NameStyle) -> *Plan {
 // A union is the name of its variant, e.g "empty", or an object with the name and the value, e.g {"circle": {"radius": 2}}.
 // The names are written like enum values, so in the style of enumValues
 @private
-writeUnion :: method (w: *Writer, data: *void, type: *TypeStruct) {
-    variant := type.variantOf(data);
+writeUnion :: method (w: *Writer, value: any) {
+    variant, inner := value.variant();
     if variant == null {
         w.sb.addString("null");
         return;
@@ -466,21 +461,15 @@ writeUnion :: method (w: *Writer, data: *void, type: *TypeStruct) {
     w.sb.addChar('"');
     w.sb.addChar(':');
     if w.options.indent > 0 { w.sb.addChar(' '); }
-    w.writeAny(variant.valueIn(data), variant.type);
+    w.writeAny(inner);
     w.endList('}', 1);
 }
 
 // A Map<string, V> is an object. Maps with other keys are arrays of [key, value] pairs
 @private
-writeMap :: method (w: *Writer, data: *void, type: *TypeStruct) {
-    entriesMember := findMember(type, "entries");
-    entriesType   := entriesMember.type as *TypeStruct;
-    entries, count, entryType := listElements(entriesMember.valueIn(data), entriesType);
-
-    entryStruct := entryType as *TypeStruct;
-    keyMember   := findMember(entryStruct, "key");
-    valueMember := findMember(entryStruct, "value");
-    stringKeys  := keyMember.type.kind == .string;
+writeMap :: method (w: *Writer, value: any) {
+    count      := value.count();
+    stringKeys := value.type.keyType().kind == .string;
 
     open  := '[' as u8;
     close := ']' as u8;
@@ -491,37 +480,20 @@ writeMap :: method (w: *Writer, data: *void, type: *TypeStruct) {
 
     w.beginList(open, count);
     for i in 0..count {
-        entry := (&entries[i * entryType.size]) as *void;
+        key, item := value.entry(i);
         w.nextElement(i);
         if stringKeys {
-            w.writeKey(*(keyMember.valueIn(entry) as *string));
-            w.writeAny(valueMember.valueIn(entry), valueMember.type);
+            w.writeKey(*(key.data as *string));
+            w.writeAny(item);
         } else {
             w.sb.addChar('[');
-            w.writeAny(keyMember.valueIn(entry), keyMember.type);
+            w.writeAny(key);
             w.sb.addChar(',');
-            w.writeAny(valueMember.valueIn(entry), valueMember.type);
+            w.writeAny(item);
             w.sb.addChar(']');
         }
     }
     w.endList(close, count);
-}
-
-@private
-writeInteger :: (sb: *fmt.StringBuilder, data: *void, type: *TypePrimitive) {
-    // A char is written as its number
-    switch type.kind {
-        case .u8
-        case .char { sb.addUInt64((*(data as *u8)) as u64); }
-        case .u16  { sb.addUInt64((*(data as *u16)) as u64); }
-        case .u32
-        case .uint { sb.addUInt64((*(data as *u32)) as u64); }
-        case .u64  { sb.addUInt64(*(data as *u64)); }
-        case .i8   { sb.addInt64((*(data as *i8)) as i64); }
-        case .i16  { sb.addInt64((*(data as *i16)) as i64); }
-        case .i64  { sb.addInt64(*(data as *i64)); }
-        else       { sb.addInt64((*(data as *i32)) as i64); }
-    }
 }
 
 //
@@ -540,63 +512,19 @@ fieldOf :: (member: *StructMember) -> Field, bool {
     return field, named;
 }
 
-@private
-findMember :: (type: *TypeStruct, name: string) -> *StructMember {
-    for i in 0..type.members.count {
-        if type.members[i].name == name {
-            return &type.members[i];
-        }
-    }
-    return null;
-}
-
-// The elements of a fixed array or a slice
-@private
-arrayElements :: (data: *void, type: *TypeArray) -> *u8, i64 {
-    if type.kind == .fixed {
-        return data as *u8, type.count;
-    }
-    slice := *(data as *[]u8);
-    return slice.data, slice.count;
-}
-
-// The elements of a List<T>, and the type T
-@private
-listElements :: (data: *void, type: *TypeStruct) -> *u8, i64, *Type {
-    dataMember  := findMember(type, "data");
-    countMember := findMember(type, "count");
-    elements := *(dataMember.valueIn(data) as **u8);
-    count    := *(countMember.valueIn(data) as *i64);
-    elemType := (dataMember.type as *TypePointer).pointerTo;
-    return elements, count, elemType;
-}
-
 // True for 0, false, "", null and things without elements
 @private
-isEmpty :: (data: *void, type: *Type) -> bool {
-    if type.kind == .string {
-        return (*(data as *string)).len == 0;
+isEmpty :: (value: any) -> bool {
+    type := value.type;
+    if type.kind == .string || type.isSequence() || type.isMap() {
+        return value.count() == 0;
     }
-    if type.kind == .array {
-        _, count := arrayElements(data, type as *TypeArray);
-        return count == 0;
-    }
-    if type.kind == .struct {
-        structType := type as *TypeStruct;
-        if structType.head.name.startsWith("List<") {
-            _, count, _ := listElements(data, structType);
-            return count == 0;
-        }
-        if structType.head.name.startsWith("Map<") {
-            return *(findMember(structType, "count").valueIn(data) as *i64) == 0;
-        }
-        if structType.head.name == typeof(Value) {
-            return (*(data as *Value)).kind == .null;
-        }
+    if type.name == typeof(Value) {
+        return (*(value.data as *Value)).kind == .null;
     }
 
     // All bytes are zero
-    bytes := data as *u8;
+    bytes := value.data as *u8;
     for i in 0..type.size {
         if bytes[i] != 0 { return false; }
     }
