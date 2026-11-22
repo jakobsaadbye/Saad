@@ -9,7 +9,6 @@ namespace json;
 
 import fmt;
 import time;
-import mem;
 import errors;
 
 // Reads the JSON into the value. err is empty when it worked, otherwise it tells what is wrong and where.
@@ -34,10 +33,7 @@ decodeInto :: <T>(text: string, value: *T, options := Options{}) -> error {
         return err;
     }
 
-    boxed: any = value;
-    pointer := boxed.type as *TypePointer;
-    target  := *(boxed.data as **void);
-    failed := assign(root, target, pointer.pointerTo, "", &options);
+    failed := assign(root, anyOf(value), "", &options);
 
     // The strings of the parsed values are used by the decoded value, so only the arrays and objects are freed
     root.free();
@@ -52,7 +48,7 @@ DecodeError :: ErrorKind{"json.DecodeError"};
 // function of attributedFunctions(), which a reflect.Call gives as an any: json.assignAt(value, call.argument(1)). 'path'
 // names it in the error, e.g "authorId"
 assignAt :: (v: Value, place: any, path := "", options := Options{}) -> error {
-    failed := assign(v, place.data, place.type, path, &options);
+    failed := assign(v, place, path, &options);
     if failed != "" { return errors.make(failed, kind: DecodeError); }
     return null;
 }
@@ -116,61 +112,51 @@ indexPath :: (path: string, index: i64) -> string {
 
 // Reads the value v into the memory at data, which holds a value of the type
 @private
-assign :: (v: Value, data: *void, type: *Type, path: string, options: *Options) -> string {
-    kind := type.kind;
+assign :: (v: Value, place: any, path: string, options: *Options) -> string {
+    type := place.type;
 
     // null leaves the value as it is, but a pointer becomes null and an optional empty
     if v.kind == .null {
-        if kind == .pointer {
-            *(data as **void) = null;
-        }
-        if type.isOptional() {
-            (type as *TypeStruct).setOptional(data, false);
-        }
+        if type.kind == .pointer || type.isOptional() { place.zero(); }
         return "";
     }
 
     // An optional, ?T, gets a value of T
     if type.isOptional() {
-        item, itemType := (type as *TypeStruct).setOptional(data, true);
-        return assign(v, item, itemType, path, options);
+        return assign(v, place.setOptional(), path, options);
     }
 
-    switch kind {
+    switch type.kind {
         case .bool {
             if v.kind != .bool { return mismatch(path, "a bool", v); }
-            *(data as *bool) = v.boolean;
+            place.set(v.boolean);
             return "";
         }
         case .int {
             if v.kind != .number { return mismatch(path, "a number", v); }
-            return assignInteger(v, data, type as *TypePrimitive, path);
+            return assignInteger(v, place, path);
         }
         case .float {
             if v.kind != .number { return mismatch(path, "a number", v); }
-            if type.size == 4 { *(data as *f32) = v.number as f32; }
-            else              { *(data as *f64) = v.number; }
+            place.setFloat(v.number);
             return "";
         }
         case .string {
             if v.kind != .string { return mismatch(path, "a string", v); }
-            *(data as *string) = v.text;
+            place.set(v.text);
             return "";
         }
         case .enum {
-            return assignEnum(v, data, type as *TypeEnum, path, options);
+            return assignEnum(v, place, path, options);
         }
         case .pointer {
-            pointee := (type as *TypePointer).pointerTo;
-            if pointee.kind == .void {
+            if type.pointee().kind == .void {
                 return failAt(path, "Can't read JSON into a *void");
             }
-            memory := mem.allocate(pointee.size as int);
-            *(data as **void) = memory;
-            return assign(v, memory, pointee, path, options);
+            return assign(v, place.allocate(), path, options);
         }
         case .array {
-            return assignArray(v, data, type as *TypeArray, path, options);
+            return assignElements(v, place, path, options);
         }
         case .struct {
             if type.name == "time.Time" {
@@ -178,10 +164,10 @@ assign :: (v: Value, data: *void, type: *Type, path: string, options: *Options) 
                 if v.kind != .string { return mismatch(path, "a time as a string", v); }
                 t, ok := time.parse(v.text);
                 if !ok { return failAt(path, fmt.sprint("\"%\" is not a time like 2026-11-02T10:15:00Z", v.text)); }
-                *(data as *time.Time) = t;
+                place.set(t);
                 return "";
             }
-            return assignStruct(v, data, type as *TypeStruct, path, options);
+            return assignStruct(v, place, path, options);
         }
         else {
             return failAt(path, fmt.sprint("Can't read JSON into a value of type %", type.name));
@@ -189,57 +175,51 @@ assign :: (v: Value, data: *void, type: *Type, path: string, options: *Options) 
     }
 }
 
+// A fixed array, a slice or a List from an array
 @private
-assignArray :: (v: Value, data: *void, type: *TypeArray, path: string, options: *Options) -> string {
+assignElements :: (v: Value, place: any, path: string, options: *Options) -> string {
     if v.kind != .array { return mismatch(path, "an array", v); }
 
-    count    := v.items.count;
-    elemSize := type.elemType.size;
-    elements: *u8 = null;
-
-    if type.kind == .fixed {
-        if count > type.count {
-            return failAt(path, fmt.sprint("The array has % elements, but there is room for %", count, type.count));
+    count := v.items.count;
+    array := place.type.asArray();
+    if array != null && array.arrayKind == .fixed {
+        if count > array.count {
+            return failAt(path, fmt.sprint("The array has % elements, but there is room for %", count, array.count));
         }
-        elements = data as *u8;
     } else {
-        elements = mem.allocate((count as int + 1) * elemSize) as *u8;
-        slice := data as *[]u8;
-        slice.data  = elements;
-        slice.count = count;
+        place.resize(count);
     }
 
     for item, i in v.items {
-        err := assign(item, &elements[i * elemSize], type.elemType, indexPath(path, i), options);
+        err := assign(item, place.element(i), indexPath(path, i), options);
         if err != "" { return err; }
     }
     return "";
 }
 
 @private
-assignStruct :: (v: Value, data: *void, type: *TypeStruct, path: string, options: *Options) -> string {
-    name := type.head.name;
+assignStruct :: (v: Value, place: any, path: string, options: *Options) -> string {
+    type := place.type.asStruct();
 
-    if name == typeof(Value) {
-        *(data as *Value) = v.clone();
+    if type.name == typeof(Value) {
+        place.set(v.clone());
         return "";
     }
-    if name.startsWith("List<") {
-        return assignList(v, data, type, path, options);
+    if type.isList() {
+        return assignElements(v, place, path, options);
     }
-    if name.startsWith("Map<") {
-        return assignMap(v, data, type, path, options);
+    if type.isMap() {
+        return assignMap(v, place, path, options);
     }
-    if type.head.isUnion() {
-        return assignUnion(v, data, type, path, options);
+    if type.isUnion() {
+        return assignUnion(v, place, path, options);
     }
 
     if v.kind != .object { return mismatch(path, "an object", v); }
 
     // The name of each member in the JSON. Empty for skipped members
     keys: [..]string;
-    for i in 0..type.members.count {
-        member := &type.members[i];
+    for *member in type.members {
         field, named := fieldOf(member);
         key := field.name;
         if field.skip { key = ""; }
@@ -248,27 +228,26 @@ assignStruct :: (v: Value, data: *void, type: *TypeStruct, path: string, options
     }
 
     err := "";
-    for i in 0..type.members.count {
+    for *member, i in type.members {
         key := keys[i];
         if key.len == 0 || !v.has(key) { continue; }
 
-        member := &type.members[i];
-        err = assign(v.get(key), member.valueIn(data), member.type, memberPath(path, key), options);
+        err = assign(v.get(key), place.memberAt(member), memberPath(path, key), options);
         if err != "" { break; }
     }
 
     if err == "" && options.strict {
         for entry in v.fields {
             if !keys.contains(entry.key) {
-                err = failAt(path, fmt.sprint("% has no member '%'", type.head.name, entry.key));
+                err = failAt(path, fmt.sprint("% has no member '%'", type.name, entry.key));
                 break;
             }
         }
     }
 
     if options.names != .asWritten {
-        for i in 0..type.members.count {
-            _, named := fieldOf(&type.members[i]);
+        for *member, i in type.members {
+            _, named := fieldOf(member);
             if !named && keys[i].len > 0 { keys[i].free(); }
         }
     }
@@ -278,14 +257,15 @@ assignStruct :: (v: Value, data: *void, type: *TypeStruct, path: string, options
 
 // A union from the name of a variant without a value, e.g "empty", or an object with one member, e.g {"circle": {"radius": 2}}
 @private
-assignUnion :: (v: Value, data: *void, type: *TypeStruct, path: string, options: *Options) -> string {
+assignUnion :: (v: Value, place: any, path: string, options: *Options) -> string {
+    type := place.type.asStruct();
     name := "";
     if v.kind == .string {
         name = v.text;
     } else if v.kind == .object && v.fields.count == 1 {
         name = v.keys()[0];
     } else {
-        return mismatch(path, fmt.sprint("the name of a variant of %, or an object with one", type.head.name), v);
+        return mismatch(path, fmt.sprint("the name of a variant of %, or an object with one", type.name), v);
     }
 
     for i in 1..type.members.count {
@@ -295,108 +275,50 @@ assignUnion :: (v: Value, data: *void, type: *TypeStruct, path: string, options:
         if options.enumValues != .asWritten { styled.free(); }
         if !same { continue; }
 
-        value := type.setVariant(data, variant);
+        value := place.setVariant(variant.name);
         if variant.type.kind == .void {
             return "";
         }
         if v.kind == .string {
-            return failAt(path, fmt.sprint("The variant '%' of % needs a value", name, type.head.name));
+            return failAt(path, fmt.sprint("The variant '%' of % needs a value", name, type.name));
         }
-        return assign(v.get(name), value, variant.type, memberPath(path, name), options);
+        return assign(v.get(name), value, memberPath(path, name), options);
     }
-    return failAt(path, fmt.sprint("'%' is not a variant of %", name, type.head.name));
+    return failAt(path, fmt.sprint("'%' is not a variant of %", name, type.name));
 }
 
-// Sets the data, count and capacity of a List<T>
+// A Map<string, V> from an object
 @private
-setList :: (data: *void, type: *TypeStruct, elements: *u8, count: i64) {
-    *(findMember(type, "data").valueIn(data) as **u8) = elements;
-    *(findMember(type, "count").valueIn(data) as *i64)    = count;
-    *(findMember(type, "capacity").valueIn(data) as *i64) = count;
-}
-
-@private
-assignList :: (v: Value, data: *void, type: *TypeStruct, path: string, options: *Options) -> string {
-    if v.kind != .array { return mismatch(path, "an array", v); }
-
-    elemType := (findMember(type, "data").type as *TypePointer).pointerTo;
-    count    := v.items.count;
-    elements := mem.allocate((count as int + 1) * elemType.size) as *u8;
-    for item, i in v.items {
-        err := assign(item, &elements[i * elemType.size], elemType, indexPath(path, i), options);
-        if err != "" { return err; }
-    }
-
-    setList(data, type, elements, count);
-    return "";
-}
-
-// A Map<string, V> from an object. The entries and the table of slots are made like Map.set would make them
-@private
-assignMap :: (v: Value, data: *void, type: *TypeStruct, path: string, options: *Options) -> string {
+assignMap :: (v: Value, place: any, path: string, options: *Options) -> string {
     if v.kind != .object { return mismatch(path, "an object", v); }
-
-    entriesMember := findMember(type, "entries");
-    slotsMember   := findMember(type, "slots");
-    entriesType   := entriesMember.type as *TypeStruct;
-    entryType     := (findMember(entriesType, "data").type as *TypePointer).pointerTo as *TypeStruct;
-    keyMember     := findMember(entryType, "key");
-    valueMember   := findMember(entryType, "value");
-    hashMember    := findMember(entryType, "hash");
-
-    if keyMember.type.kind != .string {
-        return failAt(path, fmt.sprint("Can't read an object into a % as its keys are not strings", type.head.name));
+    if place.type.keyType().kind != .string {
+        return failAt(path, fmt.sprint("Can't read an object into a % as its keys are not strings", place.type.name));
     }
 
-    count   := v.fields.count;
-    entries := mem.allocate((count as int + 1) * entryType.head.size) as *u8;
-    i: i64 = 0;
     for field in v.fields {
-        entry := (&entries[i * entryType.head.size]) as *void;
-        *(keyMember.valueIn(entry) as *string) = field.key;
-        *(hashMember.valueIn(entry) as *u64)   = field.key.hash();
-
-        err := assign(field.value, valueMember.valueIn(entry), valueMember.type, memberPath(path, field.key), options);
+        err := assign(field.value, place.put(field.key), memberPath(path, field.key), options);
         if err != "" { return err; }
-        i += 1;
     }
-
-    // A power of two number of slots, at most 70% full
-    capacity: i64 = 8;
-    while count * 10 > capacity * 7 {
-        capacity *= 2;
-    }
-    slots := mem.allocate(capacity as int * 8) as *i64;
-    mask  := (capacity - 1) as u64;
-    for index in 0..count {
-        entry := (&entries[index * entryType.head.size]) as *void;
-        slot := (*(hashMember.valueIn(entry) as *u64) & mask) as i64;
-        while slots[slot] != 0 {
-            slot = ((slot as u64 + 1) & mask) as i64;
-        }
-        slots[slot] = index + 1;
-    }
-
-    setList(entriesMember.valueIn(data), entriesType, entries, count);
-    setList(slotsMember.valueIn(data), slotsMember.type as *TypeStruct, slots as *u8, capacity);
-    *(findMember(type, "count").valueIn(data) as *i64) = count;
     return "";
 }
 
 @private
-assignEnum :: (v: Value, data: *void, type: *TypeEnum, path: string, options: *Options) -> string {
-    value: i64 = 0;
+assignEnum :: (v: Value, place: any, path: string, options: *Options) -> string {
+    type := place.type.asEnum();
     // The flags of an enum flags are a list of their names, e.g ["verbose", "color"]
-    if v.kind == .array && type.head.flags.has(.isFlags) {
+    if v.kind == .array && type.isFlags() {
+        place.zero();
         for item, i in v.items {
             flag: i64 = 0;
-            err := assignEnum(item, (&flag) as *void, type, fmt.sprint("%[%]", path, i), options);
+            err := assignEnum(item, anyAt(&flag, type), fmt.sprint("%[%]", path, i), options);
             if err != "" { return err; }
-            value = value | flag;
+            value, _ := place.toInt();
+            place.setInt(value | flag);
         }
-        writeBits(data, type.backingType.size, value as u64);
         return "";
     }
+
+    value: i64 = 0;
     switch v.kind {
         case .string {
             found := false;
@@ -411,14 +333,14 @@ assignEnum :: (v: Value, data: *void, type: *TypeEnum, path: string, options: *O
                 }
             }
             if !found {
-                return failAt(path, fmt.sprint("'%' is not a value of %", v.text, type.head.name));
+                return failAt(path, fmt.sprint("'%' is not a value of %", v.text, type.name));
             }
         }
         case .number {
             value = v.number as i64;
             _, ok := type.nameOf(value);
             if !ok || value as f64 != v.number {
-                return failAt(path, fmt.sprint("% is not a value of %", v.text, type.head.name));
+                return failAt(path, fmt.sprint("% is not a value of %", v.text, type.name));
             }
         }
         else {
@@ -426,73 +348,26 @@ assignEnum :: (v: Value, data: *void, type: *TypeEnum, path: string, options: *O
         }
     }
 
-    writeBits(data, type.backingType.size, value as u64);
+    place.setInt(value);
     return "";
-}
-
-// Writes the lowest bytes of the bits
-@private
-writeBits :: (data: *void, size: int, bits: u64) {
-    switch size {
-        case 1 { *(data as *u8) = bits as u8; }
-        case 2 { *(data as *u16) = bits as u16; }
-        case 4 { *(data as *u32) = bits as u32; }
-        else   { *(data as *u64) = bits; }
-    }
 }
 
 // An integer is read from how the number is written, so that big numbers don't lose digits on the way through an f64
 @private
-assignInteger :: (v: Value, data: *void, type: *TypePrimitive, path: string) -> string {
-    text := v.text;
-    negative := text.len > 0 && text[0] == '-';
-
-    magnitude: u64 = 0;
-    exact := true;
-    for i in 0..text.len {
-        ch := text[i];
-        if ch == '-' { continue; }
-        if ch < '0' || ch > '9' {
-            exact = false;
-            break;
-        }
-        digit := (ch - '0') as u64;
-        if magnitude > (18446744073709551615 - digit) / 10 {
-            return failAt(path, fmt.sprint("% is too big for a %", text, type.head.name));
-        }
-        magnitude = magnitude * 10 + digit;
-    }
+assignInteger :: (v: Value, place: any, path: string) -> string {
+    if place.setIntText(v.text) { return ""; }
 
     // e.g 1.0 or 2e3, which are whole numbers
-    if !exact {
-        n := v.number;
+    plain := true;
+    for ch in v.text {
+        if ch != '-' && (ch < '0' || ch > '9') { plain = false; }
+    }
+    n := v.number;
+    if !plain {
         if n != (n as i64) as f64 {
-            return failAt(path, fmt.sprint("% is not a whole number, as a % must be", text, type.head.name));
+            return failAt(path, fmt.sprint("% is not a whole number, as a % must be", v.text, place.type.name));
         }
-        negative = n < 0.0;
-        if negative { magnitude = (-n) as u64; }
-        else        { magnitude = n as u64; }
+        if place.setInt(n as i64) { return ""; }
     }
-
-    kind := type.kind;
-    unsigned := kind == .u8 || kind == .u16 || kind == .u32 || kind == .u64 || kind == .uint || kind == .char;
-    bits := (type.head.size * 8) as u64;
-
-    if unsigned {
-        biggest: u64 = 18446744073709551615;
-        if bits < 64 { biggest = ((1 as u64) << bits) - 1; }
-        if (negative && magnitude != 0) || magnitude > biggest {
-            return failAt(path, fmt.sprint("% doesn't fit in a %", text, type.head.name));
-        }
-    } else {
-        limit := (1 as u64) << (bits - 1); // The biggest negative magnitude. The biggest positive is one less
-        if (negative && magnitude > limit) || (!negative && magnitude >= limit) {
-            return failAt(path, fmt.sprint("% doesn't fit in a %", text, type.head.name));
-        }
-    }
-
-    value := magnitude;
-    if negative && magnitude != 0 { value = ~magnitude + 1; }   // The bits of the negative number, in two's complement
-    writeBits(data, type.head.size, value);
-    return "";
+    return failAt(path, fmt.sprint("% doesn't fit in a %", v.text, place.type.name));
 }

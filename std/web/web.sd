@@ -115,21 +115,18 @@ newApp :: <S>(prefix: string) -> *App, error {
     app.prefix = prefix;
     if app.prefix.endsWith("/") { app.prefix = app.prefix.slice(0, app.prefix.len - 1); }
 
-    probe: S;
-    boxed: any = probe;
-    app.sessionType = boxed.type as *TypeStruct;
-    base: Session;
-    boxedBase: any = base;
-    if app.sessionType != boxedBase.type as *TypeStruct {
+    app.sessionType = typeInfo<S>().asStruct();
+    sessionBase := typeInfo<Session>();
+    if app.sessionType != sessionBase {
         found := false;
         for member in app.sessionType.members {
-            if member.type == boxedBase.type {
+            if member.type == sessionBase {
                 app.sessionOffset = member.offset as int;
                 found = true;
             }
         }
         if !found {
-            return null, errors.make("The session % has no web.Session: give it a member '@embed base: web.Session;'", app.sessionType.head.name);
+            return null, errors.make("The session % has no web.Session: give it a member '@embed base: web.Session;'", app.sessionType.name);
         }
     }
 
@@ -137,9 +134,9 @@ newApp :: <S>(prefix: string) -> *App, error {
         marked: endpoint;
         if !f.attribute(&marked) { continue; }
         function := &attributedFunctions()[i];
-        first := f.parameters.count > 0 && f.parameters[0].type.kind == .pointer && (f.parameters[0].type as *TypePointer).pointerTo == boxed.type;
+        first := f.parameters.count > 0 && f.parameters[0].type.kind == .pointer && f.parameters[0].type.pointee() == app.sessionType;
         if !first {
-            return null, errors.make("The endpoint % must take a *% as its first parameter", f.name, app.sessionType.head.name);
+            return null, errors.make("The endpoint % must take a *% as its first parameter", f.name, app.sessionType.name);
         }
         for i in 1..f.parameters.count {
             param := f.parameters[i];
@@ -338,7 +335,7 @@ dispatch :: (w: *http.ResponseWriter, r: *http.Request) {
     call := f.newCall(&r.arena);
 
     // A new session, with the request and the response
-    session := r.arena.allocate(app.sessionType.head.size) as *u8;
+    session := r.arena.allocate(app.sessionType.size) as *u8;
     base := (&session[app.sessionOffset]) as *Session;
     base.request  = r;
     base.response = w;
@@ -397,29 +394,24 @@ jsonProblem :: (type: *Type, reading: bool, depth: int) -> string {
             return "";
         }
         case .pointer {
-            to := (type as *TypePointer).pointerTo;
+            to := type.pointee();
             if to.kind == .void { return fmt.sprint("% is a pointer to nothing", type.name); }
             return jsonProblem(to, reading, depth + 1);
         }
         case .array {
-            return jsonProblem((type as *TypeArray).elemType, reading, depth + 1);
+            return jsonProblem(type.elementType(), reading, depth + 1);
         }
         case .struct {
             // What json reads and writes as a whole
             name := type.name;
             if name == "time.Time" || name == "json.Value" { return ""; }
-            structType := type as *TypeStruct;
-            if type.flags.has(.isOptional) { return jsonProblem(structType.members[0].type, reading, depth + 1); }
-            if name.startsWith("List<") {
-                return jsonProblem((memberType(structType, "data") as *TypePointer).pointerTo, reading, depth + 1);
+            if type.isOptional() { return jsonProblem(type.optionalType(), reading, depth + 1); }
+            if type.isList() { return jsonProblem(type.elementType(), reading, depth + 1); }
+            if type.isMap() {
+                if reading && type.keyType().kind != .string { return fmt.sprint("the keys of % aren't strings", name); }
+                return jsonProblem(type.valueType(), reading, depth + 1);
             }
-            if name.startsWith("Map<") {
-                entries := memberType(structType, "entries") as *TypeStruct;
-                entry := (memberType(entries, "data") as *TypePointer).pointerTo as *TypeStruct;
-                if reading && memberType(entry, "key").kind != .string { return fmt.sprint("the keys of % aren't strings", name); }
-                return jsonProblem(memberType(entry, "value"), reading, depth + 1);
-            }
-            for member in structType.members {
+            for member in type.asStruct().members {
                 if member.isHidden() || member.name.startsWith("$") { continue; }
                 problem := jsonProblem(member.type, reading, depth + 1);
                 if problem != "" {
@@ -442,29 +434,14 @@ jsonProblem :: (type: *Type, reading: bool, depth: int) -> string {
     }
 }
 
-// The type of a member of a struct, by its name
-memberType :: (type: *TypeStruct, name: string) -> *Type {
-    for member in type.members {
-        if member.name == name { return member.type; }
-    }
-    return null;
-}
-
 // A string, or a ?string
 isText :: (type: *Type) -> bool {
-    if type.kind == .string { return true; }
-    if type.flags.has(.isOptional) {
-        item := (type as *TypeStruct).members[0].type;
-        return item.kind == .string;
-    }
-    return false;
+    return type.kind == .string || (type.isOptional() && type.optionalType().kind == .string);
 }
 
 // If the type is error, a *Error
 isErrorType :: (type: *Type) -> bool {
-    probe: error;
-    boxed: any = probe;
-    return type == boxed.type;
+    return type == typeInfo<error>();
 }
 
 // The parameters after the session: the members of the JSON object of the body for POST, or the query for GET, and the

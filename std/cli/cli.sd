@@ -83,14 +83,13 @@ parseArguments :: <T>() -> (T, error) {
 @private
 parseArgumentsFrom :: <T>(arguments: []string, program := "program") -> (T, error) {
     result: T;
-    boxed: any = result;
-    if boxed.type.kind != .struct {
-        return result, errors.make("The options are a struct, not a %", boxed.type.name, kind: UsageError);
+    data := anyOf(&result);
+    type := data.type.asStruct();
+    if type == null {
+        return result, errors.make("The options are a struct, not a %", data.type.name, kind: UsageError);
     }
-    type := boxed.type as *TypeStruct;
     options, problem := cliOptionsOf(type);
     if problem != "" { return result, errors.make("%", problem, kind: UsageError); }
-    data := (&result) as *void;
 
     positional := 0;    // The next positional option
     onlyValues := false; // After --
@@ -105,7 +104,7 @@ parseArgumentsFrom :: <T>(arguments: []string, program := "program") -> (T, erro
         }
         if !onlyValues && (text == "--help" || text == "-h") {
             defaults: T;
-            return result, errors.make("%", cliHelp(type, options, program, (&defaults) as *void), kind: HelpRequested);
+            return result, errors.make("%", cliHelp(type, options, program, anyOf(&defaults)), kind: HelpRequested);
         }
 
         isLong  := !onlyValues && text.startsWith("--");
@@ -176,23 +175,14 @@ parseArgumentsFrom :: <T>(arguments: []string, program := "program") -> (T, erro
 //
 // It is about the last arguments that were read into a struct of the type T without a mistake
 wasGiven :: <T, M>(options: *T, member: *M) -> bool {
-    boxed: any = *options;
-    if boxed.type.kind != .struct { return false; }
-    type := boxed.type as *TypeStruct;
+    type := typeInfo<T>().asStruct();
+    if type == null { return false; }
     offset := (member as i64) - (options as i64);
 
-    // The member at the offset whose type is M (the first member of a struct member has the same offset). A list is a
-    // slice in an any, so else the one of the size of M
-    empty: M;
-    memberBoxed: any = empty;
+    // The member at the offset whose type is M (the first member of a struct member has the same offset)
     name := "";
     for m in type.members {
-        if m.offset == offset && m.type == memberBoxed.type { name = m.name; }
-    }
-    if name == "" {
-        for m in type.members {
-            if m.offset == offset && m.type.size == sizeof(M) { name = m.name; }
-        }
+        if m.offset == offset && m.type == typeInfo<M>() { name = m.name; }
     }
     if name == "" { return false; }
 
@@ -231,11 +221,10 @@ rememberGiven :: (type: *TypeStruct, options: *[..]OptionInfo) {
 // The help of the options of T, as --help prints it
 helpOf :: <T>(program := "program") -> string {
     empty: T;
-    boxed: any = empty;
-    if boxed.type.kind != .struct { return ""; }
-    type := boxed.type as *TypeStruct;
+    type := typeInfo<T>().asStruct();
+    if type == null { return ""; }
     options, _ := cliOptionsOf(type);
-    return cliHelp(type, options, program, (&empty) as *void);
+    return cliHelp(type, options, program, anyOf(&empty));
 }
 
 //
@@ -253,16 +242,12 @@ OptionInfo :: struct {
     isList: bool;      // Each value is added
     given:  bool;
 
-    // Reads the text into the member
-    set :: method * (data: *void, text: string) -> string {
-        place := self.member.valueIn(data);
-        if self.isList {
-            place = addListElement(place, self.member.type, self.value.size);
-        } else if self.member.type.isOptional() {
-            item, _ := (self.member.type as *TypeStruct).setOptional(place, true);
-            place = item;
-        }
-        message := writeCliValue(text, place, self.value, self.title(), self.arg);
+    // Reads the text into the member of the options
+    set :: method * (options: any, text: string) -> string {
+        place := options.memberAt(self.member);
+        if self.isList                  { place = place.add(); }
+        else if place.type.isOptional() { place = place.setOptional(); }
+        message := writeCliValue(text, place, self.title(), self.arg);
         self.given = true;
         return message;
     }
@@ -299,14 +284,14 @@ cliOptionsOf :: (type: *TypeStruct) -> ([..]OptionInfo, string) {
         // What the value is
         valueType := member.type;
         if member.type.isOptional() {
-            valueType = (member.type as *TypeStruct).members[0].type;   // The item of the optional
-        } else if listElementType(member.type) != null {
-            valueType = listElementType(member.type);
+            valueType = member.type.optionalType();
+        } else if member.type.isSlice() || member.type.isList() {
+            valueType = member.type.elementType();
             option.isList = true;
         }
         if !canReadCliValue(valueType) {
             if hasArg {
-                return options, fmt.sprint("The member % of % can't be an option, as a % isn't read from the command line", member.name, type.head.name, member.type.name);
+                return options, fmt.sprint("The member % of % can't be an option, as a % isn't read from the command line", member.name, type.name, member.type.name);
             }
             continue;  // Not an option, e.g a table the program fills in
         }
@@ -316,16 +301,16 @@ cliOptionsOf :: (type: *TypeStruct) -> ([..]OptionInfo, string) {
         if option.isList && arg.positional { lists += 1; }
         for other in options {
             if other.long == option.long {
-                return options, fmt.sprint("The members % and % of % are both the option --%", other.member.name, member.name, type.head.name, option.long);
+                return options, fmt.sprint("The members % and % of % are both the option --%", other.member.name, member.name, type.name, option.long);
             }
             if option.short.len > 0 && other.short == option.short {
-                return options, fmt.sprint("The members % and % of % are both the option -%", other.member.name, member.name, type.head.name, option.short);
+                return options, fmt.sprint("The members % and % of % are both the option -%", other.member.name, member.name, type.name, option.short);
             }
         }
         options.add(option);
     }
     if lists > 1 {
-        return options, fmt.sprint("% has more than one positional list, which would each take all the values that are left", type.head.name);
+        return options, fmt.sprint("% has more than one positional list, which would each take all the values that are left", type.name);
     }
     return options, "";
 }
@@ -376,71 +361,28 @@ canReadCliValue :: (type: *Type) -> bool {
     }
 }
 
-// The type of the elements of a [..]T or []T, or null
+// Reads a text into the place. Gives what is wrong, or empty
 @private
-listElementType :: (type: *Type) -> *Type {
-    if type.kind == .array && (type as *TypeArray).kind == .slice {
-        return (type as *TypeArray).elemType;
-    }
-    if type.kind == .struct && type.name.startsWith("List<") {
-        data := &(type as *TypeStruct).members[0];
-        return (data.type as *TypePointer).pointerTo;
-    }
-    return null;
-}
-
-// Makes room for one more element at the end of a list or a slice, and gives where it goes
-@private
-addListElement :: (place: *void, type: *Type, size: int) -> *void {
-    // A slice is { data, count } and a List is { data, count, capacity, allocator }
-    bytes := place as *u8;
-    data  := place as **u8;
-    count := (&bytes[8]) as *i64;
-    memory := resizeMemory(heapAllocator(), *data, *count * size as i64, (*count + 1) * size as i64) as *u8;
-    *data = memory;
-    if type.kind == .struct {
-        *((&bytes[16]) as *i64) = *count + 1;                 // capacity
-        *((&bytes[24]) as *Allocator) = heapAllocator();      // where its memory is from
-    }
-    element := (&memory[*count * size as i64]) as *void;
-    *count += 1;
-    return element;
-}
-
-// Reads a text into a value of the type. Gives what is wrong, or empty
-@private
-writeCliValue :: (text: string, data: *void, type: *Type, title: string, arg: Arg) -> string {
+writeCliValue :: (text: string, place: any, title: string, arg: Arg) -> string {
+    type := place.type;
     switch type.kind {
         case .bool {
             lower := text.toLower();
-            if lower == "true" || lower == "yes" || lower == "1" || lower == "on" { *(data as *bool) = true; return ""; }
-            if lower == "false" || lower == "no" || lower == "0" || lower == "off" { *(data as *bool) = false; return ""; }
+            if lower == "true" || lower == "yes" || lower == "1" || lower == "on" { place.set(true); return ""; }
+            if lower == "false" || lower == "no" || lower == "0" || lower == "off" { place.set(false); return ""; }
             return fmt.sprint("% is true or false, not '%'", title, text);
         }
         case .int {
             parsed := text.toInt();
             if !parsed.hasValue() { return fmt.sprint("% is a whole number, not '%'", title, text); }
             n := parsed.value();
-            prim := type as *TypePrimitive;
-            signed := prim.kind == .int || prim.kind == .i8 || prim.kind == .i16 || prim.kind == .i32 || prim.kind == .i64;
-            bits := type.size * 8;
-            if signed && bits < 64 {
-                limit := (1 as i64) << (bits - 1);
-                if n < -limit || n >= limit { return fmt.sprint("% is from % to %, not %", title, -limit, limit - 1, n); }
-            }
-            if !signed {
-                if n < 0 { return fmt.sprint("% can't be negative, not %", title, n); }
-                if bits < 64 && n >= (1 as i64) << bits { return fmt.sprint("% is at most %, not %", title, ((1 as i64) << bits) - 1, n); }
-            }
             message := checkCliRange(n as f64, title, arg, text);
             if message != "" { return message; }
-            switch type.size {
-                case 1 { *(data as *u8) = n as u8; }
-                case 2 { *(data as *u16) = n as u16; }
-                case 4 { *(data as *u32) = n as u32; }
-                else   { *(data as *i64) = n; }
-            }
-            return "";
+            if place.setInt(n) { return ""; }
+            low, high := type.integerRange();
+            if !type.isSigned() && n < 0 { return fmt.sprint("% can't be negative, not %", title, n); }
+            if !type.isSigned()          { return fmt.sprint("% is at most %, not %", title, high, n); }
+            return fmt.sprint("% is from % to %, not %", title, low, high, n);
         }
         case .float {
             parsed := text.toFloat();
@@ -448,20 +390,19 @@ writeCliValue :: (text: string, data: *void, type: *Type, title: string, arg: Ar
             f := parsed.value();
             message := checkCliRange(f, title, arg, text);
             if message != "" { return message; }
-            if type.size == 4 { *(data as *f32) = f as f32; }
-            else              { *(data as *f64) = f; }
+            place.setFloat(f);
             return "";
         }
         case .string {
-            *(data as *string) = text;
+            place.set(text);
             return "";
         }
         case .enum {
-            enumType := type as *TypeEnum;
+            enumType := type.asEnum();
             wanted := normalName(text);
             for v in enumType.values {
                 if normalName(v.name) == wanted {
-                    writeEnumBits(data, enumType.backingType.size, v.value);
+                    place.setInt(v.value);
                     return "";
                 }
             }
@@ -485,22 +426,12 @@ checkCliRange :: (n: f64, title: string, arg: Arg, text: string) -> string {
     return "";
 }
 
-@private
-writeEnumBits :: (data: *void, size: int, value: i64) {
-    switch size {
-        case 1 { *(data as *u8) = value as u8; }
-        case 2 { *(data as *u16) = value as u16; }
-        case 4 { *(data as *u32) = value as u32; }
-        else   { *(data as *i64) = value; }
-    }
-}
-
 //
 // The help
 //
 
 @private
-cliHelp :: (type: *TypeStruct, options: [..]OptionInfo, program: string, defaults: *void) -> string {
+cliHelp :: (type: *TypeStruct, options: [..]OptionInfo, program: string, defaults: any) -> string {
     about: Options;
     type.attribute(&about);
     name := program;
@@ -574,21 +505,17 @@ cliHelp :: (type: *TypeStruct, options: [..]OptionInfo, program: string, default
 
 // The default of an option as text, or empty when it has none worth showing (false, 0 of a flag, an empty text)
 @private
-defaultText :: (option: OptionInfo, defaults: *void) -> string {
+defaultText :: (option: OptionInfo, defaults: any) -> string {
     if option.isList || option.isFlag || option.member.type.isOptional() || option.arg.required { return ""; }
-    place := option.member.valueIn(defaults);
-    if option.value.kind == .enum {
-        enumType := option.value as *TypeEnum;
-        name, _ := enumType.nameOf(enumType.readValue(place));
+    value := defaults.memberAt(option.member);
+    if value.type.kind == .enum {
+        name, _ := value.enumName();
         return name;
     }
-    if option.value.kind == .float {
-        if option.value.size == 4 { return numberText((*(place as *f32)) as f64); }
-        return numberText(*(place as *f64));
+    if value.type.kind == .float {
+        f, _ := value.toFloat();
+        return numberText(f);
     }
-    value: any;
-    value.type = option.member.type;
-    value.data = place;
     text := fmt.sprint("%", value);
     if text == "" || text == "\"\"" { return ""; }
     return text;
@@ -603,7 +530,7 @@ placeholderOf :: (type: *Type) -> string {
         case .bool   { return "<true|false>"; }
         case .enum {
             names: [..]string;
-            for v in (type as *TypeEnum).values { names.add(v.name); }
+            for v in type.asEnum().values { names.add(v.name); }
             return fmt.sprint("<%>", fmt.join(names.elements(), "|"));
         }
         else { return "<value>"; }

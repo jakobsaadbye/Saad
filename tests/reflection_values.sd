@@ -1,0 +1,77 @@
+// The methods of any (std/prelude/any.sd): reading and changing a value through its type, and the methods of Type
+Status :: enum { open, closed }
+Mode :: enumflags { verbose, color }
+Shape :: union { circle: f32; rect: struct { w, h: f32; }; empty; }
+Options :: struct {
+    verbose: bool;
+    level:   u8;
+    ratio:   f32;
+    name:    string;
+    files:   []string;
+    tags:    [..]int;
+    status:  Status;
+    mode:    Mode;
+    limit:   ?int;
+    next:    *Options;
+    shape:   Shape;
+    ages:    Map<string, int>;
+    fixed:   [3]i16;
+}
+
+// A method of any, like a method of another type
+describe :: method (v: any) -> string { return v.type.name; }
+
+main :: () {
+    o: Options;
+    v := anyOf(&o);
+    assert(v.type.name == "Options" && v.describe() == "Options");
+    assert(v.member("verbose").set(true) && o.verbose);
+    assert(v.member("level").setInt(200) && o.level == 200);
+    assert(!v.member("level").setInt(300) && o.level == 200);
+    assert(!v.member("level").setInt(-1));
+    assert(v.member("level").set(7) && o.level == 7);
+    assert(v.member("ratio").set(2) && o.ratio == 2.0);
+    assert(v.member("name").set("hi") && o.name == "hi");
+    assert(v.member("files").add().set("a.sd") && v.member("files").add().set("b.sd"));
+    assert(o.files.count == 2 && o.files[1] == "b.sd");
+    for i in 0..3 { v.member("tags").add().setInt(i * 10); }
+    assert(o.tags.count == 3 && o.tags[2] == 20);
+    n, ok := v.member("tags").element(1).toInt();
+    assert(ok && n == 10);
+    assert(v.member("status").setEnum("closed") && o.status == .closed);
+    name, named := v.member("status").enumName();
+    assert(named && name == "closed");
+    assert(v.member("mode").addFlag("verbose") && v.member("mode").addFlag("color") && o.mode == .verbose | .color);
+    _, present := v.member("limit").optional();
+    assert(!present);
+    assert(v.member("limit").set(5) && o.limit == 5);
+    item, has := v.member("limit").optional();
+    li, _ := item.toInt();
+    assert(has && li == 5);
+    assert(v.member("next").deref().isEmpty());
+    assert(v.member("next").allocate().member("level").setInt(9) && o.next.level == 9);
+    assert(v.member("shape").setVariant("circle").setFloat(1.5));
+    m, value := v.member("shape").variant();
+    f, _ := value.toFloat();
+    assert(m.name == "circle" && f == 1.5);
+    o.ages["bob"] = 31;
+    k, a := v.member("ages").entry(0);
+    kn, _ := k.to<string>();
+    av, _ := a.toInt();
+    assert(v.member("ages").count() == 1 && kn == "bob" && av == 31);
+    assert(v.member("fixed").count() == 3 && v.member("fixed").element(2).setInt(-4) && o.fixed[2] == -4);
+    assert(v.member("fixed").add().isEmpty());
+    assert(v.member("nope").setInt(1) == false);
+    assert(v.member("tags").type.isList() && v.member("tags").type.elementType().name == "int");
+    assert(v.member("ages").type.keyType().name == "string" && v.member("ages").type.valueType().name == "int");
+    lo, hi := typeInfo<i8>().integerRange();
+    assert(lo == -128 && hi == 127);
+    v.member("ages").put("ada").setInt(36);
+    v.member("ages").put("bob").setInt(32);
+    assert(o.ages.count == 2 && o.ages["ada"] == 36 && o.ages["bob"] == 32);
+    assert(v.member("level").setIntText("+12") && o.level == 12 && !v.member("level").setIntText("256") && !v.member("level").setIntText("1x"));
+    big: u64;
+    assert(anyOf(&big).setIntText("18446744073709551615") && big == 18446744073709551615);
+    s := v.member("name").ref<string>();
+    assert(s != null && *s == "hi" && v.member("name").ref<int>() == null);
+}

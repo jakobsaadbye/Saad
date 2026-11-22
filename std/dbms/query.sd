@@ -781,7 +781,7 @@ isNull :: (node: *ExprNode) -> bool {
     if node.value.type == null { return true; }
     if node.value.type.kind == .pointer { return *(node.value.data as **void) == null; }
     if node.value.type.isOptional() {
-        _, _, present := (node.value.type as *TypeStruct).optionalValue(node.value.data);
+        _, present := node.value.optional();
         return !present;
     }
     return false;

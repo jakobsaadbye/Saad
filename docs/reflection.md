@@ -5,33 +5,77 @@
 A value converted to an `any` carries a pointer to the descriptor of its type. The compiler makes one constant
 descriptor per type (`type_info_global()` in `ir_lower.c`), with the layouts of the structs in
 `std/prelude/runtime.sd`. So the same type always has the same descriptor, and they cost nothing at runtime.
+`typeInfo<T>()` gives the descriptor of a type, e.g `typeInfo<User>()`.
+
+Every descriptor is a `Type`: `name`, `kind`, `size` and `flags`. The kinds with more to them have a struct of their own
+that embeds it (`@embed base: Type`), so it has the members and methods of a `Type` and is one where a `*Type` is
+wanted. `asPointer()`, `asArray()`, `asEnum()` and `asStruct()` give it, or null for another kind:
 
 | Kind | Descriptor | What it has |
 | --- | --- | --- |
-| `.bool`, `.int`, `.float`, `.void` | `TypePrimitive` | `kind`: `.u8`, `.i64`, `.f32`, ... |
-| `.string`, `.function`, ... | `Type` | `name`, `kind`, `size` |
+| `.bool`, `.int`, `.float`, `.string`, `.void`, `.any` | `Type` | An integer is told apart by its `size`, `isSigned()` and `isChar()`, e.g a `u8` has size 1 and isn't signed |
 | `.pointer` | `TypePointer` | `pointerTo` |
-| `.array` | `TypeArray` | `kind` (`.fixed` or `.slice`), `elemType`, `count` of a fixed array |
-| `.enum` | `TypeEnum` | `backingType`, `values: []EnumValue` (name and value), `nameOf(v)`, `readValue(data)` |
-| `.struct` | `TypeStruct` | `members: []StructMember` (name, type, offset, index, attributes), `alignment` |
-| `.struct` with `isUnion()` | `TypeStruct` | A union: the members are `$tag` (the kind, an enum) and the variants. `variantOf(data)` and `setVariant(data, variant)` |
+| `.array` | `TypeArray` | `arrayKind` (`.fixed` or `.slice`), `elemType`, `count` of a fixed array |
+| `.enum` | `TypeEnum` | `backingType`, `values: []EnumValue` (name and value), `nameOf(n)`, `valueNamed(name)`, `flagNames(n)` |
+| `.struct` | `TypeStruct` | `members: []StructMember` (name, type, offset, index, attributes), `alignment`, `attributes`, `member(name)` |
+
+The questions a library asks about a type are methods of `Type`, so it doesn't look at names or layouts:
+
+| | |
+| --- | --- |
+| `isInteger()`, `isFloat()`, `isNumber()`, `isSigned()`, `isChar()` | the numbers. `integerRange()` is the smallest and the largest value, e.g -128 and 127 |
+| `isOptional()`, `isUnion()`, `isFlags()`, `isList()`, `isMap()`, `isSlice()` | from `flags`, which the compiler sets |
+| `isSequence()` | a fixed array, a slice or a List, which have elements |
+| `pointee()`, `elementType()`, `optionalType()`, `keyType()`, `valueType()` | the types inside, e.g `int` of `*int`, `[..]int`, `?int` and `Map<string, int>`. Null for other types |
+| `TypeStruct.variant(name)` | the variant of a union with the name |
+
+* `name` is the name of the type as `typeof` gives it, e.g `game.Vec2` or `List<int>`.
+* A fixed array is stored in the `any`. A slice is `{data, count}`, so its count is in the value.
+* A collection like `List<T>` becomes a slice of its elements when converted to an `any`. Convert a pointer to it
+  to keep its type, which `anyOf(&value)` and `typeInfo<T>()` do.
+
+## Values
+
+An `any` is the address of a value and its type, and its methods (`std/prelude/any.sd`) read and change the value
+through the type, so a library doesn't cast `data` or write to offsets:
 
 ```odin
-x: any = person;
-type := x.type as *TypeStruct;
-for member in type.members {
-    value: any;
-    value.type = member.type;
-    value.data = member.valueIn(x.data);   // the address of the member in the value
-    fmt.print("% = %", member.name, value);
+options: Options;
+v := anyOf(&options);                       // options, as an any that changes it
+v.member("verbose").set(true);
+v.member("level").setInt(3);                // false when 3 doesn't fit the type of level
+v.member("files").add().set("main.sd");     // a new element of a slice or a List
+v.member("ages").put("bob").setInt(31);     // a key of a Map
+v.member("mode").setEnum("fast");
+
+for *member in v.type.asStruct().members {
+    fmt.print("% = %", member.name, v.memberAt(member));
 }
 ```
 
-* `name` is the name of the type as `typeof` gives it, e.g `game.Vec2` or `List<int>`, so `a.type.name == typeof(Vec2)`
-  checks the type of an `any`.
-* A fixed array is stored in the `any`. A slice is `{data, count}`, so its count is in the value.
-* A collection like `List<T>` becomes a slice of its elements when converted to an `any`. Convert a pointer to it
-  to keep its type.
+| | |
+| --- | --- |
+| `to<T>()`, `ref<T>()`, `is<T>()` | the value as a `T` and true, its address as a `*T`, or false and null when it isn't a `T` |
+| `set(value)` | stores a value of the type, a number that fits, or the value of an optional. False when it can't |
+| `toInt()`, `setInt(n)`, `setIntText(text)` | an integer or an enum. `setInt` is false when the number doesn't fit, e.g 300 in a `u8`. `setIntText` reads e.g "18446744073709551615" without an `f64` |
+| `toFloat()`, `setFloat(f)` | a float, and `toFloat` an integer too |
+| `enumName()`, `setEnum(name)`, `addFlag(name)` | an enum by the names of its values |
+| `count()`, `element(i)`, `add()`, `resize(n)` | a fixed array, a slice or a List. `count` is also the entries of a Map and the bytes of a string |
+| `entry(i)`, `put(key)` | the key and the value of an entry of a Map, and the value of a key, added when it isn't there. The keys are strings or integers |
+| `member(name)`, `memberAt(member)` | a member of a struct |
+| `deref()`, `allocate()` | the value a pointer points to, and a new value of zero for it |
+| `optional()`, `setOptional()`, `clearOptional()` | the value of a `?T`, a value of zero to set, and none |
+| `variant()`, `setVariant(name)` | the variant of a union and its value, and a variant to set |
+| `zero()`, `isEmpty()` | |
+
+* A method that gives an `any` gives an empty one when there is no such value, e.g `member` of a name the struct doesn't
+  have, `element` out of range or `deref` of null. The methods of an empty `any` do nothing and give false or another
+  empty one, so `v.member("a").member("b").setInt(1)` is safe, and false when a part is missing.
+* A List grows with its own allocator. A slice doesn't own its memory, e.g it can be a fixed array, so `add` and
+  `resize` give it a new block of the allocator of the thread, and leave the old one. To add many elements to a slice,
+  `resize` it once.
+* `to<T>` is for the exact type, so `to<int>` of an `i64` is false. `toInt` reads any integer.
+* Methods can be declared on `any` like on other types, e.g `describe :: method (v: any) -> string`.
 
 ## Attributes
 
@@ -53,9 +97,9 @@ Row :: struct {
     label: string;
 }
 
-for member in (rowAny.type as *TypeStruct).members {
+for *member in typeInfo<Row>().asStruct().members {
     column: Column;
-    if attributeOf(&member, &column) {
+    if attributeOf(member, &column) {
         // column.name, column.nullable
     }
     for attribute in member.attributes {   // []any
@@ -81,7 +125,7 @@ Attribute values on a struct are in `TypeStruct.attributes`, and `type.attribute
 Options :: struct { ... }
 
 about: cli.Options;
-if (boxed.type as *TypeStruct).attribute(&about) { ... about.about ... }
+if typeInfo<Options>().asStruct().attribute(&about) { ... about.about ... }
 ```
 
 An instance of a generic struct has the attribute values of the generic struct.

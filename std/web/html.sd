@@ -168,8 +168,8 @@ respond :: method (t: *Templates, w: *http.ResponseWriter, name: string, data: a
 dataOf :: <T>(value: Value) -> *T {
     switch v in value {
         case .data {
-            if v.type.name == typeof(T) { return v.data as *T; }
-            if v.type.kind == .pointer && (v.type as *TypePointer).pointerTo.name == typeof(T) { return *(v.data as **T); }
+            if v.is<T>() { return v.ref<T>(); }
+            return v.deref().ref<T>();
         }
         else { }
     }
@@ -214,103 +214,41 @@ isTrue :: (value: Value) -> bool {
 
 // The value of a value of the program, e.g Value{integer} of an int, or Value{data} of a struct
 valueOf :: (a: any) -> Value {
-    if a.data == null || a.type == null { return .none; }
-    type := a.type;
-    switch type.kind {
-        case .bool  { return Value{boolean: *(a.data as *bool)}; }
-        case .int   { return Value{integer: readInteger(a.data, type as *TypePrimitive)}; }
+    if a.isEmpty() { return .none; }
+    switch a.type.kind {
+        case .bool { return Value{boolean: *(a.data as *bool)}; }
+        case .int {
+            n, _ := a.toInt();
+            return Value{integer: n};
+        }
         case .float {
-            if type.size == 4 { return Value{number: (*(a.data as *f32)) as f64}; }
-            return Value{number: *(a.data as *f64)};
+            f, _ := a.toFloat();
+            return Value{number: f};
         }
         case .string { return Value{text: *(a.data as *string)}; }
         case .enum   {
-            e := type as *TypeEnum;
-            n := e.readValue(a.data);
-            for v in e.values { if v.value == n { return Value{text: v.name}; } }
+            name, named := a.enumName();
+            if named { return Value{text: name}; }
+            n, _ := a.toInt();
             return Value{integer: n};
         }
         case .pointer {
-            to := *(a.data as **void);
-            if to == null { return .none; }
-            pointed: any;
-            pointed.data = to;
-            pointed.type = (type as *TypePointer).pointerTo;
-            return valueOf(pointed);
+            pointee := a.deref();
+            if pointee.isEmpty() { return .none; }
+            return valueOf(pointee);
         }
         case .any { return valueOf(*(a.data as *any)); }
         case .struct {
-            if type.isOptional() {
-                s := type as *TypeStruct;
-                present := memberOf(s, "present");
-                item := memberOf(s, "item");
-                if present == null || item == null || !*(present.valueIn(a.data) as *bool) { return .none; }
-                inner: any;
-                inner.data = item.valueIn(a.data);
-                inner.type = item.type;
-                return valueOf(inner);
+            if a.type.isOptional() {
+                item, present := a.optional();
+                if !present { return .none; }
+                return valueOf(item);
             }
-            if type.name == typeof(Value) { return *(a.data as *Value); }
+            if a.is<Value>() { return *a.ref<Value>(); }
             return Value{data: a};
         }
         else { return Value{data: a}; }
     }
-}
-
-//
-// Values
-//
-
-@private
-readInteger :: (data: *void, type: *TypePrimitive) -> i64 {
-    return switch type.kind {
-        case .u8
-        case .char => (*(data as *u8)) as i64;
-        case .u16  => (*(data as *u16)) as i64;
-        case .u32
-        case .uint => (*(data as *u32)) as i64;
-        case .u64  => (*(data as *u64)) as i64;
-        case .i8   => (*(data as *i8)) as i64;
-        case .i16  => (*(data as *i16)) as i64;
-        case .i64  => *(data as *i64);
-        else       => (*(data as *i32)) as i64;
-    };
-}
-
-@private
-memberOf :: (type: *TypeStruct, name: string) -> *StructMember {
-    for i in 0..type.members.count {
-        if type.members[i].name == name { return &type.members[i]; }
-    }
-    return null;
-}
-
-// The elements of a list, slice or array of the program, and their type. false when it isn't one
-@private
-elementsOf :: (a: any) -> *u8, i64, *Type, bool {
-    if a.type.kind == .array {
-        array := a.type as *TypeArray;
-        if array.kind == .fixed { return a.data as *u8, array.count, array.elemType, true; }
-        // A slice or a dynamic array: {data, count}
-        bytes := a.data as *u8;
-        return *(a.data as **u8), *((&bytes[8]) as *i64), array.elemType, true;
-    }
-    if a.type.kind == .struct && a.type.name.startsWith("List<") {
-        s := a.type as *TypeStruct;
-        dataMember := memberOf(s, "data");
-        countMember := memberOf(s, "count");
-        if dataMember == null || countMember == null { return null, 0, null, false; }
-        return *(dataMember.valueIn(a.data) as **u8), *(countMember.valueIn(a.data) as *i64), (dataMember.type as *TypePointer).pointerTo, true;
-    }
-    return null, 0, null, false;
-}
-
-@private
-elementAt :: (elements: *u8, elemType: *Type, index: i64) -> Value {
-    element: any;
-    element.data = &elements[index * elemType.size];
-    element.type = elemType;
-    return valueOf(element);
 }
 
 // The member of a value, e.g of value.name. length (or count) of a list or text
@@ -318,19 +256,11 @@ elementAt :: (elements: *u8, elemType: *Type, index: i64) -> Value {
 memberValue :: (value: Value, name: string) -> Value {
     switch v in value {
         case .data {
-            _, count, _, isList := elementsOf(v);
-            if isList {
-                if name == "length" || name == "count" { return Value{integer: count}; }
+            if v.type.isSequence() {
+                if name == "length" || name == "count" { return Value{integer: v.count()}; }
                 return .none;
             }
-            if v.type.kind != .struct { return .none; }
-            s := v.type as *TypeStruct;
-            member := memberOf(s, name);
-            if member == null { return .none; }
-            inner: any;
-            inner.data = member.valueIn(v.data);
-            inner.type = member.type;
-            return valueOf(inner);
+            return valueOf(v.member(name));
         }
         case .text { if name == "length" { return Value{integer: v.len}; } }
         case .html { if name == "length" { return Value{integer: v.len}; } }
@@ -348,9 +278,7 @@ indexValue :: (value: Value, index: Value) -> Value {
         case .integer {
             switch v in value {
                 case .data {
-                    elements, count, elemType, isList := elementsOf(v);
-                    if !isList || i < 0 || i >= count { return .none; }
-                    return elementAt(elements, elemType, i);
+                    return valueOf(v.element(i));
                 }
                 case .list {
                     if i < 0 || i >= v.items.count { return .none; }
@@ -370,8 +298,7 @@ indexValue :: (value: Value, index: Value) -> Value {
 
 @private
 dataIsTrue :: (a: any) -> bool {
-    _, count, _, isList := elementsOf(a);
-    if isList { return count > 0; }
+    if a.type.isSequence() { return a.count() > 0; }
     return true;
 }
 
@@ -527,9 +454,8 @@ itemsOf :: (value: Value) -> [..]Value {
     items: [..]Value;
     switch v in value {
         case .data {
-            elements, count, elemType, isList := elementsOf(v);
-            if isList {
-                for i in 0..count { items.add(elementAt(elements, elemType, i)); }
+            if v.type.isSequence() {
+                for i in 0..v.count() { items.add(valueOf(v.element(i))); }
             }
         }
         case .list {

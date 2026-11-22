@@ -11,6 +11,8 @@
 //
 //     for i in 0..v.count() { e := v.element(i); ... }
 //
+//     v.member("ages").put("bob").setInt(31);       // a key of a Map
+//
 // The methods that give an any give an empty one (isEmpty) when there is no such value, e.g member of a name that the struct
 // doesn't have, element out of range, or deref of null. The methods of an empty any do nothing, and give false, 0 or
 // another empty any, so a chain like v.member("a").member("b").setInt(1) is safe and is false when a part is missing
@@ -22,6 +24,14 @@ use c;
 anyOf :: <T>(pointer: *T) -> any {
     p: any = pointer;
     return p.deref();
+}
+
+// The type of T, e.g typeInfo<User>().asStruct().members
+typeInfo :: <T>() -> *Type {
+    // Through a pointer, which keeps the type of a collection, which would be a slice of its elements in an any
+    pointer: *T;
+    boxed: any = pointer;
+    return boxed.type.pointee();
 }
 
 // An any without a value, e.g of member("x") when there is no member x
@@ -47,9 +57,7 @@ ref :: method <T>(v: any) -> *T {
 // If the value is a T
 is :: method <T>(v: any) -> bool {
     if v.isEmpty() { return false; }
-    zero: T;
-    probe: any = zero;
-    return probe.type == v.type;
+    return typeInfo<T>() == v.type;
 }
 
 // Makes the value zero, e.g 0, false, an empty string or a struct of zeros
@@ -124,12 +132,44 @@ setInt :: method (v: any, n: i64) -> bool {
     low, high := type.integerRange();
     if n < low || (n > 0 && n as u64 > high) { return false; }
     switch type.size {
-        case 1 { *(v.data as *u8)  = n as u8; }
+        case 1 { *(v.data as *u8) = n as u8; }
         case 2 { *(v.data as *u16) = n as u16; }
         case 4 { *(v.data as *u32) = n as u32; }
         else   { *(v.data as *i64) = n; }
     }
     return true;
+}
+
+// Stores the whole number written in the text, e.g "-12", "+7" or "18446744073709551615", in an integer or an enum. It
+// doesn't go through an f64, so big numbers keep their digits. false when the text isn't a whole number or the number
+// doesn't fit, and then the value is as it was
+setIntText :: method (v: any, text: string) -> bool {
+    negative := text.len > 0 && text[0] == '-';
+    start := 0;
+    if negative || (text.len > 0 && text[0] == '+') { start = 1; }
+    if start == text.len { return false; }
+
+    magnitude: u64 = 0;
+    for i in start..text.len {
+        ch := text[i];
+        if ch < '0' || ch > '9' { return false; }
+        digit := (ch - '0') as u64;
+        if magnitude > (18446744073709551615 - digit) / 10 { return false; }
+        magnitude = magnitude * 10 + digit;
+    }
+
+    if magnitude > 9223372036854775807 {
+        // A u64 over the biggest i64, or the smallest i64, which has no positive i64
+        if !negative && v.type.kind == .int && v.type.size == 8 && !v.type.isSigned() {
+            *(v.data as *u64) = magnitude;
+            return true;
+        }
+        if negative && magnitude == 9223372036854775808 { return v.setInt(-9223372036854775807 - 1); }
+        return false;
+    }
+    n := magnitude as i64;
+    if negative { n = -n; }
+    return v.setInt(n);
 }
 
 // The value of a float or an integer. false for other types
@@ -281,6 +321,81 @@ entry :: method (v: any, index: i64) -> any, any {
     if v.isEmpty() || !v.type.isMap() { return none, none; }
     e := v.member("entries").element(index);
     return e.member("key"), e.member("value");
+}
+
+// The value of the key in a Map, added with a value of zero when it isn't there, to be set, like m[key] = ..., e.g
+// v.put("bob").setInt(31). The keys of the map are strings or integers, and the key is one too. Empty for other maps and
+// types
+put :: method (v: any, key: any) -> any {
+    none: any;
+    if v.isEmpty() || key.isEmpty() || !v.type.isMap() { return none; }
+    hash, hashed := mapKeyHash(v.type.keyType(), key);
+    if !hashed { return none; }
+
+    entries := v.member("entries");
+    slots   := v.member("slots").data as *RawList;   // A List<i64>: 0 is an empty slot, else the index of an entry + 1
+    if slots.count > 0 {
+        table := slots.data as *i64;
+        mask  := (slots.count - 1) as u64;
+        slot  := (hash & mask) as i64;
+        while table[slot] != 0 {
+            entry := entries.element(table[slot] - 1);
+            entryHash, _ := entry.member("hash").to<u64>();
+            if entryHash == hash && sameMapKey(entry.member("key"), key) { return entry.member("value"); }
+            slot = ((slot as u64 + 1) & mask) as i64;
+        }
+    }
+
+    // A new entry, made like Map.addEntry makes one, with the allocator of the map
+    count := v.member("count").ref<i64>();
+    allocator := v.member("allocator").data as *Allocator;
+    if *allocator == null { *allocator = currentAllocator(); }
+    (entries.data as *RawList).allocator = *allocator;
+    if (*count + 1) * 10 > slots.count * 7 {
+        capacity := slots.count * 2;
+        if capacity < 8 { capacity = 8; }
+        slots.allocator = *allocator;
+        slots.count = 0;
+        v.member("slots").resize(capacity);   // Of zeros
+        for i in 0..entries.count() { placeMapEntry(slots, entries, i); }
+    }
+    entry := entries.add();
+    entry.member("key").set(key);
+    entry.member("hash").set(hash);
+    *count += 1;
+    placeMapEntry(slots, entries, entries.count() - 1);
+    return entry.member("value");
+}
+
+// The hash of a key, as the hash method of the type of the keys gives it
+@private
+mapKeyHash :: (keyType: *Type, key: any) -> u64, bool {
+    if keyType.kind == .string && key.type.kind == .string { return hashString(*(key.data as *string)), true; }
+    if keyType.isInteger() && key.type.isInteger() {
+        n, ok := key.toInt();
+        return hashU64(n as u64), ok;
+    }
+    return 0, false;
+}
+
+@private
+sameMapKey :: (a: any, b: any) -> bool {
+    if a.type.kind == .string && b.type.kind == .string { return *(a.data as *string) == *(b.data as *string); }
+    x, xOk := a.toInt();
+    y, yOk := b.toInt();
+    return xOk && yOk && x == y;
+}
+
+@private
+placeMapEntry :: (slots: *RawList, entries: any, index: i64) {
+    table := slots.data as *i64;
+    mask  := (slots.count - 1) as u64;
+    hash, _ := entries.element(index).member("hash").to<u64>();
+    slot := (hash & mask) as i64;
+    while table[slot] != 0 {
+        slot = ((slot as u64 + 1) & mask) as i64;
+    }
+    table[slot] = index + 1;
 }
 
 //

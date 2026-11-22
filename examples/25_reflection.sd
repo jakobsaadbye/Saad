@@ -15,8 +15,8 @@ describe :: (value: any) {
         case .int    { print("an int: %", value); }
         case .string { print("a string: %", value); }
         case .struct {
-            type := value.type as *TypeStruct;
-            print("a struct % with % members:", type.head.name, type.members.count);
+            type := value.type.asStruct();
+            print("a struct % with % members:", type.name, type.members.count);
             for member in type.members {
                 print("    %: %", member.name, member.type.name);
             }

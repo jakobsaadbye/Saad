@@ -298,28 +298,15 @@ run :: (db: *Database, statement: *Statement, args: []any, result: *Result, err:
 bind :: (handle: *void, place: i32, arg: any, texts: *[..]c.string) -> bool {
     switch arg.type.kind {
         case .int {
-            prim := arg.type as *TypePrimitive;
-            n: i64 = 0;
-            switch prim.kind {
-                case .i8  { n = (*(arg.data as *i8)) as i64; }
-                case .i16 { n = (*(arg.data as *i16)) as i64; }
-                case .i32 { n = (*(arg.data as *i32)) as i64; }
-                case .i64 { n = *(arg.data as *i64); }
-                case .u8  { n = (*(arg.data as *u8)) as i64; }
-                case .u16 { n = (*(arg.data as *u16)) as i64; }
-                case .u32 { n = (*(arg.data as *u32)) as i64; }
-                case .u64 { n = (*(arg.data as *u64)) as i64; }
-                else      { n = (*(arg.data as *u8)) as i64; }   // A char is a text of one byte
-            }
-            if prim.kind == .char {
+            if arg.type.isChar() {
                 return sqlite3_bind_text(handle, place, arg.data as *u8, 1, null) == Ok;   // The argument lives until the reset
             }
+            n, _ := arg.toInt();
+            if arg.type.size == 8 && !arg.type.isSigned() { n = (*(arg.data as *u64)) as i64; }
             return sqlite3_bind_int64(handle, place, n) == Ok;
         }
         case .float {
-            value: f64 = 0.0;
-            if arg.type.size == 4 { value = (*(arg.data as *f32)) as f64; }
-            else                  { value = *(arg.data as *f64); }
+            value, _ := arg.toFloat();
             return sqlite3_bind_double(handle, place, value) == Ok;
         }
         case .bool {
@@ -332,23 +319,17 @@ bind :: (handle: *void, place: i32, arg: any, texts: *[..]c.string) -> bool {
             return sqlite3_bind_text(handle, place, text.data, text.len as i32, null) == Ok;   // Lives until the reset
         }
         case .pointer {
-            pointer := *(arg.data as **void);
-            if pointer == null { return sqlite3_bind_null(handle, place) == Ok; }
-            pointee := (arg.type as *TypePointer).pointerTo;
+            pointee := arg.type.pointee();
             if pointee.kind == .void || pointee.kind == .pointer { return false; }
-            inner: any;
-            inner.type = pointee;
-            inner.data = pointer;
-            return bind(handle, place, inner, texts);
+            value := arg.deref();
+            if value.isEmpty() { return sqlite3_bind_null(handle, place) == Ok; }
+            return bind(handle, place, value, texts);
         }
         case .struct {
             if arg.type.isOptional() {
-                data, valueType, present := (arg.type as *TypeStruct).optionalValue(arg.data);
+                value, present := arg.optional();
                 if !present { return sqlite3_bind_null(handle, place) == Ok; }
-                inner: any;
-                inner.type = valueType;
-                inner.data = data;
-                return bind(handle, place, inner, texts);
+                return bind(handle, place, value, texts);
             }
         }
         else {}

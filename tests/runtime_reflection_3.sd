@@ -24,8 +24,8 @@ main :: () {
         type := n.type as *TypeStruct;
         assert(type.members.count == 3);
 
-        next := type.members[1].type as *TypePointer;
-        assert(next.head.kind == .pointer);
+        next := type.members[1].type.asPointer();
+        assert(next.kind == .pointer);
         assert(next.pointerTo == n.type);
         assert(type.members[1].offset == 8);
     }
@@ -36,7 +36,7 @@ main :: () {
         assert(type.values.count == 2);
         assert(type.values[1].name == "branch" && type.values[1].value == 5);
 
-        name, ok := type.nameOf(type.readValue(k.data));
+        name, ok := k.enumName();
         assert(ok && name == "branch");
 
         _, found := type.nameOf(3);

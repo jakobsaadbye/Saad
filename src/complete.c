@@ -582,6 +582,9 @@ static void add_members(Typer *typer, Type *type) {
             if (method->identifier && !already_added(&seen, method->identifier->name)) add_identifier(method->identifier);
         }
     }
+    if (type->kind == TYPE_ANY && ((TypeAny *)type)->struct_defn) {
+        add_scope_identifiers(((TypeAny *)type)->struct_defn->node->members, &seen);   // data and type, of the struct Any
+    }
     TypeStruct *holder = type->kind == TYPE_STRUCT ? NULL : method_holder_of(typer, type);
     if (holder && holder->node) {
         add_scope_identifiers(holder->node->members, &seen);
