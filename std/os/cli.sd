@@ -163,7 +163,67 @@ parseCliArgumentsFrom :: <T>(arguments: []string, program := "program") -> (T, e
             return result, cliError("% is needed", option.title());
         }
     }
+    rememberGiven(type, &options);
     return result, null;
+}
+
+// If an option was given on the command line, rather than having its default, e.g
+//
+//     options, err := os.parseCliArguments<Options>();
+//     if os.cliArgGiven(&options, &options.seed) { ... }
+//
+// It is about the last arguments that were read into a struct of the type T without a mistake
+cliArgGiven :: <T, M>(options: *T, member: *M) -> bool {
+    boxed: any = *options;
+    if boxed.type.kind != .struct { return false; }
+    type := boxed.type as *TypeStruct;
+    offset := (member as i64) - (options as i64);
+
+    // The member at the offset whose type is M (the first member of a struct member has the same offset). A list is a
+    // slice in an any, so else the one of the size of M
+    empty: M;
+    memberBoxed: any = empty;
+    name := "";
+    for m in type.members {
+        if m.offset == offset && m.type == memberBoxed.type { name = m.name; }
+    }
+    if name == "" {
+        for m in type.members {
+            if m.offset == offset && m.type.size == sizeof(M) { name = m.name; }
+        }
+    }
+    if name == "" { return false; }
+
+    for record in givenRecords {
+        if record.type == type { return record.members.contains(name); }
+    }
+    return false;
+}
+
+// The options that were given, by the struct of the options
+@private
+GivenRecord :: struct {
+    type:    *TypeStruct;
+    members: [..]string;
+}
+
+@private
+givenRecords: [..]GivenRecord;
+
+@private
+rememberGiven :: (type: *TypeStruct, options: *[..]CliOption) {
+    record := GivenRecord{type: type};
+    for option in *options {
+        if option.given { record.members.add(option.member.name); }
+    }
+    for i in 0..givenRecords.count {
+        if givenRecords[i].type == type {
+            givenRecords[i].members.free();
+            givenRecords[i] = record;
+            return;
+        }
+    }
+    givenRecords.add(record);
 }
 
 // The help of the options of T, as --help prints it

@@ -95,6 +95,14 @@ main :: () {
     _, eKind := os.parseCliArgumentsFrom<Options>(["--nope"]);
     assert(eKind.is(os.CliError));
 
+    // If an option was given, also when it is given its default, rather than having it
+    g, e8 := os.parseCliArgumentsFrom<Camel>(["--botCount", "4", "--v"]);
+    assert(e8 == null && os.cliArgGiven(&g, &g.botCount) && os.cliArgGiven(&g, &g.verboseOutput));
+    assert(!os.cliArgGiven(&g, &g.maxSpeed) && !os.cliArgGiven(&g, &g.startLevel));
+    // It is about the last arguments read into an Options without a mistake: those of d
+    assert(os.cliArgGiven(&d, &d.botCount) && os.cliArgGiven(&d, &d.peaceful) && os.cliArgGiven(&d, &d.output));
+    assert(!os.cliArgGiven(&d, &d.tags) && !os.cliArgGiven(&d, &d.cache) && !os.cliArgGiven(&d, &d.stats));
+
     // camelCase by default, and an option can be named otherwise
     k, e6 := os.parseCliArgumentsFrom<Camel>(["--botCount", "2", "--max-speed", "2.5", "--start_level", "3", "--v"]);
     assert(e6 == null && k.botCount == 2 && k.maxSpeed == 2.5 && k.startLevel == 3 && k.verboseOutput);

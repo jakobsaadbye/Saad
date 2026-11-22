@@ -208,6 +208,10 @@ if err != null {
   `-5` is a value, not an option.
 * A mistake gives an error of the kind `os.CliError`, whose message says what is wrong, e.g `Unknown option '--bots'
   (did you mean --botCount?)`, and that `--help` lists the options.
+* `os.cliArgGiven(&options, &options.seed)` says if an option was given on the command line, rather than having its
+  default, also when it was given the same value as the default. It is about the last arguments read into a struct of
+  that type. A member `seed: ?u64` says it too, as it is null when it isn't given, but then it has no default.
+* A member that is set in code instead, e.g from the options, takes `@os.CliArg(skip: true)`.
 * `os.parseCliArgumentsFrom<T>(arguments)` reads given arguments, without the program, e.g for a test. `--help` gives an
   error of the kind `os.CliHelp` there, whose message is the help. `os.cliHelpOf<T>()` gives the help.
 
