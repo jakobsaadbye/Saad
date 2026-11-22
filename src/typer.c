@@ -4273,7 +4273,10 @@ bool check_struct_members(Typer *typer, AstStruct *ast_struct) {
     // The constants of an instance of a generic struct are checked where they are first used. See check_instance_constant()
     if (!ast_struct->generic_struct && !check_struct_constants(typer, ast_struct)) return false;
 
-    // The attributes of the members e.g @json.Field(name: "id")
+    // The attributes of the struct, e.g @os.CliOptions(about: "..."), and of its members, e.g @json.Field(name: "id")
+    for (int j = 0; j < ast_struct->identifier->attributes.count; j++) {
+        if (!check_attribute_value(typer, ((AstStructLiteral **)ast_struct->identifier->attributes.items)[j])) return false;
+    }
     for (int i = 0; i < members.count; i++) {
         AstIdentifier *member = ((AstIdentifier **)members.items)[i];
         for (int j = 0; j < member->attributes.count; j++) {

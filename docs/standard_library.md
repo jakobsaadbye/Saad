@@ -160,6 +160,75 @@ os.exit(1);
 `os.output` runs the command with cmd.exe and puts it in quotes first, so a command that starts with a quoted path
 works, e.g `os.output("\"C:/Program Files/tool.exe\" \"my file.txt\"")`.
 
+### The command line, into a struct
+
+`os.parseCliArguments<T>()` reads the arguments of the program into a struct, whose members are the options:
+
+```odin
+Difficulty :: enum { easy, normal, expert }
+
+@os.CliOptions(about: "Runs games of bots, and says how they did")
+Options :: struct {
+    @os.CliArg(help: "The bots of each game", short: "b", min: 1, max: 8)
+    botCount := 4;                       // --bot-count 6, --bot-count=6 or -b 6
+    games := 3;
+    seed: u64 = 1;
+    peaceful: bool;                      // --peaceful, a flag (--peaceful=false too)
+    difficulty := Difficulty.expert;     // --difficulty easy, by the name of the value
+    look: f32 = 0.5;
+    genome: ?string;                     // null when it isn't given
+    tags: [..]string;                    // --tags a --tags b
+    @os.CliArg(positional: true, help: "Replays to watch")
+    files: [..]string;                   // the values given without a name
+    byDifficulty: [3]Stats;              // not an option: a fixed array isn't read from the command line
+}
+
+options, err := os.parseCliArguments<Options>();
+if err != null {
+    fmt.print("%", err.message);   // e.g --bot-count is from 1 to 8, not 9. --help lists the options
+    os.exit(2);
+}
+```
+
+* The name of an option is the name of the member in kebab case: `botCount` is `--bot-count` (`--botCount` works too).
+  A member that isn't given keeps its default.
+* A member is an option when its type can be read from text: `bool`, the integers (checked against the size, e.g an
+  `i8` is -128 to 127), `f32` and `f64`, `string`, an enum (its value names, without case, `_` or `-`), an optional of
+  one of them, and a list `[..]T` or slice `[]T` of them, which gets a value for each time the option is given. Other
+  members are left alone.
+* `@os.CliArg` on a member: `name` instead of the kebab case name, `short` (a letter, for `-b`), `help`, `required`,
+  `positional` (given without a name, in the order of the members; a list takes all that are left), `min` and `max`
+  of a number, and `skip`.
+* `@os.CliOptions` on the struct: `about` (what the program does, at the top of the help) and `name` (of the program
+  in the help, instead of the name of the file it was started as).
+* `--help` or `-h` prints the help and ends the program. `--` ends the options: what comes after are values.
+  `-5` is a value, not an option.
+* A mistake gives an error of the kind `os.CliError`, whose message says what is wrong, e.g `Unknown option '--bots'
+  (did you mean --bot-count?)`, and that `--help` lists the options.
+* `os.parseCliArgumentsFrom<T>(arguments)` reads given arguments, without the program, e.g for a test. `--help` gives an
+  error of the kind `os.CliHelp` there, whose message is the help. `os.cliHelpOf<T>()` gives the help.
+
+The help of the struct above:
+
+```
+Runs games of bots, and says how they did
+
+Usage: race [options] [files...]
+
+Options:
+  -b, --bot-count <n>               The bots of each game (1 to 8, default 4)
+      --games <n>                   (default 3)
+      --seed <n>                    (default 1)
+      --peaceful
+      --difficulty <easy|normal|expert>
+                                    (default expert)
+      --look <number>               (default 0.5)
+      --genome <text>
+      --tags <text>                 (can be given more than once)
+  <files>                           Replays to watch
+  -h, --help                        Shows this help
+```
+
 `os.windows` has the bindings for the Windows API, e.g `CreateThread`, critical sections, condition variables,
 `Sleep`, `GetStdHandle`, `ReadFile` and `WriteFile`.
 

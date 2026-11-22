@@ -69,7 +69,22 @@ for member in (rowAny.type as *TypeStruct).members {
 * The arguments must be known when compiling: literals, enum values and constants. The values are constants in
   the program, made by the compiler.
 * The attributes of the language (`@private`, `@deprecated`, `@attribute`) go on declarations. Attribute values go
-  on struct members, and on functions and methods (below).
+  on struct members, on structs, and on functions and methods (below).
+
+### On structs
+
+Attribute values on a struct are in `TypeStruct.attributes`, and `type.attribute(&value)` gets one of them, e.g what
+`os.parseCliArguments` says about the program:
+
+```odin
+@os.CliOptions(about: "Runs games of bots")
+Options :: struct { ... }
+
+about: os.CliOptions;
+if (boxed.type as *TypeStruct).attribute(&about) { ... about.about ... }
+```
+
+An instance of a generic struct has the attribute values of the generic struct.
 
 ### On functions
 
