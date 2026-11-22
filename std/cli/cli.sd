@@ -80,6 +80,7 @@ parseArguments :: <T>() -> (T, error) {
 
 // The options of arguments, without the name of the program, e.g for a test. --help gives an error of the kind
 // HelpRequested, whose message is the help
+@private
 parseArgumentsFrom :: <T>(arguments: []string, program := "program") -> (T, error) {
     result: T;
     boxed: any = result;
