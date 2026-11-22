@@ -1,34 +1,35 @@
-namespace os;
+namespace cli;
 
 // The arguments of the command line, read into a struct whose members are the options, e.g
 //
-//     @os.CliOptions(about: "Runs games of bots, and says how they did")
+//     @cli.Options(about: "Runs games of bots, and says how they did")
 //     Options :: struct {
-//         @os.CliArg(help: "The bots of each game", short: "b", min: 1, max: 8)
+//         @cli.Arg(help: "The bots of each game", short: "b", min: 1, max: 8)
 //         botCount := 4;                      // --botCount 6, -b 6 or --botCount=6
 //         seed: u64 = 1;
 //         peaceful: bool;                     // --peaceful, a flag
 //         difficulty := Difficulty.expert;    // --difficulty easy, by the name of the value
 //         genome: ?string;                    // null when it isn't given
-//         @os.CliArg(positional: true)
+//         @cli.Arg(positional: true)
 //         files: [..]string;                  // what is given without a name
 //     }
 //
-//     options, err := os.parseCliArguments<Options>();
+//     options, err := cli.parseArguments<Options>();
 //     if err != null {
 //         fmt.print("%", err.message);
 //         os.exit(2);
 //     }
 //
-// The name of an option is the name of the member, e.g botCount is --botCount. @os.CliOptions(naming: .kebab) makes the
-// options of a struct --bot-count, and @os.CliArg(naming: ...) or (name: ...) changes the name of one. --help and -h
-// print the help, made from the members and their @os.CliArg, and end the program. See docs/standard_library.md
+// The name of an option is the name of the member, e.g botCount is --botCount. @cli.Options(naming: .kebab) makes the
+// options of a struct --bot-count, and @cli.Arg(naming: ...) or (name: ...) changes the name of one. --help and -h
+// print the help, made from the members and their @cli.Arg, and end the program. See docs/standard_library.md
 
 import fmt;
 import errors;
+import os;
 
 // How the names of the options are made from the names of the members
-CliNaming :: enum {
+Naming :: enum {
     camel,  // As the member is named: botCount is --botCount
     kebab,  // botCount is --bot-count
     snake,  // botCount is --bot_count
@@ -36,17 +37,17 @@ CliNaming :: enum {
 
 // On the struct of the options: what the help says about the program, and how the options are named
 @attribute
-CliOptions :: struct {
+Options :: struct {
     name:   string;               // Of the program in the help. Without it, the name of the file it was started as
     about:  string;               // What the program does, at the top of the help
-    naming: CliNaming = .camel;   // Of all the options, unless an option says otherwise
+    naming: Naming = .camel;   // Of all the options, unless an option says otherwise
 }
 
 // On a member of the struct of the options
 @attribute
-CliArg :: struct {
+Arg :: struct {
     name:       string;      // Of the option, instead of the name of the member, e.g "bots" for --bots
-    naming:     ?CliNaming;  // How the name of this option is made, instead of the naming of the struct
+    naming:     ?Naming;  // How the name of this option is made, instead of the naming of the struct
     short:      string;  // A letter for a short option, e.g "b" for -b
     help:       string;  // What it is, in the help
     required:   bool;    // It must be given
@@ -56,38 +57,38 @@ CliArg :: struct {
     skip:       bool;    // Not an option, e.g a member the program fills in itself
 }
 
-CliError :: ErrorKind{"os.CliError"};  // The arguments don't fit the options, or the struct can't have them
-CliHelp  :: ErrorKind{"os.CliHelp"};   // --help or -h was given. The message is the help
+UsageError :: ErrorKind{"cli.UsageError"};  // The arguments don't fit the options, or the struct can't have them
+HelpRequested :: ErrorKind{"cli.HelpRequested"};    // --help or -h was given. The message is the help
 
 // The options of the command line the program was started with. --help prints the help and ends the program. A
-// mistake, e.g an unknown option or a number that isn't one, is an error of the kind CliError, whose message says what
+// mistake, e.g an unknown option or a number that isn't one, is an error of the kind UsageError, whose message says what
 // is wrong and that --help lists the options
-parseCliArguments :: <T>() -> (T, error) {
-    all := args();
+parseArguments :: <T>() -> (T, error) {
+    all := os.args();
     rest: [..]string;
     for i in 1..all.count { rest.add(all[i]); }
     program := "program";
     if all.count > 0 { program = baseName(all[0]); }
 
-    options, err := parseCliArgumentsFrom<T>(rest.elements(), program);
-    if err != null && err.is(CliHelp) {
+    options, err := parseArgumentsFrom<T>(rest.elements(), program);
+    if err != null && err.is(HelpRequested) {
         fmt.print("%", err.message);
-        exit(0);
+        os.exit(0);
     }
     return options, err;
 }
 
 // The options of arguments, without the name of the program, e.g for a test. --help gives an error of the kind
-// CliHelp, whose message is the help
-parseCliArgumentsFrom :: <T>(arguments: []string, program := "program") -> (T, error) {
+// HelpRequested, whose message is the help
+parseArgumentsFrom :: <T>(arguments: []string, program := "program") -> (T, error) {
     result: T;
     boxed: any = result;
     if boxed.type.kind != .struct {
-        return result, errors.make("The options are a struct, not a %", boxed.type.name, kind: CliError);
+        return result, errors.make("The options are a struct, not a %", boxed.type.name, kind: UsageError);
     }
     type := boxed.type as *TypeStruct;
     options, problem := cliOptionsOf(type);
-    if problem != "" { return result, errors.make("%", problem, kind: CliError); }
+    if problem != "" { return result, errors.make("%", problem, kind: UsageError); }
     data := (&result) as *void;
 
     positional := 0;    // The next positional option
@@ -103,7 +104,7 @@ parseCliArgumentsFrom :: <T>(arguments: []string, program := "program") -> (T, e
         }
         if !onlyValues && (text == "--help" || text == "-h") {
             defaults: T;
-            return result, errors.make("%", cliHelp(type, options, program, (&defaults) as *void), kind: CliHelp);
+            return result, errors.make("%", cliHelp(type, options, program, (&defaults) as *void), kind: HelpRequested);
         }
 
         isLong  := !onlyValues && text.startsWith("--");
@@ -169,11 +170,11 @@ parseCliArgumentsFrom :: <T>(arguments: []string, program := "program") -> (T, e
 
 // If an option was given on the command line, rather than having its default, e.g
 //
-//     options, err := os.parseCliArguments<Options>();
-//     if os.cliArgGiven(&options, &options.seed) { ... }
+//     options, err := cli.parseArguments<Options>();
+//     if cli.wasGiven(&options, &options.seed) { ... }
 //
 // It is about the last arguments that were read into a struct of the type T without a mistake
-cliArgGiven :: <T, M>(options: *T, member: *M) -> bool {
+wasGiven :: <T, M>(options: *T, member: *M) -> bool {
     boxed: any = *options;
     if boxed.type.kind != .struct { return false; }
     type := boxed.type as *TypeStruct;
@@ -211,7 +212,7 @@ GivenRecord :: struct {
 givenRecords: [..]GivenRecord;
 
 @private
-rememberGiven :: (type: *TypeStruct, options: *[..]CliOption) {
+rememberGiven :: (type: *TypeStruct, options: *[..]OptionInfo) {
     record := GivenRecord{type: type};
     for option in *options {
         if option.given { record.members.add(option.member.name); }
@@ -227,7 +228,7 @@ rememberGiven :: (type: *TypeStruct, options: *[..]CliOption) {
 }
 
 // The help of the options of T, as --help prints it
-cliHelpOf :: <T>(program := "program") -> string {
+helpOf :: <T>(program := "program") -> string {
     empty: T;
     boxed: any = empty;
     if boxed.type.kind != .struct { return ""; }
@@ -241,11 +242,11 @@ cliHelpOf :: <T>(program := "program") -> string {
 //
 
 @private
-CliOption :: struct {
+OptionInfo :: struct {
     member: *StructMember;
     long:   string;    // Without --
     short:  string;
-    arg:    CliArg;
+    arg:    Arg;
     value:  *Type;     // The type of a value: of the member, of an optional's value, or of a list's elements
     isFlag: bool;      // A bool, which needs no value
     isList: bool;      // Each value is added
@@ -278,18 +279,18 @@ CliOption :: struct {
 
 // The options of a struct, or what is wrong with it
 @private
-cliOptionsOf :: (type: *TypeStruct) -> ([..]CliOption, string) {
-    options: [..]CliOption;
+cliOptionsOf :: (type: *TypeStruct) -> ([..]OptionInfo, string) {
+    options: [..]OptionInfo;
     lists := 0;
-    about: CliOptions;
+    about: Options;
     type.attribute(&about);
     for i in 0..type.members.count {
         member := &type.members[i];
-        arg: CliArg;
+        arg: Arg;
         hasArg := attributeOf(member, &arg);
         if arg.skip || member.isHidden() { continue; }
 
-        option := CliOption{member: member, arg: arg};
+        option := OptionInfo{member: member, arg: arg};
         option.long = optionName(member.name, arg.naming ?? about.naming);
         if arg.name.len > 0 { option.long = arg.name; }
         option.short = arg.short;
@@ -329,7 +330,7 @@ cliOptionsOf :: (type: *TypeStruct) -> ([..]CliOption, string) {
 }
 
 @private
-findCliOption :: (options: *[..]CliOption, name: string, isShort: bool) -> *CliOption {
+findCliOption :: (options: *[..]OptionInfo, name: string, isShort: bool) -> *OptionInfo {
     for i in 0..options.count {
         option := options.indexRef(i);
         if isShort {
@@ -343,7 +344,7 @@ findCliOption :: (options: *[..]CliOption, name: string, isShort: bool) -> *CliO
 
 // The name of the option that is closest to a name that isn't one, e.g bots for bost, or empty
 @private
-closestCliOption :: (options: *[..]CliOption, name: string) -> string {
+closestCliOption :: (options: *[..]OptionInfo, name: string) -> string {
     best := "";
     bestDistance := 3;
     for option in *options {
@@ -359,7 +360,7 @@ closestCliOption :: (options: *[..]CliOption, name: string) -> string {
 @private
 cliError :: (format: string, args: ...any) -> error {
     message := fmt.sprint(format, ...args);
-    return errors.make("%. --help lists the options", message, kind: CliError);
+    return errors.make("%. --help lists the options", message, kind: UsageError);
 }
 
 @private
@@ -407,7 +408,7 @@ addListElement :: (place: *void, type: *Type, size: int) -> *void {
 
 // Reads a text into a value of the type. Gives what is wrong, or empty
 @private
-writeCliValue :: (text: string, data: *void, type: *Type, title: string, arg: CliArg) -> string {
+writeCliValue :: (text: string, data: *void, type: *Type, title: string, arg: Arg) -> string {
     switch type.kind {
         case .bool {
             lower := text.toLower();
@@ -474,7 +475,7 @@ writeCliValue :: (text: string, data: *void, type: *Type, title: string, arg: Cl
 }
 
 @private
-checkCliRange :: (n: f64, title: string, arg: CliArg, text: string) -> string {
+checkCliRange :: (n: f64, title: string, arg: Arg, text: string) -> string {
     if arg.min.hasValue() && arg.max.hasValue() && (n < arg.min.value() || n > arg.max.value()) {
         return fmt.sprint("% is from % to %, not %", title, numberText(arg.min.value()), numberText(arg.max.value()), text);
     }
@@ -498,8 +499,8 @@ writeEnumBits :: (data: *void, size: int, value: i64) {
 //
 
 @private
-cliHelp :: (type: *TypeStruct, options: [..]CliOption, program: string, defaults: *void) -> string {
-    about: CliOptions;
+cliHelp :: (type: *TypeStruct, options: [..]OptionInfo, program: string, defaults: *void) -> string {
+    about: Options;
     type.attribute(&about);
     name := program;
     if about.name.len > 0 { name = about.name; }
@@ -572,7 +573,7 @@ cliHelp :: (type: *TypeStruct, options: [..]CliOption, program: string, defaults
 
 // The default of an option as text, or empty when it has none worth showing (false, 0 of a flag, an empty text)
 @private
-defaultText :: (option: CliOption, defaults: *void) -> string {
+defaultText :: (option: OptionInfo, defaults: *void) -> string {
     if option.isList || option.isFlag || option.member.type.isOptional() || option.arg.required { return ""; }
     place := option.member.valueIn(defaults);
     if option.value.kind == .enum {
@@ -615,7 +616,7 @@ placeholderOf :: (type: *Type) -> string {
 // The name of the option of a member, e.g botCount is botCount, bot-count or bot_count. A _ at the end, of a member
 // named like a keyword, is left out: for_ is for
 @private
-optionName :: (name: string, naming: CliNaming) -> string {
+optionName :: (name: string, naming: Naming) -> string {
     end := name.len as int;
     while end > 1 && name[end - 1] == '_' { end -= 1; }
     if naming == .camel { return name.slice(0, end); }

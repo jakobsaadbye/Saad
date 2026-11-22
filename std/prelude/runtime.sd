@@ -109,7 +109,7 @@ TypeStruct :: struct {
     head:       Type;
     members:    []StructMember;
     alignment:  int;
-    attributes: []any;  // The values of the attributes on the struct e.g @os.CliOptions(about: "...")
+    attributes: []any;  // The values of the attributes on the struct e.g @cli.Options(about: "...")
 };
 
 TypeAny :: struct {
@@ -257,7 +257,7 @@ attributedFunctions :: () -> []AttributedFunction {
 // Gets the value of the attribute of type T on the function, like attributeOf for a member
 // Gets the value of the attribute of type T on a struct, e.g
 //
-//     options: os.CliOptions;
+//     options: cli.Options;
 //     if type.attribute(&options) { ... options.about ... }
 attribute :: method <T>(type: *TypeStruct, value: *T) -> bool {
     name := typeof(*value);

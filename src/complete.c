@@ -1017,6 +1017,15 @@ static void skip_spaces_back(const char *text, int *at) {
     while (*at > 0 && isspace((unsigned char)text[*at - 1])) (*at)--;
 }
 
+// If the '(' at open starts the value of an attribute, e.g the ( of '@cli.Arg(' or '@json.Field('
+static bool is_attribute_open(const char *text, int open) {
+    int p = open;
+    while (p > 0 && isspace((unsigned char)text[p - 1])) p--;
+    int end = p;
+    while (p > 0 && (is_name_char(text[p - 1]) || text[p - 1] == '.')) p--;
+    return p < end && p > 0 && text[p - 1] == '@';
+}
+
 // The struct literal the offset is directly in, not in a call or an array of it
 static bool literal_at(Typer *typer, AstFile *file, int offset, Literal *literal) {
     const char *text = file->text;
@@ -1034,7 +1043,11 @@ static bool literal_at(Typer *typer, AstFile *file, int offset, Literal *literal
         }
         if (c == ')' || c == ']' || c == '}') depth++;
         else if (c == '(' || c == '[') {
-            if (depth == 0) return false;
+            if (depth == 0) {
+                // The value of an attribute is a struct literal in ( ), e.g '@cli.Arg(help: "x", |'
+                if (c == '(' && is_attribute_open(text, p)) { open = p; break; }
+                return false;
+            }
             depth--;
         }
         else if (c == '{') {
@@ -1287,6 +1300,8 @@ static Type *expected_type_at(Typer *typer, AstFile *file, AstBlock *scope, int 
 // The values that can be written as '.name' for the type: the values of an enum and the variants of a union
 static void add_values_of(Type *type) {
     type = value_type_of(type);
+    if (!type) return;
+    if (is_optional_type(type)) type = optional_inner_type(type);  // e.g naming: ?Naming takes .kebab too
     if (!type) return;
     if (type->kind == TYPE_ENUM) {
         AstEnum *node = ((TypeEnum *)type)->node;
