@@ -2,17 +2,27 @@
 //
 //     saad run examples/blog/generate.sd -- "host=localhost dbname=postgres user=postgres"
 
+import cli;
 import dbms.postgres;
 import os;
 use fmt;
 
-main :: () {
-    connectionString := "host=localhost dbname=postgres user=postgres password=postgres";
-    args := os.args();
-    if args.count > 1 { connectionString = args[1]; }   // e.g the database of tools/linux/dbtests.sh
+@cli.Options(about: "Writes the tables of the schema saad_blog as Saad files")
+Options :: struct {
+    @cli.Arg(positional: true, help: "How to connect to Postgres, e.g the database of tools/linux/dbtests.sh")
+    connection := "host=localhost dbname=postgres user=postgres password=postgres";
+    @cli.Arg(positional: true, help: "The folder of the files")
+    folder := "examples/blog/db";
+}
 
-    generator := postgres.EntityGenerator{connectionString: connectionString, schema: "saad_blog", folder: "examples/blog/db"};
-    if args.count > 2 { generator.folder = args[2]; }
+main :: () {
+    options, usage := cli.parseArguments<Options>();
+    if usage != null {
+        print("%", usage.message);
+        os.exit(2);
+    }
+
+    generator := postgres.EntityGenerator{connectionString: options.connection, schema: "saad_blog", folder: options.folder};
 
     report, err := generator.run();
     if err != null {

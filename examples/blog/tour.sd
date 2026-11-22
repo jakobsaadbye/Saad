@@ -5,6 +5,7 @@
 //
 //     saad run examples/blog/tour.sd -- "host=localhost dbname=postgres user=postgres"
 
+import cli;
 import dbms;
 import dbms.postgres;
 import os;
@@ -245,11 +246,21 @@ addTag :: (db: *database.Database, post: *Post, tag: string) {
     row.tag    = tag;
 }
 
+@cli.Options(about: "A tour of the database of the blog")
+Options :: struct {
+    @cli.Arg(positional: true, help: "How to connect to Postgres, e.g \"host=localhost dbname=postgres user=postgres\" (SAAD_BLOG_POSTGRES when not given)")
+    connection: ?string;
+}
+
 // The connection of the first argument, or of SAAD_BLOG_POSTGRES
 connect :: () -> dbms.Connection {
-    args := os.args();
+    options, usage := cli.parseArguments<Options>();
+    if usage != null {
+        print("%", usage.message);
+        os.exit(2);
+    }
     connection, found := os.getEnv("SAAD_BLOG_POSTGRES");
-    if args.count > 1 { connection = args[1]; found = true; }
+    if options.connection.hasValue() { connection = options.connection.value(); found = true; }
     if !found {
         print("Usage: saad run examples/blog/tour.sd -- \"host=localhost dbname=postgres user=postgres\"");
         os.exit(2);
