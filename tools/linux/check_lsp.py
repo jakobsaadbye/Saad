@@ -456,6 +456,23 @@ def main():
     check("*T" in value, f"hover of a variable of type *T in KeyedTable.get: {value!r}")
     client.notify("textDocument/didClose", {"textDocument": {"uri": table_uri}})
 
+    print("completion in the value of an attribute")
+    attr_path = os.path.join(tempfile.mkdtemp(), "attributes.sd")
+    attr_text = "import cli;\n\n@cli.Options(ab)\nOptions :: struct {\n    @cli.Arg(help: \"x\", )\n    bots := 4;\n    @cli.Arg(naming: .)\n    games := 3;\n}\n\nmain :: () {}\n"
+    open(attr_path, "w").write(attr_text)
+    attr_uri = uri_of(attr_path)
+    client.notify("textDocument/didOpen", {"textDocument": {"uri": attr_uri, "languageId": "saad", "version": 1, "text": attr_text}})
+    m = client.request("textDocument/completion", {"textDocument": {"uri": attr_uri}, "position": {"line": 2, "character": 15}})
+    labels = [item["label"] for item in m["result"] or []]
+    check(labels == ["name", "about", "naming"], f"the fields of @cli.Options: {labels}")
+    m = client.request("textDocument/completion", {"textDocument": {"uri": attr_uri}, "position": {"line": 4, "character": 23}})
+    labels = [item["label"] for item in m["result"] or []]
+    check("short" in labels and "required" in labels and "help" not in labels, f"the fields of @cli.Arg that aren't written: {labels}")
+    m = client.request("textDocument/completion", {"textDocument": {"uri": attr_uri}, "position": {"line": 6, "character": 22}})
+    labels = [item["label"] for item in m["result"] or []]
+    check(labels == ["camel", "kebab", "snake"], f"the values of the optional enum naming: {labels}")
+    client.notify("textDocument/didClose", {"textDocument": {"uri": attr_uri}})
+
     print("formatting")
     check(caps.get("documentFormattingProvider") is True, "capability documentFormattingProvider")
     fmt_path = os.path.join(tempfile.mkdtemp(), "messy.sd")
