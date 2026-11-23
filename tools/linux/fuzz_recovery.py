@@ -9,6 +9,8 @@ off, or puts junk in it), and gives it to the compiler with --overlay, so no fil
 compiler crashes, takes too long, or doesn't write JSON with the diagnostics.
 """
 import json, os, random, re, subprocess, sys, tempfile
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import saad_index
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SAAD = os.path.join(REPO, "bin", "saad")
@@ -73,7 +75,7 @@ def main():
                 problem = f"exit code {result.returncode}"
             else:
                 try:
-                    index = json.loads(result.stdout)
+                    index = saad_index.load(result.stdout)
                     if "diagnostics" not in index:
                         problem = "no diagnostics"
                 except ValueError as e:

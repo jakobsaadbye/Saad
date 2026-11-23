@@ -59,20 +59,27 @@ which jumps back to `parse_file()`, so the compiler no longer exits in the middl
 ## saad index
 
 `saad index main.sd` type checks a program and writes, as JSON, where every name is declared and used, and the
-diagnostics of `saad check`:
+diagnostics of `saad check`. An index has tens of thousands of names, so it is compact (version 2): a symbol is an
+array, and the references are one array of numbers, six for each:
 
 ```json
-{"version": 1, "success": true,
- "symbols": [
-   {"id": 3, "name": "area", "kind": "method", "file": 0,
-    "nameRange": {"start": {"line": 17, "character": 4}, "end": {"line": 17, "character": 8}},
-    "range": {...}, "detail": "method (self: *Circle) -> f32", "container": 2, "doc": "The area of the circle"}],
- "references": [
-   {"file": 0, "range": {"start": {"line": 40, "character": 12}, "end": {...}}, "symbol": 3}],
- "files": ["/abs/main.sd", "/abs/std/fmt/print.sd"],
- "diagnostics": [...]}
+{"version": 2, "success": true,
+"symbols": [
+["area","method",0,17,4,17,8,17,0,19,1,"method (self: *Circle) -> f32",2,"The area of the circle"]
+],
+"references": [
+0,40,12,40,16,3
+],
+"files": ["/abs/main.sd", "/abs/std/fmt/print.sd"],
+"diagnostics": [{"file": "/abs/main.sd", "range": {"start": {"line": 4, "character": 2}, "end": {...}}, "severity": 1,
+                 "message": "...", "related": [...]}]}
 ```
 
+* A symbol is `[name, kind, file, nameRange, range, detail, container, doc]`, where each range is four numbers (the
+  line and character of its start, then of its end, from 0) and `doc` is left out when there is none. Its id is its
+  place in `symbols`. A reference is `file, range, symbol`. `file` is a place in `files`. `tools/linux/saad_index.py`
+  reads it into objects, e.g for the checks of the tools; the server reads it with `project.decodeIndex`, without
+  json.Values or reflection, which is about 15 times as quick as `json.decode` of the objects.
 * A **symbol** is a declaration. `kind` is one of `namespace`, `function`, `method`, `struct`, `union`, `enum`,
   `enumMember`, `field`, `variant`, `constant`, `global`, `variable`, `parameter`, `typeAlias` and `typeParameter`.
   `nameRange` is its name and `range` the whole declaration, e.g a function with its body. `detail` is its signature
