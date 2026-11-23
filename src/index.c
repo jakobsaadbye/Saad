@@ -635,12 +635,25 @@ static int file_id(DynamicArray *files, AstFile *file) {
     return files->count - 1;
 }
 
-static void json_write_range(StringBuilder *sb, Pos start, Pos end) {
-    sb_append(sb, "{\"start\": ");
-    json_write_position(sb, start);
-    sb_append(sb, ", \"end\": ");
-    json_write_position(sb, end);
-    sb_append(sb, "}");
+// A number, without printf, as the index has hundreds of thousands
+static void sb_int(StringBuilder *sb, int n) {
+    char digits[16];
+    int at = sizeof(digits);
+    unsigned int u = n < 0 ? (unsigned int)(-(long)n) : (unsigned int)n;
+    do { digits[--at] = '0' + u % 10; u /= 10; } while (u > 0);
+    if (n < 0) digits[--at] = '-';
+    sb_copy(sb, digits + at, sizeof(digits) - at);
+}
+
+// A range as four numbers: the line and character of its start and of its end, from 0
+static void write_compact_range(StringBuilder *sb, Pos start, Pos end) {
+    sb_int(sb, start.line > 0 ? start.line - 1 : 0);
+    sb_copy_string(sb, ",");
+    sb_int(sb, start.col > 0 ? start.col - 1 : 0);
+    sb_copy_string(sb, ",");
+    sb_int(sb, end.line > 0 ? end.line - 1 : 0);
+    sb_copy_string(sb, ",");
+    sb_int(sb, end.col > 0 ? end.col - 1 : 0);
 }
 
 bool is_std_file(AstFile *file) {
@@ -691,38 +704,44 @@ void write_index_json(FILE *out, bool success) {
     int next_id = 0;
     for (int i = 0; i < symbol_count; i++) new_id[i] = keep[i] ? next_id++ : -1;
 
-    sb_append(&sb, "{\"version\": 1, \"success\": %s,\n\"symbols\": [", success ? "true" : "false");
+    // Version 2: a symbol is an array and the references are one array of numbers, so the index is small and quick to
+    // read (docs/lsp.md)
+    sb_append(&sb, "{\"version\": 2, \"success\": %s,\n\"symbols\": [", success ? "true" : "false");
     bool first_symbol = true;
     for (int i = 0; i < symbol_count; i++) {
         if (!keep[i]) continue;
         IndexSymbol *s = &((IndexSymbol *)program_index.symbols.items)[i];
-        if (!first_symbol) sb_append(&sb, ",");
+        sb_copy_string(&sb, first_symbol ? "\n[" : ",\n[");
         first_symbol = false;
-        sb_append(&sb, "\n  {\"id\": %d, \"name\": ", new_id[i]);
         json_write_string(&sb, s->name);
-        sb_append(&sb, ", \"kind\": \"%s\", \"file\": %d, \"nameRange\": ", s->kind, file_id(&files, s->file));
-        json_write_range(&sb, s->name_start, s->name_end);
-        sb_append(&sb, ", \"range\": ");
-        json_write_range(&sb, s->start, s->end);
-        sb_append(&sb, ", \"detail\": ");
+        sb_append(&sb, ",\"%s\",", s->kind);
+        sb_int(&sb, file_id(&files, s->file));
+        sb_copy_string(&sb, ",");
+        write_compact_range(&sb, s->name_start, s->name_end);
+        sb_copy_string(&sb, ",");
+        write_compact_range(&sb, s->start, s->end);
+        sb_copy_string(&sb, ",");
         json_write_string(&sb, s->detail ? s->detail : "");
-        sb_append(&sb, ", \"container\": %d", s->container >= 0 ? new_id[s->container] : -1);
+        sb_copy_string(&sb, ",");
+        sb_int(&sb, s->container >= 0 ? new_id[s->container] : -1);
         bool can_have_doc = strcmp(s->kind, "variable") != 0 && strcmp(s->kind, "parameter") != 0;
         char *doc = !can_have_doc ? NULL : is_member_kind(s->kind) ? member_doc_comment(s->file, s->start.line) : doc_comment(s->file, s->start.line);
         if (doc) {
-            sb_append(&sb, ", \"doc\": ");
+            sb_copy_string(&sb, ",");
             json_write_string(&sb, doc);
         }
-        sb_append(&sb, "}");
+        sb_copy_string(&sb, "]");
     }
 
     sb_append(&sb, "\n],\n\"references\": [");
     for (int i = 0; i < kept_references.count; i++) {
         IndexReference *r = &((IndexReference *)kept_references.items)[i];
-        if (i > 0) sb_append(&sb, ",");
-        sb_append(&sb, "\n  {\"file\": %d, \"range\": ", file_id(&files, r->file));
-        json_write_range(&sb, r->start, r->end);
-        sb_append(&sb, ", \"symbol\": %d}", new_id[r->symbol]);
+        sb_copy_string(&sb, i > 0 ? ",\n" : "\n");
+        sb_int(&sb, file_id(&files, r->file));
+        sb_copy_string(&sb, ",");
+        write_compact_range(&sb, r->start, r->end);
+        sb_copy_string(&sb, ",");
+        sb_int(&sb, new_id[r->symbol]);
     }
     (void)in_std;
 

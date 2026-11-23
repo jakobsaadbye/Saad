@@ -94,9 +94,10 @@ readIndex :: method (p: *Project, text: string, code: int, command: string) -> b
         return false;
     }
 
-    index, err := json.decode<Index>(text);
-    if err != null {
-        rpc.log(fmt.sprint("The compiler didn't write an index for %: % (% bytes: %)", p.root, err.message, text.len, text.slice(0, 60)));
+    index, err := decodeIndex(text);
+    if err != "" {
+        rpc.log(fmt.sprint("The compiler didn't write an index for %: % (% bytes: %)", p.root, err, text.len, text.slice(0, 60)));
+        index.free();
         text.free();
         return false;
     }
@@ -106,10 +107,10 @@ readIndex :: method (p: *Project, text: string, code: int, command: string) -> b
     // going to definitions and hovering still work in those files while the error is fixed. Its diagnostics are new
     if index.diagnostics.count > 0 && index.files.count < p.index.files.count {
         rpc.log(fmt.sprint("The index of % has % of % files. The names of the last index are kept", p.root, index.files.count, p.index.files.count));
-        p.index.diagnostics.free();
+        p.index.freeDiagnostics();
         p.index.diagnostics = index.diagnostics;
-        index.symbols.free();
-        index.references.free();
+        index.diagnostics = {};
+        index.free();
         return true;
     }
 
@@ -236,14 +237,20 @@ isLocal :: (kind: string) -> bool {
 @private
 free :: method (index: *Index) {
     for sym in index.symbols {
-        sym.name.free();
-        sym.kind.free();
+        sym.name.free();       // The kind is one of kinds, which are kept
         sym.detail.free();
         sym.doc.free();
     }
     for file in index.files {
         file.free();
     }
+    index.freeDiagnostics();
+    index.symbols.free();
+    index.references.free();
+    index.files.free();
+}
+
+freeDiagnostics :: method (index: *Index) {
     for d in index.diagnostics {
         d.file.free();
         d.message.free();
@@ -253,8 +260,306 @@ free :: method (index: *Index) {
         }
         d.related.free();
     }
-    index.symbols.free();
-    index.references.free();
-    index.files.free();
     index.diagnostics.free();
+}
+
+//
+// Reading the index. It is version 2 of what 'saad index' writes (docs/lsp.md): a symbol is an array, and the
+// references are one array of numbers, six for each. It is read here at once into the structs above, without a tree of
+// json.Values in between and without reflection, as an index has tens of thousands of names
+//
+
+IndexVersion :: 2;
+
+// The kinds of the symbols, each kept once: the symbols of every index share them
+@private
+kinds: [..]string;
+
+@private
+kindOf :: (text: string) -> string {
+    for kind in kinds {
+        if kind == text { return kind; }
+    }
+    kept := text.copy();
+    kinds.add(kept);
+    return kept;
+}
+
+@private
+Reader :: struct {
+    text:   string;
+    at:     i64;
+    failed: string;     // What went wrong first, or empty
+}
+
+@private
+fail :: method (r: *Reader, message: string) {
+    if r.failed == "" {
+        r.failed = fmt.sprint("% at byte %", message, r.at);
+        r.at = r.text.len;      // Nothing more is read
+    }
+}
+
+@private
+skipSpace :: method (r: *Reader) {
+    while r.at < r.text.len {
+        c := r.text[r.at];
+        if c != ' ' && c != '\n' && c != '\r' && c != '\t' { return; }
+        r.at += 1;
+    }
+}
+
+// If the next character is c, it is eaten
+@private
+next :: method (r: *Reader, c: u8) -> bool {
+    r.skipSpace();
+    if r.at < r.text.len && r.text[r.at] == c {
+        r.at += 1;
+        return true;
+    }
+    return false;
+}
+
+@private
+expect :: method (r: *Reader, c: u8) {
+    if !r.next(c) {
+        r.fail(fmt.sprint("expected '%'", fmt.sprint("%", c as char)));
+    }
+}
+
+@private
+readInt :: method (r: *Reader) -> int {
+    r.skipSpace();
+    negative := r.at < r.text.len && r.text[r.at] == '-';
+    if negative { r.at += 1; }
+    start := r.at;
+    n := 0;
+    while r.at < r.text.len {
+        c := r.text[r.at];
+        if c < '0' || c > '9' { break; }
+        n = n * 10 + (c - '0') as int;
+        r.at += 1;
+    }
+    if r.at == start {
+        r.fail("expected a number");
+        return 0;
+    }
+    if negative { return -n; }
+    return n;
+}
+
+@private
+readRange :: method (r: *Reader) -> Range {
+    range: Range;
+    range.start.line = r.readInt();
+    r.expect(',');
+    range.start.character = r.readInt();
+    r.expect(',');
+    range.end.line = r.readInt();
+    r.expect(',');
+    range.end.character = r.readInt();
+    return range;
+}
+
+@private
+hexValue :: (c: u8) -> int {
+    if c >= '0' && c <= '9' { return (c - '0') as int; }
+    if c >= 'a' && c <= 'f' { return (c - 'a') as int + 10; }
+    if c >= 'A' && c <= 'F' { return (c - 'A') as int + 10; }
+    return -1;
+}
+
+// The four hex digits of a \u escape, from the position after the u. -1 if they aren't
+@private
+readHex4 :: method (r: *Reader) -> int {
+    if r.at + 4 > r.text.len { return -1; }
+    n := 0;
+    for i in 0..4 {
+        digit := hexValue(r.text[r.at + i]);
+        if digit < 0 { return -1; }
+        n = n * 16 + digit;
+    }
+    r.at += 4;
+    return n;
+}
+
+@private
+addUtf8 :: (sb: *fmt.StringBuilder, code: int) {
+    if code < 0x80 {
+        sb.addChar(code as u8);
+    } else if code < 0x800 {
+        sb.addChar((0xC0 | (code >> 6)) as u8);
+        sb.addChar((0x80 | (code & 0x3F)) as u8);
+    } else if code < 0x10000 {
+        sb.addChar((0xE0 | (code >> 12)) as u8);
+        sb.addChar((0x80 | ((code >> 6) & 0x3F)) as u8);
+        sb.addChar((0x80 | (code & 0x3F)) as u8);
+    } else {
+        sb.addChar((0xF0 | (code >> 18)) as u8);
+        sb.addChar((0x80 | ((code >> 12) & 0x3F)) as u8);
+        sb.addChar((0x80 | ((code >> 6) & 0x3F)) as u8);
+        sb.addChar((0x80 | (code & 0x3F)) as u8);
+    }
+}
+
+// A string, allocated. Without escapes it is one copy of the text
+@private
+readString :: method (r: *Reader) -> string {
+    r.skipSpace();
+    if r.at >= r.text.len || r.text[r.at] != '"' {
+        r.fail("expected a string");
+        return "";
+    }
+    r.at += 1;
+    start := r.at;
+    while r.at < r.text.len {
+        c := r.text[r.at];
+        if c == '"' {
+            s := r.text.slice(start, r.at).copy();
+            r.at += 1;
+            return s;
+        }
+        if c == '\\' { break; }
+        r.at += 1;
+    }
+
+    // With escapes
+    sb := fmt.newStringBuilder((r.at - start + 16) as int);
+    sb.addString(r.text.slice(start, r.at));
+    while r.at < r.text.len {
+        c := r.text[r.at];
+        r.at += 1;
+        if c == '"' { return sb.toString(); }
+        if c != '\\' {
+            sb.addChar(c);
+            continue;
+        }
+        if r.at >= r.text.len { break; }
+        e := r.text[r.at];
+        r.at += 1;
+        if e == 'n'      { sb.addChar('\n'); }
+        else if e == 't' { sb.addChar('\t'); }
+        else if e == 'r' { sb.addChar('\r'); }
+        else if e == 'b' { sb.addChar(8); }
+        else if e == 'f' { sb.addChar(12); }
+        else if e == 'u' {
+            code := r.readHex4();
+            if code < 0 { break; }
+            // A pair of surrogates is one character
+            if code >= 0xD800 && code < 0xDC00 && r.at + 6 <= r.text.len && r.text[r.at] == '\\' && r.text[r.at + 1] == 'u' {
+                r.at += 2;
+                low := r.readHex4();
+                if low >= 0xDC00 && low < 0xE000 { code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00); }
+            }
+            addUtf8(&sb, code);
+        } else {
+            sb.addChar(e);      // " \ /
+        }
+    }
+    sb.free();
+    r.fail("a string that doesn't end");
+    return "";
+}
+
+// Skips a value of any kind, e.g of a member that isn't known
+@private
+skipValue :: method (r: *Reader) {
+    r.skipSpace();
+    depth := 0;
+    while r.at < r.text.len {
+        c := r.text[r.at];
+        if c == '"' {
+            s := r.readString();
+            s.free();
+        } else {
+            if c == '[' || c == '{' { depth += 1; }
+            if c == ']' || c == '}' { depth -= 1; }
+            if depth < 0 { return; }    // The end of what it is in
+            if depth == 0 && c == ',' { return; }
+            r.at += 1;
+        }
+        if depth == 0 {
+            r.skipSpace();
+            if r.at >= r.text.len { return; }
+            c2 := r.text[r.at];
+            if c2 == ',' || c2 == ']' || c2 == '}' { return; }
+        }
+    }
+}
+
+// Reads what 'saad index' wrote. The error is empty if it could
+decodeIndex :: (text: string) -> (Index, string) {
+    index: Index;
+    r := Reader{text: text};
+    r.expect('{');
+    while !r.next('}') && r.failed == "" {
+        key := r.readString();
+        r.expect(':');
+        if key == "version" {
+            version := r.readInt();
+            if version != IndexVersion { r.fail(fmt.sprint("version % of the index, not %: the compiler and the language server don't fit", version, IndexVersion)); }
+        } else if key == "success" {
+            r.skipSpace();
+            index.success = r.text.slice(r.at).startsWith("true");
+            r.skipValue();
+        } else if key == "symbols" {
+            r.expect('[');
+            while !r.next(']') && r.failed == "" {
+                r.expect('[');
+                sym: Symbol;
+                sym.id = index.symbols.count as int;
+                sym.name = r.readString();
+                r.expect(',');
+                kind := r.readString();
+                sym.kind = kindOf(kind);
+                kind.free();
+                r.expect(',');
+                sym.file = r.readInt();
+                r.expect(',');
+                sym.nameRange = r.readRange();
+                r.expect(',');
+                sym.range = r.readRange();
+                r.expect(',');
+                sym.detail = r.readString();
+                r.expect(',');
+                sym.container = r.readInt();
+                if r.next(',') { sym.doc = r.readString(); }
+                r.expect(']');
+                index.symbols.add(sym);
+                r.next(',');
+            }
+        } else if key == "references" {
+            r.expect('[');
+            while !r.next(']') && r.failed == "" {
+                ref: Reference;
+                ref.file = r.readInt();
+                r.expect(',');
+                ref.range = r.readRange();
+                r.expect(',');
+                ref.symbol = r.readInt();
+                index.references.add(ref);
+                r.next(',');
+            }
+        } else if key == "files" {
+            r.expect('[');
+            while !r.next(']') && r.failed == "" {
+                index.files.add(r.readString());
+                r.next(',');
+            }
+        } else if key == "diagnostics" {
+            // Only a few, with more to them: json.decode reads them
+            r.skipSpace();
+            start := r.at;
+            r.skipValue();
+            diagnostics, err := json.decode<[..]Diagnostic>(text.slice(start, r.at));
+            if err != null { r.fail(fmt.sprint("diagnostics: %", err.message)); }
+            index.diagnostics = diagnostics;
+        } else {
+            r.skipValue();
+        }
+        key.free();
+        r.next(',');
+    }
+    index.version = IndexVersion;
+    return index, r.failed;
 }

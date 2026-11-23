@@ -5,6 +5,8 @@ the index still has the names after it. Each case makes one mistake in tests/ind
     tools/linux/check_recovery.py
 """
 import json, os, subprocess, sys, tempfile
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import saad_index
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SAAD = os.path.join(REPO, "bin", "saad")
@@ -66,7 +68,7 @@ def main():
         result = subprocess.run([SAAD, "index", FIXTURE, "--overlay", f"{FIXTURE}={overlay}"], capture_output=True, text=True, cwd=REPO)
         problems = []
         try:
-            index = json.loads(result.stdout)
+            index = saad_index.load(result.stdout)
         except ValueError:
             print(f"FAILED {what}: no index (exit code {result.returncode})\n{result.stderr[-500:]}")
             failed += 1

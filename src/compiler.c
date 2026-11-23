@@ -691,8 +691,16 @@ static bool run_executable(CompilerConfig *config, bool output_to_console) {
 //
 
 static void json_write_string(StringBuilder *sb, const char *text) {
-    sb_append(sb, "\"");
+    sb_copy(sb, "\"", 1);
     for (const char *c = text; c && *c; c++) {
+        // A run of characters that are written as they are, at once
+        const char *plain = c;
+        while (*plain && *plain != '"' && *plain != '\\' && (unsigned char)*plain >= 32) plain++;
+        if (plain > c) {
+            sb_copy(sb, (char *)c, (int)(plain - c));
+            c = plain - 1;
+            continue;
+        }
         // Colors of the terminal e.g \x1b[1m
         if (*c == '\x1b' && c[1] == '[') {
             while (*c && *c != 'm') c++;
@@ -707,10 +715,10 @@ static void json_write_string(StringBuilder *sb, const char *text) {
         case '\t': sb_append(sb, "\\t"); break;
         default:
             if ((unsigned char)*c < 32) sb_append(sb, "\\u%04x", (unsigned char)*c);
-            else                        sb_append(sb, "%c", *c);
+            else                        sb_copy(sb, (char *)c, 1);
         }
     }
-    sb_append(sb, "\"");
+    sb_copy(sb, "\"", 1);
 }
 
 static void json_write_position(StringBuilder *sb, Pos pos) {
