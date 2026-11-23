@@ -264,7 +264,10 @@ static void skip_failed_statement(Parser *parser, ParserState *state, bool top_l
         if (parser->poisoned_names.capacity == 0) parser->poisoned_names = da_init(16, sizeof(char *));
         da_append(&parser->poisoned_names, ident->name);
     }
-    if (state->scope->identifiers.count > state->scope_identifiers) state->scope->identifiers.count = state->scope_identifiers;
+    if (state->scope->identifiers.count > state->scope_identifiers) {
+        state->scope->identifiers.count = state->scope_identifiers;
+        scope_identifiers_changed(state->scope);
+    }
 
     // And the names the statement starts with, e.g 'Limit' of 'Limit :: ;', which isn't in the scope before it is whole
     for (int i = state->token_index; ; i += 2) {

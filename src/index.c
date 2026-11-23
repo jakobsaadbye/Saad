@@ -533,34 +533,47 @@ void index_declarations(DynamicArray files) {
 // JSON
 //
 
+// Where each line of a file's text starts, counting lines from 1: line l starts at starts[l - 1]. Made once a file
+static int *line_starts_of(AstFile *file, int *count) {
+    if (file->line_starts == NULL) {
+        int capacity = 256;
+        int n = 0;
+        int *starts = malloc(capacity * sizeof(int));
+        starts[n++] = 0;
+        for (int i = 0; file->text[i]; i++) {
+            if (file->text[i] != '\n') continue;
+            if (n == capacity) { capacity *= 2; starts = realloc(starts, capacity * sizeof(int)); }
+            starts[n++] = i + 1;
+        }
+        file->line_starts = starts;
+        file->line_count  = n;
+    }
+    *count = file->line_count;
+    return file->line_starts;
+}
+
 // The '//' lines right above a line, without the slashes. Attributes between them and the declaration are skipped
 static char *doc_comment(AstFile *file, int line) {
     if (file->text == NULL || line <= 1) return NULL;
+    int line_count;
+    int *starts = line_starts_of(file, &line_count);
 
-    // The start of each line
-    DynamicArray starts = da_init(256, sizeof(int));
-    int zero = 0;
-    da_append(&starts, zero);
-    for (int i = 0; file->text[i]; i++) {
-        if (file->text[i] == '\n') { int next = i + 1; da_append(&starts, next); }
-    }
-
-    StringBuilder sb = sb_init(64);
     int first = line - 1; // The line above, counting from 1
     int last  = first;
     bool found = false;
-    for (int l = line - 1; l >= 1 && l <= starts.count; l--) {
-        char *text = file->text + ((int *)starts.items)[l - 1];
+    for (int l = line - 1; l >= 1 && l <= line_count; l--) {
+        char *text = file->text + starts[l - 1];
         while (*text == ' ' || *text == '\t') text++;
         if (text[0] == '@' && !found) { last = l - 1; continue; }
         if (text[0] != '/' || text[1] != '/') break;
         first = l;
         found = true;
     }
-    if (!found) { da_free(&starts); return NULL; }
+    if (!found) return NULL;
 
+    StringBuilder sb = sb_init(64);
     for (int l = first; l <= last; l++) {
-        char *text = file->text + ((int *)starts.items)[l - 1];
+        char *text = file->text + starts[l - 1];
         while (*text == ' ' || *text == '\t') text++;
         text += 2;
         if (*text == '/') continue; // e.g ////// separators
@@ -570,7 +583,6 @@ static char *doc_comment(AstFile *file, int line) {
         if (sb.cursor > 0) sb_append(&sb, "\n");
         sb_append(&sb, "%.*s", (int)(end - text), text);
     }
-    da_free(&starts);
     if (sb.cursor == 0) return NULL;
     return sb_to_string(&sb);
 }
@@ -578,10 +590,10 @@ static char *doc_comment(AstFile *file, int line) {
 // The '//' comment at the end of a line, e.g of a struct member, without the slashes. NULL if the line has none
 static char *trailing_comment(AstFile *file, int line) {
     if (file->text == NULL || line < 1) return NULL;
-    char *text = file->text;
-    for (int l = 1; l < line && *text; text++) {
-        if (*text == '\n') l++;
-    }
+    int line_count;
+    int *starts = line_starts_of(file, &line_count);
+    if (line > line_count) return NULL;
+    char *text = file->text + starts[line - 1];
     char quote = 0;
     for (char *c = text; *c && *c != '\n'; c++) {
         if (quote) {
@@ -636,11 +648,16 @@ bool is_std_file(AstFile *file) {
     // An editor asks about a file of the standard library: it and its namespace are the program
     AstFile *main = program_index.main_file;
     if (main && (file == main || (main->ns && file->ns == main->ns))) return false;
-    char *absolute = get_absolute_path(file->absolute_path);
-    size_t length  = strlen(program_index.std_path);
-    bool is_std    = absolute && strncmp(absolute, program_index.std_path, length) == 0;
-    free(absolute);
-    return is_std;
+    // The path of a file doesn't change, so it is only made absolute once (realpath is slow, and this is asked for
+    // every name of the index)
+    if (file->std_state == 0) {
+        char *absolute = get_absolute_path(file->absolute_path);
+        size_t length  = strlen(program_index.std_path);
+        bool is_std    = absolute && strncmp(absolute, program_index.std_path, length) == 0;
+        free(absolute);
+        file->std_state = is_std ? 1 : 2;
+    }
+    return file->std_state == 1;
 }
 
 // A symbol is written when it is declared in the program, or used by it. Then so is what it is in

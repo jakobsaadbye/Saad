@@ -170,6 +170,9 @@ typedef struct AstFile {
     Namespace   *ns;               // The namespace declared with 'namespace a.b;' at the top of the file, or NULL
     DynamicArray referenced_roots; // of char*. First names of qualified names e.g the 'math' in math.sin(x), so that their namespaces get loaded
     int          check_state;      // 0 not checked, 1 being checked, 2 checked. Files can use each other
+    int         *line_starts;      // Where each line of text starts, made when first needed (see line_starts_of)
+    int          line_count;
+    int          std_state;        // Whether it is a file of the standard library, for the index: 0 not known yet, 1 it is, 2 it isn't
     Pos          ns_name_start; // The name in 'namespace a.b;', for an editor
     Pos          ns_name_end;
 } AstFile;
@@ -180,6 +183,7 @@ typedef struct Namespace {
     DynamicArray paths;       // of char*. The files declaring the namespace
     DynamicArray files;       // of *AstFile. The parsed files of the namespace
     bool         is_standard; // Declared by the standard library. Other files cannot join it
+    bool         queued;      // Its files are queued to be parsed already (parse_all_files)
 } Namespace;
 
 typedef enum ImportKind {
@@ -344,6 +348,14 @@ typedef struct AstBlock {
     AstFunctionDefn *enclosing_function; // The function this scope was made in or null if in global scope
     AstStruct       *belongs_to_struct;        // If the scope is a struct scope, this is set to that struct
     int           scope_number; // Only for debug purposes
+
+    // A hash table of the names of identifiers, to find one without going through all of them: a file scope gets every
+    // name of the namespaces it uses. Made when it is first needed, and kept up to date as names are added at the end
+    // (see find_identifier_in_scope). Slots hold an index into identifiers, plus one, or 0 when empty
+    int          *lookup;
+    int           lookup_capacity;  // A power of two
+    int           lookup_count;     // The identifiers that are in it: the first lookup_count
+    void         *lookup_items;     // identifiers.items when they were put in it. Another one is another array
 } AstBlock;
 
 typedef struct AstStruct {

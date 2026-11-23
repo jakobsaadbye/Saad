@@ -186,7 +186,10 @@ static char *directory_of(const char *path) {
     return dir;
 }
 
+// Queues the files of a namespace to be parsed, once: every file that uses it would queue them again
 static void visit_namespace(DynamicArray *paths_to_visit, Namespace *ns) {
+    if (ns->queued) return;
+    ns->queued = true;
     for (int i = 0; i < ns->paths.count; i++) {
         da_append(paths_to_visit, ((char **)ns->paths.items)[i]);
     }
@@ -418,6 +421,7 @@ static bool parse_all_files(CompilerConfig *config, Parser *parser, const char *
     DynamicArray paths_to_visit = da_init(8, sizeof(char *));
     DynamicArray parsed_paths   = da_init(8, sizeof(char *)); // The absolute paths of the parsed files, as the same file can be reached by different paths
     da_append(&paths_to_visit, main_path);
+    for (int i = 0; i < parser->namespaces.count; i++) ((Namespace **)parser->namespaces.items)[i]->queued = false;
 
     // 'saad index --all-std': every namespace of the standard library is part of the program
     if (program_index.all_std) {
@@ -505,6 +509,12 @@ static bool parse_all_files(CompilerConfig *config, Parser *parser, const char *
 
 // Points every import at the parsed file it refers to
 static bool link_imports(Parser *parser, DynamicArray parsed_files) {
+    // The absolute path of each parsed file, made once: realpath is slow
+    char **absolutes = calloc(parsed_files.count + 1, sizeof(char *));
+    for (int k = 0; k < parsed_files.count; k++) {
+        absolutes[k] = get_absolute_path(((AstFile **)parsed_files.items)[k]->absolute_path);
+    }
+
     for (int i = 0; i < parsed_files.count; i++) {
         AstFile *file = ((AstFile **)parsed_files.items)[i];
 
@@ -512,16 +522,17 @@ static bool link_imports(Parser *parser, DynamicArray parsed_files) {
             AstImport *import = ((AstImport **)file->imports.items)[j];
             if (import->kind != IMPORT_FILE) continue;
 
+            char *a = get_absolute_path(import->resolved_path);
             for (int k = 0; k < parsed_files.count; k++) {
                 AstFile *other_file = ((AstFile **)parsed_files.items)[k];
-                char *a = get_absolute_path(import->resolved_path);
-                char *b = get_absolute_path(other_file->absolute_path);
+                char *b = absolutes[k];
                 bool same = (a && b) ? strcmp(a, b) == 0 : strcmp(import->resolved_path, other_file->absolute_path) == 0;
                 if (same) {
                     import->imported_file = other_file;
                     break;
                 }
             }
+            free(a);
 
             if (import->imported_file == NULL) {
                 report_error_ast(parser, LABEL_ERROR, (Ast *)import, "Compiler Error: Failed to link the following import");
