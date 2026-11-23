@@ -68,6 +68,7 @@ Project :: struct {
     index:      Index;
     keys:       [..]string;  // source.keyOf() of each file of the index
     generation: int = -1;    // The generation of the documents it was indexed at
+    changedAt:  int;         // The generation of the last change that can change its index (see main.sd changed)
     published:  [..]string;  // The files it has sent diagnostics for, as keys
     retired:    bool;        // A file on its own whose program was found later. It isn't checked or asked
     options:    string;      // More options for the compiler, e.g " --all-std" for the standard library
@@ -169,6 +170,11 @@ complete :: method (p: *Project, compiler: string, overlays: string, path: strin
 }
 
 // The number of the file in the index, or -1
+// If it was indexed after the last change that can change its index
+isUpToDate :: method (p: *Project) -> bool {
+    return p.generation >= 0 && p.changedAt <= p.generation;
+}
+
 fileNumber :: method (p: *Project, key: string) -> int {
     for k, i in p.keys {
         if k == key {

@@ -436,6 +436,18 @@ def main():
     m = client.request("textDocument/documentSymbol", {"textDocument": {"uri": encode_uri}})
     names = [s["name"] for s in m["result"] or []]
     check("Writer" in names and "writeAny" in names, f"the outline of encode.sd: {names[:12]}")
+
+    print("a change to the program doesn't index the standard library again")
+    std_runs = lambda: sum("Indexed" in line and "/std/json/encode.sd" in line for line in client.log)
+    before = std_runs()
+    edited = text.replace("    n: Count = Limit;", "    n: Count = Limit; extra := 1;")
+    client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 60}, "contentChanges": [{"text": edited}]})
+    m = client.request("textDocument/hover", {"textDocument": doc, "position": position_of(text, 44, "area")})
+    check(m["result"] is not None, "hover in the program after it changed")
+    m = client.request("textDocument/hover", {"textDocument": {"uri": encode_uri}, "position": position_of(encode_text, encode_line, "encode")})
+    check(m["result"] is not None, "hover in the standard library after the program changed")
+    check(std_runs() == before, f"the standard library was indexed {std_runs() - before} more times for a change to the program")
+    client.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 61}, "contentChanges": [{"text": text}]})
     client.notify("textDocument/didClose", {"textDocument": {"uri": encode_uri}})
 
     print("a generic that nothing instantiates")

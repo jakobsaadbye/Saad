@@ -114,7 +114,10 @@ lsp/
 
 * **Projects.** A file is answered with the program it is part of: a program the server already indexed that has the
   file, else the `main.sd` of its folder or a folder above it (up to the workspace), else the file on its own. A
-  project is indexed again when a document has changed since, and when a document is saved. The files of `std/` are
+  project is indexed again when a document that can change its index has changed since, and when such a document is
+  saved: a file of its index, a file in its folder (it can join a namespace of the program), a file of the standard
+  library for the standard library, or any file while the project has errors (an error can leave a file out). So
+  clicking into the standard library after editing a program doesn't index the standard library again. The files of `std/` are
   one project, indexed with `--all-std`.
 * **A file keeps its program.** Once a file is found in a program, the server remembers it (`owners`). While an error
   leaves the file out, e.g an import that is being written, it is still answered by that program instead of becoming a

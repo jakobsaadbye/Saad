@@ -36,7 +36,7 @@ projects:  [..]project.Project;
 texts:     Map<string, source.Text>;  // Files that are not open, read from disk. By key
 owners:    Map<string, string>;       // The program (the key of its main file) a file is part of, once it is known. By key
 
-generation    := 0;       // Goes up when a document changes, so the projects know they are out of date
+generation    := 0;       // Goes up when a document changes. The projects it can change are out of date (see changed)
 compiler      := "saad";
 workspaceRoot := "";      // A path, or empty
 overlayFolder := "";
@@ -195,7 +195,7 @@ didOpen :: (params: json.Value) {
     doc.unsaved = notRead != null || onDisk != doc.text.text;
     onDisk.free();
     doc.written = false;
-    generation += 1;
+    changed(doc.key);
 
     refresh(doc.key, doc.path);
 }
@@ -213,7 +213,7 @@ didChange :: (params: json.Value) {
     doc.text    = source.newText(changes.at(changes.length() - 1).get("text").asString().copy());
     doc.unsaved = true;
     doc.written = false;
-    generation += 1;
+    changed(doc.key);
 
     // Checked in main when no more messages are waiting. Another document that changed before is checked now
     if changedKey != "" && changedKey != doc.key {
@@ -231,7 +231,7 @@ didSave :: (params: json.Value) {
     if doc != null {
         doc.unsaved = false;
     }
-    generation += 1;
+    changed(key);
     if changedKey == key {
         changedKey = "";
     }
@@ -245,8 +245,31 @@ didClose :: (params: json.Value) {
         if doc.key == key {
             _ := os.removeFile(doc.overlay); // It may not be there
             documents.removeAt(i);
-            generation += 1;
+            changed(key);
             return;
+        }
+    }
+}
+
+// A document changed, was saved or closed: the projects whose index it can change are out of date, and only those, so
+// that e.g the standard library isn't indexed again when a file of the program changes. Those are the projects that
+// have the file, the ones in whose folder it is (a file can join a namespace of the program), the standard library for
+// a file of it, and the ones with errors, as an error can leave a file out of the index
+changed :: (key: string) {
+    generation += 1;
+    std := isInStandardLibrary(key);
+    for p, i in projects {
+        canChange := p.fileNumber(key) >= 0 || p.index.diagnostics.count > 0 || !p.isUpToDate();
+        if !canChange {
+            if p.options == AllStd {
+                canChange = std;
+            } else {
+                folder := source.keyOf(source.folderOf(p.root));
+                canChange = folder != "" && key.startsWith(fmt.sprint("%/", folder));
+            }
+        }
+        if canChange {
+            projects.indexRef(i).changedAt = generation;
         }
     }
 }
@@ -327,7 +350,7 @@ startWaiting :: () {
         i := waiting[0];
         waiting.removeAt(0);
         p := projects.indexRef(i);
-        if p.generation == generation || p.retired {
+        if p.isUpToDate() || p.retired {
             continue;
         }
         j := new(Job, heapAllocator());
@@ -499,7 +522,7 @@ update :: (i: int) {
         finishJob();
     }
     p := projects.indexRef(i);
-    if p.generation == generation {
+    if p.isUpToDate() {
         return;
     }
 
