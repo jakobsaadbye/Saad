@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <string.h>
 #include "scope.h"
 
@@ -24,7 +25,66 @@ void close_block(Parser *parser) {
     parser->current_scope = parser->current_scope->parent;
 }
 
+// Scopes with fewer names than this are searched one name after another, which is quicker for so few
+#define LOOKUP_MIN_NAMES 16
+
+static unsigned int hash_name(const char *name) {
+    unsigned int h = 2166136261u;   // FNV-1a
+    for (const unsigned char *c = (const unsigned char *)name; *c; c++) h = (h ^ *c) * 16777619u;
+    return h;
+}
+
+// Puts the identifier at index i in the table, unless a name before it is the same: the first one is the one found
+static void lookup_insert(AstBlock *scope, int i) {
+    AstIdentifier **items = (AstIdentifier **)scope->identifiers.items;
+    char *name = items[i]->name;
+    unsigned int mask = (unsigned int)scope->lookup_capacity - 1;
+    for (unsigned int slot = hash_name(name) & mask; ; slot = (slot + 1) & mask) {
+        int at = scope->lookup[slot];
+        if (at == 0) { scope->lookup[slot] = i + 1; return; }
+        if (strcmp(items[at - 1]->name, name) == 0) return;
+    }
+}
+
+// Brings the table up to date with the identifiers: the new ones at the end are added, and it is made again when the
+// array is another one, has fewer names than it had, or is getting full
+static void lookup_update(AstBlock *scope) {
+    int count = scope->identifiers.count;
+    bool rebuild = scope->lookup == NULL || scope->lookup_items != scope->identifiers.items || count < scope->lookup_count;
+    if (!rebuild && count * 2 > scope->lookup_capacity) rebuild = true;
+    if (rebuild) {
+        int capacity = 64;
+        while (capacity < count * 4) capacity *= 2;
+        if (capacity != scope->lookup_capacity) {
+            free(scope->lookup);
+            scope->lookup = malloc(capacity * sizeof(int));
+            scope->lookup_capacity = capacity;
+        }
+        memset(scope->lookup, 0, capacity * sizeof(int));
+        scope->lookup_count = 0;
+        scope->lookup_items = scope->identifiers.items;
+    }
+    for (int i = scope->lookup_count; i < count; i++) lookup_insert(scope, i);
+    scope->lookup_count = count;
+}
+
+// The scope's names were taken out or changed other than at the end, e.g by error recovery: the table is made again
+void scope_identifiers_changed(AstBlock *scope) {
+    scope->lookup_count = 0;
+    scope->lookup_items = NULL;
+}
+
 AstIdentifier *find_identifier_in_scope(AstBlock *scope, char *ident_name) {
+    if (scope->identifiers.count >= LOOKUP_MIN_NAMES) {
+        lookup_update(scope);
+        AstIdentifier **items = (AstIdentifier **)scope->identifiers.items;
+        unsigned int mask = (unsigned int)scope->lookup_capacity - 1;
+        for (unsigned int slot = hash_name(ident_name) & mask; ; slot = (slot + 1) & mask) {
+            int at = scope->lookup[slot];
+            if (at == 0) return NULL;
+            if (strcmp(items[at - 1]->name, ident_name) == 0) return items[at - 1];
+        }
+    }
     for (int i = 0; i < scope->identifiers.count; i++) {
         AstIdentifier *ident = ((AstIdentifier **)scope->identifiers.items)[i];
         // The first letter before strcmp, as most names in a scope differ there and this runs for every name used
